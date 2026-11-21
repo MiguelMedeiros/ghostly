@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { useI18n } from "../../contexts/I18nContext";
+import { fillNames } from "../../lib/fillNodes";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { Button, Notice } from "../wallet/ui";
 import { AppIcon } from "./AppIcon";
@@ -9,7 +10,9 @@ import { AppInstallDialog } from "./AppInstallDialog";
 import { appStopped, refreshInstalledApps, sendOpenedCard, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../../lib/apps/installed";
 import { openApp } from "../../lib/apps/open";
 import { chatAppOver } from "../../lib/apps/running";
+import { useTryAgain } from "../../lib/apps/tryAgain";
 import { appErrorText, appErrorView } from "../../lib/apps/errors";
+import { ownDirection } from "../../lib/ownDirection";
 
 /** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
 const opens = (app: InstalledAppView) => !appStopped(app);
@@ -38,6 +41,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
   const failureView = failure != null ? appErrorView(failure, t) : null;
   // Try again worked: the button went with its line, so the focus goes to the list's first control, not the page.
   const [retried, setRetried] = useState(false);
+  const retry = useTryAgain(() => { setRetried(true); return refreshInstalledApps(); });
   useEffect(() => {
     if (!retried || failure != null) return;
     setRetried(false);
@@ -88,7 +92,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
         {/* The contact's name (one long word, a nickname of 20 W's) breaks anywhere: unbroken, the sheet scrolled
             sideways on a phone, and in Arabic the name's end was drawn off the screen. */}
         <div className="[overflow-wrap:anywhere]">
-          <h2 id="chat-apps-title" className="text-lg font-medium text-text-primary">{t("apps.composer.title", { name })}</h2>
+          <h2 id="chat-apps-title" className="text-lg font-medium text-text-primary">{fillNames(t("apps.composer.title"), { name })}</h2>
           {waiting && <p className="text-xs text-text-secondary mt-1" data-testid="chat-apps-waiting">{waiting}</p>}
         </div>
         <div className="bg-surface rounded-xl divide-y divide-border">
@@ -96,8 +100,8 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
               again, as the Apps page says it. */}
           {failureView && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="chat-apps-error">
-              <Notice tone="error" testId="chat-apps-error-line" details={failureView.info} className="text-xs min-w-0 flex-[1_1_12rem]">{failureView.text}</Notice>
-              <Button className="ms-auto" onClick={() => { setRetried(true); void refreshInstalledApps(); }}>{t("apps.page.tryAgain")}</Button>
+              <Notice key={retry.tries} tone="error" testId="chat-apps-error-line" details={failureView.info} className="text-xs min-w-0 flex-[1_1_12rem]">{failureView.text}</Notice>
+              <Button className="ms-auto" loading={retry.busy} onClick={retry.again}>{t("apps.page.tryAgain")}</Button>
             </div>
           )}
           {installed === null ? <p className="px-4 py-3 text-xs text-text-muted">{t("apps.page.loading")}</p>
@@ -132,7 +136,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
             {t("apps.composer.browse")}
           </button>
         </div>
-        {error && <p role="alert" className="text-xs text-danger-ink" data-testid="chat-apps-error">{error}</p>}
+        {error && <p role="alert" dir={ownDirection(error)} className="text-xs text-danger-ink" data-testid="chat-apps-error">{error}</p>}
         <div className="flex justify-end">
           <Button onClick={onClose}>{t("common.close")}</Button>
         </div>

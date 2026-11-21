@@ -39,7 +39,7 @@ type IceServers = { urls: string; username?: string; credential?: string }[];
 /** `builds`: the engine states the side's manager built whole (`getState`, a view of every chat). */
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView>; builds: number }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; relayOnlyB?: boolean; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; relayOnlyB?: boolean; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number; otherChatB?: boolean } = {}): { a: Side; b: Side } {
   // Each side's clock: the same one unless `nowB` gives the second side its own.
   const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
@@ -47,8 +47,10 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () 
     return side;
   };
   const a = make("chat-ab"), b = make("chat-ba");
-  const engine = (me: Side, other: () => Side, heardAt: () => number, iceServers: IceServers = [], relayOnly = false): CallEngine => {
-    const state = () => ({ links: [me.link], settings: { iceServers, ...(relayOnly ? { relayOnly } : {}) } }) as unknown as EngineState;
+  // `otherChatB`: the second side has a chat with someone else too, which auto-answer may name in place of this one.
+  const other = { id: "chat-bc", profile: "paired-chat/1", callsUnavailable: null, label: "to chat-bc" };
+  const engine = (me: Side, other: () => Side, heardAt: () => number, iceServers: IceServers = [], relayOnly = false, more: unknown[] = []): CallEngine => {
+    const state = () => ({ links: [me.link, ...more], settings: { iceServers, ...(relayOnly ? { relayOnly } : {}) } }) as unknown as EngineState;
     return {
       ...engineOf(state, async ({ signal }) => {
         me.signals.push(signal);
@@ -59,7 +61,7 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () 
     };
   };
   a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs, quickRedialMs: stacks.quickRedialMs });
-  b.calls = new CallManager({ engine: engine(b, () => a, nowA, stacks.iceServersB, stacks.relayOnlyB), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.b, now: stacks.nowB ?? stacks.now, maxRedials: stacks.maxRedials, earlyAnswerMs: stacks.earlyAnswerMs, quickRedialMs: stacks.quickRedialMs });
+  b.calls = new CallManager({ engine: engine(b, () => a, nowA, stacks.iceServersB, stacks.relayOnlyB, stacks.otherChatB ? [other] : []), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.b, now: stacks.nowB ?? stacks.now, maxRedials: stacks.maxRedials, earlyAnswerMs: stacks.earlyAnswerMs, quickRedialMs: stacks.quickRedialMs });
   return { a, b };
 }
 
@@ -340,6 +342,9 @@ describe("the audio socket", () => {
     const socket = await AudioSocket.open(path, 48000, { onAudio: () => {} });
     expect(statSync(join(path, "..")).mode & 0o777).toBe(0o700);
     await socket.close();
+    // Its folder goes with its last socket; a shared one made in its place is refused.
+    expect(existsSync(join(path, ".."))).toBe(false);
+    mkdirSync(join(path, ".."), { mode: 0o755 });
     chmodSync(join(path, ".."), 0o755);
     await expect(AudioSocket.open(path, 48000, { onAudio: () => {} })).rejects.toThrow(/not a folder of this user's alone/);
     rmSync(join(path, ".."), { recursive: true, force: true });
@@ -519,6 +524,21 @@ describe("a call to a contact who is away", () => {
     }
   });
 
+  // Found in a bug hunt: a chat on DHT only (either side's choice) said the contact's app was not connected, with a
+  // `chat wait --until live` that waited 60 s and failed, where `chat connect` names whose choice it is.
+  it("on a chat on DHT only, says whose choice it is instead of a wait that never ends", async () => {
+    const dht = (fields: Partial<LinkView>) => ({ id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Calls need a live connection", ...fields }) as unknown as LinkView;
+    const start = (link: LinkView) => new CallManager({ engine: engineOf(() => ({ links: [link] }) as unknown as EngineState), emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {});
+    await expect(start(dht({ deliveryMode: "dht" }))).rejects.toMatchObject({
+      code: "unavailable", details: { chat: "chat-ab", reason: "dht-only" },
+      message: "Calls need a live connection. This chat is on DHT only on this side: choose a live method first (chat transport auto)",
+    });
+    await expect(start(dht({ dhtDelivery: { peerMode: "dht" } } as Partial<LinkView>))).rejects.toMatchObject({
+      code: "unavailable", details: { chat: "chat-ab", reason: "peer-dht-only" },
+      message: "Calls need a live connection. Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT",
+    });
+  });
+
   it("keeps the engine's own words for a chat that cannot call for another reason", async () => {
     const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Your contact's app cannot take calls" } as unknown as LinkView;
     const engine: CallEngine = engineOf(() => ({ links: [link] }) as unknown as EngineState);
@@ -615,6 +635,35 @@ describe("two call managers", { timeout: 60_000 }, () => {
 
   // Found in a bug hunt: each engine state the manager read built a view of every chat (~15-20 µs a chat on the
   // daemon's thread) to find one chat or read one setting: 5 for a call placed and hung up, 6 for one rung and answered.
+  // Found in a bug hunt: a call placed, or answered by hand, with no --rate took auto-answer's rate (16000 here), not
+  // the 48000 the help and the docs give, and a program reading the documented default heard it three times too slow.
+  it("a call placed or answered by hand with no rate is at 48000, whatever auto-answer's rate; auto-answer answers at its own", async () => {
+    const { a, b } = pairOfManagers({ otherChatB: true });
+    b.calls.setAuto({ on: true, from: ["chat-bc"], rate: 16000 });
+    expect(await b.calls.start("chat-ba", {})).toMatchObject({ direction: "out", audio: { rate: 48000 } });
+    await until(() => a.events.find((e) => e.type === "call.incoming"));
+    await a.calls.answer(undefined, {});
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected")))).catch(diagnose(a, b));
+    await b.calls.hangup("chat-ba");
+    await until(() => a.events.find((e) => e.type === "call.ended"));
+
+    // The contact's call rings here, auto-answer being for another chat: answered by hand, at the default rate.
+    await a.calls.start("chat-ab", {});
+    expect(await until(() => b.events.find((e) => e.type === "call.incoming"))).toMatchObject({ auto: false });
+    expect(await b.calls.answer(undefined, {})).toMatchObject({ direction: "in", audio: { rate: 48000 } });
+    await until(() => a.events.filter((e) => e.type === "call.connected").length === 2).catch(diagnose(a, b));
+    await b.calls.hangup("chat-ba");
+    await until(() => a.events.filter((e) => e.type === "call.ended").length === 2);
+
+    // Auto-answer still answers at its rate.
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    await a.calls.start("chat-ab", {});
+    const connected = await until(() => b.events.filter((e) => e.type === "call.connected")[2]).catch(diagnose(a, b));
+    expect(connected).toMatchObject({ direction: "in", audio: { rate: 16000 } });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("a call placed, rung and answered by its chat's id builds no engine state; a call placed by a name builds it once", async () => {
     const { a, b } = pairOfManagers();
     b.calls.setAuto({ on: true, from: ["chat-ba"], rate: 16000 });
@@ -1258,6 +1307,44 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await until(() => b.events.find((e) => e.type === "call.incoming")).catch(diagnose(a, b));
     await a.calls.hangup(undefined);
     expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "missed" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("a contact whose app died and who calls again starts over: the call placed here ends, sends no hang-up, and their call rings", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    await a.calls.start("chat-ab", {});
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected")))).catch(diagnose(a, b));
+    // The contact's new call, later than their answer (WISP 601 "Offering again"): their app gave no hang-up.
+    const [offer] = signalsOf(b, "a").map((s) => JSON.parse(s!));
+    a.calls.onSignal("chat-ab", heardCallSignal(JSON.stringify({ ...offer, t: "o", ts: offer.ts + 1000 }), Date.now()));
+    await until(() => a.events.find((e) => e.type === "call.incoming")).catch(diagnose(a, b));
+    expect(a.events.map((e) => e.type)).toEqual(["call.outgoing", "call.connected", "call.ended", "call.incoming"]);
+    expect(a.events.find((e) => e.type === "call.ended")).toMatchObject({ direction: "out", reason: "remote-hangup" });
+    // A hang-up would end their new call there as declined.
+    expect(signalsOf(a, "h")).toEqual([]);
+    expect(a.calls.list()).toMatchObject([{ direction: "in", state: "ringing" }]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("a caller whose app died and who calls again starts over: the call answered here ends, sends no hang-up, and their call rings", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    await a.calls.start("chat-ab", {});
+    await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected")))).catch(diagnose(a, b));
+    // Rung, not answered again on its own: what it shows is the ring.
+    b.calls.setAuto({ on: false, from: [], rate: 16000 });
+    // The caller's new call, later than their offer (WISP 601 "Offering again"): their app gave no hang-up.
+    const [offer] = signalsOf(a, "o").map((s) => JSON.parse(s!));
+    b.calls.onSignal("chat-ba", heardCallSignal(JSON.stringify({ ...offer, ts: offer.ts + 1000 }), Date.now()));
+    await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2).catch(diagnose(a, b));
+    expect(b.events.map((e) => e.type)).toEqual(["call.incoming", "call.connected", "call.ended", "call.incoming"]);
+    expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ direction: "in", reason: "remote-hangup" });
+    // A hang-up would end their new call there as declined.
+    expect(signalsOf(b, "h")).toEqual([]);
+    expect(b.calls.list()).toMatchObject([{ direction: "in", state: "ringing" }]);
     await a.calls.stopAll();
     await b.calls.stopAll();
   });

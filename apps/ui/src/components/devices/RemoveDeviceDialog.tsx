@@ -44,7 +44,8 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
       <p className="text-text-secondary">{t("devices.remove.text")}</p>
       <p className="text-text-muted text-xs">{t("devices.remove.copy")}</p>
       <HomeWallets wallets={homes} device={device} testId="device-remove-homes" />
-      {busy && <p role="status" data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}
+      {/* Said from a line there from the start, as Take over's: one that comes with its text is often not read. */}
+      <div role="status">{busy && <p data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}</div>
       {error && <Notice problem={error} testId="device-remove-error" className="" />}
       {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page, and a
           refusal left it there. A press while busy does nothing. */}

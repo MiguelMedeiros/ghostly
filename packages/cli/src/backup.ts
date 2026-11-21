@@ -8,7 +8,7 @@ import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { bool, str, type Method } from "./apiKit";
 import { CliError, localFileError } from "./errors";
-import { RESTORED_MARK, profileExists, profilePaths, type ProfilePaths } from "./profiles";
+import { RESTORED_MARK, profileExists, profilePaths, removeStoppedRestores, type ProfilePaths } from "./profiles";
 
 /**
  * A headless profile's backup: the WISP 05 envelope around the profile itself, its store and its files, written and
@@ -63,9 +63,47 @@ const unlessGone = (error: NodeJS.ErrnoException) => { if (error.code === "ENOEN
 /**
  * The files a backup under way writes (the store in the clear, the backup not complete yet), removed if the process
  * leaves before the backup's own cleanup: Ctrl-C on a one-shot exits once the profile closed, the backup still running.
+ * A restore's folder too (the profile in the clear), for a second Ctrl-C that leaves at once.
  */
 const leftOnExit = new Set<string>();
-process.on("exit", () => { for (const path of leftOnExit) rmSync(path, { force: true }); });
+const removeLeft = () => { for (const path of leftOnExit) try { rmSync(path, { recursive: true, force: true }); } catch { /* the others still go */ } };
+process.on("exit", removeLeft);
+
+/**
+ * SIGTERM and SIGHUP (a service manager's stop, `timeout`, an SSH session that drops) end a one-shot with no exit at
+ * all: only Ctrl-C is its own, and the daemon handles all three. While a backup runs, either removes its files, then
+ * ends the process by that signal as it would have. The daemon (another handler) stops as it does, the exit removing them.
+ */
+const LEAVING = ["SIGTERM", "SIGHUP"] as const;
+const onLeave = (signal: NodeJS.Signals) => {
+  if (process.listenerCount(signal) > 1) return;
+  removeLeft();
+  for (const name of LEAVING) process.off(name, onLeave);
+  process.kill(process.pid, signal);
+};
+const underWay = (...paths: string[]) => {
+  if (!leftOnExit.size) for (const name of LEAVING) process.on(name, onLeave);
+  for (const path of paths) leftOnExit.add(path);
+};
+const finished = (...paths: string[]) => {
+  for (const path of paths) leftOnExit.delete(path);
+  if (!leftOnExit.size) for (const name of LEAVING) process.off(name, onLeave);
+};
+
+/**
+ * The half-written backups beside `path` that a process gone since left (killed, or older than the handling above):
+ * nothing else removes them, and one with no passphrase starts with the store in the clear. A live process's stays.
+ */
+async function removeDeadPartials(path: string): Promise<void> {
+  const prefix = `${basename(path)}.partial-`;
+  for (const entry of await readdir(dirname(path)).catch(() => [])) {
+    const pid = Number(/^(\d+)(-[0-9a-f]{12})?$/.exec(entry.startsWith(prefix) ? entry.slice(prefix.length) : "")?.[1]);
+    if (!pid || pid === process.pid) continue;
+    let alive = true;
+    try { process.kill(pid, 0); } catch (error) { alive = (error as NodeJS.ErrnoException).code === "EPERM"; }
+    if (!alive) await rm(join(dirname(path), entry), { force: true });
+  }
+}
 
 async function walk(root: string, dir = root, out: string[] = []): Promise<string[]> {
   let names: string[];
@@ -150,9 +188,11 @@ export const BACKUP_METHODS: Record<string, Method> = {
     let out: FileHandle | null = null, writing = false;
     // From its export on, the store (every message and key in the clear) goes however the backup ends: an export cut
     // short, a failure before the backup is written, and a process that leaves first (Ctrl-C on a one-shot), the
-    // half-written backup with it. One a killed process left goes at the profile's next start (`startRuntime`).
-    leftOnExit.add(store).add(partial);
+    // half-written backup with it. One a killed process left goes at the profile's next start (`startRuntime`), and its
+    // half-written backup at the next backup to this path.
+    underWay(store, partial);
     try {
+      await removeDeadPartials(path);
       await ctx.runtime.store.exportSnapshot(store);
       stillAsked(gone);
       const holds = settings.find((setting) => setting.name === HOLDS), after = await readSetting(paths.dir, HOLDS);
@@ -211,10 +251,11 @@ export const BACKUP_METHODS: Record<string, Method> = {
       throw error;
     } finally {
       await out?.close().catch(() => {});
-      await rm(partial, { force: true });
-      await rm(store, { force: true });
-      leftOnExit.delete(store);
-      leftOnExit.delete(partial);
+      // Each on its own, the store first: one that cannot be removed (a name the disk takes whose `.partial-…` is too
+      // long for it) neither keeps the store nor takes the place of the backup's own error.
+      await rm(store, { force: true }).catch(() => {});
+      await rm(partial, { force: true }).catch(() => {});
+      finished(store, partial);
     }
   },
 };
@@ -262,25 +303,18 @@ function inside(root: string, path: unknown): string {
   return target;
 }
 
-/** While a restore writes it, the profile's folder is not a profile: no profile name starts with a dot (`listProfiles`). */
-const RESTORING = /^\.restoring-(.+)-(\d+)$/;
-
 /**
  * The folder a restore writes into, beside the profiles: it takes the profile's name only once everything is in it,
  * so a restore that is stopped at any moment (Ctrl-C, a kill, the power) leaves no profile, whole or half-made.
- * What an earlier restore that was stopped left behind is removed here, once the process that made it is gone.
+ * Stopped by a signal, the restore removes it itself (`restoreProfile`'s `stop`), or the process's exit does; what
+ * a killed one left goes here and when the profiles are listed (`removeStoppedRestores`), its process gone.
  */
 async function restoringFolder(home: string, name: string): Promise<ProfilePaths> {
   const root = join(home, "profiles");
   await mkdir(root, { recursive: true, mode: 0o700 });
-  for (const entry of await readdir(root)) {
-    const pid = Number(RESTORING.exec(entry)?.[2]);
-    if (!pid) continue;
-    let alive = pid === process.pid;
-    if (!alive) try { process.kill(pid, 0); alive = true; } catch (error) { alive = (error as NodeJS.ErrnoException).code === "EPERM"; }
-    if (!alive) await rm(join(root, entry), { recursive: true, force: true });
-  }
+  removeStoppedRestores(root);
   const dir = join(root, `.restoring-${name}-${process.pid}`);
+  leftOnExit.add(dir);
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { mode: 0o700 });
   return { ...profilePaths(home, name), dir, db: join(dir, "db"), files: join(dir, "files") };
@@ -290,10 +324,11 @@ async function restoringFolder(home: string, name: string): Promise<ProfilePaths
  * The folder is whole: marked as a restored copy (`RESTORED_MARK`, which names the files a light backup left out),
  * then given the profile's name. Never over a profile.
  */
-async function finishRestore(home: string, name: string, work: ProfilePaths, leftOut: string[] = []): Promise<ProfilePaths> {
+async function finishRestore(home: string, name: string, work: ProfilePaths, leftOut: string[] = [], stop?: AbortSignal): Promise<ProfilePaths> {
   const paths = profilePaths(home, name);
   await writeFile(join(work.dir, RESTORED_MARK), leftOut.length ? JSON.stringify({ leftOut }) : "", { mode: 0o600 });
   if (existsSync(paths.dir)) throw new CliError("refused", `Profile ${name} exists: restore into a new name`);
+  stop?.throwIfAborted();
   await rename(work.dir, paths.dir);
   return paths;
 }
@@ -301,14 +336,15 @@ async function finishRestore(home: string, name: string, work: ProfilePaths, lef
 /**
  * Opens the backup at `file` into a new profile (never over an existing one), with its passphrase when it has one.
  * Runs with no engine: nothing is open yet. A backup that is refused, damaged or cut short leaves no profile behind,
- * and neither does a restore that is stopped while it runs (`restoringFolder`). The profile is marked as a restored
- * copy: its engine, the first time it starts, treats the money in it as a restore does (`RESTORED_MARK`).
+ * and neither does a restore that is stopped while it runs (`restoringFolder`): `stop` aborted (Ctrl-C) ends it at its
+ * next record with its reason, the folder removed. The profile is marked as a restored copy: its engine, the first
+ * time it starts, treats the money in it as a restore does (`RESTORED_MARK`).
  */
-export async function restoreProfile(home: string, name: string, file: string, passphrase?: string): Promise<ProfilePaths> {
-  if (passphrase === undefined) return await restoreWith(home, name, file);
+export async function restoreProfile(home: string, name: string, file: string, passphrase?: string, stop?: AbortSignal): Promise<ProfilePaths> {
+  if (passphrase === undefined) return await restoreWith(home, name, file, undefined, stop);
   let first: unknown;
   for (const form of passphraseForms(passphrase)) {
-    try { return await restoreWith(home, name, file, form); } catch (error) {
+    try { return await restoreWith(home, name, file, form, stop); } catch (error) {
       if (!(error instanceof CliError && error.code === "refused" && error.message.startsWith("Wrong passphrase"))) throw error;
       first ??= error;
     }
@@ -332,7 +368,7 @@ export function passphraseForms(given: string): string[] {
 }
 
 /** One restore with one passphrase (none for a backup made without one). */
-async function restoreWith(home: string, name: string, file: string, passphrase?: string): Promise<ProfilePaths> {
+async function restoreWith(home: string, name: string, file: string, passphrase?: string, stop?: AbortSignal): Promise<ProfilePaths> {
   if (profileExists(home, name)) throw new CliError("refused", `Profile ${name} exists: restore into a new name`);
   const source = await fileSource(file);
   let work: ProfilePaths | null = null;
@@ -341,11 +377,12 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
     try { reader = await BackupReader.open(source, passphrase); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
     if (!reader) {
       const payload = await readWhole(file, passphrase ?? "");
+      stop?.throwIfAborted();
       work = await restoringFolder(home, name);
-      await writeWhole(work, payload);
-      return await finishRestore(home, name, work);
+      await writeWhole(work, payload, stop);
+      return await finishRestore(home, name, work, [], stop);
     }
-    const next = async () => { try { return await reader.next(); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); } };
+    const next = async () => { stop?.throwIfAborted(); try { return await reader.next(); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); } };
     const parse = (json: string) => { try { return JSON.parse(json) as BackupRecord; } catch { throw new CliError("refused", "This backup is damaged: it was changed or cut short"); } };
 
     // The first record is read (and with it the passphrase checked) before any folder is made.
@@ -383,11 +420,12 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
       }
       if (out || !ended || !stored) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
     } finally { await out?.handle.close().catch(() => {}); }
-    return await finishRestore(home, name, work, leftOut);
+    return await finishRestore(home, name, work, leftOut, stop);
   } catch (error) {
     if (work) await rm(work.dir, { recursive: true, force: true });
     throw error;
   } finally {
+    if (work) leftOnExit.delete(work.dir);
     await source.close();
   }
 }
@@ -400,10 +438,11 @@ async function readWhole(file: string, passphrase: string): Promise<Payload1> {
   return payload;
 }
 
-async function writeWhole(paths: ProfilePaths, payload: Payload1): Promise<void> {
+async function writeWhole(paths: ProfilePaths, payload: Payload1, stop?: AbortSignal): Promise<void> {
   await mkdir(paths.db, { recursive: true, mode: 0o700 });
   await writeFile(join(paths.db, "snapshot.bin"), Buffer.from(payload.store, "base64"), { mode: 0o600 });
   for (const entry of payload.files) {
+    stop?.throwIfAborted();
     const target = inside(paths.files, entry.path);
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
     await writeFile(target, Buffer.from(entry.data, "base64"), { mode: 0o600 });

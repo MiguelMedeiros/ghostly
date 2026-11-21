@@ -238,7 +238,9 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
       }
       if (act === "unban") banned.delete(target);
     } catch (error) {
-      return send(res, 502, { error: String(error.message ?? error) });
+      // The reason stays in the double's log: the engine reads only the status, and a reply carries no stack.
+      console.error("group-moderate:", error);
+      return send(res, 502, { error: "livekit" });
     }
     send(res, 200, { state: { muted: Object.fromEntries([...muted].sort(([a], [b]) => (a < b ? -1 : 1))), banned: [...banned].sort() } });
   }
@@ -269,6 +271,9 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
     }
     send(res, 404, { error: "not found" });
   });
+  // Idle keep-alive sockets stay open: a spec's route.fetch reuses its socket after a quiet stretch of a call, and one
+  // closed after Node's 5 s could close just as that request went out (socket hang up through the stack's docker-proxy).
+  server.keepAliveTimeout = 0;
   return new Promise((resolve) => server.listen(port, host, () => {
     resolve({ url: `http://${host}:${server.address().port}`, close: () => new Promise((done) => { server.closeAllConnections(); server.close(() => done()); }) });
   }));

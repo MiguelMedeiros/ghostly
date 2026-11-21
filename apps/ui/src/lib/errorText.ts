@@ -89,6 +89,12 @@ export const SAVE_REFUSED = /^(?:The file could not be saved there|Unreadable fi
  */
 export const DESKTOP_SAVE_REFUSED = /^(?:.+ \(os error \d+\)|The chosen place has no file name)$/;
 
+/**
+ * A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
+ * worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
+ */
+export const PART_NOT_LOADED = /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/;
+
 /** No room left in the storage that holds items for an away contact (WISP 404, engine/hold.ts): it sends once some are picked up. */
 const HOLD_FULL_ITEMS = /^At most (?<max>\d+) items can wait for this contact\. Wait until some are picked up\.$/;
 const HOLD_FULL_BYTES = /^Items waiting for this contact would exceed (?<max>\d+) MB\. Wait until some are picked up\.$/;
@@ -121,10 +127,10 @@ const RULES: readonly Rule[] = [
   // The page's way to the peer and its services (packages/browser/src/platform).
   exact("Ghostly is starting…", "errors.app.starting"),
   exact("Ghostly is still starting. Try again in a moment.", "errors.app.stillStarting"),
-  exact("Lost the Ghostly peer", "errors.app.lostPeer"),
-  // A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
-  // worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
-  { match: /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
+  // A call the peer was answering when it went away (an extension's offscreen restart, Clear all data or a profile
+  // switch in another tab): the old peer may have done it before it went, so it says to look before trying again.
+  exact("Lost the Ghostly peer", "errors.app.lostPeer", "errors.app.lostPeerNext"),
+  { match: PART_NOT_LOADED, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
   // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent. A
   // forward's copy that found no room (engine/forwards.ts forwardError) says Desktop's io error the same way.
   { match: /^Not enough space on this device \((?:QuotaExceededError(?:: [\s\S]*)?|No space left on device[\s\S]*)\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
@@ -132,7 +138,8 @@ const RULES: readonly Rule[] = [
   exact("This device has no room left to save this", "errors.app.noRoomToSave", "errors.app.noRoomToSaveNext"),
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
-  exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
+  // A no in the host's question (Chrome's prompt, Desktop's dialog), from Share or a card's Allow: it can be asked again.
+  exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress", "errors.app.localAddressNext"),
   // The Share form's address checks (packages/core http.ts parseLocalTarget; the CLI matches the English) and its name
   // check (engine/node.ts addService): what is wrong, then what to type.
   exact("Not a valid URL", "errors.services.badAddress", "errors.services.addressNext"),
@@ -182,6 +189,10 @@ const RULES: readonly Rule[] = [
   exact("Too many files are waiting here", "errors.files.floor.tooMany", "errors.files.floor.tooManyNext"),
   exact("It was refused here", "errors.files.floor.refused", "errors.files.askAgain"),
   exact("It did not come within a week", "errors.files.floor.notInAWeek", "errors.files.askAgain"),
+  // Accept on an offer larger than the room left now (engine/fileDesk.ts `accept`): it keeps waiting, its room shown.
+  // One that fits the free space but not beside the files still coming: waiting for them, or cancelling one, makes room.
+  { match: /^No room on this device for this file beside the files still coming \((?<left>.+) left of (?<free>.+) free\)$/, key: "errors.files.noRoomBesideComing", next: "errors.files.noRoomBesideComingNext" },
+  { match: /^No room on this device for this file \((?<free>.+) free\)$/, key: "errors.files.noRoomHere", next: "errors.app.noRoomNext" },
   // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
   exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
   // A received file this device had no room for (packages/core chatFiles.ts `storeFailure`): named QuotaExceededError
@@ -297,6 +308,8 @@ const RULES: readonly Rule[] = [
   // A send or an edit a chat refused (engine/node.ts sendMessage, editMessage, replyRef; platform/useChat.ts).
   { match: /^Message exceeds (?<max>\d+) UTF-8 bytes\.$/, key: "errors.chat.tooLong", next: "errors.chat.tooLongNext" },
   exact("Message too long once encoded. Shorten it or send it as a file.", "errors.chat.tooLong", "errors.chat.tooLongNext"),
+  // A text within the DHT's 256 bytes that its envelope, ratchet and receipt still do not fit (core dhtDelivery.ts).
+  exact("Text and authentication exceed the DHT packet budget. Shorten the message.", "errors.chat.dhtTooLong", "errors.chat.dhtTooLongNext"),
   { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
   { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
   // A forward of a message deleted meanwhile, or of none (engine/node.ts forwardMessages).
@@ -856,6 +869,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   ecashFeeTakesAll: "errors.engine.ecashFeeTakesAll",
   lightningRefused: "errors.engine.lightningRefused",
   ecashOtherUnit: "errors.engine.ecashOtherUnit",
+  ecashUnnamedUnit: "errors.engine.ecashUnnamedUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
   lnurlRange: "errors.engine.lnurlRange",

@@ -3,13 +3,11 @@
  * on an origin of its own, full screen over the app, and every request it makes sent over the contact's data link
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
-import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, WEBRTC_GUARD, guardViewerAnswer, viewerResponseHeaders, viewerServicePolicy, type ClientRequest, type ClientResponse, type PageGuard } from "@ghostly/core";
+import { GhostlyHttpError, viewerResponseHeaders, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, BRIDGE_SHOWN, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServiceRequestMessage, type ServicesHost } from "./protocol";
 import { SERVICE_LOCKED, callWindowOn, serviceWindowsClosedSince } from "../../../ui/src/lib/serviceWindows";
 import { appInput } from "../../../ui/src/lib/apps/open";
 import { isLocalHost } from "../../../ui/src/lib/parse/linkPreview";
-
-const CLIPBOARD_GUARD: PageGuard = { script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH };
 
 /**
  * How a request reaches the contact: the engine's `request` for that contact and service. Each chunk of the answer's
@@ -189,14 +187,12 @@ function heldBytes(request: ServiceRequestMessage): number {
 /**
  * Sends one request from the app over the link and streams the answer back on its port. `view`: aborted once the page
  * that asked is gone (the view closed, its frame loaded again), so a request still waiting on the contact ends there
- * too, rather than running on their machine and holding one of the link's places. Every answer carries Ghostly's viewer
- * policy after the contact's own (`viewerServicePolicy`, as Desktop, the extension and `ghostly service open` add it):
- * the app talks to nothing but its own origin, and nothing over plain http. Its pages run the clipboard guard first
- * (`guardViewerAnswer`, `CLIPBOARD_GUARD_SCRIPT`): it writes the clipboard only in the person's own tap in it.
- * `relayOnly`: Hide my IP from contacts was on when the app opened, and the policy is `VIEWER_SERVICE_CSP_RELAY_ONLY`:
- * the app loads nothing but its own origin. Its pages run the WebRTC guard first too.
+ * too, rather than running on their machine and holding one of the link's places. Ghostly's viewer policy and the
+ * guards each page of the app runs first are the services worker's to add (`guarded` in worker.ts), as the bridge
+ * registered it for Hide my IP from contacts (`workerScript`): the port this answer goes back on passes the bridge, on
+ * the app's own origin, so the app's pages could answer in this page's place.
  */
-export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords, view?: AbortSignal, relayOnly = false): Promise<void> {
+export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords, view?: AbortSignal): Promise<void> {
   const request = readRequest(data);
   // Once an error went, nothing more does: the port is the worker's, and it took that as the whole answer.
   let ended = false;
@@ -257,19 +253,12 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
       post({ type: "error", status: answer.status, text: hostError });
       return;
     }
-    let out: [string, string][] = [];
+    const out: [string, string][] = [];
     for (const [name, value] of viewerResponseHeaders(answer.headers)) {
       if (name.toLowerCase() === "set-cookie") jar.take(value, path);
       else out.push([name, value]);
     }
-    // No policy keeps a page off `execCommand("copy")`, nor (Hide my IP from contacts) off WebRTC: each of the app's
-    // pages runs the guards first.
-    const guards: PageGuard[] = [CLIPBOARD_GUARD, ...(relayOnly ? [WEBRTC_GUARD] : [])];
-    const guarded = await guardViewerAnswer(out, answer.body, request.destination ?? null, guards);
-    out = guarded.headers;
-    const body = guarded.body;
-    // A browser enforces every policy it is sent: the contact's own cannot widen this one.
-    out.push(["content-security-policy", viewerServicePolicy(relayOnly)]);
+    const body = answer.body;
     headed = true;
     clearTimeout(late);
     if (ended) return;
@@ -326,7 +315,7 @@ export function outsideLink(url: unknown, host: ServicesHost): string | null {
   let link: URL;
   try { link = new URL(url); } catch { return null; }
   if ((link.protocol !== "http:" && link.protocol !== "https:") || link.href.length > 4096) return null;
-  const name = link.hostname.toLowerCase().replace(/\.$/, "");
+  const name = link.hostname.toLowerCase().replace(/\.+$/, "");
   if (isLocalHost(name) || name === host.suffix || name.endsWith(`.${host.suffix}`) || name === location.hostname) return null;
   return link.href;
 }
@@ -375,7 +364,7 @@ function watchDeadEntries(): void {
 
 /**
  * Shows a contact's app full screen over the app, on its own origin under `host`, with a bar to close it. One at a
- * time: opening another closes the one before. `relayOnly`: Hide my IP from contacts is on (`serve`).
+ * time: opening another closes the one before. `relayOnly`: Hide my IP from contacts is on (`workerScript`).
  */
 export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords; presence?: ContactPresence; relayOnly?: boolean }): Promise<void> {
   // The profile locking while it opens closes nothing yet: it is never drawn, behind the lock or over its screen.
@@ -618,8 +607,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     const { signal } = bridge;
     const channel = new MessageChannel();
     ports.add(channel.port1);
-    channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words, signal, options.relayOnly === true); };
-    // With Hide my IP on, the bridge runs the WebRTC guard too: the app's frame, on its origin, reaches its window.
+    channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words, signal); };
+    // With Hide my IP on, the bridge runs the WebRTC guard too (the app's frame, on its origin, reaches its window), and
+    // registers the services worker that guards the app's pages for it (`workerScript`).
     frame.contentWindow!.postMessage({ type: BRIDGE_PORT, relayOnly: options.relayOnly === true }, origin, [channel.port2]);
   };
   // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on

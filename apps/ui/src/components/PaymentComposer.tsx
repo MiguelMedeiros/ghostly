@@ -363,10 +363,14 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
           <p className="payment-back-hint" data-testid={amountField.hint && !blocked ? "amount-unclear" : undefined}>{blocked ?? amountField.hint ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
           {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unitFor(t, unit, value)}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
-            <FocusSafeButton data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => guarded(() => void request())} className="payment-back-secondary">
+            {/* The button at work is busy and `aria-disabled`, not disabled: the memo's Send anyway gives the focus back to
+                it as its work starts, and a disabled one would drop it to the page, there still when the work is refused. */}
+            <FocusSafeButton data-testid="payment-request" disabled={turning || !value || busy === "send" || !!asking || !!blocked} aria-disabled={busy === "request" || undefined} aria-busy={busy === "request" || undefined}
+              onClick={() => { if (!busy) guarded(() => void request()); }} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
             </FocusSafeButton>
-            <FocusSafeButton data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => guarded(() => void send())}
+            <FocusSafeButton data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy === "request" || tooMuch} aria-disabled={busy === "send" || !!asking || undefined} aria-busy={busy === "send" || !!asking || undefined}
+              onClick={() => { if (!busy && !asking) guarded(() => void send()); }}
               title={canSend ? undefined : sendUnavailable ?? t("payments.composer.sendHint")} className="payment-back-primary">
               {asking ? t("payments.composer.asking") : busy === "send" ? t("payments.composer.preparing") : t("payments.composer.send")}
             </FocusSafeButton>

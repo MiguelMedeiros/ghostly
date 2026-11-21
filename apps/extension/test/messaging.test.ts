@@ -432,7 +432,7 @@ describe("viewer tabs", () => {
     expect(reply).toEqual({ ok: false, error: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
-    expect(world.session.size).toBe(0);
+    expect([...world.session.keys()].filter((key) => key.startsWith("viewer:"))).toEqual([]);
     // A page that says anything but true counts as off.
     const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
     expect(world.tabs.get(shown)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
@@ -739,7 +739,8 @@ describe("viewer tabs", () => {
       now += 10_000;
       windowOpen("https://example.org/self", false);
       for (const url of ["http://localhost:8080/", "http://192.168.1.1/", "https://nas.local/", "http://router/", "http://[::1]/",
-        `https://${SERVICE}.${PEER}.${TAG}.invalid/other`, "javascript:alert(1)", "file:///etc/passwd", "chrome://settings", `https://example.org/${"a".repeat(4100)}`]) windowOpen(url);
+        "http://[2002:c0a8:101::1]/", "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/", "http://[2::1]/", "http://[20::1]/",
+        `https://${SERVICE}.${PEER}.${TAG}.invalid/other`, `https://${SERVICE}.${PEER}.${TAG}.invalid../other`, "javascript:alert(1)", "file:///etc/passwd", "chrome://settings", `https://example.org/${"a".repeat(4100)}`]) windowOpen(url);
       await settle();
       expect(opened()).toEqual(["https://example.org/doc?q=1"]);
 

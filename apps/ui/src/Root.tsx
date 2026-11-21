@@ -247,13 +247,20 @@ function ChatNotStoredNotice() {
  * after it): the router reads it as home with the link as its hash, so no intake took it and it stayed in the address.
  * It opens as the link it doubles, and the intakes take it from there. One that starts with `//` or `/\` after it is no
  * page's, as with one `#` (`anchorTarget`): the router reads it as another site's address and refuses it, so home.
+ * A link after another page (`#/chat/<id>#ghostly1…`, `#/settings#ghostly1…`: pasted after the app's address) opens
+ * as that link too: no intake reads a page's hash. Not after a page that is a link itself, nor a device code's link
+ * that names the profile (`namedDeviceLink`): their intakes take those.
  */
 function DoubledHashLink() {
   const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   useEffect(() => {
-    if (pathname !== "/" || !hash) return;
+    if (!hash) return;
     const route = undoubledRoute(hash);
+    if (pathname !== "/") {
+      if (linkInAddress(route) !== null && linkInAddress(pathname) === null && !namedDeviceLink(pathname, hash)) navigate(route, { replace: true });
+      return;
+    }
     if (/^[\\/]{2}/.test(route)) navigate("/", { replace: true });
     else if (linkInAddress(route) !== null || /^\/chat\/./.test(route)) navigate(route, { replace: true });
   }, [pathname, hash, navigate]);
@@ -269,7 +276,7 @@ function DoubledHashLink() {
  * counted once the engine has loaded its groups.
  */
 function GroupLinkIntake() {
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   const nav = useAppNavigation();
   const { isLocked, hasUnlocked } = useLockScreen();
@@ -287,7 +294,9 @@ function GroupLinkIntake() {
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
-    if (!found) return;
+    // A device code's link whose name reads as a group's (`#/join/…#ghostly1z…`): the invite intake's alone, as a fresh
+    // page takes it (`takeDeviceLinkFromAddress`).
+    if (!found || namedDeviceLink(pathname, hash)) return;
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
@@ -295,7 +304,7 @@ function GroupLinkIntake() {
     else { setProblem(null); setCode(link); codeAfter.current = otherLinks.current; }
     linkTaken("group");
     navigate("/", { replace: true });
-  }, [pathname, navigate, t]);
+  }, [pathname, hash, navigate, t]);
   useOtherLink("group", useCallback(() => { otherLinks.current += 1; setProblem(null); }, []));
   useEffect(() => {
     if (!code || isLocked || !hasUnlocked || !groupsLoaded) return;

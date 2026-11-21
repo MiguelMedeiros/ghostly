@@ -109,8 +109,9 @@ describe("search inside a chat", () => {
     openChat(true, short());
     await screen.findByText(`Message ${COUNT - 1}`);
     ctrlF();
-    // 40 × 40 px before; the measure is a browser's (e2e/web/phone-touch-targets.spec.ts).
-    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:w-11", "max-md:h-11");
+    // 40 × 40 px before; in px, not rem, so a larger text size leaves the field its room. The measure is a browser's
+    // (e2e/web/phone-touch-targets.spec.ts, e2e/web/chat-search.spec.ts).
+    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:w-[44px]", "max-md:h-[44px]");
   });
 
   it("on a phone held upright puts the count on a line of its own under the field, and keeps it beside the field when wider", async () => {
@@ -277,7 +278,8 @@ describe("search inside a chat", () => {
     // Before, the search began again at the newest ("Message 299"), as if its words had just been typed.
     act(() => { deleteMessage("chat-1", "m297"); notifySessionsChanged(); });
     await vi.waitFor(() => expect(row("m297")).toBeNull());
-    expect(count()).toContain("of 10");
+    // The count keeps the place it stood at, as Older and Newer do. Before, it read "1 of 10" (and said so aloud).
+    expect(count()).toBe("3 of 10");
     fireEvent.click(screen.getByTestId("chat-search-older"));
     expect(last()).toBe("m296");
     expect(count()).toBe("3 of 10");
@@ -289,9 +291,22 @@ describe("search inside a chat", () => {
       notifySessionsChanged();
     });
     await vi.waitFor(() => expect(count()).toContain("of 9"));
+    expect(count()).toBe("3 of 9");
     fireEvent.click(screen.getByTestId("chat-search-newer"));
     expect(last()).toBe("m298");
     expect(count()).toBe("2 of 9");
+
+    // The oldest match gone: its place is past the end, the count stays on the last one rather than reading "9 of 8".
+    fireEvent.keyDown(field(), { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(field(), { key: "Enter", shiftKey: true });
+    expect(last()).toBe("m29");
+    expect(count()).toBe("9 of 9");
+    act(() => { deleteMessage("chat-1", "m29"); notifySessionsChanged(); });
+    await vi.waitFor(() => expect(row("m29")).toBeNull());
+    expect(count()).toBe("8 of 8");
+    fireEvent.click(screen.getByTestId("chat-search-older"));
+    expect(last()).toBe("m299");
+    expect(count()).toBe("1 of 8");
   });
 
   it("finds whatever the case and accents, a file by its name, and says when nothing is found", async () => {

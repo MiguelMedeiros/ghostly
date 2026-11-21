@@ -23,6 +23,24 @@ export class CliError extends Error {
   }
 }
 
+/**
+ * A value as a refusal quotes it (`--limit takes a number, not "x"`): a word with a line break or longer than 40
+ * characters is described, not printed, as an unknown option is (docs/CLI.md "Secrets stay hidden"). A Cashu token, a
+ * wallet connection link, an nsec, a seed or a hex key typed in the wrong place is that long, and bots keep the output.
+ */
+export function shownValue(value: unknown): string {
+  if (typeof value !== "string") return JSON.stringify(value);
+  return secretValue(value) ?? JSON.stringify(value);
+}
+
+/** What `shownValue` says in place of a long or secret-looking word, else undefined (the word may be printed). */
+export function secretValue(value: string): string | undefined {
+  if (/^cashu[AB]/.test(value)) return "(a Cashu token)";
+  if (/^nostr\+walletconnect:/i.test(value)) return "(a wallet connection link)";
+  if (/^nsec1/.test(value)) return "(a private key)";
+  return value.length > 40 || /[\r\n]/.test(value) ? `(a ${value.length}-character word)` : undefined;
+}
+
 /** Anything thrown, as the error a bot sees: the engine's own refusals keep their words. */
 export function asCliError(error: unknown): CliError {
   if (error instanceof CliError) return error;

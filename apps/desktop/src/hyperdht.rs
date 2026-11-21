@@ -524,6 +524,22 @@ pub async fn paired_hyperdht_send(
         .await
         .map_err(|_| "HyperDHT endpoint closed".into())
 }
+/// The page took `frames` more of the connection's frames: the runtime hands a connection's frames within a credit
+/// (`RECEIVE_CREDIT` in sidecar.mjs) and pauses its socket past it. In order with the sends; never dropped, or the
+/// connection stayed paused.
+#[tauri::command]
+pub async fn paired_hyperdht_took(
+    state: State<'_, HyperState>,
+    endpoint_id: u64,
+    connection_id: u64,
+    frames: u32,
+) -> Result<(), String> {
+    let value = json!({"type":"took", "id":connection_id, "frames":frames});
+    sender(&state, endpoint_id)?
+        .send(Request { value, reply: None })
+        .await
+        .map_err(|_| "HyperDHT endpoint closed".into())
+}
 /// The most frames held for the app's exit: two connections on each of eight endpoints.
 const MAX_PARTINGS: usize = 16;
 
@@ -785,6 +801,29 @@ mod tests {
         assert_eq!(
             rx.recv().await.unwrap().value,
             json!({"type": "close", "id": 3})
+        );
+    }
+
+    /// The frames the page took go to the runtime in order with its sends, which resumes a connection it paused there.
+    #[tokio::test]
+    async fn what_the_page_took_goes_to_the_runtime_in_order() {
+        let app = app();
+        let (id, mut rx) = runtime(&app, 4);
+        sending(&app, id, 1, Some("hi".into()), None)
+            .await
+            .unwrap()
+            .unwrap();
+        paired_hyperdht_took(app.state(), id, 3, 4).await.unwrap();
+        assert_eq!(rx.recv().await.unwrap().value["type"], "send");
+        assert_eq!(
+            rx.recv().await.unwrap().value,
+            json!({"type": "took", "id": 3, "frames": 4})
+        );
+        assert_eq!(
+            paired_hyperdht_took(app.state(), 99, 3, 1)
+                .await
+                .unwrap_err(),
+            "HyperDHT endpoint closed"
         );
     }
 

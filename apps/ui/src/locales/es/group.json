@@ -231,8 +231,10 @@
     "fullInvited": "El grupo está lleno ({{max}} de {{max}}), contando invitaciones aún sin respuesta ({{invited}}). No se puede invitar a nadie más hasta que alguien salga.",
     "invite": "Invitar a un contacto",
     "inviteAction": "Invitar",
+    "inviteLabel": "Invitar a {{name}}",
     "invited": "Invitado…",
     "makeAdmin": "Ceder admin",
+    "makeAdminLabel": "Ceder admin a {{name}}",
     "missing": "Faltan por llegar {{count}} mensajes de este miembro",
     "missingOne": "Falta por llegar {{count}} mensaje de este miembro",
     "needsBothHint": "Los grupos necesitan ambas apps conectadas y actualizadas",
@@ -242,6 +244,7 @@
     "notReachable": "no accesible",
     "reachable": "accesible",
     "remove": "Eliminar",
+    "removeLabel": "Eliminar a {{name}}",
     "removePicture": "Quitar foto"
   },
   "menu": {

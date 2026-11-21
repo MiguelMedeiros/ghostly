@@ -8,7 +8,7 @@ import { extensionAtproto } from "./atproto";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
 import { translatorFor } from "../../ui/src/locales";
-import { activeNamespace, markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
+import { activeNamespace, markEngineRestart, pageNamespace, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
 import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { forgetLocalAccess, releaseUnusedLocalAccess, withLocalAccess } from "./localAccess";
 import { allowLocalOrigin, localOriginAllowed } from "./localAllowList";
@@ -46,12 +46,14 @@ engine.subscribe(() => {
   const listed: OpenedViewer[] = [];
   for (const link of links) {
     if (!link.peerServices?.length) continue;
-    const tag = viewerTag(link.myPubKeyZ32);
+    // Keyed by the chat's own key, not its tag: the tag is a hash, and every state lists every chat's apps again.
+    let tag: string | undefined;
     for (const { id: service, type } of link.peerServices) {
       if (type !== "http") continue;
-      const key = `${profile} ${tag} ${service} ${link.peerPubKeyZ32}`;
+      const key = `${profile} ${link.myPubKeyZ32} ${service} ${link.peerPubKeyZ32}`;
       if (listedNoted.has(key)) continue;
       listedNoted.add(key);
+      tag ??= viewerTag(link.myPubKeyZ32);
       listed.push({ profile, tag, service, peer: link.peerPubKeyZ32 });
     }
   }
@@ -110,14 +112,14 @@ export const extensionHost: BrowserHost = {
     markEngineRestart();
   },
 
-  // Chrome's own prompt, and only from a user gesture: it comes first. The exact address goes on this profile's list,
-  // the only addresses its peer reaches (localAllowList.ts).
+  // Chrome's own prompt, and only from a user gesture: it comes first. The exact address goes on this page's profile's
+  // list, the only addresses its peer reaches (localAllowList.ts): never on the one another tab switched to meanwhile.
   async requestLocalAccess(originPattern, origin) {
     const granted = await chrome.permissions.request({ origins: [originPattern] });
-    if (granted) await allowLocalOrigin(activeNamespace(), origin);
+    if (granted) await allowLocalOrigin(pageNamespace(), origin);
     return granted;
   },
-  localAccessAllowed: (origin) => localOriginAllowed(activeNamespace(), origin),
+  localAccessAllowed: (origin) => localOriginAllowed(pageNamespace(), origin),
   // The share's app is added under the lock the give-back holds, so neither runs in the middle of the other.
   withLocalAccess,
   // Given back once no app of any profile is at that host, on any port (localAccess.ts).

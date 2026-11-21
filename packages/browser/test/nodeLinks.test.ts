@@ -5,6 +5,7 @@ import { GROUP_ANCHOR_ANSWER_MS, GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, Ghost
 import { db } from "../src/engine/db";
 import { setJoinTraceSink } from "../src/engine/joinTrace";
 import { EditQueue } from "../src/engine/edits";
+import { mayReach } from "../src/engine/serviceAccess";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import { storedBlob } from "../src/shared/storedFiles";
 import type { GroupEdgeView, StoredLink } from "../src/shared/types";
@@ -27,6 +28,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     isDataLinkOpen = true;
     supportsFiles = true;
     canSendText = true;
+    textRoom = true;
     textDelivery = "stream";
     groupsSupport = false;
     supportsGroupVersion = vi.fn(() => false);
@@ -65,6 +67,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     validateText = vi.fn(() => null);
     setCallSignal = vi.fn(async () => {});
     setTyping = vi.fn();
+    refreshServices = vi.fn(async () => {});
     confirmPair = vi.fn(async () => {});
     peerAllowsPayment = vi.fn((m: string) => m === "cashu");
     // Its choice, wallets aside: Lightning too, which it has no wallet of (peerAllowsPayment leaves it out).
@@ -266,6 +269,38 @@ describe("a chat as the contact drives it", () => {
     await link.stop.mock.results[0]!.value;
     expect(node["outboxes"].has(chat.id)).toBe(false);
     expect(node["fileDesk"]["chats"].has(chat.id)).toBe(false);
+  });
+
+  it("a removed chat's contact no longer reaches the services shared with it, nor again once the same invite is joined anew", async () => {
+    const chat = row(), other = row(), twin = row({ peerPubKeyZ32: other.peerPubKeyZ32 });
+    const { node } = await started(chat, other, twin);
+    onTestFinished(async () => { for (const s of await db.getServices()) await db.deleteService(s.id); });
+    const { serviceId } = node.addService({ name: "web", target: "http://127.0.0.1:3400" });
+    for (const { peerPubKeyZ32 } of [chat, other]) node.setServiceShared({ serviceId, peerPubKeyZ32, shared: true });
+    const service = () => node.getState().services.find((s) => s.id === serviceId)!;
+    node.removeLink({ linkId: chat.id });
+    // Another chat with the same contact still has it: only the chat's own contact is cut off.
+    node.removeLink({ linkId: twin.id });
+    expect(mayReach(service(), chat.peerPubKeyZ32)).toBe(false);
+    expect(service().sharedWith).toEqual([other.peerPubKeyZ32]);
+    await vi.waitFor(async () => expect((await db.getServices()).find((s) => s.id === serviceId)?.sharedWith).toEqual([other.peerPubKeyZ32]));
+    // The same invite joined again is a chat of the same id and contact key: nothing is shared with it.
+    await node.shutdown();
+    const again = await started(chat);
+    expect(again.node.getState().services.find((s) => s.id === serviceId)?.sharedWith).toEqual([other.peerPubKeyZ32]);
+  });
+
+  it("a service still shared with a contact whose chat is gone (deleted by an older release) is no longer shared with it at start", async () => {
+    const gone = row(), other = row();
+    onTestFinished(async () => { for (const s of await db.getServices()) await db.deleteService(s.id); });
+    await db.putService({ id: "web", name: "web", target: "http://127.0.0.1:3400", enabled: true, createdAt: 1,
+      sharedWith: [gone.peerPubKeyZ32, other.peerPubKeyZ32] });
+    const { node } = await started(other);
+    const service = () => node.getState().services.find((s) => s.id === "web")!;
+    expect(service().sharedWith).toEqual([other.peerPubKeyZ32]);
+    // The same invite joined again (the same contact key) is not served.
+    expect(mayReach(service(), gone.peerPubKeyZ32)).toBe(false);
+    await vi.waitFor(async () => expect((await db.getServices()).find((s) => s.id === "web")?.sharedWith).toEqual([other.peerPubKeyZ32]));
   });
 
   it("a ready session remembers which ways of paying the contact chose, wallets aside, for requests held while it is away", async () => {

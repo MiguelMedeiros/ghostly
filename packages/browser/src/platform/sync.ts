@@ -35,6 +35,7 @@ import { forgetServicesOf } from "../host";
 import { viewerTag } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
 import { isRefusalId, paymentRefusal } from "../shared/refusals";
+import { isJoinLine } from "../shared/systemLines";
 
 /**
  * The Desktop UI keeps its sessions in localStorage and that stays the list
@@ -49,13 +50,6 @@ import { isRefusalId, paymentRefusal } from "../shared/refusals";
 const MIGRATED_KEY = "gb-sessions-imported";
 const OLD_MIGRATED_KEY = "ghostly_browser_sessions_imported";
 const FORGET_AFTER_MS = 15_000;
-const JOIN_PATTERN = /^👋 (?:.+ )?joined$/;
-
-/**
- * Whether a row is the chat's joined line, drawn as the app's own line: the contact's only when the engine took it as
- * one (`joinLine`, their first row of the chat), any other row of theirs in those words being a message; mine by its words.
- */
-const isJoinLine = (message: StoredMessage) => JOIN_PATTERN.test(message.text) && (message.sender === "me" || !!message.joinLine);
 
 export function notifySessionsChanged(): void {
   window.dispatchEvent(new Event("session-updated"));
@@ -92,6 +86,7 @@ export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
   return (id && loadShownSession(id)) || undefined;
 }
 
+/** A row of the engine's as the pages hold it. The rows it draws as the app's own lines are `isSystemLine`'s (shared/systemLines.ts). */
 export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
   const isJoin = isJoinLine(message);
   // A payment of the contact's this app refused: the app's own line, not the contact's (stored as theirs for the CLI).
@@ -256,6 +251,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
       row.timestamp = message.timestamp;
       if (message.sentAt !== undefined) row.sentAt = message.sentAt;
       moved = true;
+    }
+    // A file that waited for the contact and went live: the engine's row has no delivery since, the row here loses its
+    // waiting state with it (only the engine sets it; a text of mine keeps the status the chat gave it).
+    if (previous?.delivery === "waiting" && message.sender === "me" && !message.delivery) {
+      const row = change();
+      delete row.delivery;
+      delete row.deliveryError;
     }
     if (previous && mirrorable(message)) {
       if (message.delivery && (previous.delivery !== message.delivery || previous.deliveryError !== message.deliveryError)) {

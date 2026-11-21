@@ -1,10 +1,13 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkPreview } from "@ghostly/core";
+import { engine } from "@ghostly/browser/platform/engine";
 import { MessageInput } from "../../components/MessageInput";
 import { MessageBubble } from "../../components/MessageBubble";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { forgetLinkPreviews } from "../../lib/linkPreviewFetch";
+import { PREVIEW_DEBOUNCE_MS } from "../../hooks/useLinkPreviewDraft";
+import { setSessionDraft } from "../../lib/storage";
 import { renderApp } from "../render";
 import { fakeEngine } from "../fakeEngine";
 
@@ -38,10 +41,17 @@ beforeEach(() => { onSend.mockReset().mockResolvedValue(null); forgetLinkPreview
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("a link preview in the composer", () => {
+  // The text's rest (PREVIEW_DEBOUNCE_MS) runs on a fake clock that also keeps real time: `rest()` passes it at once.
+  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] }); });
+  afterEach(() => { vi.useRealTimers(); });
+  /** Past the time the text rests before its link is read, and a little more: what would be asked has been by now. */
+  const rest = () => act(() => vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS + 100));
+
   it("is read from the page once the text rests, shown, and sent with the message", async () => {
     const fetch = sites();
     composer();
     type("look https://news.example/story?utm_source=feed&id=9");
+    await rest();
     const card = await screen.findByTestId("composer-link-preview");
     await waitFor(() => expect(card).toHaveAttribute("data-status", "ready"));
     expect(within(card).getByTestId("composer-link-preview-title")).toHaveTextContent("Ghosts are real");
@@ -61,6 +71,7 @@ describe("a link preview in the composer", () => {
     sites();
     composer();
     type("look https://news.example/story");
+    await rest();
     const card = await screen.findByTestId("composer-link-preview");
     await waitFor(() => expect(card).toHaveAttribute("data-status", "ready"));
     for (const id of ["composer-link-preview-title", "composer-link-preview-description"]) {
@@ -78,11 +89,12 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     composer();
     type("https://news.example/a");
+    await rest();
     await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
     fireEvent.click(screen.getByTestId("link-preview-remove"));
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     type("https://news.example/a and more");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://news.example/a and more"));
@@ -93,18 +105,19 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     const view = composer(false);
     type("https://news.example/a");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     view.unmount();
 
     composer();
     type("my router http://192.168.0.1/ and http://printer.local/");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(fetch).not.toHaveBeenCalled();
     // CORS refused: the fetch fails as a network error does, and there is simply no card.
     fetch.mockRejectedValue(new TypeError("Failed to fetch"));
     type("https://closed.example/page");
+    await rest();
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByTestId("composer-link-preview")).toBeNull());
     send();
@@ -118,11 +131,26 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     composer();
     type("look https://their-server.example/page");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("look https://their-server.example/page"));
+  });
+
+  it("asks nothing for a kept draft's link before the engine says whether Hide my IP is on", async () => {
+    engine.state = null;
+    setSessionDraft("chat-kept", "look https://their-server.example/page");
+    const fetch = sites();
+    renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews draftId="chat-kept" /></LockScreenProvider>);
+    expect(field().value).toBe("look https://their-server.example/page");
+    await rest();
+    expect(fetch).not.toHaveBeenCalled();
+    // Once the engine says it is off, the preview is made.
+    act(() => fakeEngine.update({ settings: { relayOnly: false } }));
+    await rest();
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(String(fetch.mock.calls[0][0])).toBe("https://their-server.example/page");
   });
 
   it("of a message being edited goes with the edit while its link stays: saved at once, or the site failing now", async () => {
@@ -146,6 +174,7 @@ describe("a link preview in the composer", () => {
     view = editing("look https://news.example/story");
     await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
     type("Look https://news.example/story");
+    await rest();
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
@@ -183,7 +212,7 @@ describe("a link preview in the composer", () => {
       let view = editing("look https://news.example/story", linkPreviews);
       await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
       type("Look https://news.example/story");
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await rest();
       expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
       save();
       await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
@@ -212,11 +241,12 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     composer();
     type("guess the ending: ||https://news.example/ending||");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     // The same link outside the spoiler too: it shows, so its card tells nothing hidden.
     type("read https://news.example/ending, or guess: ||https://news.example/ending||");
+    await rest();
     await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
     expect(fetch).toHaveBeenCalledOnce();
   });

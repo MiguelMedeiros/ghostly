@@ -1,7 +1,9 @@
 import { createHmac, createPrivateKey, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { once } from "node:events";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
+import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { keyBytes, moderateBytes, signedBytes, startTokenService, verifyModeration, verifyRequest } from "../../../e2e/infra/sfu-token/server.mjs";
@@ -98,6 +100,25 @@ describe("the group-token mock (e2e/infra/sfu-token, WISP 602)", () => {
     expect(slow.status).toBe(429);
     expect(Number(slow.headers.get("retry-after"))).toBeGreaterThan(0);
     expect(slow.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("keeps an idle keep-alive socket open past Node's idle close, so a client's next request on it is not cut", { timeout: 15_000 }, async () => {
+    // route.fetch keeps its sockets alive; a double that closed one after Node's 5 s (+ 1 s) could close it just as a
+    // quiet call's next request went out on it, through the stack's docker-proxy: socket hang up.
+    const { url } = await service();
+    const socket = connect(Number(new URL(url).port), "127.0.0.1");
+    let ended = false;
+    socket.on("end", () => { ended = true; });
+    const ask = async () => {
+      const reply = once(socket, "data");
+      socket.write("GET /healthz HTTP/1.1\r\nHost: x\r\n\r\n");
+      return String((await reply)[0]);
+    };
+    expect(await ask()).toMatch(/^HTTP\/1\.1 200 /);
+    await new Promise((r) => setTimeout(r, 6_500));
+    expect(ended).toBe(false);
+    expect(await ask()).toMatch(/^HTTP\/1\.1 200 /);
+    socket.destroy();
   });
 
   it("names a key the roster has no name for by the request's name, cut to 64 code points", async () => {

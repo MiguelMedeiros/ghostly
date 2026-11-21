@@ -47,6 +47,7 @@ mod linked_files;
 mod lnd;
 mod local_access;
 mod local_fetch;
+mod local_names;
 mod microphone;
 // Android and iOS: the Desktop-only modules' commands, refusing (`commands!` is one list for every platform).
 #[cfg(mobile)]
@@ -151,6 +152,7 @@ macro_rules! commands {
             commands::generate_enc_key,
             commands::get_profile,
             commands::get_public_key,
+            commands::group_call_fetch,
             commands::hide_from_switcher,
             commands::hold_fetch,
             commands::link_preview_fetch,
@@ -211,6 +213,7 @@ macro_rules! commands {
             hyperdht::paired_hyperdht_send,
             hyperdht::paired_hyperdht_start,
             hyperdht::paired_hyperdht_stop,
+            hyperdht::paired_hyperdht_took,
             keep_awake::keep_awake,
             linked_files::linked_files_entry,
             linked_files::linked_files_forget,
@@ -255,6 +258,7 @@ macro_rules! commands {
             paired_transport::paired_native_close,
             paired_transport::paired_native_parting,
             paired_transport::paired_native_send,
+            paired_transport::paired_native_took,
             share::share_text,
             translate::translate_texts,
             translate_models::translation_download,
