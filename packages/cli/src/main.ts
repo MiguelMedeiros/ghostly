@@ -11,7 +11,7 @@ import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_
 import { callRef } from "./commands/calls";
 import { here, inRange, INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
-import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
+import { asCliError, CliError, type ErrorCode, EXIT, localFileError, SINGLE_DEVICE } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { identityWaitLines } from "./identityWait";
@@ -615,6 +615,8 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["profile set [--name <name>] [--share-profile | --no-share-profile] [--force]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
   ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out; any other space or line break at an end is refused"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out"), use: o("boolean", "Make it the current profile"), copy: o("boolean", "Restore it even when a profile here is the same person (both would act as one to contacts)") }],
+  // No device commands: `ghostly device …` says why (usage, exit 2), and the engine's device calls are refused alike.
+  ["device", SINGLE_DEVICE],
   ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)") }],
   ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
@@ -1897,6 +1899,8 @@ export async function main(input: string[]): Promise<number> {
   if (first === "daemon") { await daemonCommand(argv.slice(1)); return -1; }
   if (first === "listen") { await listenCommand(argv.slice(1)); return -1; }
   if (first === "engine") { await engineCommand(argv.slice(1)); return 0; }
+  // A CLI profile is on this one device only: whatever follows `device`, the answer is why, and what to do instead.
+  if (first === "device") throw new CliError("usage", `${SINGLE_DEVICE} (ghostly help device)`);
   if (first === "settings") { await settingsCommand(second, argv.slice(2)); return 0; }
   if (two === "identity add") { await identityAddCommand(argv.slice(2)); return 0; }
   if (two === "call pipe") { await callPipeCommand(argv.slice(2)); return -1; }
