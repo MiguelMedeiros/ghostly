@@ -5,7 +5,7 @@ import { SignerTimeout, type IdentityProofProvider, type IdentitySigner, type Si
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
 import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 
 /**
  * Identity proofs (WISP 300, WISP 1100 phase 3b), as the Identities page makes them: the engine draws the proof key
@@ -115,8 +115,10 @@ function withSubject(p: IdentityProofProvider, signer: IdentitySigner<unknown>, 
   if (!subject) return { values };
   const field = signer.kind === "in-app" ? signer.fields?.find((f) => f.kind !== "secret" && f.label === p.subject?.label) : undefined;
   if (!field) return { values, expected: canonical(p, subject) };
-  const other = values[field.name];
-  if (other && other !== subject) throw new CliError("usage", `Two ${field.label.toLowerCase()}s: ${subject} as <subject>, ${other} as --field ${field.name}; give one`);
+  // Compared as the provider reads them (a domain in capitals is the same one); one that is no subject of it is refused
+  // in its words, and either is quoted as a refusal quotes a value: a link or key typed in its place is not printed back.
+  const given = canonical(p, subject), other = values[field.name];
+  if (other && canonical(p, other) !== given) throw new CliError("usage", `Two ${field.label.toLowerCase()}s: ${shownValue(subject)} as <subject>, ${shownValue(other)} as --field ${field.name}; give one`);
   return { values: { ...values, [field.name]: subject } };
 }
 
@@ -178,7 +180,8 @@ export const IDENTITY_METHODS: Record<string, Method> = {
           if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { ...tag, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
         },
       }, async (session) => {
-        const subject = await session.subject();
+        // In the form `expected` is in: a signer may answer its key another way (a Pubky key in capitals).
+        const subject = canonical(p, await session.subject());
         if (expected !== undefined && subject !== expected) {
           const shown = (key: string) => p.publicUri?.(key) ?? key;
           throw new CliError("bad_request", `${signer.label} holds ${shown(subject)}, not ${shown(expected)}: nothing was signed`);

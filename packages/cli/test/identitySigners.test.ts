@@ -143,10 +143,20 @@ describe("identity signers on Node", () => {
         await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { bunker: BUNKER } })).rejects.toThrow("stopped here");
         await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { domain: "example.com", bunker: BUNKER } })).rejects.toThrow("stopped here");
         await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { domain: "other.org", bunker: BUNKER } })).rejects.toMatchObject({
-          code: "usage", message: "Two domains: example.com as <subject>, other.org as --field domain; give one",
+          code: "usage", message: "Two domains: \"example.com\" as <subject>, \"other.org\" as --field domain; give one",
         });
+        // The same domain written another way is one domain, as the provider reads it.
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "Example.COM", fields: { domain: "example.com", bunker: BUNKER } })).rejects.toThrow("stopped here");
+        // A link or key typed as the subject (or the field) is refused in the provider's words, never printed back.
+        const SECRET = `${BUNKER}&secret=TOPSECRET123`, NSEC = `nsec1${"q".repeat(58)}`;
+        for (const [subject, domain] of [[SECRET, "example.com"], ["example.com", SECRET], [NSEC, "example.com"]]) {
+          const refused = await callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject, fields: { domain, bunker: BUNKER } }).catch((error: unknown) => error);
+          expect(refused).toMatchObject({ code: "bad_request" });
+          expect((refused as Error).message).not.toContain("TOPSECRET123");
+          expect((refused as Error).message).not.toContain("nsec1");
+        }
       } finally { run.mockRestore(); }
-      expect(seen).toEqual([{ domain: "example.com", bunker: BUNKER }, { domain: "example.com", bunker: BUNKER }]);
+      expect(seen).toEqual([{ domain: "example.com", bunker: BUNKER }, { domain: "example.com", bunker: BUNKER }, { domain: "Example.COM", bunker: BUNKER }]);
       expect(node.beginIdentityProof).not.toHaveBeenCalled();
     });
 
