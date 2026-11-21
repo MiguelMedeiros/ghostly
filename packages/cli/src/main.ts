@@ -614,7 +614,7 @@ export const SPECIAL: [usage: string, summary: string, options?: Record<string, 
   ["profile show", "The name contacts see, and whether it is shared"],
   ["profile set [--name <name>] [--share-profile | --no-share-profile] [--force]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)"), force: o("boolean", "Use --name even if it looks like a seed, a key or ecash") }],
   ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out; any other space or line break at an end is refused"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
-  ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out"), use: o("boolean", "Make it the current profile") }],
+  ["profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file, or stdin for - (else GHOSTLY_BACKUP_PASSPHRASE). One line break at its end is left out"), use: o("boolean", "Make it the current profile"), copy: o("boolean", "Restore it even when a profile here is the same person (both would act as one to contacts)") }],
   ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)") }],
   ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
@@ -844,7 +844,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
   const specs: Record<string, Record<string, OptionSpec>> = {
     create: { use: { type: "boolean", description: "" }, name: { type: "string", description: "" }, force: { type: "boolean", description: "" } },
     backup: { out: { type: "string", description: "" }, "passphrase-file": { type: "string", description: "" }, passphrase: { type: "boolean", description: "" }, light: { type: "boolean", description: "" } },
-    restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
+    restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" }, copy: { type: "boolean", description: "" } },
     set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true }, force: { type: "boolean", description: "" } },
   };
   let parsed: Parsed;
@@ -942,8 +942,8 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     }
     case "restore": {
       const [given, name] = parsed.positionals;
-      if (!given || !name) throw new CliError("usage", `Missing <${given ? "new profile" : "file"}>: ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]`);
-      noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
+      if (!given || !name) throw new CliError("usage", `Missing <${given ? "new profile" : "file"}>: ghostly profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]`);
+      noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use] [--copy]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
       const file = here(given) as string;
       const { backupFileProtection, restoreProfile } = await import("./backup");
@@ -962,7 +962,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
       for (const signal of signals) process.on(signal, onSignal);
       let paths: Awaited<ReturnType<typeof restoreProfile>>;
-      try { paths = await restoreProfile(g.home, checkProfileName(name), file, passphrase, stop.signal); } catch (error) {
+      try { paths = await restoreProfile(g.home, checkProfileName(name), file, passphrase, stop.signal, parsed.options.copy === true); } catch (error) {
         // Said only when the stop is what ended it: one that came after the profile took its name restored it all the same.
         if (error === stop.signal.reason) process.stderr.write(`ghostly: ${words}\n`);
         throw error;
