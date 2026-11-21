@@ -142,6 +142,24 @@ describe("opening a service on a given port", () => {
     expect(portOf((await openOn()).url)).toBeGreaterThan(0);
   });
 
+  it("open already, once the contact no longer shares it (taken back, or not live): not_found as for a first open, and its port is closed", async () => {
+    const shared = link.peerServices;
+    const { url } = await openOn();
+    try {
+      for (const gone of [[], undefined]) {
+        link.peerServices = gone as typeof shared;
+        await expect(openOn()).rejects.toMatchObject({ code: "not_found", message: "The contact shares no service app (or is not live)" });
+        await expect(fetch(url, { redirect: "manual" })).rejects.toThrow();
+        await expect(SERVICE_METHODS["service.close"](ctx, { chat: link.id, service: "app" })).rejects.toMatchObject({ code: "not_found" });
+      }
+      // Shared again: it opens anew.
+      link.peerServices = shared;
+      expect(portOf((await openOn()).url)).toBeGreaterThan(0);
+    } finally {
+      link.peerServices = shared;
+    }
+  });
+
   it("the API takes a whole number only, for a socket caller too", async () => {
     await expect(openOn(1.5)).rejects.toMatchObject({ code: "bad_request", message: "port must be a whole number from 0 to 65535" });
   });
