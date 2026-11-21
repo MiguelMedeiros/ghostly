@@ -94,6 +94,11 @@ H=$(fpr heidi@example.org)
 at $KEYS --quick-add-key "$H" ed25519 sign 2026-06-01
 pub "$H" subkey-expired; clearsign "$H" subkey-expired-clearsign "$SIGN"
 
+# Vic: Ed448, which GnuPG 2.3 and later make as a v5 key (refused). GnuPG 2.2 cannot: the copy made by 2.4.4 stays.
+if gpg --version | head -1 | grep -qE ' 2\.(2|1|0)\.'; then echo "GnuPG 2.2: ed448-v5 kept as it is" >&2
+else at $KEYS --quick-gen-key 'Vic Five <vic@example.org>' ed448 sign,cert never
+  V=$(fpr vic@example.org); pub "$V" ed448-v5; clearsign "$V" ed448-v5-clearsign "$SIGN"; fi
+
 # A key that never signed anything, to paste beside another key's signature.
 at $KEYS --quick-gen-key 'Ivan Test <ivan@example.org>' ed25519 sign,cert never
 I=$(fpr ivan@example.org); pub "$I" ivan

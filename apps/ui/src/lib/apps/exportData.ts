@@ -14,10 +14,10 @@ export function appDataFile(file: AppDataExportText): string {
 
 /**
  * Saves an app's data before an uninstall (WISP 1200 § Updates and rollback: uninstall offers an export): one
- * `ghostlyAppData` file per scope, all in one JSON list. Nothing when the app kept nothing.
+ * `ghostlyAppData` file per scope, all in one JSON list. Nothing when the app kept nothing: false, for the screen to say so.
  */
-export async function saveAppData(ref: string, exports: readonly AppDataExportText[]): Promise<void> {
-  if (!exports.length) return;
+export async function saveAppData(ref: string, exports: readonly AppDataExportText[]): Promise<boolean> {
+  if (!exports.length) return false;
   const name = `${ref.slice(53)}-data.json`;
   const parts: BlobPart[] = ["["];
   for (const [i, file] of exports.entries()) {
@@ -28,4 +28,5 @@ export async function saveAppData(ref: string, exports: readonly AppDataExportTe
   }
   parts.push("\n]\n");
   await saveMade(servicesPlatform, new Blob(parts, { type: "application/json" }), name);
+  return true;
 }

@@ -8,6 +8,8 @@ import { useGroupNameField } from "../hooks/useGroupNameField";
 import { useEngineValue } from "../lib/engineState";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { SecretGuardDialog } from "./SecretGuardDialog";
+import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { useNoLinksHint } from "../hooks/useNoLinksHint";
 
 type Kind = "community" | "mesh";
@@ -50,8 +52,12 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
   }, [returnFocus, input]);
   // A name with nothing visible in it (a zero-width space, a direction mark) is refused as the engine refuses it.
   const named = !!groupName(name);
-  const submit = async () => {
+  // A name that looks like a secret asks first, as the chat composer does: everyone let in reads it.
+  const [secret, setSecret] = useState<SecretFinding | null>(null);
+  const submit = async (confirmed = false) => {
     if (!named || busy || noLinks) return;
+    const found = confirmed ? null : findSecret(name);
+    if (found) { setSecret(found); return; }
     setBusy(true); setError(null);
     try {
       const { groupId } = await engine.call("createGroup", { name: name.trim(), profile: kind });
@@ -68,7 +74,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
     <p className="mt-1 text-sm text-text-muted">{t("group.create.hint")}</p>
     <form className="mt-4" onSubmit={e => { e.preventDefault(); void submit(); }}>
       <input ref={input} value={name} {...nameField} placeholder={t("group.rename.label")} aria-label={t("group.rename.label")} data-testid="new-group-name"
-        className="w-full rounded-lg bg-input-bg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent" />
+        className="w-full rounded-lg bg-input-bg border border-field-border px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent focus:ring-2 focus:ring-focus-ring" />
       <div role="radiogroup" aria-label={t("group.create.kind")} className="mt-3 grid gap-2">
         {kinds(t).map(k => <label key={k.kind} data-testid={`new-group-kind-${k.kind}`}
           className={`flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5 transition-colors ${kind === k.kind ? "border-accent bg-accent/10" : "border-border hover:bg-surface-hover"}`}>
@@ -81,9 +87,11 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
       {error && <Notice problem={error} className="mt-2 text-sm" />}
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
-        <button type="submit" disabled={!named || busy || noLinks} data-testid="new-group-create"
-          className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent">{t("group.create.create")}</button>
+        {/* While it works, a press does nothing; not disabled, which would drop the focus to the page (and keep it there if refused). */}
+        <button type="submit" disabled={!named || noLinks} aria-disabled={busy || undefined} aria-busy={busy || undefined} data-testid="new-group-create"
+          className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent">{t("group.create.create")}</button>
       </div>
     </form>
+    {secret && <SecretGuardDialog finding={secret} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void submit(true); }} />}
   </dialog>, document.body);
 }

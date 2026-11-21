@@ -27,7 +27,10 @@ export function findReference(slug: string): Reference | undefined {
   return references.find((ref) => ref.slug === slug || ref.aliases.includes(slug));
 }
 
-/** Only known local docs become reader routes. Other relative references identify repository source. */
+/**
+ * Only known local docs become reader routes. Other relative references identify repository source, on `main`: the
+ * site is built from it, so the file is there (on `dev` it may have moved since the release).
+ */
 export function resolveReferenceUrl(url: string, sourcePath: string): string {
   if (/^(?:https?:|mailto:)/i.test(url) || url.startsWith("#")) return url;
   if (/^[a-z][a-z\d+.-]*:/i.test(url) || url.startsWith("//")) return "";
@@ -46,5 +49,5 @@ export function resolveReferenceUrl(url: string, sourcePath: string): string {
   const found = references.find((ref) => ref.sourcePath === normalized || ref.aliases.some((slug) => `docs/wisps/${slug}.md` === normalized));
   return found
     ? referencePath(found.file) + hash
-    : `https://github.com/MiguelMedeiros/ghostly/blob/dev/${normalized}${hash}`;
+    : `https://github.com/MiguelMedeiros/ghostly/blob/main/${normalized}${hash}`;
 }

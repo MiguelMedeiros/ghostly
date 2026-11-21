@@ -10,7 +10,7 @@ export function announceJoins(hub: EventHub, node: GhostlyNode): () => void {
   const say = (chat: string) => {
     if (hub.said(chat, "join")) return;
     hub.markSaid(chat, "join");
-    const nick = node.getState().settings.nick?.trim();
+    const nick = node.getSettings().nick?.trim();
     void node.sendMessage({ linkId: chat, text: nick ? `👋 ${nick} joined` : "👋 joined" }).catch(() => {});
   };
   return hub.onEvent((event) => {

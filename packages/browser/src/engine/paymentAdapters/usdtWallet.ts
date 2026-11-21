@@ -2,8 +2,8 @@ import { generateMnemonic, validateMnemonic } from '@scure/bip39';
 import { awayFrom, refuseAway } from "./away";
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { ETHEREUM_USDT, EVM_TEST_CHAINS, SEPOLIA_TEST_USDT, USDT_PUBLIC_RPC, type WalletNetwork } from '@ghostly/core';
-import type { WalletMode } from '../../shared/mints';
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from './modeGate';
+import { usdtMode } from './walletModes';
 import { walletKey } from './walletNetworks';
 import { viewNews } from './viewNews';
 import { STORES, store, transact, wrap } from '../../shared/idb';
@@ -24,8 +24,7 @@ const loadUsdt=()=>import('./usdt');
 export const DEFAULT_USDT = {network:'ethereum',provider:USDT_PUBLIC_RPC.ethereum,token:ETHEREUM_USDT} as const satisfies Omit<UsdtCreate,'password'|'mnemonic'>;
 /** A Testnet USDT wallet starts on Sepolia, with Aave's test USDT (anyone can mint it from their faucet). */
 export const TESTNET_USDT = {network:'sepolia',provider:USDT_PUBLIC_RPC.sepolia,token:SEPOLIA_TEST_USDT} as const satisfies Omit<UsdtCreate,'password'|'mnemonic'>;
-/** Ethereum carries real USDT; Sepolia and a local chain carry worthless test tokens. */
-export const usdtMode=(network:UsdtConfig['network']):WalletMode=>network==='ethereum'?'mainnet':'testnet';
+export { usdtMode };
 /** A wallet with a device key opens by itself; one sealed with a password (older profiles) waits for it. */
 interface SavedWallet {config:UsdtConfig;seed:EncryptedSeed;deviceKey?:string}
 /** The defaults a new wallet of this network is made with, in one click. */

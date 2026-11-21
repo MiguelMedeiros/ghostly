@@ -76,3 +76,30 @@ for (const gap of [1_000, 3_000]) for (const chooser of ["the dialling side", "t
     expect(took).toBeLessThan(8_000);
     for (const app of apps) expect(app.link.transportWait, app.name).toBeUndefined();
   }, 90_000);
+
+/**
+ * Moves back and forth between HyperDHT and WebRTC, each made as soon as the last one is live (a bot, or a person
+ * changing their mind): one every `SWITCH_RETIRE_MS` and a round trip, about 20 a minute. The contact read 10 of this
+ * side's policies a minute (`POLICY_RECEIVE_LIMIT`), and the 11th waited for the window: when this side plans the moves,
+ * its plan for that policy was refused and sat in "connecting" until its 30 s timeout, then the 20 s retry (50.05 to
+ * 50.22 s in 4 of 50 such moves between two CLIs); when the contact plans them, the window's wait (about 20 s here).
+ */
+for (const chooser of ["the dialling side", "the other side"] as const)
+  it(`twenty moves back and forth, each as the last went live, each go within the old session's retirement, chosen by ${chooser}`, async () => {
+    const { inviter, joiner } = invitationWhere("inviter");
+    const a = startApp("a", inviter, { side: joiner, name: "b" }), b = startApp("b", joiner, { side: inviter, name: "a" });
+    const who = chooser === "the dialling side" ? a : b;
+    await who.link.setTransportPreference("hyperdht/1", true);
+    expect(await until(on("hyperdht/1"), 60_000)).toBeLessThan(60_000);
+    await run(5_000);
+
+    const took: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      const target: PairedTransport = i % 2 === 0 ? "webrtc/1" : "hyperdht/1";
+      await who.link.setTransportPreference(target, true);
+      took.push(await until(on(target), 60_000));
+    }
+    console.log(`BACK_TO_BACK ${chooser}: ${took.map((ms) => ms / 1000).join(" ")} s`);
+    for (const ms of took) expect(ms).toBeLessThan(SWITCH_RETIRE_MS + 1_500);
+    for (const app of apps) expect(app.link.transportWait, app.name).toBeUndefined();
+  }, 120_000);

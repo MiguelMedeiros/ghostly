@@ -1,6 +1,11 @@
+import { sha256 } from "@noble/hashes/sha2.js";
 import { readAppStore } from "./store-core/appStore";
+import { toBase64Url } from "./store-core/bytes";
 import { APP_ICON_PATH, APP_PERMISSIONS, appViewOf, readAppBundle, type AppBundle, type AppPermission, type AppViewMode } from "./store-core/appBundle";
-import { appFingerprint, appRef, appRefPublisher, type SignedAppRevocation } from "./store-core/appStatements";
+import { readCanonicalJson } from "./store-core/canonicalJson";
+import {
+  APP_STATEMENT_LIMITS, appFingerprint, appRef, appRefPublisher, appRevocationId, readAppRevocationShape, readAppRevocations, type SignedAppRevocation,
+} from "./store-core/appStatements";
 import { APPS_RELEASE, versionAtLeast } from "./appsGate";
 
 /*
@@ -19,7 +24,7 @@ export const STORE_HOSTS = ["raw.githubusercontent.com", "cdn.jsdelivr.net"] as 
  * What the build reads, at most: the app's own bounds (appFetch.ts), the URLs one listing may have (core's appStore.ts),
  * and a cap on how many apps one page lists.
  */
-export const STORE_LIMITS = { indexBytes: 4 * 1024 * 1024, sigBytes: 1024, bundleBytes: 16 * 1024 * 1024, apps: 200, urls: 4 } as const;
+export const STORE_LIMITS = { indexBytes: 4 * 1024 * 1024, sigBytes: 1024, bundleBytes: 16 * 1024 * 1024, revocationsBytes: 16 * 1024 * 1024, apps: 200, urls: 4 } as const;
 
 /** A URL the app would read an app from: https on one of the two hosts, no port, no user. */
 export function isStoreFetchUrl(value: string): boolean {
@@ -32,11 +37,34 @@ export function isStoreFetchUrl(value: string): boolean {
   return url.protocol === "https:" && url.port === "" && !url.username && !url.password && (STORE_HOSTS as readonly string[]).includes(url.hostname.toLowerCase());
 }
 
-/** The bytes the build read: the index, its `.sig`, and each bundle by the URL it came from. */
+/**
+ * Whether Apps, Add reads this URL, pasted, as it is (packages/browser/src/engine/appFetch.ts `appPasteUrl`, apps.ts
+ * `refusePrivateLink`): no query or fragment, which it refuses as a private repository's link, and a last segment naming
+ * a `.ghostlyapp` or `.json` file, where it would read `app.ghostlyapp` inside a folder of that name.
+ */
+export function pastedAsIs(value: string): boolean {
+  if (!isStoreFetchUrl(value)) return false;
+  const url = new URL(value);
+  return !/[?#]/.test(url.href) && /\.(ghostlyapp|json)$/.test(url.pathname.split("/").pop() ?? "");
+}
+
+/** A file beside another, as the app names it (packages/browser/src/engine/appFetch.ts): `ghostly-revoke.json` beside a bundle. */
+export function besideUrl(url: string, name: string): string {
+  const target = new URL(url);
+  target.search = "";
+  target.hash = "";
+  return new URL(name, target).href;
+}
+
+/**
+ * The bytes the build read: the index, its `.sig`, each bundle by the URL it came from, and each publisher's
+ * `ghostly-revoke.json` by its own URL (none in a snapshot written before the build read them).
+ */
 export interface StoreBytes {
   index: Uint8Array;
   sig: Uint8Array;
   bundles: Record<string, Uint8Array>;
+  revocations?: Record<string, Uint8Array>;
 }
 
 export interface StoreApp {
@@ -67,8 +95,13 @@ export interface StoreApp {
   repo?: string;
   support?: string;
   releaseNotes?: string;
-  /** The URL the bundle verified from: what Apps, Add takes. */
+  /** The URL the bundle verified from. */
   url: string;
+  /**
+   * The first URL holding the listed version that Apps, Add reads as pasted (`pastedAsIs`), as the page offers it under
+   * "add it by its link"; none when every such URL has a query, a fragment or names no file.
+   */
+  link?: string;
   /** icon.png, a square PNG the bundle reader checked, when the bundle has one. */
   icon?: Uint8Array;
 }
@@ -85,7 +118,7 @@ export type StoreView =
       expires: number;
       expired: boolean;
       apps: StoreApp[];
-      /** Listings left out, and why: a bundle that did not verify, a removed or revoked version. */
+      /** Listings left out, and why: a bundle that did not verify, a removed or revoked version, revocations past what one read checks. */
       skipped: { ref: string; reason: string }[];
     }
   | { ok: false; reason: string };
@@ -109,18 +142,107 @@ function revokedBy(revocations: SignedAppRevocation[], ref: string, digest: stri
 }
 
 /**
+ * The signature checks the publishers' `ghostly-revoke.json` files may take in one read of the store, each a
+ * millisecond or so of the server's one thread: one publisher's (a full file the app accepts) and all of them. Past
+ * either, a file not checked yet is not checked, and the listing that needs it is left out.
+ */
+export const REVOCATION_CHECKS = { publisher: APP_STATEMENT_LIMITS.revocations, all: 2 * APP_STATEMENT_LIMITS.revocations } as const;
+
+/** What one read of the store keeps of the revocation files it checked, and the checks it has spent. */
+interface RevocationReads {
+  /** Each file's answer, by its URL and by the SHA-256 of its bytes. */
+  files: Map<string, SignedAppRevocation[]>;
+  /** Every revocation verified, by `appRevocationId`: one repeated, in a file or across files, is checked once. */
+  checked: Set<string>;
+  /** Signature checks spent, by publisher key. */
+  spent: Map<string, number>;
+  all: number;
+}
+
+/** The signatures a file would have checked: its distinct revocations not verified yet, up to the first that is not one. */
+function checksOf(bytes: Uint8Array, checked: ReadonlySet<string>): number {
+  const read = readCanonicalJson(bytes);
+  if (!read.ok || !Array.isArray(read.value) || read.value.length > APP_STATEMENT_LIMITS.revocations) return 0;
+  const ids = new Set<string>();
+  for (const entry of read.value) {
+    const one = readAppRevocationShape(entry);
+    if (!one.ok) break;
+    const id = appRevocationId(one.revocation);
+    if (!checked.has(id)) ids.add(id);
+  }
+  return ids.size;
+}
+
+/**
+ * Whether the publisher's own `ghostly-revoke.json` revokes this version, read where the app reads it before Install:
+ * beside each URL of the listing and each `sources` URL of the verified manifest, on the app's hosts. Each file is read
+ * with core's `readAppRevocations`, as the app reads it: one entry that does not verify refuses the whole file, and a
+ * file that is missing, refused or over the app's bound revokes nothing. `reads` keeps each file's answer for the read,
+ * by its URL and by the SHA-256 of its bytes as the app keeps them: the same file at many URLs (a signature check per
+ * entry, up to 4096) is checked once, not once per URL that serves it. `checked` holds each revocation that verified, so
+ * the same entries in another order (other bytes) are not checked again either. A file over what is left of
+ * `REVOCATION_CHECKS` is not checked: "unchecked", and that bound is spent, so the publisher's next files wait no more.
+ */
+function publisherRevoked(
+  listing: { ref: string; digest: string; sequence: number; urls: string[] },
+  sources: readonly string[] | undefined,
+  revocations: Record<string, Uint8Array>,
+  reads: RevocationReads,
+): "revoked" | "unchecked" | undefined {
+  const { files, checked, spent } = reads;
+  const publisher = appRefPublisher(listing.ref);
+  const urls = [...listing.urls.slice(0, STORE_LIMITS.urls), ...(sources ?? [])].filter(isStoreFetchUrl);
+  for (const url of new Set(urls.map((u) => besideUrl(u, "ghostly-revoke.json")))) {
+    let held = files.get(url);
+    if (held === undefined) {
+      const bytes = revocations[url];
+      held = [];
+      if (bytes !== undefined && bytes.length <= STORE_LIMITS.revocationsBytes) {
+        const id = toBase64Url(sha256(bytes));
+        const known = files.get(id);
+        if (known !== undefined) held = known;
+        else {
+          const mine = spent.get(publisher) ?? 0;
+          const left = Math.min(REVOCATION_CHECKS.publisher - mine, REVOCATION_CHECKS.all - reads.all);
+          const cost = left > 0 ? checksOf(bytes, checked) : Infinity;
+          if (cost > left) {
+            spent.set(publisher, REVOCATION_CHECKS.publisher);
+            if (REVOCATION_CHECKS.all - reads.all <= REVOCATION_CHECKS.publisher - mine) reads.all = REVOCATION_CHECKS.all;
+            return "unchecked";
+          }
+          spent.set(publisher, mine + cost);
+          reads.all += cost;
+          const read = readAppRevocations(bytes, checked);
+          if (read.ok) held = read.revocations;
+          files.set(id, held);
+        }
+      }
+      files.set(url, held);
+    }
+    if (revokedBy(held, listing.ref, listing.digest, listing.sequence)) return "revoked";
+  }
+  return undefined;
+}
+
+/**
  * The bundle of the very version a listing names (reference, digest, sequence), from the first of its URLs that holds
- * it, tried in order as the app tries them: a URL that was not read, does not verify, or holds another version (the
- * store's repository moved on while the site was built) gives way to the next. Unlike an install from a card, a newer
+ * it, tried in the order the app tries them (`listingUrls` in packages/browser/src/engine/apps.ts): a jsDelivr copy
+ * first, as it names a commit, where a raw `HEAD` the page would offer to add by its link moves on to versions the store
+ * has not reviewed. A URL that was not read, does not verify, or holds another version (the store's repository moved on
+ * while the site was built) gives way to the next. Unlike an install from a card, a newer
  * version than the listing's is not shown: the store lists the version it reviewed, and an app from the store updates
- * only to that.
+ * only to that. `link` is the first URL in that order that holds the version and Apps, Add reads as pasted.
  */
 function listedBundle(
   listing: { ref: string; digest: string; sequence: number; urls: string[] },
   bundles: Record<string, Uint8Array>,
-): { ok: true; url: string; bundle: AppBundle } | { ok: false; reason: string } {
+): { ok: true; url: string; link?: string; bundle: AppBundle } | { ok: false; reason: string } {
   let reason = "not-fetched";
-  for (const url of listing.urls.slice(0, STORE_LIMITS.urls)) {
+  let found: { ok: true; url: string; link?: string; bundle: AppBundle } | undefined;
+  const urls = listing.urls.slice(0, STORE_LIMITS.urls);
+  const pinned = (u: string) => isStoreFetchUrl(u) && new URL(u).hostname.toLowerCase() === "cdn.jsdelivr.net";
+  for (const url of [...urls.filter(pinned), ...urls.filter((u) => !pinned(u))]) {
+    if (found && !pastedAsIs(url)) continue;
     const bytes = isStoreFetchUrl(url) ? bundles[url] : undefined;
     if (bytes === undefined) continue;
     if (bytes.length > STORE_LIMITS.bundleBytes) {
@@ -136,14 +258,18 @@ function listedBundle(
     if (digest !== listing.digest) reason = "digest";
     else if (appRef(manifest.publisher, manifest.name) !== listing.ref) reason = "ref";
     else if (manifest.sequence !== listing.sequence) reason = "sequence";
-    else return { ok: true, url, bundle: read.bundle };
+    else {
+      found ??= { ok: true, url, bundle: read.bundle };
+      if (pastedAsIs(url)) return { ...found, link: url };
+    }
   }
-  return { ok: false, reason };
+  return found ?? { ok: false, reason };
 }
 
 /**
  * Checks the index (size, canonical JSON, fields, the signature by `key`, revocations, `expires` at `now` seconds), then
- * each listing's bundle (`listedBundle`). A removed or revoked version is left out, as the app leaves it out.
+ * each listing's bundle (`listedBundle`). A removed or revoked version is left out, as the app leaves it out: revoked by
+ * the index's own `revoked`, or by its publisher's `ghostly-revoke.json` (`publisherRevoked`).
  */
 export function readStore(bytes: StoreBytes, now: number, key: string): StoreView {
   if (bytes.index.length > STORE_LIMITS.indexBytes) return { ok: false, reason: "too-large" };
@@ -153,6 +279,7 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
   const { index, expired } = read.store;
   const apps: StoreApp[] = [];
   const skipped: { ref: string; reason: string }[] = [];
+  const revocationReads: RevocationReads = { files: new Map(), checked: new Set(), spent: new Map(), all: 0 };
   for (const listing of index.apps) {
     const skip = (reason: string) => skipped.push({ ref: listing.ref, reason });
     if (apps.length >= STORE_LIMITS.apps) {
@@ -172,8 +299,13 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
       skip(found.reason);
       continue;
     }
-    const { url, bundle } = found;
+    const { url, link, bundle } = found;
     const { manifest, digest, files } = bundle;
+    const revoked = publisherRevoked(listing, manifest.sources, bytes.revocations ?? {}, revocationReads);
+    if (revoked) {
+      skip(revoked === "revoked" ? "revoked" : "revocations-unchecked");
+      continue;
+    }
     const icon = files.get(APP_ICON_PATH);
     apps.push({
       slug: slugOf(listing.ref),
@@ -200,6 +332,7 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
       ...((listing.support ?? manifest.support) !== undefined && { support: listing.support ?? manifest.support }),
       ...(manifest.releaseNotes !== undefined && { releaseNotes: manifest.releaseNotes }),
       url,
+      ...(link !== undefined && { link }),
       ...(icon && { icon: icon.slice() }),
     });
   }

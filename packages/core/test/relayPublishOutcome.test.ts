@@ -56,6 +56,31 @@ describe("a publish no relay took", () => {
     expect(await outcome(silent)).toBe("nowhere");
   });
 
+  it("a relay not asked now on every relay: refused before it is signed and dated, in the words it always had", async () => {
+    const refusing = relays(async () => { throw refused(); }, async () => { throw refused(); });
+    expect(await outcome(refusing)).toBe("nowhere");
+    // Within the cooldown nothing is asked of either relay: the packet is neither dated nor signed. With every relay
+    // out of reach on a page that is online, 300 chats signed ~58 packets a second that went nowhere (bug hunt, 2026-11-12).
+    const dated = vi.spyOn(refusing, "nextTimestamp");
+    const error = await refusing.publish(id, []).catch((e: Error) => e);
+    expect(dated).not.toHaveBeenCalled();
+    expect((error as Error).message).toBe("Publish failed on every relay: Error: https://a.test did not answer a moment ago; retry shortly; Error: https://b.test did not answer a moment ago; retry shortly");
+    expect(publishedNowhere(error)).toBe(true);
+  });
+
+  it("every relay left alone after failing, none due for its probe: refused before it is signed", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // Each answers 503: the breaker leaves it alone after a few failures; its network never cools down.
+    const down = relays(no(503), no(503));
+    for (let i = 0; i < 5; i++) await outcome(down);
+    expect(String(await down.publish(id, []).catch((e: Error) => e))).toContain("left alone after failing");
+    const dated = vi.spyOn(down, "nextTimestamp");
+    const error = await down.publish(id, []).catch((e: Error) => e);
+    expect(dated).not.toHaveBeenCalled();
+    expect((error as Error).message).toMatch(/^Publish failed on every relay: Error: https:\/\/a\.test is left alone after failing; asked again in \d+ s; Error: https:\/\/b\.test is left alone after failing; asked again in \d+ s$/);
+    expect(publishedNowhere(error)).toBe(true);
+  });
+
   it("with no relay at all, it went nowhere", async () => {
     expect(await outcome(new RelayTransport({ relays: [] }))).toBe("nowhere");
   });

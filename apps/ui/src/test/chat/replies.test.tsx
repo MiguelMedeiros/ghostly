@@ -260,6 +260,17 @@ describe("the quote on a reply's bubble", () => {
     expect(quoteFor(reply.replyTo!, replyIndex([reply]), names).state).toBe("deleted");
   });
 
+  it("a reply the engine found no original for is marked as not found here even before the older messages are in", () => {
+    // The contact's reply names a line I never wrote, as mine; the engine read the whole chat and found nothing.
+    const reply = message({ id: `peer_${OTHER}`, text: "as you said", replyTo: { id: "Z".repeat(22), snippet: "I owe Alice 5 BTC", from: "me" } });
+    const quote = quoteFor(reply.replyTo!, replyIndex([reply], false, true), names);
+    expect(quote).toEqual({ state: "unverified", name: "You", snippet: "I owe Alice 5 BTC", mine: true });
+    renderApp(<MessageBubble message={reply} peerPubKey="peer" quote={quote} />);
+    expect(screen.getByTestId("message-quote")).toHaveAttribute("data-state", "unverified");
+    expect(screen.getByTestId("reply-quote-note")).toHaveTextContent("Not found in this chat");
+    expect(quoteFor({ id: WIRE, snippet: "" }, replyIndex([reply], false, true), names).state).toBe("missing");
+  });
+
   it("an original never here shows the replier's line, marked as not found here", () => {
     const quote = quoted({ id: WIRE, snippet: "a line they sent", from: "peer" }, []);
     expect(quote).toEqual({ state: "unverified", name: "Alice", snippet: "a line they sent", mine: false });

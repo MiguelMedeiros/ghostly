@@ -6,6 +6,7 @@ Real Chromium against the shipped build: the web app (`apps/web/dist`, served by
 npm run test:affected -- --port 50310   # only the tests tagged with the features your diff touches (docs/TESTING.md)
 npm run test:e2e            # everything (builds the web app and the extension first)
 npm run test:e2e:offline    # everything but the tests that need the internet
+npm run test:e2e:journeys   # only the 15 golden user journeys (`@journey`), about 10 minutes on 2 workers
 npm run test:e2e:ui         # pick, watch and debug tests
 npm run test:e2e:report     # the report of the last run: traces, videos, screenshots of failures
 HEADED=1 npm run test:e2e -- --project=extension   # watch the extension windows
@@ -83,8 +84,10 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47098 | Cashu mint on a real LND node (`cashubtc/mintd`, with a peer: `support/mint-lnd-regtest`) | `GHOSTLY_MINT_LND_URL` (gate `GHOSTLY_MINT_LND_REGTEST`) |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
+| 47120 (+47121 TCP, 47122 UDP media) | LiveKit SFU (`livekit/livekit-server:v1.13.11 --dev`, key `devkey`): group calls (WISP 602) | `GHOSTLY_LIVEKIT_URL` |
+| 47123 | Group-call token mock (`e2e/infra/sfu-token`, WISP 602's checks, roster set by a test with `PUT /test/roster/<g>`), answering for `https://sfu.ghostly.test`; specs start with `test.skip(!process.env.GHOSTLY_SFU_URL, …)` | `GHOSTLY_SFU_URL`, `GHOSTLY_SFU_ORIGIN` |
 
-The last two are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
+47100 and 47110-47119 are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
 another runner reading that file (the scenario matrix, 47300-47399) keeps its own defaults. The domain-proof
 servers (`support/domain.ts`, DoH and well-known, in the test process) have no port here: each listens on a free one
 the system gives it.
@@ -477,6 +480,32 @@ It runs one test at a time: Playwright's WebKit keeps the origin-private file sy
 place per origin (`~/Library/WebKit/org.webkit.Playwright` on a Mac), so each test empties it as it starts, and two at
 once would delete each other's files.
 
+## Golden journeys
+
+What people do most, one test each, tagged `@journey`: `npm run test:e2e:journeys` runs them alone, web project only.
+Each is a test that already ran for its own sake, picked as the steadiest of its journey; a new one only where none
+covered it. Retagging one moves the journey: keep this table in step.
+
+| Journey | Test |
+|---|---|
+| Pair by invite | `paired.spec.ts` › a first connection needs no comparison |
+| Send, edit and react | `edits.spec.ts` › an edit shows on the contact's side in place; `reactions.spec.ts` › 1:1 reactions |
+| Reconnect after a restart | `restart-relink.spec.ts` › a reloaded page is live again with its contact |
+| A message to an away contact (DHT) | `dht-delivery.spec.ts` › DHT published while contact is away |
+| Create a group and join by link; a message and a file in a group | `group-files.spec.ts` › a new group, joined through its link |
+| A large file | `large-files.spec.ts` › a file over 16 MiB goes through file storage |
+| A voice and a video call | `calls.spec.ts` › an audio call grows a camera and a screen |
+| Pay and request Cashu in a chat | `wallet-providers.spec.ts` › Cashu: test coins in, a Send in the chat, and a Request paid in the chat |
+| Receive and pay Lightning from the wallet | `wallet-providers.spec.ts` › Lightning: Receive only makes an invoice, out by paying someone else's invoice |
+| Back up and restore a profile | `profile-backup-file.spec.ts` › a profile goes to a file and comes back |
+| Link a new device | `devices-enroll.spec.ts` › a profile adds a second device |
+| Switch profile | `profile-switcher.spec.ts` › the account bar switches profiles in one tap |
+| Open a mini-app (Chess) | `apps-built-in.spec.ts` › opened from a chat's Apps, Chess runs with the contact |
+| Network and privacy settings | `network-settings.spec.ts` › with Hide my IP from contacts on, connections use the TURN server alone |
+
+The two wallet journeys pay through the Cashu test mint: give them a mint of your own with `E2E_MINT_URL` (see
+[No servers](#no-servers)), or they reach the public one.
+
 ## When they run
 
 The app's e2e suites do not run on pull requests: they would hold up every merge. The table of every workflow is in
@@ -487,6 +516,7 @@ The app's e2e suites do not run on pull requests: they would hold up every merge
 | Web and extension (`E2E`, `e2e.yml`) | before every release (`release.yml` runs it first; no draft release and no web image unless it passes), and by hand (Actions → E2E → Run workflow, optionally with the URL of a deployed web app) |
 | Desktop specs on Linux (`e2e/desktop/`) | a job of its own in `E2E` (a Rust build never holds up the browser tests), and nightly after the Desktop scenarios of E2E (full) |
 | Everything, gated suites included (`E2E (full)`, `npm run e2e:full`) | nightly on `dev`, and by hand |
+| Time budgets (`@perf`: milliseconds and frame times, left out of every other run; `E2E (perf)`, `E2E_PERF=1`) | nightly on `dev`, and by hand; each budget's value in the run's summary and its `perf.json` artifact |
 | Compatibility with v0.4.0, v1.1.4, v1.1.5 and the newest release | nightly, before every release, and by hand ([Compatibility with older releases](#compatibility-with-older-releases)) |
 | Desktop on macOS | on every pull request and push, as part of CI (required), nightly, and by hand ([Desktop on macOS](#desktop-on-macos)) |
 
@@ -499,6 +529,7 @@ contracts in 37 s, Playwright (2 workers, one retry) in 39 minutes, inside the w
 ## Writing one
 
 For Desktop, use `test` and `app` from `support/desktop.ts`: `app.text(selector)` returns null until something matches, so wait with `expect.poll`. For the browser clients, use `test` and `peer` from `support/fixtures.ts` (or `extensionPeer` / `webPeer` from `support/extension.ts`), `link(a, b)` to put two people in a chat and `connect(a, b)` to wait for the peer-to-peer link. Look for text in the conversation with `chat(peer)`, since the chat list previews the last message too. Prefer what a person sees (titles, labels, text); add a `data-testid` to the app when there is nothing else to hold on to.
+A helper that loads the app again (a `reload` after setting something it reads as it starts) waits with `openApp(page, name, () => page.reload())`, as `openPeer` does for the first load: on a machine whose network changes under Chromium (another e2e's docker containers coming and going), a load it aborted with `net::ERR_NETWORK_CHANGED` before the app drew is done again, at most twice, with a `↻ … reloaded` line in the log (`support/bootReload.ts`). Any other failure still fails at once.
 
 Say what it covers: `{ tag: ["@feature:<id>"] }` with ids from [`features.json`](features.json), plus `"@gated"` when it needs infrastructure that is not always there. `npm run test:map` checks the tags on every pull request; see [docs/TESTING.md](../docs/TESTING.md).
 
