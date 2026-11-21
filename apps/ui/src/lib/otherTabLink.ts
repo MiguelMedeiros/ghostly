@@ -11,13 +11,16 @@ const channelName = (lock: string) => `${lock}-links`;
 
 /**
  * The route of the link this address carries (the hash without its `#`), when it carries one the app's intakes take:
- * a `ghostly1` invite or device code, a `web+ghostly:` link, a group's `/join/…` link, or a device code's link that
- * names the profile (`#<profile>#ghostly1z…`). Null for anything else: home, a chat's address, a page of the menu.
+ * a `ghostly1` invite or device code, a `web+ghostly:` link, a group's `/join/…` link, an older invite link
+ * (`/chat/ghostly1…`, `/chat/<seed>/<key>/<enc>`: what `ChatLinkIntake` never reads as a chat's address), or a device
+ * code's link that names the profile (`#<profile>#ghostly1z…`). Null for anything else: home, a chat's address
+ * (`/chat/<sessionId>`), a page of the menu.
  */
 export function linkInAddress(hash: string): string | null {
   const route = hash.replace(/^#/, "");
   const pathname = route.split(/[?#]/)[0];
-  if (/^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null || /^\/join\/./.test(pathname)) return route;
+  const olderInvite = /^\/chat\/(?:ghostly1|[^/]+\/)/i.test(pathname);
+  if (/^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null || /^\/join\/./.test(pathname) || olderInvite) return route;
   return /#ghostly1/i.test(route) ? route : null;
 }
 

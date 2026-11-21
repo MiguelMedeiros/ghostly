@@ -24,6 +24,12 @@ describe("linkInAddress", () => {
     expect(linkInAddress("#work#ghostly1zabc")).toBe("work#ghostly1zabc");
     for (const plain of ["", "#", "#/", "#/chat/0123abcd", "#/settings", "#/shared"]) expect(linkInAddress(plain)).toBeNull();
   });
+
+  it("reads an older invite link's `#/chat/…` forms, never a chat's own address", () => {
+    expect(linkInAddress(`#/chat/${CODE}`)).toBe(`/chat/${CODE}`);
+    expect(linkInAddress("#/chat/c2VlZA/pubkeyz32/ZW5j")).toBe("/chat/c2VlZA/pubkeyz32/ZW5j");
+    expect(linkInAddress("#/chat/a1b2c3d4-e5f6")).toBeNull();
+  });
 });
 
 describe("a link handed to the tab that holds the profile", () => {
