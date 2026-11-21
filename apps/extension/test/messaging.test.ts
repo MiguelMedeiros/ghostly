@@ -469,8 +469,7 @@ describe("viewer tabs", () => {
     it("refuses the peer's http-request itself, whoever asks", async () => {
       engineControl().settings = { relayOnly: true };
       engineControl().respond = app;
-      const reply = await send({ target: "engine", type: "http-request", peerPubKeyZ32: PEER, serviceId: SERVICE, method: "GET", path: "/", headers: [], bodyB64: null });
-      expect(reply).toMatchObject({ ok: false, code: "relay-only", status: 403, message: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
+      expect(await askPeer(world)).toMatchObject({ ok: false, code: "relay-only", status: 403, message: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
       expect(engine().requests).toEqual([]);
     });
 
