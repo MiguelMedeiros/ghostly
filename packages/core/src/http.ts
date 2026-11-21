@@ -91,12 +91,14 @@ export function resolveTargetUrl(target: LocalTarget, path: string): string | nu
   if (!path.startsWith("/") || path.startsWith("//")) return null;
   for (const char of path) {
     const code = char.codePointAt(0) ?? 0;
-    if (code <= 32 || code === 127 || char === "\\") return null;
+    if (code <= 32 || code === 127) return null;
   }
-  // Encoded separators survive URL normalization here but not in every server:
-  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   const queryAt = path.indexOf("?");
   const pathPart = queryAt === -1 ? path : path.slice(0, queryAt);
+  // Some servers read `\` in the path as `/`. In the query a browser's fetch leaves it raw (`?path=C:\x`), so it passes.
+  if (pathPart.includes("\\")) return null;
+  // Encoded separators survive URL normalization here but not in every server:
+  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   if (/%(2f|5c|2e)/i.test(pathPart)) return null;
   if (pathPart.split("/").some(climbsOut)) return null;
   let url: URL;
@@ -187,6 +189,22 @@ export function sanitizeRequestHeaders(headers: HeaderList): HeaderList {
   });
 }
 
+/**
+ * A cookie's `Path` as the client sees the app: without the target's base path, which the client never sees (as
+ * `relativizeLocation` takes it off), so a cookie the app keeps on `/notes` is sent back to its `/home` at `/`. One
+ * outside the base path would never be sent at all and goes on `/`; one that does not start with `/` the browser
+ * ignores, so it stays.
+ */
+function cookieOnClient(cookie: string, target: LocalTarget): string {
+  if (!target.basePath) return cookie;
+  return cookie.replace(/;\s*path\s*=\s*([^;]*)/gi, (attribute, value: string) => {
+    const path = value.trim();
+    if (!path.startsWith("/")) return attribute;
+    const under = path === target.basePath || path.startsWith(`${target.basePath}/`);
+    return `; Path=${under ? path.slice(target.basePath.length) || "/" : "/"}`;
+  });
+}
+
 /** `from`: the local URL of the request answered, the one a relative `Location` is read against. */
 export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget, from?: string): HeaderList {
   const out: HeaderList = [];
@@ -200,7 +218,7 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
       if (location !== null) out.push([name, location]);
     } else if (lower === "set-cookie") {
       // The cookie belongs to the virtual origin on the client, not to localhost.
-      out.push([name, value.replace(/;\s*domain\s*=[^;]*/gi, "")]);
+      out.push([name, cookieOnClient(value.replace(/;\s*domain\s*=[^;]*/gi, ""), target)]);
     } else {
       out.push([name, value]);
     }
@@ -211,10 +229,11 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
 /**
  * The contact's headers a viewer does not pass on: each makes the browser send something to a place it names, outside
  * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
- * early connections). With Hide my IP from contacts on, that place would learn this device's address. The same list
- * as the CLI's `OPENED_SERVICE_DROPPED_HEADERS` and Desktop's `DROPPED_HEADERS`.
+ * early connections; `Speculation-Rules` prefetches and prerenders). With Hide my IP from contacts on, that place would
+ * learn this device's address. The same list as the CLI's `OPENED_SERVICE_DROPPED_HEADERS` and Desktop's
+ * `DROPPED_HEADERS`.
  */
-export const VIEWER_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+export const VIEWER_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link", "speculation-rules"];
 
 /** The directives of a contact's policy that send reports to a URL it names, dropped from it (`OPENED_SERVICE_DROPPED_DIRECTIVES`). */
 export const VIEWER_DROPPED_DIRECTIVES = ["report-uri", "report-to"];
@@ -283,11 +302,12 @@ export function viewerServicePolicy(relayOnly: boolean): string {
  * The browser features a contact's app in the extension's viewer tab may not use. Its tab is a site of its own, so
  * what the person granted it (camera, microphone, location, a device) would be a site setting of the browser's, which
  * no Delete chat, Clear all data or Delete profile reaches; denied here, the browser never asks and ignores a grant
- * made before. The web app's view is a frame of another site, which gets none of them, and Desktop's window grants none.
+ * made before. The web app's view is a frame of another site, which gets none of them, and Desktop's window grants none
+ * and is served the same value (`PERMISSIONS_POLICY` in `apps/desktop/src/viewer.rs`).
  */
 export const VIEWER_PERMISSIONS_POLICY = [
   "camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read",
-  "idle-detection", "local-fonts", "window-management", "storage-access", "publickey-credentials-create",
+  "clipboard-write", "idle-detection", "local-fonts", "window-management", "storage-access", "publickey-credentials-create",
 ].map((feature) => `${feature}=()`).join(", ");
 
 /** A contact's headers that would set the page's features: the viewer's own policy takes their place. */

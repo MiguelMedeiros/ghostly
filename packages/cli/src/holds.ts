@@ -122,6 +122,16 @@ export function holdOf(ctx: ApiContext, linkId: string): number | null {
   return until !== undefined && until > Date.now() ? until : null;
 }
 
+/**
+ * When the chat's hold ends, or null for none, as what waits in a held chat reads it: also a hold whose time is up and
+ * that has not ended yet (its release is under way, or waits for the chat to open: `expire`), which `holdOf` no longer
+ * reports while the chat is still on DHT only. Read as no hold, a text or edit waiting through it was said to wait
+ * for a transport to be chosen, and it goes by itself.
+ */
+export function holdEnds(ctx: ApiContext, linkId: string): number | null {
+  return readHolds(ctx)[linkId]?.until ?? null;
+}
+
 /** Keeps the chat off its direct link for `minutes` (again: from now). */
 export function holdChat(ctx: ApiContext, link: LinkView, minutes: number): Promise<number> {
   return inTurn(ctx, link.id, async () => {

@@ -61,11 +61,13 @@ export async function readDesktopStorage(local: number): Promise<DesktopStorage>
 }
 
 /**
- * When the count is read again after `local` changed (chats deleted): at once, and then twice more. The engine deletes
- * a chat's files and rows after the page let the chat go, and says nothing once they are gone, so a read in the same
- * moment still counted every one of them, and "Storage used" kept the deleted files until Settings was opened again.
+ * When the count is read again after `local` changed (chats deleted): at once, and then for a minute more. The engine
+ * deletes a chat's files and rows after the page let the chat go, and says nothing once they are gone, so a read in the
+ * same moment still counted every one of them, and "Storage used" kept the deleted files until Settings was opened
+ * again. A chat's files go only after its messages: in the Linux WebView, 100,000 messages took 7 s to delete, and
+ * 200,000 across 50 chats 15 s.
  */
-export const RECOUNT_AFTER_MS = [0, 1_000, 5_000];
+export const RECOUNT_AFTER_MS = [0, 1_000, 5_000, 15_000, 30_000, 60_000];
 
 /** The Desktop's storage, read when Settings opens and again when `local` changes (chats deleted, `RECOUNT_AFTER_MS`); null elsewhere. */
 export function useDesktopStorage(desktop: boolean, local: number): DesktopStorage | null {

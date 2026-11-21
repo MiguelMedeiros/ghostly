@@ -7,6 +7,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { pageOf } from "./support/messagePage";
+import { groupViewOf } from "./support/chatView";
 import { groupMessageJson, type MessageJson } from "../src/views";
 // covers: headless.groups
 
@@ -44,6 +45,7 @@ const plain: StoredMessage = { linkId: "group:g1", id: "anakey:1:3", text: "hell
 function fake(who: string, messages: StoredMessage[], payments: Record<string, Partial<PaymentView>>) {
   const node = {
     getState: () => ({ links: [], groups: [groupOf(who)], settings: {}, transport: {}, payments }) as unknown as EngineState,
+    groupView: groupViewOf,
     messagePage: vi.fn(async (params: { limit?: number; before?: string | number }) => pageOf(messages, params)),
     getMessage: vi.fn(async (_chat: string, id: string) => messages.find((m) => m.id === id)),
   };

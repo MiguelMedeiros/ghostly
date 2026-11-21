@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import { LOCKFILES, NOT_SHIPPED } from "../security-scan.mjs";
 
 /**
- * The Security workflow is green when no lockfile the scan reads holds a known advisory, and the security autorelease
- * ships on that. A lockfile the scan does not read is a part of the product nobody is told about: the Desktop's
+ * The Security workflow is green when no lockfile the scan reads holds a known advisory, and a security patch release
+ * is cut on that. A lockfile the scan does not read is a part of the product nobody is told about: the Desktop's
  * HyperDHT sidecar, the relay for browsers and Iroh for browsers each ship from a lockfile of their own, and the scan
  * read the root's two and the site's only. This holds its list to the tree: every lockfile is scanned, or named as
  * not shipped with the reason.

@@ -55,7 +55,7 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     const daemon = new Running(["--home", bob, "daemon"], bobEnv);
     running.push(daemon);
     await daemon.waitFor((l) => l.daemon === "ready");
-    for (let i = 0; i < 12; i++) ok(await ghostly(["--home", bob, "invite", "create", "--label", `unused${i}`], { env: bobEnv }));
+    await Promise.all(Array.from({ length: 12 }, async (_, i) => ok(await ghostly(["--home", bob, "invite", "create", "--label", `unused${i}`], { env: bobEnv }))));
     ok(await ghostly(["--home", bob, "daemon", "stop"], { env: bobEnv }));
     await daemon.exited(20_000);
     const carolDaemon = new Running(["--home", carol, "daemon"], carolEnv);
@@ -108,9 +108,27 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
 
   it("leaves every chat unstarted, its history unread, for a read that needs none", () => {
     for (const method of ["status", "profile.get", "settings.get", "status.get", "chat.list", "group.list", "group.get", "group.history",
-      "call.list", "service.list", "identity.list", "x401.credential.list", "app.served"]) expect(readsNoHistory(method), method).toBe(true);
+      "call.list", "service.list", "identity.list", "x401.credential.list", "app.served", "wallet.list", "wallet.history", "payment.list",
+      "identity.providers", "saved.list"]) expect(readsNoHistory(method), method).toBe(true);
+    // `call auto` and `group auto` with no on|off say what is kept in the profile.
+    for (const method of ["call.auto", "group.auto"]) {
+      expect(readsNoHistory(method, {}), method).toBe(true);
+      expect(readsNoHistory(method, { on: true, from: ["carol"] }), method).toBe(false);
+    }
     // A chat's own read restores the chat it names (`startNamedChats`); a read across chats may need what their histories say.
-    for (const method of ["chat.history", "file.list", "payment.list", "wallet.list", "wallet.history", "saved.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
+    for (const method of ["chat.history", "file.list", "events.replay", "chat.send"]) expect(readsNoHistory(method), method).toBe(false);
+  });
+
+  it("leaves every chat unstarted, its history unread, for a change kept here and a call only a daemon answers", () => {
+    // What the profile keeps outside any chat (its status, x401 keys and credentials, a service, a draft, a served
+    // app), and `call answer` and `call flush`, which a one-shot refuses whatever the chats say.
+    for (const method of ["status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add",
+      "identity.cancel", "app.serve", "app.unserve", "call.answer", "call.flush"]) expect(readsNoHistory(method), method).toBe(true);
+    // The wallet's own stores: an address, a Lightning card's name or default, a wallet removed. Each started every
+    // chat and read its history: with 10 chats and 30,000 messages, 20 relay requests and 0.35 s more, a refusal too.
+    for (const method of ["wallet.address", "lightning.rename", "lightning.default", "wallet.remove"]) expect(readsNoHistory(method), method).toBe(true);
+    // A change about a message reads the chat it names (`startNamedChats`).
+    for (const method of ["saved.add", "saved.remove", "chat.rename"]) expect(readsNoHistory(method), method).toBe(false);
   });
 });
 
@@ -141,25 +159,30 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
     daveEnv = { GHOSTLY_PKARR_RELAYS: daveRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
     erinEnv = { GHOSTLY_PKARR_RELAYS: erinRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE: "Infinity" };
     const erinDaemon = new Running(["--home", erin, "daemon"], erinEnv);
-    const daveDaemon = new Running(["--home", dave, "daemon"], daveEnv);
+    // Dave's daemon makes the setup only, with no relay budget: under it, the seven joins waited on its relay minute,
+    // about 20 s each. His one-shots below, which are measured, keep theirs.
+    const daveDaemon = new Running(["--home", dave, "daemon"], { ...daveEnv, GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE: "Infinity" });
     running.push(erinDaemon, daveDaemon);
     await Promise.all([erinDaemon, daveDaemon].map((d) => d.waitFor((l) => l.daemon === "ready")));
     // Dave joins Erin's private group and six more of hers through their links, then makes twelve invites nobody
     // takes, and stops.
-    for (const name of ["Crew", "One", "Two", "Three", "Four", "Five", "Six"]) {
+    const groups = await Promise.all(["Crew", "One", "Two", "Three", "Four", "Five", "Six"].map(async (name) => {
       const made = ok(await ghostly(["--home", erin, "group", "create", name, "--mesh"], { env: erinEnv })).group as string;
       const link = ok(await ghostly(["--home", erin, "group", "link", made], { env: erinEnv })).link as string;
       ok(await ghostly(["--home", dave, "group", "join", link], { env: daveEnv }));
-      for (let i = 0; ; i++) {
-        const shown = ok(await ghostly(["--home", dave, "group", "show", made], { env: daveEnv }));
-        const members = shown.members as { online: boolean }[];
-        if (shown.status === "active" && members.length === 2 && members.every((m) => m.online)) break;
-        if (i > 90) throw new Error(`Dave not in ${name}: ${JSON.stringify(shown)}`);
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-      group ||= made;
+      return made;
+    }));
+    for (let i = 0, waiting = groups; waiting.length; i++) {
+      const shown = await Promise.all(waiting.map(async (made) => ok(await ghostly(["--home", dave, "group", "show", made], { env: daveEnv }))));
+      waiting = waiting.filter((_, j) => {
+        const members = shown[j].members as { online: boolean }[];
+        return !(shown[j].status === "active" && members.length === 2 && members.every((m) => m.online));
+      });
+      if (waiting.length && i > 90) throw new Error(`Dave not in ${waiting.join(", ")}: ${JSON.stringify(shown)}`);
+      if (waiting.length) await new Promise((r) => setTimeout(r, 1000));
     }
-    for (let i = 0; i < 12; i++) ok(await ghostly(["--home", dave, "invite", "create", "--label", `unused${i}`], { env: daveEnv }));
+    group = groups[0];
+    await Promise.all(Array.from({ length: 12 }, async (_, i) => ok(await ghostly(["--home", dave, "invite", "create", "--label", `unused${i}`], { env: daveEnv }))));
     ok(await ghostly(["--home", dave, "daemon", "stop"], { env: daveEnv }));
     await daveDaemon.exited(20_000);
   }, 300_000);
@@ -188,7 +211,10 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
 
   it("leaves the 1:1 chats unstarted only for what goes over the group's edges", () => {
     for (const method of ["group.send", "group.edit", "group.react", "group.typing"]) expect(oneGroupOnly(method), method).toBe(true);
-    // An invitation goes over the contact's 1:1 chat, and an answer to one over the chat it came by.
-    for (const method of ["group.invite", "group.accept", "group.decline", "group.join", "chat.send"]) expect(oneGroupOnly(method), method).toBe(false);
+    // The admin's name, picture, hubs and fresh secret go over the edges too (a commit or the group's metadata).
+    for (const method of ["group.rename", "group.picture", "group.call", "group.hub", "group.rotate"]) expect(oneGroupOnly(method), method).toBe(true);
+    // An invitation goes over the contact's 1:1 chat, and an answer to one over the chat it came by. A removal tells the
+    // one removed over the chat that invited them, and a new admin takes back the invitations still out, over theirs.
+    for (const method of ["group.invite", "group.accept", "group.decline", "group.join", "group.remove", "group.admin", "chat.send"]) expect(oneGroupOnly(method), method).toBe(false);
   });
 });

@@ -16,7 +16,7 @@ const r = (e: string, n = 1, at = n): MessageReaction => ({ e, n, at });
 const message = (patch: Partial<ChatMessage> = {}): ChatMessage => ({ id: `peer_${WIRE}`, text: "lunch at noon?", sender: "peer", timestamp: 1_700_000_000_000, ...patch });
 const names = (by: string) => by === "peer" ? "Alice" : by === "k1" ? "Bo" : by === "k2" ? "Cy" : by;
 
-// The emoji panel's data set, here before the picker opens (its loading: emojiPanelLoad.test.tsx).
+// The emoji panel's data set, here before the picker opens (its loading: emojiPanel.test.tsx).
 beforeAll(() => loadEmoji());
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
@@ -246,6 +246,7 @@ describe("the quick bar", () => {
   it("the React button's bar (a pointer) has no Copy: the text is selectable there", async () => {
     const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
     await user.click(screen.getByTestId("message-react-action"));
+    expect(screen.getByTestId("reaction-bar")).toBeInTheDocument();
     expect(screen.queryByTestId("reaction-bar-copy")).not.toBeInTheDocument();
   });
 
@@ -316,6 +317,18 @@ describe("chips under the bubble", () => {
     expect(chip).toHaveAccessibleName(new RegExp(`${who}$`));
     fireEvent.pointerEnter(chip, { pointerType: "mouse" });
     expect(await screen.findByTestId("reaction-who")).toHaveTextContent(who);
+  });
+
+  // One plain string: in Arabic a Latin name ending in punctuation read backwards ("Bob!" as "!Bob").
+  it("isolates each name in the list of who reacted", async () => {
+    const named = (by: string) => by === "k1" ? "Bob!" : names(by);
+    renderApp(<MessageBubble message={message({ reactions: { peer: r("👍"), k1: r("👍", 2) } })} peerPubKey="peer" onReact={() => {}} reactionName={named} />, { language: "ar" });
+    const chip = await screen.findByTestId("reaction-chip");
+    expect(chip).toHaveAccessibleName(/Alice وBob!$/);
+    fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+    const who = await screen.findByTestId("reaction-who");
+    expect([...who.querySelectorAll("bdi")].map(b => b.textContent)).toEqual(["Alice", "Bob!"]);
+    expect(who).toHaveTextContent("Alice وBob!");
   });
 });
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { isLetterKey } from "../lib/appCommands";
-import { searchable, searchMessages } from "../lib/chatSearch";
+import { searchable, searchMessages, type Searchable } from "../lib/chatSearch";
 import { jumpToMessage } from "../lib/replies";
 import type { Translate } from "../locales/translate";
 import type { ChatMessage } from "../lib/types";
@@ -104,8 +104,10 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   // Folded once while the search is open, not on each key; a closed search costs nothing. `t`: a voice message, a video
   // or a picture is found by its kind in the profile's language too. `translated`: a received text shown translated is
   // found by the words shown (folded again when a translation comes or Show original is pressed).
+  // A change of the chat folds only the texts it brings (`searchable`'s `before`).
   const translated = useShownTranslations(chat, open);
-  const items = useMemo(() => (open ? searchable(messages, t, translated) : []), [open, messages, t, translated]);
+  const folded = useRef<Searchable[]>([]);
+  const items = useMemo(() => (folded.current = open ? searchable(messages, t, translated, folded.current) : []), [open, messages, t, translated]);
   const results = useMemo(() => searchMessages(items, term), [items, term]);
   const found = useMemo(() => new Set(results), [results]);
   const latest = useRef(results);
@@ -125,6 +127,11 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   /** The matches as they were while the one being read was among them: where it stood, once it is gone. */
   const held = useRef(results);
   if (index >= 0) held.current = results;
+  /**
+   * The place the count shows: the one being read, or where it stood once it is gone (deleted, edited away), so the count
+   * stays where Older and Newer go on from. Before, it read "1 of N" there. Past the end (the oldest went): the last.
+   */
+  const place = index >= 0 || !current ? index : Math.min(placeOf(current, held.current, results), results.length - 1);
   const step = useCallback((by: 1 | -1) => {
     // Enter before the pause is over: these words now, on their newest match.
     if (query.trim() && query !== term) { setTerm(query); return; }
@@ -145,7 +152,7 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   /** The words to mark in a message: the search's, when that message is one of its matches. */
   const highlight = useCallback((id: string) => (found.has(id) ? term : undefined), [found, term]);
 
-  return { open, show, close, dismiss, query, setQuery, term, results, index, current, older, newer, highlight, inputRef };
+  return { open, show, close, dismiss, query, setQuery, term, results, index, place, current, older, newer, highlight, inputRef };
 }
 
 export type ChatSearch = ReturnType<typeof useChatSearch>;

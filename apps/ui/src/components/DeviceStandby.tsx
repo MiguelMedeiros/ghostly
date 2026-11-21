@@ -4,6 +4,7 @@ import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
 import { useLockPassedNow } from "../contexts/LockScreenContext";
 import { listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
@@ -141,7 +142,7 @@ export function DeviceStandby({ gate: asked }: { gate: DeviceGateView }) {
             <div className="flex flex-wrap justify-center gap-2">
               {others.map((profile) => (
                 <button key={profile.id} type="button" data-testid="device-standby-switch" onClick={() => switchProfile(profile.id, { route: "/" })} className={SCREEN_QUIET}>
-                  {t("profileSwitcher.switchTo", { name: profile.name })}
+                  {withName(t("profileSwitcher.switchTo", { name: NAME }), profile.name)}
                 </button>
               ))}
             </div>

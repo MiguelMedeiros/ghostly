@@ -29,6 +29,18 @@ describe("a refused payment's line", () => {
     expect(paymentRefusal(row({ type: "paymentRefused", amount: 1.5, reason: "x".repeat(2_000) }))?.reason).toHaveLength(500);
   });
 
+  it("never names a token's unit that is not one, in a line an older version stored with it", () => {
+    const unnamed = "This ecash is in another unit: only sat ecash can be redeemed here";
+    const crafted = "This ecash is in sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example\u202e: only sat ecash can be redeemed here";
+    const stored = { id: "peer_7_refused", text: `Could not receive 21 test sats: ${crafted}` };
+    expect(paymentRefusal({ ...stored, notice: { type: "paymentRefused", amount: 21, network: "testnet", reason: crafted } })).toEqual({ type: "paymentRefused", amount: 21, network: "testnet", reason: unnamed });
+    expect(paymentRefusal(stored)).toEqual({ type: "paymentRefused", amount: 21, network: "testnet", reason: unnamed });
+    expect(paymentRefusal({ id: "peer_7_refused", text: `Could not receive 21 sats: This ecash is in ${"u".repeat(600)}: only sat ecash can be redeemed here` })?.reason).toBe(unnamed);
+    // A unit that is one is still named.
+    expect(paymentRefusal({ id: "peer_7_refused", text: "Could not receive 21 sats: This ecash is in usd: only sat ecash can be redeemed here" })?.reason)
+      .toBe("This ecash is in usd: only sat ecash can be redeemed here");
+  });
+
   it("reads a line older versions stored in English, in whatever locale they wrote the amount", () => {
     expect(paymentRefusal({ id: "peer_7_refused", text: `Could not receive 1.000 sats: ${reason}` })).toEqual({ type: "paymentRefused", amount: 1000, reason });
     expect(paymentRefusal({ id: `peer_spent_${"a".repeat(32)}`, text: "Could not receive 1 000 sats: This ecash was already spent somewhere else" }))

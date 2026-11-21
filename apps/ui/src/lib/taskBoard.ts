@@ -2,6 +2,7 @@ import { ACTIVE_TASK_STATUSES, taskProgress, type RoutineCard, type TaskCard, ty
 import type { CardIndexRow, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import type { Translate } from "../contexts/I18nContext";
 import { foldText } from "./chatSearch";
+import { listText } from "./listText";
 
 /*
  * The Tasks board (WISP 405 · Status Cards § The Tasks board): every task card of the profile, from all its chats and
@@ -356,12 +357,12 @@ export function boardCardLabel(t: Translate, task: BoardTask, age: string): stri
   const { card } = task;
   // A bot's own chat has the bot's name: said once, as on the card's chips.
   const names = chatNames(task), others = task.botKey === "me" ? names : names.filter((name) => name !== task.bot);
-  const from = others.length && task.botKey !== "me" ? t("cards.board.card.from", { bot: task.bot, chat: others.join(", ") }) : t("cards.board.card.in", { chat: (others.length ? others : names).join(", ") });
+  const from = others.length && task.botKey !== "me" ? t("cards.board.card.from", { bot: task.bot, chat: listText(others, t) }) : t("cards.board.card.in", { chat: listText(others.length ? others : names, t) });
   const parts = partsDone(task);
-  return [card.title, t(`cards.task.status.${card.status}`), progressText(t, task), parts && t("cards.board.card.parts", parts), from,
+  return listText([card.title, t(`cards.task.status.${card.status}`), progressText(t, task), parts && t("cards.board.card.parts", parts), from,
     card.pr && (card.pr.number !== undefined ? t("cards.task.pr", { number: card.pr.number }) : t("cards.task.prNoNumber")),
     card.pr?.state && t(`cards.board.card.prState.${card.pr.state}`), card.pr?.checks && t(`cards.board.card.checks.${card.pr.checks}`),
-    ...(card.tags ?? []), t("cards.task.updated", { ago: age })].filter(Boolean).join(", ");
+    ...(card.tags ?? []), t("cards.task.updated", { ago: age })].filter((part): part is string => !!part), t);
 }
 
 /**

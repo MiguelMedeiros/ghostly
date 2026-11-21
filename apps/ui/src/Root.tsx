@@ -26,12 +26,13 @@ import { useDeviceGate } from "./hooks/useDeviceGate";
 import { useViewportHeight } from "./hooks/useViewportHeight";
 import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
-import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
+import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite, undoubledRoute } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
 import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "./lib/groups";
 import { useEngineValue } from "./lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
+import { trimEndOf } from "@ghostly/core";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import { modalOpen } from "./hooks/useAppCommands";
 import { problemText, type Problem } from "./lib/problemText";
@@ -58,7 +59,7 @@ const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
  * it when the address changes while the app is open: the name as the path, the code as its hash. Null for anything else.
  */
 function namedDeviceLink(pathname: string, hash: string): string | null {
-  const named = `#${pathname.replace(/^\//, "")}${hash.replace(/\/+$/, "")}`;
+  const named = `#${pathname.replace(/^\//, "")}${trimEndOf(hash, "/")}`;
   const link = readDeviceLink(named);
   return link.profile && /^ghostly1/i.test(link.code) && isDeviceCode(link.code) ? named : null;
 }
@@ -242,6 +243,31 @@ function ChatNotStoredNotice() {
 }
 
 /**
+ * A link with a doubled `#` before it (`##ghostly1…`, `##/join/…`, or the app's own `#/` with a `#…` typed or pasted
+ * after it): the router reads it as home with the link as its hash, so no intake took it and it stayed in the address.
+ * It opens as the link it doubles, and the intakes take it from there. One that starts with `//` or `/\` after it is no
+ * page's, as with one `#` (`anchorTarget`): the router reads it as another site's address and refuses it, so home.
+ * A link after another page (`#/chat/<id>#ghostly1…`, `#/settings#ghostly1…`: pasted after the app's address) opens
+ * as that link too: no intake reads a page's hash. Not after a page that is a link itself, nor a device code's link
+ * that names the profile (`namedDeviceLink`): their intakes take those.
+ */
+function DoubledHashLink() {
+  const { pathname, hash } = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!hash) return;
+    const route = undoubledRoute(hash);
+    if (pathname !== "/") {
+      if (linkInAddress(route) !== null && linkInAddress(pathname) === null && !namedDeviceLink(pathname, hash)) navigate(route, { replace: true });
+      return;
+    }
+    if (/^[\\/]{2}/.test(route)) navigate("/", { replace: true });
+    else if (linkInAddress(route) !== null || /^\/chat\/./.test(route)) navigate(route, { replace: true });
+  }, [pathname, hash, navigate]);
+  return null;
+}
+
+/**
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
  * invite; once the app is unlocked (again, when it locked after) the engine joins and the group opens, saying it waits
  * for the admin's app. A refusal is a notice as JoinDialog shows one (a title, what to do, the engine's English behind
@@ -250,7 +276,7 @@ function ChatNotStoredNotice() {
  * counted once the engine has loaded its groups.
  */
 function GroupLinkIntake() {
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   const nav = useAppNavigation();
   const { isLocked, hasUnlocked } = useLockScreen();
@@ -268,7 +294,9 @@ function GroupLinkIntake() {
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
-    if (!found) return;
+    // A device code's link whose name reads as a group's (`#/join/…#ghostly1z…`): the invite intake's alone, as a fresh
+    // page takes it (`takeDeviceLinkFromAddress`).
+    if (!found || namedDeviceLink(pathname, hash)) return;
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
@@ -276,7 +304,7 @@ function GroupLinkIntake() {
     else { setProblem(null); setCode(link); codeAfter.current = otherLinks.current; }
     linkTaken("group");
     navigate("/", { replace: true });
-  }, [pathname, navigate, t]);
+  }, [pathname, hash, navigate, t]);
   useOtherLink("group", useCallback(() => { otherLinks.current += 1; setProblem(null); }, []));
   useEffect(() => {
     if (!code || isLocked || !hasUnlocked || !groupsLoaded) return;
@@ -320,7 +348,7 @@ function isIntake(pathname: string): boolean {
  */
 function dropLinksFromAddress(): () => void {
   const drop = () => {
-    const route = window.location.hash.replace(/^#/, "");
+    const route = undoubledRoute(window.location.hash.replace(/^#/, ""));
     if (linkInAddress(route) === null && !isIntake(route.split(/[?#]/)[0])) return;
     window.history.replaceState(null, "", "#/");
   };
@@ -411,6 +439,7 @@ export function Root() {
             {standby ? <LockGate><StandbyViewport /><DeviceStandby gate={standby} /></LockGate> : (
             <AppRouter>
               <ErrorBoundary>
+              <DoubledHashLink />
               <ChatLinkIntake />
               <JoinNotice />
               <ChatNotStoredNotice />

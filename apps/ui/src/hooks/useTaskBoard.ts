@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
-import { engine } from "@ghostly/browser/platform/engine";
+import { engine, type ListChanges } from "@ghostly/browser/platform/engine";
 import type { CardIndexRow, EngineState, GroupMemberView, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { RoutineCard, TaskCard } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
@@ -103,7 +103,14 @@ const chatIds = (state: EngineState | null) => `${state?.links.map((l) => l.id).
 
 function start(): () => void {
   let ids = chatIds(engine.state);
-  const offMessages = engine.onMessages((linkId: string, messages: StoredMessage[]) => {
+  const offMessages = engine.onMessages((linkId: string, messages: StoredMessage[], changes?: ListChanges) => {
+    // A group this page holds no list of (the extension's tabs): what changed is all there is, held against the index.
+    if (changes && !engine.messages.has(linkId)) {
+      const had = indexed.get(linkId)?.split(",") ?? [];
+      if (changes.messages.some((m) => boardCard(m) && !had.includes(cardKey(m.id, m.edit?.at))) ||
+        rows.some((row) => row.linkId === linkId && changes.deleted.includes(row.id))) soon();
+      return;
+    }
     // Only a change of the chat's cards changes the board: most messages are not cards, and the whole history the
     // engine posts at start holds the cards the index has. A chat first heard is held against the index instead.
     const cards = cardsOf(messages.filter(boardCard).map((m) => cardKey(m.id, m.edit?.at)));

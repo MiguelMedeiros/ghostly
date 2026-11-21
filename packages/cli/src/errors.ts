@@ -23,6 +23,24 @@ export class CliError extends Error {
   }
 }
 
+/**
+ * A value as a refusal quotes it (`--limit takes a number, not "x"`): a word with a line break or longer than 40
+ * characters is described, not printed, as an unknown option is (docs/CLI.md "Secrets stay hidden"). A Cashu token, a
+ * wallet connection link, an nsec, a seed or a hex key typed in the wrong place is that long, and bots keep the output.
+ */
+export function shownValue(value: unknown): string {
+  if (typeof value !== "string") return JSON.stringify(value);
+  return secretValue(value) ?? JSON.stringify(value);
+}
+
+/** What `shownValue` says in place of a long or secret-looking word, else undefined (the word may be printed). */
+export function secretValue(value: string): string | undefined {
+  if (/^cashu[AB]/.test(value)) return "(a Cashu token)";
+  if (/^nostr\+walletconnect:/i.test(value)) return "(a wallet connection link)";
+  if (/^nsec1/.test(value)) return "(a private key)";
+  return value.length > 40 || /[\r\n]/.test(value) ? `(a ${value.length}-character word)` : undefined;
+}
+
 /** Anything thrown, as the error a bot sees: the engine's own refusals keep their words. */
 export function asCliError(error: unknown): CliError {
   if (error instanceof CliError) return error;
@@ -60,10 +78,11 @@ export function asCliError(error: unknown): CliError {
  * `details.reason`. Any other keeps `engine`. Read by its shape, as `profileOpenError`.
  */
 const ENGINE_CODES: Record<string, ErrorCode> = {
-  mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable",
+  mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable", mintFailedInvoice: "unavailable",
   hostTimedOut: "timeout", networkTimedOut: "timeout",
   invalidMintUrl: "bad_request", mintNotHttps: "bad_request", invalidMaxFee: "bad_request",
   notEnoughSats: "refused", notEnoughForFee: "refused", mintsNoAnyAmount: "refused", ecashAlreadySpent: "refused", ecashFeeTakesAll: "refused", lightningRefused: "refused", contactNoWallet: "refused", contactNoPayments: "refused",
+  serviceShareFull: "refused",
 };
 /** `details.reason` of an engine error a bot tells apart from others of its code. */
 const ENGINE_REASONS: Record<string, string> = { contactNoWallet: "contact_no_wallet", contactNoPayments: "contact_payments_off" };
@@ -139,6 +158,8 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
   const { code, path } = error as { code?: unknown; path?: unknown };
   const where = typeof path === "string" ? path : file ?? "the path";
   if (code === "ENOENT" || code === "ENOTDIR") return new CliError("not_found", `No such file or folder: ${where}`);
+  // A symbolic link to itself (or a ring of them) leads nowhere: before, Node's raw "ELOOP: …, stat" as `engine`.
+  if (code === "ELOOP") return new CliError("not_found", `No such file or folder: ${where} (its symbolic links go round in a loop)`);
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") return new CliError("refused", `Not allowed to write or read ${where}`);
   if (code === "EISDIR") return new CliError("bad_request", `${where} is a folder: name a file`);
   // A file where a folder is to be made (`store sign --out`, `app publish --key`/`--out`): Node's "EEXIST: file already

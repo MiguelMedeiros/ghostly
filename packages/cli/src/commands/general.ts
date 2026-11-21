@@ -1,6 +1,6 @@
 import { STATUS_AVAILABILITIES } from "@ghostly/core";
 import { STATUS_CARD_LIMITS } from "@ghostly/core/statusCards";
-import { CliError } from "../errors";
+import { CliError, shownValue } from "../errors";
 import { checkOwnStatus } from "../ownStatus";
 import { type Command, CARD_TIME_FORMS, cardTime, force, here, picture, since, translate } from "./shared";
 
@@ -17,8 +17,8 @@ function statusUntil(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   const text = String(value).trim(), duration = DURATION.exec(text);
   const ms = duration ? Date.now() + Number(duration[1]) * UNIT_MS[duration[2] as keyof typeof UNIT_MS] : cardTime(text, "until", `30m, 2h or 1d from now (whole minutes, hours or days), milliseconds or a date: ${CARD_TIME_FORMS}`)!;
-  if (duration && !(ms <= Date.now() + STATUS_CARD_LIMITS.nextRunMs)) throw new CliError("usage", `--until takes a time within a year from now, not ${JSON.stringify(value)}`);
-  if (ms <= Date.now()) throw new CliError("usage", `--until takes a time to come, not ${JSON.stringify(value)}: a status that ended is none`);
+  if (duration && !(ms <= Date.now() + STATUS_CARD_LIMITS.nextRunMs)) throw new CliError("usage", `--until takes a time within a year from now, not ${shownValue(value)}`);
+  if (ms <= Date.now()) throw new CliError("usage", `--until takes a time to come, not ${shownValue(value)}: a status that ended is none`);
   return ms;
 }
 

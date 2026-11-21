@@ -241,4 +241,57 @@ describe("the invoice callback", () => {
     expect(action({ tag: "url", description: "Receipt ‮", url: "https://ln.example.com/r" })).toEqual({ tag: "url", url: "https://ln.example.com/r", description: "Receipt " });
     expect(action({ tag: "message", message: "Tha​nks ⁦for⁩ ‮paying" })).toEqual({ tag: "message", message: "Thanks for paying" });
   });
+
+  it("keeps a success URL only on the callback's own host (LUD-09)", () => {
+    const pr = testInvoice({ sats: 21, descriptionHash: metadataHash });
+    const action = (successAction: unknown) => parseInvoiceCallback({ pr, successAction }, params, 21).successAction;
+    expect(action({ tag: "url", description: "Your receipt", url: "https://other.example/login" })).toBeUndefined();
+    expect(action({ tag: "url", description: "Your receipt", url: "https://ln.example.com.other.example/r" })).toBeUndefined();
+    expect(action({ tag: "url", description: "Your receipt", url: "https://pay.ln.example.com/r" })).toBeUndefined();
+    expect(action({ tag: "url", description: "Your receipt", url: "https://ln.example.com:8443/r" })).toBeUndefined();
+    expect(action({ tag: "url", description: "Your receipt", url: "https://LN.example.com/r" })).toEqual({ tag: "url", description: "Your receipt", url: "https://LN.example.com/r" });
+  });
+
+  it("keeps no direction control or invisible character in the pay request's description", () => {
+    const metadata = JSON.stringify([["text/plain", "Coffee ‮ for⁦ two​\nthanks"]]);
+    expect(parsePayParams({ ...PARAMS, metadata }, ALICE).description).toBe("Coffee  for two thanks");
+  });
+});
+
+describe("where a destination in a message ends", () => {
+  // Written as escapes: the left-to-right, right-to-left and Arabic letter marks draw as nothing.
+  const LRM = "\u200e", RLM = "\u200f", ALM = "\u061c";
+  const LN = lnurl("https://ln.example.com/p");
+
+  it("is where a link would end: at Chinese, Japanese or Arabic punctuation and before a direction mark", () => {
+    for (const after of [`${RLM}.`, "。", "、", "،", "؟", "۔", LRM, RLM, ALM, `${RLM}${LRM}`, "🔥"]) {
+      expect(findLightningDestination(`ادفع ${LN}${after} شكرا`)?.destination, JSON.stringify(after)).toMatchObject({ kind: "lnurl", url: "https://ln.example.com/p" });
+    }
+    expect(findLightningDestination(`払って ${LN}。`)).toMatchObject({ destination: { kind: "lnurl" }, rest: "払って 。" });
+    for (const after of ["、", "،", "؟", LRM, RLM, ALM, `${RLM}.`]) {
+      expect(findLightningDestination(`tip ⚡alice@ln.example.com${after}`), JSON.stringify(after)).toMatchObject({ destination: ALICE });
+    }
+  });
+
+  it("drops a direction mark at the end of a whole pasted address", () => {
+    for (const mark of [LRM, RLM, ALM, `${RLM}${LRM}`]) {
+      expect(parseLightningDestination(`⚡alice@ln.example.com${mark}`), JSON.stringify(mark)).toEqual(ALICE);
+      expect(parseLightningDestination(`${LN}${mark} `), JSON.stringify(mark)).toMatchObject({ kind: "lnurl", url: "https://ln.example.com/p" });
+    }
+  });
+
+  it("still leaves a plain full stop out", () => {
+    expect(findLightningDestination(`pay ${LN}.`)?.destination).toMatchObject({ kind: "lnurl", url: "https://ln.example.com/p" });
+    expect(findLightningDestination("tip alice@ln.example.com.")?.destination).toEqual(ALICE);
+  });
+
+  it("is not cut at a mark inside it, which would leave a shorter address that still reads as one", () => {
+    for (const mark of [LRM, RLM, ALM]) {
+      expect(findLightningDestination(`tip alice@ln.example.com${mark}.evil.example`), JSON.stringify(mark)).toBeNull();
+      expect(findLightningDestination(`tip alice@ln.exam${mark}ple.com`), JSON.stringify(mark)).toBeNull();
+      expect(findLightningDestination(`pay ${LN.slice(0, 20)}${mark}${LN.slice(20)} now`), JSON.stringify(mark)).toBeNull();
+      expect(parseLightningDestination(`alice@ln.example.com${mark}.evil.example`), JSON.stringify(mark)).toBeNull();
+      expect(parseLightningDestination(`alice@ln.exam${mark}ple.com`), JSON.stringify(mark)).toBeNull();
+    }
+  });
 });

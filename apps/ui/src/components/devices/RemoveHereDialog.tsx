@@ -36,8 +36,11 @@ export function RemoveHereDialog({ onClose }: { onClose(): void }) {
     window.history.replaceState(null, "", "#/");
     window.location.reload();
   };
+  // While it removes × and Escape do nothing: closed, its failure would be said nowhere, and a removal that went through
+  // still reloads the app.
+  const close = () => { if (!busy) onClose(); };
   return (
-    <DeviceDialog title={fillNames(t("devices.standby.removeHere.title"), { name })} onClose={onClose} testId="device-remove-here">
+    <DeviceDialog title={fillNames(t("devices.standby.removeHere.title"), { name })} onClose={close} testId="device-remove-here">
       <p className="text-text-secondary">{t("devices.standby.removeHere.hint")}</p>
       {!id && <p className="text-text-secondary">{t("devices.standby.removeHere.first")}</p>}
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); if (ready && !busy) void submit(); }}>
