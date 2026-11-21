@@ -1,7 +1,9 @@
+import { writeFileSync } from "node:fs";
 import type { Server } from "node:http";
+import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, type Result } from "./support/cli";
-// covers: chat.dht.delivery, headless.chat
+// covers: chat.dht.delivery, chat.edit.wire, headless.chat
 
 /**
  * A text past the 256 bytes the DHT carries, in a chat both sides keep on the DHT only: it waits for a live session,
@@ -36,6 +38,24 @@ function saysWhy(result: Result) {
 function forwardSaysWhy(answer: Record<string, unknown>) {
   const [result] = answer.results as Record<string, unknown>[];
   expect(result).toMatchObject({ kind: "chat", error: null, note: expect.stringContaining("you and the contact keep this chat on the DHT only: it goes once both choose a live transport (ghostly chat transport bob auto), or shorten it") });
+}
+
+/**
+ * The same wait on a terminal, ended with Ctrl-C: its notice said "it still goes" and Ctrl-C that it is kept and "still
+ * goes by itself" (or with the next command), neither true while the chat stays on the DHT only. Both say the note.
+ */
+async function interruptedSaysWhy(dir: string) {
+  const tty = join(dir, "tty-stderr.cjs");
+  writeFileSync(tty, "Object.defineProperty(process.stderr, \"isTTY\", { value: true });\n");
+  const send = new Running(["--home", dir, "send", "bob", waited, "--wait", "sent", "--timeout", "60"], { ...env, NODE_OPTIONS: `--require "${tty}"` });
+  running.push(send);
+  const note = "Longer than the 256 bytes the DHT carries, and you and the contact keep this chat on the DHT only: it goes once both choose a live transport (ghostly chat transport bob auto), or shorten it";
+  await expect.poll(() => send.stderr, { timeout: 30_000, interval: 100 }).toContain("ghostly: waiting for it to go out to bob (up to 60 s; Ctrl-C stops waiting). " + note + "\n");
+  send.child.kill("SIGINT");
+  expect(await send.exited(15_000)).toBe(130);
+  expect(send.stderr).toContain("ghostly: stopped waiting (Ctrl-C): it is kept here. " + note + "\n");
+  expect(send.stderr).not.toMatch(/still goes|next command|daemon --detach/);
+  expect(send.lines).toEqual([{ error: { code: "interrupted", message: "Stopped waiting (Ctrl-C): it is kept here. " + note, details: { method: "chat.send" } } }]);
 }
 
 beforeAll(async () => {
@@ -77,6 +97,7 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   const forwardWait = await as(alice, "forward", "bob", kept.messageId as string, "--to", "bob", "--wait", "sent", "--timeout", "2");
   saysWhy(forwardWait);
   forwardSaysWhy((forwardWait.json.error as { details: Record<string, unknown> }).details);
+  await interruptedSaysWhy(alice);
 
   // A one-shot: no 30 s wait for a send that cannot come, no timeout.
   await daemons.get(alice)!.stop();
@@ -86,6 +107,7 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   expect(oneShot.delivery).toBe("waiting");
   expect(oneShot.note).toContain("you and the contact keep this chat on the DHT only");
   for (const wait of ["sent", "delivered"]) saysWhy(await as(alice, "send", "bob", waited, "--wait", wait, "--timeout", "2"));
+  await interruptedSaysWhy(alice);
 
   // What the note says ends the wait does: both choose a live transport, and every text, the forwarded ones too, reaches the contact.
   const back = new Running(["--home", alice, "daemon"], env);
@@ -95,7 +117,7 @@ it("a text past 256 bytes in a DHT-only chat answers at once (or at an explicit 
   ok(await as(bob, "chat", "transport", "alice", "auto"));
   ok(await as(alice, "chat", "wait", "bob", "--until", "live", "--timeout", "90"));
   await expect.poll(async () => (ok(await as(bob, "chat", "history", "alice", "--limit", "10")).messages as { text: string; from: string }[])
-    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 60_000, interval: 1_000 }).toBe(8);
+    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 60_000, interval: 1_000 }).toBe(10);
 });
 
 /** When a hold ends, as the CLI says it: this machine's hour and minute, with the day when it is not today. */
@@ -106,12 +128,14 @@ function clock(until: number): string {
 }
 
 /**
- * A hold (`chat disconnect --hold`) is this side's DHT only for a while: a text past 256 bytes waits through it and goes
- * by itself when it ends. The note and an explicit `--wait`'s timeout said it goes only once you choose a live
+ * A hold (`chat disconnect --hold`) is this side's DHT only for a while, which ends by itself. A text past 256 bytes
+ * waits through it and goes when it ends; a text or an edit the DHT packet cannot carry (about 249-256 bytes, an edit
+ * about 215 and up) is refused there. The note, an explicit `--wait`'s timeout and the refusals said to choose a live
  * transport (`chat transport <chat> auto`, which ends the hold the person asked for). They say when the hold ends, and
- * the command that ends it now.
+ * the command that ends it now; once it ended, both texts reach the contact, and the same edit is taken and reaches
+ * them too. One hold for all of it: each is a real 30 s.
  */
-it("under a hold, a text past 256 bytes says it goes when the hold ends, and goes then with nothing chosen", { timeout: 300_000 }, async () => {
+it("under a hold, a text past 256 bytes and a text or an edit too long for the DHT packet say when the hold ends, and go then with nothing chosen", { timeout: 300_000 }, async () => {
   for (const dir of [carol, dave]) {
     ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((r) => r.url))));
     const daemon = new Running(["--home", dir, "daemon"], env);
@@ -121,7 +145,9 @@ it("under a hold, a text past 256 bytes says it goes when the hold ends, and goe
   const invite = ok(await as(carol, "invite", "create", "--label", "dave"));
   ok(await as(dave, "invite", "join", invite.link as string, "--label", "carol"));
   for (const [dir, chat] of [[carol, "dave"], [dave, "carol"]]) ok(await as(dir, "chat", "wait", chat, "--until", "live", "--timeout", "90"));
+  const id = ok(await as(carol, "send", "dave", "first, live", "--wait", "delivered", "--timeout", "90")).messageId as string;
   const until = ok(await as(carol, "chat", "disconnect", "dave", "--hold", "0.5")).heldUntil as number;
+  await expect.poll(async () => ok(await as(carol, "chat", "show", "dave")).live, { timeout: 30_000 }).toBe(false);
   const held = `this chat is held on the DHT only until ${clock(until)}: it goes then, or now with ghostly chat connect dave`;
 
   const kept = ok(await as(carol, "send", "dave", long));
@@ -133,8 +159,18 @@ it("under a hold, a text past 256 bytes says it goes when the hold ends, and goe
   expect(failure.message).toContain(`the message is waiting. Longer than the 256 bytes the DHT carries, and ${held}`);
   expect((timedOut.json.error as { details?: Record<string, unknown> }).details).toMatchObject({ delivery: "waiting", note: expect.stringContaining(held) });
 
-  // What the words say: the hold ends by itself, and both texts reach the contact with no transport chosen.
+  const refusedHeld = (act: string) => `this chat is held on the DHT only until ${clock(until)}: ${act} then, or now with ghostly chat connect dave, or shorten it`;
+  const longEdit = "e".repeat(223);
+  const edit = error(await as(carol, "edit", "dave", id, longEdit, "--wait", "none"), "refused", 1).message;
+  expect(edit).toBe(`Too long for the DHT (an edit fits about 214 bytes there once sealed): ${refusedHeld("make the edit")}`);
+  const text = error(await as(carol, "send", "dave", "x".repeat(252), "--wait", "none"), "refused", 1).message;
+  expect(text).toBe(`Too long for the DHT (a text fits about 248 bytes there once sealed): ${refusedHeld("send it")}`);
+
+  // What the words say: the hold ends by itself, both texts reach the contact with no transport chosen, and the edit
+  // made then reaches them too.
   await expect.poll(async () => (ok(await as(dave, "chat", "history", "carol", "--limit", "10")).messages as { text: string; from: string }[])
     .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 150_000, interval: 2_000 }).toBe(2);
-  expect(ok(await as(carol, "chat", "show", "dave"))).toMatchObject({ heldUntil: null, deliveryMode: "stream" });
+  await expect.poll(async () => ok(await as(carol, "chat", "show", "dave")), { timeout: 60_000, interval: 2_000 }).toMatchObject({ heldUntil: null, deliveryMode: "stream", live: true });
+  ok(await as(carol, "edit", "dave", id, longEdit, "--wait", "confirmed", "--timeout", "60"));
+  expect((ok(await as(dave, "chat", "history", "carol", "--limit", "10")).messages as { text: string; from: string }[]).some((m) => m.from === "peer" && m.text === longEdit)).toBe(true);
 });

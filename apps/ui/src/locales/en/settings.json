@@ -12,6 +12,7 @@
   "clearAllData": "Clear all data",
   "clearAllDataConfirm": "This erases for good:",
   "clearAllDataDescription": "Chats, identities and settings of this profile. Wallets stay.",
+  "clearAllDataFailed": "Not everything could be cleared. Some data may still be on this device: try again.",
   "clearAllDataInfo": "First, Ghostly takes back what it can: items held for contacts, your DID, your proofs and wake-ups. Proofs you posted on other sites stay there.",
   "clearAllDataItems": {
     "appsData": "Installed apps and their data",
@@ -24,6 +25,7 @@
     "storage": "S3 storage settings and wake-ups"
   },
   "clearAllDataKeeps": "Stays: your wallets, your backups and other profiles.",
+  "clearingData": "Clearing…",
   "colorScheme": "Mode",
   "colorSchemes": {
     "dark": "Dark",

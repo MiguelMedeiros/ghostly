@@ -17,6 +17,7 @@
   "deleteChatLocal": "Isso exclui a conversa e o histórico deste dispositivo. A cópia do seu contato não é excluída.",
   "deleteChatTitle": "Excluir conversa?",
   "goHome": "Ir para o início",
+  "labelValue": "{{label}}: {{value}}",
   "loading": "Carregando...",
   "moreInfo": "Mais informações",
   "needsYou": {
@@ -27,6 +28,7 @@
   "notCopied": "Não copiado",
   "quotedName": "“{{name}}”",
   "save": "Salvar",
+  "sentences": "{{first}}. {{second}}",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",

@@ -68,6 +68,7 @@ import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType,
 import { servicesPlatform } from "../lib/platform";
 import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
+import { publicKeyLabel } from "../lib/publicKeyLabel";
 import { videoMetaOf } from "../lib/videoPoster";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { useKeptEdit } from "../lib/keptEdits";
@@ -147,7 +148,7 @@ const replyNames = (group: GroupView, you: string, t: Translate): NameOf => (fro
 
 /** Whom "@" offers in the composer: every other member, by name and the end of their key. */
 function mentionCandidates(group: GroupView, t: Translate): MentionCandidate[] {
-  return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}` }));
+  return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}`, ...(m.nick ? {} : { label: publicKeyLabel(m.key) }) }));
 }
 
 /** The note that captions a payment bubble (`groupPayCaption`, shared with the CLI's group history). */
@@ -359,7 +360,7 @@ function joiningText(stage: GroupJoinStage, name: string, community: boolean, t:
   if (stage === "full" && full) return { title: t("group.join.full"), body: t("group.join.fullBody", { n: full.n, max: full.max }) };
   // Or that it grows only once every member's app is updated: the same, until they are.
   if (stage === "blocked") return { title: t("group.join.blocked"), body: t("group.join.blockedBody") };
-  if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
+  if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name: isolate(name) }) : t("group.join.joiningGroup"),
     body: !community ? t("group.join.admitted") : admittedLong ? t("group.join.admittedStuck") : t("group.join.admittedCommunity") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
     body: community ? t("group.join.answeredCommunity") : t("group.join.answered") };
@@ -478,6 +479,11 @@ export function GroupChat() {
   const avatarButton = useRef<HTMLButtonElement>(null);
   if (viewingPicture && !group?.picture) setViewingPicture(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The groups whose Rotate keys is still going. Each press signs a rotation of its own (a fresh epoch every member
+  // fetches), so a second press while the first goes does nothing. By group: this page stays mounted when another group
+  // is opened.
+  const rotatingRef = useRef(new Set<string>());
+  const [rotating, setRotating] = useState<ReadonlySet<string>>(() => new Set());
   const [showMute, setShowMute] = useState(false);
   const [showTranslate, setShowTranslate] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
@@ -698,8 +704,14 @@ export function GroupChat() {
   // Mine, taken off every member's device: a refusal (limited mode) rejects, and the bubble says it under the message.
   const removeRow = useHandler((m: StoredMessage) => engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id })
     .then(result => { if (result.error) throw new Error(result.error); forgetSentOriginal(groupChat(groupId), m.id); }));
+  // A reaction or a pin the group refuses ("You are not in this group", a community's admin-only pin) shows nothing
+  // on the row: why is said in the group's notice.
+  const sayRefusal = (call: Promise<{ error?: string | null }>) => {
+    setError(null);
+    void call.then(result => { if (result.error) throw new Error(result.error); }).catch(e => setError(problemText(e, t)));
+  };
   // Reactions (WISP 902 § Reactions): one per member per message, named by the roster.
-  const react = useHandler((messageId: string, emoji: string) => { void engine.call("react", { linkId: `group:${groupId}`, messageId, emoji }).catch(() => {}); });
+  const react = useHandler((messageId: string, emoji: string) => sayRefusal(engine.call("react", { linkId: `group:${groupId}`, messageId, emoji })));
   // One function while the roster's names stay (a row draws the names it answers): not one per draw of the page.
   const reactionName = useMemo(() => {
     const nameOf = group && replyNames(group, t("chat.reply.you"), t);
@@ -708,7 +720,7 @@ export function GroupChat() {
   }, [namesKey, t]);
   // The pinned message (WISP 400 § Pinned message): any member of a private group pins, only the admin of a community.
   const pinMessage = useHandler((messageId: string | undefined, remove: boolean = false) => {
-    void engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }).catch(() => {});
+    sayRefusal(engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }));
   });
   const pinRow = useHandler((m: StoredMessage) => pinMessage(m.id, replyTarget(rowNow(m), true) === group?.pin?.id));
   const saveRow = useHandler((messageId: string) => void setSaved(`group:${groupId}`, messageId, savedHere.has(messageId)).catch(() => {}));
@@ -857,6 +869,13 @@ export function GroupChat() {
     setMenuOpen(false); setError(null);
     try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); }
   };
+  const rotate = () => {
+    const id = groupId;
+    if (rotatingRef.current.has(id)) return;
+    const mark = (on: boolean) => { if (on) rotatingRef.current.add(id); else rotatingRef.current.delete(id); setRotating(new Set(rotatingRef.current)); };
+    mark(true);
+    void act(() => engine.call("rotateGroup", { groupId: id })).finally(() => mark(false));
+  };
   // Knocking again, Try again goes: the focus it had goes to Cancel joining beside it, not to the page.
   const tryAgain = (pressed: HTMLElement) => void act(async () => {
     await engine.call("acceptGroupInvitation", { groupId });
@@ -875,7 +894,9 @@ export function GroupChat() {
       <MessageAnnouncer chat={groupId} linkId={`group:${groupId}`} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} noteLine={note => ownNotes.has(note.id) ? null : groupPayNoteLine(note, group, t)} ready={historyIn} />
       {/* On a phone its buttons are sized in px, as the name is (and as a chat's header, pages/Chat.tsx): in rem they grew
           with the browser's text size and left the name 23px at 150%, the members line under the connection button. */}
-      <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
+      {/* A size container: Share keeps its label by the header's width, not the window's. By the window, a phone on its
+          side (844x390 with an iPhone's safe areas) kept it beside the chat list and cut "Clube do livro" to 65 of 92 px. */}
+      <div className="@container/group-head h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
           {back}
           {/* With a picture, the avatar opens it large; without one, the members, as the line under the name does. A contact's
@@ -883,7 +904,7 @@ export function GroupChat() {
           {invited ? <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           : <button ref={avatarButton} onClick={() => (group.picture ? setViewingPicture(true) : setShowMembers(true))} data-testid="group-avatar-open"
             className={`relative rounded-full shrink-0 max-md:p-[2px] ${group.picture ? "cursor-zoom-in" : ""}`}
-            {...(group.picture ? { "aria-label": t("common.viewPhoto", { name: group.name || t("group.chat.unnamed") }) } : { title: t("group.chat.membersButton"), "aria-label": t("group.chat.membersButton") })}>
+            {...(group.picture ? { "aria-label": t("common.viewPhoto", { name: isolate(group.name || t("group.chat.unnamed")) }) } : { title: t("group.chat.membersButton"), "aria-label": t("group.chat.membersButton") })}>
             <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           </button>}
           <div className="min-w-0">
@@ -911,7 +932,7 @@ export function GroupChat() {
           {canShare && !narrow && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
             className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-[44px] max-md:min-w-[44px] max-md:px-[10px]">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-            <span className="max-[480px]:hidden">{t("group.chat.shareLink")}</span>
+            <span className="@max-[480px]/group-head:hidden">{t("group.chat.shareLink")}</span>
           </button>}
           <div className="relative" ref={menuRef}>
             <button ref={optionsRef} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={openOnArrow(() => setMenuOpen(true))} className="flex items-center justify-center p-2 max-md:h-[44px] max-md:w-[44px] max-md:p-0 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
@@ -925,7 +946,7 @@ export function GroupChat() {
               {!invited && <TranslateMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowTranslate(true); }} />}
               {!invited && <FolderMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowFolders(true); }} />}
               {!noTimeline && !invited && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
-              {group.isAdmin && <MenuItem testId="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))}>{t("group.menu.rotate")}</MenuItem>}
+              {group.isAdmin && <MenuItem testId="group-rotate" busy={rotating.has(groupId)} onClick={rotate}>{t("group.menu.rotate")}</MenuItem>}
               {!invited && <MenuSeparator />}
               {group.status === "active" && <MenuItem danger testId="group-leave" onClick={() => { closeMenu(); setConfirmLeave(true); }}>{t("group.menu.leave")}</MenuItem>}
               <MenuItem danger testId="group-forget" onClick={() => { closeMenu(); setConfirmForget(true); }}>{t("group.menu.forget")}</MenuItem>
@@ -1077,8 +1098,14 @@ export function GroupChat() {
             ? (group.invitation.contact ? t("group.forget.invitationKept", { contact: isolate(group.invitation.contact) }) : t("group.forget.invitationKeptUnknown"))
             : (group.invitation.contact ? t("group.forget.invitation", { contact: isolate(group.invitation.contact) }) : t("group.forget.invitationUnknown")))
           : t("group.forget.kept")}
-        // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes.
-        onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); goneHere(); nav.home(); }); }} />}
+        // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes. The
+        // dialog gives the focus back to ⋮, which goes with the page: it goes to the list's next row, or New, as
+        // Cancel joining's does; it was left on the page's body.
+        onConfirm={() => {
+          const next = rowAfter(groupId);
+          setConfirmForget(false);
+          void act(async () => { await engine.call("forgetGroup", { groupId }); goneHere(); nav.home(); focusPastRow(next, optionsRef.current); });
+        }} />}
     </div>
     </MemberColorsProvider>
     </NowPlayingChat.Provider>

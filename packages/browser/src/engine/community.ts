@@ -362,6 +362,11 @@ interface Live {
   lobbyBusyUntil: number;
   /** As a hub: my lobby is polled fast until then too, for a member I dropped that is likely coming back (`MEMBER_BACK_MS`). */
   memberBackUntil?: number;
+  /**
+   * Started again with edges of my last run that are not up (their apps were closed too): until then those apps may come
+   * back, as hubs or members, and I look for them fast (my lobby, the beacon, our edge). Set at the first tick.
+   */
+  restartedUntil?: number;
   /** Members whose edge is due any moment (we just met over the admission): opened expecting them, and since when it is awaited. */
   expect: Set<string>;
   awaited: Map<string, number>;
@@ -1096,7 +1101,9 @@ export class Communities {
     // The admin replaced the link (or turned it off) while I let someone in through it, as its own door does
     // (`replaceLink`): a welcome said now names the new entry key, which that joiner, holding the old link, refuses.
     if (live.doorKey && live.doorKey !== s.entryKey) { live.doorKey = undefined; await this.closeEntries(groupId); }
-    const alone = live.hub && !freshHubs(this.hubs(live), now).some(h => h.key !== me);
+    // Not while the apps of my last run may be coming back (`restartedUntil`): opened again, one may step up as a hub, and
+    // a hub alone read the beacon every half minute, so it found that hub, and their edge, that long after (2026-11-17).
+    const alone = live.hub && !freshHubs(this.hubs(live), now).some(h => h.key !== me) && now >= (live.restartedUntil ?? 0);
     // A read that failed is tried again in a moment, not at the next turn of the usual pace.
     const readDue = live.beaconFailedAt ? now - live.beaconFailedAt >= BEACON_RETRY_MS : now - live.lastBeaconRead >= this.beaconEvery(groupId, live, alone);
     if (readDue || live.lastBeaconRead === 0) await this.readBeacon(groupId, live, now);
@@ -1219,7 +1226,7 @@ export class Communities {
       // the hubs left once they give up on it. Read every half minute, my lobby kept them waiting that long more.
       if (this.hubDropped(groupId, live, others, now)) live.lobbyBusyUntil = Math.max(live.lobbyBusyUntil, now + this.timings.lobbyBusyMs);
       // And so is one whose member I dropped a while ago (`MEMBER_BACK_MS`): its app, opened again, asks there.
-      const lobbyEvery = (now < live.lobbyBusyUntil || now < (live.memberBackUntil ?? 0)) && !busy ? this.timings.lobbyPollMs : this.timings.lobbyIdlePollMs;
+      const lobbyEvery = (now < live.lobbyBusyUntil || now < (live.memberBackUntil ?? 0) || now < (live.restartedUntil ?? 0)) && !busy ? this.timings.lobbyPollMs : this.timings.lobbyIdlePollMs;
       // A read the relays held back is no reading: again when the hold ends (`lobbyHeldUntil`), not at the next turn.
       if (now - live.lastLobbyPoll >= lobbyEvery || (!busy && now >= (live.lobbyHeldUntil ?? Infinity))) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
       await this.answerKnocks(groupId, live, now, busy);
@@ -1581,8 +1588,25 @@ export class Communities {
       return false;
     }
     live.beaconFailedAt = 0; live.beaconKnown = true;
+    const first = !live.beaconAt, listed = new Set(freshHubs(this.hubs(live), now).map(h => h.key));
     // Hubs I do not know yet are members newer than my view of the roster: exactly whom I need to catch up.
     live.beacon = live.hubClocks.inMyTime(readBeacon(keys, records ?? []), now);
+    // Both our apps were closed, and one is back before the other: each looks fast for the other's side of their edge,
+    // which it opens, or kept from its last run (down). The second back reads the first listed at its first reading;
+    // the first, while the apps of its last run may be coming back (`restartedUntil`), reads the second listed anew. At
+    // the background pace each found the other's side half a minute later, and the second back waited 27-61 s for what
+    // was said meanwhile (web build and CommunityWorld, 2026-11-17).
+    // Only the hubs I count: any member can write a key of nobody in the beacon, which no edge is ever opened to. Looked
+    // for, it stayed expected for the rest of the run, and kept this hub's reads at the door's share (CommunityWorld).
+    if (first || now < (live.restartedUntil ?? 0)) {
+      const edges = this.host.edges(groupId);
+      for (const h of freshHubs(this.hubs(live), now)) {
+        if (h.key === live.session.myKey || listed.has(h.key) || this.hubDead(groupId, live, h, now)) continue;
+        const id = edges.get(h.key);
+        if (!id) { if (live.hub) live.expect.add(h.key); }
+        else if (!this.host.linkReady(id, 2)) this.host.expectPeer?.(id);
+      }
+    }
     live.head = readBeaconHead(keys, records ?? []);
     live.beaconAt = now;
     this.noteHubs(live, now);
@@ -1856,11 +1880,16 @@ export class Communities {
       }
     }
     for (const [key, since] of live.restored) {
+      // Its first tick: an app of my last run whose edge is not up was closed too, and may be back any moment. Looked for
+      // fast a while (`restartedUntil`), as a hub looks for a member it dropped (`MEMBER_BACK_MS`), which a restart forgets.
+      if (!since && !(existing.has(key) && this.host.linkReady(existing.get(key)!, 2))) live.restartedUntil = now + MEMBER_BACK_MS;
       if (!since) live.restored.set(key, now);
       if (!existing.has(key) || now - (since || now) >= RESTORED_EDGE_MS || s.wasRemoved(key)) live.restored.delete(key);
       else wanted.add(key);
     }
     for (const [key, id] of existing) if (!wanted.has(key)) await this.host.closeEdge(id);
+    // Expected and no edge wanted to it: none will open, and kept, I would go on letting it in (`admitting`) for good.
+    for (const key of live.expect) if (!wanted.has(key)) live.expect.delete(key);
     for (const key of wanted) if (!existing.has(key) && key !== s.myKey) {
       const expect = live.expect.delete(key);
       try { await this.host.openEdge(s.state, key, expect); if (expect) live.awaited.set(key, now); } catch { /* next tick */ }
@@ -2434,8 +2463,12 @@ export class Communities {
         const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }), ...(m.frame && { frame: m.frame }) }, m.live);
         placing(stored !== false);
-        // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645).
-        if (stored === false && this.stored.get(id)?.removedIds?.includes(m.id)) return false;
+        // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645). Deleted while its file was being
+        // taken: the file goes too.
+        if (stored === false && this.stored.get(id)?.removedIds?.includes(m.id)) {
+          if (file) await this.files?.forget(id, m.id);
+          return false;
+        }
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         markCame(this.marks, id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(id), came, m.sender !== session.myKey, mentioned);

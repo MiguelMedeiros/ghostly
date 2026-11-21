@@ -90,7 +90,8 @@ it("a reaction waiting behind a text that leaves it no room keeps the text's bac
     // The send published the text (at 0).
     const at: number[] = [0], sent = Date.now();
     h.publish.mockImplementation(async () => { at.push(Date.now() - sent); });
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    // Past the fourth retry (4 + 8 + 16 + 32 s after the send) and short of the fifth (64 s later): the four gaps compared.
+    await vi.advanceTimersByTimeAsync(70_000);
     await a.stop();
     return at.slice(1).map((t, i) => Math.round((t - at[i]) / 1_000));
   };

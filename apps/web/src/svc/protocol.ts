@@ -20,6 +20,20 @@ export const CLEAR_COOKIES = `${BRIDGE_DIR}clear-cookies`;
 export const WORKER_SCRIPT = "/ghostly-services-sw.js";
 
 /**
+ * The address the bridge registers the worker from: its query says whether Hide my IP from contacts is on, the one
+ * thing the worker cannot read from the app's answers (its pages can reach the bridge, and so answer a request
+ * themselves) nor keep anywhere the app cannot write.
+ */
+export function workerScript(relayOnly: boolean): string {
+  return `${WORKER_SCRIPT}?relay-only=${relayOnly ? 1 : 0}`;
+}
+
+/** Whether the worker at `href` keeps to Hide my IP from contacts: unless its address says it is off, it does. */
+export function workerRelayOnly(href: string): boolean {
+  try { return new URL(href).searchParams.get("relay-only") !== "0"; } catch { return true; }
+}
+
+/**
  * What the view's frame and the bridge's frame of the contact's app allow: nothing. No `fullscreen`: in full screen the
  * app would cover the view's bar, the one thing that says it is the contact's app and not Ghostly (as a mini-app's
  * frame, WISP 1200). No `clipboard-write`: once tapped, the contact's code could replace what the person copied (an
@@ -99,7 +113,7 @@ export interface ServiceRequestMessage {
   path: string;
   headers: [string, string][];
   body: ArrayBuffer | null;
-  /** The request's `destination` ("iframe", "script", …): whether the answer is a page (`guardViewerAnswer`). */
+  /** The request's `destination` ("iframe", "script", …), as the browser said it to the worker. */
   destination?: string;
   /** The worker says what the frame read (`ServiceRead`): the page sends only `ANSWER_AHEAD_BYTES` past it. */
   flow?: true;
