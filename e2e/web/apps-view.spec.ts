@@ -564,18 +564,21 @@ const NOTES = "<!doctype html><meta charset=utf-8><title>Notes</title><body><tex
 
 test("taps and keys in an app keep the lock away while the person plays it; left alone, it locks", { tag: ["@feature:apps.view", "@feature:settings.lock.idle"] }, async ({ peer }) => {
   const { ana, app, notes } = await inAppWithLock(peer, NOTES);
+  // The clock moves a second at a time, as the watchdog pings: each pong comes back through the port's relay (a thread of
+  // its own) between two of them, as it does in real time, and not after ten pings fired at once.
+  const runFor = async (ms: number) => { for (let t = 0; t < ms; t += 1000) await ana.page.clock.runFor(1000); };
 
   // Two minutes of play, twice the lock time, in the app alone: the Ghostly page around it hears none of it.
   for (const move of ["e4", "Nf3", "Bc4"]) {
     await notes.click();
     await notes.pressSequentially(move);
-    await ana.page.clock.runFor(40_000);
+    await runFor(40_000);
     await expect(ana.page.getByText("Ghostly is locked")).toHaveCount(0);
   }
   await expect(notes).toHaveValue("e4Nf3Bc4");
 
   // Left alone, the lock comes, and the app stops with it.
-  await ana.page.clock.runFor(65_000);
+  await runFor(65_000);
   await expect(ana.page.getByText("Ghostly is locked")).toBeVisible();
   await expect(app).toHaveCount(0);
 });
@@ -584,12 +587,15 @@ test("an app that says `activity` by itself does not keep the lock away once the
   // On the real clock, a minute of it: the test's own calls into the page (the clock's runFor included) count as the
   // person's activation of it, so nothing is asked of the page while the person is away.
   test.setTimeout(240_000);
-  // The app takes the runner's port from its first call (it runs in the runner's realm) and says `activity` on it every
-  // 3 seconds, input or not.
+  // The app takes the runner's port from the first message the runner reads on it (it runs in the runner's realm; the
+  // runner posts through a postMessage it saved before the app ran) and says `activity` on it every 3 seconds, input or
+  // not.
   const { ana, app, notes } = await inAppWithLock(peer, `${NOTES}<script>
     const post = MessagePort.prototype.postMessage;
+    const data = Object.getOwnPropertyDescriptor(MessageEvent.prototype, "data").get;
+    const target = Object.getOwnPropertyDescriptor(Event.prototype, "currentTarget").get;
     let port = null;
-    MessagePort.prototype.postMessage = function (...args) { port = this; return post.apply(this, args); };
+    Object.defineProperty(MessageEvent.prototype, "data", { configurable: true, get() { port ??= target.call(this); return data.call(this); } });
     void ghostly.context().catch(() => {});
     let id = 1e6;
     setInterval(() => { if (port) post.call(port, { id: id++, type: "activity", args: [] }); }, 3000);

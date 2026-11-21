@@ -1,0 +1,1 @@
+Granting `files` (an install, or an update that adds it) starts with no links to picked files: links an earlier grant kept, before an update that dropped `files`, are not read again, and the person picks again.

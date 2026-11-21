@@ -17,6 +17,8 @@ import type { Translate } from "../../locales/translate";
 import { useBackCloses } from "../../hooks/useDismiss";
 import { SearchStatus } from "../ui/SearchStatus";
 import { FocusSafeButton } from "../ui/FocusSafeButton";
+import { neighbourOptions } from "../MessageBubble";
+import { focusLost } from "../../lib/focus";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
@@ -52,10 +54,18 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const [got, setGot] = useState<Record<string, string[]>>({});
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
+    // Opened from a message's ⋮: the message can leave the chat while the dialog is open (the contact deleted it for
+    // everyone, and the dialog closes with it). The focus then goes to the ⋮ of the message now in its place, as a
+    // delete of mine leaves it, not to the page.
+    const around = neighbourOptions(previous);
     const element = dialog.current!;
     element.showModal();
     search.current?.focus();
-    return () => { element.close(); if (previous?.isConnected) previous.focus(); };
+    return () => {
+      element.close();
+      if (previous?.isConnected) previous.focus();
+      else if (focusLost()) around.find((el) => el.isConnected)?.focus({ preventScroll: true });
+    };
   }, []);
 
   const shown = useMemo(() => findChatTargets(targets, query), [targets, query]);
