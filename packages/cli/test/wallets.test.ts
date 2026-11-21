@@ -8,7 +8,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { pairs } from "../src/commands/shared";
-import { asCliError } from "../src/errors";
+import { asCliError, EXIT } from "../src/errors";
 import { invoiceNetwork, paymentJson } from "../src/wallets";
 import { chatViewOf } from "./support/chatView";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
@@ -317,6 +317,49 @@ describe("wallets", () => {
     // A check of the contact's own request still reaches the engine.
     (node as unknown as { checkPayment: ReturnType<typeof vi.fn> }).checkPayment.mockResolvedValueOnce(undefined);
     expect(await callApi(ctx, "payment.check", { chat: "Alice", payment: "test" })).toEqual({ chat: "chat-one", paymentId: "test" });
+  });
+
+  it("a request already paid, with a payment on its way, or paid only through the app's review: not the engine failing", async () => {
+    // Found in a bug hunt: each of these was `engine` (exit 1), which a bot may read as "the engine broke, retry".
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    node.getState = () => {
+      const s = engine();
+      // Requests that name where to pay (`target`): the engine pays them only through a review the person approves.
+      s.payments.ark = { id: "ark", linkId: "chat-one", kind: "request", direction: "in", amount: 5, unit: "sat", state: "pending", createdAt: 5, network: "testnet", target: { method: "arkade", network: "testnet", address: "tark1x" } } as unknown as typeof s.payments[string];
+      s.payments.chain = { id: "chain", linkId: "chat-one", kind: "request", direction: "in", amount: 5, unit: "sat", state: "pending", createdAt: 6, network: "testnet", target: { method: "bitcoin", network: "testnet", address: "tb1q" } } as unknown as typeof s.payments[string];
+      return s;
+    };
+    Object.assign(node, { checkPayment: vi.fn(async (_: unknown) => undefined) });
+    const check = (node as unknown as { checkPayment: ReturnType<typeof vi.fn> }).checkPayment;
+    // As the engine throws them: the payment desk's words (payments.ts), and node.ts's `engineError`s.
+    const said = (message: string) => () => node.payRequest.mockRejectedValueOnce(new Error(message));
+    const known = (engineCode: string, message: string) => () => node.payRequest.mockRejectedValueOnce(Object.assign(new Error(message), { engineCode }));
+    const reviewFirst = "Review and explicitly approve this payment before sending";
+    const cases: [() => void, string, Record<string, unknown>, string, RegExp][] = [
+      [said("You already paid this request"), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused", /^You already paid this request$/],
+      [said("A Lightning payment for this request is still pending"), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused", /^A Lightning payment for this request is still pending$/],
+      [known("requestHasPayment", "This request already has a payment. Reconcile it before trying again."), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused", /^This request already has a payment\. Reconcile it/],
+      [known("requestPaymentInFlight", "This request already has a payment; reconcile it instead"), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused", /^This request already has a payment; reconcile it instead$/],
+      // A request the CLI cannot pay: which way of paying it is, and where it is paid.
+      [said(reviewFirst), "chat.payRequest", { chat: "Alice", payment: "ark" }, "unavailable", /^This request is paid with Ark: chat pay-request cannot approve that payment, pay it in the app$/],
+      [said(reviewFirst), "chat.payRequest", { chat: "Alice", payment: "chain" }, "unavailable", /^This request is paid with on-chain Bitcoin: chat pay-request cannot approve that payment, pay it in the app$/],
+      // The CLI's copy of the request knows no way of paying yet (its state not caught up): said without one.
+      [said(reviewFirst), "chat.payRequest", { chat: "Alice", payment: "test" }, "unavailable", /^This request is paid through a review: chat pay-request cannot approve that payment, pay it in the app$/],
+      [() => check.mockRejectedValueOnce(new Error("This request cannot be paid from another wallet")), "payment.check", { chat: "Alice", payment: "test" }, "refused", /^This request cannot be paid from another wallet$/],
+      // Its sibling stays as it was, and an error nobody knows stays the engine's.
+      [said("This request is no longer open"), "chat.payRequest", { chat: "Alice", payment: "test" }, "refused", /^This request is no longer open$/],
+      [said("Something else broke"), "chat.payRequest", { chat: "Alice", payment: "test" }, "engine", /^Something else broke$/],
+      [() => check.mockRejectedValueOnce(new Error("Something else broke")), "payment.check", { chat: "Alice", payment: "test" }, "engine", /^Something else broke$/],
+    ];
+    const answered = [], wanted = [];
+    for (const [arrange, method, params, code, message] of cases) {
+      arrange();
+      const error = asCliError(await callApi(ctx, method, params).catch((e: unknown) => e));
+      answered.push({ method, params, code: error.code, exit: EXIT[error.code], message: error.message });
+      wanted.push({ method, params, code, exit: 1, message: expect.stringMatching(message) });
+    }
+    expect(answered).toEqual(wanted);
   });
 
   it("pay or ask from a profile with no wallet of the network: refused, naming the wallet to make", async () => {
