@@ -188,7 +188,7 @@ describe("a move hands over the installed apps' bundles", () => {
     const host = handoffProfileHost("1.10.2", "web");
     const staging = await host.staging.open();
     const file = { id: `app-${staged.digest}`, size: staged.bytes.length, sha256: staged.sha256 };
-    await staging.begin(file.id);
+    await staging.begin([file.id]);
     await staging.append(file.id, 0, staged.bytes);
     await staging.finish(file);
     expect(opfs.files.has(`${staging.database}/${file.id}`)).toBe(true);
