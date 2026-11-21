@@ -36,6 +36,7 @@ describe("file send of a video", () => {
     getMessage: vi.fn(async () => undefined),
     sendFile: vi.fn(async ({ file }: { file: MessageFile }) => { sent.push(file); }),
     groupFileCheck: vi.fn(async () => ({ error: null })),
+    groupTaken: vi.fn(() => 1),
     sendGroupFile: vi.fn(async ({ file }: { file: MessageFile }) => { sent.push(file); return { error: null, messageId: "m" }; }),
     setGroupTyping: vi.fn(async () => {}),
   };
