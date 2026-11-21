@@ -200,15 +200,16 @@ Main types: `message.received`, `message.sent`, `message.delivery`, `message.edi
 ### Allowlist
 
 ```bash
-ghostly listen --from alice --from bob --group team --exec ./bot.sh
+ghostly listen --from alice --from bob --group k3x9q2abcdefghijklmnop --exec ./bot.sh
 ```
 
 - `--from` takes a chat (its id or a label given here) or a contact's key (`peer` in `chat show`); a key also matches a
   chat made after `listen` started, and only ever the chat of that key (a contact's own name never stands for a key).
   A prefix of a chat's id or the name its contact gave itself is refused, with the chat it found: another contact
-  could call itself that. Name the chat first (`ghostly chat rename <chat> <name>`). `--group` takes a group (id,
-  prefix or name, or `group:<id>`; one that fits more than one group is refused, with their ids). Names are turned into ids once, at the
-  start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
+  could call itself that. Name the chat first (`ghostly chat rename <chat> <name>`). `--group` takes a group by
+  its id (as `group list` gives it), or `group:<id>`. Its name or a prefix of its id is refused, with the id to use: its
+  admin chose the name and its creator the id, so another group's admin could name theirs that. Names are turned into
+  ids once, at the start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
 - With either flag, an event of any other chat or group never reaches `--exec`, `--webhook` or stdout. The message
   itself is kept in the chat as always, and the cursor moves past it. Events of the profile itself
   (`daemon.started`, `events.gap`, `identity.approval`) still pass.
@@ -269,8 +270,8 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
 
 A chat is named by its id, its contact's key, the label you gave it, or (only when no label matches) a unique prefix
 of its id or the name the contact gave itself; a group by its id, its name, or a unique
-prefix of its id, each also written `group:<ref>` (every command that takes a group, `listen --group` included, and
-every one that takes a chat or a group); a member by its key, a unique prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
+prefix of its id, each also written `group:<ref>` (every command that takes a group, and every one that takes a chat
+or a group; `listen --group` takes only its id, as is or after `group:`); a member by its key, a unique prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
 group's and a member its own, so a bot or a script addresses by id (`<chat id>`, `group:<group id>`, a member's whole
 key), which every answer and event carries. What the CLI does when names meet:
 

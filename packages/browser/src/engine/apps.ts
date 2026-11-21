@@ -489,10 +489,10 @@ async function noteBundles(change: (noted: Set<string>) => void): Promise<void> 
  */
 export const APP_REVOCATIONS_KEY = "appRevocations";
 /**
- * Revocations kept there: at most `each` of one app and `all` in all, dropped from the publisher holding the most (see
- * `keepRevocations`). A revocation is at most about 3.5 KiB (64 digests and a reason).
+ * Revocations kept there: at most `each` of one app and `all` in all, dropped from the publisher holding the most past
+ * its `reserve` (see `keepRevocations`). A revocation is at most about 3.5 KiB (64 digests and a reason).
  */
-const REVOCATIONS_KEPT = { each: 64, all: 1024 } as const;
+const REVOCATIONS_KEPT = { each: 64, all: 1024, reserve: 4 } as const;
 
 /**
  * The revocations as kept, by reference, in the order they were last added to (`all`), and those of `ref` (`mine`), read
@@ -543,22 +543,25 @@ function keepRevocations(settings: IDBObjectStore, adds: ReadonlyMap<string, rea
       changed = true;
     }
     if (!changed) return;
-    // Past the cap, room is made from the publisher that holds the most (on a tie, the one kept longest ago), from its
-    // apps kept longest ago: one publisher's revocations of its own apps never push out another's, and a publisher keeps
-    // its revocations until as many others each hold as many.
+    // Past the cap, room is made from the publisher that holds the most past its reserve (on a tie, the one kept longest
+    // ago), from its apps kept longest ago, down to its reserve: one publisher's revocations of its own apps never push out
+    // another's. With none past it, from the publisher kept last: many publishers holding a few each refuse room to one
+    // more, and never push out the newest few of a publisher kept before them.
     const held = new Map<string, number>();
     let all = 0;
     for (const [r, list] of kept) {
       held.set(appRefPublisher(r), (held.get(appRefPublisher(r)) ?? 0) + list.length);
       all += list.length;
     }
+    const past = (publisher: string) => (held.get(publisher) ?? 0) - REVOCATIONS_KEPT.reserve;
     while (all > REVOCATIONS_KEPT.all) {
       let most = "";
-      for (const [publisher, n] of held) if (n > (held.get(most) ?? 0)) most = publisher;
-      const [other, list] = [...kept].find(([r]) => appRefPublisher(r) === most)!;
-      const drop = Math.min(list.length, all - REVOCATIONS_KEPT.all);
+      for (const publisher of held.keys()) if (past(publisher) > Math.max(past(most), 0)) most = publisher;
+      const entries = [...kept];
+      const [other, list] = most ? entries.find(([r]) => appRefPublisher(r) === most)! : entries[entries.length - 1]!;
+      const drop = Math.min(list.length, all - REVOCATIONS_KEPT.all, most ? past(most) : Infinity);
       all -= drop;
-      held.set(most, held.get(most)! - drop);
+      held.set(appRefPublisher(other), held.get(appRefPublisher(other))! - drop);
       if (drop === list.length) kept.delete(other); else kept.set(other, list.slice(drop));
     }
     settings.put([...kept], APP_REVOCATIONS_KEY);
@@ -606,6 +609,12 @@ function refusePrivateLink(url: unknown): void {
 }
 
 const versionOf = (manifest: AppManifest, digest: string): AppVersion => ({ ref: appRef(manifest.publisher, manifest.name), sequence: manifest.sequence, digest });
+/**
+ * Whether a bundle is the one an installed record names: its signed manifest's reference and publisher, and no grant
+ * beyond what that manifest asks. A record is written as a restored profile holds it; only its digest was checked.
+ */
+const bundleFits = (app: InstalledApp, manifest: AppManifest): boolean =>
+  versionOf(manifest, app.digest).ref === app.ref && manifest.publisher === app.publisher && app.permissions.every((p) => manifest.permissions.includes(p));
 const byteLength = (text: string) => utf8Encode(text).length;
 
 /** The app with these revocations merged into the ones it holds, each kept once. */
@@ -632,7 +641,8 @@ function installDecision(installed: InstalledApp | undefined, version: AppVersio
 
 /**
  * Whether `now` is still the record `was`: the same install, version, waiting update, files and mark. A store pinned or
- * unpinned meanwhile is not a change here: the update check unpins on its own (`removeStore`).
+ * unpinned meanwhile is not a change here: the update check unpins on its own (`removeStore`), and keeps a pin made
+ * meanwhile (`putAppIfUnchanged`'s `pinned`).
  */
 function sameRecord(now: InstalledApp | undefined, was: InstalledApp | undefined): boolean {
   if (!was) return !now;
@@ -1084,8 +1094,11 @@ export class Apps {
    * the record `keepStoreRevocations` read. A store removed since keeps no index: what it revoked of this app is among
    * the ones this profile kept (`APP_REVOCATIONS_KEY`), judged here too. Every revocation of this app the stores hold
    * is kept there at the write.
+   * `pinned` is for the update check, which does not set the record's store: one changed since `was` (pinned, moved or
+   * unpinned meanwhile) is the one written. "version": the write brings a version found under the store as it was, so
+   * the record pinned or moved meanwhile is not written at all.
    */
-  private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
+  private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined, pinned?: "kept" | "version"): Promise<boolean> {
     const stores = await this.records();
     const tx = (await openDb()).transaction([STORES.apps, STORES.settings], "readwrite");
     let put = false;
@@ -1094,6 +1107,11 @@ export class Apps {
     read.onsuccess = () => {
       const now = read.result as InstalledApp | undefined;
       if (!sameRecord(now, was)) return;
+      if (pinned && now && now.store !== was?.store) {
+        if (pinned === "version" && now.store !== undefined) return;
+        const { store: _s, ...rest } = app;
+        app = { ...rest, ...(now.store !== undefined && { store: now.store }) };
+      }
       const had = new Set((was?.revocations ?? []).map((r) => canonicalJson(r)));
       app = withRevocations(app, (now?.revocations ?? []).filter((r) => !had.has(canonicalJson(r))));
       const revoked = [...stores.values()].flatMap((s) => (s.removed ? [] : s.index?.revoked ?? []));
@@ -1316,7 +1334,13 @@ export class Apps {
   }
 
   /** The installed bundle read back and checked again before it runs (WISP 1200 § Signatures: "again before it runs one"). */
-  private verifiedBundle(app: InstalledApp, running: boolean): Promise<AppBundle> {
+  private async verifiedBundle(app: InstalledApp, running: boolean): Promise<AppBundle> {
+    const bundle = await this.bundleRead(app, running);
+    if (!bundleFits(app, bundle.manifest)) fail("damaged", "This app's stored files do not match what was installed");
+    return bundle;
+  }
+
+  private bundleRead(app: InstalledApp, running: boolean): Promise<AppBundle> {
     if (running) this.runUsed.set(app.digest, this.now());
     const kept = this.verified.get(app.digest);
     // Used last, dropped last: a running app's `file` reads keep its bundle, and drop the ones no app has used for a while.
@@ -2291,8 +2315,8 @@ export class Apps {
         const next = this.versionRecord(app, bundle, kind, url, app.store);
         const passed = old.pending && old.pending.sequence <= version.sequence ? old.pending : undefined;
         if (passed) delete next.pending;
-        // Uninstalled while it downloaded, or changed by the person: not put back.
-        if (!(await this.putAppIfUnchanged(next, stored))) break;
+        // Uninstalled while it downloaded, or changed by the person (pinned to a store too): not put back.
+        if (!(await this.putAppIfUnchanged(next, stored, "version"))) break;
         app = stored = next;
         if (passed) await this.removeBundle(passed.bytes, passed.digest);
         await this.removeBundle(old.bytes, old.digest);
@@ -2315,9 +2339,10 @@ export class Apps {
     const stays = revocations ? stopping(versions, app.revocations ?? []) : app.revocations ?? [];
     const carried = stopping(versions, stores.flatMap((s) => s.index?.revoked ?? []));
     const merged = new Map([...stays, ...(revocations ?? []), ...carried].map((r) => [canonicalJson(r), r]));
-    // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
+    // Removed meanwhile: not put back, and the files this check fetched go too. Pinned, moved or unpinned meanwhile: the
+    // record keeps the store it has at the write.
     const current = await this.app(app.ref);
-    if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
+    if (current?.store !== stored.store) { const { store: _s, ...rest } = app; app = { ...rest, ...(current?.store !== undefined && { store: current.store }) }; }
     // None of its publisher's files answered (no network on the device, the host's own trouble): not marked checked, so
     // the check at start does not take it as fresh and the scheduled one tries again soon. One not there is an answer.
     const unreached = reach.failed && !reach.answered;
@@ -2326,7 +2351,7 @@ export class Apps {
     // checks, and a write drops the record held for the app's calls). The mark is kept fresh enough for a reload to skip
     // the check at start.
     const idle = sameExceptChecked(app, stored) && (unreached || this.checkedWithin(stored.checkedAt, APP_CHECK_TIMINGS.freshMs / 2));
-    const put = idle ? sameRecord(current, stored) : await this.putAppIfUnchanged(app, stored);
+    const put = idle ? sameRecord(current, stored) : await this.putAppIfUnchanged(app, stored, "kept");
     for (const files of [...dropped, ...(!put && wrote ? [wrote] : [])]) await this.removeUnusedBundle(app.ref, files.bytes, files.digest);
     if (!put) return null;
     return { app, outcome, ...(unreached && { unreached: true as const }) };
@@ -2379,6 +2404,7 @@ export class Apps {
       // Another bundle whole than its peek showed (a host answering the range and the whole read apart): not read whole
       // again for that peek for an hour, as at the update check.
       if (fetched.bundle.digest !== app.digest) { this.refuseRead(url, app.digest); continue; }
+      if (!bundleFits(app, fetched.bundle.manifest)) continue;
       return this.filesBack(app, fetched.bytes, stores);
     }
     return { status: "needs-files" };

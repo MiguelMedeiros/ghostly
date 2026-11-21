@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { appFingerprint } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
+import { DEFAULT_STORE_KEY } from "@ghostly/browser/engine/appDefaults";
 import type { AppListedBy, AppPreview, AppRunStatus, AppSource, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { useFocusBack } from "../../hooks/useFocusBack";
@@ -43,9 +45,17 @@ function hostOf(url: string): string {
   try { return new URL(url).host; } catch { return url; }
 }
 
-/** Where the app stands with the person's stores: "In <store>", "Found by <index>", "Not in any of your stores". */
-function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: BuiltIn): { key: string; line: ReactNode }[] {
-  const named = (key: TranslationKey) => (s: AppListedBy) => ({ key: s.key, line: withName(t(key, { name: NAME }), s.name) });
+/** A line, and the fingerprint of the store it names when that store is not the official one. */
+interface StoreLine { key: string; line: ReactNode; fingerprint?: string }
+
+/**
+ * Where the app stands with the person's stores: "In <store>", "Found by <index>", "Not in any of your stores". A
+ * store's name is its own words, and another store may take the official store's name or one the person has already:
+ * only its key tells them apart, so every store but the official one (known by its key) is named with its fingerprint.
+ */
+function storeLines(listedBy: readonly AppListedBy[], t: Translate, builtIn?: BuiltIn): StoreLine[] {
+  const named = (key: TranslationKey) => (s: AppListedBy): StoreLine =>
+    ({ key: s.key, line: withName(t(key, { name: NAME }), s.name), ...(s.key !== DEFAULT_STORE_KEY && { fingerprint: appFingerprint(s.key) }) });
   const curated = listedBy.filter((s) => s.kind === "curated");
   if (curated.length) return curated.map(named("apps.install.inStore"));
   const found = listedBy.map(named("apps.install.foundBy"));
@@ -101,7 +111,9 @@ function Publisher({ fingerprint, unknown: unlisted, listedBy, sentBy, builtIn }
         <span className="ms-auto"><Fingerprint value={fingerprint} /></span>
       </div>
       {unknown && open && <p id={id} className="text-xs text-text-secondary">{t("apps.install.unknownPublisherInfo")}</p>}
-      {storeLines(listedBy, t, builtIn).map(({ key, line }) => <Line key={key} testId="app-store-line">{line}</Line>)}
+      {storeLines(listedBy, t, builtIn).map(({ key, line, fingerprint }) => (
+        <Line key={key} testId="app-store-line">{line}{fingerprint && <> <Fingerprint value={fingerprint} /></>}</Line>
+      ))}
       {sentBy && <Line testId="app-sent-by">{withName(t("apps.install.sentBy", { name: NAME }), sentBy)}</Line>}
     </div>
   );
