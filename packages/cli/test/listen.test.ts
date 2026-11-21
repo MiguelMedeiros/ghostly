@@ -587,10 +587,10 @@ describe("the allowlist", () => {
   it("resolves names to ids once at start; a contact key with no chat yet is kept as a key; anything else is an error", async () => {
     const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
       if (method === "chat.get" && params.chat === "bob") return { id: "c1", label: "bob", peer: KEY };
-      if (method === "group.get" && params.group === "team") return { id: "g1" };
+      if (method === "group.get" && params.group === "g1") return { id: "g1" };
       throw new CliError("not_found", `No ${method} ${String(params.chat ?? params.group)}`);
     });
-    const list = await allowlist(["bob", OTHER_KEY], ["team"], call, async (chat) => (chat === "c9" ? OTHER_KEY : null));
+    const list = await allowlist(["bob", OTHER_KEY], ["g1"], call, async (chat) => (chat === "c9" ? OTHER_KEY : null));
     expect(await list.allows(received("c1", "a", "hi"))).toBe(true);
     expect(await list.allows(received("c9", "b", "hi"))).toBe(true);
     expect(await list.allows(received("c2", "c", "hi"))).toBe(false);

@@ -4,6 +4,45 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.13.5
+
+### Security
+
+**Apps**
+
+- The install screen now shows the fingerprint beside the name of every store except Ghostly's official one, so a store added from a link can no longer pass for another store by taking its name.
+- An installed app now runs only when its files are that app's own, from its publisher, with no permission beyond what it asks for. A restored profile's app record is now checked against its files.
+- A store pin made while an update check was running is now kept, so the app keeps updating only to versions that store lists.
+- A revoked app version stays refused when installed from a copy, however many other publishers' revocations the app has kept since.
+
+**Chat**
+
+- The secret guard now recognises a recovery phrase written as a numbered list in two columns, in more of the ways people write one.
+- The secret guard now also asks before sending a Trezor Shamir (SLIP39) backup share or an LND aezeed seed.
+
+**Web**
+
+- The installed web app now delivers content shared into it only to a window of the profile it was shared to.
+
+**CLI**
+
+- The secret guard now also checks the link preview text sent, edited or forwarded with a message, and a file's type.
+- `ghostly listen --group` now takes a group only by its id (or `group:<id>`). A group's name or a prefix of its id, which other people choose, is refused with the id to use.
+- The local socket's `call.auto`, `group.auto` and `chat.delete` methods now refuse parameters they do not take (`bad_request`) instead of ignoring them.
+- A profile restore stopped while it runs (Ctrl-C, SIGTERM, SIGHUP) now removes the decrypted copy it was writing, instead of leaving it in a hidden folder.
+- An unknown command, or a value a command does not take, no longer repeats a long or secret-looking word in its error.
+- `ghostly app verify`, `app serve` and `app publish` now read only regular files from a bundle or an app folder, and no more than a bundle's size limit.
+
+**Website**
+
+- The /apps pages now bound the work spent checking publishers' revocation files, so a store with many of them can no longer hold up the site's server when it starts.
+
+### For developers
+
+- `ghostly listen --group <name>` now fails at start with `bad_request` (details `{group, name}`) and prints the id to use: a unit started with a group's name needs its id instead.
+- The socket's `call.auto`, `group.auto` and `chat.delete` answer `bad_request` to a parameter they do not take; before, it was dropped without a word.
+- `ghostly profile restore` stopped by a signal now exits 130 with the `interrupted` error and a line on stderr saying no profile was made.
+
 ## 1.13.4
 
 ### Security

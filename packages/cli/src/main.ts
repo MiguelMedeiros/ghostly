@@ -4,7 +4,7 @@ import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import { dirname, sep } from "node:path";
 import packageJson from "../package.json" with { type: "json" };
-import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
+import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, shownWord, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaemon, notTheDaemon } from "./client";
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
@@ -947,7 +947,25 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const file = here(given) as string;
       const { backupFileProtection, restoreProfile } = await import("./backup");
       const protection = await backupFileProtection(file);
-      const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : await backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE));
+      const passphrase = protection === "none" ? undefined : await backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE);
+      // Ctrl-C, a service manager's stop or the terminal closing ends the restore at its next record, its folder (the
+      // profile in the clear) removed: killed by the signal, the process left it behind. A second signal leaves at once,
+      // the folder still removed on the way out.
+      const stop = new AbortController();
+      let words = "";
+      const onSignal = (signal: NodeJS.Signals) => {
+        if (stop.signal.aborted) process.exit(EXIT.interrupted);
+        words = `stopped (${signal === "SIGINT" ? "Ctrl-C" : signal}) before the restore finished: no profile was made`;
+        stop.abort(new CliError("interrupted", words[0].toUpperCase() + words.slice(1)));
+      };
+      const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+      for (const signal of signals) process.on(signal, onSignal);
+      let paths: Awaited<ReturnType<typeof restoreProfile>>;
+      try { paths = await restoreProfile(g.home, checkProfileName(name), file, passphrase, stop.signal); } catch (error) {
+        // Said only when the stop is what ended it: one that came after the profile took its name restored it all the same.
+        if (error === stop.signal.reason) process.stderr.write(`ghostly: ${words}\n`);
+        throw error;
+      } finally { for (const signal of signals) process.off(signal, onSignal); }
       if (parsed.options.use) selectProfile(g.home, name);
       // Whether --use made it the current profile, as profile create says it.
       print({ restored: name, folder: paths.dir, protection, current: currentProfileOrNone(g.home) === name });
@@ -1907,7 +1925,7 @@ export function unknownCommand(first: string | undefined, second?: string, third
   if (said) return new CliError("usage", `Unknown command: ${said} (ghostly ${APP_WORDS[said]}; ghostly help ${commandWords(APP_WORDS[said]).join(" ")})`);
   const all = helpRows().map((row) => commandWords(row.usage));
   const takes = (group: readonly string[]) => [...new Set(all.filter((words) => words.length > group.length && group.every((word, i) => words[i] === word)).map((words) => words[group.length]))];
-  const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);
+  const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.map(shownWord).join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);
   for (let depth = Math.min(asked.length, 2); depth >= 1; depth--) {
     const group = asked.slice(0, depth), name = group.join(" "), extra = asked[depth];
     const subs = takes(group);
@@ -1915,12 +1933,12 @@ export function unknownCommand(first: string | undefined, second?: string, third
     const near = extra === undefined ? undefined : nearest(extra, subs);
     if (near) return meant([...group, extra!], [...group, near]);
     const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
-    return new CliError("usage", extra ? `Unknown command: ${name} ${extra}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
+    return new CliError("usage", extra ? `Unknown command: ${name} ${shownWord(extra)}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
   }
   // A first word that names no command: the words after it are its arguments (`sned hi`), unless they are a command
   // word of the one it meant (`chta list`).
   const near = asked[0] === undefined ? undefined : nearest(asked[0], takes([]));
-  if (!near) return new CliError("usage", `Unknown command: ${asked[0] ?? '""'} (ghostly help)`);
+  if (!near) return new CliError("usage", `Unknown command: ${asked[0] === undefined ? '""' : shownWord(asked[0])} (ghostly help)`);
   return asked[1] !== undefined && takes([near]).includes(asked[1]) ? meant(asked.slice(0, 2), [near, asked[1]]) : meant([asked[0]], [near]);
 }
 

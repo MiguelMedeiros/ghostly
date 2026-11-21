@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, parseLinkPreview, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type LinkPreview, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -10,7 +10,7 @@ import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PA
 import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type CallScope, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -742,7 +742,7 @@ const METHODS: Record<string, Method> = {
       chosen.push(message);
     }
     if (!bool(params, "force")) for (const message of chosen) {
-      const secret = message.file ? null : findSecret(message.text);
+      const secret = message.file ? null : secretIn([message.text, ...previewTexts(message.preview)]);
       if (secret) throw new CliError("confirm", `A message looks like ${secretWords(secret)}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
     }
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
@@ -813,6 +813,8 @@ const METHODS: Record<string, Method> = {
   },
   // `--purge` folds the store even when the delete answers no (`foldsAnyway`): a message already gone, another's.
   "chat.delete": foldsAnyway(async (ctx, params) => {
+    // A misspelt `everyone` (`Everyone`) deleted the message here only, and the contact kept it.
+    onlyKeys(params, "chat.delete", ["chat", "message", "everyone", "wait", "timeout", "purge"]);
     // `--purge`: what it said leaves the profile's folder before the answer (`purgeMessage`), and the answer says so.
     const purge = bool(params, "purge"), purged = purge ? { purged: true } : {};
     // For everyone (WISP 400 § Delete for everyone): a message of mine, in a chat or a group, gone from every device.
@@ -1007,6 +1009,7 @@ const METHODS: Record<string, Method> = {
   },
   /** Invitations over the chats named accepted by the daemon itself (`group auto on --from`); no argument: the setting. */
   async "group.auto"(ctx, params) {
+    onlyKeys(params, "group.auto", ["on", "from"]);
     if (params.on === undefined) return { autoJoin: ctx.groupAuto.get() };
     return { autoJoin: ctx.groupAuto.set({ on: bool(params, "on"), from: list(params, "from") }) };
   },
@@ -1266,8 +1269,11 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
-  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.status, "text"), args.content,
-    ...(args.fields && typeof args.fields === "object" ? Object.values(args.fields) : [])];
+  const text = args.text;
+  let texts: unknown = [text, args.card, args.caption, args.memo, args.comment, args.name, of(args.settings, "nick"), of(args.file, "name"), of(args.file, "mime"), of(args.status, "text"), args.content,
+    ...(args.fields && typeof args.fields === "object" ? Object.values(args.fields) : []),
+    // A link preview's card, as the engine carries it with the text (WISP 401 § Link previews).
+    ...previewTexts(typeof text === "string" && args.preview !== undefined ? parseLinkPreview(args.preview, text.trim()) : undefined)];
   if (method === "forwardMessages") {
     // Each id once, and none past the engine's bound, which it refuses before reading any: as `chat.forward` reads them.
     // One id given 50,000 times was read as often, all at once, for the engine's refusal or its one message.
@@ -1275,11 +1281,16 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
     const linkId = args.linkId;
     texts = typeof linkId === "string" && linkId && ids.length <= FORWARD_MESSAGES ? await Promise.all(ids.map(async (id) => {
       const message = await node(ctx).getMessage(linkId, id);
-      return message && !message.file ? message.text : null;
+      return message && !message.file ? [message.text, ...previewTexts(message.preview)] : null;
     })) : [];
   }
   const secret = secretIn(texts);
   if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; call ${method} with --force if you mean to`, { kind: secret.kind });
+}
+
+/** What a link preview's card shows the contact besides the link: its title, description and site. */
+function previewTexts(preview: LinkPreview | undefined): (string | undefined)[] {
+  return preview ? [preview.t, preview.d, preview.s] : [];
 }
 
 /**

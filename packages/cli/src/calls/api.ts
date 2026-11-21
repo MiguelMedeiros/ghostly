@@ -1,4 +1,4 @@
-import { bool, list, str, type Method } from "../apiKit";
+import { bool, list, onlyKeys, str, type Method } from "../apiKit";
 
 /** Voice calls (WISP 1100 § Calls): the API methods. The audio itself goes over each call's own socket. */
 export const CALL_METHODS: Record<string, Method> = {
@@ -21,6 +21,8 @@ export const CALL_METHODS: Record<string, Method> = {
     return ctx.calls.flush(str(params, "call"));
   },
   async "call.auto"(ctx, params) {
+    // A key misspelt next to on (`From`) left the chats out: auto-answer on for every contact.
+    onlyKeys(params, "call.auto", ["on", "from", "rate"]);
     if (params.on === undefined) return { autoAnswer: ctx.calls.getAuto() };
     return { autoAnswer: ctx.calls.setAuto({ on: bool(params, "on"), from: list(params, "from"), rate: params.rate }) };
   },

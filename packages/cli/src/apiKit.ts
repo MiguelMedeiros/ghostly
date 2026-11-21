@@ -100,6 +100,14 @@ export function list(params: Params, name: string): string[] {
   return value as string[];
 }
 /**
+ * Refuses a key `method` does not take, naming it and the ones it takes. A setting whose list left out means every
+ * contact (`call.auto`'s `from`) read a misspelt key (`From`) as left out: the widest setting, with no word.
+ */
+export function onlyKeys(params: Params, method: string, takes: readonly string[]): void {
+  const unknown = Object.keys(params).filter((key) => !takes.includes(key));
+  if (unknown.length) throw new CliError("bad_request", `${method} takes no ${unknown.map((key) => JSON.stringify(key)).join(", ")}: it takes ${takes.join(", ")}`, { unknown, takes: [...takes] });
+}
+/**
  * One of `values`; `fallback` when it was left out. Given empty (an unset variable in a script: `wallet remove ""`), it
  * is refused like any other wrong choice, never read as left out: that acted on the default (the Cashu wallet).
  */

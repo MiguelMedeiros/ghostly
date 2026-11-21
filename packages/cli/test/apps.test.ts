@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -583,6 +584,48 @@ describe("app verify", () => {
     error(await ghostly(["app", "verify", "http://example.com/app.ghostlyapp"]), "usage", 2);
     error(await ghostly(["app", "verify", "https://cdn.jsdelivr.net/gh/ana/chess@main/app.ghostlyapp"]), "usage", 2);
   }, 60_000);
+});
+
+describe("a file that is not a regular one, in a bundle's place or its folder", () => {
+  // A device or a FIFO says size 0 and never ends: read, it held the command (and a daemon serving it) until killed.
+  const notFile = async (run: Promise<unknown>) => {
+    const refusal = await run.then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(CliError);
+    expect((refusal as CliError).code).toBe("bad_request");
+    expect((refusal as CliError).message).toContain("is not a file");
+  };
+
+  it("refuses a bundle that links to a device or is a FIFO, unread", async () => {
+    if (process.platform === "win32") return;
+    const dir = tmp();
+    symlinkSync("/dev/zero", join(dir, "app.ghostlyapp"));
+    await notFile(verifyApp(join(dir, "app.ghostlyapp")));
+    execFileSync("mkfifo", [join(dir, "fifo.ghostlyapp")]);
+    await notFile(verifyApp(join(dir, "fifo.ghostlyapp")));
+  });
+
+  it("reads a ghostly-revoke.json beside a bundle that links to a device as no revocation", async () => {
+    if (process.platform === "win32") return;
+    const { vector } = chess();
+    const dir = tmp();
+    writeFileSync(join(dir, "app.ghostlyapp"), fromSegments(vector.bytes));
+    symlinkSync("/dev/zero", join(dir, "ghostly-revoke.json"));
+    expect(await verifyApp(join(dir, "app.ghostlyapp"))).toMatchObject({ valid: true, digest: vector.read.digest });
+  });
+
+  it("refuses to publish a folder whose ghostly-app.json or ghostly-revoke.json links to a device", async () => {
+    if (process.platform === "win32") return;
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    const revoke = appFolder(manifest, files);
+    symlinkSync("/dev/zero", join(revoke, "ghostly-revoke.json"));
+    await notFile(publishApp(revoke, key));
+    expect(existsSync(join(revoke, "app.ghostlyapp"))).toBe(false);
+    const source = appFolder(manifest, files);
+    rmSync(join(source, "ghostly-app.json"));
+    symlinkSync("/dev/zero", join(source, "ghostly-app.json"));
+    await notFile(publishApp(source, key));
+  });
 });
 
 describe("app verify <url>", () => {
