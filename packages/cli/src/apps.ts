@@ -53,26 +53,47 @@ const PEM = /-----BEGIN PRIVATE KEY-----\r?\n([A-Za-z0-9+/=\r\n]+)-----END PRIVA
 /** `pem`: a key made by this run, written to its file by `saveKey` only once every check passed. */
 export interface LoadedKey { signer: Signer; key: string; created: boolean; pem?: string }
 
-/** Refuses a key file that is not a plain file of this user's, or that anyone else may read or write. */
-function checkKeyFile(path: string): void {
+/**
+ * Refuses a key file that is not a plain file of this user's, and gives its mode. Whether anyone else may read or write
+ * it (`openToOthers`) is asked once `readKey` knows what it holds: a public key is no secret, so its mode is no reason
+ * to refuse it.
+ */
+function checkKeyFile(path: string): number {
   const info = statSync(path);
   if (!info.isFile()) throw new CliError("bad_request", `${path} is not a file: --key names a key file`);
-  if (process.platform === "win32") return;
+  if (process.platform === "win32") return info.mode;
   if (process.getuid && info.uid !== process.getuid()) throw new CliError("refused", `${path} is not this user's: a key file must be yours alone`);
-  if ((info.mode & 0o077) !== 0) {
-    throw new CliError("refused", `${path} may be read by others (mode ${(info.mode & 0o777).toString(8)}): run chmod 600 ${path}, and think whether the key was seen`);
-  }
+  return info.mode;
 }
+
+/** True when anyone else may read or write a key file (never on Windows, whose modes do not say it). */
+const openToOthers = (mode: number): boolean => process.platform !== "win32" && (mode & 0o077) !== 0;
+
+/**
+ * Files a --key is often given by mistake, told apart so the refusal names them: a public key (an OpenSSH line such as
+ * an id_ed25519.pub holds, or a PEM or SSH2 public key block), and an OpenSSH private key (what ssh-keygen writes).
+ */
+const PUBLIC_KEY = /^(?:(?:ssh|ecdsa-sha2|sk-ssh|sk-ecdsa-sha2)-[\w@.-]+ AAAA|-----BEGIN (?:RSA )?PUBLIC KEY-----|---- BEGIN SSH2 PUBLIC KEY ----)/m;
+const OPENSSH_KEY = /^-----BEGIN OPENSSH PRIVATE KEY-----/m;
 
 /** Reads a key file: the PEM block, an Ed25519 key, and the kind its first line names (when it names one). */
 function readKey(path: string, kind: KeyKind): LoadedKey {
-  checkKeyFile(path);
+  const mode = checkKeyFile(path);
   const text = readFileSync(path, "utf8");
+  const block = PEM.exec(text);
+  const openSsh = OPENSSH_KEY.test(text);
+  // Before, an id_ed25519.pub was refused as a key others may read, and after the chmod as holding no private key.
+  // While others may read it, still the `refused` the mode check answered.
+  if (!block && !openSsh && PUBLIC_KEY.test(text)) {
+    throw new CliError(openToOthers(mode) ? "refused" : "bad_request", `${path} is a public key, not a private one: --key names a ${kind} key file (an Ed25519 key in a PEM "PRIVATE KEY" block). Name a new path and ghostly makes one`);
+  }
+  if (openToOthers(mode)) {
+    throw new CliError("refused", `${path} may be read by others (mode ${(mode & 0o777).toString(8)}): run chmod 600 ${path}, and think whether the key was seen`);
+  }
   const other: KeyKind = kind === "publisher" ? "store" : "publisher";
   if (text.startsWith(`Ghostly ${other} key`)) {
     throw new CliError("refused", `${path} is a ${other} key: ${kind === "publisher" ? "a store key never signs an app or its revocations" : "a publisher key never signs a store index"} (WISP 1200 · Stores)`);
   }
-  const block = PEM.exec(text);
   let seed: Uint8Array | undefined;
   if (block) {
     try {
@@ -80,6 +101,9 @@ function readKey(path: string, kind: KeyKind): LoadedKey {
       const d = key.asymmetricKeyType === "ed25519" ? key.export({ format: "jwk" }).d : undefined;
       if (d) seed = fromBase64Url(d);
     } catch { /* said below, without the file's text */ }
+  }
+  if (!block && openSsh) {
+    throw new CliError("bad_request", `${path} is an OpenSSH private key (as ssh-keygen writes), which ghostly does not read: a ${kind} key is a key of its own. Name a new path with --key and ghostly makes one, or give an Ed25519 key in a PEM "PRIVATE KEY" block (openssl genpkey -algorithm ed25519)`);
   }
   if (!seed || seed.length !== 32) throw new CliError("bad_request", `${path} holds no Ed25519 private key (a PEM "PRIVATE KEY" block, as openssl genpkey -algorithm ed25519 writes)`);
   const signer = seedSigner(seed);
