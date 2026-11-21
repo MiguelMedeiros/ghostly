@@ -450,7 +450,8 @@ it. A message's text never goes to stderr or a log.
 ## The socket API
 
 The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `ghostly-<hash>/` in
-`$XDG_RUNTIME_DIR`, else `/tmp/ghostly-<uid>-<hash>/`, a folder of the user's alone, when the folder's path is too long for a socket). `ghostly daemon status` names it, as
+`$XDG_RUNTIME_DIR`, else in the system temp folder (`$TMPDIR`, on macOS `/var/folders/…/T/`), else in
+`/tmp/ghostly-<uid>-<hash>/`, a folder of the user's alone that the daemon removes when it stops, when the folder's path is too long for a socket). `ghostly daemon status` names it, as
 `socket`, whether the daemon runs or not. One JSON object per line each way:
 
 ```json
@@ -502,7 +503,7 @@ speech to text, Claude and text to speech, stops talking when the caller talks, 
 Its `AGENTS.md` is the guide for an AI agent that sets it up.
 
 **The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `ghostly-calls-<hash>/<call>.sock` in
-`$XDG_RUNTIME_DIR`, else in `/tmp/ghostly-calls-<uid>-<hash>/` (a folder of yours alone, 0700), when that path is too long; `call start`, `call answer`, `call list` and the
+`$XDG_RUNTIME_DIR`, else in the system temp folder, else in `/tmp/ghostly-calls-<uid>-<hash>/` (a folder of yours alone, 0700, removed with the last call's socket), when that path is too long; `call start`, `call answer`, `call list` and the
 `call.connected` event name it. On Windows it is a named pipe. It carries raw PCM,
 with no framing:
 
