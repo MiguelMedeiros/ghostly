@@ -278,7 +278,7 @@ it("a backup refuses a passphrase with a space, line break or byte order mark at
   // A space inside is the passphrase's own, and a CRLF file's line end is left out whole: the environment opens it.
   writeFileSync(file, `${pass}\r\n`);
   ok(await ghostly(["--home", dir, "profile", "backup", "--out", out, "--passphrase-file", file], { env: NO_PASS }));
-  expect(ok(await ghostly(["--home", dir, "profile", "restore", out, "copy"], { env: PASS }))).toMatchObject({ restored: "copy" });
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", out, "copy", "--copy"], { env: PASS }))).toMatchObject({ restored: "copy" });
 });
 
 // The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a
