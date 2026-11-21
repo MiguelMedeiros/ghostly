@@ -2300,6 +2300,38 @@ describe("one pull request alone", () => {
     expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/refused the push of its rebase onto `dev` twice \(! \[remote rejected\] .*rule violations\)\)/)]);
   });
 
+  it("keeps a lone pull request in line when its push fails for a reason that passes (network, GitHub's own error), run after run", async () => {
+    // GitHub's own failures come as `[remote rejected]` too: two in a row (an incident between runs) said a branch rule
+    // refused the push and dropped a good pull request.
+    for (const message of [
+      "fatal: unable to access 'https://github.com/o/r/': Could not resolve host: github.com",
+      "error: RPC failed; HTTP 500 curl 22 The requested URL returned error: 500",
+      `! [remote rejected] ${"a".repeat(40)} -> fix-11 (Internal Server Error)`,
+      `! [remote rejected] ${"a".repeat(40)} -> fix-11 (failure)`,
+      `! [remote rejected] ${"a".repeat(40)} -> fix-11 (failed to update ref)`,
+    ]) {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      repo.git.pushHead = async () => ({ ok: false, message });
+      for (let i = 0; i < 3; i++) expect((await repo.run()).dropped).toEqual([]);
+      expect(repo.pulls.get(11)!.labels).toContain(LABEL.queue);
+      expect(repo.comments.get(11)!.at(-1)!.body).not.toMatch(/refused/);
+    }
+  });
+
+  it("keeps its mark whole when GitHub's refusal holds `<!--` or `-->`, and reads it back at the next run", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    const message = "! [remote rejected] fix-11 -> fix-11 (pre-receive hook declined: <!-- merge-train:x --> no)";
+    repo.git.pushHead = async () => ({ ok: false, message });
+    await repo.run();
+    const position = repo.comments.get(11)!.at(-1)!.body;
+    const mark = position.match(/<!-- merge-train:alone (.*?) -->/)![1];
+    expect(JSON.parse(mark).refused).toBe(message);
+    expect(position).not.toContain("<!-- merge-train:x");
+    expect((await repo.run()).dropped).toEqual([11]);
+  });
+
   it("leaves out of its comment any credentials in the URL of a refused push", async () => {
     const repo = fakeRepo();
     repo.add(11, { behind: true });

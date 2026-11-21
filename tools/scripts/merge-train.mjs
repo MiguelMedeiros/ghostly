@@ -633,9 +633,10 @@ export const noSkip = (text) => text.replace(SKIP_CI, "($1)");
 const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
 /**
  * A push GitHub itself refused (a branch rule's GH013, a hook, a token without the right): not a lease lost to an
- * author's push (`! [rejected]`) or a network error, which the next run gets past.
+ * author's push (`! [rejected]`), a network error or GitHub's own failure (`[remote rejected] … (Internal Server
+ * Error)`, `(failure)`, `(failed to update ref)`), which the next run gets past. Only GitHub's policy reasons count.
  */
-const PUSH_REFUSED = /\[remote rejected\]|returned error: 403/;
+const PUSH_REFUSED = /\[remote rejected\] .*\((?:push declined|protected branch hook declined|pre-receive hook declined)|returned error: 403/;
 /** A refusal's text as the comment shows it: no credentials, even if a remote's URL held them. */
 const refusalText = (message) => message.replace(/\/\/[^/@\s]+@/g, "//");
 /** Two refusals are the same one whatever commit each run pushed: git names the rebase's object id, new at every run. */
