@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { npubEncode } from "nostr-tools/nip19";
 import { describe, expect, it, vi } from "vitest";
 import { IdentityCheckUnavailable } from "@ghostly/core";
 import type { EngineState } from "@ghostly/browser/shared/types";
@@ -118,6 +119,73 @@ describe("identity signers on Node", () => {
       code: "bad_request", message: "Domain takes a subject, its domain (example.com): ghostly identity add domain <subject>",
     });
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `identity add <provider> [subject]` with a signer that runs here and brings its own subject dropped the subject:
+   * NIP-05 asked for `--field domain` after the domain was given, and Nostr made a proof of whatever key the signer
+   * held, exit 0, though another npub was named.
+   */
+  describe("a subject given to a signer that runs here", () => {
+    const signerOf = (provider: string, id: string) => IDENTITY_PROVIDERS.find((p) => p.id === provider)!.signers.find((s) => s.id === id) as InAppSigner<unknown>;
+    const ALICE = "a".repeat(64), BOB = "b".repeat(64);
+    // A link the bunker check takes: the signer itself is stubbed, so it never connects.
+    const BUNKER = `bunker://${"c".repeat(64)}?relay=wss://relay.example.com`;
+
+    it("is NIP-05's domain, as --field domain is", async () => {
+      const { ctx, node } = fake();
+      await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com" })).rejects.toMatchObject({
+        code: "usage", message: "NIP-05 with a remote signer needs bunker (Signer connection link): give it on stdin (--stdin, a bunker=... line), or --field bunker=...",
+      });
+      const seen: Record<string, string>[] = [];
+      const run = vi.spyOn(signerOf("domain", "nip05-nip46"), "run").mockImplementation(async (sctx) => { seen.push({ ...sctx.values }); throw new Error("stopped here"); });
+      try {
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { bunker: BUNKER } })).rejects.toThrow("stopped here");
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { domain: "example.com", bunker: BUNKER } })).rejects.toThrow("stopped here");
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { domain: "other.org", bunker: BUNKER } })).rejects.toMatchObject({
+          code: "usage", message: "Two domains: \"example.com\" as <subject>, \"other.org\" as --field domain; give one",
+        });
+        // The same domain written another way is one domain, as the provider reads it.
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "Example.COM", fields: { domain: "example.com", bunker: BUNKER } })).rejects.toThrow("stopped here");
+        // A link or key typed as the subject (or the field) is refused in the provider's words, never printed back.
+        const SECRET = `${BUNKER}&secret=TOPSECRET123`, NSEC = `nsec1${"q".repeat(58)}`;
+        for (const [subject, domain] of [[SECRET, "example.com"], ["example.com", SECRET], [NSEC, "example.com"]]) {
+          const refused = await callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject, fields: { domain, bunker: BUNKER } }).catch((error: unknown) => error);
+          expect(refused).toMatchObject({ code: "bad_request" });
+          expect((refused as Error).message).not.toContain("TOPSECRET123");
+          expect((refused as Error).message).not.toContain("nsec1");
+        }
+      } finally { run.mockRestore(); }
+      expect(seen).toEqual([{ domain: "example.com", bunker: BUNKER }, { domain: "example.com", bunker: BUNKER }, { domain: "Example.COM", bunker: BUNKER }]);
+      expect(node.beginIdentityProof).not.toHaveBeenCalled();
+    });
+
+    it("is checked against the key a Nostr signer holds before anything is signed", async () => {
+      const { ctx, node } = fake();
+      node.beginIdentityProof.mockImplementation(async ({ provider, subject }: { provider: string; subject: string }) => ({
+        draftId: "d1", binding: { v: 1, provider, subject, key: "y".repeat(52), issuedAt: 1_800_000_000, expiresAt: 1_800_086_400, nonce: "A".repeat(22) },
+      }));
+      node.completeIdentityProof.mockResolvedValue({ id: "p1", provider: "nostr", subject: BOB, verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] });
+      const sign = vi.fn(async () => ({}));
+      const run = vi.spyOn(signerOf("nostr", "nip46"), "run").mockImplementation((_, work) => work({ subject: async () => BOB, sign }));
+      try {
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: npubEncode(ALICE), fields: { bunker: BUNKER } })).rejects.toMatchObject({
+          code: "bad_request", message: `Remote signer (NIP-46) holds nostr:${npubEncode(BOB)}, not nostr:${npubEncode(ALICE)}: nothing was signed`,
+        });
+        expect(node.beginIdentityProof).not.toHaveBeenCalled();
+        expect(sign).not.toHaveBeenCalled();
+        // One the provider cannot read, before the signer is asked.
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: "npub1nope", fields: { bunker: BUNKER } })).rejects.toMatchObject({
+          code: "bad_request", message: "Enter a Nostr public key: npub1… or 64 hex characters",
+        });
+        expect(run).toHaveBeenCalledTimes(1);
+        // Its own key, as an npub or in hex: the proof is made.
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: npubEncode(BOB), fields: { bunker: BUNKER } })).resolves.toMatchObject({ done: true });
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: BOB.toUpperCase(), fields: { bunker: BUNKER } })).resolves.toMatchObject({ done: true });
+      } finally { run.mockRestore(); }
+      expect(node.beginIdentityProof).toHaveBeenCalledTimes(2);
+      expect(node.beginIdentityProof).toHaveBeenCalledWith({ provider: "nostr", subject: BOB });
+    });
   });
 
   // The link or code a signer waits on holds the request's secret: it went into the event journal, kept on disk and
