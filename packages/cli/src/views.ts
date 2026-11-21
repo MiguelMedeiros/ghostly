@@ -326,11 +326,21 @@ function knockSince(group: GroupView): number | undefined {
 export function longKnockNote(group: GroupView, now = Date.now()): string | undefined {
   const invitation = group.invitation;
   const since = knockSince(group);
-  if (!invitation || since === undefined) return undefined;
-  const knock = invitation.stage ?? (invitation.admin ? "admitted" : "knocked");
-  if (knock !== "knocked" || invitation.unanswered || now - since < LONG_KNOCK_MS) return undefined;
-  if (invitation.waiting || invitation.othersKnocked) return "Still waiting: the group lets people in a few at a time";
-  return `Still no answer after 2 minutes. ${LINK_MAYBE_REPLACED}`;
+  if (!invitation || since === undefined || !stillKnocked(invitation) || now - since < LONG_KNOCK_MS) return undefined;
+  return maybeReplacedLink(invitation) ? `Still no answer after 2 minutes. ${LINK_MAYBE_REPLACED}` : "Still waiting: the group lets people in a few at a time";
+}
+
+/** A knock out at the link, nobody answering yet, and still going on (as the app reads its stage). */
+function stillKnocked(invitation: NonNullable<GroupView["invitation"]>): boolean {
+  return (invitation.stage ?? (invitation.admin ? "admitted" : "knocked")) === "knocked" && !invitation.unanswered;
+}
+
+/**
+ * A knock nobody answers, and nobody waits with: the link may have been replaced. Others waiting with it are a slow
+ * door, an answer means the link reached someone, and a knock not out yet is the network (the app's `stale` line).
+ */
+export function maybeReplacedLink(invitation: NonNullable<GroupView["invitation"]>): boolean {
+  return stillKnocked(invitation) && !invitation.waiting && !invitation.othersKnocked;
 }
 
 /**

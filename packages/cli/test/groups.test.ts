@@ -84,13 +84,22 @@ describe("a one-shot group join", () => {
   it("after 60 s not in, says so and the next step; the knock is kept for a daemon", async () => {
     vi.useFakeTimers();
     try {
-      const { ctx } = oneShot();
-      const answer = callApi(ctx, "group.join", { link: LINK });
-      await vi.advanceTimersByTimeAsync(60_000);
+      const daemon = "Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9";
+      const after60 = async (joined: GroupView) => {
+        const { ctx } = oneShot("one-shot", joined);
+        const answer = callApi(ctx, "group.join", { link: LINK });
+        await vi.advanceTimersByTimeAsync(60_000);
+        return answer;
+      };
       // Found in a bug hunt: a link replaced (or turned off) reaches nobody and nothing says so; the line named only a
       // daemon, which knocks for an hour at a link nobody reads. The app says the other cause after 2 minutes.
-      expect(await answer).toEqual({ group: "g9", joined: false, stage: "knocking",
-        warning: "Not in yet: no member's app has let you in. A member's app lets you in only while this profile is running: keep it running (ghostly daemon --detach), then ghostly group show g9. If the link was replaced or turned off, nobody answers it: ask someone in the group for the current link, then ghostly group join <link>" });
+      expect(await after60(knocking("knocked"))).toEqual({ group: "g9", joined: false, stage: "knocked",
+        warning: `${daemon}. If the link was replaced or turned off, nobody answers it: ask someone in the group for the current link, then ghostly group join <link>` });
+      // Not for a knock not out yet (the network), one a member answered (the link reached them), or one others wait
+      // with (a slow door): the line stays as it was.
+      for (const joined of [knocking("knocking"), knocking("answered"), { ...knocking("knocked"), invitation: { ...knocking("knocked").invitation!, waiting: 2 } },
+        { ...knocking("knocked"), invitation: { ...knocking("knocked").invitation!, othersKnocked: true } }] as GroupView[])
+        expect(await after60(joined), JSON.stringify(joined.invitation)).toEqual({ group: "g9", joined: false, stage: joined.invitation!.stage, warning: daemon });
     } finally { vi.useRealTimers(); }
   });
 
