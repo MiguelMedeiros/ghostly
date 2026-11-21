@@ -7,10 +7,12 @@
 //   latest `labeled` event, so taking the label off and on again goes to the back), then by number. A draft, a fork, or a pull request with
 //   neither CI Success nor the draft's fast tier (CI Success (draft)) green on its last commit, or with CI Success red
 //   there, waits without losing its place. So does one with `queue:hold` (HOLD), whatever else it has: it never boards
-//   or lands until the label comes off, and the train never takes the hold off itself. So does one with a review
-//   running: a reviewer's newest `Review:` comment is "Review: in progress (head <sha>)" on its head, posted less than
-//   90 minutes ago (REVIEW_HOLD, `reviewHold`), or "Review: changes needed (head <sha>)" on its head, with no time
-//   limit; a later approved, a new head or (for "in progress") the bound ends it (not for `queue:priority`).
+//   or lands until the label comes off, and the train never takes the hold off itself. So does one a reviewer asked
+//   changes on: "Review: changes needed (head <sha>)" on its head, newer than any "Review: approved" on its head, holds
+//   it with no time limit, whatever "in progress" comes after it; a later approved or a new head ends it (for every
+//   pull request, `queue:priority` too). So does one with a review running: a reviewer's newest `Review:` comment is
+//   "Review: in progress (head <sha>)" on its head, posted less than 90 minutes ago (REVIEW_HOLD, `reviewHold`); a
+//   verdict, a new head or the bound ends it (not for `queue:priority`).
 //   A green run of CI that skipped
 //   jobs the pull request's own files turn on (ci.yml planned it from other files: a run for another base) does not
 //   count; the run before it does. Nor does a
@@ -129,25 +131,36 @@ const REVIEW_LINE = /^[\W_]*review:\s*(in progress|approved|changes needed)\b(?:
 // Who may start one: an account that could put `queue:hold` on it as well. Anyone may comment on a public pull request.
 const REVIEWERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 /**
- * A review holding a pull request's head `sha`, { since, until } (ms; `until` null: no time limit), or null. The newest
- * `Review:` comment by a reviewer says it, naming this head (all of it, or its first 7 or more digits): "in progress"
- * holds it until REVIEW_HOLD after it was posted; "changes needed" holds it with no time limit (as review-verdict reads
- * it), so a pull request that still has `queue` before its reviewer takes the label off never boards. A later approved,
- * a new head or (for "in progress") the bound passing ends it, with nothing to lift. While it holds, the pull request is
- * held like one with `queue:hold`: it waits in line, keeps its place, and a batch it is aboard stops before landing it.
+ * A review holding a pull request's head `sha`, { since, until } (ms; `until` null: no time limit), or null. `Review:`
+ * comments by a reviewer say it, naming this head (all of it, or its first 7 or more digits). "Changes needed" on this
+ * head holds it with no time limit (as review-verdict reads it) while it is newer than any "approved" on this head,
+ * whatever "in progress" comes after it, so a pull request that still has `queue` before its reviewer takes the label
+ * off never boards, nor once a re-review that never ends started on it. Else the newest one, "in progress" on this
+ * head, holds it until REVIEW_HOLD after it was posted; a later verdict or the bound passing ends that. A new head ends
+ * both, with nothing to lift. `priority` (`queue:priority`: a flake, a blocker) skips only the "in progress" hold.
+ * While it holds, the pull request is held like one with `queue:hold`: it waits in line, keeps its place, and a batch
+ * it is aboard stops before landing it.
  */
-export function reviewHold(comments, sha, now) {
+export function reviewHold(comments, sha, now, priority = false) {
+  const onHead = (head) => !!head && !!sha && (head === sha.toLowerCase() || (head.length >= 7 && sha.toLowerCase().startsWith(head)));
   let newest = null;
+  let asked = NaN;
+  let approved = NaN;
   for (const c of comments ?? []) {
     if (!REVIEWERS.has(c.author_association)) continue;
     const m = REVIEW_LINE.exec((c.body ?? "").trimStart().split("\n", 1)[0]);
-    if (m && !(Date.parse(c.created_at) < Date.parse(newest?.at))) newest = { at: c.created_at, what: m[1].toLowerCase(), head: m[2]?.toLowerCase() };
+    if (!m) continue;
+    const at = Date.parse(c.created_at);
+    const what = m[1].toLowerCase();
+    const head = m[2]?.toLowerCase();
+    if (!(at < newest?.at)) newest = { at, what, head };
+    if (!onHead(head)) continue;
+    if (what === "changes needed" && !(at < asked)) asked = at;
+    if (what === "approved" && !(at < approved)) approved = at;
   }
-  const head = newest?.what === "approved" ? null : newest?.head;
-  if (!head || !sha || !(head === sha.toLowerCase() || (head.length >= 7 && sha.toLowerCase().startsWith(head)))) return null;
-  const since = Date.parse(newest.at);
-  if (newest.what === "changes needed") return { since, until: null };
-  return now - since < REVIEW_HOLD ? { since, until: since + REVIEW_HOLD } : null;
+  if (!Number.isNaN(asked) && !(asked < approved)) return { since: asked, until: null };
+  if (priority || newest?.what !== "in progress" || !onHead(newest.head)) return null;
+  return now - newest.at < REVIEW_HOLD ? { since: newest.at, until: newest.at + REVIEW_HOLD } : null;
 }
 /** Held: by `queue:hold`, or by a review running on its head (`pr.review`, from `reviewHold`). */
 export const isHeld = (p) => onHold(p) || !!p?.review;
@@ -784,8 +797,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.failed = p.ci === "failure" ? failedJobs(jobs) : [];
     const said = await gh.comments(p.number);
     p.sticky = said.find((c) => isPosition(c, login));
-    // A fix with `queue:priority` (a flake, a blocker) does not wait for a review.
-    p.review = p.priority ? null : reviewHold(said, p.sha, now);
+    // A fix with `queue:priority` (a flake, a blocker) does not wait for a review to end, but changes needed holds it too.
+    p.review = reviewHold(said, p.sha, now, p.priority);
     // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
     // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
     if (events.truncated) p.unread = "events";
@@ -1126,7 +1139,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const leftSince = async (s) => {
       const read = await gh.pull(s.number);
       // A review that started since the line was read: its comment, read again too.
-      if (read.open && read.sha === s.sha && !onHold(read) && !read.labels.includes(LABEL.priority)) read.review = reviewHold(await gh.comments(s.number), read.sha, now);
+      if (read.open && read.sha === s.sha && !onHold(read)) read.review = reviewHold(await gh.comments(s.number), read.sha, now, read.labels.includes(LABEL.priority));
       const out = !read.open || read.sha !== s.sha || isHeld(read) || !(inLine(read.labels) || also.includes(s.number)) || (bySquash && read.draft);
       return out ? read : null;
     };
