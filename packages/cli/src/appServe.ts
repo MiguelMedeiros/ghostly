@@ -73,8 +73,11 @@ export function servedApp(apps: readonly ServedApp[], ref: string): ServedApp {
 /** A link a contact's app reads a card's bundle from. */
 const readable = (url: string | undefined): url is string => isAppFetchUrl(url) && appCardUrl(url) !== undefined;
 
-/** Whether this engine offers apps/1 now: it read the list when it started, so the first app served waits for a restart. */
-const offered = (ctx: ApiContext, apps: ServedApp[]) => ({ offered: ctx.runtime.apps, ...(apps.length > 0 && !ctx.runtime.apps && { restart: true }) });
+/**
+ * Whether this engine offers apps/1 now: it read the list when it started, so the first app served waits for a restart,
+ * and so does the end of the offer once the last one is unserved.
+ */
+const offered = (ctx: ApiContext, apps: ServedApp[]) => ({ offered: ctx.runtime.apps, ...(apps.length > 0 !== ctx.runtime.apps && { restart: true }) });
 
 export const APP_SERVE_METHODS: Record<string, Method> = {
   async "app.serve"(ctx, params) {

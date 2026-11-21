@@ -1,6 +1,20 @@
 import { CliError } from "../errors";
 import { type Command, here, secret } from "./shared";
 
+/**
+ * `x401 credential add --label`, by the engine's rule (x401.ts): its line breaks and tabs read as one space, then up to
+ * 80 characters and no other control character. Past it, a usage error (exit 2) naming the flag before the profile
+ * opens: before, the engine refused it once the profile was open (`bad_request`, exit 1).
+ */
+function credentialLabel(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const label = value.replace(/\s+/g, " ").trim();
+  const length = [...label].length;
+  if (length > 80) throw new CliError("usage", `--label is up to 80 characters on one line, not ${length}`);
+  if (/\p{Cc}/u.test(label)) throw new CliError("usage", "--label is up to 80 characters on one line, with no control character");
+  return value;
+}
+
 /** Identity proofs and x401 credentials: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
   "identity cancel": { method: "identity.cancel", usage: "identity cancel <draft>", summary: "Drop a proof not finished", args: ["draft"], params: (_, a) => ({ draft: a.draft }) },
@@ -24,7 +38,7 @@ export const commands: Record<string, Command> = {
   "x401 credential add": {
     method: "x401.credential.add", usage: "x401 credential add <file|-> [--label <name>]", summary: "Keep an issued SD-JWT VC bound to a key from x401 key new (a file, or - for stdin)",
     args: ["path"], options: { label: { type: "string", description: "Your name for it, up to 80 characters on one line (default: its type)" } },
-    params: ({ options }, a) => ({ file: a.path === "-" ? "-" : here(a.path), label: options.label }),
+    params: ({ options }, a) => ({ file: a.path === "-" ? "-" : here(a.path), label: credentialLabel(options.label) }),
   },
   "x401 credential list": {
     method: "x401.credential.list", usage: "x401 credential list [--show-secret]", summary: "This profile's x401 credentials: issuer, type, claim paths",

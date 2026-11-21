@@ -170,6 +170,9 @@ function shownOption(arg: string, privateKey: boolean): string {
   return secretValue(arg) ?? arg;
 }
 
+/** A typed word a refusal names unquoted (an unknown command, a setting's key), as an unknown option is. */
+export const shownWord = (word: string): string => shownOption(word, /PRIVATE KEY/.test(word));
+
 /**
  * A first word that starts with a dash and is no global option (`ghostly --porfile bot send …`, `ghostly -x status`):
  * `Unknown option --porfile (did you mean --profile? ghostly help)`, as after the command. Before, "Unknown command".
@@ -221,7 +224,7 @@ export function checkSettingKey(key: string, kinds: Record<string, SettingKind>)
   if (Object.hasOwn(kinds, key)) return kinds[key];
   const byLower = new Map(Object.keys(kinds).map((name) => [name.toLowerCase(), name]));
   const near = byLower.get(nearest(key.toLowerCase(), byLower.keys()) ?? "");
-  throw new CliError("usage", `${key} is not a setting the CLI changes${near ? ` (did you mean ${near}?)` : ""}: ghostly settings set takes ${Object.keys(kinds).join(", ")} (ghostly help settings set)`);
+  throw new CliError("usage", `${shownWord(key)} is not a setting the CLI changes${near ? ` (did you mean ${near}?)` : ""}: ghostly settings set takes ${Object.keys(kinds).join(", ")} (ghostly help settings set)`);
 }
 
 /** A value of another kind than its key takes (`online maybe`): a usage error too, before the profile opens. */

@@ -237,8 +237,11 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
     focusBack();
     setBusy(true); setPending(which);
     // A store removed meanwhile (another tab): said so, and the stores read again, so its block goes rather than staying
-    // to say it at each Refresh.
-    try { await call(); done?.(); onChanged(); } catch (e) { onError(e); if (appErrorCode(e) === "no-store") onChanged(); } finally { setBusy(false); setPending(null); }
+    // to say it at each Refresh. The button that had the focus goes with it, as after a Remove here: removed, too.
+    try { await call(); done?.(); onChanged(); } catch (e) {
+      onError(e);
+      if (appErrorCode(e) === "no-store") { onRemoved(store.key); onChanged(); }
+    } finally { setBusy(false); setPending(null); }
   };
   // A store may list up to 4096 apps: one page of them at a time, and a search over them all.
   const [limit, setLimit] = useState(LISTING_PAGE);
@@ -262,8 +265,14 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
     const words = filter.trim().toLocaleLowerCase();
     return words ? store.apps.filter((l) => `${l.title}\n${l.tagline}`.toLocaleLowerCase().includes(words)) : store.apps;
   }, [store.apps, filter]);
-  // The installed apps it vouches for: removed, it no longer brings their updates or takedowns.
-  const vouched = useMemo(() => store.apps.flatMap((l) => have.get(l.ref)?.title ?? []), [store.apps, have]);
+  // The installed apps it took down, listed or not: removed, its takedown ends with it (only the person's stores are
+  // checked, WISP 1200 § Takedowns), so the question names them. Those it vouches for and did not take down: removed,
+  // it no longer brings their updates or takedowns.
+  const takenDown = useMemo(() => installed.filter((a) => removals.has(`${a.ref} ${a.digest}`)), [installed, removals]);
+  const vouched = useMemo(() => store.apps.flatMap((l) => {
+    const app = have.get(l.ref);
+    return app && !takenDown.includes(app) ? app.title : [];
+  }), [store.apps, have, takenDown]);
   const read = store.fetchedAt !== undefined || store.apps.length > 0;
   // What its block shows as its name: its link until it is read.
   const storeName = store.name ?? store.url;
@@ -323,9 +332,16 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
           <div role="group" aria-labelledby={questionId} data-testid="app-store-remove-question" className="basis-full space-y-2"
             onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
             <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.store.removeTitle", { name: NAME }), storeName)}</p>
-            <p className="text-xs text-text-secondary">
-              {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
-            </p>
+            {takenDown.length > 0 && (
+              <p data-testid="app-store-remove-taken-down" className="text-xs text-danger-ink">
+                {t(takenDown.length === 1 ? "apps.store.removeTakenDownOne" : "apps.store.removeTakenDown", { titles: listText(takenDown.map((a) => a.title), t) })}
+              </p>
+            )}
+            {(vouched.length > 0 || !takenDown.length) && (
+              <p className="text-xs text-text-secondary">
+                {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
+              </p>
+            )}
             <div className="flex flex-wrap justify-end gap-2">
               <Button ref={keep} disabled={busy} onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
               <Button variant="danger" data-testid="app-store-remove-confirm" disabled={busy} loading={pending === "remove"}

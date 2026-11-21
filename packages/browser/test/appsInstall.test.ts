@@ -1432,6 +1432,42 @@ describe("a restored profile (installed list, no bundle)", () => {
     expect(await bundleIds()).toEqual([]);
   });
 
+  it("a restored record granting more than its bundle's manifest asks never runs", async () => {
+    const { v1, store } = await restored();
+    const [row] = await appRows() as { permissions: AppPermission[] }[];
+    row!.permissions = ["chat", "files", "internet", "name"];
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put(row));
+    // Its files missing: the bundle fetched by digest is not taken for it.
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
+    expect(await bundleIds()).toEqual([]);
+    // Its files here: the bundle read back refuses the record.
+    await (await fileBytes()).append(`app-${v1.digest}`, 0, v1.bytes);
+    await (await fileBytes()).close(`app-${v1.digest}`);
+    await expect(apps(net).entry({ ref: v1.ref })).rejects.toThrow(/^damaged/);
+  });
+
+  it("a restored record naming one app with another publisher's bundle never runs that bundle under its ref", async () => {
+    const other = await bundle({ by: signer("someone else"), permissions: [] });
+    const elsewhere = "https://raw.githubusercontent.com/eve/chess/HEAD/app.ghostlyapp";
+    net.put(elsewhere, other.bytes);
+    const first = apps(net);
+    await first.preview({ url: elsewhere });
+    await first.install({ digest: other.digest, grant: [] });
+    const [installed] = await appRows() as { ref: string; publisher: string; name: string }[];
+    const named = { ...installed!, ref: `${keyOf(PUBLISHER)}/chess`, publisher: keyOf(PUBLISHER), permissions: [] };
+    const db = await openDb();
+    const tx = db.transaction(STORES.apps, "readwrite");
+    tx.objectStore(STORES.apps).delete(installed!.ref);
+    tx.objectStore(STORES.apps).put(named);
+    await wrap(tx.objectStore(STORES.apps).count());
+    // Its files kept: read back, they are another app's.
+    await expect(apps(net).entry({ ref: named.ref })).rejects.toThrow(/^damaged/);
+    // Its files missing (a restored profile): the bundle fetched is not taken for it.
+    await (await fileBytes()).remove(`app-${other.digest}`);
+    await expect(apps(net).entry({ ref: named.ref })).rejects.toThrow(/^needs-files/);
+    expect(await bundleIds()).toEqual([]);
+  });
+
   it("a URL its publisher moved on from costs a peek, never the whole bundle, at each open and each check", async () => {
     const mirror = "https://raw.githubusercontent.com/ana/chess-mirror/HEAD/app.ghostlyapp";
     const sources = [BUNDLE_URL, mirror];

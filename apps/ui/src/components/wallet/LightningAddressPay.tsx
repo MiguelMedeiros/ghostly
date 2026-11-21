@@ -59,11 +59,13 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   // from there (to the amount, to Pay, to Done). Not when they went somewhere else meanwhile, nor on the first step.
   const step = outcome ? "done" : !info ? "resolve" : quote && invoice ? "review" : "amount";
   const stepLine = useRef<HTMLParagraphElement>(null);
+  /** A payment left pending: its notice takes the keys in the step line's place. */
+  const waitLine = useRef<HTMLDivElement>(null);
   const shownStep = useRef(step);
   useEffect(() => {
     if (shownStep.current === step) return;
     shownStep.current = step;
-    if (!document.activeElement || document.activeElement === document.body) stepLine.current?.focus();
+    if (!document.activeElement || document.activeElement === document.body) (stepLine.current ?? waitLine.current)?.focus();
   }, [step]);
   const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress`;
   const quiet = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer disabled:opacity-40`;
@@ -71,9 +73,16 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const muted = `${dense ? "text-[11px]" : "text-xs"} opacity-70 m-0`;
 
   if (outcome) {
+    // Left pending, it reads as waiting, never as paid (it may still come back), as an invoice's Pay does: paid by the
+    // mints, it says the mint holds it and that the amount shows as set aside meanwhile.
+    const byMints = via === "cashu" || !quote?.source || quote.source === CASHU_MINT_SOURCE;
     return (
       <div className="space-y-1.5" data-testid="lnurl-done">
-        <p ref={stepLine} tabIndex={-1} className={`${dense ? "text-xs" : "text-sm"} font-semibold text-accent m-0 focus:outline-none`} data-testid={outcome === "paid" ? "lnurl-paid" : "lnurl-pending"}>{outcome === "paid" ? t("wallet.lightning.paidTo", { amount: quote ? formatAmount(quote.amount, t.language) : "", unit, to: text }) : t("wallet.lightning.pending")}</p>
+        {outcome === "paid"
+          ? <p ref={stepLine} tabIndex={-1} className={`${dense ? "text-xs" : "text-sm"} font-semibold text-accent m-0 focus:outline-none`} data-testid="lnurl-paid">{t("wallet.lightning.paidTo", { amount: quote ? formatAmount(quote.amount, t.language) : "", unit, to: text })}</p>
+          : <div ref={waitLine} tabIndex={-1} className="focus:outline-none">
+            <Notice tone="wait" testId="lnurl-pending" className={dense ? "text-xs" : "text-sm"} title={byMints ? t("wallet.cashu.pendingMint") : t("wallet.lightning.pending")} next={byMints ? t("wallet.cashu.pendingMintNext") : undefined} />
+          </div>}
         {invoice?.successAction?.tag === "message" && invoice.successAction.message && <p className={muted} data-testid="lnurl-success">{t("wallet.lightning.says", { domain: info?.domain ?? "", message: invoice.successAction.message })}</p>}
         {/* The service's link reads as the address it opens, as a chat's does, and its words cannot reorder it. */}
         {invoice?.successAction?.tag === "url" && invoice.successAction.url && <p className={muted}>{fillNodes(t("wallet.lightning.linkLine"), { what: invoice.successAction.description ? <bdi>{invoice.successAction.description}</bdi> : t("wallet.lightning.leftLink", { domain: info?.domain ?? "" }), link: <a className="underline" dir="ltr" {...externalLinkProps(invoice.successAction.url)}>{shownUrl(invoice.successAction.url)}</a> })}</p>}

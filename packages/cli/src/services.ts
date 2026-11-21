@@ -126,9 +126,9 @@ export const OPENED_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'un
 /**
  * The contact's headers that are not passed on: each makes the browser send something to a place it names, outside
  * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
- * early connections). Only the contact's server is reached.
+ * early connections; `Speculation-Rules` prefetches and prerenders). Only the contact's server is reached.
  */
-export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link", "speculation-rules"];
 
 /**
  * A contact's headers that would set the page's browser features (camera, microphone, location, a device): the
@@ -315,14 +315,15 @@ export function serviceShape(params: Params): { name: string; target: string } {
   try { parseLocalTarget(target); } catch (error) {
     const said = error instanceof Error ? error.message : String(error);
     // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
-    // parts refused here can hold a secret (a token). One that is no URL at all is named as given.
+    // parts refused here can hold a secret (a token). One that is no URL at all (a mistyped port) is not repeated: it
+    // has no parts to tell apart, and a token or password in it would be said whole.
     const text = target.trim();
-    let shown = text;
+    let shown = "";
     try {
       const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
-      shown = `${url.protocol}//${url.host}${url.pathname}`;
-    } catch { /* Not a URL: named as given. */ }
-    throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
+      shown = `: ${url.protocol}//${url.host}${url.pathname}`;
+    } catch { /* Not a URL: not repeated. */ }
+    throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}${shown}`);
   }
   return { name, target };
 }
