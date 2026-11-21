@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { desktopOpener } from "../../lib/apps/desktopOpener";
+import { desktopOpener, type DesktopOpenerOptions } from "../../lib/apps/desktopOpener";
 import { memoryHost } from "../../lib/apps/memoryHost";
 import { appsRunning, stopRunningApps } from "../../lib/apps/open";
 import { webOpener } from "../../lib/apps/webOpener";
@@ -55,7 +55,7 @@ describe("an app opened just before the profile locks (Desktop)", () => {
       if (command === "app_focused") return true;
       if (command === "app_open") { await windowHeld; return "app-1"; }
       return undefined;
-    }) as unknown as <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+    }) as unknown as DesktopOpenerOptions["invoke"];
     const open = desktopOpener({ apps: () => engine(entryHeld), invoke, listen: async () => () => {}, nameIn: () => undefined, view: { theme: () => "light", locale: () => "en" }, startTimeoutMs: 60_000 });
     const did = (command: string) => calls.filter((c) => c.command === command);
     return { open, did };

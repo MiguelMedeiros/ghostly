@@ -651,6 +651,16 @@ export function removedCardText(of: RemovableKind, title?: string): string {
 }
 
 /**
+ * A message's text without the line that is its app card's link (`statusCardText` puts it on a line of its own for an
+ * older app): what a line quoting the message says where the card is not drawn, never the bundle's raw link. Any other
+ * message's text as it is.
+ */
+export function withoutAppLink(text: string, card: StatusCard | undefined): string {
+  const url = card?.kind === "app" ? card.url : undefined;
+  return url ? text.split("\n").filter(line => line.trim() !== url).join("\n") : text;
+}
+
+/**
  * The text a card's message carries: what an app without cards shows, the DHT floor carries, the chat list previews
  * and search finds. Plain lines, the first naming the card, no bars or layout that would read badly elsewhere.
  */

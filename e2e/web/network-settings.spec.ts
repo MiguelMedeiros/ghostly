@@ -66,6 +66,9 @@ test("Hide my IP from contacts needs a TURN server, is kept across a reload, and
   await save(page);
   await relayOnly.click();
   await expect(relayOnly).toHaveAttribute("aria-checked", "true");
+  // Busy while it worked, not disabled: the focus is still on it, so a keyboard's next Tab goes on from here.
+  await expect(relayOnly).not.toHaveAttribute("aria-busy");
+  await expect(relayOnly).toBeFocused();
   await page.reload();
   await expect(relayOnly).toHaveAttribute("aria-checked", "true");
 
@@ -88,7 +91,7 @@ test("Hide my IP from contacts needs a TURN server, is kept across a reload, and
  * port here) leaves nothing to connect with: no STUN server asked, no address of this machine handed out, the chat on
  * the DHT, where a text still arrives. Turned off, the chat is live again.
  */
-test("with Hide my IP from contacts on, a contact's connections use the TURN server alone and fail closed", { tag: ["@feature:settings.network.relay-only", "@feature:chat.paired.send"] }, async ({ peer }) => {
+test("with Hide my IP from contacts on, a contact's connections use the TURN server alone and fail closed", { tag: ["@journey", "@feature:settings.network.relay-only", "@feature:chat.paired.send"] }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);
   const [alice, bob] = await Promise.all([peer("relay-only-alice", { beforeOpen: recordConnections }), peer("relay-only-bob")]);
   await pair(alice, bob);

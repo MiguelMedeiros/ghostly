@@ -12,7 +12,7 @@ import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import { forkTimes, type DevicePatch, type DeviceRecord, type DeviceSlot, type DeviceState, type SecretOffer } from "./state";
 import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store";
-import { acknowledged, pendingFrames } from "./remove";
+import { acknowledged, delivered, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
 import type { TurnKeeper, TurnOutcome } from "./turn";
 import { TakeoverRefusal, canTakeOver, forceTakeover, takeoverTarget } from "./takeover";
@@ -33,6 +33,8 @@ export interface DeviceHandoffHandler {
   call?(method: string, params: unknown): Promise<unknown> | undefined;
   /** What a turn read found: a standby that released learns from it that its release was taken. */
   turnRead?(outcome: TurnOutcome): void;
+  /** A forced takeover is about to write: a pull here ends, and its staging goes (`HandoffTaker.abandon`). */
+  dropStaging?(): Promise<void>;
   stop(): void;
 }
 
@@ -306,15 +308,29 @@ export class DeviceLinks implements DeviceLinkEngine {
   /** Turn reads and new secrets one after the other: a read made under the old secret must not undo a secret just taken. */
   private turnQueue: Promise<unknown> = Promise.resolve();
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The turn watch ended on a `removed` record (`watchTurn`). */
+  private turnWatchEnded = false;
   private lastHintRead = 0;
   /** When a link closing by the other side's doing last made this standby read the turn (`linkLost`). */
   private lastLossRead = 0;
   /** A hint came inside `TURN_HINT_EVERY_MS` of the last read, and a read is due at its end. */
   private hintDeferred = false;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
+  /** When this device added each device it enrolled in this run, by signing key (`expectDevice`). */
+  private readonly added = new Map<string, number>();
 
   constructor(private readonly options: DeviceLinksOptions) {
     this.createPeerConnection = "createPeerConnection" in options ? options.createPeerConnection : defaultPeerConnection();
+  }
+
+  /**
+   * This device just added the device of signing key `key` (an enrollment's record was written): its link, opened by the
+   * next `refresh`, awaits it as a chat awaits the contact of an invite just sent (`AWAITING_PEER_MS`). The new device
+   * starts into its standby screen only once the person taps Continue there, after the link's first read: read at the
+   * background pace from then, it went live about 30 s after it started (bug hunt, 2026-11-06).
+   */
+  expectDevice(key: string): void {
+    this.added.set(key, Date.now());
   }
 
   /** `host` is the device-link-only server's: it is told when what the standby screen shows changes. */
@@ -335,14 +351,29 @@ export class DeviceLinks implements DeviceLinkEngine {
   /**
    * A standby's own reads of the turn: now, then every 10 minutes (with jitter) while it runs. A read that changes the
    * device's state (a tombstone: `moving` or `removed`; a record that names another active device) tells the pages.
+   * None for a `removed` device: no read can change that state, so the watch ends there (and a screen that opens on it
+   * starts none); a new enrollment, which makes it `standby` again, starts it again (`reconcile`).
    */
   private watchTurn(after: number): void {
     if (this.stopped) return;
     if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.turnWatchEnded = false;
     this.turnTimer = setTimeout(() => {
       this.turnTimer = null;
-      void this.checkAndShow().catch(() => null).finally(() => this.watchTurn(STANDBY_TURN_EVERY_MS + Math.floor(Math.random() * STANDBY_TURN_JITTER_MS)));
+      void (async () => {
+        if (await this.removed()) return;
+        await this.checkAndShow().catch(() => null);
+        if (await this.removed()) return;
+        this.watchTurn(STANDBY_TURN_EVERY_MS + Math.floor(Math.random() * STANDBY_TURN_JITTER_MS));
+      })();
     }, after);
+  }
+
+  /** The record says `removed`: the turn watch ends here. */
+  private async removed(): Promise<boolean> {
+    if ((await this.record().catch(() => null))?.state !== "removed") return false;
+    this.turnWatchEnded = true;
+    return true;
   }
 
   /** Reads the turn and, when the device's state, the device it believes or a name in the set changed, tells the pages. */
@@ -426,6 +457,8 @@ export class DeviceLinks implements DeviceLinkEngine {
       if (became && this.isLive(kept)) void this.linkLive(kept).catch(() => {});
     }
     if (closing.length || wanted.length) this.changed();
+    // Added again by enrollment (`removed` to `standby`): the turn watch that ended on `removed` starts again.
+    if (this.turnWatchEnded && !this.stopped && ((await this.record().catch(() => null))?.state ?? "removed") !== "removed") this.watchTurn(0);
     // A device the set no longer lists (removed) takes its push target and its token with it. Also once at start: a
     // device removed while this one was closed had no link open here to close.
     if (!this.stopped && (closing.length || !this.pushPruned)) {
@@ -464,12 +497,15 @@ export class DeviceLinks implements DeviceLinkEngine {
     // across several moves holds one secret, the oldest set still waiting for it: that set's link is the one it opens.
     // The set's frame names the secret it takes from there, and only that set's link follows: the newest one (a frame
     // this device signed again, `remove.ts`), which the current link covers, or the next set (one another device
-    // signed). A link under any other set is under a secret that device never got, and could never open.
+    // signed). A link under any other set is under a secret that device never got, and could never open. Except where a
+    // frame went to the device over a live link (`delivered`): it may hold the secret that frame named then, its
+    // `set-ack` lost, and the chain from that set's link follows too.
     const pendingFor = (key: string, d?: string) => record.earlierSets.find((set) => set.d !== record.d && (d === undefined || set.d === d) && set.pending.includes(key));
     for (const staying of record.deviceSet) {
       if (!staying || staying.key === own) continue;
       const key = staying.key;
-      for (let set = pendingFor(key); set;) {
+      const took = record.earlierSets.flatMap((set) => (set.pending.includes(key) ? (set.delivered ?? []).filter((e) => e.key === key).map((e) => pendingFor(key, e.d)) : []));
+      for (const start of [pendingFor(key), ...took]) for (let set = start; set;) {
         const id = `${set.d}|${key}`;
         if (wanted.some((w) => w.id === id)) break;
         wanted.push({ id, d: fromBase64Url(set.d), key, name: staying.name, earlier: true });
@@ -496,8 +532,9 @@ export class DeviceLinks implements DeviceLinkEngine {
       transport: this.options.transport,
       pollIntervals: this.options.pollIntervals,
       // Never an invite just sent: the other device is there (its packet is read at once) or away. As one, a link to a
-      // device away read it every 4 s for the first ten minutes of every start, half a relay's minute each.
-      madeAt: 0,
+      // device away read it every 4 s for the first ten minutes of every start, half a relay's minute each. Only a device
+      // this one added just now is awaited (`expectDevice`), from when it was added.
+      madeAt: want.earlier ? 0 : this.added.get(want.key) ?? 0,
       autoConnect: true,
       createPeerConnection: () => {
         if (!this.createPeerConnection) throw new ReferenceError("RTCPeerConnection is not defined");
@@ -804,7 +841,9 @@ export class DeviceLinks implements DeviceLinkEngine {
     if (running.earlier) {
       for (const pending of pendingFrames(record)) {
         if (pending.d !== running.d || pending.key !== running.key) continue;
-        try { running.link.sendDeviceFrame(pending.frame); } catch { /* the link closed under it: the next session sends it */ }
+        try { running.link.sendDeviceFrame(pending.frame); } catch { continue; /* the link closed under it: the next session sends it */ }
+        // The device may take it and its `set-ack` be lost: the link of the secret it names is kept after the next move.
+        if (record.state === "active" && delivered(record, pending.key, pending.d)) await amendDevice(this.options.profile, (current) => delivered(current, pending.key, pending.d));
       }
       return;
     }
@@ -1189,6 +1228,7 @@ export class DeviceLinks implements DeviceLinkEngine {
           amend: (patch) => amendDevice(this.options.profile, patch),
           proves: (verifier, password) => provesHandoffPassword(verifier, password),
           keeper: () => this.turnKeeper(),
+          dropStaging: async () => { await this.handoff?.dropStaging?.(); },
         }, { password: typeof p.password === "string" ? p.password : "", name: typeof p.name === "string" ? p.name : "" });
         // Lost or stolen: once the profile opens here, the money checklist comes first, then removing that device.
         if (outcome.kind === "start" && p.lost === true) {

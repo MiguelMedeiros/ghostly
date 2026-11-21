@@ -43,6 +43,18 @@ describe("Copy refused under a QR code", () => {
     expect(screen.getByRole("textbox", { name: "Link" })).toHaveValue(link);
   });
 
+  it("a refused Share points to the Copy button that is there: the link's under Add a device, the invite's under an invite", async () => {
+    Object.defineProperty(navigator, "share", { configurable: true, value: () => Promise.reject(new DOMException("Share denied.", "NotAllowedError")) });
+    const { user, unmount } = renderApp(<QRCodeDisplay value={link} copyLabel="Copy link" />);
+    await user.click(screen.getByRole("button", { name: "Share" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not share. Copy the link instead.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/invite/i);
+    unmount();
+    const invite = renderApp(<QRCodeDisplay value={link} />);
+    await invite.user.click(screen.getByRole("button", { name: "Share" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not share. Copy the invite instead.");
+  });
+
   it("a copy that worked shows no field", async () => {
     const { user } = renderApp(<QRCodeDisplay value={link} copyLabel="Copy link" />);
     vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();

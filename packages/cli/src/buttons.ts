@@ -1,9 +1,10 @@
 import { BUTTONS_CAPABILITY, BUTTON_STYLES, STATUS_CARD_LIMITS, buttonLabelClash, checkStatusCard, randomBytes, toBase64Url, type ButtonsCard } from "@ghostly/core";
 import type { LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { Parsed } from "./args";
-import { bool, chatOrGroup, messageOf, node, num, oneOf, str, type Method, type Params } from "./apiKit";
-import { CliError } from "./errors";
+import { bool, chatOrGroup, messageOf, noMessage, node, num, oneOf, oneShotWaits, str, type Method, type Params, type RefPlace } from "./apiKit";
+import { CliError, shownValue } from "./errors";
 import { findSecret, secretWords } from "./secretGuard";
+import { checkTextSize } from "./textSize";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
@@ -16,9 +17,9 @@ import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 /**
  * `--button id:Label` (again for each, 1 to 6), `--style id=primary|neutral|danger`, `--once` and `--id`, as the
  * method's parameters: `buttons` and `buttonsId`. Nothing when no `--button` is given. The label may hold colons: the
- * id ends at the first one. An id given twice, two labels that read the same (ignoring case and spaces at the ends), a
- * label that is another button's id, or a style not listed are a usage error here, before the profile opens; other
- * bounds (ids, labels, how many) are the card's, checked when it is sent.
+ * id ends at the first one. More buttons than a message holds, an id given twice, two labels that read the same
+ * (ignoring case and spaces at the ends), a label that is another button's id, or a style not listed are a usage error
+ * here, before the profile opens; other bounds (ids, labels) are the card's, checked when it is sent.
  */
 export function buttonsOf(options: Parsed["options"]): { buttons: Record<string, unknown>[]; buttonsId?: string } | undefined {
   const given = Array.isArray(options.button) ? options.button as string[] : [];
@@ -27,9 +28,10 @@ export function buttonsOf(options: Parsed["options"]): { buttons: Record<string,
       if (options[flag] !== undefined) throw new CliError("usage", `--${flag} goes with --button id:Label`);
     return undefined;
   }
+  if (given.length > STATUS_CARD_LIMITS.buttons) throw new CliError("usage", `--button is given at most ${STATUS_CARD_LIMITS.buttons} times, not ${given.length}`);
   const buttons: Record<string, unknown>[] = given.map((value) => {
     const colon = value.indexOf(":");
-    if (colon < 1 || colon === value.length - 1) throw new CliError("usage", `--button takes id:Label, like yes:Yes, not ${JSON.stringify(value)}`);
+    if (colon < 1 || colon === value.length - 1) throw new CliError("usage", `--button takes id:Label, like yes:Yes, not ${shownValue(value)}`);
     return { id: value.slice(0, colon), label: value.slice(colon + 1).trim() };
   });
   const twice = buttons.findIndex((button, at) => buttons.findIndex((other) => other.id === button.id) !== at);
@@ -45,7 +47,7 @@ export function buttonsOf(options: Parsed["options"]): { buttons: Record<string,
   for (const value of Array.isArray(options.style) ? options.style as string[] : []) {
     const eq = value.indexOf("=");
     const button = eq > 0 ? buttons.find((b) => b.id === value.slice(0, eq)) : undefined;
-    if (!button) throw new CliError("usage", `--style takes id=primary|neutral|danger for one of the buttons, not ${JSON.stringify(value)}`);
+    if (!button) throw new CliError("usage", `--style takes id=primary|neutral|danger for one of the buttons, not ${shownValue(value)}`);
     const style = value.slice(eq + 1);
     if (!(BUTTON_STYLES as readonly string[]).includes(style)) throw new CliError("usage", `--style ${JSON.stringify(value)}: a button's style is ${BUTTON_STYLES.join(", ")}`);
     button.style = style;
@@ -83,8 +85,8 @@ export function pressable(link: LinkView): boolean | null {
 }
 
 /** The message of mine with buttons that `button update` names, by its id here (or the id both sides know). */
-function buttonsMessage(message: StoredMessage | undefined, ref: string, group: boolean): StoredMessage & { card: ButtonsCard } {
-  if (!message) throw new CliError("not_found", `No message ${JSON.stringify(ref)} of yours in this ${group ? "group" : "chat"}: the messageId send gave`);
+function buttonsMessage(message: StoredMessage | undefined, ref: string, place: RefPlace): StoredMessage & { card: ButtonsCard } {
+  if (!message) throw noMessage(ref, place, { whose: "of yours" });
   if (message.card?.kind !== "buttons") throw new CliError("bad_request", "That message has no buttons: send one with send --button id:Label");
   return message as StoredMessage & { card: ButtonsCard };
 }
@@ -100,18 +102,21 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
   const close = bool(params, "close");
   const newText = str(params, "text");
   if (chosen === undefined && !close && newText === undefined) throw new CliError("bad_request", "Nothing to update: give chosen, close or text");
-  // A new text is a message like any other: the same guard as `send` and `edit`.
+  // The engine fills a card's blank text with its fallback line ("Reply: Yes / No"): the question's words were lost.
+  if (newText !== undefined && !newText.trim()) throw new CliError("bad_request", "The new text is blank: give the question's new words, or leave text out to keep them");
+  // A new text is a message like any other: the same size check and guard as `send` and `edit`.
+  if (newText !== undefined) checkTextSize(newText);
   if (newText !== undefined && !bool(params, "force")) {
     const secret = findSecret(newText);
     if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; update with --force if you mean to`, { kind: secret.kind });
   }
-  const message = buttonsMessage(await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me"), ref, target.group);
+  const message = buttonsMessage(await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me"), ref, { group: target.group, ref: str(params, "chat", true) });
   if ((message.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits)
     throw new CliError("refused", `This message took ${STATUS_CARD_LIMITS.edits} updates, the most one takes: ask again with a new send`, { messageId: message.id, edits: message.edit!.seq });
   const before = message.card;
-  // Said here, with the buttons it has, as a press says it: the card's own check names only the field.
+  // Said here, with the buttons it has, as a press says it (not_found, exit 3): the card's own check names only the field.
   if (chosen !== undefined && !before.buttons.some((b) => b.id === chosen))
-    throw new CliError("bad_request", `That message has no button ${JSON.stringify(chosen)}; its buttons: ${before.buttons.map((b) => b.id).join(", ")}`, { card: before });
+    throw new CliError("not_found", `That message has no button ${JSON.stringify(chosen)}; its buttons: ${before.buttons.map((b) => b.id).join(", ")}`, { card: before });
   const card = checked({ ...before, ...(chosen !== undefined && { chosen }), ...((close || before.closed) && { closed: true }) });
   const text = newText ?? message.text;
   const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "confirmed"] as const, "none");
@@ -139,13 +144,13 @@ async function pressButton(ctx: Parameters<Method>[0], params: Params): Promise<
   const buttonId = str(params, "button", true);
   const where = target.group ? "group" : "chat";
   const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender !== "me");
-  if (!message) throw new CliError("not_found", `No message ${JSON.stringify(ref)} from someone else in this ${where}: the id its event or history gave`);
+  if (!message) throw noMessage(ref, { group: target.group, ref: str(params, "chat", true) }, { whose: "from someone else" });
   if (message.card?.kind !== "buttons") throw new CliError("bad_request", "That message has no buttons");
   const button = message.card.buttons.find((b) => b.id === buttonId);
   if (!button) throw new CliError("not_found", `That message has no button ${JSON.stringify(buttonId)}; its buttons: ${message.card.buttons.map((b) => b.id).join(", ")}`);
   const wait = target.group
     ? oneOf(params, "wait", ["none", "sent"] as const, "none")
-    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, ctx.mode === "one-shot" ? "sent" : "none");
+    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, oneShotWaits(ctx, target.linkId) ? "sent" : "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   const result = await node(ctx).pressButton({ linkId: target.linkId, messageId: message.id, buttonId });
   if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error, result.paced ? { paced: true } : undefined);

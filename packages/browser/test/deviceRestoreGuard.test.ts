@@ -4,7 +4,9 @@ import { createIdentity, firstDeviceSetSecret, fromBase64Url, identityFromSeed, 
 import { STORES, openDb, transact, wrap } from "../src/shared/idb";
 import { readBackupHeader, bytesSource, DEVICE_SET_BACKUP_VERSION } from "../src/backup/stream";
 import { PENDING_RAISE_KEY, isPendingRaise } from "../src/devices/raise";
-import { activeName, bundleSecret, peekTurn, restoreCase, restoredStandby, type BundleDevices, type TurnPeek } from "../src/devices/restoreGuard";
+import { activeName, bundleActiveSlot, bundleSecret, peekTurn, restoreCase, restoredStandby, type BundleDevices, type TurnPeek } from "../src/devices/restoreGuard";
+import { MAX_DEVICES, firstRecord, type DeviceSlot } from "../src/devices/state";
+import { takeoverTarget } from "../src/devices/takeover";
 import { closeDevicesDb, setDeviceMirror } from "../src/devices/store";
 import { newDeviceKey, sealSeed } from "../src/engine/paymentAdapters/persistence";
 import { putDeviceRecord, dropDevicesDatabase } from "./helpers/deviceRecord";
@@ -62,7 +64,7 @@ describe("a bundle of an enrolled profile", () => {
     const bundle = await createProfileBackup(PASS);
     expect((await readBackupHeader(bytesSource(bundle)))?.header.version).toBe(DEVICE_SET_BACKUP_VERSION);
     const opened = await openProfileBackup(bundle, PASS);
-    expect(opened.devices).toEqual({ d: D, set: [{ key: MAC, name: "MacBook" }, { key: PHONE, name: "Phone" }], turn: 812, takeovers: 2 });
+    expect(opened.devices).toEqual({ d: D, set: [{ key: MAC, name: "MacBook" }, { key: PHONE, name: "Phone" }], turn: 812, takeovers: 2, active: 0 });
     expect(JSON.stringify(opened.devices)).not.toContain("c2VjcmV0cGFja2V0");
     expect(JSON.stringify(opened.devices)).not.toContain("c2V0dXA");
   });
@@ -120,7 +122,8 @@ describe("the cases of a restore", () => {
     // A bundle with no device set whose turn cannot be read: restored, and it starts limited until a read (`unchecked`).
     expect(restoreCase(undefined, peek("unreachable"))).toBe("unchecked");
     expect(activeName(devices, peek("other", record))).toBe("Phone");
-    expect(activeName(devices, peek("none"))).toBe("MacBook");
+    // A bundle from before it said which slot was active names no device when the record expired: not its first slot.
+    expect(activeName(devices, peek("none"))).toBeUndefined();
   });
 
   it("a copy that takes over gets a free slot for its new key, or the active device's when all four are used", () => {
@@ -133,6 +136,101 @@ describe("the cases of a restore", () => {
     expect(full).toMatchObject({ ownSlot: 3, turn: 900 });
     expect(full.activeSlot).toBeUndefined();
     expect(full.deviceSet?.[3]).toEqual({ key: toBase64Url(own), name: "Laptop" });
+  });
+});
+
+/*
+ * The record expired and the bundle is all there is: it says which slot was active when it was made (the device that
+ * made it, when that one was active). A Desktop in slot 0 and a Phone in slot 1, the Phone active and backed up there.
+ */
+describe("the device a restore names when the turn record expired", () => {
+  const DESKTOP = toBase64Url(new Uint8Array(32).fill(3));
+  const set: DeviceSlot[] = [{ key: DESKTOP, name: "Desktop" }, { key: PHONE, name: "Phone" }];
+  const laptop = new Uint8Array(32).fill(9);
+  const backupOn = async (state: "active" | "standby", ownSlot: number, activeSlot: number) => {
+    await seed();
+    await putDeviceRecord({ v: 1, profile: "ghostly", state, saved: 1, turn: 812, rev: 0, d: D, ownSlot, activeSlot, deviceSet: set, takeovers: 0, earlierSets: [] });
+    return (await openProfileBackup(await createProfileBackup(PASS), PASS)).devices!;
+  };
+  /** What the restore screen says and what the takeover asks to type, as `restoreForTakeover` writes the copy's record. */
+  const restoreOf = (bundle: BundleDevices | undefined, read: TurnPeek) => {
+    const standby = restoredStandby(bundle, null, read, laptop, "Laptop");
+    return { case: restoreCase(bundle, read), screen: activeName(bundle, read), activeSlot: standby.activeSlot, ownSlot: standby.ownSlot, takeover: takeoverTarget(firstRecord("ghostly", "standby", standby)) };
+  };
+
+  it("names the device that made the backup, and the takeover asks for its name, not the first slot's", async () => {
+    const bundle = await backupOn("active", 1, 1);
+    expect(bundle.active).toBe(1);
+    expect(restoreOf(bundle, peek("none"))).toEqual({ case: "active", screen: "Phone", activeSlot: 1, ownSlot: 2, takeover: "Phone" });
+  });
+
+  it("a backup made on a standby names the device that standby knew active", async () => {
+    const bundle = await backupOn("standby", 0, 1);
+    expect(bundle.active).toBe(1);
+    expect(restoreOf(bundle, peek("none"))).toMatchObject({ screen: "Phone", activeSlot: 1, takeover: "Phone" });
+  });
+
+  it("a record that can be read still wins over what the bundle says", async () => {
+    const bundle = await backupOn("active", 1, 1);
+    const read = peek("other", { turn: 900, active: 0, slots: [...set, null, null] });
+    expect(restoreOf(bundle, read)).toEqual({ case: "active", screen: "Desktop", activeSlot: 0, ownSlot: 2, takeover: "Desktop" });
+  });
+
+  it("a bundle from before the field names no device, and the takeover asks for no name, rather than guess slot 0", () => {
+    const old: BundleDevices = { d: D, set, turn: 812, takeovers: 0 };
+    expect(restoreOf(old, peek("none"))).toEqual({ case: "active", screen: undefined, activeSlot: undefined, ownSlot: 2, takeover: undefined });
+    // With all four slots used, the copy still takes a slot; it names none active.
+    const four: BundleDevices = { ...old, set: [...set, { key: MAC, name: "MacBook" }, { key: toBase64Url(new Uint8Array(32).fill(4)), name: "Tablet" }] };
+    expect(restoreOf(four, peek("none"))).toMatchObject({ screen: undefined, activeSlot: undefined, takeover: undefined });
+  });
+
+  it("with all four slots used, the copy takes the slot of the device the bundle names active", () => {
+    const four: BundleDevices = { d: D, set: [...set, { key: MAC, name: "MacBook" }, { key: toBase64Url(new Uint8Array(32).fill(4)), name: "Tablet" }], turn: 812, takeovers: 0, active: 1 };
+    const standby = restoredStandby(four, null, peek("none"), laptop, "Laptop");
+    expect(standby.ownSlot).toBe(1);
+    expect(standby.deviceSet?.[1]).toEqual({ key: toBase64Url(laptop), name: "Laptop" });
+  });
+
+  it("a slot that names no device of the set is taken as not said: a damaged copy names no device rather than a wrong one", () => {
+    for (const active of [2, MAX_DEVICES, -1, 0.5, "1", null]) {
+      const bundle = { d: D, set: [set[0], set[1], null], turn: 812, takeovers: 0, active } as unknown as BundleDevices;
+      expect(bundleActiveSlot(bundle)).toBeUndefined();
+      expect(activeName(bundle, peek("none"))).toBeUndefined();
+    }
+  });
+});
+
+/*
+ * The field is optional and the envelope is the same: an app of 1.10.2 opens a new bundle as before. Its check of the
+ * device set record, as `git show v1.10.2:packages/browser/src/devices/restoreGuard.ts` has it, and its read of the
+ * record in `openProfileBackup` (`const { t, ...rest } = value; if (!isBundleDevices(rest)) throw ...`).
+ */
+function isBundleDevicesV1_10_2(value: unknown): value is BundleDevices {
+  const v = value as Partial<BundleDevices> | null;
+  if (!v || typeof v !== "object" || typeof v.d !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(v.d)) return false;
+  if (!Array.isArray(v.set) || v.set.length > MAX_DEVICES) return false;
+  if (!v.set.every((slot) => slot === null || (!!slot && typeof slot.key === "string" && /^[A-Za-z0-9_-]{43}$/.test(slot.key) && typeof slot.name === "string" && slot.name.length <= 64))) return false;
+  return Number.isSafeInteger(v.turn) && v.turn! >= 0 && v.turn! <= 2 ** 32 - 1 && Number.isSafeInteger(v.takeovers) && v.takeovers! >= 0;
+}
+
+describe("a bundle that says which slot was active, read by 1.10.2", () => {
+  it("keeps the envelope version and passes 1.10.2's check of the device set record", async () => {
+    await seed();
+    await putDeviceRecord({ v: 1, profile: "ghostly", state: "active", saved: 1, turn: 812, rev: 0, d: D, ownSlot: 1, activeSlot: 1,
+      deviceSet: [{ key: MAC, name: "Desktop" }, { key: PHONE, name: "Phone" }], takeovers: 0, earlierSets: [] });
+    const bundle = await createProfileBackup(PASS);
+    expect((await readBackupHeader(bytesSource(bundle)))?.header.version).toBe(DEVICE_SET_BACKUP_VERSION);
+    const { BackupReader } = await import("../src/backup/stream");
+    const { decode } = await import("../src/backup/codec");
+    const reader = (await BackupReader.open(bytesSource(bundle), PASS))!;
+    let record: Record<string, unknown> | undefined;
+    for (let next = await reader.next(); next?.json !== undefined && !record; next = await reader.next()) {
+      const value = decode(next.json) as Record<string, unknown>;
+      if (value.t === "devices") record = value;
+    }
+    expect(record).toMatchObject({ t: "devices", active: 1 });
+    const { t: _t, ...rest } = record!;
+    expect(isBundleDevicesV1_10_2(rest)).toBe(true);
   });
 });
 

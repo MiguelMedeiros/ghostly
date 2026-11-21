@@ -217,6 +217,8 @@ is shared. The contact's app never trusts the sender's check.
   checks a verified or unconfirmed proof again by itself once that time, and at least a day, has passed since the
   last check (`autoRecheckDue`, which `recheckDue` in the chat's view reports), and shows a failed re-check honestly
   ("Could not be confirmed on …"), without deleting the proof. `describeIdentityProof` then requires the harness to have `revoke()`.
+  A server that limits lookups per IP also gets `perHour`, well under that limit: the app re-checks no more of
+  that provider's proofs an hour on its own, so a check a person starts still gets an answer.
 
 ## On the wire
 

@@ -69,6 +69,10 @@
   line-height: 1.5;
   color: var(--mint);
 }
+/* The copy was refused: a warning, not the green "Invite copied". */
+.join-note--failed {
+  color: var(--amber);
+}
 .join-code {
   display: block;
   margin-top: 8px;

@@ -29,7 +29,7 @@ import { createDesktopHost, type ServiceRequest, type ServiceWindowResponse } fr
  */
 
 type Host = {
-  openService(peer: string, service: string, tag: string): Promise<void>;
+  openService(peer: string, service: string, tag: string, relayOnly?: boolean): Promise<void>;
   onServer(server: unknown): void;
 };
 const called = vi.mocked(invoke) as unknown as ReturnType<typeof vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>>;
@@ -61,5 +61,18 @@ describe("a Desktop viewer window whose app the contact took back", () => {
     await listeners.get("ghostly-svc-request")!({ payload: request });
     const [, args] = called.mock.calls.find(([command]) => command === "service_respond")!;
     expect(page((args as { response: ServiceWindowResponse }).response)).toBe("Atlas is no longer shared with you.");
+  });
+});
+
+describe("a Desktop viewer window opened while Hide my IP from contacts is on", () => {
+  it("tells Rust, so the window's pages load nothing but their own origin; off, as before", async () => {
+    // covers: settings.network.relay-only
+    vi.spyOn(engine, "linkByPeer").mockImplementation(() => ({ peerPubKeyZ32: PEER, peerServices: [{ id: "atlas", name: "Atlas" }] }) as unknown as LinkView);
+    const desktop = createDesktopHost("1.2.0") as unknown as Host;
+    const opened = () => called.mock.calls.filter(([command]) => command === "open_service_window").map(([, args]) => (args as { relayOnly?: unknown }).relayOnly);
+    called.mockClear();
+    await desktop.openService(PEER, "atlas", TAG, true);
+    await desktop.openService(PEER, "atlas", TAG, false);
+    expect(opened()).toEqual([true, false]);
   });
 });

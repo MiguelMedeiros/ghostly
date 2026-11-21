@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { GhostLink, createIdentity, createLink, encodeFileData, fromBase64Url, type BoundChannel, type NativeEndpoint, type PairingState } from "@ghostly/core";
+import { GhostLink, checkedDescriptors, createIdentity, createLink, encodeFileData, fromBase64Url, type BoundChannel, type NativeEndpoint, type PairingState } from "@ghostly/core";
 import { createRelayedHyperEndpoint, hyperKeyPair, relayUrlProblem } from "../src/platform/hyperdhtRelay";
 // covers: transport.hyperdht-relay, transport.hyperdht, transport.relayed
 
@@ -69,14 +69,29 @@ it("accepts only wss:// relays, and ws:// to this machine", () => {
   expect(relayUrlProblem("not a url")).toMatch(/relay address/);
   // Only the server's address: the endpoint tells it to every contact as its relay.
   for (const bad of ["wss://alice:hunter2@relay.example", "wss://alice@relay.example", "wss://relay.example/?token=s3cr3t", "wss://relay.example/?",
-    "wss://relay.example/#s3cr3t", "ws://alice:hunter2@127.0.0.1:49443/", `wss://relay.example/${"a".repeat(256)}`])
+    "wss://relay.example/#s3cr3t", "ws://alice:hunter2@127.0.0.1:49443/"])
     expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+  // A relay address all the same, one too long: said as what to do, not as a typo to look for in it.
+  for (const long of [`wss://relay.example/${"a".repeat(256)}`, `wss://${"a".repeat(121)}`, `ws://127.0.0.1:49443/${"a".repeat(101)}`])
+    expect(relayUrlProblem(long)).toBe(`Use a shorter relay address: ${long}`);
+  // A login is refused for what it is, however long the address.
+  expect(relayUrlProblem(`wss://alice@relay.example/${"a".repeat(256)}`)).toBe(`Not a relay address: wss://alice@relay.example/${"a".repeat(256)}`);
 });
 
 it("never names a relay with a login or a token in its descriptor, saved before that was refused", async () => {
   const url = relay.url.replace("ws://", "ws://alice:hunter2@") + "/?token=s3cr3t";
   await expect(createRelayedHyperEndpoint(seed(), url)).rejects.toThrow("Not a relay address");
 });
+
+it("names its relay as a contact reads it: a scheme pasted in capitals goes as wss://, an address a contact drops is refused", async () => {
+  // A contact keeps a descriptor only with a relay `relayUrl` reads, and drops the whole descriptor otherwise.
+  for (const bad of ["wss://relay.example/my relay", "ws://LOCALHOST:49443"]) expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+  expect(relayUrlProblem(`wss://${"a".repeat(121)}`)).toBe(`Use a shorter relay address: wss://${"a".repeat(121)}`);
+  expect(relayUrlProblem("WSS://relay.example")).toBeNull();
+  const endpoint = await web(relay.url.replace("ws://", "WS://"));
+  expect(endpoint.descriptor).toMatchObject({ relay: relay.url });
+  expect(checkedDescriptors({ "hyperdht/1": endpoint.descriptor })["hyperdht/1"]).toEqual(endpoint.descriptor);
+}, 30_000);
 
 it("gives the Desktop's key for the same seed, and says it is relayed", async () => {
   const seedB64 = seed();
@@ -447,7 +462,7 @@ it("frees the slot of a client that neither listens nor dials, one that stops an
   await vi.waitFor(() => expect(own.stats().accepted).toBe(3));
   await Promise.all([deafClosed, silentClosed, halfClosed]);
   expect(answer).toMatch(/^HTTP\/1\.1 408/);
-  expect(reasons).toEqual(expect.arrayContaining(["dropped no pong", "dropped idle"]));
+  expect(reasons).toEqual(expect.arrayContaining(["dropped no pong: no answer to the last ping by the next, 300 ms later (GHOSTLY_RELAY_PING_MS)", "dropped idle: no listen and no dial for 1500 ms (GHOSTLY_RELAY_IDLE_MS)"]));
   expect(own.stats().clients).toBe(1);
   // The browser listens, answers pings, and stays.
   await new Promise(resolve => setTimeout(resolve, 2000));
@@ -626,7 +641,7 @@ it("holds at most `streams` HyperDHT streams for a client while it stays: a dial
   expect(own.stats().dropped).toBe(0);
   dial(4);
   await dialer.closed;
-  expect(reasons).toContain("dropped stream limit");
+  expect(reasons).toContain("dropped stream limit: 3 streams open at once (GHOSTLY_RELAY_STREAMS)");
   expect(own.stats().dropped).toBe(1);
   await vi.waitFor(() => expect(open(accepted)).toBe(0), { timeout: 15_000 });
   // The listener was never dropped and still holds its three.
@@ -709,7 +724,7 @@ it("holds at most `queuedBytes` that a client has not read: one that reads gets 
     const stalled = await client();
     stalled.link.up.pause();
     go[stalled.at]();
-    await vi.waitFor(() => expect(reasons).toContain("dropped queue"), { timeout: 10_000 });
+    await vi.waitFor(() => expect(reasons).toContain("dropped queue: 4 MiB waiting for the client and its far peers (GHOSTLY_RELAY_QUEUED_BYTES)"), { timeout: 10_000 });
     expect(own.stats().dropped).toBe(1);
     expect(written[stalled.at]).toBeLessThan(total / 2);
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -788,8 +803,10 @@ it("holds at most `queuedTotalBytes` unread over all clients: past it the one ho
     for (const one of stalled) { one.link.up.pause(); go[one.at](); }
     // The reader gets a whole fast transfer meanwhile.
     go[reader.at]();
-    await vi.waitFor(() => expect(reasons.filter(reason => reason === "dropped queue total")).toHaveLength(3), { timeout: 60_000 });
-    expect(reasons).not.toContain("dropped queue");
+    // The first line of a kind names its limit: counted by kind.
+    const kind = (reason: string) => reason.split(":")[0];
+    await vi.waitFor(() => expect(reasons.filter(reason => kind(reason) === "dropped queue total")).toHaveLength(3), { timeout: 60_000 });
+    expect(reasons.filter(reason => kind(reason) === "dropped queue")).toEqual([]);
     for (const one of stalled) expect(written[one.at]).toBeLessThan(perClient / 2);
     await vi.waitFor(() => expect(reader.got.bytes).toBe(total), { timeout: 60_000 });
     expect(own.stats().dropped).toBe(3);
@@ -837,6 +854,71 @@ it("holds a client's handshakes only while they wait on it, and its signatures o
     await own.close();
   }
 }, 90_000);
+
+it("takes a client's first answer to a handshake, ignores one sent again in the same batch, and keeps serving every client", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  const own = await startRelay({ testnet: 3 });
+  // What would end the relay's process, as the dial's outcome.
+  const uncaught: unknown[] = [];
+  let crashed: (why: string) => void = () => {};
+  const crash = new Promise<string>(resolve => { crashed = resolve; });
+  const onUncaught = (error: unknown) => { uncaught.push(error); crashed(`uncaught ${String(error)}`); };
+  process.on("uncaughtException", onUncaught);
+  type Socket = { on(event: string, f: (...args: unknown[]) => void): void; once(event: string, f: () => void): void; destroy(): void };
+  type Server = { listen(keyPair: unknown): Promise<void>; address(): { port: number } | null; close(): Promise<void> };
+  type Client = { _protocol: Record<string, { send(m: unknown): void }>; createServer(options: unknown, onconnection: (socket: Socket) => void): Server; connect(publicKey: Uint8Array): Socket };
+  const sockets: WebSocket[] = [];
+  const client = async () => {
+    const socket = new WebSocket(own.url);
+    sockets.push(socket);
+    await new Promise(resolve => socket.addEventListener("open", resolve, { once: true }));
+    const stream = new WebSocketStream(true, socket) as { userData?: unknown };
+    // protomux keeps itself on a stream whose userData is null: the client corks its messages into one batch through it.
+    stream.userData = null;
+    const node = new RelayedDHT(stream, { custodial: false }) as unknown as Client;
+    return { node, mux: stream.userData as unknown as { cork(): void; uncork(): void } };
+  };
+  try {
+    const listener = await client();
+    const keyPair = DHT.keyPair();
+    let onReached: (value: string) => void = () => {};
+    const reached = new Promise<string>(resolve => { onReached = resolve; });
+    const server = listener.node.createServer({}, socket => { socket.on("error", () => {}); onReached("reached"); });
+    await server.listen(keyPair);
+    expect(server.address()?.port).toBeGreaterThan(0);
+    const dialler = await client();
+    const reply = dialler.node._protocol.noiseReply;
+    const send = reply.send.bind(reply);
+    let twice = false;
+    reply.send = message => {
+      if (twice) return send(message);
+      twice = true;
+      dialler.mux.cork(); send(message); send(message); dialler.mux.uncork();
+    };
+    const socket = dialler.node.connect(keyPair.publicKey);
+    socket.on("error", () => {});
+    const opened = new Promise(resolve => socket.once("open", () => resolve("open")));
+    const timeout = (ms: number) => new Promise(resolve => setTimeout(() => resolve("timeout"), ms));
+    await expect(Promise.race([opened, crash, timeout(20_000)])).resolves.toBe("open");
+    await expect(Promise.race([reached, timeout(5_000)])).resolves.toBe("reached");
+    expect(twice).toBe(true);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(uncaught).toEqual([]);
+    // Nobody was dropped, and another client still listens.
+    expect(own.stats()).toMatchObject({ dropped: 0 });
+    const other = (await client()).node.createServer({}, () => {});
+    await other.listen(DHT.keyPair());
+    expect(other.address()?.port).toBeGreaterThan(0);
+    socket.destroy();
+  } finally {
+    process.off("uncaughtException", onUncaught);
+    for (const socket of sockets) socket.close();
+    await own.close();
+  }
+}, 60_000);
 
 it("keeps a client's other chats reachable, both ways, while one chat's contact dials it over and over", async () => {
   const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
@@ -900,7 +982,7 @@ it("keeps a client's other chats reachable, both ways, while one chat's contact 
     const into = await dials(contact, chat2);
     expect({ out, into }).toEqual({ out: Array(6).fill("ok"), into: Array(6).fill("ok") });
     // The flood is refused past chat 1's share, and the operator sees it; nobody is dropped.
-    expect(reasons).toContain("refused handshake listen share");
+    expect(reasons).toContain("refused handshake listen share: 16 incoming handshakes waiting on one key, a quarter of GHOSTLY_RELAY_HANDSHAKES");
     expect(own.stats().dropped).toBe(0);
   } finally {
     flooding = false;

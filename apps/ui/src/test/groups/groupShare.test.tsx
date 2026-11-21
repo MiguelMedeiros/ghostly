@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { GroupShareDialog } from "../../components/GroupLinkPanel";
@@ -84,6 +84,43 @@ describe("the group header's Share link", () => {
   });
 });
 
+describe("the group header on the narrowest phone", () => {
+  /** How wide the window is, as matchMedia reads it. */
+  const viewport = (width: number, height = 640) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+  afterEach(() => viewport(1024, 768));
+
+  // At 320px the back button, the picture, the connection, Share link and ⋮ left the name about 70px ("Clube d…").
+  it("has Share link as a row of ⋮, which opens the link, and leaves its room to the name", async () => {
+    viewport(320);
+    const { user } = openGroup(admin({ entryLink: LINK }));
+    expect(screen.queryByTestId("group-share")).not.toBeInTheDocument();
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(within(screen.getByTestId("group-options-menu")).getByTestId("group-share"));
+    expect(await screen.findByTestId("group-share-dialog")).toHaveTextContent("Share Friends");
+  });
+
+  it("keeps Share link in the header on a wider phone, and not in ⋮", async () => {
+    viewport(390);
+    const { user } = openGroup(admin({ entryLink: LINK }));
+    expect(screen.getByTestId("group-share")).toBeInTheDocument();
+    await user.click(screen.getByTestId("group-options"));
+    expect(within(screen.getByTestId("group-options-menu")).queryByTestId("group-share")).not.toBeInTheDocument();
+  });
+});
+
+// A phone on its side (844x390 with an iPhone's safe areas) left the group a 330 px pane beside the chat list: Share
+// kept its label by the window's width, and "Clube do livro" was cut to 65 of 92 px. The label follows the header's.
+describe("the group header's Share link in a narrow pane", () => {
+  it("hides its label by the header's width, not the window's", () => {
+    openGroup(admin({ entryLink: LINK }));
+    const share = screen.getByTestId("group-share");
+    const label = within(share).getByText("Share link");
+    expect(label).toHaveClass("@max-[480px]/group-head:hidden");
+    expect(label).not.toHaveClass("max-[480px]:hidden");
+    expect(share.closest(".\\@container\\/group-head")).toContainElement(screen.getByTestId("group-name"));
+  });
+});
+
 describe("a link that lets nobody in", () => {
   it("tells the admin, and New link asks first, replaces it and shows the new one to share", async () => {
     const NEW = encodeGroupEntryLink({ g: ID, host: createIdentity().pubKeyZ32 });
@@ -101,7 +138,11 @@ describe("a link that lets nobody in", () => {
   });
 
   it("is not shown to a member who is not the admin, nor while the link works", () => {
-    openGroup(admin({ entryLink: LINK, entryJammed: true, isAdmin: false }));
+    const { unmount } = openGroup(admin({ entryLink: LINK, entryJammed: true, isAdmin: false }));
+    expect(screen.queryByTestId("group-link-jammed")).not.toBeInTheDocument();
+    unmount();
+    openGroup(admin({ entryLink: LINK }));
+    expect(screen.getByTestId("group-chat")).toBeInTheDocument();
     expect(screen.queryByTestId("group-link-jammed")).not.toBeInTheDocument();
   });
 });

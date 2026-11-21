@@ -3,7 +3,7 @@ import { p256 } from "@noble/curves/nist.js";
 import { fromBase64Url, toBase64Url, utf8Decode } from "../src/bytes";
 import { KNOWN_SESSION_CAPABILITIES } from "../src/pairedCapabilities";
 import {
-  DEVICE_WAKE_TTL_SECONDS, WAKE_CALL_TTL_SECONDS, WAKE_CAPABILITY, WAKE_ONLINE_TTL_SECONDS, WAKE_INTERVAL_MS, WakeLimiter, deviceWakeRequest, newWakeToken, parseWakeFrame, readWake, readWakePayload, relayRequest, wakeFrame, wakeRequest, type WakeTarget,
+  DEVICE_WAKE_TTL_SECONDS, WAKE_CALL_TTL_SECONDS, WAKE_CAPABILITY, WAKE_ONLINE_TTL_SECONDS, WAKE_INTERVAL_MS, WAKE_RETRY_MS, WakeLimiter, deviceWakeRequest, newWakeToken, parseWakeFrame, readWake, readWakePayload, relayRequest, wakeFrame, wakeRequest, type WakeTarget,
 } from "../src/pairedWake";
 import { decryptPushPayload, generateVapidKeys } from "../src/webPush";
 
@@ -153,5 +153,25 @@ describe("at most one wake-up per contact per interval", () => {
     expect(limiter.take("ana", t + WAKE_INTERVAL_MS)).toBe(true);
     limiter.reset("ana");
     expect(limiter.take("ana", t + WAKE_INTERVAL_MS + 1)).toBe(true);
+  });
+
+  it("one that did not reach the push service does not count: the next may go a short pause after it failed", () => {
+    const limiter = new WakeLimiter();
+    const t = 1_800_000_000_000;
+    expect(limiter.take("ana", t)).toBe(true);
+    limiter.missed("ana", t, WAKE_RETRY_MS, t + 5000);
+    expect(limiter.take("ana", t + 5000 + WAKE_RETRY_MS - 1)).toBe(false);
+    expect(limiter.take("ana", t + 5000 + WAKE_RETRY_MS)).toBe(true);
+    // A miss of an older one, or after the count started over, changes nothing.
+    limiter.missed("ana", t, WAKE_RETRY_MS, t + 5000 + WAKE_RETRY_MS);
+    expect(limiter.take("ana", t + 5000 + 2 * WAKE_RETRY_MS)).toBe(false);
+    limiter.reset("ana");
+    limiter.missed("ana", t, WAKE_RETRY_MS, t);
+    expect(limiter.take("ana", t + 1)).toBe(true);
+    // A limit shorter than the pause (a call's) is never made longer.
+    const calls = new WakeLimiter(10_000);
+    expect(calls.take("ana", t)).toBe(true);
+    calls.missed("ana", t, WAKE_RETRY_MS, t);
+    expect(calls.take("ana", t + 10_000)).toBe(true);
   });
 });

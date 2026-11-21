@@ -7,7 +7,8 @@ import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice, input } from "../wallet/ui";
 import { AppInstallDialog } from "./AppInstallDialog";
 import { Fingerprint } from "./AppIcon";
-import { appErrorCode, appErrorView, appStoreErrorView, type AppErrorView } from "../../lib/apps/errors";
+import { AppDescription } from "./AppDescription";
+import { appErrorView, appNothingThere, appStoreErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { date } from "../../lib/identities";
 
 /*
@@ -56,13 +57,15 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
 
   const check = async () => {
     const typed = url.trim();
-    if (!typed) return;
+    if (!typed || adding) return;
     // The engine takes nothing but `https:` (`appPasteUrl`): any other text goes to it as typed, and it refuses it in the dialog's words.
     const link = typed.replace(LOOSE_SCHEME, "https://");
     const mine = ++asked.current;
     const current = () => mine === asked.current;
     focusBack();
     setBusy(true); setError(null); setStore(null);
+    // The app read that found nothing there, when the link is then read as a store.
+    let noApp: unknown = null;
     try {
       if (!/\.json(?:[?#].*)?$/i.test(link)) {
         try {
@@ -71,8 +74,10 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
           return;
         } catch (e) {
           if (!current()) return;
-          // No app there (a 404, or not a bundle): it may be a store. A link to a host off the list stops here.
-          if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || ["host", "github-link", "private-link"].includes(appErrorCode(e) ?? "")) { setError(appErrorView(e, t)); return; }
+          // No app there (a 404, or not a bundle): it may be a store. Any other refusal is the app's (a link off the
+          // list, too large, not signed, too slow, the host's own trouble), said in its words.
+          if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || !appNothingThere(e)) { setError(appErrorView(e, t)); return; }
+          noApp = e;
         }
       }
       // Read as a store from here: one refused is a link that holds no valid store, not an app refused.
@@ -80,7 +85,10 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
       if (current()) setStore(found);
       // The preview marked the held store (two lists under one number): the Apps page reads its stores again to show it.
       if (found.held?.equivocation) onStoreAdded();
-    } catch (e) { if (current()) setError(appStoreErrorView(e, t)); } finally { if (current()) setBusy(false); }
+    } catch (e) {
+      // No store there either: what the app read found is said, not the store file's 404.
+      if (current()) setError(noApp && appNothingThere(e) ? appErrorView(noApp, t) : appStoreErrorView(e, t));
+    } finally { if (current()) setBusy(false); }
   };
 
   const edit = (value: string) => {
@@ -107,6 +115,9 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
     : store.sequence < held.sequence ? t("apps.add.storeOlder")
     : held.equivocation ? t("apps.add.storeEquivocation") : t("apps.add.storeHeld");
   const offered = !!store && !store.refused && (!held || held.sequence === undefined || store.sequence > held.sequence);
+  // The store found, said to a screen reader: Enter in the field keeps the focus there, and Check's focus goes to a bare
+  // Cancel, so nothing else told that a store came, which one, or that it is held already.
+  const found = store ? [store.name, t("apps.store.count", { count: store.apps }), heldLine].filter(Boolean).join(". ") : "";
 
   if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} onInstalled={onInstalled} />;
   return (
@@ -117,8 +128,10 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
         {/* noValidate: a link the field's type refuses is answered below in the app's words, not by the browser's own bubble. */}
         <form className="space-y-2" noValidate onSubmit={(e) => { e.preventDefault(); void check(); }}>
           <label htmlFor={fieldId} className="text-sm text-text-primary">{t("apps.add.label")}</label>
+          {/* Fixed while Add store runs: an edit (or Enter, which checks again) dropped the store's question and its busy
+              state, and Cancel then closed Add while the store was added all the same. */}
           <input id={fieldId} data-testid="apps-add-url" autoFocus className={input} type="url" inputMode="url" autoComplete="off" spellCheck={false} dir="ltr"
-            placeholder="https://github.com/owner/repo" value={url} onChange={(e) => edit(e.target.value)} />
+            readOnly={adding} placeholder="https://github.com/owner/repo" value={url} onChange={(e) => edit(e.target.value)} />
           <Notice>{t("apps.add.hint")}</Notice>
           {error && <Notice tone="error" testId="apps-add-error" details={error.info}>{error.text}</Notice>}
           {!store && (
@@ -128,6 +141,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
             </div>
           )}
         </form>
+        <p role="status" className="sr-only" data-testid="apps-add-store-said">{found}</p>
         {store && (
           <div className="space-y-3" data-testid="apps-add-store">
             <div className="bg-surface rounded-xl px-4 py-3 space-y-1">
@@ -137,12 +151,14 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
                 <span>{t("apps.store.count", { count: store.apps })}</span>
                 <Fingerprint value={store.fingerprint} />
               </p>
-              {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{store.description}</p>}
               {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires, t.language) })}</p>}
             </div>
             {heldLine && <Notice testId="apps-add-store-held" tone={held?.equivocation ? "warning" : undefined}>{heldLine}</Notice>}
-            {/* A store held is still read from its own link: this one is not where it is read from. */}
-            {offered && !held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
+            {/* A newer copy of a store held is read too, at each refresh while the store's own link is behind it (the
+                engine keeps it as `copyUrl`; one at a commit stays behind): its host is named as a new store's. */}
+            {offered && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
+            {/* The store's own words come after Ghostly's lines about it (expired, held, where it is read from). */}
+            {store.description && <AppDescription text={store.description} from="store" testId="apps-add-store-description" />}
             {/* Wraps rather than push Cancel off the screen (a phone at a large text size), as the install screen's. */}
             <div className="flex flex-wrap justify-end gap-2">
               <Button ref={storeCancel} disabled={adding} onClick={onClose}>{offered ? t("common.cancel") : t("common.close")}</Button>

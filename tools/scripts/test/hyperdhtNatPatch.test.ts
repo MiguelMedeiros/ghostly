@@ -3,10 +3,10 @@ import { expect, it } from "vitest";
 // covers: transport.hyperdht
 
 /**
- * Our patch to hyperdht's lib/nat.js (tools/patches/hyperdht+6.34.1.patch, holepunchto/hyperdht#308), checked on the
+ * Our patch to hyperdht's lib/nat.js (tools/patches/hyperdht+6.36.0.patch, holepunchto/hyperdht#308), checked on the
  * installed copy with upstream's own test. Without it a fresh process's first dial could open and carry nothing for
  * ~13 s (docs/wisps/103-hyperdht.md). A dependency bump that drops the patch fails here. Remove this test with the
- * patch when Holepunch releases the fix (hyperdht > 6.34.1 containing #308).
+ * patch when Holepunch releases the fix (hyperdht > 6.36.0 containing #308).
  */
 const require = createRequire(import.meta.url);
 const Nat = require("hyperdht/lib/nat.js");

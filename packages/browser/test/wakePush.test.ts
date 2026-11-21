@@ -1,11 +1,12 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { p256 } from "@noble/curves/nist.js";
-import { createIdentity, decryptPushPayload, fromBase64Url, generateVapidKeys, newWakeToken, toBase64Url, utf8Decode, type WakeTarget } from "@ghostly/core";
+import { createIdentity, decryptPushPayload, fromBase64Url, generateVapidKeys, newWakeToken, toBase64Url, utf8Decode, WAKE_RETRY_MS, type WakeTarget } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink, WakeSubscription } from "../src/shared/types";
+import { hostOf } from "./helpers/urlHost";
 
 // covers: push.wake.exchange, push.wake.rate-limit, push.wake.send, push.wake.mute, push.wake.group, push.wake.online
 
@@ -211,7 +212,7 @@ describe("waking a contact whose app is closed", () => {
     const calls: { url: string; body: unknown }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
       calls.push({ url, body: init.body });
-      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
       return new Response(JSON.stringify({ status: 201 }), { status: 200 });
     }));
     const node = engine();
@@ -235,7 +236,7 @@ describe("waking a contact whose app is closed", () => {
     let relay = () => new Response("<html>Not Found</html>", { status: 404 });
     const relayed = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
       relayed();
       return relay();
     }));
@@ -257,11 +258,77 @@ describe("waking a contact whose app is closed", () => {
     await vi.waitFor(async () => expect((await saved(chat.id))?.peerWake).toBeUndefined());
   });
 
+  it("a wake-up that did not reach the push service does not hold the next message's back past a short pause", async () => {
+    const failures: [string, () => Response][] = [
+      ["relay 429 (its own minute full)", () => new Response("Too Many Requests", { status: 429 })],
+      ["relay 502 (push service did not answer)", () => new Response(JSON.stringify({ error: "The push service did not answer" }), { status: 502 })],
+      ["push service 503 via relay", () => new Response(JSON.stringify({ status: 503 }), { status: 200 })],
+      ["push service 429 via relay", () => new Response(JSON.stringify({ status: 429 }), { status: 200 })],
+      ["relay unreachable", () => { throw new TypeError("Failed to fetch"); }],
+    ];
+    for (const [name, failure] of failures) {
+      const posts: string[] = [];
+      let relay = failure;
+      vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+        if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
+        // The look at an unreachable relay's address (no-cors) gets no answer either; it is not a post.
+        if (init?.mode === "no-cors") throw new TypeError("Failed to fetch");
+        try { const answer = relay(); posts.push(answer.ok && (await answer.clone().json() as { status: number }).status === 201 ? "ok" : "fail"); return answer; }
+        catch (error) { posts.push("fail"); throw error; }
+      }));
+      const t = Date.now();
+      const now = vi.spyOn(Date, "now").mockReturnValue(t);
+      const node = engine();
+      await node.updateSettings({ settings: { pushRelay: "https://push-relay.example/" } });
+      const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await vi.waitFor(() => expect(posts, name).toEqual(["fail"]));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      relay = () => new Response(JSON.stringify({ status: 201 }), { status: 200 });
+      // At once: the relay is not asked again yet.
+      now.mockReturnValue(t + 50);
+      await node.sendMessage({ linkId: chat.id, text: "are you there?" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(posts, name).toEqual(["fail"]);
+      // A little later, the next message's own wake-up goes.
+      now.mockReturnValue(t + WAKE_RETRY_MS);
+      await node.sendMessage({ linkId: chat.id, text: "hello?" });
+      await vi.waitFor(() => expect(posts, name).toEqual(["fail", "ok"]));
+      // That one went out: the 5-minute limit holds from it.
+      now.mockReturnValue(t + 4 * 60_000);
+      await node.sendMessage({ linkId: chat.id, text: "still there?" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(posts, name).toEqual(["fail", "ok"]);
+      expect((await saved(chat.id))?.peerWake, name).toBeDefined();
+      now.mockRestore();
+    }
+  });
+
+  it("a wake-up the push service took holds the next for five minutes, as does a subscription refused for good", async () => {
+    let status = 201;
+    const pushSend = vi.fn(async () => status);
+    const t = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t);
+    const node = engine({ pushSend });
+    for (const answer of [201, 400]) {
+      status = answer;
+      const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+      const before = pushSend.mock.calls.length;
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      now.mockReturnValue(t + WAKE_RETRY_MS);
+      await node.sendMessage({ linkId: chat.id, text: "hi again" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(pushSend.mock.calls.length - before).toBe(1);
+      now.mockReturnValue(t);
+    }
+  });
+
   it("a push relay that answers but not as a push relay is kept in the state, with its own error text, until it forwards one", async () => {
     let relay: () => Response | Promise<Response> = () => new Response("<!doctype html><title>My site</title>", { status: 200, headers: { "Content-Type": "text/html" } });
     const relayed = vi.fn();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
       relayed();
       return relay();
     }));
@@ -307,8 +374,10 @@ describe("waking a contact whose app is closed", () => {
   it("a push relay that cannot be reached (offline, timed out) is not said to refuse; another relay address drops what the old one said", async () => {
     let relay: () => Response | Promise<Response> = () => { throw new TypeError("Failed to fetch"); };
     const relayed = vi.fn();
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.startsWith("https://web.push.apple.com")) throw new TypeError("Failed to fetch");
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
+      // Nothing answers at all: the no-cors look at the address fails as the post did.
+      if (init?.mode === "no-cors") throw new TypeError("Failed to fetch");
       relayed();
       return relay();
     }));
@@ -332,6 +401,55 @@ describe("waking a contact whose app is closed", () => {
     await wake();
     expect(node.getState().pushRelayRefused).toMatchObject({ http: 429 });
     await node.updateSettings({ settings: { pushRelay: "https://other-relay.example/" } });
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+  });
+
+  it("a push relay address that answers without CORS (another kind of server, a proxy's error page) is kept as such while online, never while offline", async () => {
+    // The post's preflight gets no CORS headers (the HyperDHT relay's 426), so the page's fetch throws a TypeError, as
+    // it does offline; a no-cors GET of the address tells the two apart.
+    let probe: () => Response = () => new Response("Upgrade Required", { status: 426, headers: { "Content-Type": "text/plain" } });
+    let relay: () => Response = () => { throw new TypeError("Failed to fetch"); };
+    const posted = vi.fn(), probed = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
+      if (init?.mode === "no-cors") {
+        expect(init.method).toBe("GET");
+        expect(init.credentials).toBe("omit");
+        probed(url);
+        return probe();
+      }
+      posted();
+      return relay();
+    }));
+    const node = engine();
+    await node.updateSettings({ settings: { pushRelay: "https://push-relay.example/" } });
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+    const wake = async () => {
+      const before = posted.mock.calls.length;
+      node["wakeLimiter"].reset(chat.id);
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await vi.waitFor(() => expect(posted.mock.calls.length).toBe(before + 1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    // Something answers at that address, just not readably: not a push relay this page can use.
+    await wake();
+    expect(probed).toHaveBeenLastCalledWith("https://push-relay.example/");
+    expect(node.getState().pushRelayRefused).toEqual({ url: "https://push-relay.example/", at: expect.any(Number), http: 0 });
+    // A push relay that forwards one: nothing is said any more.
+    relay = () => new Response(JSON.stringify({ status: 201 }), { status: 200 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    // Offline, the post and the look both fail: nothing is said (no false alarm).
+    relay = () => { throw new TypeError("Failed to fetch"); };
+    probe = () => { throw new TypeError("Failed to fetch"); };
+    await wake();
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    // A page that knows it is offline does not even look.
+    probe = () => new Response("", { status: 426 });
+    vi.stubGlobal("navigator", { onLine: false });
+    const looks = probed.mock.calls.length;
+    await wake();
+    expect(probed.mock.calls.length).toBe(looks);
     expect(node.getState().pushRelayRefused).toBeUndefined();
   });
 
@@ -431,6 +549,32 @@ describe("online notices: a contact whose app is closed hears that this one came
     node["settings"] = { ...node["settings"], online: false };
     node["sayOnline"]();
     expect(pushSend).not.toHaveBeenCalled();
+  });
+
+  it("none while \"Share when I'm online\" is off; switched back on, the next start says it again", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const { target, secret, auth } = asked();
+    await addChat(node, stubLink({ isDataLinkOpen: false, setStatus: vi.fn() }), { peerWake: target });
+    await node.updateSettings({ settings: { sharePresence: false } });
+    node["sayOnline"]();
+    expect(pushSend).not.toHaveBeenCalled();
+    await node.updateSettings({ settings: { sharePresence: true } });
+    node["sayOnline"]();
+    expect(bodies(pushSend.mock.calls, secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }]);
+  });
+
+  it("none while the host says this run is not online to its contacts (a headless profile with no presence)", async () => {
+    const pushSend = vi.fn(async () => 201);
+    let says = false;
+    const node = engine({ pushSend, onlineNotices: () => says });
+    const { target, secret, auth } = asked();
+    await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: target });
+    node["sayOnline"]();
+    expect(pushSend).not.toHaveBeenCalled();
+    says = true;
+    node["sayOnline"]();
+    expect(bodies(pushSend.mock.calls, secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }]);
   });
 
   it("at most one per contact every 30 minutes, kept across a restart (a restart is what says it)", async () => {
@@ -575,6 +719,24 @@ describe("private groups: a mention wakes a member whose app is closed", () => {
     expect(framesOf(b).at(-1)!.w!.k).toBeTruthy();
     expect(framesOf(b).at(-1)!.w!.k).not.toBe(before);
     expect((await db.getSettings()).wakeMutedGroups).toBeUndefined();
+  });
+
+  it("a group left, removed or deleted takes its mute with it: joined again under the id, it is not muted", async () => {
+    const node = engine();
+    const b = edgeLink();
+    await addEdge(node, "g", memberKey(), b);
+    await addEdge(node, "other", memberKey(), edgeLink());
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect(framesOf(b)).toHaveLength(1));
+    await node.setWakeMuted({ linkId: "group:g", muted: true });
+    await node.setWakeMuted({ linkId: "group:other", muted: true });
+    const said = framesOf(b).length;
+    // Every way out of a group (leave, removed, deleted) tells the engine by this.
+    (node["groups"] as unknown as { host: { historyGone(groupId: string): void } }).host.historyGone("g");
+    expect(node["groupWakeView"]({ id: "g", profile: "mesh" } as never)).toEqual({});
+    await vi.waitFor(async () => expect((await db.getSettings()).wakeMutedGroups).toEqual(["other"]));
+    // A group just left hands its members no new token.
+    expect(framesOf(b)).toHaveLength(said);
   });
 
   it("an edge whose member held a token closes: replaced when the member is out of the group, not when a group on hubs only drops the edge", async () => {

@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "Delivered (receipt received)",
-    "failed": "Failed",
+    "failed": "Not sent",
     "held": "Held for the contact",
     "queued": "Not confirmed yet, sends again by itself",
     "sending": "Sending",

@@ -1,20 +1,24 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { pairLinkId } from "@ghostly/browser/shared/payLinks";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { useWalletPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { edgeDot, memberName, sameNamed } from "../lib/groups";
+import { reachDot } from "../lib/connection";
+import { useEngineValue } from "../lib/engineState";
 import { PaymentComposer } from "./PaymentComposer";
 import type { ChatRail } from "./WalletCards";
 import { problemText } from "../lib/problemText";
 
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
 const EVERYONE = "*";
 const GROUP_RAILS: readonly ChatRail[] = ["cashu", "lightning"];
+
+/** Of a member's link, what the sheet reads: whom a payment goes to, and whether their app said it takes payments (absent: not said yet). */
+type PayLink = Pick<LinkView, "id" | "peerPubKeyZ32"> & { payments?: boolean };
+const payLink = ({ id, peerPubKeyZ32, capabilities }: LinkView): PayLink => ({ id, peerPubKeyZ32, payments: capabilities && !!capabilities.payments });
 
 /**
  * ⚡ in a group (WISP 902 § Payments): first whom — one member, or the whole group for a request anyone may pay
@@ -24,10 +28,11 @@ const GROUP_RAILS: readonly ChatRail[] = ["cashu", "lightning"];
  */
 export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onClose(): void }) {
   const { t } = useI18n();
-  const state = useSyncExternalStore(subscribe, snapshot);
-  const wallet = useServicesPlatform()?.wallet;
+  // Drawn again when the wallets change (the balance below), not on every change of the platform.
+  const wallet = useWalletPlatform();
   const [to, setTo] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  // Escape too, spent there: a key handler of its own closed it once more and left the key to a notice behind.
   useOutsideDismiss(ref, to === null, onClose);
   // On a phone the list of members is a sheet over a backdrop, as the payment sheet after it: Tab stays in it.
   useTabTrap(ref, useIsMobile() && to === null);
@@ -36,16 +41,23 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   const community = group.profile === "community";
   // A community member is reached through the group: a link the engine lists once their ways of paying are known.
   const linkIdOf = (m: GroupMemberView) => community ? pairLinkId(group.id, m.key) : m.edge?.linkId;
-  const linkOf = (m: GroupMemberView): LinkView | undefined => { const id = linkIdOf(m); return id ? state?.edges?.find(l => l.id === id) : undefined; };
+  // Of the engine's state, only the links of these members, by id and compared by content (lib/engineState): the whole
+  // state drew every row (or the payment form being typed in) again on every change, up to 20 a second while a file moves.
+  const links = useEngineValue(state => {
+    const wanted = new Set(others.map(linkIdOf)), found: Record<string, PayLink> = {};
+    for (const l of state?.edges ?? []) if (wanted.has(l.id)) found[l.id] = payLink(l);
+    return found;
+  });
+  const linkOf = (m: GroupMemberView): PayLink | undefined => { const id = linkIdOf(m); return id ? links[id] : undefined; };
   // Their app is asked what it takes, so the cards say what the two of you share.
   useEffect(() => { if (community && to && to !== EVERYONE) void engine.call("groupPaymentHello", { groupId: group.id, member: to }).catch(() => {}); }, [community, group.id, to]);
   /** Why this member cannot be paid right now, if they cannot. */
   const why = (m: GroupMemberView): string | undefined => {
     const link = linkOf(m);
     // Through the group it goes now or when they are back; only a member who said it takes nothing cannot be paid.
-    if (community) return link?.capabilities && !link.capabilities.payments ? t("payments.group.why.noWay") : undefined;
+    if (community) return link?.payments === false ? t("payments.group.why.noWay") : undefined;
     if (!link || m.edge?.state !== "open") return t("payments.group.why.unreachable");
-    if (!link.capabilities?.payments) return t("payments.group.why.noPayments");
+    if (!link.payments) return t("payments.group.why.noPayments");
     return undefined;
   };
   const balance = wallet?.getState()?.balance ?? 0;
@@ -79,7 +91,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
 
   return <>
     <div className="sheet-backdrop" />
-    <div ref={ref} data-testid="group-pay-recipients" onKeyDown={e => e.key === "Escape" && onClose()}
+    <div ref={ref} data-testid="group-pay-recipients"
       className="sheet sheet-padded absolute bottom-full start-0 mb-2 z-50 animate-fade-in w-[360px] max-w-[calc(100vw-1.5rem)] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3">
       <p className="m-0 px-1 text-sm font-semibold text-text-primary">{t("payments.mode.pay")}</p>
       <p className="m-0 px-1 text-xs text-text-muted">{community
@@ -91,7 +103,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
           return <li key={m.key}>
             <button type="button" data-testid="group-pay-recipient" data-key={m.key} disabled={!!reason} title={reason} onClick={() => setTo(m.key)}
               className="flex w-full min-h-11 items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50">
-              <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${edgeDot(m)}`} />
+              <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${reachDot(edgeDot(m))}`} />
               {/* The member's name in its own direction, on the box that cuts it and as wide as it: a Latin name in Arabic
                   keeps its start, and a short one stays at the line's start. */}
               <span className="min-w-0 flex-1 flex flex-col items-start">

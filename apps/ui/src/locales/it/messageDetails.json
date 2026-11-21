@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "Consegnato (ricevuta arrivata)",
-    "failed": "Non riuscito",
+    "failed": "Non inviato",
     "held": "Custodito per il contatto",
     "queued": "Non ancora confermato, riparte da solo",
     "sending": "Invio in corso",

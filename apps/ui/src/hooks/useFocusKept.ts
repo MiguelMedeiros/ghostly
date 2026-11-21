@@ -11,8 +11,13 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 export function useFocusKept(ref: RefObject<HTMLElement | null>, next?: () => HTMLElement | null | false): void {
   /** What has the focus inside the element. */
   const held = useRef<HTMLElement | null>(null);
-  useEffect(() => {
+  /** The element listened to. `ref`'s can come after the first render (a payment said in words until the wallet is there). */
+  const listened = useRef<{ root: HTMLElement; stop: () => void } | null>(null);
+  useLayoutEffect(() => {
     const root = ref.current;
+    if (listened.current?.root === root) return;
+    listened.current?.stop();
+    listened.current = null;
     if (!root) return;
     const onIn = (event: FocusEvent) => { held.current = event.target instanceof HTMLElement && event.target !== root ? event.target : null; };
     const onOut = (event: FocusEvent) => {
@@ -23,8 +28,9 @@ export function useFocusKept(ref: RefObject<HTMLElement | null>, next?: () => HT
     };
     root.addEventListener("focusin", onIn);
     root.addEventListener("focusout", onOut);
-    return () => { root.removeEventListener("focusin", onIn); root.removeEventListener("focusout", onOut); };
-  }, [ref]);
+    listened.current = { root, stop: () => { root.removeEventListener("focusin", onIn); root.removeEventListener("focusout", onOut); } };
+  });
+  useEffect(() => () => { listened.current?.stop(); listened.current = null; }, []);
   // After every render: what took the button out is this component's own render.
   useLayoutEffect(() => {
     const root = ref.current, was = held.current;

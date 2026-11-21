@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { identityStatement, newIdentityBinding, type IdentityStatement } from '@ghostly/core';
+import { IdentityCheckUnavailable, identityStatement, newIdentityBinding, type IdentityStatement } from '@ghostly/core';
 import type { IdentityFetch, RedirectSigner, SignerContext } from '../src/proofs/contract';
 import type { OidcHost } from '../src/host';
 import { createOidcIdentityProvider, type OidcEvidence } from '../src/proofs/providers/oidc';
@@ -69,7 +69,7 @@ describe('OpenID Connect identity provider', () => {
     const verified = await verifyIdentity([provider], s, { token: await token(key, s, { email: 'alice@example.test', email_verified: true, name: 'Alice' }) }, ctx(net.fetch));
     expect(verified).toMatchObject({
       subject: `${ISSUER}#alice-0001`, attester: 'oidc.ghostly.test', source: 'ID token signed by oidc.ghostly.test',
-      display: { name: 'Alice · alice@example.test', source: 'Signed by Test issuer; email verified by Test issuer' },
+      display: { name: 'Alice · alice@example.test', source: 'Signed by Test issuer; email verified by Test issuer; name set on the account, not checked by Test issuer' },
     });
     const bare = await verifyIdentity([provider], s, { token: await token(key, s) }, ctx(net.fetch));
     expect(bare.display).toBeUndefined();
@@ -113,6 +113,29 @@ describe('OpenID Connect identity provider', () => {
     await expect(verifyIdentity([elsewhere], s, { token: await token(key, s) }, ctx(gone.fetch, later))).rejects.toThrow(/does not publish the key/);
   });
 
+  it('could not run, rather than failed, while the provider keys cannot be fetched', async () => {
+    const key = await testKey('k1', 'ES256');
+    const s = statementFor(ISSUER);
+    const evidence = { token: await token(key, s) };
+    const answer = (status: number, text = ''): IdentityFetch => async () => ({ status, contentType: 'application/json', text, bytes: new TextEncoder().encode(text) });
+    const outages: IdentityFetch[] = [
+      async () => { throw new TypeError('fetch failed'); },
+      async () => { throw new DOMException('The operation timed out.', 'TimeoutError'); },
+      answer(503), answer(500), answer(429), answer(404), answer(200, '<html>'),
+    ];
+    for (const fetch of outages) {
+      // A fresh cache each time: one per contact's app.
+      const provider = createOidcIdentityProvider({ providers: () => [test], jwks: new JwksCache(), host: () => undefined });
+      const failure = await verifyIdentity([provider], s, evidence, ctx(fetch)).catch((e: unknown) => e);
+      expect(failure).toBeInstanceOf(IdentityCheckUnavailable);
+    }
+    // A key set it did read, without the key that signed the token, is still a failed proof.
+    const provider = createOidcIdentityProvider({ providers: () => [test], jwks: new JwksCache(), host: () => undefined });
+    const missing = await verifyIdentity([provider], s, evidence, ctx(answer(200, '{"keys":[]}'))).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(missing)).toMatch(/does not publish the key/);
+  });
+
   it('refuses a token from another issuer, or for another subject, and account IDs it cannot show', async () => {
     const key = await testKey('k1', 'ES256');
     const provider = createOidcIdentityProvider({ providers: () => [test, { ...OIDC_PROVIDERS.google, clientIds: { web: 'g' } }], jwks: new JwksCache(), host: () => undefined });
@@ -133,6 +156,27 @@ describe('OpenID Connect identity provider', () => {
     const tid = '9188040d-6c67-4c5b-b112-36a304b66dad';
     const verified = await verifyIdentity([provider], s, { token: await token(key, s, { iss: `https://login.microsoftonline.com/${tid}/v2.0`, tid }, microsoft) }, ctx(network(microsoft, () => [key]).fetch));
     expect(verified).toMatchObject({ subject: `https://login.microsoftonline.com/${tid}/v2.0#alice-0001`, attester: 'login.microsoftonline.com' });
+  });
+
+  it('says a name the account set for itself is not the provider’s word', async () => {
+    const key = await testKey('k1');
+    const microsoft = { ...OIDC_PROVIDERS.microsoft, clientIds: { web: '11111111-2222-3333-4444-555555555555' } };
+    const tid = '9188040d-6c67-4c5b-b112-36a304b66dad';
+    const s = statementFor(microsoft.issuer);
+    const signIn = async (p: typeof microsoft, claims: Record<string, unknown>) => (await verifyIdentity([createOidcIdentityProvider({ providers: () => [p], jwks: new JwksCache(), host: () => undefined })], s,
+      { token: await token(key, s, claims, p) }, ctx(network(p, () => [key]).fetch))).display;
+    // Any tenant's admin picks a user's name, and Microsoft never marks an email verified: the name stands alone.
+    const ms = await signIn(microsoft, { iss: `https://login.microsoftonline.com/${tid}/v2.0`, tid, name: 'Satya Nadella' });
+    expect(ms).toMatchObject({ name: 'Satya Nadella', source: 'Signed by Microsoft; name set on the account, not checked by Microsoft' });
+    const upn = await signIn(microsoft, { iss: `https://login.microsoftonline.com/${tid}/v2.0`, tid, preferred_username: 'ceo@bank.test', email: 'ceo@bank.test' });
+    expect(upn).toMatchObject({ name: 'ceo@bank.test', source: 'Signed by Microsoft; email not verified by Microsoft; name set on the account, not checked by Microsoft' });
+    // A username unique at GitLab is GitLab's own; the display name beside it is not.
+    const gitlab = { ...OIDC_PROVIDERS.gitlab, clientIds: { web: 'gitlab-client' } };
+    const s2 = statementFor(gitlab.issuer);
+    const atGitlab = async (claims: Record<string, unknown>) => (await verifyIdentity([createOidcIdentityProvider({ providers: () => [gitlab], jwks: new JwksCache(), host: () => undefined })], s2,
+      { token: await token(key, s2, claims, gitlab) }, ctx(network(gitlab, () => [key]).fetch))).display;
+    expect(await atGitlab({ nickname: 'alice' })).toMatchObject({ name: 'alice', source: 'Signed by GitLab' });
+    expect((await atGitlab({ nickname: 'alice', name: 'Satya Nadella' }))?.source).toBe('Signed by GitLab; name set on the account, not checked by GitLab');
   });
 
   it('signs in through the platform window with the statement id as nonce, asking only for what the provider can give', async () => {

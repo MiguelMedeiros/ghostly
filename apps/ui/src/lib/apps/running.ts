@@ -16,6 +16,8 @@ import type { AppTakedown } from "./open";
 import type { Translate } from "../../locales/translate";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { OpenAppOptions } from "./open";
+import { MOBILE_QUERY } from "../../hooks/useIsMobile";
+import { isolate } from "../ownStatus";
 
 export interface ChatApp {
   ref: string;
@@ -27,6 +29,8 @@ export interface ChatApp {
   /** Where its manifest says it shows: `full` covers the whole chat, with Back to it, at every width. */
   view: "chat" | "full";
   running: RunningApp;
+  /** Opened with "Run anyway" (a version a store removed): Open again opens it the same way. */
+  runAnyway?: boolean;
   /** Stopped by the client, for this reason: the panel says why until the person closes it (WISP 1200 § Takedowns). */
   stopped?: AppTakedown;
   /** It lets the contact's app read a file now (WISP 1200 § A read lane to the contact): the header says so. */
@@ -48,6 +52,11 @@ interface Slot {
 }
 
 const slots = new Map<string, Slot>();
+/**
+ * Who the contact was in each chat whose panel showed, kept once the panel goes: a Desktop app's window outlives its
+ * chat page, and its title still names the contact while the app serves them a file.
+ */
+const contacts = new Map<string, AppContact>();
 const apps = new Map<string, ChatApp>();
 const listeners = new Set<() => void>();
 let sessions: readonly string[] = [];
@@ -63,7 +72,7 @@ function changed() {
  * running there stops. Called again as the contact's name changes.
  */
 export function registerAppSlot(linkId: string, slot: Slot | null): void {
-  if (slot) { slots.set(linkId, slot); return; }
+  if (slot) { slots.set(linkId, slot); contacts.set(linkId, slot.contact); return; }
   slots.delete(linkId);
   const app = apps.get(linkId);
   if (app?.stopped) setChatApp(linkId, null);
@@ -74,9 +83,9 @@ export function appSlot(linkId: string): HTMLElement | undefined {
   return slots.get(linkId)?.box;
 }
 
-/** Who the contact is in `linkId`, as its chat shows them. */
+/** Who the contact is in `linkId`, as its chat shows them, or last showed them once it closed. */
 export function appContact(linkId: string): AppContact | undefined {
-  return slots.get(linkId)?.contact;
+  return contacts.get(linkId);
 }
 
 export function chatApp(linkId: string): ChatApp | undefined {
@@ -87,6 +96,36 @@ export function setChatApp(linkId: string, app: ChatApp | null): void {
   if (app) apps.set(linkId, app);
   else if (!apps.delete(linkId)) return;
   changed();
+}
+
+/**
+ * Each chat's presses, in the order pressed: an Open (`webOpener.ts`), or "Back to <app>" on the one running there
+ * (`ChatAppResume`). An Open counts as the person's choice only once nothing can refuse it any more (`noteChoice`):
+ * one refused (revoked, offline, locked) chose nothing, so an older one still on its way there still opens.
+ */
+const pressed = new Map<string, number>();
+/** The newest press that counted as the person's choice in each chat (`noteChoice`). */
+const choices = new Map<string, number>();
+
+/** An Open pressed in the chat `linkId`: its place in the order pressed, not a choice yet (`noteChoice`). */
+export function pressTurn(linkId: string): number {
+  const turn = (pressed.get(linkId) ?? 0) + 1;
+  pressed.set(linkId, turn);
+  return turn;
+}
+
+/**
+ * The person chose what runs in the chat `linkId` now (`turn`, from `pressTurn`; a new press when not given): an open
+ * pressed before it, still on its way there, starts nothing. Call it only once `isNewestChoice(linkId, turn)`.
+ */
+export function noteChoice(linkId: string, turn = pressTurn(linkId)): number {
+  choices.set(linkId, turn);
+  return turn;
+}
+
+/** Whether no press after `turn` (from `pressTurn`) counted as the person's choice in the chat `linkId` yet. */
+export function isNewestChoice(linkId: string, turn: number): boolean {
+  return (choices.get(linkId) ?? 0) <= turn;
 }
 
 /** Shows or hides the app in `linkId`, or puts it over the whole chat (`wide`). */
@@ -108,13 +147,41 @@ export function useChatApp(linkId: string | undefined): ChatApp | undefined {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
-/** Whether the app in the chat `linkId` covers the chat (over its whole width, or a `full` one): all its page needs. */
-export function useChatAppCovers(linkId: string | undefined): boolean {
-  const snapshot = () => {
-    const app = linkId ? apps.get(linkId) : undefined;
-    return !!app?.shown && (app.wide || app.view === "full");
-  };
+/**
+ * The chats whose page is too narrow for an app beside a chat that still works, on a screen wider than a phone (a
+ * tablet held upright, a narrow window): an app there covers the chat, as a `full` one does. Beside it, at 768 px with
+ * the chat list open, the chat was 0 px wide, and at 1024 px its name was gone and the message field 84 px.
+ */
+const narrow = new Set<string>();
+
+/** The chat `linkId`'s page is too narrow for an app beside it, or no longer (its panel measures it, ChatAppPanel.tsx). */
+export function setChatAppNarrow(linkId: string, on: boolean): void {
+  if (narrow.has(linkId) === on) return;
+  if (on) narrow.add(linkId); else narrow.delete(linkId);
+  changed();
+}
+
+/** Whether an app in the chat `linkId` covers the chat, with Back to it, whatever it is: its page is too narrow. */
+export function useChatAppNarrow(linkId: string | undefined): boolean {
+  const snapshot = () => !!linkId && narrow.has(linkId);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+const covers = (linkId: string, app: ChatApp | undefined) => !!app?.shown && (app.wide || app.view === "full" || narrow.has(linkId));
+
+/** Whether the app in the chat `linkId` covers the chat (over its whole width, a `full` one, or no room beside it): all its page needs. */
+export function useChatAppCovers(linkId: string | undefined): boolean {
+  const snapshot = () => !!linkId && covers(linkId, apps.get(linkId));
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+/**
+ * Whether the app in the chat `linkId` is shown over the chat now, the chat's own dialogs (+ → Apps) out of sight under
+ * it: over its whole width, a `full` one or one with no room beside it, and any on a phone.
+ */
+export function chatAppOver(linkId: string): boolean {
+  const app = apps.get(linkId);
+  return covers(linkId, app) || (!!app?.shown && window.matchMedia(MOBILE_QUERY).matches);
 }
 
 /** The chats an app runs in, by session: App.tsx keeps them loaded. */
@@ -125,14 +192,15 @@ export function useAppSessions(): readonly string[] {
 /**
  * Opened from the Apps page in a chat the person picked (a `chat` app runs in a chat only): the chat takes it as it
  * shows, once its panel is there (Chat.tsx), and opens it as its own + → Apps would. One not taken within a minute (the
- * person went elsewhere) is dropped.
+ * person went elsewhere) is dropped. Its age is read on the monotonic clock (the map lives only as long as the page): a
+ * device clock set back never keeps a stale one, to open by itself the next time that chat shows.
  */
 export interface OpenRequest { app: InstalledAppView; options?: OpenAppOptions }
 const OPEN_REQUEST_MS = 60_000;
 const requests = new Map<string, OpenRequest & { at: number }>();
 
 export function requestOpenInChat(linkId: string, request: OpenRequest): void {
-  requests.set(linkId, { ...request, at: Date.now() });
+  requests.set(linkId, { ...request, at: performance.now() });
   changed();
 }
 
@@ -148,14 +216,15 @@ export function takeOpenRequest(linkId: string): OpenRequest | undefined {
   if (!request) return undefined;
   requests.delete(linkId);
   changed();
-  return Date.now() - request.at <= OPEN_REQUEST_MS ? { app: request.app, ...(request.options && { options: request.options }) } : undefined;
+  return performance.now() - request.at <= OPEN_REQUEST_MS ? { app: request.app, ...(request.options && { options: request.options }) } : undefined;
 }
 
 /**
  * "Chess with Ana": a panel's name, and a Desktop app window's title; "Chess · sharing a file with Ana" while it serves
- * the contact a file (`serving`). Only the title when opened alone.
+ * the contact a file (`serving`). Only the title when opened alone. Each name keeps its own direction (an Arabic name in
+ * an English title, "Hunt!" in an Arabic one).
  */
 export function appWithContact(title: string, linkId: string | null, t: Translate, serving = false): string {
   const contact = linkId ? appContact(linkId) : undefined;
-  return contact ? t(serving ? "apps.view.withSharing" : "apps.view.with", { title, name: contact.name }) : title;
+  return contact ? t(serving ? "apps.view.withSharing" : "apps.view.with", { title: isolate(title), name: isolate(contact.name) }) : title;
 }

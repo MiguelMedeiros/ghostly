@@ -141,7 +141,7 @@ describe("the push relay (infra/services/push-relay)", () => {
     // One kind among the refusals: the first line names the origin, the rest of the minute is a count (the preflights
     // were answered, so three POSTs and one without an Origin are the four refusals).
     expect(lines).toEqual(['refused origin "https://app.ghostly.tools.example"']);
-    expect(await (await fetch(`${url}healthz`)).json()).toMatchObject({ forwarded: 0, refused: 4 });
+    expect(relay.stats()).toMatchObject({ forwarded: 0, refused: 4 });
     await relay.close();
     close = undefined;
     expect(lines).toEqual(['refused origin "https://app.ghostly.tools.example"', "refused origin 3 more"]);
@@ -196,6 +196,18 @@ describe("the push relay (infra/services/push-relay)", () => {
     expect((await post("4.4.4.4")).status).toBe(429);
     expect((await post("3.3.3.3")).status).toBe(429);
     expect((await post("1.1.1.1")).status).toBe(400);
+  });
+
+  it("a full table keeps an address at its limit and forgets one under it", async () => {
+    const relay = await startRelay({ limits: { perMinute: 2, tracked: 3 }, proxies: 1 });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}/`;
+    const post = (xff: string) => fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools", "X-Forwarded-For": xff }, body: request({ endpoint: "https://example.com/" }) });
+    expect((await post("1.1.1.1")).status).toBe(400);
+    expect((await post("1.1.1.1")).status).toBe(400);
+    for (const address of ["2.2.2.2", "3.3.3.3", "4.4.4.4", "5.5.5.5"]) expect((await post(address)).status).toBe(400);
+    expect(relay.tracked()).toBe(3);
+    expect((await post("1.1.1.1")).status).toBe(429);
   });
 
   it("weighs a request in bytes, not characters", async () => {

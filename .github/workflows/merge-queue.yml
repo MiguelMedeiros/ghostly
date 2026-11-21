@@ -51,8 +51,11 @@ permissions: {}
 jobs:
   bases:
     name: Bases with a train
-    # A pull request's CI ending can turn a batch or a queued pull request green; CI on a push already ran this. Which
-    # pull request it ended on is read below (`List the bases`): one that is not in line starts no train. A run
+    # A pull request's CI ending can turn a batch or a queued pull request green. CI ending on a push to a base (dev or
+    # an epic) can end a hold: a red batch or lone pull request waits while CI Success on the base's tip still runs, and
+    # nothing else wakes it then. Which commit it ended on is read below (`List the bases`): a pull request that is not
+    # in line, or a base's commit that is no longer its tip or has no train, starts no train. CI on a push to any other
+    # branch (main, the security routine's) starts nothing. A run
     # that was cancelled says nothing (a newer push, leaving draft, or the train's own cancel of a boarded pull request's
     # run): the train reads it as not finished, and the run that replaced it wakes the train when it ends. Nor does a
     # fork's: the train never boards a fork's pull request, and anyone whose fork runs need no approval could otherwise
@@ -63,7 +66,9 @@ jobs:
     # from the run that goes on by itself.
     if: >-
       (github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled' &&
+      ((github.event.workflow_run.event == 'pull_request' ||
+      (github.event.workflow_run.event == 'push' && (github.event.workflow_run.head_branch == 'dev' || startsWith(github.event.workflow_run.head_branch, 'epic/')))) &&
+      github.event.workflow_run.conclusion != 'cancelled' &&
       github.event.workflow_run.head_repository.full_name == github.repository)) &&
       (github.event_name != 'pull_request_target' ||
       (github.event.action == 'labeled' && (github.event.label.name == 'queue' || github.event.label.name == 'queue:priority')) ||
@@ -117,8 +122,9 @@ jobs:
           BASE: ${{ inputs.base }}
           # The head commit of the CI run that woke this run, when one did. Most CI runs end on a pull request that is
           # not in line (a draft still worked on, a ready one before `queue`): the train can do nothing with those, so
-          # only the bases where this commit is the head of a queued pull request or of a batch are listed, and with
-          # none the train job is skipped. A head pushed after `queue` waits for its own CI run, or the schedule.
+          # only the bases where this commit is the head of a queued pull request or of a batch, or the base's own tip
+          # (its CI on a push, which a held batch waits on), are listed, and with none the train job is skipped. A head
+          # pushed after `queue` waits for its own CI run, or the schedule.
           WOKEN: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
           # This run, among the workflow's runs: the ones that waited in the group and were replaced since the last
           # one that ran are served here too, the heads their names carry (every base for one not woken by CI).

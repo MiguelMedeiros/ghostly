@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook } from "@testing-library/react";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 
-// covers: calls.linux-native, calls.devices-linux, calls.reconnect, calls.speaking
+// covers: calls.linux-native, calls.devices-linux, calls.reconnect, calls.speaking, settings.network.relay-only
 
 /**
  * Ghostly Desktop on Linux calls without WebRTC in its WebView: apps/ui/src/desktop/nativeCalls.ts stands in for
@@ -42,7 +43,13 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
-const { callRtcConfig } = await import("@ghostly/core");
+const { callRtcConfig, keepsToRelays } = await import("@ghostly/core");
+const { GROUP_CALLS_NOT_ON_LINUX, groupCallSupport } = await import("../../desktop/groupCallSupport");
+const { useGroupCallSupport } = await import("../../hooks/useGroupCallSupport");
+const { errorText } = await import("../../lib/errorText");
+const { translateWith } = await import("../../locales/translate");
+const { LOCALES } = await import("../i18n/locales");
+const { CallRelayError } = await import("@ghostly/react");
 const { chooseDevice } = await import("../../lib/mediaDevices");
 const { callLevels } = await import("../../lib/voiceLevels");
 
@@ -94,6 +101,67 @@ describe("what the host makes of what Rust says about calls", () => {
   it("on Linux without the GStreamer plugins, offers no calls and says what to install", () => {
     const missing = "Calls need GStreamer plugins: install gstreamer1.0-plugins-good";
     expect(nativeCallOptions({ native: true, missing })).toEqual({ node: { callsSupport: false, callsUnavailable: missing } });
+  });
+});
+
+/** The agents each app's page has: WKWebView, WebView2, WebKitGTK, Android's WebView, and two browsers. */
+const AGENTS = {
+  mac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+  windows: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+  linux: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+  android: "Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/AP2A.240805.005; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36",
+  firefoxLinux: "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
+  safariMac: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+};
+
+describe("where group calls work", () => {
+  const off = { supported: false, reason: GROUP_CALLS_NOT_ON_LINUX };
+  const on = { supported: true, reason: null };
+
+  it("not on the Linux Desktop, whose WebView has no WebRTC: the button says to join from the web app", () => {
+    expect(groupCallSupport(true, AGENTS.linux)).toEqual(off);
+    expect(GROUP_CALLS_NOT_ON_LINUX).toBe("Group calls aren't on Linux yet: join from app.ghostly.tools in a browser");
+  });
+
+  it("on the macOS and Windows Desktop, with the WebView's own WebRTC, and in the Android app", () => {
+    expect(groupCallSupport(true, AGENTS.mac)).toEqual(on);
+    expect(groupCallSupport(true, AGENTS.windows)).toEqual(on);
+    expect(groupCallSupport(true, AGENTS.android)).toEqual(on);
+  });
+
+  it("in a browser on any system, Linux included: that is where the Linux Desktop sends people", () => {
+    for (const agent of [AGENTS.firefoxLinux, AGENTS.linux, AGENTS.safariMac, AGENTS.windows]) expect(groupCallSupport(false, agent)).toEqual(on);
+  });
+
+  describe("on this page, as the group's call button reads it", () => {
+    const tauri = window as unknown as { __TAURI_INTERNALS__?: object };
+    afterEach(() => {
+      delete tauri.__TAURI_INTERNALS__;
+      Reflect.deleteProperty(navigator, "userAgent");
+    });
+    const agent = (value: string) => Object.defineProperty(navigator, "userAgent", { value, configurable: true });
+
+    it("off with the reason in the Linux Desktop, on in its browser", () => {
+      agent(AGENTS.linux);
+      tauri.__TAURI_INTERNALS__ = {};
+      expect(groupCallSupport()).toEqual(off);
+      expect(renderHook(() => useGroupCallSupport()).result.current).toEqual(off);
+      delete tauri.__TAURI_INTERNALS__;
+      expect(renderHook(() => useGroupCallSupport()).result.current).toEqual(on);
+    });
+
+    it("on in the Mac and Windows Desktop", () => {
+      tauri.__TAURI_INTERNALS__ = {};
+      for (const value of [AGENTS.mac, AGENTS.windows]) {
+        agent(value);
+        expect(renderHook(() => useGroupCallSupport()).result.current).toEqual(on);
+      }
+    });
+
+    it("says the reason in the app's language", () => {
+      const pt = translateWith(LOCALES.pt, "pt");
+      expect(errorText(GROUP_CALLS_NOT_ON_LINUX, pt)).toBe("Chamadas em grupo ainda não chegaram ao Linux: entre pelo app.ghostly.tools num navegador");
+    });
   });
 });
 
@@ -314,9 +382,38 @@ describe("the RTCPeerConnection stand-in", () => {
   it("hands Rust the profile's own ICE servers (a TURN server), not the apps' built-in STUN ones", () => {
     const turn = { urls: "turn:turn.example.org:3478", username: "ghost", credential: "test-credential" };
     const pc = new NativePeerConnection(callRtcConfig([turn]));
-    expect(tauri.invoke).toHaveBeenCalledWith("native_call_open", { id: pc.id, events: expect.anything(), iceServers: [{ urls: ["turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" }] });
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_open", { id: pc.id, events: expect.anything(), iceServers: [{ urls: ["turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" }], relayOnly: false });
     expect(ownIceServers(callRtcConfig())).toEqual([]);
     expect(ownIceServers({})).toEqual([]);
+  });
+
+  it("with Hide my IP from contacts on, keeps the call to the relay: Rust is told, and the call hook may place it", () => {
+    const turn = { urls: ["stun:stun.example.org", "turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" };
+    const pc = new NativePeerConnection(callRtcConfig([turn], { relayOnly: true }));
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_open", { id: pc.id, events: expect.anything(), iceServers: [{ urls: ["turn:turn.example.org:3478"], username: "ghost", credential: "test-credential" }], relayOnly: true });
+    // What the call hook checks before the microphone (`assertKeepsToRelays`), and when the switch goes on mid-call.
+    expect(nativeCallMedia().keepsToRelays).toBe(true);
+    expect(keepsToRelays(pc as unknown as RTCPeerConnection)).toBe(true);
+  });
+
+  it("with Hide my IP from contacts on, a call Rust could not keep to the relay is the relay not answering, and other failures stay as they are", async () => {
+    const relayOnly = callRtcConfig([{ urls: "turns:turn.example.org:5349", username: "ghost", credential: "test-credential" }], { relayOnly: true });
+    // No TURN server Rust can use: the call was not opened.
+    tauri.invoke.mockImplementation(async (command) => { if (command === "native_call_open") throw "Hide my IP: no TURN server this app can use"; });
+    const unopened = new NativePeerConnection(relayOnly);
+    await expect(unopened.createOffer()).rejects.toBeInstanceOf(CallRelayError);
+    await unopened.setRemoteDescription({ type: "offer", sdp: "their offer" });
+    await expect(unopened.createAnswer()).rejects.toMatchObject({ problem: "relay" });
+    expect(commands()).not.toContain("native_call_offer");
+    expect(commands()).not.toContain("native_call_answer");
+    // A TURN server that gave no relay candidate: no description.
+    tauri.invoke.mockImplementation(async (command) => { if (command === "native_call_offer" || command === "native_call_answer") throw "Hide my IP: the TURN server gave no relay candidate"; });
+    await expect(new NativePeerConnection(relayOnly).createOffer()).rejects.toBeInstanceOf(CallRelayError);
+    const answering = new NativePeerConnection(relayOnly);
+    await answering.setRemoteDescription({ type: "offer", sdp: "their offer" });
+    await expect(answering.createAnswer()).rejects.toBeInstanceOf(CallRelayError);
+    tauri.invoke.mockImplementation(async (command) => { if (command === "native_call_offer") throw "No microphone"; });
+    await expect(new NativePeerConnection(relayOnly).createOffer()).rejects.toBe("No microphone");
   });
 
   it("restarts ICE through Rust on the call it started: a restart offer, and the peer's answer to it", async () => {
@@ -424,6 +521,36 @@ describe("the RTCPeerConnection stand-in", () => {
     const late: number[] = [];
     levels.own((level) => late.push(level));
     expect(late).toEqual([0.1]);
+  });
+
+  it("asks Rust for the levels only while a ring listens: a video call, which draws none, is told none", async () => {
+    // Rust says a level at nearly every reading while someone speaks, an eval each: 20 a second for no ring.
+    const levelCommands = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_call_levels").map(([, args]) => args);
+    const pc = new NativePeerConnection({});
+    const local = await nativeCallMedia().getUserMedia({ audio: true });
+    pc.addTrack(local.getAudioTracks()[0]);
+    const levels = callLevels(local)!;
+    // A ring that listens before Rust has the call waits for it.
+    const stopEarly = levels.peer(() => {});
+    expect(levelCommands()).toEqual([]);
+    await pc.createOffer();
+    expect(levelCommands()).toEqual([{ id: pc.id, on: true }]);
+    stopEarly();
+    expect(levelCommands()).toEqual([{ id: pc.id, on: true }, { id: pc.id, on: false }]);
+    // Both rings back (the camera off again): asked once, and let go once the last stops.
+    const stopPeer = levels.peer(() => {});
+    const stopOwn = levels.own(() => {});
+    stopPeer();
+    expect(levelCommands()).toHaveLength(3);
+    stopOwn();
+    expect(levelCommands().slice(2)).toEqual([{ id: pc.id, on: true }, { id: pc.id, on: false }]);
+
+    // A video call: no ring ever listens, and Rust starts with none to say.
+    tauri.invoke.mockClear();
+    const video = new NativePeerConnection({});
+    video.addTrack((await nativeCallMedia().getUserMedia({ audio: true })).getAudioTracks()[0]);
+    await video.createOffer();
+    expect(levelCommands()).toEqual([]);
   });
 
   it("has no levels to tell for a microphone no call sends, or a stream that is not a call's", async () => {
@@ -657,12 +784,14 @@ describe("the devices, which are GStreamer's and known by name", () => {
 
     await video.sender.replaceTrack((await media.getUserMedia({ video: true })).getVideoTracks()[0]);
     const headset = (await media.getUserMedia({ audio: { deviceId: { exact: "Headset" } } })).getAudioTracks()[0];
-    await audio.sender.replaceTrack(headset);
+    // Settled once Rust has it, as a switch on a call that is up.
+    const switching = audio.sender.replaceTrack(headset);
     nativeDevices.playCallOn("Headphones");
     await new Promise((done) => setTimeout(done, 0));
     for (const [command, args] of tauri.invoke.mock.calls) if (args?.id === pc.id) spoken.push(command);
     described();
     await describing;
+    await switching;
 
     expect(spoken, "nothing for a call Rust does not have yet").toEqual([]);
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_camera", { id: pc.id, camera: 7 });
@@ -670,6 +799,120 @@ describe("the devices, which are GStreamer's and known by name", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_speaker", { id: pc.id, device: "Headphones" });
     expect(headset.getSettings().deviceId).toBe("Headset");
     pc.close();
+  });
+
+  it("a microphone picked while the call catches up on earlier picks stays the one sent, not the earlier pick", async () => {
+    let described!: () => void;
+    let spoken!: () => void;
+    tauri.invoke.mockImplementation(async (command, args) => {
+      if (command === "native_call_offer") { await new Promise<void>((done) => { described = done; }); return { sdp: "sdp", microphone: null }; }
+      // Rust relaunches the call's sound on the new speaker: the person picks another microphone meanwhile.
+      // (This call's: a call an earlier test left open plays on it at once.)
+      if (command === "native_call_speaker" && args?.id === pc.id) { await new Promise<void>((done) => { spoken = done; }); return undefined; }
+      if (command === "native_call_microphone") return args?.device ?? null;
+      return undefined;
+    });
+    const media = nativeCallMedia();
+    const pc = new NativePeerConnection({});
+    const [audio] = pc.getTransceivers();
+    pc.addTrack((await media.getUserMedia({ audio: true })).getAudioTracks()[0]);
+    const describing = pc.createOffer();
+    await vi.waitFor(() => expect(described).toBeTypeOf("function"));
+    // While Rust gathers: a headset, both ways.
+    const headset = audio.sender.replaceTrack((await media.getUserMedia({ audio: { deviceId: { exact: "Headset" } } })).getAudioTracks()[0]);
+    nativeDevices.playCallOn("Headphones");
+    described();
+    await vi.waitFor(() => expect(spoken).toBeTypeOf("function"));
+    // The call has started in Rust, which has not had the microphone yet: this one goes with the earlier pick.
+    const usb = (await media.getUserMedia({ audio: { deviceId: { exact: "USB Mic" } } })).getAudioTracks()[0];
+    const switching = audio.sender.replaceTrack(usb);
+    spoken();
+    await describing;
+    await Promise.all([headset, switching]);
+
+    const microphones = tauri.invoke.mock.calls.filter(([command]) => command === "native_call_microphone").map(([, args]) => args?.device);
+    expect(microphones[microphones.length - 1], "the last microphone Rust was told").toBe("USB Mic");
+    expect(usb.getSettings().deviceId).toBe("USB Mic");
+    pc.close();
+  });
+
+  describe("a microphone picked while Rust starts the call, which the call hook swaps in once its replaceTrack resolves", () => {
+    const calls: InstanceType<typeof NativePeerConnection>[] = [];
+    afterEach(() => calls.forEach((pc) => pc.close()));
+
+    /** A call Rust starts on Mic A once let go; the microphone switches as `switched` answers. */
+    async function starting(switched: (device: string | null) => Promise<string | null>) {
+      let described!: () => void;
+      tauri.invoke.mockImplementation(async (command, args) => {
+        // Rust gathers its candidates first (up to a few seconds): the person picks another microphone meanwhile.
+        if (command === "native_call_offer") { await new Promise<void>((done) => { described = done; }); return { sdp: "sdp", microphone: "Mic A" }; }
+        if (command === "native_call_microphone") return switched((args?.device as string | null | undefined) ?? null);
+        return undefined;
+      });
+      const media = nativeCallMedia();
+      const pc = new NativePeerConnection({});
+      calls.push(pc);
+      const [audio] = pc.getTransceivers();
+      const mic = async (device: string) => (await media.getUserMedia({ audio: { deviceId: { exact: device } } })).getAudioTracks()[0];
+      const micA = await mic("Mic A");
+      pc.addTrack(micA);
+      const describing = pc.createOffer();
+      await vi.waitFor(() => expect(described).toBeTypeOf("function"));
+      /** Picks `device` as `useWebRTC.switchMicrophone` does: the old track stops once it is swapped in, the new one if it is refused. */
+      const pick = async (device: string) => {
+        const track = await mic(device);
+        const switching = audio.sender.replaceTrack(track).then(() => { micA.stop(); }, (error: unknown) => { track.stop(); throw error; });
+        // Awaited by the test later: no unhandled rejection meanwhile.
+        switching.catch(() => {});
+        return { track, switching };
+      };
+      const start = async () => { described(); await describing; };
+      const ended = (device: "microphone") => tauri.channels[0].onmessage(json({ ended: device }));
+      return { pc, audio, micA, pick, start, ended };
+    }
+
+    it("refused by Rust, fails the switch: the call keeps the one Rust sends, which its device check falls back from when it fails", async () => {
+      const { audio, micA, pick, start, ended } = await starting(async () => { throw new Error("Headset could not be opened"); });
+      const { track: headset, switching } = await pick("Headset");
+      await start();
+      await expect(switching, "the call hook hears the switch failed, and says so").rejects.toThrow("Headset could not be opened");
+      expect(headset.readyState).toBe("ended");
+      expect(micA.readyState, "Mic A, the one Rust sends, stays on").toBe("live");
+      expect(micA.getSettings().deviceId).toBe("Mic A");
+      expect(audio.sender.track, "a later offer asks Rust for the one it sends").toBe(micA);
+      ended("microphone");
+      expect(micA.readyState, "Mic A failing ends its track").toBe("ended");
+    });
+
+    it("opened by Rust, is the one sent: its track, which ends when it fails", async () => {
+      const { audio, micA, pick, start, ended } = await starting(async (device) => device);
+      const { track: headset, switching } = await pick("Headset");
+      await start();
+      await switching;
+      expect(tauri.invoke).toHaveBeenCalledWith("native_call_microphone", expect.objectContaining({ device: "Headset" }));
+      expect(micA.readyState).toBe("ended");
+      expect(headset.getSettings().deviceId).toBe("Headset");
+      expect(audio.sender.track).toBe(headset);
+      ended("microphone");
+      expect(headset.readyState, "the Headset failing ends its track").toBe("ended");
+    });
+
+    it("picked again as the one Rust starts with, is the one sent: its track ends when it fails", async () => {
+      const { pick, start, ended } = await starting(async (device) => device);
+      const { track: again, switching } = await pick("Mic A");
+      await start();
+      await switching;
+      expect(commands()).not.toContain("native_call_microphone");
+      ended("microphone");
+      expect(again.readyState).toBe("ended");
+    });
+
+    it("on a call hung up meanwhile, lets the switch go", async () => {
+      const { pc, pick } = await starting(async (device) => device);
+      const { switching } = await pick("Headset");
+      pc.close();
+      await switching;
+    });
   });
 
   it("meters a microphone in Rust for Settings, by name, until stopped", async () => {
@@ -692,6 +935,33 @@ describe("the devices, which are GStreamer's and known by name", () => {
     expect(tauri.invoke).toHaveBeenLastCalledWith("native_microphone_meter", expect.objectContaining({ device: null }));
     tauri.invoke.mockRejectedValueOnce("The microphone could not start");
     await expect(nativeDevices.meter!("Mic B", () => {})).rejects.toBe("The microphone could not start");
+  });
+
+  it("tells Rust when the window goes out of sight once Settings' meter is on, with no call or camera open", async () => {
+    // Out of sight, Rust says no level to the meter: 12 a second, each an eval in the page, for a meter nobody sees.
+    // A page of its own: no picture of an earlier test has started following the window already. That earlier
+    // module's own listener is still on `document`, so the one this page adds is called by itself.
+    vi.resetModules();
+    const fresh = await import("../../desktop/nativeCalls");
+    tauri.invoke.mockImplementation(async (command) => (command === "native_microphone_meter" ? { meter: 1, device: null } : undefined));
+    const hidden = { on: false };
+    const hiddenSpy = vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden.on);
+    const added = vi.spyOn(document, "addEventListener");
+    const told = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_pictures_shown").map(([, args]) => args);
+    try {
+      const stop = await fresh.nativeDevices.meter!(undefined, () => {});
+      const follows = added.mock.calls.filter(([type]) => type === "visibilitychange").map(([, listener]) => listener as () => void);
+      expect(follows, "the page follows the window's sight").toHaveLength(1);
+      hidden.on = true;
+      follows[0]();
+      hidden.on = false;
+      follows[0]();
+      await vi.waitFor(() => expect(told()).toEqual([{ shown: false }, { shown: true }]));
+      stop();
+    } finally {
+      added.mockRestore();
+      hiddenSpy.mockRestore();
+    }
   });
 
   it("plays the speakers' test in Rust, on the speaker by name", async () => {

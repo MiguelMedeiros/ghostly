@@ -13,6 +13,7 @@ import { NativeWorld } from "./support/nativeWorld";
  * contact's connection is left as it is. The side whose key dials offered at once; the other did nothing until the
  * contact's own connection gave up: 31-34 s offline with a CLI contact (node-datachannel goes `failed` about 30 s on),
  * 20 s with a browser's (`disconnected` at 5 s, then `DISCONNECT_GRACE_MS`), although Iroh was up on both sides.
+ * Both apps chose WebRTC here: on Automatic the chat is on Iroh.
  */
 
 interface App { name: string; link: GhostLink; state: PairingState }
@@ -25,7 +26,8 @@ function startApp(name: string, side: Side, contact: { side: Side; name: string 
     params: side.params,
     rtcAvailable: true,
     pairing: { credentials: { seedB64: side.seedB64, peerKey: identityFromSeedB64(contact.side.seedB64).pubKeyZ32 }, pinPeer: async () => {}, trustOnFirstUse: true },
-    native: { peerDescriptors: { "iroh/1": { id: native.key("iroh/1", contact.name), relay: "https://relay.test./", addresses: [] } }, peerTransports: ["webrtc/1", "iroh/1"], peerFallback: true, automatic: true },
+    // WebRTC first, as the person chose it (Automatic puts Iroh first, WISP 100 revision 2026-11-08).
+    native: { peerDescriptors: { "iroh/1": { id: native.key("iroh/1", contact.name), relay: "https://relay.test./", addresses: [] } }, peerTransports: ["webrtc/1", "iroh/1"], peerFallback: true, preferred: "webrtc/1", automatic: false },
     ...(upgrade ? { upgradeSupport: true, peerUpgrades: () => true } : {}),
     transport: pkarr.transport(),
     pollIntervals: RELAY_POLL_INTERVALS,

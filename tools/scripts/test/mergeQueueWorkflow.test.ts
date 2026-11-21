@@ -20,9 +20,9 @@ const wakes = ({ event_name, event }: Event) =>
 
 const push = (type: string): Event => ({ event_name: "push", event: { sender: { type, login: type === "Bot" ? "ghostly-merge-queue-mm[bot]" : "MiguelMedeiros" } } });
 const label = (name: string, action = "labeled"): Event => ({ event_name: "pull_request_target", event: { action, label: { name } } });
-const ci = (conclusion: string, event = "pull_request", from = repository): Event => ({
+const ci = (conclusion: string, event = "pull_request", from = repository, branch = "fix"): Event => ({
   event_name: "workflow_run",
-  event: { workflow_run: { event, conclusion, head_repository: { full_name: from } } },
+  event: { workflow_run: { event, conclusion, head_branch: branch, head_repository: { full_name: from } } },
 });
 
 describe("merge-queue.yml wakes the train", () => {
@@ -60,10 +60,22 @@ describe("merge-queue.yml wakes the train", () => {
     expect(wakes(label("queue:failed"))).toBe(false);
   });
 
-  it("not for another label or CI on a push", () => {
+  it("not for another label, nor CI on a push to a branch that is no base", () => {
     expect(wakes(label("kind:bug"))).toBe(false);
     expect(wakes(label("queued"))).toBe(false);
-    expect(wakes(ci("success", "push"))).toBe(false);
+    for (const branch of ["main", "claude/security-auto-1", "fix", "batch/dev-1", "release/1.2", "devx"]) expect(wakes(ci("success", "push", repository, branch)), branch).toBe(false);
+  });
+
+  // A red batch or lone pull request is held while CI Success on its base's tip still runs: that run ending is the only
+  // event that can move it, so it wakes the train (the script lists the base only while the commit is its tip).
+  it("for CI on a push to dev or an epic, green or red, and not when it was cancelled", () => {
+    for (const branch of ["dev", "epic/apps-1.2"]) {
+      expect(wakes(ci("success", "push", repository, branch)), branch).toBe(true);
+      expect(wakes(ci("failure", "push", repository, branch)), branch).toBe(true);
+      expect(wakes(ci("cancelled", "push", repository, branch)), branch).toBe(false);
+    }
+    // The trigger is CI's completed runs, from any branch: the condition above is what picks.
+    expect(text).toMatch(/^ {2}workflow_run:\n {4}workflows: \[CI\]\n {4}types: \[completed\]$/m);
   });
 
   // A held pull request waits in line and boards once `queue:hold` comes off: nothing else may wake the train then, and
@@ -86,6 +98,12 @@ describe("merge-queue.yml waits in line", () => {
   it("only for runs that pass the bases job's condition: the group is that job's, not the workflow's", () => {
     expect(text).not.toMatch(/^concurrency:/m);
     expect(job("bases")).toMatch(/^ {4}concurrency:\n {6}group: merge-queue-bases\n {6}cancel-in-progress: false$/m);
+  });
+
+  // Two wakes close together (dev's CI and a batch's CI ending a second apart) never run two trains on one base: the
+  // second waits behind the first, and a third replaces it.
+  it("and one train per base at a time", () => {
+    expect(job("train")).toMatch(/^ {4}concurrency:\n {6}group: merge-train-\$\{\{ matrix\.base \}\}\n {6}cancel-in-progress: false$/m);
   });
 
   it("and a run woken by CI is named after its head, so the run that replaced it serves it", async () => {

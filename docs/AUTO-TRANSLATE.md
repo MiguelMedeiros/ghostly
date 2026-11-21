@@ -23,7 +23,7 @@ Nothing leaves the device: no cloud service, no peer is asked to translate. The 
 language model once, after asking.
 
 Neither direction needs a wire or stored-format change, and so no WISP. Reading is a view of a message the app already
-has: the original text stays what is stored, sent on to your other devices, quoted, searched and backed up, and the
+has: the original text stays what is stored, sent on to your other devices, quoted and backed up, and the
 translation is a local cache that can be thrown away at any time. Writing produces an ordinary text message: what is
 sent is the translated text, exactly as if I had typed it.
 
@@ -213,8 +213,10 @@ The reverse direction, on request: my draft translated into the chat's language 
   draft stays in the composer until something is sent.
 - **My translated bubble:** "Translated to Italian · Show original" under my message, on the sending device only, in
   the same quiet style.
-- **Copy, reply, quote, forward, search:** act on the original text of a received message, and on the sent text (the
+- **Copy, reply, quote, forward:** act on the original text of a received message, and on the sent text (the
   translation) of mine. Copy offers the other text as a second item.
+- **Search in a chat:** finds a message by the text its bubble shows: a received message by its translation (the one
+  this device already holds; searching translates nothing), or by its original with Show original pressed.
 - **Accessibility:** the screen reader reads the translated text, then "translated from Portuguese"; Show original is
   a real button. The composer preview is a labelled region ("Translation to Italian"), announced when it is ready;
   Send translation is the default action, so Enter sends what is shown.
@@ -440,8 +442,8 @@ Nothing needs to be precached:
 
 - the wasm is already left out (`precacheList` drops every `.wasm`); fetched once on the first translation, the
   worker's `asset` route then keeps it, as it does the wallets' wasm;
-- the engine's Worker and its glue (100 KB) must be left out by name, as the detector's worker is today
-  (`/assets/translateDetector.worker-`), or the build would precache them for everyone;
+- the engine's Worker and its glue (100 KB) must be started from a module only a build with translation keeps, as the
+  detector's worker is (`lib/translateDetectorStart.ts`), or every build would write them and the web would precache them;
 - the models are never in the worker's cache: they come from the mirror into OPFS.
 
 ### Recommendation

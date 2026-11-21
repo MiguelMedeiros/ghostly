@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommunityWorld, type Peer } from "./communityWorld";
 import { MESH_SYNC_HOLD_MS } from "../src/engine/groups";
+vi.mock("../../core/src/identity", async importOriginal => (await import("../../core/test/support/verifyOnce")).verifyOnce(await importOriginal()));
 // covers: groups.catch-up
 
 /**
@@ -318,7 +319,7 @@ describe("a member back in a private group reads what it missed in the order it 
     const [alice, , carol, dave] = peers;
     dave.online = false;
     await world.run(2_000);
-    for (let i = 0; i < 200; i++) await carol.groups.send(id, `carol ${i}`);
+    for (let i = 0; i < 200; i++) { await carol.groups.send(id, `carol ${i}`); await world.run(400); }
     await world.run(2_000);
     // Every frame to Dave waits its turn behind the others: the members' syncs first, then Alice's answer of all 200.
     const seen = new Set<string>();

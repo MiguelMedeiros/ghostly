@@ -8,6 +8,16 @@ import { useCallback, useMemo, useRef, type CompositionEvent, type KeyboardEvent
 export const COMPOSITION_END_WINDOW_MS = 100;
 
 /**
+ * Whether a keydown is the input method's: while it composes, or the key that ended a composition at `endedAt` (the
+ * `compositionend`'s timeStamp, null for none). For a listener on the whole page; a field takes `useComposition`.
+ */
+export function composingKey(e: globalThis.KeyboardEvent, endedAt: number | null): boolean {
+  // 229: the key went to the input method (WebKit reports it, and older Chrome, without `isComposing`).
+  if (e.isComposing || e.keyCode === 229) return true;
+  return endedAt !== null && Math.abs(e.timeStamp - endedAt) < COMPOSITION_END_WINDOW_MS;
+}
+
+/**
  * Keys that belong to an input method (Japanese, Chinese, Korean…): while it composes, Enter confirms a candidate,
  * the arrows move among candidates and Escape drops the composition. A field that acts on those keys asks
  * `composing(e)` first and leaves the key alone when it says true. Spread `inputProps` on the field.
@@ -20,9 +30,7 @@ export function useComposition() {
     const native = "nativeEvent" in e ? e.nativeEvent : e;
     const ended = endedAt.current;
     endedAt.current = null;
-    // 229: the key went to the input method (WebKit reports it, and older Chrome, without `isComposing`).
-    if (native.isComposing || native.keyCode === 229) return true;
-    return ended !== null && Math.abs(native.timeStamp - ended) < COMPOSITION_END_WINDOW_MS;
+    return composingKey(native, ended);
   }, []);
   const inputProps = useMemo(() => ({ onCompositionEnd }), [onCompositionEnd]);
   return { composing, inputProps };
