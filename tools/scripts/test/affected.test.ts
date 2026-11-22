@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "../affected/files.mjs";
 import { bundleReaches, checkPaths, featureGrep, globToRegExp, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_ALONE, UNIT_HALVED, UNIT_PROJECTS, unitGroupOf, unitPartsOf, workspaceExports } from "../affected/select.mjs";
 import { shardByTime, TimedShards } from "../../vitest.shards.ts";
@@ -469,9 +470,9 @@ describe("fallbacks", () => {
     const scripts = byName(p.unit).scripts;
     expect(scripts.mode).toBe("related");
     expect(scripts.files).toEqual(["tools/scripts/test/releaseInstallScripts.test.ts", "tools/scripts/test/webAppsTestFlag.test.ts"]);
-    // A workspace's package.json is not the root's.
+    // A workspace's package.json is not the root's: only the test that reads that one runs.
     const site = byName(plan({ changed: [{ path: "apps/website/package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles }).unit).scripts;
-    expect(site.mode).toBe("skip");
+    expect(site.files).toEqual(["tools/scripts/test/websiteSteps.test.ts"]);
   });
 
   it("core's index.ts runs every project that imports core whole, and every spec", () => {
@@ -874,7 +875,30 @@ describe("--unit-group: the draft tier's unit projects over a few runners", () =
     expect(count).toBeGreaterThan(UNIT_ALONE.length);
     expect(job).toContain(`name: Affected unit tests (draft \${{ matrix.group }}/${count})`);
     expect(job).toMatch(new RegExp(`run: node tools/scripts/test-affected\\.mjs .*--unit-group \\$\\{\\{ matrix\\.group \\}\\}/${count}( |$)`, "m"));
+    // CI Success gets one result for every group: it names the range, and each group names its own failures.
+    expect(ci).toContain(`check "Affected unit tests (draft 1/${count} to ${count}/${count})" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"`);
   });
+
+  it("names, in CI, its group's job and each unit project that failed, the job the run page shows", () => {
+    const bin = mkdtempSync(join(tmpdir(), "affected-npx-"));
+    try {
+      // Every vitest run fails at once.
+      writeFileSync(join(bin, "npx"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      const run = (env: Record<string, string>) =>
+        spawnSync(process.execPath, [script, "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--unit-group", "1/4", "--files", "packages/core/src/http.ts"], {
+          encoding: "utf8",
+          timeout: 60_000,
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, ...env },
+        });
+      const ci = run({ GITHUB_ACTIONS: "true" });
+      expect(ci.status).toBe(1);
+      expect(ci.stdout.split("\n").filter((l) => l.startsWith("::error::"))).toEqual(["::error::Affected unit tests (draft 1/4): unit ui failed"]);
+      // Not in a terminal.
+      expect(run({ GITHUB_ACTIONS: "" }).stdout).not.toContain("::error::");
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
 
 describe("the cli's halves (tools/vitest.shards.ts): vitest --shard cut by time", () => {
@@ -920,6 +944,22 @@ describe("the cli's halves (tools/vitest.shards.ts): vitest --shard cut by time"
     const [a, b] = [await half(1), await half(2)];
     expect([...a, ...b].sort()).toEqual(specs.map((s) => s.moduleId).sort());
     expect(a.map((m) => m.slice(repo.length + 1)).sort()).toEqual([...shardByTime(cliTests, seconds, 1, 2)].sort());
+  });
+
+  it("says so when its half gets none of the files, which the other half runs", async () => {
+    // A change reaching one CLI test: Vitest's own line for the empty half ("No affected test files found") read as if
+    // the test ran nowhere.
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const specs = [{ moduleId: join(repo, cliTests[0]) }];
+      const half = (index: number) => new TimedShards({ config: { shard: { index, count: 2 } } } as never).shard(specs as never);
+      expect(await half(1)).toHaveLength(1);
+      expect(log).not.toHaveBeenCalled();
+      expect(await half(2)).toEqual([]);
+      expect(log).toHaveBeenCalledWith("--shard=2/2 (cut by time, tools/vitest.shards.ts): none of the 1 test file(s) here, the other half runs them");
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 

@@ -53,6 +53,28 @@ describe("a share into the app", () => {
       expect(shareText(share({ text: "https://a.example/p\nvia app", url: "https://a.example/p" }))).toBe("https://a.example/p\nvia app");
     });
 
+    it("its link is not repeated when the text carries it between CJK or Arabic punctuation, which no address holds", () => {
+      const url = "https://a.example/p";
+      // Also right after another link's 。 or ، (no space), which the bubble reads as a link of its own since #8104.
+      for (const text of [`链接：${url}`, `記事、${url}。`, `見て ${url}。${"とても面白い記事です".repeat(10)}`, `رابط،${url}؟ ${"ممتاز".repeat(20)}`, `看 https://b.example/x。${url}`, `رابط https://b.example/x،${url}`]) {
+        expect(shareText(share({ text, url }))).toBe(text);
+      }
+      // A longer address after the punctuation still does not carry it.
+      expect(shareText(share({ text: `链接：${url}2`, url }))).toBe(`链接：${url}2\n${url}`);
+    });
+
+    it("its link is not repeated when the text's differs only by a site's closing '/' or the scheme and host's case", () => {
+      expect(shareText(share({ text: "Check this https://x.example", url: "https://x.example/" }))).toBe("Check this https://x.example");
+      expect(shareText(share({ text: "Check this https://x.example/.", url: "https://x.example" }))).toBe("Check this https://x.example/.");
+      expect(shareText(share({ text: "HTTPS://X.EXAMPLE/a", url: "https://x.example/a" }))).toBe("HTTPS://X.EXAMPLE/a");
+      expect(shareText(share({ text: "Look https://x.example/ab", url: "https://x.example/a" }))).toBe("Look https://x.example/ab\nhttps://x.example/a");
+      // The path's case is the page's own.
+      expect(shareText(share({ text: "Look https://x.example/A", url: "https://x.example/a" }))).toBe("Look https://x.example/A\nhttps://x.example/a");
+      // What is no web address is compared as typed.
+      expect(shareText(share({ text: "Code: GHOST-42 here", url: "ghost-42" }))).toBe("Code: GHOST-42 here\nghost-42");
+      expect(shareText(share({ text: "Code: ghost-42 here", url: "ghost-42" }))).toBe("Code: ghost-42 here");
+    });
+
     it("a text where the link turns up at every character is read at once, not once per place (any website can post one)", () => {
       const started = performance.now();
       expect(shareText(share({ text: "(".repeat(60_000), url: "(" })).startsWith("(".repeat(60_000))).toBe(true);

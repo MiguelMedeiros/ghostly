@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeInvoice } from "@ghostly/browser/engine/paymentAdapters/providers/testing";
 import { DEFAULT_MINTS, TEST_MINTS } from "@ghostly/browser/shared/mints";
@@ -91,6 +91,19 @@ describe("the Cashu card keeps the keyboard's place while it works", () => {
     expect(send).toHaveFocus();
     expect(send).not.toHaveAttribute("aria-busy");
     expect(calls).toBe(1);
+  });
+
+  it("Send's Pay <amount> wraps its label, like Create invoice, instead of leaving the card (a long amount, 200% text size), busy too", async () => {
+    const paid = later<never>();
+    const { user } = show({ quoteInvoice: () => paid.promise }, "mainnet");
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    await user.click(screen.getByTestId("wallet-pay-input"));
+    await user.paste(liveMainnetInvoice(21_000_000_000));
+    const pay = screen.getByRole("button", { name: /^Pay 21,000,000,000 sats$/ });
+    expect(pay.className).toContain("!whitespace-normal");
+    await user.click(pay);
+    expect(pay).toHaveAttribute("aria-busy", "true");
+    expect(pay.className).toContain("!whitespace-normal");
   });
 
   it("Add: busy where it was pressed, then the emptied address field takes the keys", async () => {
@@ -339,6 +352,52 @@ describe("Receive's invoice on screen", () => {
     vi.advanceTimersByTime(5 * 60_000);
     expect(watchInvoice).toHaveBeenCalledTimes(2);
   });
+
+  /**
+   * Nobody sees an invoice in a hidden page (another tab, the window minimised): the screen stops saying it, so the
+   * engine falls back to its own pace instead of asking the mint every 4 s for the invoice's whole life. Shown again,
+   * it says it at once, so a payment made meanwhile shows within seconds.
+   */
+  describe("while the page is hidden", () => {
+    let visibility: DocumentVisibilityState = "visible";
+    const turn = (to: DocumentVisibilityState) => act(() => {
+      visibility = to;
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    const showWatched = async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+      const watchInvoice = vi.fn(async () => {});
+      const wallet: WalletPlatform = Object.assign(Object.create(servicesPlatform!.wallet), {
+        receiveLightning: async () => ({ quote: "our-quote", invoice: REGTEST_INVOICE, expiresAt: null, source: "cashu-mint" }),
+        watchInvoice,
+      });
+      const view = renderApp(<CashuWallet wallet={wallet} state={at([])} rail="cashu" onOpenCashu={() => {}} />);
+      await view.user.click(screen.getByTestId("wallet-receive-amount"));
+      await view.user.keyboard("1000{Enter}");
+      await waitFor(() => expect(watchInvoice).toHaveBeenCalledWith(REGTEST_INVOICE));
+      return watchInvoice;
+    };
+    afterEach(() => { visibility = "visible"; vi.restoreAllMocks(); });
+
+    it("is not watched at all, however long it stays hidden", async () => {
+      const watchInvoice = await showWatched();
+      expect(watchInvoice).toHaveBeenCalledOnce();
+      turn("hidden");
+      vi.advanceTimersByTime(30 * 60_000);
+      expect(watchInvoice).toHaveBeenCalledOnce();
+    });
+
+    it("is watched at once when the page shows again, then every minute", async () => {
+      const watchInvoice = await showWatched();
+      turn("hidden");
+      vi.advanceTimersByTime(10 * 60_000);
+      turn("visible");
+      expect(watchInvoice).toHaveBeenCalledTimes(2);
+      vi.advanceTimersByTime(60_000);
+      expect(watchInvoice).toHaveBeenCalledTimes(3);
+    });
+  });
 });
 
 // covers: wallet.cashu.pay-invoice
@@ -479,6 +538,20 @@ describe("in Arabic, someone else's memo in the wallet keeps its own direction",
     await user.click(screen.getByTestId("lnurl-invoice"));
     await screen.findByTestId("lnurl-review");
     expect(screen.getByText(MEMO)).toHaveAttribute("dir", "auto");
+  });
+
+  it("a received ecash's memo and its mint's name in History, and the mint's name in Mints", async () => {
+    // Joined bare, an Arabic mint name, " · " and an Arabic memo made one right-to-left run: the memo was drawn first.
+    const TEST_MINT = TEST_MINTS[0];
+    const NAME = "مينت الاختبار (2)";
+    const ecash = { id: "tx-ecash", kind: "ecash-in" as const, amount: 100, fee: 0, timestamp: 1_791_000_000_000, mint: TEST_MINT, note: MEMO };
+    const state = networkState(walletView({ mints: [{ ...mint(TEST_MINT, 100), name: NAME }], balance: 100, history: [ecash] }) as WalletState, "testnet");
+    const { user } = renderApp(<CashuWallet wallet={servicesPlatform!.wallet} state={state} rail="cashu" onOpenCashu={() => {}} />, { language: "ar" });
+    expect(screen.getByText(NAME).tagName).toBe("BDI");
+    expect(screen.getByTestId("mint-row")).toContainElement(screen.getByText(NAME));
+    await user.click(screen.getByRole("tab", { name: "السجل" }));
+    const row = screen.getByTestId("wallet-tx");
+    for (const text of [NAME, MEMO]) expect(within(row).getByText(text).tagName).toBe("BDI");
   });
 });
 

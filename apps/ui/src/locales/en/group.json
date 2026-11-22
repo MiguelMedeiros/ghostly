@@ -181,6 +181,7 @@
     "fullShort": "The group is full",
     "hideQr": "Hide QR",
     "jammed": "Nobody can join with this group's link right now: it keeps getting requests from apps that never connect, and they take the places newcomers wait in. Someone who has the link may be doing it on purpose. Make a new link and share it again.",
+    "madeNew": "The admin made a new link",
     "note": "Anyone who opens this link joins, without being your contact or saying who they are. They get in while your app is open, up to {{count}} members.",
     "noteCommunity": "Anyone who opens this link joins, without being anyone's contact or saying who they are. Any member's app lets them in, so it works while you are away; up to {{count}} members. Removing someone does not stop them from opening the link again: the admin makes a new one for that.",
     "off": "The link is off: nobody can join with it, and the link shared before will not work again. Turning it on makes a new link to share.",
@@ -188,6 +189,7 @@
     "qrTitle": "Group link QR code",
     "reset": "New link",
     "resetBody": "The link shared so far stops working for good: whoever has it and has not joined yet cannot get in with it. Members stay in the group.",
+    "resetDone": "New link made: the one shared before no longer works",
     "resetHint": "A new link; the current one stops working",
     "resetTitle": "Make a new link?",
     "share": "Share",
@@ -199,6 +201,7 @@
     "title": "Group link",
     "tooMany": "Too many group links opened",
     "tooManyNext": "Delete a group that is still waiting to be let in, or paste the link in Join.",
+    "turnedOff": "The admin turned the link off",
     "unanswered": "People opening the link may not be getting in: many who knocked lately never answered. A new link fixes it; share the new one after."
   },
   "makeAdmin": {
@@ -231,8 +234,10 @@
     "fullInvited": "The group is full ({{max}} of {{max}}), counting invitations not answered yet ({{invited}}). Nobody else can be invited until someone leaves.",
     "invite": "Invite a contact",
     "inviteAction": "Invite",
+    "inviteLabel": "Invite {{name}}",
     "invited": "Invited…",
     "makeAdmin": "Hand over admin",
+    "makeAdminLabel": "Hand over admin to {{name}}",
     "missing": "{{count}} of their messages have not arrived yet",
     "missingOne": "{{count}} of their messages has not arrived yet",
     "needsBothHint": "Groups need both apps connected and updated",
@@ -242,13 +247,16 @@
     "notReachable": "not reachable",
     "reachable": "reachable",
     "remove": "Remove",
+    "removeLabel": "Remove {{name}}",
     "removePicture": "Remove picture"
   },
   "menu": {
     "forget": "Delete from this device",
     "leave": "Leave group",
     "members": "Members…",
-    "rotate": "Rotate keys"
+    "rotate": "Rotate keys",
+    "rotated": "Keys rotated: members get the new keys",
+    "rotating": "Rotating keys…"
   },
   "others": {
     "body": "Anyone who knows a group's id can make a group of their own under it, and only one of them can be on this device. Keep this one, or switch to the other: switching leaves this one and deletes it from this device.",
