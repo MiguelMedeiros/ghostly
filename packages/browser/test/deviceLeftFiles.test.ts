@@ -135,7 +135,7 @@ class Storage implements HandoffStagingHost {
     return {
       database: name,
       held: async () => [...space.held.values()],
-      begin: async (id) => { space.files.set(id, new Uint8Array()); space.held.delete(id); },
+      begin: async (ids) => { for (const id of ids) { space.files.set(id, new Uint8Array()); space.held.delete(id); } },
       append: async (id, _offset, bytes) => {
         const was = space.files.get(id) ?? new Uint8Array();
         const next = new Uint8Array(was.length + bytes.length); next.set(was); next.set(bytes, was.length);
