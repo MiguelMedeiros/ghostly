@@ -2,8 +2,9 @@ import { useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
 import { useSettings } from "../../contexts/SettingsContext";
-import { lostWalletLines, removeErrorKey } from "../../lib/devices";
+import { lostWalletLines, removeErrorKey, walletsAtHomeOn } from "../../lib/devices";
 import { DeviceDialog, dangerButton, primaryButton, quietButton } from "./DeviceDialog";
+import { HomeWallets } from "./HomeWallets";
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { said } from "../../lib/notices";
@@ -18,7 +19,11 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const [checklist, setChecklist] = useState(false);
+  // The wallets at home on that device (WISP 06 § Wallets that stay home): once it is removed, they open here instead.
+  const wallet = useSyncExternalStore(subscribe, walletOf);
+  const homes = walletsAtHomeOn(wallet, deviceKey);
   const remove = async () => {
+    if (busy) return;
     setBusy(true); setError(null);
     try {
       await engine.call("deviceRemove", { key: deviceKey });
@@ -38,13 +43,20 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
     <DeviceDialog title={fillNames(t("devices.remove.title"), { device })} onClose={close} testId="device-remove">
       <p className="text-text-secondary">{t("devices.remove.text")}</p>
       <p className="text-text-muted text-xs">{t("devices.remove.copy")}</p>
-      {busy && <p role="status" data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}
+      <HomeWallets wallets={homes} device={device} testId="device-remove-homes" />
+      {/* Said from a line there from the start, as Take over's: one that comes with its text is often not read. */}
+      <div role="status">{busy && <p data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}</div>
       {error && <Notice problem={error} testId="device-remove-error" className="" />}
-      <button type="button" data-testid="device-remove-go" disabled={busy} onClick={() => void remove()} className={dangerButton}>{t("devices.remove.go")}</button>
-      <button type="button" data-testid="device-remove-lost" disabled={busy} onClick={() => setChecklist(true)} className={quietButton}>{t("devices.remove.lost")}</button>
+      {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page, and a
+          refusal left it there. A press while busy does nothing. */}
+      <button type="button" data-testid="device-remove-go" aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={() => void remove()} className={`${dangerButton} ${BUSY}`}>{t("devices.remove.go")}</button>
+      <button type="button" data-testid="device-remove-lost" aria-disabled={busy || undefined} onClick={() => { if (!busy) setChecklist(true); }} className={`${quietButton} ${BUSY}`}>{t("devices.remove.lost")}</button>
     </DeviceDialog>
   );
 }
+
+/** A button busy by `aria-disabled` looks as a disabled one does. */
+const BUSY = "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const walletOf = () => engine.state?.wallet;

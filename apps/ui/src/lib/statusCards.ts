@@ -1,4 +1,4 @@
-import { ACTIVE_TASK_STATUSES, taskProgress, usageLeft, type RoutineCard, type RunResult, type StatusCard, type TaskCard, type TaskStatus, type UsageCard } from "@ghostly/core";
+import { ACTIVE_TASK_STATUSES, taskProgress, usageLeft, type AppCard, type RoutineCard, type RunResult, type StatusCard, type TaskCard, type TaskStatus, type UsageCard } from "@ghostly/core";
 import type { Translate } from "../contexts/I18nContext";
 import { installedApps } from "./apps/installed";
 import { sharedRows } from "./chatRows";
@@ -304,7 +304,7 @@ export function appCardsShown(chat: string | undefined, appsOn: boolean): boolea
  * version, never the sender's words for it (`installed`: the list as last read). None for any other message, and none
  * where its chat does not draw it as a card (`shown`: `appCardsShown`), where the message's text is read instead.
  */
-export function appCardLine(card: StatusCard | undefined, shown: boolean, t: Translate, installed = installedApps()): string | undefined {
+export function appCardLine(card: StatusCard | Pick<AppCard, "kind" | "ref" | "title" | "version"> | undefined, shown: boolean, t: Translate, installed = installedApps()): string | undefined {
   if (!shown || card?.kind !== "app") return undefined;
   const { title, version } = installed?.find((app) => app.ref === card.ref) ?? card;
   return `🧩 ${t("apps.card.label", { title: version ? `${title} ${version}` : title })}`;

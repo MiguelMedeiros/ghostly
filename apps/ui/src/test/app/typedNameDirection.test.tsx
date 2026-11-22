@@ -39,7 +39,7 @@ function SearchBar() {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const search = { open: true, query, term: query, results: [], index: -1, inputRef, setQuery, dismiss() {}, older() {}, newer() {} };
-  return <ChatSearchBar search={search as unknown as ChatSearch} />;
+  return <ChatSearchBar search={search as unknown as ChatSearch} nameOf={() => "Ana"} />;
 }
 
 function ForwardSearch() {

@@ -269,8 +269,10 @@ describe("waking a contact whose app is closed", () => {
     for (const [name, failure] of failures) {
       const posts: string[] = [];
       let relay = failure;
-      vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
         if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
+        // The look at an unreachable relay's address (no-cors) gets no answer either; it is not a post.
+        if (init?.mode === "no-cors") throw new TypeError("Failed to fetch");
         try { const answer = relay(); posts.push(answer.ok && (await answer.clone().json() as { status: number }).status === 201 ? "ok" : "fail"); return answer; }
         catch (error) { posts.push("fail"); throw error; }
       }));
@@ -372,8 +374,10 @@ describe("waking a contact whose app is closed", () => {
   it("a push relay that cannot be reached (offline, timed out) is not said to refuse; another relay address drops what the old one said", async () => {
     let relay: () => Response | Promise<Response> = () => { throw new TypeError("Failed to fetch"); };
     const relayed = vi.fn();
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
+      // Nothing answers at all: the no-cors look at the address fails as the post did.
+      if (init?.mode === "no-cors") throw new TypeError("Failed to fetch");
       relayed();
       return relay();
     }));
@@ -397,6 +401,55 @@ describe("waking a contact whose app is closed", () => {
     await wake();
     expect(node.getState().pushRelayRefused).toMatchObject({ http: 429 });
     await node.updateSettings({ settings: { pushRelay: "https://other-relay.example/" } });
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+  });
+
+  it("a push relay address that answers without CORS (another kind of server, a proxy's error page) is kept as such while online, never while offline", async () => {
+    // The post's preflight gets no CORS headers (the HyperDHT relay's 426), so the page's fetch throws a TypeError, as
+    // it does offline; a no-cors GET of the address tells the two apart.
+    let probe: () => Response = () => new Response("Upgrade Required", { status: 426, headers: { "Content-Type": "text/plain" } });
+    let relay: () => Response = () => { throw new TypeError("Failed to fetch"); };
+    const posted = vi.fn(), probed = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (hostOf(url) === "web.push.apple.com") throw new TypeError("Failed to fetch");
+      if (init?.mode === "no-cors") {
+        expect(init.method).toBe("GET");
+        expect(init.credentials).toBe("omit");
+        probed(url);
+        return probe();
+      }
+      posted();
+      return relay();
+    }));
+    const node = engine();
+    await node.updateSettings({ settings: { pushRelay: "https://push-relay.example/" } });
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+    const wake = async () => {
+      const before = posted.mock.calls.length;
+      node["wakeLimiter"].reset(chat.id);
+      await node.sendMessage({ linkId: chat.id, text: "hi" });
+      await vi.waitFor(() => expect(posted.mock.calls.length).toBe(before + 1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+    // Something answers at that address, just not readably: not a push relay this page can use.
+    await wake();
+    expect(probed).toHaveBeenLastCalledWith("https://push-relay.example/");
+    expect(node.getState().pushRelayRefused).toEqual({ url: "https://push-relay.example/", at: expect.any(Number), http: 0 });
+    // A push relay that forwards one: nothing is said any more.
+    relay = () => new Response(JSON.stringify({ status: 201 }), { status: 200 });
+    await wake();
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    // Offline, the post and the look both fail: nothing is said (no false alarm).
+    relay = () => { throw new TypeError("Failed to fetch"); };
+    probe = () => { throw new TypeError("Failed to fetch"); };
+    await wake();
+    expect(node.getState().pushRelayRefused).toBeUndefined();
+    // A page that knows it is offline does not even look.
+    probe = () => new Response("", { status: 426 });
+    vi.stubGlobal("navigator", { onLine: false });
+    const looks = probed.mock.calls.length;
+    await wake();
+    expect(probed.mock.calls.length).toBe(looks);
     expect(node.getState().pushRelayRefused).toBeUndefined();
   });
 
@@ -666,6 +719,24 @@ describe("private groups: a mention wakes a member whose app is closed", () => {
     expect(framesOf(b).at(-1)!.w!.k).toBeTruthy();
     expect(framesOf(b).at(-1)!.w!.k).not.toBe(before);
     expect((await db.getSettings()).wakeMutedGroups).toBeUndefined();
+  });
+
+  it("a group left, removed or deleted takes its mute with it: joined again under the id, it is not muted", async () => {
+    const node = engine();
+    const b = edgeLink();
+    await addEdge(node, "g", memberKey(), b);
+    await addEdge(node, "other", memberKey(), edgeLink());
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect(framesOf(b)).toHaveLength(1));
+    await node.setWakeMuted({ linkId: "group:g", muted: true });
+    await node.setWakeMuted({ linkId: "group:other", muted: true });
+    const said = framesOf(b).length;
+    // Every way out of a group (leave, removed, deleted) tells the engine by this.
+    (node["groups"] as unknown as { host: { historyGone(groupId: string): void } }).host.historyGone("g");
+    expect(node["groupWakeView"]({ id: "g", profile: "mesh" } as never)).toEqual({});
+    await vi.waitFor(async () => expect((await db.getSettings()).wakeMutedGroups).toEqual(["other"]));
+    // A group just left hands its members no new token.
+    expect(framesOf(b)).toHaveLength(said);
   });
 
   it("an edge whose member held a token closes: replaced when the member is out of the group, not when a group on hubs only drops the edge", async () => {

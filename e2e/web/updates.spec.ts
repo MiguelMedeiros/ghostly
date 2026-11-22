@@ -1,4 +1,5 @@
 import { expect, test } from "../support/fixtures";
+import { keepsAnEdge } from "../support/forcedColors";
 
 /**
  * The web app finds out it is out of date by asking its own origin what it
@@ -18,6 +19,9 @@ test("offers the new version, and reloads into it when asked", { tag: ["@feature
   const banner = page.getByTestId("update-banner");
   await expect(banner).toBeVisible();
   await expect(banner).toContainText("9.9.9");
+
+  // Drawn by its fill alone, it read as bare text in forced colors (Windows Contrast themes).
+  await keepsAnEdge(page, banner.getByRole("button", { name: "Reload" }), "the update banner's Reload");
 
   // The reload lands on what the server now serves, and there is nothing left to offer.
   serving = JSON.stringify({ version: "0.0.0", build: "same" });

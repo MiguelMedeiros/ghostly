@@ -113,7 +113,7 @@ it("closes a stream whose far peer has stopped taking what the client sends, pas
     expect(streamClosed).toBe(true);
     expect(sent).toBeLessThanOrEqual(MiB / 2 + CHUNK.length);
     expect(most).toBeLessThan(8 * MiB);
-    expect(lines).toContain("closed far queue");
+    expect(lines).toContain("closed far queue: a far peer leaving half of 1 MiB untaken on one stream (GHOSTLY_RELAY_QUEUED_BYTES)");
     // The client itself stays: only that conversation was stuck.
     expect(closed()).toBe(false);
   });
@@ -176,7 +176,7 @@ it("weighs what a stream holds toward a frozen far peer without going over every
     // The bound still holds, and this burst stays under it.
     expect(streamClosed).toBe(false);
     expect(closed()).toBe(false);
-    expect(lines).not.toContain("closed far queue");
+    expect(lines.filter(line => line.startsWith("closed far queue"))).toEqual([]);
   }, { setup: count });
 }, 60_000);
 
@@ -197,7 +197,7 @@ it("keeps a stream open whose far peer takes what is sent, however much passes t
     expect(sent).toBe(8 * MiB);
     expect(streamClosed).toBe(false);
     expect(closed()).toBe(false);
-    expect(lines).not.toContain("closed far queue");
+    expect(lines.filter(line => line.startsWith("closed far queue"))).toEqual([]);
   }, { freeze: false });
 }, 60_000);
 
@@ -206,8 +206,8 @@ it("drops a client whose streams together hold more than queuedBytes toward far 
     // 448 KiB each: under half of `queuedBytes` per stream, over all of it by the third.
     for (const stream of streams) await send(stream, socket, 7 * CHUNK.length, closed);
     expect(closed()).toBe(true);
-    expect(lines).toContain("dropped queue");
-    expect(lines).not.toContain("closed far queue");
+    expect(lines).toContain("dropped queue: 1 MiB waiting for the client and its far peers (GHOSTLY_RELAY_QUEUED_BYTES)");
+    expect(lines.filter(line => line.startsWith("closed far queue"))).toEqual([]);
     expect(relay.stats()).toMatchObject({ clients: 0, dropped: 1 });
   });
 }, 60_000);
