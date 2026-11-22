@@ -260,3 +260,41 @@ test.describe("a received message's long one-word name on a 320px phone", () => 
     }
   });
 });
+
+/**
+ * A 768-880 px window with a mouse and a 24 px browser font (Chrome's Font size at Very large): the chat's column beside
+ * the list is 348-460 px, and the desktop's header, sized in rem, grew 1.5x there and cut a short name to 0-8 px. The
+ * header is the phone's in that column now, and the name shows whole; a wider window has every button again.
+ */
+test("with a larger browser font, a mid-size window's chat header keeps the contact's whole name", { tag: ["@feature:app.mobile-layout"] }, async ({ peer, relay }) => {
+  const url = await relay.listen();
+  const bot = new HeadlessBot();
+  try {
+    await bot.start(url, "Hermes");
+    const person = await peer("large-font-person", { viewport: { width: 1280, height: 800 } });
+    const page = person.page;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Page.setFontSizes", { fontSizes: { standard: 24 } });
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).fontSize), "the browser's font").toBe("24px");
+    const invite = await bot.run("invite", "create", "--label", "person");
+    await page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+    await pasteInvite(page, invite.invite as string);
+    await bot.run("chat", "wait", invite.chat as string, "--until", "live", "--timeout", "120");
+    await expectConnected(page);
+    const name = page.getByTestId("chat-name");
+    await expect(name).toHaveText("Hermes");
+
+    for (const width of [768, 800, 880]) {
+      await page.setViewportSize({ width, height: 800 });
+      for (const id of ["connection-options", "call-audio"]) await expect(page.getByTestId(id), `${id} at ${width}px`).toBeVisible();
+      await expect(page.getByTestId("call-video"), `call-video at ${width}px`).toHaveCount(0);
+      const room = await name.evaluate((el) => ({ shown: el.clientWidth, whole: el.scrollWidth }));
+      expect(room.whole, `at ${width}px: ${JSON.stringify(room)}`).toBeLessThanOrEqual(room.shown);
+    }
+    await page.screenshot({ path: test.info().outputPath("large-font-880.png") });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page.getByTestId("call-video")).toBeVisible();
+  } finally {
+    await bot.stop();
+  }
+});
