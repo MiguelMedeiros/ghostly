@@ -768,9 +768,10 @@ jobs:
       - name: ESLint
         run: npm run lint
 
-      # WISP content lives in docs/wisps only: every WISP has the header rows the site reads, and the site
-      # holds no text of its own per WISP (scripts/check-single-source.mjs).
-      - name: WISP content has one source
+      # Every scripts/*.test.mjs of the site (the package's test script), among them WISP content has one source:
+      # every WISP has the header rows the site reads, and the site holds no text of its own per WISP
+      # (scripts/check-single-source.mjs). A failing one is named in the step's log.
+      - name: Site script tests (npm test)
         run: npm test
 
       - name: TypeScript check
