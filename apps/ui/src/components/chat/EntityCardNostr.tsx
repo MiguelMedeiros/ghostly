@@ -9,6 +9,7 @@ import { ProviderMark } from "../identities/ProviderMark";
 import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
 import { useI18n } from "../../contexts/I18nContext";
 import { problemLine } from "../../lib/problemText";
+import { ownDirection } from "../../lib/ownDirection";
 
 const shortCode = (code: string) => (code.length > 24 ? `${code.slice(0, 14)}…${code.slice(-6)}` : code);
 const keyOf = (p: NostrPointer) => (p.type === "profile" ? `p:${p.pubkey}` : `e:${p.id}`);
@@ -76,7 +77,7 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
       <button type="button" data-testid="entity-nostr-load" aria-disabled={busy || undefined} aria-busy={busy || undefined} className={cardQuiet} onClick={() => void load()}>
         {busy ? t("chat.entity.loading") : result ? t("chat.menu.refresh") : profile ? t("chat.entity.loadProfile") : t("chat.entity.loadNote")}
       </button>
-      {error && <p role="alert" data-testid="entity-nostr-error" className="m-0 text-danger-ink">{error}</p>}
+      {error && <p role="alert" dir={ownDirection(error)} data-testid="entity-nostr-error" className="m-0 text-danger-ink">{error}</p>}
     </EntityCardFrame>
   );
 }

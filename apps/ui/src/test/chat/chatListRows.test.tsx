@@ -77,6 +77,28 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(markOf("Gus")).toHaveAccessibleName("Waiting for your contact to be online");
   });
 
+  it.each([
+    ["did not go", { retry: true }],
+    ["never left this device", { retry: false }],
+  ] as const)("marks a file of mine that %s Not sent, as its bubble does", (_, failed) => {
+    const file = { id: "h-out-1", name: "report.pdf", size: 10, mime: "application/pdf" };
+    saveSession(chat("h", { nick: "Hal", messages: [message({ sender: "me", text: "report.pdf", file })] }));
+    const { engine } = list();
+    const markOf = () => within(rowOf("Hal")).getByTestId("chat-row-delivery");
+    expect(markOf()).toHaveAccessibleName("Sent");
+    act(() => engine.update({ transfers: { [file.id]: { state: "failed", direction: "out", transferred: 0, size: 10, error: "Connection lost", ...failed } } }));
+    expect(markOf()).toHaveAccessibleName("Not sent");
+    expect(markOf()).toHaveAttribute("data-delivery", "failed");
+  });
+
+  it("keeps a declined file of mine's mark: the contact said no, nothing failed to go", () => {
+    const file = { id: "i-out-1", name: "report.pdf", size: 10, mime: "application/pdf" };
+    saveSession(chat("i", { nick: "Ian", messages: [message({ sender: "me", text: "report.pdf", file, delivery: "delivered" })] }));
+    const { engine } = list();
+    act(() => engine.update({ transfers: { [file.id]: { state: "failed", direction: "out", transferred: 0, size: 10, error: "Declined" } } }));
+    expect(within(rowOf("Ian")).getByTestId("chat-row-delivery")).toHaveAccessibleName("Delivered");
+  });
+
   it("marks my last text of a compatibility chat delivered once the contact's acknowledgement covers it, as its bubble does", () => {
     saveSession(chat("k", { profile: undefined, nick: "Kim", messages: [message({ sender: "me", text: "on my way", timestamp: 5000 })] }));
     const { engine } = list();

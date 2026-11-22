@@ -109,17 +109,28 @@ export class TreeFile {
     for (const tree of this.live) tree.abort(owner);
   }
 
-  /** The layers of the journal's entries up to `upTo` into SQLite, in one transaction that says so (`applied`). */
-  apply(upTo: number): void {
+  /** The name of the snapshot that the last fold's `apply` went with (`storage.ts`). */
+  snapshot(): string | undefined {
+    const row = this.db.prepare("SELECT value FROM meta WHERE name = 'snapshot'").get() as { value: string } | undefined;
+    return row ? String(row.value) : undefined;
+  }
+
+  /**
+   * The layers of the journal's entries up to `upTo` into SQLite, in one transaction that says so (`applied`). `snapshot`:
+   * the fold's, written whole before this and put in place after; recorded with them, so a process killed between the
+   * two comes back to it, not to the snapshot before it with these transactions half there.
+   */
+  apply(upTo: number, snapshot?: string): void {
     // An entry that wrote no tree (settings, the event set's notes) has nothing to take: no SQLite write for it.
     const due = [...this.live].filter((tree) => tree.due(upTo));
-    if (!due.length) return;
+    if (!due.length && snapshot === undefined) return;
     this.db.exec("BEGIN");
     try {
       // The number of the last entry that wrote here: a replay skips what wrote trees up to it.
       let top = 0;
       for (const tree of due) top = Math.max(top, tree.write(upTo));
       this.db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('applied', max(?, coalesce((SELECT value FROM meta WHERE name = 'applied'), 0)))").run(top);
+      if (snapshot !== undefined) this.db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('snapshot', ?)").run(snapshot);
       this.db.exec("COMMIT");
     } catch (error) { rollback(this.db); throw error; }
     // Only once SQLite has them: a write that failed leaves the layers where reads still find them, for the next try.

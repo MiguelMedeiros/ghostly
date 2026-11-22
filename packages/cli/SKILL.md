@@ -129,7 +129,7 @@ So is a `<group>` that is one group's name and a prefix of another's id.
 ### 5. Be woken: listen with an allowlist
 
 ```bash
-ghostly listen --turns --from alice --group team --cursor ~/.ghostly/agent.cursor --exec ./on-turn.sh
+ghostly listen --turns --from alice --group <group id> --cursor ~/.ghostly/agent.cursor --exec ./on-turn.sh
 ```
 
 - `--turns` gives one `agent.turn` event per message to answer: each message a contact sends in a 1:1 chat, and each
@@ -138,7 +138,8 @@ ghostly listen --turns --from alice --group team --cursor ~/.ghostly/agent.curso
   trim) also reaches the hook: check `type`.
 - `--from <chat|key>` and `--group <group>` (each again for more) are the allowlist, checked before the agent wakes.
   Anyone else's message stays in the chat and never reaches the hook. `--group` alone lets no 1:1 chat through, and
-  `--from` alone no group. Names are turned into ids once, when `listen` starts. Everyone on it can try to steer the
+  `--from` alone no group. `--group` takes only a group's id (its name is its admin's to choose). Names are turned
+  into ids once, when `listen` starts. Everyone on it can try to steer the
   agent: an agent with tools gets `--from owner` only (step 11).
 - `--exec '<command>'` runs once per turn, in order, with the turn on **stdin** (never in its arguments). It gets
   `GHOSTLY_PROFILE` and `GHOSTLY_HOME` of the listen (`--profile` and `--home` too), so the hook's `ghostly send`

@@ -94,7 +94,7 @@ export function UpdateBanner() {
             onClick={later}
             aria-disabled={busy}
             aria-label={t("updates.later")}
-            className="shrink-0 max-md:min-h-11 max-md:min-w-11 max-md:-me-3 grid place-items-center text-text-muted hover:text-text-primary transition-colors text-lg leading-none cursor-pointer aria-disabled:opacity-40 aria-disabled:cursor-not-allowed"
+            className="shrink-0 max-md:min-h-[44px] max-md:min-w-[44px] max-md:-me-3 grid place-items-center text-text-muted hover:text-text-primary transition-colors text-lg leading-none cursor-pointer aria-disabled:opacity-40 aria-disabled:cursor-not-allowed"
           >
             ×
           </button>

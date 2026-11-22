@@ -25,8 +25,10 @@ import { ProviderMark } from "./ProviderMark";
 import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./contact-panel.css";
 import { deckArrows } from "../deck/arrows";
+import { ownDirection } from "../../lib/ownDirection";
 import { problemLine } from "../../lib/problemText";
 import { fillNames } from "../../lib/fillNodes";
+import { isolate } from "../../lib/ownStatus";
 import { sourceWords } from "../../lib/providerWords";
 import { focusLost } from "../../lib/focus";
 import { FocusSafeButton } from "../ui/FocusSafeButton";
@@ -99,7 +101,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
             <PeerAvatar peerPubKey={peerKey} label={name} photo={face?.photo} testId="chat-identities-picture" presence />
           </AvatarOpener>
           <div className="min-w-0">
-            <h2 id={titleId} className="contact-panel-title">{t("identities.contact.title", { name })}</h2>
+            <h2 id={titleId} className="contact-panel-title">{fillNames(t("identities.contact.title"), { name })}</h2>
             {/* Whether they are online, in words (the dot is on their picture), and the status they set. */}
             <PeerPresenceLine peerKey={peerKey} testId="chat-identities-presence" className="mt-0.5 text-[13px]" />
             <p className="contact-panel-lead">{t("identities.contact.lead")}</p>
@@ -111,13 +113,13 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
       </div>
       <div className="contact-panel-body">
         <ContactFacePicker peerKey={peerKey} received={received} />
-        <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={t("identities.contact.sharedBy", { name })}>
-          <h3 className="contact-panel-heading">{t("identities.contact.sharedBy", { name })}</h3>
+        <section className="contact-panel-section" data-testid="chat-identities-received" aria-label={t("identities.contact.sharedBy", { name: isolate(name) })}>
+          <h3 className="contact-panel-heading">{fillNames(t("identities.contact.sharedBy"), { name })}</h3>
           {link
             ? <TheirCards t={t} entries={entries} link={link} links={links} name={name} nostr={link.nostr ?? []} initial={card?.side === "theirs" ? card.id : undefined} />
-            : <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>}
+            : <p className="contact-panel-note" data-testid="chat-identities-none">{fillNames(t("identities.ghostly.nothingElse"), { name })}</p>}
         </section>
-        {link?.identities?.error && <p className="contact-panel-note" role="alert" data-testid="chat-identities-link-error">{problemLine(link.identities.error, t)}</p>}
+        {link?.identities?.error && <p className="contact-panel-note" role="alert" dir={ownDirection(problemLine(link.identities.error, t))} data-testid="chat-identities-link-error">{problemLine(link.identities.error, t)}</p>}
         <p className="contact-panel-note" data-testid="chat-identities-share-yours">{t("identities.contact.shareYours")}</p>
       </div>
     </div>
@@ -175,13 +177,13 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
           : <TheirCardBack t={t} entry={showing} linkId={link.id} name={name} nostr={nostr.find(v => v.subject === showing.r.subject)} turning={turning} onCards={turnBack} />} />
       : <>
         <Deck<Entry> compact cards={entries} selected={entry.id} onSelect={setChosen} onChoose={id => { setChosen(id); turn(); }}
-          kind="radios" label={t("identities.contact.deckLabel", { name })} name="contact-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 300, share: .78 }}
+          kind="radios" label={t("identities.contact.deckLabel", { name: isolate(name) })} name="contact-identity-deck" arrows={deckArrows(t)} className="id-deck" size={{ max: 300, share: .78 }}
           testId={e => (e.ghostly ? "chat-identity-ghostly" : "chat-identity-received")}
           face={(e, { after }) => <IdCardFace card={e.card} after={after} />}
           mark={e => <IdCardMark provider={e.card.provider} subject={e.card.bound} />}
           tone={tone} />
         {entries.length === 1
-          ? <p className="contact-panel-note" data-testid="chat-identities-none">{t("identities.ghostly.nothingElse", { name })}</p>
+          ? <p className="contact-panel-note" data-testid="chat-identities-none">{fillNames(t("identities.ghostly.nothingElse"), { name })}</p>
           : <p className="contact-panel-hint">{t("identities.contact.tapHint")}</p>}
         {!entry.ghostly && (entry.card.status === "verified" || entry.card.status === "expiring") && hasIdentityActivity(entry.r.provider) &&
           <IdentityActivity key={entry.id} provider={entry.r.provider} subject={entry.r.verified.subject} profile={entry.r.publicProfile} links={links} />}
@@ -238,9 +240,21 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
   const { r, card } = entry;
   const provider = providerOf(r.provider);
   const [busy, setBusy] = useState(""), [error, setError] = useState("");
-  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(problemLine(e, t))).finally(() => setBusy("")); };
+  /** Check again answered (not thrown), with the record as it was at the press: the reply comes before the new state
+   *  (50 ms or more), so the check counts as done once the record differs, or a second after the reply (a check in the
+   *  same second as the last, with the same result, leaves the record as it was). */
+  const [rechecked, setRechecked] = useState<{ checkedAt: number; status: string; error?: string; settled?: boolean } | null>(null);
+  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); setRechecked(null); void work().catch(e => setError(problemLine(e, t))).finally(() => setBusy("")); };
+  const recheckIn = !!rechecked && (!!rechecked.settled || r.checkedAt !== rechecked.checkedAt || r.status !== rechecked.status || r.error !== rechecked.error);
+  useEffect(() => {
+    if (!rechecked || rechecked.settled) return;
+    const timer = setTimeout(() => setRechecked(x => x && { ...x, settled: true }), 1000);
+    return () => clearTimeout(timer);
+  }, [rechecked]);
   const ok = card.status === "verified" || card.status === "expiring";
   const canCheck = r.status !== "withdrawn" && r.status !== "revoked" && r.status !== "previous-key";
+  const status = r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: receivedRefusal(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
+    : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel;
   return (
     <div className="id-card-back contact-card-back" data-testid="chat-identity-back" data-provider={r.provider} data-status={card.status}>
       <div className="id-card-back-band">
@@ -272,18 +286,23 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <dt>{t("identities.contact.validity")}</dt>
           <dd>{card.validity}</dd>
           <dt>{t("identities.contact.status")}</dt>
-          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: receivedRefusal(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
-            : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
+          <dd data-testid="chat-identity-received-status" data-status={card.status}>{status}</dd>
         </dl>
+        {/* Check again said out loud (it runs over the network, seconds): Checking…, then what it found, confirmed or
+            not; a thrown error is the alert's below. Always there, so its first words are heard, also when the check
+            finds a revocation (Check again is gone then). */}
+        <p role="status" data-testid="chat-identity-recheck-live" className="sr-only">
+          {busy === "recheck" || (rechecked && !recheckIn) ? t("identities.contact.checking") : recheckIn ? (ok ? t("identities.contact.rechecked", { status: card.statusLabel }) : status) : ""}
+        </p>
         <div className="flex flex-wrap gap-2">
           {canCheck && <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-recheck" disabled={turning} aria-disabled={!!busy || undefined}
-            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id })); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</FocusSafeButton>}
+            onClick={() => { if (!busy) act("recheck", () => engine.call("recheckIdentityProof", { linkId, id: r.id }).then(() => setRechecked({ checkedAt: r.checkedAt, status: r.status, error: r.error }))); }}>{busy === "recheck" ? t("identities.contact.checking") : t("identities.contact.recheck")}</FocusSafeButton>}
           {provider?.lookupDisplay && ok && <FocusSafeButton type="button" className="contact-card-action" data-testid="chat-identity-lookup" disabled={turning} aria-disabled={!!busy || undefined}
             onClick={() => { if (!busy) act("lookup", () => engine.call("lookupIdentityDisplay", { linkId, id: r.id })); }}>{busy === "lookup" ? t("identities.contact.lookingUp") : r.provider === "openpgp" ? t("identities.contact.lookupOpenpgp") : provider.lookupLabel ?? t("identities.contact.showProfile")}</FocusSafeButton>}
         </div>
         {/* What Check again does, only where there is one: a withdrawn or revoked card is not checked again. */}
         {canCheck && <p className="id-card-back-note">{provider?.recheck ? t("identities.contact.recheckNoteRepeat") : t("identities.contact.recheckNote")}{provider?.lookupDisplay && ok ? ` ${t("identities.contact.lookupNote")}` : ""}</p>}
-        {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="chat-identities-error">{error}</p>}
+        {error && <p role="alert" dir={ownDirection(error)} className="m-0 text-xs text-danger" data-testid="chat-identities-error">{error}</p>}
         {r.provider === "nostr" && ok && nostr && <div className="contact-card-nostr"><NostrContactCard linkId={linkId} view={nostr} name={name} compact turning={turning} /></div>}
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{machineLine(card.label, card.subject)}</span>

@@ -6,7 +6,11 @@
  * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage, only a navigation
  * it could not place for the few seconds its own page takes to go on with it (`goOn`).
  */
-import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, type ServiceRead, type ServiceReply, type ServiceRequestMessage } from "./protocol";
+import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, workerRelayOnly, type ServiceRead, type ServiceReply, type ServiceRequestMessage } from "./protocol";
+import { WEBRTC_GUARD, guardViewerAnswer, type PageGuard } from "../../../../packages/core/src/viewerGuard";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT } from "../../../../packages/core/src/clipboardGuard";
+import { viewerResponseHeaders, viewerServicePolicy } from "../../../../packages/core/src/http";
+import type { HeaderList } from "../../../../packages/core/src/frames";
 
 declare const __SERVICES_HOST__: string;
 declare const __SERVICES_APP_ORIGIN__: string;
@@ -26,6 +30,13 @@ const worker = self as unknown as WorkerScope;
 const host = parseServicesHost(__SERVICES_HOST__);
 /** Anywhere but a contact's app origin (the app's own, above all) this worker does nothing at all. */
 const active = !!host && isServiceHostname(host, worker.location.hostname);
+/** Hide my IP from contacts, as the bridge registered this worker (`workerScript`). */
+const relayOnly = workerRelayOnly(worker.location.href);
+/**
+ * What each page of the app runs first: the clipboard guard always, the WebRTC guard while Hide my IP from contacts is
+ * on (no policy keeps a page off `execCommand("copy")`, nor off WebRTC).
+ */
+const GUARDS: PageGuard[] = [{ script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH }, ...(relayOnly ? [WEBRTC_GUARD] : [])];
 
 worker.addEventListener("install", (event) => {
   // Refused where it does not belong: the registration fails and nothing is left behind.
@@ -42,6 +53,33 @@ export function frameAncestors(): string {
 export function withoutFrameAncestors(policy: string): string {
   return policy.split(",").map((one) => one.split(";").filter((d) => !/^\s*frame-ancestors(\s|$)/i.test(d)).join(";").trim())
     .filter((one) => one.replace(/;/g, "").trim()).join(", ");
+}
+
+/**
+ * An answer's headers and body as the frame gets them. Put here, and not only in Ghostly's page: the answer comes on a
+ * port the bridge hands on, and the bridge is on the app's own origin, where the app's pages can take a request's port
+ * and answer it themselves. So whoever answered, the contact's headers are a viewer's (`viewerResponseHeaders`), each
+ * page of the app runs the guards first (`guardViewerAnswer`), Ghostly's policy goes after the contact's own
+ * (`viewerServicePolicy`; a browser enforces every policy it is sent), and only the bridge and the app's page frame it:
+ * the app's own X-Frame-Options would refuse the bridge, so this policy takes its place.
+ */
+async function guarded(headers: unknown, body: AsyncIterable<Uint8Array>, destination: string): Promise<{ headers: Headers; body: AsyncIterable<Uint8Array> }> {
+  if (!Array.isArray(headers)) throw new TypeError("No headers");
+  const own: HeaderList = [];
+  for (const [name, value] of viewerResponseHeaders(headers as HeaderList)) {
+    const lower = name.toLowerCase();
+    if (lower === "x-frame-options") continue;
+    const kept = lower === "content-security-policy" ? withoutFrameAncestors(value) : value;
+    if (kept) own.push([name, kept]);
+  }
+  const answer = await guardViewerAnswer(own, body, destination, GUARDS);
+  const out = new Headers();
+  for (const [name, value] of answer.headers) {
+    try { out.append(name, value); } catch { /* not a header a Response takes */ }
+  }
+  out.append("content-security-policy", viewerServicePolicy(relayOnly));
+  out.append("content-security-policy", frameAncestors());
+  return { headers: out, body: answer.body };
 }
 
 function plain(status: number, text: string): Response {
@@ -194,28 +232,40 @@ async function forward(event: FetchEvent): Promise<Response> {
   const message: ServiceRequestMessage = { type: "request", method: again?.method ?? request.method, path: url.pathname + url.search, headers, body, destination: request.destination, flow: true };
   const channel = new MessageChannel();
   const port = channel.port1;
-  // The answer's chunks wait here, not in the stream, until the frame reads: the page is told what it read, and sends
-  // only `ANSWER_AHEAD_BYTES` past that, so an answer the frame leaves unread stays on the link.
+  // The answer's chunks wait here, not in the stream, until the frame reads (or the guards look for their place in a
+  // page): the page is told what was read, and sends only `ANSWER_AHEAD_BYTES` past that, so an answer the frame leaves
+  // unread stays on the link.
   const waiting: Uint8Array[] = [];
   let last: { error: Error } | "end" | null = null;
   let read = 0;
   let wanted: (() => void) | null = null;
-  const give = (c: ReadableStreamDefaultController<Uint8Array>): boolean => {
-    const bytes = waiting.shift();
-    if (bytes) {
-      c.enqueue(bytes);
-      read += bytes.byteLength;
-      port.postMessage({ type: "read", bytes: read } satisfies ServiceRead);
-    } else if (last === "end") c.close();
-    else if (last) c.error(last.error);
-    else return false;
-    return true;
-  };
   const arrived = () => { wanted?.(); wanted = null; };
-  const stream = new ReadableStream<Uint8Array>({
-    pull(c) { if (!give(c)) return new Promise<void>((resolve) => { wanted = () => { give(c); resolve(); }; }); },
-    cancel() { waiting.length = 0; port.postMessage({ type: "cancel" }); port.close(); },
-  }, { highWaterMark: 0 });
+  const next = async (): Promise<IteratorResult<Uint8Array>> => {
+    for (;;) {
+      const bytes = waiting.shift();
+      if (bytes) {
+        read += bytes.byteLength;
+        port.postMessage({ type: "read", bytes: read } satisfies ServiceRead);
+        return { done: false, value: bytes };
+      }
+      if (last === "end") return { done: true, value: undefined };
+      if (last) throw last.error;
+      await new Promise<void>((resolve) => { wanted = resolve; });
+    }
+  };
+  const incoming: AsyncIterable<Uint8Array> = { [Symbol.asyncIterator]: () => ({ next }) };
+  const nothing: AsyncIterable<Uint8Array> = { [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true, value: undefined }) }) };
+  const streamOf = (body: AsyncIterable<Uint8Array>) => {
+    const chunks = body[Symbol.asyncIterator]();
+    return new ReadableStream<Uint8Array>({
+      async pull(c) {
+        const one = await chunks.next();
+        if (one.done) c.close();
+        else c.enqueue(one.value);
+      },
+      cancel() { waiting.length = 0; port.postMessage({ type: "cancel" }); port.close(); },
+    }, { highWaterMark: 0 });
+  };
   return new Promise<Response>((resolve) => {
     let answered = false;
     const timer = setTimeout(() => { if (!answered) { answered = true; port.close(); resolve(plain(504, "The app did not answer in time.")); } }, HEAD_TIMEOUT_MS);
@@ -227,24 +277,18 @@ async function forward(event: FetchEvent): Promise<Response> {
       clearTimeout(timer);
       try { resolve(make()); return true; } catch { resolve(plain(502, "The request failed.")); return false; }
     };
+    const drop = () => { port.postMessage({ type: "cancel" }); port.close(); };
     port.onmessage = (event: MessageEvent<ServiceReply>) => {
       const reply = event.data;
       if (reply?.type === "head" && !answered) {
+        answered = true;
+        clearTimeout(timer);
         const status = answerStatus(reply.status);
-        // Framed by the bridge, under the app, and by nothing else: no other site, nor another contact's app. The
-        // app's own X-Frame-Options would refuse the bridge, so this policy takes its place.
-        const out = new Headers();
-        for (const [name, value] of reply.headers) {
-          const lower = name.toLowerCase();
-          if (lower === "x-frame-options") continue;
-          const kept = lower === "content-security-policy" ? withoutFrameAncestors(value) : value;
-          if (!kept) continue;
-          try { out.append(name, kept); } catch { /* not a header a Response takes */ }
-        }
-        out.append("content-security-policy", frameAncestors());
         const empty = NULL_BODY.has(status) || request.method === "HEAD";
-        if (!settle(() => new Response(empty ? null : stream, { status, headers: out }))) { port.postMessage({ type: "cancel" }); port.close(); }
-        else if (empty) port.close();
+        guarded(reply.headers, empty ? nothing : incoming, request.destination).then((answer) => {
+          if (!settle(() => new Response(empty ? null : streamOf(answer.body), { status, headers: answer.headers }))) drop();
+          else if (empty) port.close();
+        }, () => { settle(() => plain(502, "The request failed.")); drop(); });
       } else if (reply?.type === "chunk" && answered && !last) {
         waiting.push(reply.bytes);
         arrived();

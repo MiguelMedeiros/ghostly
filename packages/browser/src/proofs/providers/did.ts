@@ -172,17 +172,16 @@ function previewOf(r: DidResolution, say: ProviderSay): SubjectPreview {
   const unusable = r.document.keys.length - keys.length + r.document.skipped;
   if (!keys.length && r.method !== "web") throw new DidError("This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign");
   const method = `did:${r.method}`;
-  const facts: { label: string; value: string }[] = [{
-    label: say("preview.method", "Method"),
-    value: r.method === "key" || r.method === "jwk" ? say("preview.keyIsIdentifier", "{{method}}, the key is the identifier", { method }) : method,
-  }];
-  if (r.host) facts.push({ label: say("preview.domain", "Domain"), value: r.host });
-  if (r.documentUrl) facts.push({ label: say("preview.document", "Document"), value: r.documentUrl });
-  if (r.relay) facts.push({ label: say("preview.relay", "Relay"), value: r.relay.replace(/^https:\/\//, "") });
-  facts.push({
-    label: keys.length === 1 ? say("preview.key", "Key") : say("preview.keys", "Keys"),
-    value: keys.length ? keys.map(k => `${fragment(k.id)} (${k.curve})`).join(", ") : say("preview.noKeys", "none that can sign: publish instead"),
-  });
+  const facts: SubjectPreview["facts"][number][] = [r.method === "key" || r.method === "jwk"
+    ? { label: say("preview.method", "Method"), value: say("preview.keyIsIdentifier", "{{method}}, the key is the identifier", { method }) }
+    : { label: say("preview.method", "Method"), value: method, code: true }];
+  if (r.host) facts.push({ label: say("preview.domain", "Domain"), value: r.host, code: true });
+  if (r.documentUrl) facts.push({ label: say("preview.document", "Document"), value: r.documentUrl, code: true });
+  if (r.relay) facts.push({ label: say("preview.relay", "Relay"), value: r.relay.replace(/^https:\/\//, ""), code: true });
+  const label = keys.length === 1 ? say("preview.key", "Key") : say("preview.keys", "Keys");
+  facts.push(keys.length
+    ? { label, value: keys.map(k => `${fragment(k.id)} (${k.curve})`).join(", "), code: true }
+    : { label, value: say("preview.noKeys", "none that can sign: publish instead") });
   if (unusable > 0) facts.push({
     label: say("preview.notUsable", "Not usable"),
     value: unusable === 1

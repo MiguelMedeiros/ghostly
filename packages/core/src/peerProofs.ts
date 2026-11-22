@@ -105,13 +105,32 @@ export async function verifyPeerProof(event: ProofEvidence, c: ProofChallenge, r
     if (sig.length !== 64 || !verify(sig,data,fromZ32(c.externalKey))) throw new Error('Invalid Pubky signature');
   } else if (c.adapter === 'keet-import') {
     // Pinned SDK v1 root-only DataAttestation: uint version, uint64 epoch,
-    // fixed32 identity, empty chain, data flag, fixed64 signature. Enforce this
-    // bounded canonical shape before the SDK's generic array decoder runs.
+    // fixed32 identity, empty chain, data flag, fixed64 signature. Only this
+    // bounded canonical shape is accepted.
     if (sig.length !== 107 || sig[0] !== 1 || sig[41] !== 0 || sig[42] !== 1) throw new Error('Unsupported Keet attestation');
-    const { default: IdentityKey } = await import('keet-identity-key');
-    if (!IdentityKey.verify(b4a.from(sig), b4a.from(data), { expectedIdentity: b4a.from(unhex(c.externalKey)) }))
-      throw new Error('Invalid Keet attestation');
+    const { blake2b } = await import('@noble/hashes/blake2.js');
+    if (!verifyKeetAttestation(sig, blake2b(data, { dkLen: 32 }), unhex(c.externalKey))) throw new Error('Invalid Keet attestation');
   } else throw new Error('Unsupported proof adapter');
+}
+/**
+ * `IdentityKey.verify` of keet-identity-key 3.2.0 for a root-only attestation, by hand: the SDK's
+ * index also loads its keychain and every BIP39 word list (~1.3 MB), which only importing needs.
+ * The identity signs AttestedData: uint8 1, uint64 epoch, fixed32 identity, BLAKE2b-256 of the data.
+ */
+function verifyKeetAttestation(attestation: Uint8Array, dataHash: Uint8Array, identity: Uint8Array): boolean {
+  const view = new DataView(attestation.buffer, attestation.byteOffset, attestation.byteLength);
+  const read = view.getUint32(1, true) + view.getUint32(5, true) * 0x100000000;
+  // The SDK refuses an epoch past 2^53 - 1, and signs over the seconds it gets back from milliseconds.
+  const seconds = Math.floor(read * 1000 / 1000);
+  if (!Number.isSafeInteger(read) || !Number.isSafeInteger(seconds) || !b4a.equals(attestation.subarray(9, 41), identity)) return false;
+  const signable = new Uint8Array(73);
+  const out = new DataView(signable.buffer);
+  signable[0] = 1;
+  out.setUint32(1, seconds % 0x100000000, true);
+  out.setUint32(5, Math.floor(seconds / 0x100000000), true);
+  signable.set(identity, 9);
+  signable.set(dataHash, 41);
+  return verify(attestation.subarray(43), signable, identity);
 }
 function replace(records: ProofRecord[], record: ProofRecord): ProofRecord[] {
   return [...records.filter(r => r.challenge.adapter !== record.challenge.adapter), record];

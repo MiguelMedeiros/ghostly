@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { FAILURES, dayText, handoffProblem, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
+import { FAILURES, dayText, handoffErrorKey, handoffProblem, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import { meteredConnection } from "@ghostly/browser/devices/handoffHost";
@@ -12,6 +12,7 @@ import { DeviceDialog, field, primaryButton, quietButton } from "./DeviceDialog"
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { nextOf } from "../../lib/notices";
+import { focusToRetype } from "../../lib/focus";
 import { fillNames } from "../../lib/fillNodes";
 
 /*
@@ -158,25 +159,32 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
   const [later, setLater] = useState(metered);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
+  // Only a refusal of the password itself marks the field wrong; that field gets the focus back, its text selected.
+  const [wrongPassword, setWrongPassword] = useState(false);
+  const passwordInput = useRef<HTMLInputElement>(null);
+  const errorId = useId();
   const submit = async () => {
     if (busy || !password) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setWrongPassword(false);
     try { onStarted(await engine.call("deviceHandoffPull", { password, later: later ? HANDOFF_LATER_BYTES : 0 })); onClose(); }
-    catch (cause) { setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t)); }
+    catch (cause) {
+      setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t));
+      if (handoffErrorKey(cause) === FAILURES.password) { setWrongPassword(true); focusToRetype(passwordInput.current); }
+    }
     finally { setBusy(false); }
   };
   return (
     <DeviceDialog title={t("devices.handoff.useHereTitle")} onClose={onClose} testId="handoff-use-here-dialog">
       <p className="text-text-secondary">{fillNames(t("devices.handoff.passwordHint"), { device })}</p>
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-        <input type="password" autoFocus autoComplete="current-password" data-testid="handoff-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
-          aria-invalid={!!error || undefined} value={password} onChange={(event) => setPassword(event.target.value)} className={field} />
+        <input ref={passwordInput} type="password" autoFocus autoComplete="current-password" data-testid="handoff-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
+          aria-invalid={wrongPassword || undefined} aria-describedby={wrongPassword ? errorId : undefined} value={password} onChange={(event) => setPassword(event.target.value)} className={field} />
         {metered && <p className="text-xs text-text-muted">{t("devices.handoff.metered")}</p>}
         <label className="flex items-center justify-between gap-3 text-text-secondary">
           <span className="min-w-0">{t("devices.handoff.later")}</span>
           <Switch checked={later} onChange={setLater} label={t("devices.handoff.later")} testId="handoff-later" />
         </label>
-        {error && <Notice problem={error} className="" />}
+        {error && <div id={errorId}><Notice problem={error} className="" /></div>}
         {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page. */}
         <button type="submit" data-testid="handoff-start" disabled={!password} aria-disabled={busy || undefined} aria-busy={busy || undefined} className={primaryButton}>{t("devices.handoff.useHere")}</button>
       </form>

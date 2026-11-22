@@ -49,6 +49,112 @@ it("takes without asking only what fits beside the files still on their way, fro
 });
 
 /**
+ * Offers from several contacts that come at the same moment (a device back online, each contact's waiting files offered
+ * on its own session) were each decided before any of them was recorded: none saw the others, and all were taken
+ * without asking though together they did not fit (two 20 MiB files with 30 MiB free). An offer being decided counts
+ * as still to come for the others decided beside it.
+ */
+it.each([
+  { free: 30, size: 20, links: ["chat-a", "chat-b"] },
+  { free: 32, size: 15, links: ["chat-a", "chat-b", "chat-c"] },
+])("asks about offers from contacts at the same moment that together do not fit ($links.length × $size MiB, $free MiB free)", async ({ free, size, links }) => {
+  vi.stubGlobal("navigator", { storage: { estimate: async () => ({ quota: free * MiB, usage: 0 }) } });
+  resetFileBytes(["idb"]);
+  const sent: { link: string; frame: Record<string, unknown> }[] = [];
+  const desk = new FileDesk({
+    send: (link, frame) => { sent.push({ link, frame }); return true; },
+    receivedBytes: () => 0,
+    wireIds: () => new Set(),
+    deleted: () => false,
+    messageExists: async () => false,
+    storeMessage: async () => {},
+    transfers: new Map(),
+    changed: () => {},
+  });
+  for (const link of links) desk.session(link, true);
+  const ids = links.map((link) => `wAtOnce${link.slice(-1)}01`);
+  await Promise.all(links.map((link, i) => desk.handle(link, { t: "pf-offer", id: ids[i], name: `${ids[i]}.mp4`, mime: "video/mp4", size: size * MiB, ts: 1_700_000_000_000 })));
+  const answered = (t: string) => sent.filter(({ frame }) => frame.t === t && (t !== "pf-wait" || frame.why === "consent")).map(({ frame }) => frame.id);
+  // As many as fit together are taken, the first ones; the rest are asked about.
+  const fit = Math.floor(free / size);
+  await vi.waitFor(() => expect(answered("pf-accept")).toEqual(ids.slice(0, fit)));
+  await vi.waitFor(() => expect(answered("pf-wait")).toEqual(ids.slice(fit)));
+  expect(sent.filter(({ frame }) => frame.t === "pf-refuse")).toEqual([]);
+  for (const link of links) desk.drop(link);
+  await fileStore.deleteForLink("chat-c");
+});
+
+/**
+ * Every offer decided before counted at its full size, the ones that would never be taken without asking too: a small
+ * offer beside one refused (larger than the room) or asked about (above 25 MiB, or not fitting beside the ones before
+ * it) was asked about, though it fits. Only what an earlier offer will itself take counts, and a file offered twice
+ * at once counts once: the same answers as when they come one after another.
+ */
+it.each([
+  { free: 100, offers: [["chat-a", 200], ["chat-b", 10]], taken: ["b"], asked: [], refused: ["a"] },
+  { free: 100, offers: [["chat-a", 90], ["chat-b", 20]], taken: ["b"], asked: ["a"], refused: [] },
+  { free: 30, offers: [["chat-a", 10], ["chat-b", 25], ["chat-c", 5], ["chat-d", 8], ["chat-e", 12]], taken: ["a", "c", "d"], asked: ["b", "e"], refused: [] },
+  { free: 30, offers: [["chat-a", 10], ["chat-a", 10], ["chat-b", 15]], taken: ["a", "b"], asked: [], refused: [] },
+] as const)("counts only what the offers decided beside it will take ($free MiB free, $offers)", async ({ free, offers, taken, asked, refused }) => {
+  vi.stubGlobal("navigator", { storage: { estimate: async () => ({ quota: free * MiB, usage: 0 }) } });
+  resetFileBytes(["idb"]);
+  const sent: { link: string; frame: Record<string, unknown> }[] = [];
+  const desk = new FileDesk({
+    send: (link, frame) => { sent.push({ link, frame }); return true; },
+    receivedBytes: () => 0,
+    wireIds: () => new Set(),
+    deleted: () => false,
+    messageExists: async () => false,
+    storeMessage: async () => {},
+    transfers: new Map(),
+    changed: () => {},
+  });
+  const links = [...new Set(offers.map(([link]) => link))];
+  for (const link of links) desk.session(link, true);
+  // One file per chat: the same chat offering twice offers the same file again (a session swap re-offers it).
+  const id = (link: string) => `wBeside${link.slice(-1)}01`;
+  await Promise.all(offers.map(([link, size]) => desk.handle(link, { t: "pf-offer", id: id(link), name: `${id(link)}.mp4`, mime: "video/mp4", size: size * MiB, ts: 1_700_000_000_000 })));
+  const answered = (t: string) => sent.filter(({ frame }) => frame.t === t && (t !== "pf-wait" || frame.why === "consent")).map(({ frame }) => frame.id).sort();
+  await vi.waitFor(() => expect(answered("pf-accept")).toEqual(taken.map((c) => id(`chat-${c}`))));
+  expect(answered("pf-wait")).toEqual(asked.map((c) => id(`chat-${c}`)));
+  expect(answered("pf-refuse")).toEqual(refused.map((c) => id(`chat-${c}`)));
+  for (const link of links) { desk.drop(link); await fileStore.deleteForLink(link); }
+});
+
+/**
+ * The group files this device fetches were not counted: an offer that fit only without them was taken without asking,
+ * and the disk filled part way through one or the other. They count beside the 1:1 files still to come.
+ */
+it("asks about an offer that fits only without the group files still on their way, and takes one that fits beside them", async () => {
+  vi.stubGlobal("navigator", { storage: { estimate: async () => ({ quota: 40 * MiB, usage: 0 }) } });
+  resetFileBytes(["idb"]);
+  const sent: { link: string; frame: Record<string, unknown> }[] = [];
+  const desk = new FileDesk({
+    send: (link, frame) => { sent.push({ link, frame }); return true; },
+    receivedBytes: () => 0,
+    wireIds: () => new Set(),
+    deleted: () => false,
+    messageExists: async () => false,
+    storeMessage: async () => {},
+    transfers: new Map(),
+    changed: () => {},
+    // Four 8 MiB group files asked for, none of their bytes here yet.
+    groupsComing: () => 32 * MiB,
+  });
+  desk.session("chat-a", true);
+  const offer = (id: string, size: number) => desk.handle("chat-a", { t: "pf-offer", id, name: `${id}.mp4`, mime: "video/mp4", size, ts: 1_700_000_000_000 });
+  await offer("wBesideGroup01", 20 * MiB);
+  const answered = (t: string) => sent.filter(({ frame }) => frame.t === t && (t !== "pf-wait" || frame.why === "consent")).map(({ frame }) => frame.id);
+  await vi.waitFor(() => expect(answered("pf-wait")).toEqual(["wBesideGroup01"]));
+  await offer("wBesideGroup02", 5 * MiB);
+  await vi.waitFor(() => expect(answered("pf-accept")).toEqual(["wBesideGroup02"]));
+  expect(answered("pf-refuse")).toEqual([]);
+  // What the group files are fetched beside: the chats' files alone, not the group files' own again.
+  expect(desk.chatsComing(40 * MiB)).toBe(5 * MiB);
+  desk.drop("chat-a");
+});
+
+/**
  * What is still to come was read by copying every record of every chat, the finished ones the chats keep for good
  * included: each offer cost more with every file the profile ever had (about 10 ms at 200 chats of 500 files). It is
  * read from the transfers not ended alone, and answers the same.
