@@ -36,7 +36,14 @@ this machine or no name at all, stop the start with one line that names the sett
 Put it behind HTTPS (a tunnel or a reverse proxy) and enter its address in Settings. Behind a proxy, set
 `GHOSTLY_RELAY_PROXIES` to the number of proxies in front of it (`1` for one tunnel), so the limit counts each
 client's address from `X-Forwarded-For` rather than the proxy's; without it the header is ignored, and the first request
-that carries one logs `requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set`. With proxies set,
+that carries one logs `requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set`. With it set, the first
+request without that entry (a proxy that does not write the header, such as nginx without `proxy_set_header
+X-Forwarded-For $proxy_add_x_forwarded_for`) logs `requests arrive without X-Forwarded-For though
+GHOSTLY_RELAY_PROXIES is set`: it counts as the proxy, as every other one would. One with fewer entries than the
+setting (`2` behind a single proxy) logs `requests carry 1 X-Forwarded-For entry though GHOSTLY_RELAY_PROXIES is 2`:
+set it to the number of proxies that write the header. Until such a request comes, a client that writes the header
+itself chooses the address it counts as; from it on, the relay reads no deeper than the fewest entries a request has
+come with (no header at all: the proxy's address). With proxies set,
 the relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
 write that header. Ghostly runs none for you: no relay is set by default.
 
@@ -64,6 +71,11 @@ request, such as `refused Not a push service` or `refused Bad TTL value`). The f
 kind of refusal) is logged at once and the rest as one count a minute (`forwarded 201 4120 more`, `refused rate 41
 more`), so busy traffic or a flood stays a line a minute each. A refused origin's first line names it, quoted
 (`refused origin "https://app.ghostly.tools.example"`, `refused origin (none)` without one), so a misspelt
-`GHOSTLY_RELAY_ORIGINS` shows; the count after it covers every origin refused that minute. On a stop, the relay
+`GHOSTLY_RELAY_ORIGINS` shows; the count after it covers every origin refused that minute. A rate's first line names
+its limit (`refused rate (30 requests a minute from one address)`, `refused subscription rate (30 forwards a minute to
+one subscription)`): both are fixed, and behind a proxy without `GHOSTLY_RELAY_PROXIES` every user shares the first.
+Without `GHOSTLY_RELAY_PROXIES` and without `X-Forwarded-For`, the first request refused at the rate from a loopback or
+private address logs `requests refused at the rate of 30 a minute from one address come from a loopback or private
+address`, once per start: behind a proxy that writes no header, every user shares that one rate. On a stop, the relay
 waits up to 3 seconds for the requests still open, then writes the counts, so a push that went out while it stopped is
 in the log; forwards still waiting on the push service when it cuts them are one line (`cut 2 forwards in flight`).

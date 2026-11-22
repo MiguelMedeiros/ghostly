@@ -75,6 +75,12 @@ function originOf(target: string | undefined): string | null {
   try { return parseLocalTarget(target).origin; } catch { return null; }
 }
 
+/** Asks the host for `target`'s address where it asks the person (Chrome's prompt), from the click: a no throws. */
+async function askLocalAccess(target: string): Promise<void> {
+  const { origin } = parseLocalTarget(target);
+  if (!(await getBrowserHost().requestLocalAccess(localAccessPattern(origin), origin))) throw new Error("Ghostly needs your permission to reach that local address");
+}
+
 const preparingListeners = new Set<() => void>();
 let preparingTold = 0;
 function preparingChanged(force = false): void {
@@ -315,9 +321,8 @@ export const servicesPlatform: ServicesPlatform | null = {
     try { return !(await host.localAccessAllowed(parseLocalTarget(target).origin)); } catch { return false; }
   },
   async allowLocalAccess(target) {
-    const { origin } = parseLocalTarget(target);
     // From the click, as when it was shared.
-    if (!(await getBrowserHost().requestLocalAccess(localAccessPattern(origin), origin))) throw new Error("Ghostly needs your permission to reach that local address");
+    await askLocalAccess(target);
   },
   async removeService(serviceId) {
     // Read before the call: the state after it may not have caught up yet.
@@ -330,7 +335,13 @@ export const servicesPlatform: ServicesPlatform | null = {
       await getBrowserHost().forgetLocalAccess?.(origin).catch(() => {});
     }
   },
-  setServiceEnabled: (serviceId, enabled) => engine.call("setServiceEnabled", { serviceId, enabled }),
+  async setServiceEnabled(serviceId, enabled) {
+    // On again, it asks for its address as Allow does: the extension turns an app off when Chrome's site access to its
+    // host is taken back, and turned on without it its contacts were refused until a second click on Allow.
+    const target = enabled ? engine.state?.services.find((s) => s.id === serviceId)?.target : undefined;
+    if (target) await askLocalAccess(target);
+    await engine.call("setServiceEnabled", { serviceId, enabled });
+  },
   setServiceShared: (serviceId, peerPubKeyZ32, shared) => engine.call("setServiceShared", { serviceId, peerPubKeyZ32, shared }),
 
   getPeer(peerPubKeyZ32) {

@@ -99,7 +99,11 @@ export function useViewportHeight() {
       // screen, devtools docked) is the whole height there now, or the phone tab bar stayed hidden under 768px.
       const whole = !mayType && event?.type === "resize" ? viewport.height : Math.max(tallest.get(width) ?? 0, viewport.height);
       tallest.set(width, whole);
-      const measured = touch ? Math.max(window.innerHeight - viewport.height, whole - viewport.height) : 0;
+      // A touch laptop with its keyboard (a 2-in-1, a Chromebook: the touchpad the primary pointer) has no keyboard that
+      // shrinks the page: there a shorter height is the window made shorter, and the tab bar stayed hidden after the
+      // field lost the focus. Safari's gap, `innerHeight` kept, still says an iPad's keyboard or shortcut bar.
+      const shrinks = !window.matchMedia?.("(pointer: fine)").matches;
+      const measured = touch ? Math.max(window.innerHeight - viewport.height, shrinks ? whole - viewport.height : 0) : 0;
       // Measured at this width now: Android gives the whole height first at a turn and lays the keyboard out after it,
       // so the height carried was that whole one, and the keyboard down again there did not grow past it.
       if (measured > KEYBOARD) carried = 0;

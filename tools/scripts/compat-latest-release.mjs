@@ -7,7 +7,7 @@
  *
  *   node tools/scripts/compat-latest-release.mjs   # prints e.g. v1.7.2
  *
- * Asks the remote: a CI checkout has no tags.
+ * Asks the remote: a CI checkout has no tags. A remote that does not answer is asked again (remoteReleases).
  */
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -35,14 +35,29 @@ export function newestRelease(lsRemote, head) {
   return releasesNewestFirst(lsRemote, head)[0] ?? null;
 }
 
-/** The release tags on origin, newest first, leaving out the commit checked out here. */
-export function remoteReleases() {
-  const git = (...args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 26 });
-  return releasesNewestFirst(git("ls-remote", "--tags", "origin", "v*"), git("rev-parse", "HEAD").trim());
+const git = (args, options) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 26, ...options });
+
+/**
+ * The release tags on origin, newest first, leaving out the commit checked out here. `git ls-remote` has no connect
+ * timeout of its own: where github.com does not answer the connect, it fails only when the kernel gives up on it, after
+ * some 130 s. It is stopped after `timeout` ms and tried again, 4 times, 2, 4 then 8 seconds apart, then throws.
+ */
+export async function remoteReleases({ run = git, attempts = 4, timeout = 20_000, backoff = 2000, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), log = () => {} } = {}) {
+  const head = run(["rev-parse", "HEAD"]).trim();
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return releasesNewestFirst(run(["ls-remote", "--tags", "origin", "v*"], { timeout, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }), head);
+    } catch (error) {
+      const reason = error?.code === "ETIMEDOUT" ? `no answer in ${timeout / 1000} s` : String(error?.stderr || error?.message || error).trim().split("\n")[0];
+      if (attempt >= attempts) throw new Error(`git ls-remote origin: ${reason} (${attempts} attempts)`);
+      log(`git ls-remote origin: ${reason}, trying again`);
+      await sleep(backoff * 2 ** (attempt - 1));
+    }
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [tag] = remoteReleases();
+  const [tag] = await remoteReleases({ log: (line) => console.error(line) });
   if (!tag) throw new Error("origin has no release tag");
   console.log(tag);
 }

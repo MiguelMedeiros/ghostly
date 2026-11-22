@@ -140,7 +140,8 @@ describe("sharing the screen from inside a call", () => {
     expect(share).toBeEnabled();
     expect(share).toHaveAttribute("title", "Share screen");
     expect(share).toHaveAccessibleName("Share screen");
-    expect(share).toHaveAttribute("aria-pressed", "false");
+    // Named for what it does next, as the camera and microphone buttons beside it: never a toggle too.
+    expect(share).not.toHaveAttribute("aria-pressed");
     await user.click(share);
     expect(onToggleScreenShare).toHaveBeenCalledOnce();
   });
@@ -157,7 +158,8 @@ describe("sharing the screen from inside a call", () => {
     const share = screen.getByTestId("share-screen");
     expect(share).toHaveAttribute("title", "Stop sharing");
     expect(share).toHaveAccessibleName("Stop sharing");
-    expect(share).toHaveAttribute("aria-pressed", "true");
+    // "Stop sharing, pressed" read as stopped already.
+    expect(share).not.toHaveAttribute("aria-pressed");
     expect(screen.getByTestId("call-sharing")).toHaveTextContent("You're sharing your screen");
     // The screen took the camera's place: the camera button turns it back on.
     expect(screen.getByTitle("Turn camera on")).toBeInTheDocument();
@@ -514,6 +516,21 @@ describe("a call ringing while you are on another (End and answer)", () => {
     const ring = screen.getByRole("alertdialog", { name: "Ana" });
     expect(ring).toHaveAccessibleDescription("Incoming video call...");
     expect(within(ring).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Decline", "Accept audio call", "Accept video call"]);
+  });
+
+  it("keeps the focus in the ring when its choices change under it, and Enter answers nothing", async () => {
+    const props = { peerName: "Ana", onAcceptAudio: vi.fn(), onAcceptVideo: vi.fn(), onReject: vi.fn() };
+    const { rerender, user } = renderApp(<IncomingCallNotification {...props} hasVideo onCall />);
+    const ring = screen.getByRole("alertdialog", { name: "Ana" });
+    // The call that was on ends by itself while the focus is on End and answer: the choices become Accept and Decline.
+    screen.getByRole("button", { name: "End and answer" }).focus();
+    rerender(<IncomingCallNotification {...props} hasVideo />);
+    expect(ring).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(props.onAcceptAudio).not.toHaveBeenCalled();
+    expect(props.onAcceptVideo).not.toHaveBeenCalled();
+    expect(props.onReject).not.toHaveBeenCalled();
+    // Accept video going with the call's kind is the kind's own: the focus goes to Accept audio (incomingCallKindChange).
   });
 
   it("is said in every language", async () => {
