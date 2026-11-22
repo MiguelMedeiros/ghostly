@@ -671,7 +671,7 @@ describe("the notice of a green fast tier", () => {
 
   const gate = (draft: string, leftDraft: string, queued = "") => {
     // The fast tier: lint and the affected tests passed, every other job skipped as its gate said.
-    const skipped = ["FRONTEND_TESTS", "FRONTEND_BUILD", "PACKAGES_TESTS", "CLI_ARM64", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"].map((j) => [j, "skipped"]);
+    const skipped = ["FRONTEND_TESTS", "FRONTEND_BUILD", "PACKAGES_TESTS", "INTEGRATION_TESTS", "CLI_ARM64", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"].map((j) => [j, "skipped"]);
     const off = ["RUST", "WEBSITE_GATE", "WEBSITE_E2E_GATE", "APP", "PACKAGES"].map((g) => [g, "false"]);
     const ok = { ...Object.fromEntries([...skipped, ...off]), CHANGES: "success", FRONTEND_CHECKS: "success", AFFECTED: "success", LINT: "true", AFFECTED_GATE: "true" };
     const run = bash(script("ci-success", "Check all jobs passed"), { ...ok, DRAFT: draft, LEFT_DRAFT: leftDraft, QUEUED: queued, FULL: "false", TESTED: "false" });
@@ -722,7 +722,7 @@ describe("the errors of a red CI Success", () => {
   const script = body.split(/\n(?! {10}| *\n)/)[0].replace(/^ {10}/gm, "");
   /** The full tier on a ready pull request with app changes: every job ran and passed, but for `results`. */
   const gate = (results: Record<string, string>) => {
-    const jobs = ["FRONTEND_CHECKS", "FRONTEND_TESTS", "PACKAGES_TESTS", "CLI_ARM64", "FRONTEND_BUILD", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"];
+    const jobs = ["FRONTEND_CHECKS", "FRONTEND_TESTS", "PACKAGES_TESTS", "INTEGRATION_TESTS", "CLI_ARM64", "FRONTEND_BUILD", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"];
     const plan = { CHANGES: "success", DRAFT: "false", TESTED: "false", FULL: "true", AFFECTED_GATE: "false", AFFECTED: "skipped", LINT: "true", PACKAGES: "true", RUST: "true", WEBSITE_GATE: "true", WEBSITE_E2E_GATE: "true", APP: "true" };
     const run = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", ...plan, ...Object.fromEntries(jobs.map((j) => [j, "success"])), ...results } });
     return { status: run.status, errors: run.stdout.split("\n").filter((l) => l.startsWith("::error::")) };
@@ -734,6 +734,8 @@ describe("the errors of a red CI Success", () => {
       status: 1,
       errors: ["::error::Tauri Backend ended failure", "::error::Website browser checks was skipped, but this change needs it"],
     });
+    // The package tests that start real peers run in their own job: a run that skipped it did not test the packages.
+    expect(gate({ INTEGRATION_TESTS: "skipped" })).toEqual({ status: 1, errors: ["::error::Integration tests was skipped, but this change needs it"] });
   });
 
   it("names the range of the draft's unit test groups, since their one result does not say which failed", () => {

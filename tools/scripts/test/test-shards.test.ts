@@ -1,8 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
-import { ALONE, WORKERS, appSuites, packages, reportTimes, slowWarnings, split, staleWarning, unlistedAlone } from "../test-shards.mjs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { quarantined } from "../../vitest.shared.ts";
+import { ALONE, WORKERS, appSuites, integrationFiles, integrationLeft, packages, reportTimes, slowWarnings, split, staleWarning, unlistedAlone } from "../test-shards.mjs";
 
 const unit = (id: string, files: string[], alone = false) => ({ id, dir: id, files, alone });
 
@@ -125,6 +126,38 @@ describe("the packages shards", () => {
     // One slow runner (40 s) does not set the record; with two runs it is their mean.
     const runs = [report("a.json", [[file, 10], [other, 4]]), report("b.json", [[file, 40], [other, 6]]), report("c.json", [[file, 12]])];
     expect(reportTimes(runs)).toEqual({ [file]: 12, [other]: 5 });
+  });
+});
+
+describe("the integration tests", () => {
+  const repo = resolve(import.meta.dirname, "../../..");
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("are package test files, each named once, in order, and the file that runs alone among them", () => {
+    const list = integrationFiles();
+    expect(list.length).toBeGreaterThan(0);
+    expect(list).toEqual([...new Set(list)].sort());
+    for (const file of list) expect([file, existsSync(join(repo, file))]).toEqual([file, true]);
+    expect(list.filter((f) => !/^packages\/(core|browser|cli|sdk)\/test\/[\w.-]+\.test\.ts$/.test(f))).toEqual([]);
+    for (const file of ALONE) expect(list).toContain(file);
+  });
+
+  it("are out of the shards' and the draft tier's Vitests (GHOSTLY_INTEGRATION=0) and in a plain npm test", () => {
+    const cli = join(repo, "packages/cli");
+    vi.stubEnv("GHOSTLY_INTEGRATION", "0");
+    expect(quarantined(undefined, cli)).toContain("test/twoPeers.test.ts");
+    expect(quarantined(undefined, cli)).not.toContain("test/connectionError.test.ts");
+    vi.stubEnv("GHOSTLY_INTEGRATION", "1");
+    expect(quarantined(undefined, cli)).not.toContain("test/twoPeers.test.ts");
+    vi.stubEnv("GHOSTLY_INTEGRATION", undefined);
+    expect(quarantined(undefined, cli)).not.toContain("test/twoPeers.test.ts");
+  });
+
+  it("refuse a listed file no package's Vitest lists, but not one tools/scripts/quarantine.json holds", () => {
+    const [a, b] = ["packages/cli/test/a.test.ts", "packages/cli/test/b.test.ts"];
+    expect(integrationLeft([unit("cli", [a])], [a, b], [])).toEqual([b]);
+    expect(integrationLeft([unit("cli", [a])], [a, b], [b])).toEqual([]);
+    expect(integrationLeft([unit("cli", [a]), unit(b, [b], true)], [a, b], [])).toEqual([]);
   });
 });
 

@@ -3737,7 +3737,7 @@ describe("a green CI run planned for other files", () => {
     const yml = readFileSync(resolve(import.meta.dirname, "../../../.github/workflows/ci.yml"), "utf8");
     // Each job's name and condition: `  <id>:`, then `    name: ...` and, within its first lines, `    if: needs.changes.outputs.<gate> == 'true'`.
     const gated = [...yml.matchAll(/^ {2}[\w-]+:\n {4}name: (.+)\n(?: {4}.+\n){0,3}? {4}if: needs\.changes\.outputs\.(\w+) == 'true'$/gm)].map((m) => ({ name: m[1], gate: m[2] }));
-    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "lint", "packages", "packages", "rust", "website", "website_e2e"]);
+    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "lint", "packages", "packages", "packages", "rust", "website", "website_e2e"]);
     // The draft tier's job is skipped in every full run: it is no path gate.
     for (const { name, gate } of gated) expect([name, gateOf(name)]).toEqual([name, gate === "affected" ? undefined : gate]);
     expect(Object.keys(PLANNED_JOBS).filter((start) => !gated.some((j) => j.name.startsWith(start)))).toEqual([]);
