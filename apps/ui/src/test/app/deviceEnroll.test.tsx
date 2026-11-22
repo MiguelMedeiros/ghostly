@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { configure, screen, waitFor } from "@testing-library/react";
+import { act, configure, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
@@ -29,7 +29,7 @@ HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { t
 
 const waiting = { role: "inviter" as const, step: "waiting" as const, code: "ghostly1zexample", expires: Math.floor(Date.now() / 1000) + 600 };
 
-afterEach(() => { vi.unstubAllGlobals(); Reflect.deleteProperty(navigator, "userAgent"); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); Reflect.deleteProperty(navigator, "userAgent"); });
 
 describe("the lock password a device set needs (WISP 06 § Adding a device)", () => {
   it("is 8 characters with a device set, 4 without, and typed the same twice", () => {
@@ -173,7 +173,7 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(spoken).toHaveAttribute("role", "status");
     expect(spoken).toHaveTextContent(/^$/);
     view = { role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web" };
-    await waitFor(() => expect(spoken).toHaveTextContent("Found Phone. Check that it shows the same digits. 482 913"), { timeout: 3_000 });
+    await waitFor(() => expect(spoken).toHaveTextContent("Found Phone. Check that it shows the same digits. 4 8 2 9 1 3"), { timeout: 3_000 });
     view = { role: "inviter", step: "done", device: "Phone", published: true };
     await waitFor(() => expect(spoken).toHaveTextContent("Phone added. It is on standby."), { timeout: 3_000 });
     expect(screen.getByTestId("device-add-spoken")).toBe(spoken);
@@ -385,6 +385,8 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
   }, 20_000);
 
   it("once the device is added or the enrollment failed, its state is not read again while the dialog stays open", async () => {
+    // The half-second reads run on a fake clock that also keeps real time: `readsOver` passes three rounds at once.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setInterval", "clearInterval"] });
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
     engine.on("deviceEnrollInvite", () => waiting);
@@ -397,7 +399,7 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     /** The reads of the enrollment's state over three of its half-second rounds. */
     const readsOver = async () => {
       const before = engine.callsTo("deviceEnrollView").length;
-      await new Promise((resolve) => setTimeout(resolve, 1_600));
+      await act(() => vi.advanceTimersByTimeAsync(1_600));
       return engine.callsTo("deviceEnrollView").length - before;
     };
     view = { role: "inviter", step: "failed", reason: "expired" };
@@ -459,6 +461,8 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
   }, 20_000);
 
   it("Try again refused while offline shows that reason only: the enrollment that ended stays off the dialog", async () => {
+    // The half-second reads run on a fake clock that also keeps real time: three rounds are passed at once below.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setInterval", "clearInterval"] });
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
     engine.on("deviceEnrollInvite", () => waiting);
@@ -473,7 +477,7 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(await screen.findByTestId("device-add-error")).toHaveTextContent("You are offline.");
     // No enrollment runs, so nothing is read: what the engine still answers never comes back over the reason.
     const reads = engine.callsTo("deviceEnrollView").length;
-    await new Promise((resolve) => setTimeout(resolve, 1_600));
+    await act(() => vi.advanceTimersByTimeAsync(1_600));
     expect(engine.callsTo("deviceEnrollView")).toHaveLength(reads);
     expect(screen.queryByTestId("device-add-failed")).toBeNull();
     expect(screen.getByTestId("device-add-again")).toBeInTheDocument();

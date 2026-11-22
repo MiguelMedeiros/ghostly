@@ -518,6 +518,21 @@ describe("a call ringing while you are on another (End and answer)", () => {
     expect(within(ring).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Decline", "Accept audio call", "Accept video call"]);
   });
 
+  it("keeps the focus in the ring when its choices change under it, and Enter answers nothing", async () => {
+    const props = { peerName: "Ana", onAcceptAudio: vi.fn(), onAcceptVideo: vi.fn(), onReject: vi.fn() };
+    const { rerender, user } = renderApp(<IncomingCallNotification {...props} hasVideo onCall />);
+    const ring = screen.getByRole("alertdialog", { name: "Ana" });
+    // The call that was on ends by itself while the focus is on End and answer: the choices become Accept and Decline.
+    screen.getByRole("button", { name: "End and answer" }).focus();
+    rerender(<IncomingCallNotification {...props} hasVideo />);
+    expect(ring).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(props.onAcceptAudio).not.toHaveBeenCalled();
+    expect(props.onAcceptVideo).not.toHaveBeenCalled();
+    expect(props.onReject).not.toHaveBeenCalled();
+    // Accept video going with the call's kind is the kind's own: the focus goes to Accept audio (incomingCallKindChange).
+  });
+
   it("is said in every language", async () => {
     for (const language of ["en", "pt", "es", "fr", "it", "ja", "zh", "ar"]) {
       const calls = (await import(`../../locales/${language}/calls.json`)).default as Record<string, unknown>;

@@ -80,6 +80,14 @@ describe("react in a 1:1 chat, without a daemon", () => {
     await expect(callApi(fake().ctx, "chat.react", { chat: "Alice", message: "peer_x", emoji: "👍", wait: "confirmed", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: /still goes by itself while this profile is online/ });
   });
 
+  it("a timeout's details name the message and the emoji, as edit's and message delete's do: a bot that retries has them there", async () => {
+    const error = await callApi(fake(undefined, "one-shot").ctx, "chat.react", { chat: "Alice", message: "peer_x", emoji: "👍", timeout: 1 }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "timeout" });
+    expect((error as { details: unknown }).details).toEqual({ chat: "chat-one", messageId: "peer_x", emoji: "👍" });
+    const back = await callApi(fake(undefined, "one-shot").ctx, "chat.react", { chat: "Alice", message: "peer_x", remove: true, timeout: 1 }).catch((e: unknown) => e);
+    expect((back as { details: unknown }).details).toEqual({ chat: "chat-one", messageId: "peer_x", emoji: null });
+  });
+
   it("takes --wait and --timeout, checked before anything is sent", async () => {
     const parsed = parseArgs(["alice", "peer_x", "👍", "--wait", "none", "--timeout", "5"], COMMANDS.react.options ?? {}, idSlot(COMMANDS.react));
     expect(COMMANDS.react.params!(parsed, positionals(COMMANDS.react, parsed.positionals))).toEqual({ chat: "alice", message: "peer_x", emoji: "👍", remove: false, wait: "none", timeout: 5 });

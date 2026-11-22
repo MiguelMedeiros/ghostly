@@ -108,6 +108,19 @@ describe("the group header on the narrowest phone", () => {
   });
 });
 
+// A phone on its side (844x390 with an iPhone's safe areas) left the group a 330 px pane beside the chat list: Share
+// kept its label by the window's width, and "Clube do livro" was cut to 65 of 92 px. The label follows the header's.
+describe("the group header's Share link in a narrow pane", () => {
+  it("hides its label by the header's width, not the window's", () => {
+    openGroup(admin({ entryLink: LINK }));
+    const share = screen.getByTestId("group-share");
+    const label = within(share).getByText("Share link");
+    expect(label).toHaveClass("@max-[480px]/group-head:hidden");
+    expect(label).not.toHaveClass("max-[480px]:hidden");
+    expect(share.closest(".\\@container\\/group-head")).toContainElement(screen.getByTestId("group-name"));
+  });
+});
+
 describe("a link that lets nobody in", () => {
   it("tells the admin, and New link asks first, replaces it and shows the new one to share", async () => {
     const NEW = encodeGroupEntryLink({ g: ID, host: createIdentity().pubKeyZ32 });

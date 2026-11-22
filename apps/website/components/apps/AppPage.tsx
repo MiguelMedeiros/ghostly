@@ -52,14 +52,6 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
 
       <div className="wrap ap-body">
         <div className="ap-main">
-          {app.description && (
-            <section className="ap-block ap-description">
-              {app.description.split(/\n+/).map((line, i) => (
-                <p key={i}>{line}</p>
-              ))}
-            </section>
-          )}
-
           <section className="ap-block" aria-labelledby="ap-can">
             <h2 id="ap-can" className="h-card">
               {t.can}
@@ -109,6 +101,22 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
               </>
             )}
           </section>
+
+          {/* The publisher's own words, after Ghostly's (what it can do, the key to check), under a heading that says whose
+              they are: first, a line like "✓ Verified by Ghostly, no internet" read as the site's, and 2000 characters of
+              lines pushed the permissions far down. As the install screen draws it (apps/ui AppDescription). */}
+          {app.description && (
+            <section className="ap-block ap-description" aria-labelledby="ap-from">
+              <h2 id="ap-from" className="h-card">
+                {t.fromPublisher}
+              </h2>
+              {app.description.split(/\n+/).map((line, i) => (
+                <p key={i} dir="auto">
+                  {line}
+                </p>
+              ))}
+            </section>
+          )}
         </div>
 
         <aside className="ap-side">

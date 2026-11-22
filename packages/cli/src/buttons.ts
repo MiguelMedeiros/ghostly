@@ -2,7 +2,7 @@ import { BUTTONS_CAPABILITY, BUTTON_STYLES, STATUS_CARD_LIMITS, buttonLabelClash
 import type { LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { Parsed } from "./args";
 import { bool, chatOrGroup, messageOf, noMessage, node, num, oneOf, oneShotWaits, str, type Method, type Params, type RefPlace } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 import { findSecret, secretWords } from "./secretGuard";
 import { checkTextSize } from "./textSize";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
@@ -17,9 +17,9 @@ import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 /**
  * `--button id:Label` (again for each, 1 to 6), `--style id=primary|neutral|danger`, `--once` and `--id`, as the
  * method's parameters: `buttons` and `buttonsId`. Nothing when no `--button` is given. The label may hold colons: the
- * id ends at the first one. An id given twice, two labels that read the same (ignoring case and spaces at the ends), a
- * label that is another button's id, or a style not listed are a usage error here, before the profile opens; other
- * bounds (ids, labels, how many) are the card's, checked when it is sent.
+ * id ends at the first one. More buttons than a message holds, an id given twice, two labels that read the same
+ * (ignoring case and spaces at the ends), a label that is another button's id, or a style not listed are a usage error
+ * here, before the profile opens; other bounds (ids, labels) are the card's, checked when it is sent.
  */
 export function buttonsOf(options: Parsed["options"]): { buttons: Record<string, unknown>[]; buttonsId?: string } | undefined {
   const given = Array.isArray(options.button) ? options.button as string[] : [];
@@ -28,9 +28,10 @@ export function buttonsOf(options: Parsed["options"]): { buttons: Record<string,
       if (options[flag] !== undefined) throw new CliError("usage", `--${flag} goes with --button id:Label`);
     return undefined;
   }
+  if (given.length > STATUS_CARD_LIMITS.buttons) throw new CliError("usage", `--button is given at most ${STATUS_CARD_LIMITS.buttons} times, not ${given.length}`);
   const buttons: Record<string, unknown>[] = given.map((value) => {
     const colon = value.indexOf(":");
-    if (colon < 1 || colon === value.length - 1) throw new CliError("usage", `--button takes id:Label, like yes:Yes, not ${JSON.stringify(value)}`);
+    if (colon < 1 || colon === value.length - 1) throw new CliError("usage", `--button takes id:Label, like yes:Yes, not ${shownValue(value)}`);
     return { id: value.slice(0, colon), label: value.slice(colon + 1).trim() };
   });
   const twice = buttons.findIndex((button, at) => buttons.findIndex((other) => other.id === button.id) !== at);
@@ -46,7 +47,7 @@ export function buttonsOf(options: Parsed["options"]): { buttons: Record<string,
   for (const value of Array.isArray(options.style) ? options.style as string[] : []) {
     const eq = value.indexOf("=");
     const button = eq > 0 ? buttons.find((b) => b.id === value.slice(0, eq)) : undefined;
-    if (!button) throw new CliError("usage", `--style takes id=primary|neutral|danger for one of the buttons, not ${JSON.stringify(value)}`);
+    if (!button) throw new CliError("usage", `--style takes id=primary|neutral|danger for one of the buttons, not ${shownValue(value)}`);
     const style = value.slice(eq + 1);
     if (!(BUTTON_STYLES as readonly string[]).includes(style)) throw new CliError("usage", `--style ${JSON.stringify(value)}: a button's style is ${BUTTON_STYLES.join(", ")}`);
     button.style = style;
