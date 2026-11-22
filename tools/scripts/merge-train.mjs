@@ -161,7 +161,7 @@ export const MAX_BATCH = 12;
 // longest has waited MAX_WAIT since it could board, or at once for `queue:priority`. Pull requests come in minutes
 // apart and each batch's CI takes ~20 minutes, one at a time, so leaving with the first one ready made batches of ~2
 // (15 batches on 2026-10-15/16: 1 to 4 each): more full CI runs, and a slower line. A run that holds a batch has the
-// workflow wake the train just past the deadline (`wakeIn`): GitHub runs the 5-minute schedule only every 10 to 30.
+// workflow wake the train just past the deadline (`wakeIn`): GitHub keeps the workflow's schedule only loosely.
 export const MIN_BATCH = 3;
 export const MAX_WAIT = 15 * 60_000;
 /**
@@ -528,7 +528,7 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * it: the one in flight is no longer waiting for its own CI, and nobody behind it moves. `company` is set while the
  * next batch, this pull request in it, waits for company (`holdBatch`): how many can board, the batch size it waits
  * for, and from when it leaves anyway (a fixed time, so the comment does not change from run to run; it leaves at the
- * train's first run after it, and GitHub runs the 5-minute schedule 10 to 30 minutes apart). `stuck` is the base's
+ * train's first run after it, which the workflow starts at that time). `stuck` is the base's
  * commit once a hold for its red has lasted HOLD_HELP: the comment then says what a person can do. A lone pull request
  * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so. One with `pr.behind` ({ batch,
  * with }) merges cleanly onto the base but conflicts with `with`, aboard the batch in flight: it waits for the next.
