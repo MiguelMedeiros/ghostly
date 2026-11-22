@@ -530,7 +530,8 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * for, and from when it leaves anyway (a fixed time, so the comment does not change from run to run; it leaves at the
  * train's first run after it, and GitHub runs the 5-minute schedule 10 to 30 minutes apart). `stuck` is the base's
  * commit once a hold for its red has lasted HOLD_HELP: the comment then says what a person can do. A lone pull request
- * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so. One with `pr.behind` ({ batch,
+ * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so; one whose has `refused`, GitHub's
+ * refusal of the push of its rebase, says that. One with `pr.behind` ({ batch,
  * with }) merges cleanly onto the base but conflicts with `with`, aboard the batch in flight: it waits for the next.
  */
 export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null, stuck = null) {
@@ -545,9 +546,13 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
   const cancelled = " Cancelled checks here are not failures; a push would take it out of the line.";
   if (alone) {
     const again = alone.retried ? " (a second run, after a red one)" : "";
-    const where = held ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
+    // A push GitHub refused (`refused`, its message): the branch never got that commit, so no CI Success is coming.
+    const where = alone.refused
+      ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}, but GitHub refused the push of that rebase to its branch: ${escapeMark(alone.refused)}. The train tries once more at its next run; refused again, it leaves the line.`
+      : held ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
     const past = alone.past ? ` It goes ahead of #${alone.past}, which the train holds while CI Success on \`${base}\` itself is red (\`${LABEL.priority}\`).` : "";
-    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone)} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${hold}`;
+    // GitHub's message may hold any text: escaped (JSON.parse reads it back) so none ends the mark.
+    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${hold}`;
   }
   if (batch) {
     const note = own ? ` Its own full CI is not needed: the batch's CI is its gate, so the train cancels that run if it is still going.${cancelled}` : "";
@@ -626,6 +631,16 @@ export const noSkip = (text) => text.replace(SKIP_CI, "($1)");
 
 /** GitHub's refusal of a push whose commits change a workflow, by a token without the `workflows` permission. */
 const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
+/**
+ * A push GitHub itself refused (a branch rule's GH013, a hook, a token without the right): not a lease lost to an
+ * author's push (`! [rejected]`), a network error or GitHub's own failure (`[remote rejected] … (Internal Server
+ * Error)`, `(failure)`, `(failed to update ref)`), which the next run gets past. Only GitHub's policy reasons count.
+ */
+const PUSH_REFUSED = /\[remote rejected\] .*\((?:push declined|protected branch hook declined|pre-receive hook declined)|returned error: 403/;
+/** A refusal's text as the comment shows it: no credentials, even if a remote's URL held them. */
+const refusalText = (message) => message.replace(/\/\/[^/@\s]+@/g, "//");
+/** Two refusals are the same one whatever commit each run pushed: git names the rebase's object id, new at every run. */
+const sameRefusal = (a, b) => typeof a === "string" && a.replace(/\b[0-9a-f]{7,64}\b/g, "") === b.replace(/\b[0-9a-f]{7,64}\b/g, "");
 
 // A file name may hold any text, the train's marks too: `<` is escaped (as for titles in `batchBody`) so none forms.
 const escapeMark = (f) => f.replaceAll("<", "&lt;");
@@ -643,6 +658,8 @@ const unlistedText = (workflow, others, after) =>
   `Merge train: GitHub lists no files for this pull request (it changes 3000 files or more, or none), and it refused the batch's push for a workflow (${workflow ? `\`${escapeMark(workflow)}\`: ` : ""}the queue app's token has no \`workflows\` permission). GitHub lists none for ${others.map((o) => `#${o.number}`).join(", ")} either, so the train cannot tell which of them changes it, and all of them left the line: the rest of the line goes on without them. They come back one at a time, in number order, so that only one of them boards at once: ${after ? `once #${after.number} has landed, left the line again or is not coming back, add \`queue\` again` : "add `queue` again now, before the others"}, and it only leaves again if it is the one that changes it (the train takes \`queue:failed\` off).`;
 const workflowText = (base, workflows) =>
   `Merge train: this pull request changes a workflow (${workflows.map(escapeMark).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission: then add \`queue\` again (the train takes \`queue:failed\` off).`;
+const pushRefusedText = (base, message) =>
+  `Merge train: GitHub refused the push of its rebase onto \`${base}\` twice (${escapeMark(message)}), so it left the line: the rest of the line goes on without it. A rule on its branch or the queue app's permissions keep the app from pushing it: once that is fixed, add \`queue\` again (the train takes \`queue:failed\` off); or land it by hand into \`${base}\`.`;
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -1390,6 +1407,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // never got, which the next run reads as nothing in flight. A branch already on the train's own rebase keeps it
     // vouched for in `from`: else, stopped before the push, the next run read it as an author's push and dropped it.
     const from = p.sha !== (queuedHead(p.sticky) ?? p.sha) && (p.alone?.sha === p.sha || p.alone?.from === p.sha) ? p.sha : null;
+    const prev = p.alone;
     p.alone = { sha: built.sha, baseSha: built.baseSha, at: new Date(now).toISOString(), retried, ...(from ? { from } : {}), ...(past ? { past } : {}) };
     await setSticky(p, positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone));
     say(`ALONE #${p.number}: rebased onto ${built.baseSha.slice(0, 12)} as ${built.sha.slice(0, 12)}${retried ? " (second run)" : ""}`);
@@ -1406,6 +1424,18 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         done.dropped.push(p.number);
         await leave(p, LABEL.failed, workflowText(base, workflows));
         return null;
+      }
+      if (!pushed.ok && PUSH_REFUSED.test(pushed.message)) {
+        // Any other refusal by GitHub (a branch rule, a push the app's token may not do) comes back on every run too:
+        // the comment says so with GitHub's message, and the same refusal at the next run takes it out of the line.
+        const refused = refusalText(pushed.message);
+        if (sameRefusal(prev?.refused, refused)) {
+          say(`DROP #${p.number} (GitHub refused the push of its rebase twice: ${refused})`);
+          done.dropped.push(p.number);
+          await leave(p, LABEL.failed, pushRefusedText(base, refused));
+          return null;
+        }
+        p.alone.refused = refused;
       }
       if (!pushed.ok) say(`::warning::Could not push the rebase of #${p.number}: ${pushed.message}`);
     }
