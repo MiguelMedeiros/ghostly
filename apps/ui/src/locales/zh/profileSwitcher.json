@@ -14,6 +14,7 @@
   "standby": "待机",
   "switchTo": "切换到 {{name}}",
   "switching": "正在打开 {{name}}…",
+  "switchingFromOtherTab": "另一个 Ghostly 标签页打开了 {{name}}…",
   "title": "切换资料",
   "unread": "{{count}} 条未读"
 }

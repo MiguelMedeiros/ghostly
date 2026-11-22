@@ -7,6 +7,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { useBackCloses, useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
 import { groupCallRelayConfig, NO_CALL_KEY, NO_SEALING, useGroupCall, type GroupCallSeal, type LivekitModule } from "../hooks/useGroupCall";
 import { useGroupCallSupport } from "../hooks/useGroupCallSupport";
+import { useGroupCallDevices } from "../hooks/useCallDevices";
 import { useHandler } from "../hooks/useHandler";
 import { useCallService } from "../lib/callService";
 import { askGroupCallPass, groupCallOf, groupCallProblem, PASS_REFRESH_LEAD_S, passRefreshInMs, passRefused, type GroupCallPass } from "../lib/groupCallPass";
@@ -190,6 +191,8 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
 
   // On the app's calls while in the room: a 1:1 call answered meanwhile ("End and answer") leaves it.
   const on = !!joined && (call.status === "connecting" || call.status === "connected");
+  // The speaker, microphone and camera chosen in Settings, followed through the call as a 1:1 call does.
+  const devices = useGroupCallDevices(call, on);
   useEffect(() => {
     if (!on) return;
     setCallOn(key, leave);
@@ -238,7 +241,7 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
           {!blocked && <button type="button" onClick={() => void join()} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
         </div>
       </div>}
-      {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised} moderator={moderator} connected={call.status === "connected"}
+      {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised} moderator={moderator} connected={call.status === "connected"} devices={devices}
         onToggleMic={() => void call.toggleMic()} onToggleCamera={() => void call.toggleCamera()} onToggleScreen={() => void call.toggleScreen()} onLeave={leave} />}
       {askIp && <HideIpDialog onClose={() => setAskIp(false)} onConfirm={() => { setAskIp(false); joinedShowingIp.add(ipShownTo); go(); }} />}
       {askEnd && <EndOtherCallDialog onClose={() => setAskEnd(false)} onConfirm={() => { setAskEnd(false); endOtherCalls(key); void join(); }} />}

@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalJsonBytes, readAppBundle, readAppRevocations, seedSigner, setAppSignatureFastPath, signAppRevocation, toBase64Url, type SignedAppRevocation } from "@ghostly/core";
-import { revokeApp, signStore } from "../src/apps";
+import { publishApp, revokeApp, signStore, verifyApp } from "../src/apps";
 // covers: apps.bundle, apps.store
 
 /*
@@ -89,5 +89,49 @@ describe("a publisher command checks each revocation once per run", () => {
     expect(await signStore(join(dir, "index.json"), key)).toMatchObject({ previous: index.sequence, sequence: index.sequence + 1 });
     // The held index (its signature and revocations), then only the new index's signature: 4 × 40 + 2 before.
     expect(verifies.count).toBe(HELD + 2);
+  }, 60_000);
+});
+
+describe("app verify checks each revocation once, however often the files beside the bundle repeat it", () => {
+  const REPEATS = 200;
+  const repeated = async (ref: string) => canonicalJsonBytes(Array(REPEATS).fill((await revocations(ref, 1))[0]) as never);
+
+  it("in the ghostly-revoke.json beside a bundle file", async () => {
+    const { dir, ref } = chessFolder();
+    writeFileSync(join(dir, "ghostly-revoke.json"), await repeated(ref));
+    verifies.count = 0;
+    expect(await verifyApp(join(dir, "app.ghostlyapp"))).toMatchObject({ valid: true });
+    // The bundle's signature and the one revocation: 1 + 200 before.
+    expect(verifies.count).toBe(1 + 1);
+  }, 60_000);
+
+  it("in the files beside a URL and each of the manifest's sources", async () => {
+    const { dir: vectorDir, ref } = chessFolder();
+    const read = readAppBundle(new Uint8Array(readFileSync(join(vectorDir, "app.ghostlyapp"))));
+    if (!read.ok) throw new Error("vector 0 does not read");
+    const sources = ["ana/chess-a", "ana/chess-b"].map((repo) => `https://raw.githubusercontent.com/${repo}/HEAD/app.ghostlyapp`);
+    const { publisher: _p, files: _f, ghostlyApp: _g, ...draft } = { ...read.bundle.manifest, sources };
+    const dir = tmp();
+    writeFileSync(join(dir, "ghostly-app.json"), JSON.stringify(draft));
+    for (const [path, bytes] of read.bundle.files) {
+      mkdirSync(dirname(join(dir, path)), { recursive: true });
+      writeFileSync(join(dir, path), bytes);
+    }
+    await publishApp(dir, keyFile(tmp(), "publisher"));
+    const published = new Uint8Array(readFileSync(join(dir, "app.ghostlyapp")));
+    const list = new Uint8Array(await repeated(ref));
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", async (at: string) => {
+      seen.push(at);
+      return new Response(at.endsWith("/app.ghostlyapp") ? published : list, { status: 200 });
+    });
+    try {
+      verifies.count = 0;
+      expect(await verifyApp(url)).toMatchObject({ valid: true });
+      expect(seen.filter((at) => at.endsWith("/ghostly-revoke.json"))).toHaveLength(3);
+      // The bundle's signature and the one revocation: 1 + 3 × 200 before.
+      expect(verifies.count).toBe(1 + 1);
+    } finally { vi.unstubAllGlobals(); }
   }, 60_000);
 });
