@@ -7684,6 +7684,8 @@ export class GhostlyNode implements EngineImplementation {
 
   removeService({ serviceId }: { serviceId: string }): void {
     this.services = this.services.filter((s) => s.id !== serviceId);
+    // An app added again under the same name gets the same id: it starts with no requests of its own.
+    this.requestCounts.delete(serviceId);
     void db.deleteService(serviceId);
     this.servicesChanged();
   }
