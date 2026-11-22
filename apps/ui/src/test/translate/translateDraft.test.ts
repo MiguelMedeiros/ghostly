@@ -23,6 +23,23 @@ describe("what of a draft is translated", () => {
     expect(upper.startsWith("LOOK AT THIS https://")).toBe(true);
   });
 
+  it("a payment link the chat shows as a card stays whole, amount and all", () => {
+    const usdt = "ethereum:0xdAC17F958D2ee523a2206206994597C13D831ec7@1/transfer?address=0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed&uint256=1000000";
+    const xmr = "monero:4AzKEX4gXdJdNeM6dfiBFL7kqund3HYGvMBF3ttsNd9SfzgYB6L7ep1Yg1osYJzLdaKAYSLVh6e6jKnAuzj3bw1oGy9kXCb?tx_amount=0.25&tx_description=Rent%20%28May%29";
+    expect(words(`pay ${usdt} today`)).toEqual(["pay", "today"]);
+    expect(words(`pay ${xmr} today`)).toEqual(["pay", "today"]);
+  });
+
+  it("a link or payment link ends where the bubble's does, so the sentence after it is translated too", () => {
+    const text = "見て https://a.example/x。明日会いましょう";
+    expect(words(text)).toEqual(["見て", "。明日会いましょう"]);
+    expect(joinParts(draftParts(text), ["Look", ". See you tomorrow"])).toBe("Look https://a.example/x. See you tomorrow");
+    expect(words("看 www.a.example/x，明天见")).toEqual(["看", "，明天见"]);
+    expect(words("付款 bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.1。谢谢")).toEqual(["付款", "。谢谢"]);
+    // Inside the address, what the bubble keeps stays kept.
+    expect(words("see https://a.example/x_(y) ok")).toEqual(["see", "ok"]);
+  });
+
   it("each line goes on its own, and its spaces and line breaks stay", () => {
     expect(words("  bom dia\n\ntudo bem?  ")).toEqual(["bom dia", "tudo bem?"]);
     expect(joinParts(draftParts("  bom dia\n\ntudo bem?  "), ["good morning", "all good?"])).toBe("  good morning\n\nall good?  ");

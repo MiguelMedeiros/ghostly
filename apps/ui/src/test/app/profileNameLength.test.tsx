@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
-import { listProfiles, PROFILE_NAME_MAX, registryKey, renameProfile } from "../../lib/profiles";
+import { createProfile, listProfiles, PROFILE_NAME_MAX, registryKey, renameProfile } from "../../lib/profiles";
 import { Profile } from "../../pages/Profile";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -51,6 +51,19 @@ describe("the profile's name fields", () => {
     expect((name as HTMLInputElement).value.endsWith("\u200d")).toBe(true);
     await user.type(name, "{Enter}");
     expect(listProfiles()[0].name).toBe("x".repeat(26) + "👨‍👩‍👧");
+  });
+
+  it("take no name with nothing visible: New profile's Create stays off, and the registry refuses it", async () => {
+    const { user } = renderApp(<Profile />);
+    await user.click(screen.getByTestId("profile-new"));
+    await user.paste("\u200b\u200b");
+    expect(screen.getByTestId("profile-create")).toBeDisabled();
+    expect(() => createProfile("\u200b \u2066\u2069")).toThrow("Give the profile a name");
+    expect(() => renameProfile("", "\u200b\u200e")).toThrow("Give the profile a name");
+    expect(listProfiles()).toHaveLength(1);
+    // Hidden and direction-changing characters go from a name that shows; an emoji's joiners stay.
+    renameProfile("", `Wo\u200brk\u202e ${family}`);
+    expect(listProfiles()[0].name).toBe(`Work ${family}`);
   });
 
   it("are kept whole by the registry, which cuts a longer name between whole characters too", () => {

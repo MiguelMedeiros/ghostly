@@ -48,6 +48,23 @@ describe("my pin", () => {
     expect(await myPin(t.pins, linkId, "N".repeat(22), false, undefined, 5)).toEqual({ error: expect.stringMatching(/not in this chat/) });
     expect(t.whole).toHaveBeenCalledTimes(1);
   });
+
+  it("the message pinned already is not numbered again, unless its number no longer holds", async () => {
+    const linkId = `pins-${crypto.randomUUID()}`, t = host(linkId), now = 1_700_000_100_000;
+    expect(await myPin(t.pins, linkId, `me_${wire(7)}`, false, { id: wire(7), n: now - 5 }, now)).toEqual({ already: true });
+    expect(await myPin(t.pins, linkId, fileWire, false, { id: fileWire, n: now - 5 }, now)).toEqual({ already: true });
+    expect(await myPin(t.pins, linkId, wire(8), false, { id: wire(7), n: now - 5 }, now)).toMatchObject({ id: wire(8), by: "me", n: now });
+    // A number far past now counts as none: the pin is made again, numbered from now.
+    expect(await myPin(t.pins, linkId, wire(7), false, { id: wire(7), n: Number.MAX_SAFE_INTEGER }, now)).toMatchObject({ id: wire(7), by: "me", n: now });
+  });
+
+  it("in a group, says the group when nothing is pinned or the message is not there", async () => {
+    const t = host("group:g1");
+    expect(await myPin(t.pins, "group:g1", undefined, true, undefined, 5)).toEqual({ error: "Nothing is pinned in this group" });
+    expect(await myPin(t.pins, "group:g1", "k:0:9", false, undefined, 5)).toEqual({ error: "That message is not in this group, or cannot be pinned" });
+    // A 1:1 chat's still says the chat.
+    expect(await myPin(t.pins, "chat-a", undefined, true, undefined, 5)).toEqual({ error: "Nothing is pinned in this chat" });
+  });
 });
 
 describe("a pin the contact makes", () => {

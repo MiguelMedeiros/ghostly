@@ -4,16 +4,25 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Android's network callback (GhostlyHostPlugin.kt), which tells Iroh of a new network. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Voice messages and calls in the WebView (asked at the first use); the screen-off call service is A4's. -->
+    <!-- Voice messages and calls in the WebView (asked at the first use). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- Android 13 and up: asked when the person turns notifications on in Settings, never at start. -->
+    <!-- Android 13 and up: asked when the person turns notifications on in Settings, or as a call starts (its ongoing
+         notification), never at start. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- A file moving with the app out of sight (TransferService.kt): a data-sync foreground service and a partial
          wake lock, for as long as files move. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- A call going on with the app out of sight (CallService.kt): a foreground service of type microphone, and
+         camera while the call sends the camera's picture, for as long as the call is on. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- Chats and groups staying connected with the app out of sight (ConnectionService.kt), while "Stay connected in
+         the background" is on: a remote-messaging foreground service (Android 14 and up), and a partial wake lock
+         while links are up. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -39,10 +48,14 @@
         <!-- configChanges names every configuration change (font size, display size, bold text, a right-to-left
              language, Material You's colours...): one left out relaunches the activity, whose new WebView loads the
              page again while the first one's page still runs and holds the profile, so the app would stay on "Ghostly
-             is already running with this profile". The page lays itself out again on any of them. -->
+             is already running with this profile". The page lays itself out again on any of them.
+             An empty taskAffinity: the default one (the package name) is a name another app's activity can claim, to be
+             started into a task Android may bring forward as Ghostly's. singleTask still finds the one MainActivity by
+             its component. -->
         <activity
             android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|grammaticalGender|fontScale|fontWeightAdjustment|assetsPaths"
             android:launchMode="singleTask"
+            android:taskAffinity=""
             android:label="@string/main_activity_title"
             android:name=".MainActivity"
             android:exported="true">
@@ -73,6 +86,16 @@
             android:name=".TransferService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
+
+        <service
+            android:name=".CallService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

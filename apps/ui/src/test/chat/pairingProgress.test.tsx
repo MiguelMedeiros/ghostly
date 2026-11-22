@@ -19,8 +19,8 @@ import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
 // The sounds module plays through Web Audio, which happy-dom has not: the test hears what is asked of it.
-const { playSound } = vi.hoisted(() => ({ playSound: vi.fn((_name: string) => () => {}) }));
-vi.mock("../../lib/sounds", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../lib/sounds")>()), playSound }));
+const { playSound, warmSound } = vi.hoisted(() => ({ playSound: vi.fn((_name: string) => () => {}), warmSound: vi.fn((_name: string) => {}) }));
+vi.mock("../../lib/sounds", async (importOriginal) => ({ ...(await importOriginal<typeof import("../../lib/sounds")>()), playSound, warmSound }));
 
 // covers: chat.paired.pairing-progress, chat.one-chat, app.attention.sounds
 
@@ -32,7 +32,7 @@ function Pairing({ inviter = true, createdAt, muted, onShow }: { inviter?: boole
   const p = usePairingProgress("peer", { inviter, enabled: true, createdAt, muted });
   if (!p.show || !p.progress) return <p>the chat</p>;
   return <>
-    <ChatConnection peerKey="peer" pairing={p.progress.stage === "live" ? undefined : { progress: p.progress, onShow: p.scene ? onShow : undefined }} />
+    <ChatConnection peerKey="peer" pairing={p.progress.stage === "live" ? undefined : { progress: p.progress, onShow: p.scene ? onShow : undefined }} scene={p.scene} />
     <PairingScene progress={p.progress} contact="Alice" retry={() => void p.retry()} retrying={p.retrying} retryError={p.retryError} />
   </>;
 }
@@ -54,7 +54,7 @@ const label = () => screen.getByTestId("pairing-stage-label").textContent;
 const currentStep = () => screen.getByTestId("pairing-steps").querySelector("[aria-current=step]")?.getAttribute("data-step");
 const scene = () => screen.queryByTestId("pairing-scene");
 
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); playSound.mockClear(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); playSound.mockClear(); warmSound.mockClear(); });
 
 describe("the stage, read off today's link fields", () => {
   it.each<[string, Partial<LinkView> | undefined, "inviter" | "joiner", string]>([
@@ -114,12 +114,46 @@ describe("the inviter's scene", () => {
       ["Connected", undefined, "live"],
     ]);
     expect(screen.getByText("You can chat now. Say hello!")).toBeInTheDocument();
-    expect(screen.getByTestId("pairing-announcement")).toHaveTextContent("Connected");
     act(() => vi.advanceTimersByTime(CELEBRATE_MS - 300));
     expect(scene()).toHaveAttribute("data-leaving");
     act(() => vi.advanceTimersByTime(400));
     expect(scene()).toBeNull();
     expect(screen.getByText("the chat")).toBeInTheDocument();
+  });
+
+  it("says each step aloud once: the header's label stays quiet while the scene speaks, and the scene has no hidden copy", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const { engine } = renderApp(<Pairing inviter />);
+    // What a screen reader is told: every polite live region's words.
+    const spoken = () => [...document.querySelectorAll("[aria-live=polite]")].map(region => region.textContent).filter(Boolean);
+    const heard: (string | null)[][] = [];
+    for (const link of [published, knocked, connecting, live]) {
+      show(link, engine);
+      heard.push(spoken());
+      // Read through, the stage is one line, not the line and a hidden copy of it.
+      expect(within(scene()!).getAllByText(label()!)).toHaveLength(1);
+    }
+    expect(heard).toEqual([
+      ["Waiting for your contact to open the invite"],
+      ["Your contact knocked. Answering…"],
+      ["Opening a direct, encrypted link…"],
+      ["Connected"],
+    ]);
+  });
+
+  it("the header's label is muted, not emptied, while the scene is on: the scene going says nothing new; a connection issue is still said", () => {
+    const { engine, rerender } = renderApp(<ChatConnection peerKey="peer" scene />);
+    const region = () => document.querySelector(".sr-only[aria-live]")!;
+    show(live, engine);
+    expect(region()).toHaveAttribute("aria-live", "off");
+    expect(region()).toHaveTextContent("Connected · WebRTC");
+    rerender(<ChatConnection peerKey="peer" />);
+    expect(region()).toHaveAttribute("aria-live", "polite");
+    expect(region()).toHaveTextContent("Connected · WebRTC");
+    rerender(<ChatConnection peerKey="peer" scene />);
+    show({ ...live, pairing: pairing({ status: "error", error: "ICE failed" }) }, engine);
+    expect(region()).toHaveAttribute("aria-live", "polite");
+    expect(region()).toHaveTextContent("Connection issue");
   });
 
   it("stays the inviter once the invite code is forgotten", () => {
@@ -594,6 +628,34 @@ describe("the connected sound", () => {
     show(live, engine);
     expect(scene()).toHaveAttribute("data-stage", "live");
     expect(sounds()).toEqual(["connected"]);
+  });
+
+  // Fetched and decoded the first time it played, the sound came 20 to 40 ms after the scene went live, and over 100 ms
+  // on a loaded machine: its file is fetched while the scene waits, so it starts with the moment.
+  it("is fetched ahead while the scene waits, not for a contact already paired, nor with sounds off or muted", () => {
+    const warmed = () => warmSound.mock.calls.map(([name]) => name);
+    const waiting = renderApp(<Pairing inviter />);
+    show(published, waiting.engine);
+    expect(sounds()).toEqual([]);
+    expect(new Set(warmed())).toEqual(new Set(["connected"]));
+    waiting.unmount();
+    warmSound.mockClear();
+    fakeEngine.reset();
+    fakeEngine.update({ links: [linkView({ createdAt: Date.now() - 86_400_000, ...connecting, peerParticipationKey: "p" })] });
+    const paired = renderApp(<Pairing inviter={false} />);
+    show({ ...fresh, peerParticipationKey: "p" }, paired.engine);
+    paired.unmount();
+    fakeEngine.reset();
+    const muted = renderApp(<Pairing inviter muted />);
+    show(published, muted.engine);
+    muted.unmount();
+    fakeEngine.reset();
+    saveSettings({ ...loadSettings(), notifications: { ...loadSettings().notifications, soundEnabled: false } });
+    const off = renderApp(<Pairing inviter />);
+    show(published, off.engine);
+    off.unmount();
+    saveSettings({ ...loadSettings(), notifications: { ...loadSettings().notifications, soundEnabled: true } });
+    expect(warmed()).toEqual([]);
   });
 
   it("not again when the first pairing drops and comes back, during the moment or after it", () => {

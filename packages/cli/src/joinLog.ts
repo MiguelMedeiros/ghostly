@@ -18,8 +18,11 @@ const SAID: Record<string, string> = {
   "link.native": "entry session: WebRTC connected nothing, going on over a native transport",
   "invite.sent": "invitation sent on the entry session",
   "invite.received": "invitation received on the entry session: accepting",
+  "full.sent": "the group is full: told the joiner on the entry session",
+  "full.received": "the group is full: knocking on until there is room",
   "welcome.sent": "welcome sent",
   "welcome.received": "welcome received: in the group",
+  "join.unanswered": "nobody answered for an hour: knocks stopped (ghostly group accept knocks again)",
 };
 
 /** The log line for one join-trace line, or null when it is not said. */

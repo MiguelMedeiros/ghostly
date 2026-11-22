@@ -1,5 +1,8 @@
-import { CliError } from "../errors";
-import { type Command, here, showSecret, secret, cursor, pageLimit, typingFor, typingKind } from "./shared";
+import { CliError, shownValue } from "../errors";
+import { type Command, groupWait, here, picture, refs, showSecret, secret, cursor, pageLimit, reaction, timeout, typingFor, typingKind, typingWords } from "./shared";
+
+const nameForce = { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } as const;
+const forced = (options: Record<string, unknown>) => (options.force === true ? { force: true } : {});
 
 /** Groups: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -8,10 +11,39 @@ export const commands: Record<string, Command> = {
     method: "group.admin", usage: "group admin <group> <member> [--show-secret]", summary: "Make a member the admin (admin)", args: ["group", "member"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, member: a.member, ...secret(options) }),
   },
+  "group auto": {
+    method: "group.auto", usage: "group auto [on|off] [--from <chat>]...", summary: "Accept group invitations by themselves, only from the chats named (kept in the profile; the daemon accepts)",
+    args: ["mode...?"], options: { from: { type: "list", description: "Invitations from this chat: its id, its contact's key or a label given here with chat rename (again for more: a new on replaces the list)" } },
+    params: ({ options }, a) => {
+      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `group auto takes on or off, not ${shownValue(a.mode)}: ghostly group auto [on|off] [--from <chat>]...`);
+      // Never from anyone: on names its chats. Without on, the chats would be dropped without a word.
+      if (a.mode === "on" && options.from === undefined) throw new CliError("usage", "group auto on needs the chats whose invitations it accepts: ghostly group auto on --from <chat>");
+      if (a.mode !== "on" && options.from !== undefined) throw new CliError("usage", "--from goes with on: ghostly group auto on --from <chat>");
+      refs(options.from, "from", "chat");
+      if (a.mode === undefined) return {};
+      return a.mode === "on" ? { on: true, from: options.from } : { on: false };
+    },
+  },
+  "group call": {
+    method: "group.call", usage: "group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear [--show-secret]",
+    summary: "Name the node a community group's calls go through, turn sealed call media on or off, or --clear (admin)", args: ["group"],
+    options: {
+      ...showSecret, sfu: { type: "string", description: "The node's https origin, e.g. https://call.example.com" },
+      e2ee: { type: "boolean", eitherWay: true, description: "Seal the call media end to end (--no-e2ee: off); left out, the group keeps what it had" },
+      clear: { type: "boolean", description: "The group has no calls" },
+    },
+    params: ({ options }, a) => {
+      // Every form the usage line takes: before, only --sfu and --clear, though `--e2ee` alone seals the node set already.
+      if (options.sfu === undefined && options.clear !== true && options.e2ee === undefined) throw new CliError("usage", "Missing --sfu, --e2ee, --no-e2ee or --clear: ghostly group call <group> --sfu <https origin> [--e2ee | --no-e2ee] | --e2ee | --no-e2ee | --clear");
+      if (options.sfu !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --sfu");
+      if (options.e2ee !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the call node: not with --e2ee or --no-e2ee");
+      return { group: a.group, ...(options.clear === true ? { clear: true } : options.sfu !== undefined ? { sfu: options.sfu } : {}), ...(options.e2ee !== undefined && { e2ee: options.e2ee === true }), ...secret(options) };
+    },
+  },
   "group create": {
-    method: "group.create", usage: "group create <name...> [--mesh]", summary: "A community (a link anyone can open) or, with --mesh, a private group of up to 32",
-    args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" } },
-    params: ({ options }, { name }) => ({ name, profile: options.mesh ? "mesh" : "community" }),
+    method: "group.create", usage: "group create <name...> [--mesh] [--force]", summary: "A community (anyone who has its link can join) or, with --mesh, a private group of up to 32",
+    args: ["name..."], options: { mesh: { type: "boolean", description: "A private mesh of contacts instead of a community" }, force: nameForce },
+    params: ({ options }, { name }) => ({ name, profile: options.mesh ? "mesh" : "community", ...forced(options) }),
   },
   "group decline": { method: "group.decline", usage: "group decline <group>", summary: "Decline an invitation to a group", args: ["group"], params: (_, { group }) => ({ group }) },
   "group forget": {
@@ -37,41 +69,45 @@ export const commands: Record<string, Command> = {
     method: "group.invite", usage: "group invite <group> <chat> [--show-secret]", summary: "Invite a contact into a group you administer", args: ["group", "chat"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, chat: a.chat, ...secret(options) }),
   },
-  "group join": { method: "group.join", usage: "group join [<link> | -]", summary: "Join a group by its link; the link on stdin keeps it out of ps", args: ["link?"], params: (_, { link }) => ({ link }) },
+  "group join": { method: "group.join", usage: "group join [<link> | -]", summary: "Join a group by its link; the link on stdin keeps it out of ps (without a daemon it waits up to 60 s to be let in)", args: ["link?"], params: (_, { link }) => ({ link }) },
   "group leave": {
     method: "group.leave", usage: "group leave <group> --yes", summary: "Leave a group; its history and files go from this device", args: ["group"],
     options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { group }) => ({ group, yes: options.yes === true }),
   },
   "group link": {
-    method: "group.link", usage: "group link <group> [--off] [--reset]", summary: "Turn the group's link on (--reset: a new one), or --off", args: ["group"],
+    method: "group.link", usage: "group link <group> [--off] [--reset]", summary: "Print the group's link (anyone who has it can join); --reset: a new one, the old one stops working; --off", args: ["group"],
     options: { off: { type: "boolean", description: "Turn the link off" }, reset: { type: "boolean", description: "Replace it: the old link stops working" } },
     params: ({ options }, a) => {
       if (options.off === true && options.reset === true) throw new CliError("usage", "--off turns the link off: not with --reset");
       return { group: a.group, on: options.off !== true, reset: options.reset === true };
     },
   },
-  "group list": { method: "group.list", usage: "group list [--show-secret]", summary: "Groups and invitations", options: showSecret, params: ({ options }) => secret(options) },
+  "group list": { method: "group.list", usage: "group list [--show-secret]", summary: "Groups, invitations and auto-join", options: showSecret, params: ({ options }) => secret(options) },
   "group picture": {
     method: "group.picture", usage: "group picture <group> <jpeg> | --clear", summary: "Set or clear the group's picture (admin; a square JPEG)", args: ["group", "path...?"],
     options: { clear: { type: "boolean", description: "Remove the picture" } },
     params: ({ options }, a) => {
       if (!a.path && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
       if (a.path && options.clear === true) throw new CliError("usage", "--clear removes the picture: not with a <jpeg>");
-      return { group: a.group, path: here(a.path || undefined), clear: options.clear === true };
+      return { group: a.group, path: picture(here(a.path || undefined)), clear: options.clear === true };
     },
   },
   "group react": {
-    method: "group.react", usage: "group react <group> <message> <emoji> [--remove]", summary: "React to a group's message with one emoji; --remove takes yours back",
-    args: ["group", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" } },
-    params: ({ options }, a) => ({ group: a.group, message: a.message, emoji: a.emoji, remove: options.remove === true }),
+    method: "group.react", usage: "group react <group> <message> <emoji> [--remove] [--wait none|sent] [--timeout s]", summary: "React to a group's message with one emoji; --remove takes yours back",
+    args: ["group", "message", "emoji...?"],
+    options: {
+      remove: { type: "boolean", description: "Take your reaction back" },
+      wait: { ...groupWait.wait, description: "none or sent: until an edge took it (default: none with a daemon, sent without)" }, timeout: groupWait.timeout,
+    },
+    params: ({ options }, a) => ({ group: a.group, message: a.message, emoji: reaction(options, a.emoji), remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
   },
   "group remove": {
     method: "group.remove", usage: "group remove <group> <member> [--show-secret]", summary: "Remove a member (admin)", args: ["group", "member"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, member: a.member, ...secret(options) }),
   },
   "group rename": {
-    method: "group.rename", usage: "group rename <group> <name...> [--show-secret]", summary: "Rename the group (admin; the picture stays)", args: ["group", "name..."],
-    options: showSecret, params: ({ options }, a) => ({ group: a.group, name: a.name, ...secret(options) }),
+    method: "group.rename", usage: "group rename <group> <name...> [--force] [--show-secret]", summary: "Rename the group (admin; the picture stays)", args: ["group", "name..."],
+    options: { ...showSecret, force: nameForce }, params: ({ options }, a) => ({ group: a.group, name: a.name, ...forced(options), ...secret(options) }),
   },
   "group rotate": {
     method: "group.rotate", usage: "group rotate <group> [--show-secret]", summary: "A fresh group secret, members unchanged (admin)", args: ["group"],
@@ -90,6 +126,6 @@ export const commands: Record<string, Command> = {
       status: { type: "string", description: "A short line shown instead, e.g. \"Reading the thread…\" (40 characters, no links)" },
       for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
     },
-    params: ({ options }, { group }) => ({ group, stop: options.stop === true, kind: options.kind, status: options.status, for: typingFor(options) }),
+    params: ({ options }, { group }) => ({ group, stop: options.stop === true, ...typingWords(options), for: typingFor(options) }),
   },
 };

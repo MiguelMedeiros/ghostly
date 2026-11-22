@@ -278,6 +278,29 @@ describe("hands-free (locked) recording", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("leaves Enter and Esc to an input method composing in a field: a candidate picked or dropped sends and deletes nothing", async () => {
+    await locked();
+    await wait(2_000);
+    const search = document.createElement("input");
+    document.body.append(search);
+    search.focus();
+    fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(search, { key: "Escape", isComposing: true });
+    // WebKit: compositionend first, then the Enter that confirmed the candidate, no longer composing.
+    fireEvent.compositionEnd(search, { data: "日本" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+    expect(screen.getByTestId("voice-bar")).toBeInTheDocument();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    // The next Enter is the person's.
+    await wait(500);
+    fireEvent.keyDown(search, { key: "Enter" });
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+    search.remove();
+  });
+
   it("deletes with Esc or the bin, and gives the microphone back", async () => {
     await locked();
     await wait(1_000);
@@ -329,6 +352,25 @@ describe("hands-free (locked) recording", () => {
     view.unmount();
     expect(media.released()).toBe(true);
     expect(onTyping).toHaveBeenLastCalledWith(false, "recording");
+  });
+
+  it("stops telling the contact \"recording\" while the recording is paused, and tells it again on Resume", async () => {
+    const onTyping = vi.fn();
+    composer({ onTyping });
+    await press(mouse);
+    fireEvent.pointerUp(mic(), mouse);
+    fireEvent.click(screen.getByTestId("voice-send"));
+    await wait(1_000);
+    expect(onTyping).toHaveBeenLastCalledWith(true, "recording");
+
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await wait(0);
+    expect(onTyping).toHaveBeenLastCalledWith(false, "recording");
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await wait(0);
+    expect(onTyping).toHaveBeenLastCalledWith(true, "recording");
   });
 
   it("pauses without counting the pause, plays what is recorded so far, and resumes", async () => {
@@ -607,6 +649,24 @@ describe("what each state shows", () => {
     expect(screen.getByTestId("voice-binned")).toBeInTheDocument();
     await wait(1_000);
     expect(screen.queryByTestId("voice-binned")).not.toBeInTheDocument();
+  });
+});
+
+// In a right-to-left language the composer is mirrored (Send at the left): an arrow still pointing right pointed back
+// into the screen's edge. Send points where the message goes, the way the app's Back arrows and chevrons mirror.
+describe("Send's arrow in a right-to-left language", () => {
+  const mirrored = (button: HTMLElement) => button.querySelector("svg")?.classList.contains("rtl:-scale-x-100");
+
+  it("the composer's Send and the voice bar's Send are mirrored; the mic is not", async () => {
+    composer();
+    expect(mirrored(mic())).toBe(false);
+    fireEvent.click(mic());
+    await wait(0);
+    expect(mirrored(screen.getByTestId("voice-send"))).toBe(true);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    fireEvent.change(screen.getByPlaceholderText("Message…"), { target: { value: "hi" } });
+    expect(mirrored(screen.getByRole("button", { name: "Send message" }))).toBe(true);
   });
 });
 

@@ -279,13 +279,47 @@ describe("group session", () => {
     expect(dave.roster).toHaveLength(4);
     await dave.sendText("hello all"); await mesh.settle();
     expect(mesh.texts(alice)).toContain("hello all");
-    // A commit the former admin signs anyway is refused everywhere.
+    // A commit the former admin signs anyway is refused everywhere: its history drops the hand-over, a stale branch, not a fork.
     const stale = new GroupSession(clone({ ...alice.state, chain: alice.state.chain.slice(0, 3) }), { save: async () => {}, send: () => {}, message: () => {}, changed: () => {} });
     await stale.rotate();
     await carol.handle(alice.myKey, { t: "group-commit", g: alice.id, commit: clone(stale.top) });
-    expect(carol.status).toBe("forked"); // it *is* a validly signed fork of epoch 3, and that is what the protocol says about it
+    expect(carol.status).toBe("active");
     await dave.handle(alice.myKey, { t: "group-commit", g: alice.id, commit: clone(stale.top) });
-    expect(dave.status).toBe("forked");
+    expect(dave.status).toBe("active");
+  });
+
+  it("a former admin cannot halt the group with another history from an epoch it was the admin of", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice, "Bob"), carol = await admit(mesh, alice, "Carol"), dave = await admit(mesh, alice, "Dave");
+    await alice.transferAdmin(bob.myKey); await mesh.settle();
+    await bob.rotate(); await mesh.settle();
+    expect(carol.epoch).toBe(5); expect(carol.admin).toBe(bob.myKey);
+    // Alice, a plain member now, signs an admission after the commit before her hand-over (with a tag no secret gives),
+    // and a second genesis, and sends both to everyone.
+    const me = identityFromSeedB64(alice.state.seedB64), parent = alice.state.chain[3], stranger = createIdentity().pubKeyZ32;
+    const forged = [
+      signCommit(tagged(draft(parent, "add", sorted([...parent.m, [stranger, "member"]]), me.pubKeyZ32, stranger)), me.seed),
+      signCommit(tagged({ ...draft(null, "create", [[me.pubKeyZ32, "admin"]], me.pubKeyZ32), g: alice.id }), me.seed),
+    ];
+    const relayed = mesh.sentFrames.length;
+    for (const commit of forged) for (const to of [bob, carol, dave]) await to.handle(alice.myKey, { t: "group-commit", g: alice.id, commit: clone(commit) });
+    await mesh.settle();
+    for (const s of [bob, carol, dave]) { expect(s.status).toBe("active"); expect(s.epoch).toBe(5); }
+    expect(mesh.sentFrames.slice(relayed).filter(f => f.frame.t === "group-commit")).toHaveLength(0); // passed on by nobody
+    // The group goes on: members read each other and the admin still commits.
+    await carol.sendText("still here"); await mesh.settle();
+    expect(mesh.texts(dave)).toContain("still here");
+    await bob.rotate(); await mesh.settle();
+    expect(dave.epoch).toBe(6);
+    // And after a restart.
+    const restarted = new GroupSession(clone(mesh.saved.get(carol.myKey)!), { save: async () => {}, send: () => {}, message: () => {}, changed: () => {} });
+    expect(restarted.status).toBe("active");
+    // The admin of the tip signing another history still halts it.
+    const evilBob = new GroupSession(clone({ ...bob.state, chain: bob.state.chain.slice(0, 6) }), { save: async () => {}, send: () => {}, message: () => {}, changed: () => {} });
+    await evilBob.rotate();
+    await carol.handle(bob.myKey, { t: "group-commit", g: alice.id, commit: clone(evilBob.top) });
+    expect(carol.status).toBe("forked");
   });
 
   it("names everyone only while its author is still the admin: a former admin's old epoch gives no `*`, in a message or an edit", async () => {

@@ -278,6 +278,29 @@ it("a profile running in another tab is not deleted, and nothing of it is touche
   expect(storage.getItem(`ghostly_${busy.id}_app_settings`)).toBe("{}");
 });
 
+it("a delete refused because another connection holds the profile's database deletes nothing, even once that connection closes", async () => {
+  const { registerProfile } = await import("../../../apps/ui/src/lib/profiles");
+  const { deleteProfile } = await import("../../../apps/ui/src/lib/profileData");
+  const held = registerProfile("heldprofil", "Held");
+  storage.setItem(`ghostly_${held.id}_app_settings`, "{}");
+  const request = indexedDB.open(`ghostly_${held.id}`, 1);
+  request.onupgradeneeded = () => { request.result.createObjectStore("settings").put({ nick: "Held" }, "settings"); };
+  (await wrap(request)).close();
+  // A connection that does not close when asked (a backup of that profile made from another tab, say).
+  const holder = await wrap(indexedDB.open(`ghostly_${held.id}`));
+  await expect(deleteProfile(held.id)).rejects.toThrow("This profile is open in another window. Close it, then try again.");
+  holder.close();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(listProfiles().map((p) => p.id)).toContain(held.id);
+  expect(storage.getItem(`ghostly_${held.id}_app_settings`)).toBe("{}");
+  expect(await readAll(`ghostly_${held.id}`, "settings"), "its database is still there once the holder lets go").toEqual([{ nick: "Held" }]);
+
+  // Tried again with nothing holding it, it all goes.
+  await deleteProfile(held.id);
+  expect(listProfiles().map((p) => p.id)).not.toContain(held.id);
+  expect((await indexedDB.databases()).map((d) => d.name)).not.toContain(`ghostly_${held.id}`);
+});
+
 it("a backup of a wallet whose database cannot be read fails instead of leaving the wallet out", async () => {
   const { registerProfile } = await import("../../../apps/ui/src/lib/profiles");
   const broken = registerProfile("uvwxyzabcd", "Broken");

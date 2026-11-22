@@ -1,0 +1,696 @@
+//! Files dragged onto the Ghostly window from a file manager, on Linux.
+//!
+//! WebKitGTK hands the page a file manager's drag as `text/uri-list` only: no `File`, and an empty `getData` (the
+//! window's own `dragDropEnabled` is off, so the page's drops stay the page's). The drop on a chat did nothing, and on
+//! the message field it wrote the file's `file://` address into the draft. Here the window watches its WebView's drags:
+//! one from another app that names files on this machine is said to the page (`file-drag`, true while it is over the
+//! window), which then takes it as files: on a chat the window picks them on the page's own file input
+//! (`choose_dropped_files`), Files read from the disk as + → Document's, of any size; elsewhere (Join's QR picture) they
+//! go on the paste shelf, and the page reads them by token (`read_dropped_files`) as a paste's. The page never sees a
+//! path. A drag that starts in the page itself (a link, a picture) or in a web page is never files: only another app's
+//! drag counts, as only a file manager's copy counts on the clipboard (`copied_files`).
+
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use tauri::Manager;
+
+use crate::clipboard::{pasted_files, regular_files, shelve_files, PasteShelf, PastedItem};
+
+/// The event the page hears while another app's drag of files is over the window (true), and when it left (false).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const DRAG_EVENT: &str = "file-drag";
+
+/// How long a drop's files wait for the page: it asks as its drop event runs, a moment later.
+const FRESH: Duration = Duration::from_secs(10);
+
+/// How long files the page asked to have picked wait for its input's chooser: the window clicks it as it answers, so
+/// WebKit asks at once, or never; no later chooser (a mini-app's frame in this window) gets them.
+const CHOSEN_FRESH: Duration = Duration::from_secs(2);
+
+/// The `accept` of the page's own file input that the window picks a drop's files on (`choose_dropped_files`): no file
+/// type, a mark. A chooser for any other input (+ → Document) is the system's dialog, as always.
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+const DROP_CHOOSER: &str = "application/x-ghostly-dropped-files";
+
+/// What `choose_dropped_files` answers when a drop's files can't be picked on the page's input (a path that is not
+/// UTF-8, which WebKit's chooser takes no other way): the drop stays, for the page to read by token.
+const READ_INSTEAD: &str = "read-dropped-files";
+
+/// The page's drop input (`DROP_INPUT_ID` in apps/ui/src/lib/pastedFiles.ts).
+const DROP_INPUT_ID: &str = "ghostly-dropped-files";
+
+/// Marks that input with this call's own type and clicks it as the app: WebKit opens a file chooser only for a click a
+/// person made, and a drop is none. Only a chooser with that type gets the files: a fixed mark, any frame in the window
+/// could ask with.
+fn choose_script(accept: &str) -> String {
+    format!("(i=>{{if(i){{i.accept='{accept}';i.click()}}}})(document.getElementById('{DROP_INPUT_ID}'))")
+}
+
+/// The files of the latest drop from another app, until the page takes them, once; and those it asked to have picked
+/// on its file input, with the type that input's chooser asks with, until that chooser takes them, once.
+#[derive(Default)]
+pub struct DroppedFiles {
+    latest: Mutex<Option<(Vec<PathBuf>, Instant)>>,
+    chosen: Mutex<Option<(Vec<PathBuf>, Instant, String)>>,
+}
+
+/// What was put a moment ago (within `fresh`), taken with when it was put; nothing after that, nor a second time.
+fn take_fresh(
+    slot: &Mutex<Option<(Vec<PathBuf>, Instant)>>,
+    fresh: Duration,
+) -> Option<(Vec<PathBuf>, Instant)> {
+    slot.lock()
+        .unwrap()
+        .take()
+        .filter(|(_, at)| at.elapsed() <= fresh)
+}
+
+impl DroppedFiles {
+    #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+    fn put(&self, paths: Vec<PathBuf>, at: Instant) {
+        *self.latest.lock().unwrap() = Some((paths, at));
+    }
+
+    /// The latest drop's files, if it was a moment ago; nothing after that, nor a second time.
+    fn take(&self) -> Vec<PathBuf> {
+        self.take_latest()
+            .map(|(paths, _)| paths)
+            .unwrap_or_default()
+    }
+
+    /// The latest drop's files and when it was, if it was a moment ago.
+    fn take_latest(&self) -> Option<(Vec<PathBuf>, Instant)> {
+        take_fresh(&self.latest, FRESH)
+    }
+
+    /// The files a chooser with these types picks: those the page asked a moment ago to have picked, for the chooser of
+    /// that ask; nothing after that, nor a second time, nor for any other chooser (which leaves them to that one).
+    #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+    fn take_chosen<S: AsRef<str>>(&self, types: &[S]) -> Vec<PathBuf> {
+        let mut chosen = self.chosen.lock().unwrap();
+        if !matches!(&*chosen, Some((_, _, accept)) if is_drop_chooser(types, accept)) {
+            return Vec::new();
+        }
+        chosen
+            .take()
+            .filter(|(_, at, _)| at.elapsed() <= CHOSEN_FRESH)
+            .map(|(paths, ..)| paths)
+            .unwrap_or_default()
+    }
+}
+
+/// A new type for the drop input's chooser, of one call: `DROP_CHOOSER` and 128 random bits.
+fn drop_chooser_type() -> String {
+    format!("{DROP_CHOOSER}.{:032x}", rand::random::<u128>())
+}
+
+/// Whether a file chooser is the one `choose_script` opened with this `accept` (its one type).
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+fn is_drop_chooser<S: AsRef<str>>(types: &[S], accept: &str) -> bool {
+    matches!(types, [only] if only.as_ref() == accept)
+}
+
+/// Whether a file chooser is the page's drop input's, which the window answers itself, never with the system's dialog:
+/// `DROP_CHOOSER`, as the page makes it, or with a call's type.
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+fn is_drop_input<S: AsRef<str>>(types: &[S]) -> bool {
+    matches!(types, [only] if only.as_ref().starts_with(DROP_CHOOSER))
+}
+
+/// Names only a web engine gives a drag's targets: a page's drag, whatever its list says. Chromium marks every drag a
+/// page started (`x-renderer-taint`), Firefox and WebKitGTK keep a page's own types in a target of theirs. Measured
+/// on Xvfb: neither browser hands over a page's `text/uri-list` today (Chromium makes a `file:` one a `text/x-moz-url`),
+/// and the day one does, the list stays a link: a page must never name the files this window reads.
+const WEB_PAGE_TARGETS: [&str; 3] = ["chromium/", "application/x-moz-", "org.webkitgtk.WebKit."];
+
+/// Whether a drag with these targets comes from a web page.
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+pub fn from_a_web_page<S: AsRef<str>>(targets: &[S]) -> bool {
+    targets.iter().any(|target| {
+        WEB_PAGE_TARGETS
+            .iter()
+            .any(|web| target.as_ref().starts_with(web))
+    })
+}
+
+/// The files a drag's `text/uri-list` names on this machine: `file:` addresses with no host (or `localhost`), in
+/// their order. A link, or a file on another host, is none.
+#[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+pub fn local_files<S: AsRef<str>>(uris: &[S]) -> Vec<PathBuf> {
+    uris.iter()
+        .filter_map(|uri| {
+            let url = url::Url::parse(uri.as_ref().trim()).ok()?;
+            if url.scheme() != "file" {
+                return None;
+            }
+            match url.host_str() {
+                None | Some("") | Some("localhost") => url.to_file_path().ok(),
+                Some(_) => None,
+            }
+        })
+        .collect()
+}
+
+/// The files of the drop the page just took, on the shelf (regular files only, as a paste's): read by token
+/// (`read_pasted_bytes`), let go with `incoming_share_done`. Empty when no drop of files came from another app.
+#[tauri::command]
+pub async fn read_dropped_files<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+) -> Result<Vec<PastedItem>, String> {
+    if window.label() != "main" {
+        return Err("Not allowed from this window".into());
+    }
+    let paths = window
+        .try_state::<DroppedFiles>()
+        .map(|dropped| dropped.take())
+        .unwrap_or_default();
+    let files = tauri::async_runtime::spawn_blocking(move || pasted_files(paths))
+        .await
+        .map_err(|e| e.to_string())?;
+    let shelf = window
+        .try_state::<PasteShelf>()
+        .ok_or("Clipboard unavailable")?;
+    Ok(shelve_files(&shelf, files))
+}
+
+/// The files of the drop the page just took, picked on its own file input (regular files only, all of them): the page
+/// gets Files WebKit reads from the disk as they are sent, as + → Document's, of any size, where a read by token
+/// (`read_dropped_files`) brings every byte into the page first. How many are picked: 0, and nothing is clicked, when
+/// the drop brought no file to send. `READ_INSTEAD` when one of its files has a path the chooser can't take: the drop
+/// stays, whole, for `read_dropped_files`.
+#[tauri::command]
+pub async fn choose_dropped_files<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+) -> Result<usize, String> {
+    if window.label() != "main" {
+        return Err("Not allowed from this window".into());
+    }
+    let dropped = window
+        .try_state::<DroppedFiles>()
+        .ok_or("Dropping files is unavailable")?;
+    let Some((paths, at)) = dropped.take_latest() else {
+        return Ok(0);
+    };
+    let (files, paths) =
+        tauri::async_runtime::spawn_blocking(move || (regular_files(paths.clone()), paths))
+            .await
+            .map_err(|e| e.to_string())?;
+    if files.is_empty() {
+        return Ok(0);
+    }
+    if files.iter().any(|(path, ..)| path.to_str().is_none()) {
+        dropped.put(paths, at);
+        return Err(READ_INSTEAD.into());
+    }
+    let count = files.len();
+    let accept = drop_chooser_type();
+    let script = choose_script(&accept);
+    *dropped.chosen.lock().unwrap() = Some((
+        files.into_iter().map(|(path, ..)| path).collect(),
+        Instant::now(),
+        accept,
+    ));
+    if let Err(e) = window.eval(&script) {
+        // No click, no chooser: nothing else in the window may take these files.
+        dropped.chosen.lock().unwrap().take();
+        return Err(e.to_string());
+    }
+    Ok(count)
+}
+
+/// Watches the main window's drags (Linux only: elsewhere the WebView hands the page the dropped files itself).
+pub fn install<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    #[cfg(target_os = "linux")]
+    {
+        let main = window.clone();
+        let _ = window.with_webview(move |webview| linux::watch(webview.inner(), main));
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = window;
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::{from_a_web_page, is_drop_input, local_files, DroppedFiles, DRAG_EVENT};
+    use gtk::prelude::{DragContextExtManual, WidgetExt};
+    use std::cell::{Cell, RefCell};
+    use std::path::PathBuf;
+    use std::rc::Rc;
+    use std::time::Instant;
+    use tauri::{Emitter, Manager};
+    use webkit2gtk::{FileChooserRequestExt, WebViewExt};
+
+    /// What the drag over the window brings: the files it names when it comes from another app.
+    #[derive(Default)]
+    struct Drag {
+        files: RefCell<Vec<PathBuf>>,
+        /// What the page was last told.
+        said: Cell<bool>,
+        /// The drag ended in a drop (GTK says it left first).
+        dropped: Cell<bool>,
+    }
+
+    /// Runs before WebKit's own handlers (GTK's drag signals run the class's last), and leaves every drag to it: the
+    /// page decides where a drop goes, and cancels it there (`MessageInput`), so WebKit never writes its address.
+    pub fn watch<R: tauri::Runtime>(webview: webkit2gtk::WebView, main: tauri::WebviewWindow<R>) {
+        let drag = Rc::new(Drag::default());
+        let app = main.app_handle().clone();
+
+        // The page's drop input (`choose_dropped_files`): the drop's files for the chooser of that call's type, nothing
+        // for any other, never a dialog. Any other input's chooser goes on to WebKit's own, the system's dialog.
+        {
+            let app = app.clone();
+            webview.connect_run_file_chooser(move |_, request| {
+                let types = request.mime_types();
+                if !is_drop_input(&types) {
+                    return false;
+                }
+                let paths = app
+                    .try_state::<DroppedFiles>()
+                    .map(|dropped| dropped.take_chosen(&types))
+                    .unwrap_or_default();
+                let paths: Vec<&str> = paths.iter().filter_map(|path| path.to_str()).collect();
+                if paths.is_empty() {
+                    request.cancel();
+                } else {
+                    request.select_files(&paths);
+                }
+                true
+            });
+        }
+        let tell = {
+            let drag = drag.clone();
+            move |over: bool| {
+                if drag.said.replace(over) != over {
+                    let _ = main.emit_to("main", DRAG_EVENT, over);
+                }
+            }
+        };
+        let tell = Rc::new(tell);
+
+        // WebKit asks for a drag's data as it enters, before the page hears of it.
+        {
+            let (drag, tell) = (drag.clone(), tell.clone());
+            webview.connect_drag_data_received(move |_, context, _, _, data, _, _| {
+                if data.target().name() != "text/uri-list" {
+                    return;
+                }
+                // A drag the page started (a link, a picture in a chat), or any window of this app, has a source
+                // widget here; a web page's, a browser's targets.
+                let targets: Vec<_> = context.list_targets().iter().map(|t| t.name()).collect();
+                let files =
+                    if context.drag_get_source_widget().is_none() && !from_a_web_page(&targets) {
+                        local_files(&data.uris())
+                    } else {
+                        Vec::new()
+                    };
+                drag.dropped.set(false);
+                tell(!files.is_empty());
+                *drag.files.borrow_mut() = files;
+            });
+        }
+
+        {
+            let drag = drag.clone();
+            webview.connect_drag_drop(move |_, _, _, _, _| {
+                let files = std::mem::take(&mut *drag.files.borrow_mut());
+                drag.dropped.set(true);
+                // The page clears its own note as it takes the drop: telling it now could reach it first.
+                drag.said.set(false);
+                if !files.is_empty() {
+                    if let Some(dropped) = app.try_state::<DroppedFiles>() {
+                        dropped.put(files, Instant::now());
+                    }
+                }
+                false
+            });
+        }
+
+        // GTK says a drag left before it says it dropped: whether it did is known once both are in.
+        webview.connect_drag_leave(move |_, _, _| {
+            drag.dropped.set(false);
+            let (drag, tell) = (drag.clone(), tell.clone());
+            gtk::glib::idle_add_local_once(move || {
+                if !drag.dropped.get() {
+                    drag.files.borrow_mut().clear();
+                    tell(false);
+                }
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // covers: app.composer.paste-files
+    use super::*;
+    use tauri::test::{mock_builder, MockRuntime};
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    #[test]
+    fn a_file_managers_list_names_its_files_and_nothing_else() {
+        assert_eq!(
+            local_files(&[
+                "file:///home/ana/Pictures/photo.png",
+                "file:///home/ana/relat%C3%B3rio%20final%20a%C3%A7%C3%A3o.txt",
+                "file://localhost/home/ana/a%20folder",
+                "https://example.com/photo.png",
+                "file://nas.local/share/photo.png",
+                "ghostly://join#abc",
+                "not an address",
+                "",
+            ]),
+            vec![
+                PathBuf::from("/home/ana/Pictures/photo.png"),
+                PathBuf::from("/home/ana/relatório final ação.txt"),
+                PathBuf::from("/home/ana/a folder"),
+            ]
+        );
+        // A name of its own that ends in a carriage return stays whole; the list's own line end is gone already.
+        assert_eq!(
+            local_files(&["file:///home/ana/twin.txt%0D"]),
+            vec![PathBuf::from("/home/ana/twin.txt\r")]
+        );
+    }
+
+    #[test]
+    fn a_drag_a_web_page_made_is_never_files() {
+        // What Chromium and Firefox offered for a page's drag naming a file (Xvfb, 2026-11-03), and WebKitGTK's own.
+        for page in [
+            &[
+                "text/x-moz-url",
+                "UTF8_STRING",
+                "STRING",
+                "TEXT",
+                "text/plain",
+                "_NETSCAPE_URL",
+                "chromium/x-renderer-taint",
+                "chromium/x-web-custom-data",
+            ][..],
+            &["application/x-moz-custom-clipdata"],
+            &[
+                "text/uri-list",
+                "org.webkitgtk.WebKit.custom-pasteboard-data",
+            ],
+        ] {
+            assert!(from_a_web_page(page), "{page:?}");
+        }
+        // A file manager's (GTK 3 source as Thunar, Nautilus, Dolphin).
+        for file_manager in [
+            &["text/uri-list"][..],
+            &[
+                "application/vnd.portal.filetransfer",
+                "application/vnd.portal.files",
+                "text/uri-list",
+                "text/plain;charset=utf-8",
+            ],
+            &[
+                "text/uri-list",
+                "application/x-kde4-urilist",
+                "text/x-moz-url",
+                "text/plain",
+            ],
+            &["x-special/gnome-icon-list", "text/uri-list", "UTF8_STRING"],
+        ] {
+            assert!(!from_a_web_page(file_manager), "{file_manager:?}");
+        }
+    }
+
+    fn app() -> tauri::App<MockRuntime> {
+        mock_builder()
+            .manage(PasteShelf::default())
+            .manage(DroppedFiles::default())
+            .build(tauri::generate_context!(test = true))
+            .expect("app")
+    }
+
+    fn read(window: &tauri::WebviewWindow<MockRuntime>) -> Result<Vec<PastedItem>, String> {
+        tauri::async_runtime::block_on(read_dropped_files(window.clone()))
+    }
+
+    fn scratch() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ghostly-drop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// The page reads a drop's files by token, as a paste's: regular files only, once, and a moment after the drop.
+    #[test]
+    fn a_drop_is_read_once_by_the_ghostly_window_by_token() {
+        let dir = scratch();
+        std::fs::write(dir.join("ghost story.txt"), b"boo").unwrap();
+        std::fs::create_dir_all(dir.join("a folder")).unwrap();
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        assert_eq!(read(&main), Ok(Vec::new()), "no drop yet");
+
+        let dropped = app.state::<DroppedFiles>();
+        dropped.put(
+            vec![dir.join("ghost story.txt"), dir.join("a folder")],
+            Instant::now(),
+        );
+        let url = "ghostly-svc://atlas.peer/".parse().unwrap();
+        let other = WebviewWindowBuilder::new(&app, "svc-1", WebviewUrl::CustomProtocol(url))
+            .build()
+            .unwrap();
+        assert_eq!(read(&other), Err("Not allowed from this window".into()));
+
+        let items = read(&main).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            (
+                items[0].name.as_deref(),
+                items[0].size,
+                items[0].mime.as_deref()
+            ),
+            (Some("ghost story.txt"), 3, None)
+        );
+        let bytes = tauri::async_runtime::block_on(crate::clipboard::read_pasted_bytes(
+            main.clone(),
+            items[0].token.clone(),
+            0,
+            64,
+        ))
+        .unwrap();
+        match tauri::ipc::IpcResponse::body(bytes).unwrap() {
+            tauri::ipc::InvokeResponseBody::Raw(raw) => assert_eq!(raw, b"boo"),
+            other => panic!("not raw bytes: {other:?}"),
+        }
+        assert_eq!(read(&main), Ok(Vec::new()), "taken once");
+
+        // A drop the page never asked for in time is gone.
+        dropped.put(
+            vec![dir.join("ghost story.txt")],
+            Instant::now().checked_sub(FRESH * 2).unwrap(),
+        );
+        assert_eq!(read(&main), Ok(Vec::new()));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A drop's files over the page's read limit are picked on its file input, as + → Document's: only the drop's
+    /// regular files, once, for the Ghostly window; only the drop input's chooser takes them, never another one's.
+    #[test]
+    fn a_drop_is_picked_once_on_the_pages_drop_input() {
+        // Not under `scratch()`, which the test beside this one removes as it ends.
+        let dir = std::env::temp_dir().join(format!("ghostly-choose-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("a folder")).unwrap();
+        std::fs::write(dir.join("archive 300.bin"), b"large").unwrap();
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let choose = |window: &tauri::WebviewWindow<MockRuntime>| {
+            tauri::async_runtime::block_on(choose_dropped_files(window.clone()))
+        };
+        let dropped = app.state::<DroppedFiles>();
+        assert_eq!(choose(&main), Ok(0), "no drop yet");
+        assert!(take_asked(&dropped).is_empty());
+
+        dropped.put(
+            vec![dir.join("archive 300.bin"), dir.join("a folder")],
+            Instant::now(),
+        );
+        let url = "ghostly-svc://atlas.peer/".parse().unwrap();
+        let other = WebviewWindowBuilder::new(&app, "svc-1", WebviewUrl::CustomProtocol(url))
+            .build()
+            .unwrap();
+        assert_eq!(choose(&other), Err("Not allowed from this window".into()));
+        assert_eq!(choose(&main), Ok(1));
+        assert_eq!(read(&main), Ok(Vec::new()), "the drop is taken");
+        let accept = asked(&dropped);
+        assert_eq!(take_asked(&dropped), vec![dir.join("archive 300.bin")]);
+        assert!(dropped.take_chosen(&[&accept]).is_empty(), "picked once");
+
+        // Files the page asked to have picked a while ago go to no chooser: the click comes at once, or never.
+        *dropped.chosen.lock().unwrap() = Some((
+            vec![dir.join("archive 300.bin")],
+            Instant::now().checked_sub(Duration::from_secs(3)).unwrap(),
+            accept.clone(),
+        ));
+        assert!(take_asked(&dropped).is_empty(), "too late for a chooser");
+
+        // A folder alone: nothing to pick, and nothing clicked.
+        dropped.put(vec![dir.join("a folder")], Instant::now());
+        assert_eq!(choose(&main), Ok(0));
+        assert!(take_asked(&dropped).is_empty());
+
+        // Only the drop input's chooser is the window's to answer; any other is the system's dialog.
+        for input in [&[DROP_CHOOSER][..], &[accept.as_str()]] {
+            assert!(is_drop_input(input), "{input:?}");
+        }
+        for other in [
+            &[][..],
+            &["image/*"],
+            &["application/x-ghostly-dropped-files", "image/*"],
+        ] {
+            assert!(!is_drop_input(other), "{other:?}");
+            assert!(!is_drop_chooser(other, &accept), "{other:?}");
+        }
+        // The page clicks the input the window picks on, which starts with a type no call's chooser has.
+        let page = include_str!("../../ui/src/lib/pastedFiles.ts");
+        assert!(page.contains(&format!("DROP_INPUT_ID = \"{DROP_INPUT_ID}\"")));
+        assert!(page.contains(&format!("DROP_INPUT_ACCEPT = \"{DROP_CHOOSER}\"")));
+        assert!(choose_script(&accept).contains(&format!(
+            "i.accept='{accept}';i.click()}}}})(document.getElementById('{DROP_INPUT_ID}'))"
+        )));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The type `choose_dropped_files` gave the drop input's chooser this time, or none.
+    fn asked(dropped: &DroppedFiles) -> String {
+        dropped
+            .chosen
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|(.., accept)| accept.clone())
+            .unwrap_or_default()
+    }
+
+    /// What the chooser `choose_dropped_files` just opened gets.
+    fn take_asked(dropped: &DroppedFiles) -> Vec<PathBuf> {
+        dropped.take_chosen(&[asked(dropped)])
+    }
+
+    /// A drop's files go only to the chooser of the call that asked for them, by a type of that call's own: a chooser
+    /// any frame in the window could open with the input's fixed mark, or with an earlier call's type, gets nothing, and
+    /// leaves them to the one asked.
+    #[test]
+    fn only_the_chooser_of_this_call_gets_a_drops_files() {
+        let dir = std::env::temp_dir().join(format!("ghostly-nonce-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("first.txt"), b"1").unwrap();
+        std::fs::write(dir.join("second.txt"), b"2").unwrap();
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let choose = || tauri::async_runtime::block_on(choose_dropped_files(main.clone()));
+        let dropped = app.state::<DroppedFiles>();
+
+        dropped.put(vec![dir.join("first.txt")], Instant::now());
+        assert_eq!(choose(), Ok(1));
+        let stale = asked(&dropped);
+        assert_eq!(take_asked(&dropped), vec![dir.join("first.txt")]);
+
+        dropped.put(vec![dir.join("second.txt")], Instant::now());
+        assert_eq!(choose(), Ok(1));
+        let accept = asked(&dropped);
+        assert_ne!(accept, stale, "a new type each call");
+        let random = accept.strip_prefix(&format!("{DROP_CHOOSER}.")).unwrap();
+        assert!(
+            random.len() == 32
+                && random
+                    .bytes()
+                    .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+            "{accept}: 128 bits, as WebKit hands a type over (lowercase)"
+        );
+        let upper = accept.to_uppercase();
+        for guess in [DROP_CHOOSER, stale.as_str(), upper.as_str(), "*/*", ""] {
+            assert!(dropped.take_chosen(&[guess]).is_empty(), "{guess:?}");
+        }
+        assert!(dropped
+            .take_chosen(&[accept.as_str(), "image/*"])
+            .is_empty());
+        assert_eq!(
+            dropped.take_chosen(&[&accept]),
+            vec![dir.join("second.txt")]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Every file of a drop on a chat is picked, as + → Document picks any number: none of them is read into the page,
+    /// so a paste's limit on how many it reads ([`MAX_PASTED_FILES`]) left the rest out of the sheet without a word.
+    #[test]
+    fn a_drop_of_more_files_than_a_paste_reads_is_picked_whole() {
+        let dir = std::env::temp_dir().join(format!("ghostly-many-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let many: Vec<PathBuf> = (0..crate::clipboard::MAX_PASTED_FILES + 8)
+            .map(|n| dir.join(format!("photo {n:02}.jpg")))
+            .collect();
+        for path in &many {
+            std::fs::write(path, b"jpg").unwrap();
+        }
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let dropped = app.state::<DroppedFiles>();
+        dropped.put(many.clone(), Instant::now());
+        assert_eq!(
+            tauri::async_runtime::block_on(choose_dropped_files(main.clone())),
+            Ok(many.len())
+        );
+        assert_eq!(take_asked(&dropped), many);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A file in a folder whose name is not UTF-8 can't be picked on the page's input (WebKit takes UTF-8 paths): such a
+    /// drop is left to be read by token, as before, and the page is told so, never left waiting for a pick.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_drop_the_chooser_cant_name_is_read_by_token() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = std::env::temp_dir()
+            .join(format!("ghostly-bytes-{}", std::process::id()))
+            .join(std::ffi::OsStr::from_bytes(b"dir-\xff"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("report.txt"), b"boo").unwrap();
+        let plain = dir.parent().unwrap().join("plain.txt");
+        std::fs::write(&plain, b"hi").unwrap();
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let dropped = app.state::<DroppedFiles>();
+        dropped.put(vec![plain, dir.join("report.txt")], Instant::now());
+        assert_eq!(
+            tauri::async_runtime::block_on(choose_dropped_files(main.clone())),
+            Err(READ_INSTEAD.into())
+        );
+        assert!(take_asked(&dropped).is_empty(), "nothing to pick");
+        let items = read(&main).unwrap();
+        assert_eq!(
+            items.iter().map(|i| i.name.as_deref()).collect::<Vec<_>>(),
+            vec![Some("plain.txt"), Some("report.txt")],
+            "the whole drop, by token"
+        );
+        // The page reads the drop when told so.
+        assert!(include_str!("../../ui/src/lib/pastedFiles.ts")
+            .contains(&format!("READ_INSTEAD = \"{READ_INSTEAD}\"")));
+        std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+    }
+
+    /// `run` is what the person's app is built from: the watch goes on its Ghostly window.
+    #[test]
+    fn the_app_watches_the_ghostly_windows_drags() {
+        let run = include_str!("lib.rs");
+        let run = &run[run.find("pub fn run()").unwrap()..];
+        let run = &run[..run.find("\n}\n").unwrap()];
+        assert!(run.contains("dropped_files::install(&main)"));
+        assert!(run.contains(".manage(dropped_files::DroppedFiles::default())"));
+    }
+}

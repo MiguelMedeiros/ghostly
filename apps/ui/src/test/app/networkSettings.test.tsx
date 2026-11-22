@@ -7,7 +7,7 @@ import { fakeEngine } from "../fakeEngine";
 import { LANGUAGES, lookup } from "../i18n/locales";
 import arNetwork from "../../locales/ar/network.json";
 
-// covers: settings.network.native-dht, settings.network.relays, settings.network.iroh-relays, settings.network.turn
+// covers: settings.network.native-dht, settings.network.relays, settings.network.iroh-relays, settings.network.turn, settings.network.relay-only
 
 const RELAYS = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
 
@@ -33,6 +33,18 @@ describe("Settings, Network: Pkarr relays", () => {
     act(() => engine.update({ settings: { relays: RELAYS, readRelays: true } }));
     expect(screen.getByTestId("network-read-relays")).toHaveAttribute("aria-checked", "true");
     expect(await info(user, screen.getByTestId("network-relays-field"))).toHaveTextContent(/this app writes to them too/);
+  });
+
+  it("on the Desktop with Hide my IP on, relay reads show on and stay so: nothing goes to the DHT directly", async () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true }, settings: { relays: RELAYS, relayOnly: true } }));
+    const toggle = screen.getByTestId("network-read-relays");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(toggle).toBeDisabled();
+    expect(screen.getByTestId("network-read-relays-row")).toHaveTextContent("Hide my IP is on: this app reads and writes through these relays only");
+    act(() => engine.update({ settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-read-relays")).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("network-read-relays")).toBeEnabled();
   });
 
   it("in a browser there is no switch: the relays are the only way to the DHT", async () => {
@@ -94,6 +106,17 @@ describe("Settings, Network: the transport line", () => {
       });
     }
   }
+
+  // Hide my IP from contacts closes the Desktop's DHT node: every read and write goes through the relays.
+  it("on the Desktop with Hide my IP on, says it reaches the DHT through the relays, not directly", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: transports.direct, settings: { relays: RELAYS, relayOnly: true } }));
+    const line = screen.getByTestId("network-protocol");
+    expect(line.textContent).toBe("Reaches the Mainline DHT (BEP44) through Pkarr relays (HTTP)");
+    expect(line).toHaveAttribute("data-kind", "relays");
+    act(() => engine.update({ settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-protocol").textContent).toBe("Reaches the Mainline DHT (BEP44) directly (UDP) and Pkarr relays (HTTP)");
+  });
 });
 
 describe("Settings, Network: Iroh relays", () => {
@@ -147,6 +170,31 @@ describe("Settings, Network: Iroh relays", () => {
     expect(field).toHaveAccessibleDescription("Não é um endereço de relay: relay.example.org");
     expect(field).toHaveFocus();
   });
+
+  // A relay address past what a contact reads (`relayUrl`) is one: "not a relay address" sent the person looking for a
+  // typo in it. Said as what to do, in the app's language, for the Iroh list and the HyperDHT relay alike.
+  it("asks for a shorter address when a relay is too long for contacts, not that it is no relay address", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    engine.on("updateSettings", ({ settings }) => {
+      const problem = (settings as { irohRelays?: string[] }).irohRelays?.map(irohRelayProblem).find(Boolean);
+      if (problem) throw new Error(problem);
+    });
+    const long = `https://${"a".repeat(60)}.example.com/${"p".repeat(60)}`;
+    const field = screen.getByTestId("network-iroh-relays");
+    await user.clear(field);
+    await user.type(field, long);
+    await user.click(screen.getByTestId("network-save"));
+    expect(field).toHaveAccessibleDescription(`Use um endereço de relay mais curto: ${long}`);
+    expect(field).toHaveFocus();
+    await user.clear(field);
+    await user.type(field, DEFAULTS.join("\n"));
+    const hyperdht = screen.getByTestId("network-hyperdht-relay");
+    const longWss = `wss://${"a".repeat(60)}.example.com/${"p".repeat(60)}`;
+    await user.type(hyperdht, longWss);
+    await user.click(screen.getByTestId("network-save"));
+    expect(hyperdht).toHaveAccessibleDescription(`Use um endereço de relay mais curto: ${longWss}`);
+  });
 });
 
 describe("Settings, Network: push relay", () => {
@@ -159,6 +207,76 @@ describe("Settings, Network: push relay", () => {
     await user.click(screen.getByTestId("network-save"));
     expect(screen.getByTestId("network-error").textContent).toBe("Use https:// no endereço do relay: http://push.example.org/");
     expect(engine.callsTo("updateSettings")).toEqual([]);
+  });
+
+  const RELAY = "https://push-relay.example/";
+  const refused = { url: RELAY, at: 1, http: 403, text: "Origin not allowed" };
+
+  it("says under it when the saved relay answered the last wake-up but not as a push relay, with what the relay said; nothing once it forwards one", async () => {
+    // The field shows the relay as saved when the page opens.
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY } });
+    const { engine, user } = renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay")).toHaveValue(RELAY);
+    expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
+    act(() => engine.update({ pushRelayRefused: refused }));
+    // A 403 is the relay not letting this app in: the next step names this app's origin, for whoever runs the relay.
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      `The last wake-up through this relay failed: the relay does not let this app in (HTTP 403). Ask whoever runs it to add ${window.location.origin} to its allowed origins (GHOSTLY_RELAY_ORIGINS). Until then, contacts whose app is closed are not woken through it.The relay said: “Origin not allowed”`);
+    expect(screen.getByTestId("network-push-relay-refused").querySelector("p bdi")?.textContent).toBe(window.location.origin);
+    // The relay's words are its own: kept apart from the sentence's direction.
+    expect(screen.getByTestId("network-push-relay-said").querySelector("bdi")?.textContent).toBe("Origin not allowed");
+    // A web page at that address says nothing of its own.
+    act(() => engine.update({ pushRelayRefused: { url: RELAY, at: 2, http: 200 } }));
+    expect(screen.getByTestId("network-push-relay-refused")).toHaveTextContent("(HTTP 200)");
+    expect(screen.queryByTestId("network-push-relay-said")).toBeNull();
+    // Another address typed in: what the saved one did is not about it.
+    await user.type(screen.getByTestId("network-push-relay"), "x");
+    expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
+    await user.type(screen.getByTestId("network-push-relay"), "{Backspace}");
+    expect(screen.getByTestId("network-push-relay-refused")).toBeInTheDocument();
+    act(() => engine.update({ pushRelayRefused: undefined }));
+    expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
+  });
+
+  it("a relay at its limit (429) is said to be busy, not to answer as no push relay", () => {
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http: 429, text: "Too many" } });
+    renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "The last wake-up through this relay was turned away: it was at its limit (HTTP 429). It wakes contacts again once it has room.The relay said: “Too many”");
+  });
+
+  it("a working relay that cannot reach the push service (502 with its own words) is said to be the relay's side, not a wrong address", () => {
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http: 502, text: "The push service did not answer" } });
+    renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "The last wake-up through this relay failed: the relay answered, but could not reach the push service (HTTP 502). The problem is on the relay's side, not in this setting: ask whoever runs it. Until then, contacts whose app is closed are not woken through it.The relay said: “The push service did not answer”");
+  });
+
+  it("a 502-504 with no words of the relay's own (a proxy's page) and other statuses keep the line that it did not answer as a push relay", () => {
+    for (const [http, text] of [[503, undefined], [504, undefined], [404, "Not found"], [500, "Oops"]] as const) {
+      fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http, ...(text && { text }) } });
+      const { unmount } = renderApp(<NetworkSettings />);
+      expect(screen.getByTestId("network-push-relay-refused"), String(http)).toHaveTextContent(`it did not answer as a push relay (HTTP ${http})`);
+      unmount();
+    }
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http: 503, text: "The push service did not answer" } });
+    renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay-refused")).toHaveTextContent("could not reach the push service (HTTP 503)");
+  });
+
+  it("an address that answers without CORS (another kind of server, a proxy's error page) is said not to be a push relay this app can read", () => {
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http: 0 } });
+    renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "The last wake-up through this relay failed: something answers at this address, but not as a push relay this app can read (no CORS). It may be another kind of server, such as a HyperDHT relay, or a proxy's error page while the relay is down. Contacts whose app is closed are not woken through it.");
+    expect(screen.queryByTestId("network-push-relay-said")).toBeNull();
+  });
+
+  it("pt: says it in the app's language, the relay's words as it gave them", () => {
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: refused });
+    renderApp(<NetworkSettings />, { language: "pt" });
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      `O último despertar por este relay falhou: o relay não deixa este app entrar (HTTP 403). Peça a quem o mantém para adicionar ${window.location.origin} às origens permitidas (GHOSTLY_RELAY_ORIGINS). Até lá, contatos com o app fechado não são acordados por ele.O relay disse: “Origin not allowed”`);
   });
 });
 
@@ -197,6 +315,80 @@ describe("Settings, Network: HyperDHT relay", () => {
     expect(screen.getByTestId("network-iroh-relays")).toBeInTheDocument();
     expect(screen.getByText("Optional fallback when WebRTC fails. Empty: no HyperDHT.")).toBeInTheDocument();
     expect(screen.queryByText(/WebRTC only/)).toBeNull();
+  });
+});
+
+describe("Settings, Network: Hide my IP from contacts", () => {
+  const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS };
+  const TURN = { urls: "turn:turn.example.org:3478", username: "ghost", credential: "c" };
+
+  it("turns on at once with the relays and TURN server as saved, and says what it does", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN] } }));
+    const toggle = screen.getByTestId("network-relay-only");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    const row = screen.getByTestId("network-relay-only-row");
+    expect(row).toHaveTextContent("Hide my IP from contacts");
+    expect(row).toHaveTextContent("Calls and chats go through your TURN server only.");
+    expect(await info(user, row)).toHaveTextContent("Contacts see your TURN server, never your IP.");
+    await user.click(toggle);
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toEqual({ settings: { relays: RELAYS, relayOnly: true } });
+    act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+    expect(screen.getByTestId("network-relay-only")).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByTestId("network-relay-only"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toEqual({ settings: { relays: RELAYS, relayOnly: false } });
+  });
+
+  it("without a TURN server it stays off and says what to do first, in the app's language", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    // As the engine refuses it (packages/browser/src/engine/node.ts `updateSettings`).
+    engine.on("updateSettings", () => { throw new Error("Add a TURN server first"); });
+    await user.click(screen.getByTestId("network-relay-only"));
+    expect(screen.getByRole("alert")).toHaveTextContent("Adicione um servidor TURN antes. Salve um acima e depois ligue isto.");
+    expect(screen.getByTestId("network-relay-only")).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("while on, a Save that takes the TURN server away is refused under its address", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+    engine.on("updateSettings", () => { throw new Error("Hide my IP from contacts needs a TURN server. Turn it off first"); });
+    await user.clear(screen.getByLabelText("TURN server URL"));
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByLabelText("TURN server URL")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Hide my IP needs this TURN server. Turn it off first, then remove the server.");
+  });
+
+  // Every connection to a contact goes through the TURN server then, and the engine keeps it: it is not optional.
+  for (const language of LANGUAGES) {
+    it(`${language}: while it is on, the TURN server's hint says it is required, not optional`, () => {
+      // toHaveTextContent reads the page's no-break spaces (French's before ":") as plain ones.
+      const said = (key: string) => lookup(language, key)!.replace(/\s+/g, " ");
+      const { engine } = renderApp(<NetworkSettings />, { language });
+      act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+      const field = screen.getByTestId("network-turn-field");
+      expect(field).not.toHaveTextContent(said("network.turnHint"));
+      expect(field).toHaveTextContent(said("network.turnHintRelayOnly"));
+      act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN] } }));
+      expect(screen.getByTestId("network-turn-field")).toHaveTextContent(said("network.turnHint"));
+    });
+  }
+
+  it("while it is on, the TURN server's hint says so in English", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport, settings: { relays: RELAYS, iceServers: [TURN], relayOnly: true } }));
+    expect(screen.getByTestId("network-turn-field")).toHaveTextContent("Required while Hide my IP is on: calls and chats go through it.");
+    expect(screen.getByTestId("network-turn-field")).not.toHaveTextContent("Optional");
+  });
+
+  it("on the Desktop, while it is on, offers the HyperDHT relay its HyperDHT then goes through", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true }, settings: { relays: RELAYS, iceServers: [TURN], hyperdhtRelay: "" } }));
+    expect(screen.queryByTestId("network-hyperdht-relay")).toBeNull();
+    act(() => engine.update({ settings: { relays: RELAYS, iceServers: [TURN], hyperdhtRelay: "", relayOnly: true } }));
+    await user.type(screen.getByTestId("network-hyperdht-relay"), "wss://relay.example.org");
+    await user.click(screen.getByTestId("network-save"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { hyperdhtRelay: "wss://relay.example.org" } });
   });
 });
 
@@ -275,7 +467,7 @@ describe("Settings, Network: a refused field is said in the page's language, und
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings")).toEqual([]);
     // Not "Use a wss:// relay address" in an Arabic page.
-    expect(hyperdht).toHaveAccessibleDescription("استخدم wss:// في عنوان المرحّل");
+    expect(hyperdht).toHaveAccessibleDescription("استخدم \u2066wss://\u2069 في عنوان المرحّل");
     expect(push).toHaveAccessibleDescription("أزِل اسم المستخدم وكلمة المرور من العنوان");
     expect(marked()).toEqual(["network-hyperdht-relay", "network-push-relay"]);
     // The error sits right under the field that points at it.
@@ -314,7 +506,7 @@ describe("Settings, Network: a refused field is said in the page's language, und
     const url = screen.getByLabelText(arNetwork.turnUrl);
     await user.type(url, "https://turn.example.org");
     await user.click(screen.getByTestId("network-save"));
-    expect(url).toHaveAccessibleDescription("ليس عنوان TURN أو STUN (مثل turn:host:port): https://turn.example.org");
+    expect(url).toHaveAccessibleDescription("ليس عنوان TURN أو STUN (مثل \u2066turn:host:port\u2069): https://turn.example.org");
     expect(marked()).toEqual(["network-turn-url"]);
     expect(url).toHaveFocus();
     await user.clear(url);

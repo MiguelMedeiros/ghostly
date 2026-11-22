@@ -24,7 +24,8 @@ export type WorkerRequest = { n: number; space: string } & (
   | { op: "flush" | "close" | "size" | "digest" | "remove"; id: string }
   | { op: "truncate"; id: string; size: number }
   | { op: "read"; id: string; offset: number; length: number }
-  | { op: "removeWhere"; prefix: string });
+  | { op: "removeWhere"; prefix: string }
+  | { op: "dropSpace" });
 
 /** `name`: the error's own name when it says what happened (`QuotaExceededError`: no room left). */
 export type WorkerReply = { n: number } & ({ ok: true; value?: unknown } | { ok: false; error: string; name?: string } | { progress: number });
@@ -110,14 +111,52 @@ function writeAll(sync: SyncHandle, bytes: Uint8Array, at: number): void {
   throw noRoom();
 }
 
+/**
+ * Lets the worker's other tasks run: another file's request, and the replies of the file system it waits for. A large
+ * file copied in or checked is read and hashed a step at a time; with its bytes ready, the whole file was one task, and
+ * every other file of the page (a voice note arriving, a photo's Save) waited for it. A message, not a timer: a timer
+ * set from a timer's turn waits at least 4 ms after a few, a second per GiB.
+ */
+function yieldToOthers(): Promise<void> {
+  return new Promise((resolve) => {
+    const { port1, port2 } = new MessageChannel();
+    port1.onmessage = () => { port1.close(); resolve(); };
+    port2.postMessage(null);
+  });
+}
+
+/**
+ * `blob` a step at a time, yielding between steps. Slices, not its stream: the stream hands out small chunks, one task
+ * each once its bytes are on disk, so a file read that way got one chunk in per step of the large one. The next step
+ * is read while this one is hashed.
+ */
+async function* steps(blob: Blob): AsyncGenerator<Uint8Array> {
+  const read = (offset: number) => {
+    const bytes = blob.slice(offset, offset + FILE_BYTES_STEP).arrayBuffer();
+    bytes.catch(() => {}); // Left unread when the copy stops early; awaited below otherwise.
+    return bytes;
+  };
+  let next = blob.size ? read(0) : null;
+  for (let offset = 0; next; offset += FILE_BYTES_STEP) {
+    const bytes = await next;
+    next = offset + FILE_BYTES_STEP < blob.size ? read(offset + FILE_BYTES_STEP) : null;
+    if (offset) await yieldToOthers();
+    yield new Uint8Array(bytes);
+  }
+}
+
 async function runRequest(request: WorkerRequest): Promise<{ value?: unknown; transfer?: Transferable[] }> {
   const { space } = request;
   switch (request.op) {
     case "probe": {
       // Sync access handles are the reason for this worker: a browser without them keeps files in IndexedDB.
-      const sync = await handle(space, "ghostly-probe", true);
-      release(space, "ghostly-probe");
-      await (await folder(space, false))?.removeEntry("ghostly-probe").catch(() => {});
+      // A file of its own: every page of the profile and its peer probe the same folder, and a handle is exclusive.
+      // On one shared name, two app tabs opening their storage at once (their first large received file finishing)
+      // had one refused, and that tab then read every file kept here as "No longer available" (agents#2504).
+      const name = `ghostly-probe-${Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+      const sync = await handle(space, name, true);
+      release(space, name);
+      await (await folder(space, false))?.removeEntry(name).catch(() => {});
       return { value: !!sync };
     }
     case "stage": {
@@ -126,15 +165,13 @@ async function runRequest(request: WorkerRequest): Promise<{ value?: unknown; tr
       try {
         sync.truncate(0);
         const hash = sha256.create();
-        const reader = request.source.stream().getReader();
-        let offset = 0, told = 0;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        let offset = 0;
+        for await (const value of steps(request.source)) {
+          if (!value.length) break;
           hash.update(value);
           writeAll(sync, value, offset);
           offset += value.length;
-          if (offset - told >= FILE_BYTES_STEP) { told = offset; scope.postMessage({ n: request.n, progress: offset }); }
+          scope.postMessage({ n: request.n, progress: offset });
         }
         if (offset !== request.source.size) throw new Error("The file changed while it was being copied");
         release(space, request.id);
@@ -183,12 +220,14 @@ async function runRequest(request: WorkerRequest): Promise<{ value?: unknown; tr
       if (held) {
         held.flush();
         const size = held.getSize();
-        for (let offset = 0; offset < size; offset += FILE_BYTES_STEP) hash.update(readAt(held, offset, FILE_BYTES_STEP));
+        for (let offset = 0; offset < size; offset += FILE_BYTES_STEP) {
+          if (offset) await yieldToOthers();
+          hash.update(readAt(held, offset, FILE_BYTES_STEP));
+        }
       } else {
         const file = await entry(space, request.id, false);
         if (!file) throw new Error("No such file");
-        const reader = (await file.getFile()).stream().getReader();
-        for (;;) { const { done, value } = await reader.read(); if (done) break; hash.update(value); }
+        for await (const value of steps(await file.getFile())) hash.update(value);
       }
       return { value: digestText(hash.digest()) };
     }
@@ -206,10 +245,24 @@ async function runRequest(request: WorkerRequest): Promise<{ value?: unknown; tr
       for (const name of names) { release(space, name); await dir.removeEntry(name).catch(() => {}); }
       return {};
     }
+    case "dropSpace": {
+      // After every request on its files, and with their handles closed: a file left open (one a move was writing when
+      // it stopped) is locked, and the folder's removal failed on it, leaving every file not yet removed in place.
+      if (!SPACE.test(space)) throw new Error("Invalid profile space");
+      const prefix = `${space}/`;
+      await Promise.all([...queues].filter(([key]) => key.startsWith(prefix)).map(([, run]) => run));
+      for (const key of [...open.keys()]) if (key.startsWith(prefix)) release(space, key.slice(prefix.length));
+      const root = await navigator.storage.getDirectory().then((dir) => dir.getDirectoryHandle("ghostly-files")).catch(() => null);
+      await root?.removeEntry(space, { recursive: true }).catch((error: { name?: string }) => { if (error?.name !== "NotFoundError") throw error; });
+      return {};
+    }
   }
 }
 
-/** Requests for one file run one after another (a read never sees half of a write); files do not wait for each other. */
+/**
+ * Requests for one file run one after another (a read never sees half of a write); files do not wait for each other:
+ * a long copy or check yields between its steps (`yieldToOthers`).
+ */
 const queues = new Map<string, Promise<unknown>>();
 scope.onmessage = (event) => {
   const request = event.data;

@@ -78,6 +78,8 @@ export interface CarriedHooks {
    * admin, which keeps an edge with everyone), so the relays can wait even before anything came back that way.
    */
   carry(payload: Uint8Array): { taken: number; sure: boolean };
+  /** Whether `carry` would hand a packet to any link now (none: every member that could pass it on is away). */
+  canCarry?(): boolean;
   /** The edge's own data link is open: it carries everything, and nothing is handed to anyone. */
   open(): boolean;
   /** A carried packet of the member's is here and no read is under way: look now. */
@@ -104,6 +106,8 @@ export interface CarriedHooks {
 export class CarriedTransport implements PkarrTransport {
   /** My last packet while the edge is down: what a member that just became reachable is handed. */
   private mine: Uint8Array | null = null;
+  /** The records `mine` holds, as members last took them, and when. */
+  private handed: { said: string; at: number } | null = null;
   private lastTimestamp = 0n;
   /** The date each packet `stamp` signed carries: the relays' transport takes it rather than check the signature again. */
   private readonly dated = new WeakMap<Uint8Array, bigint>();
@@ -116,6 +120,8 @@ export class CarriedTransport implements PkarrTransport {
   private seen = -1n;
   /** A read under way: resolved when a carried packet comes meanwhile. */
   private waiting: (() => void) | null = null;
+  /** The records of a publish refused before they were signed, while nobody could carry them: signed when one can (`latest`). */
+  private unsigned: { identity: Identity; records: GhostRecord[] } | null = null;
   /** The packet the relays have not got yet. */
   private pending: { identity: Identity; records: GhostRecord[]; payload: Uint8Array; options?: PkarrRequestOptions; timer: ReturnType<typeof setTimeout>; heardBefore: number; ended: Promise<"ended">; end: () => void } | null = null;
   /** How many carried packets of the member's came: a deferral that ends with none more says no member reaches it. */
@@ -146,6 +152,7 @@ export class CarriedTransport implements PkarrTransport {
   async publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void> {
     if (this.stopped || identity.pubKeyZ32 !== this.myKey) return this.inner.publish(identity, records, options);
     this.drop();
+    this.unsigned = null;
     // Up: the edge carries everything, and its packet on the relays (it is here, its offer is settled) is nothing
     // anyone waits for. It goes as a background write, behind the links that are signaling (a new offer of its own aside).
     if (this.hooks.open()) {
@@ -161,10 +168,24 @@ export class CarriedTransport implements PkarrTransport {
       if (this.hooks.direct && this.inner.publishPayload) void published.then(() => this.handDirect(payload), () => { /* the link publishes again, and hands it then */ });
       return published;
     }
+    // Down, and no member to hand it to: refused before it is signed when no relay takes it either, as when up. Its
+    // records wait for a member that can carry them (`latest`). With every member away, 10 groups' 30 edges signed ~80
+    // packets a minute that went nowhere.
+    if (this.hooks.canCarry && !this.hooks.canCarry()) {
+      const held = this.inner.publishHeld?.(identity.pubKeyZ32, options);
+      if (held) { this.unsigned = { identity, records }; throw held; }
+    }
+    // The records members took a moment ago (`SIGNAL_REPLY_MS`), again: the link trying once more what the relays' budget
+    // held back. Members have them: the relays get that very packet. Signed and handed again at each try, an edge to a
+    // member who left sent two frames every few seconds that no member could pass on (35 KB a minute on an idle web app
+    // with two such edges, bug hunt 2026-11-08). A member who can pass it on later is handed it then (`latest`).
+    const said = JSON.stringify(records);
+    if (this.mine && this.handed?.said === said && Date.now() - this.handed.at < SIGNAL_REPLY_MS) return this.toRelays(identity, records, this.mine, options);
     const payload = this.newest = this.stamp(identity, records);
     this.mine = payload;
     let carried = { taken: 0, sure: false };
     try { carried = this.hooks.carry(payload); } catch { /* nobody took it */ }
+    this.handed = carried.taken ? { said, at: Date.now() } : null;
     // The relays wait only when the way through members is known to work, or as good as: a member that took the
     // packet may not reach the other end (after a restart, two members answering the same one each hold the other's
     // answer), and an answer held back for nothing is read a poll later.
@@ -318,13 +339,24 @@ export class CarriedTransport implements PkarrTransport {
   }
 
   /** My newest packet for this edge while it is down, for a member that can pass it on now; null once it is up. */
-  latest(): Uint8Array | null { return this.stopped || this.hooks.open() ? null : this.mine; }
+  latest(): Uint8Array | null {
+    if (this.stopped || this.hooks.open()) return null;
+    if (this.unsigned) {
+      const { identity, records } = this.unsigned;
+      this.unsigned = null;
+      // Other records than the ones handed last: a publish of those must not send this packet (`handed`).
+      this.handed = null;
+      this.mine = this.newest = this.stamp(identity, records);
+    }
+    return this.mine;
+  }
 
   /** The edge is going: nothing more is deferred or carried, and a last packet goes straight to the relays. */
   stop(): void {
     this.stopped = true;
     this.drop();
     this.mine = null;
+    this.unsigned = null;
     const waiting = this.waiting;
     this.waiting = null;
     waiting?.();

@@ -122,7 +122,8 @@ impl TurnDht {
 
 /// Where the turn is read and put: the DHT (the Desktop app has one) and the relays of Settings.
 pub struct TurnSources<'a> {
-    pub dht: Option<&'a TurnDht>,
+    /// The turn's node; none while Hide my IP from contacts keeps the app off the DHT (`Pkarr::configure`).
+    pub dht: Option<std::sync::Arc<TurnDht>>,
     pub relays: Vec<Url>,
     pub http: &'a reqwest::Client,
 }
@@ -327,7 +328,7 @@ pub async fn read(
 ) -> Vec<SourceAnswer> {
     let within = within.map_or(SOURCE_TIMEOUT, |given| given.min(SOURCE_TIMEOUT));
     let dht = async {
-        match sources.dht {
+        match sources.dht.as_deref() {
             Some(dht) => Some(read_dht(dht, key, within).await),
             None => None,
         }
@@ -439,7 +440,7 @@ pub async fn put(
         )),
     };
     // The DHT first: it is the one source with a real condition.
-    let dht = match (sources.dht, dht_condition) {
+    let dht = match (sources.dht.as_deref(), dht_condition) {
         (Some(dht), Some(cas)) => Some(put_dht(dht, key, payload, cas).await),
         _ => None,
     };
@@ -828,12 +829,12 @@ mod tests {
             .map(|url| url.parse().unwrap())
             .collect();
         let http = reqwest::Client::new();
-        let dht = TurnDht::new(None);
+        let dht = std::sync::Arc::new(TurnDht::new(None));
         let joining = std::time::Instant::now();
         dht.warm().await;
         println!("node joined in {:?}", joining.elapsed());
         let sources = TurnSources {
-            dht: Some(&dht),
+            dht: Some(dht.clone()),
             relays: relays.clone(),
             http: &http,
         };

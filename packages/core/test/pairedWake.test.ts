@@ -3,7 +3,7 @@ import { p256 } from "@noble/curves/nist.js";
 import { fromBase64Url, toBase64Url, utf8Decode } from "../src/bytes";
 import { KNOWN_SESSION_CAPABILITIES } from "../src/pairedCapabilities";
 import {
-  DEVICE_WAKE_TTL_SECONDS, WAKE_CALL_TTL_SECONDS, WAKE_CAPABILITY, WAKE_INTERVAL_MS, WakeLimiter, deviceWakeRequest, newWakeToken, parseWakeFrame, readWake, readWakePayload, relayRequest, wakeFrame, wakeRequest, type WakeTarget,
+  DEVICE_WAKE_TTL_SECONDS, WAKE_CALL_TTL_SECONDS, WAKE_CAPABILITY, WAKE_ONLINE_TTL_SECONDS, WAKE_INTERVAL_MS, WAKE_RETRY_MS, WakeLimiter, deviceWakeRequest, newWakeToken, parseWakeFrame, readWake, readWakePayload, relayRequest, wakeFrame, wakeRequest, type WakeTarget,
 } from "../src/pairedWake";
 import { decryptPushPayload, generateVapidKeys } from "../src/webPush";
 
@@ -30,6 +30,16 @@ describe("sharing a push subscription with a contact", () => {
     const frame = JSON.parse(JSON.stringify(wakeFrame(target)));
     expect(frame.t).toBe("paired-wake");
     expect(parseWakeFrame(frame)).toEqual(target);
+  });
+
+  it("says whether this side wants online notices (`o`, on unless turned off); an older side's frame has none", () => {
+    const { target } = subscription();
+    const frame = JSON.parse(JSON.stringify(wakeFrame({ ...target, online: true })));
+    expect(frame.w.o).toBe(1);
+    expect(parseWakeFrame(frame)).toEqual({ ...target, online: true });
+    expect(wakeFrame(target).w).not.toHaveProperty("o");
+    expect(parseWakeFrame({ t: "paired-wake", w: { ...wakeFrame(target).w, o: 0 } })).toEqual(target);
+    expect(parseWakeFrame({ t: "paired-wake", w: { ...wakeFrame(target).w, o: "1" } })).toEqual(target);
   });
 
   it("null says: forget what I shared", () => {
@@ -87,6 +97,35 @@ describe("the wake-up itself", () => {
     expect(readWake(JSON.stringify({ wake: 1, k: target.token, c: 1, d: 1 }))?.kind).toBe("device");
   });
 
+  it("an online notice (revision 2026-10-27) says so and nothing more, and lives five minutes: a stale \"online\" is worse than none", () => {
+    const { target, secret, auth } = subscription();
+    const request = wakeRequest(target, Date.now(), "online");
+    expect(request.headers.TTL).toBe(String(WAKE_ONLINE_TTL_SECONDS));
+    expect(WAKE_ONLINE_TTL_SECONDS).toBe(300);
+    // Per-kind times to live (WISP 401 § Privacy): an online notice has a handoff's, so it adds no value of its own.
+    expect(WAKE_ONLINE_TTL_SECONDS).toBe(DEVICE_WAKE_TTL_SECONDS);
+    const text = utf8Decode(decryptPushPayload(request.body, secret, auth));
+    expect(JSON.parse(text)).toEqual({ wake: 1, k: target.token, o: 1 });
+    expect(readWake(text)).toEqual({ token: target.token, kind: "online" });
+    // A call or a device flag wins: an online notice never hides one.
+    expect(readWake(JSON.stringify({ wake: 1, k: target.token, c: 1, o: 1 }))?.kind).toBe("call");
+    expect(readWake(JSON.stringify({ wake: 1, k: target.token, d: 1, o: 1 }))?.kind).toBe("device");
+  });
+
+  it("a message, a call, an online notice and a device wake-up are the same size on the wire, whatever the token's length", () => {
+    for (const token of [newWakeToken(), "a".repeat(16), "b".repeat(64)]) {
+      const { target, secret, auth } = subscription();
+      const t = { ...target, token };
+      const sizes = [wakeRequest(t), wakeRequest(t, Date.now(), "call"), wakeRequest(t, Date.now(), "online"), deviceWakeRequest(t)].map((request) => {
+        readWake(utf8Decode(decryptPushPayload(request.body, secret, auth)));
+        return request.body.length;
+      });
+      expect(new Set(sizes).size).toBe(1);
+      expect(relayRequest(wakeRequest(t)).body.length).toBe(relayRequest(deviceWakeRequest(t)).body.length);
+      expect(relayRequest(wakeRequest(t, Date.now(), "online")).body.length).toBe(relayRequest(wakeRequest(t)).body.length);
+    }
+  });
+
   it("the receiver reads nothing else as a wake-up", () => {
     for (const text of [null, "", "{}", '{"wake":2,"k":"aaaaaaaaaaaaaaaaaaaaaa"}', '{"wake":1,"k":"<script>"}', "not json", "x".repeat(500)]) {
       expect(readWakePayload(text)).toBeNull();
@@ -114,5 +153,25 @@ describe("at most one wake-up per contact per interval", () => {
     expect(limiter.take("ana", t + WAKE_INTERVAL_MS)).toBe(true);
     limiter.reset("ana");
     expect(limiter.take("ana", t + WAKE_INTERVAL_MS + 1)).toBe(true);
+  });
+
+  it("one that did not reach the push service does not count: the next may go a short pause after it failed", () => {
+    const limiter = new WakeLimiter();
+    const t = 1_800_000_000_000;
+    expect(limiter.take("ana", t)).toBe(true);
+    limiter.missed("ana", t, WAKE_RETRY_MS, t + 5000);
+    expect(limiter.take("ana", t + 5000 + WAKE_RETRY_MS - 1)).toBe(false);
+    expect(limiter.take("ana", t + 5000 + WAKE_RETRY_MS)).toBe(true);
+    // A miss of an older one, or after the count started over, changes nothing.
+    limiter.missed("ana", t, WAKE_RETRY_MS, t + 5000 + WAKE_RETRY_MS);
+    expect(limiter.take("ana", t + 5000 + 2 * WAKE_RETRY_MS)).toBe(false);
+    limiter.reset("ana");
+    limiter.missed("ana", t, WAKE_RETRY_MS, t);
+    expect(limiter.take("ana", t + 1)).toBe(true);
+    // A limit shorter than the pause (a call's) is never made longer.
+    const calls = new WakeLimiter(10_000);
+    expect(calls.take("ana", t)).toBe(true);
+    calls.missed("ana", t, WAKE_RETRY_MS, t);
+    expect(calls.take("ana", t + 10_000)).toBe(true);
   });
 });

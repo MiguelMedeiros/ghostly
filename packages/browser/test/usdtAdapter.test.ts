@@ -218,6 +218,14 @@ describe("checking the token and RPC before a wallet is used", () => {
     chain.code = CODE; chain.decimals = 8;
     await expect(UsdtAdapter.connect(config(), MNEMONIC)).rejects.toThrow("Token metadata changed");
   });
+  it("a balance read asks for the two balances only: the chain and the contract were checked when the wallet opened", async () => {
+    // The wallet reads its balances every 8 s for as long as it is open: the contract's whole code each time was most
+    // of what it downloaded. A payment still checks both before it signs (above and below).
+    const { adapter } = await wallet();
+    chain.calls.length = 0;
+    expect(await adapter.balances()).toEqual({ balance: "5000000", gasBalance: String(10n ** 18n) });
+    expect(chain.calls.sort()).toEqual(["eth_call", "eth_getBalance"]);
+  });
   it("labels a request with real USDT only on Ethereum, and a locked wallet has no address", async () => {
     const { adapter, me } = await wallet();
     expect(await adapter.target()).toMatchObject({ method: "usdt", asset: "TEST-USDT", unit: "token-base", chainId: 31337, token: TOKEN, decimals: 6, address: getAddress(me) });

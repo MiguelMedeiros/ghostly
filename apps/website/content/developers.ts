@@ -201,7 +201,7 @@ export const developers = {
     off: "Stays off",
     fail: "No live line",
     failBody: "The chat stays on DHT text and keeps trying. Nothing bridges one transport to another.",
-    first: "Before a key is pinned, a new chat dials WebRTC only. After the pin, Iroh and HyperDHT can carry it too: their descriptors travel in the capability record on the DHT, so a web chat reaches a desktop over relayed Iroh. A chat with no path at all stays on the DHT.",
+    first: "A first pairing dials WebRTC, and Iroh and HyperDHT when WebRTC is missing on either side or connects nothing: their descriptors travel in the capability record on the DHT, sealed with the invite key until the pin, so a Linux Desktop pairs and a web chat reaches a desktop over relayed Iroh. A chat with no path at all stays on the DHT.",
     rule: "Same rule as rankTransports() in packages/core/src/pairedTransports.ts",
     simplified: "offers simplified",
     status: "Every chat: web, desktop, extension and CLI",
@@ -214,7 +214,7 @@ export const developers = {
     steps: [
       {
         title: "Understand the core",
-        body: "Signed Pkarr records: at most 1000 bytes, a 300-second TTL.",
+        body: "Signed Pkarr records: at most 1000 bytes, a TTL set per record: 300 seconds by default, 3600 for _caps, 7200 for did:dht.",
         links: [
           { label: "WISP 01 · Ghost Core", href: "/wisps/01-ghost-core" },
           { label: "The Ghost Protocol", href: "/wisps/protocol" },
@@ -233,9 +233,9 @@ export const developers = {
         title: "Build a client or adapter",
         body: "The protocol library, the SDK and the native transports.",
         links: [
-          { label: "packages/core", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/core/src" },
-          { label: "packages/sdk", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/sdk" },
-          { label: "native/transports", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/native/transports" },
+          { label: "packages/core", href: "https://github.com/MiguelMedeiros/ghostly/tree/main/packages/core/src" },
+          { label: "packages/sdk", href: "https://github.com/MiguelMedeiros/ghostly/tree/main/packages/sdk" },
+          { label: "native/transports", href: "https://github.com/MiguelMedeiros/ghostly/tree/main/native/transports" },
         ],
       },
       {
@@ -245,7 +245,7 @@ export const developers = {
           { label: "CLI guide", href: "/cli" },
           { label: "AI agents", href: "/developers/agents" },
           { label: "WISP 1100 · Headless", href: "/wisps/1100-headless" },
-          { label: "packages/cli", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/cli" },
+          { label: "packages/cli", href: "https://github.com/MiguelMedeiros/ghostly/tree/main/packages/cli" },
         ],
       },
     ],
@@ -257,6 +257,7 @@ export const developers = {
     feature: "Feature",
     clients: ["Web app", "Desktop", "Extension", "CLI"],
     none: "No",
+    noneSaid: "Not supported",
     rows: [
       { name: "Text chat, ghostly1 invites", cells: [A, A, A, A] },
       { name: "Pinned keys, durable outbox", cells: [A, A, A, A] },
@@ -297,7 +298,7 @@ export const developers = {
       "CLI: the headless ghostly CLI, the app's engine on Node for bots (WISP 1100): a daemon, a local socket and JSON events; spending real money needs --confirm-real; npm install -g @ghostlytools/cli. The older Rust CLI, no longer shipped from 1.0, speaks only the 0.4 DHT text and does not read ghostly1 codes.",
       "Calls: in every chat while it is live, not in groups. The CLI places and answers voice calls and hands the audio to your program over a Unix socket. Groups: text, a picture, payments, and files and voice messages (WISP 503: announced in the group, fetched from a member who has them); no calls. Desktop on Linux: its webview has no WebRTC, so its calls run their own WebRTC and media in the app (no screen sharing yet), and its chats go live over Iroh or HyperDHT.",
       "WebLN is web-only (the CLI takes every other Lightning source), Bitcoin Core desktop-only. BDK runs on test networks only; Breez and Spark on Mainnet with your own Breez API key. Arkade and Bark run on Mainnet with no unilateral exit yet. OpenID waits for OAuth clients.",
-      "Also contacted: Pkarr relays, the Mainline DHT (Desktop and CLI), Google STUN, mints, n0's Iroh relays, HyperDHT bootstrap nodes, Ark and Spark operators, Fedimint guardians, Esplora servers, Nostr relays, a public Ethereum RPC, DNS over HTTPS (Quad9 by default), public profile hosts, the pages you link (for previews), archive.org for GIFs, and any service you add. No TURN by default: you can set your own.",
+      "Also contacted: Pkarr relays, the Mainline DHT (Desktop and CLI), Google STUN, mints, n0's Iroh relays and Ghostly's own (iroh.miguelmedeiros.dev), HyperDHT bootstrap nodes, Ark and Spark operators, Fedimint guardians, Esplora servers, Nostr relays, a public Ethereum RPC, DNS over HTTPS (Quad9 by default, then Cloudflare and Google when it gives no answer; Cloudflare on the Mac app and Safari), public profile hosts, the pages you link (for previews), archive.org for GIFs, and any service you add. No TURN by default: you can set your own.",
     ],
   },
   next: {

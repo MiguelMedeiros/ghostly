@@ -12,7 +12,7 @@ import { ghostly } from "./support/cli";
  */
 
 const ROOT = resolve(import.meta.dirname, "../../..");
-const DOCS = ["packages/cli/SKILL.md", "packages/cli/skills/ghostly/SKILL.md", "docs/AI-AGENTS.md", "apps/website/content/agents.ts", "apps/website/content/agentsThreat.ts"];
+const DOCS = ["packages/cli/SKILL.md", "packages/cli/skills/ghostly/SKILL.md", "docs/AI-AGENTS.md", "docs/VOICE-AGENT.md", "apps/website/content/agents.ts", "apps/website/content/agentsThreat.ts"];
 const GLOBAL = ["--profile", "--home", "--pretty", "--help", "--version"];
 const WORD = /^[a-z][a-z-]*$/;
 /** Commands whose secret shows in `ps` and the shell's history when given as an argument: taught on stdin only. */

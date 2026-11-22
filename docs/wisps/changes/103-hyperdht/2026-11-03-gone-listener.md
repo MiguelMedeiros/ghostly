@@ -1,0 +1,1 @@
+A 1:1 chat whose contact has not been seen online for 10 minutes (no session, unused, not on screen) lets its HyperDHT listener go, and listens again on the same key when the contact's packet says it is online, a text goes, or the chat is opened. No wire change.

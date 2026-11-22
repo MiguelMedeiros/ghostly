@@ -509,12 +509,16 @@ mod proxy_tests {
         .into_bytes()
     }
 
+    /// The node's RPC password in these tests: drawn per run, so no fixed one is written here.
+    static PASSWORD: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| rand::random::<u128>().to_string());
+
     async fn rpc(url: String, method: &str, params: Vec<Value>) -> Result<Value, RpcError> {
         call(
             url,
             "w".into(),
             "alice".into(),
-            "hunter2-secret".into(),
+            PASSWORD.clone(),
             method.into(),
             params,
         )
@@ -583,7 +587,7 @@ mod proxy_tests {
         for error in [refused, auth] {
             let text = serde_json::to_string(&error).unwrap();
             assert!(
-                !text.contains("hunter2") && !text.contains("alice"),
+                !text.contains(PASSWORD.as_str()) && !text.contains("alice"),
                 "{text}"
             );
             assert!(!text.contains(&port.to_string()), "{text}");

@@ -69,6 +69,9 @@ test("removed from a community, knocking again with nobody there keeps the histo
   // On a phone the line and its button fit the screen: nothing wider than it, the button a full touch target.
   const desktop = bob.page.viewportSize()!;
   await bob.page.setViewportSize({ width: 375, height: 720 });
+  // The phone layout comes with React's next render, after the resize: measured before it, the line is still in the
+  // two-pane layout, beside the chat list.
+  await expect(bob.page.locator(".app-shell")).toBeVisible();
   await expect(cancel).toBeVisible();
   const box = (await cancel.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
@@ -78,6 +81,7 @@ test("removed from a community, knocking again with nobody there keeps the histo
   await sees(bob, "said while a member");
   await testInfo.attach("knocking-again-375", { body: await bob.page.screenshot(), contentType: "image/png" });
   await bob.page.setViewportSize(desktop);
+  await expect(bob.page.locator(".two-pane")).toBeVisible();
   await testInfo.attach("knocking-again-desktop", { body: await bob.page.screenshot(), contentType: "image/png" });
 
   // Still waiting a while later (nobody answers), then he gives up: the group is as it was before he opened the link.

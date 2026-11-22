@@ -17,6 +17,8 @@ export class Mesh {
   readonly changes = new Map<string, number>();
   /** The sessions' clock (`hooks.clock`) when set; the wall clock otherwise. */
   clock: number | null = null;
+  /** Moves the sessions' clock on by `ms`, from the wall clock the first time: an author's messages taken at its pace. */
+  tick(ms: number): void { this.clock = (this.clock ?? Date.now()) + ms; }
   private closed = new Set<string>();
   private pending: Promise<unknown>[] = [];
   private edge(a: string, b: string): string { return [a, b].sort().join("|"); }

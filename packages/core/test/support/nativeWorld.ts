@@ -20,7 +20,7 @@ interface End extends FrameChannel {
   hear(): void;
 }
 
-interface Entry { name: string; endpoint: NativeEndpoint; identity: string; closed: boolean; ends: End[] }
+interface Entry { name: string; endpoint: NativeEndpoint; identity: string; closed: boolean; ends: End[]; quietSince: number }
 
 const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), b => b.toString(16).padStart(2, "0")).join("");
 
@@ -42,11 +42,25 @@ export class NativeWorld {
   asleep = new Set<string>();
   idleMs = 30_000;
   /**
+   * HyperDHT announces an endpoint only while none of its channels is live (endpoint.mjs), and again once the last one
+   * closed: a dial to one that holds a channel, or whose last one closed less than `announceMs` ago, finds no announce
+   * and fails after `notFoundMs` with hyperdht's PEER_NOT_FOUND. Off, every running endpoint is found.
+   */
+  unannouncedWhileLive = false;
+  announceMs = 300;
+  notFoundMs = 100;
+  /**
    * Apps whose next dial connects and then carries nothing: the handshake went through, and no frame or close crosses
    * after it, either way; each end closes when its idle timeout (`idleMs`) runs out (the Linux Desktop dialling the web
    * app back after both restarted, through a relay path that died with the handshake: Omarchy, 2026-10-01).
    */
   deadPaths = new Set<string>();
+  /**
+   * Apps whose endpoints lost their relay (a phone back from Doze, its Iroh waiting out its relay reconnect backoff): a dial
+   * from or to one fails after `dialFailMs`, even when the relay comes back meanwhile (what the dial sent went nowhere,
+   * and QUIC sends it again only seconds on). `relayBack` ends it, and tells the app's endpoints (`onRelayBack`).
+   */
+  offRelay = new Set<string>();
   /** Every dial that reached an endpoint, and every one that did not. */
   dials = 0;
   /** The dials that reached an endpoint, by the name of the app that dialled. */
@@ -67,7 +81,7 @@ export class NativeWorld {
   endpoint(transport: NativeTransport, name: string): NativeEndpoint {
     const id = `${name}:${transport}`;
     const identity = this.key(transport, name);
-    const entry: Entry = { name, identity, closed: false, ends: [], endpoint: null as unknown as NativeEndpoint };
+    const entry: Entry = { name, identity, closed: false, ends: [], quietSince: 0, endpoint: null as unknown as NativeEndpoint };
     const key = this.hexIds ? identity : id;
     const descriptor = transport === "hyperdht/1" ? { publicKey: key } : { id: key, relay: "https://relay.test./", addresses: [] };
     entry.endpoint = {
@@ -75,10 +89,16 @@ export class NativeWorld {
       connect: async (to: unknown): Promise<BoundChannel> => {
         const d = to as { id?: string; publicKey?: string };
         const remote = this.find(d.id ?? d.publicKey ?? "");
-        if (!remote || remote.closed || entry.closed || !remote.endpoint.onConnection || this.dialsLost.has(name) || this.asleep.has(remote.name)) {
+        if (!remote || remote.closed || entry.closed || !remote.endpoint.onConnection || this.dialsLost.has(name) || this.asleep.has(remote.name)
+          || this.offRelay.has(name) || this.offRelay.has(remote.name)) {
           this.dialFailures++;
           await after(this.dialFailMs);
           throw new Error(`${transport}: the contact's endpoint did not answer`);
+        }
+        if (this.unannouncedWhileLive && transport === "hyperdht/1" && (remote.ends.length || Date.now() - remote.quietSince < this.announceMs)) {
+          this.dialFailures++;
+          await after(this.notFoundMs);
+          throw new Error("PEER_NOT_FOUND: Peer not found");
         }
         await after(this.dialMs);
         if (remote.closed || entry.closed || this.find(d.id ?? d.publicKey ?? "") !== remote) { this.dialFailures++; throw new Error(`${transport}: the contact's endpoint went away`); }
@@ -115,6 +135,12 @@ export class NativeWorld {
     }
   }
 
+  /** The endpoints of the app named `name` are on their relay again (`offRelay`), and say so. */
+  relayBack(name: string): void {
+    this.offRelay.delete(name);
+    for (const entry of this.entries.values()) if (entry.name === name && !entry.closed) entry.endpoint.onRelayBack?.();
+  }
+
   /** Nothing crosses between these two ends any more; each hears its idle timeout. */
   private deadPath(...ends: End[]): void {
     for (const end of ends) { end.dead = true; setTimeout(() => end.hear(), this.idleMs); }
@@ -140,6 +166,7 @@ export class NativeWorld {
           if (end.closed) return;
           end.closed = true;
           owner.ends = owner.ends.filter(e => e !== end);
+          if (!owner.ends.length) owner.quietSince = Date.now();
           end.onClose?.();
           // The close reaches the other end a moment later, unless this app is gone (its end is dead).
           if (!end.dead) setTimeout(() => end.peer.hear(), this.latencyMs);
@@ -149,6 +176,7 @@ export class NativeWorld {
           if (end.closed) return;
           end.closed = true;
           owner.ends = owner.ends.filter(e => e !== end);
+          if (!owner.ends.length) owner.quietSince = Date.now();
           end.onClose?.();
         },
       };

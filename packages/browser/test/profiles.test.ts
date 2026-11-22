@@ -29,7 +29,7 @@ beforeEach(() => {
 const chat = (peer: string) => ensureSession({ seedB64: "c2VlZA", peerPubKeyB64: peer, encKeyB64: "ZW5j" });
 
 it("starts with the default profile, in the original namespace", () => {
-  expect(listProfiles()).toEqual([{ id: "", name: "Personal", createdAt: 0 }]);
+  expect(listProfiles()).toEqual([{ id: "", name: "Personal", createdAt: 0, builtIn: true }]);
   expect(activeProfileId()).toBe("");
 });
 

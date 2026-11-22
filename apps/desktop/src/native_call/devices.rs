@@ -241,10 +241,36 @@ pub fn watch(changed: Sink) {
     });
 }
 
+/// A document takes the Ghostly window's place: the page before it is told of no more changes.
+pub fn page_started() {
+    watchers().lock().unwrap().clear();
+}
+
 #[cfg(test)]
 mod tests {
     // covers: calls.devices-linux
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    #[test]
+    fn a_new_page_is_told_of_changes_and_the_one_before_no_longer() {
+        let (before, after) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let counting = |count: &Arc<AtomicU64>| -> Sink {
+            let count = count.clone();
+            Arc::new(move |_| {
+                count.fetch_add(1, Ordering::Relaxed);
+            })
+        };
+        watchers().lock().unwrap().push(counting(&before));
+        page_started();
+        watchers().lock().unwrap().push(counting(&after));
+        for tell in watchers().lock().unwrap().iter() {
+            tell(b"{}".to_vec());
+        }
+        assert_eq!(before.load(Ordering::Relaxed), 0);
+        assert_eq!(after.load(Ordering::Relaxed), 1);
+    }
 
     #[test]
     fn devices_with_one_name_are_numbered_and_another_providers_copy_is_left_out() {

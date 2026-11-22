@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
-import { ATPROTO_PROOF_COLLECTION, atprotoProofRecord, identityStatement, newIdentityBinding, type IdentityStatement } from "@ghostly/core";
+import { ATPROTO_PROOF_COLLECTION, atprotoProofRecord, IdentityCheckUnavailable, identityStatement, newIdentityBinding, type IdentityStatement } from "@ghostly/core";
 import type { IdentityFetch } from "../src/proofs/contract";
 import { createAtprotoIdentityProvider, RECORD_PROOF_MAX_BYTES } from "../src/proofs/providers/atproto";
 import { IDENTITY_PROVIDERS } from "../src/proofs/registry";
@@ -152,6 +152,27 @@ describe("the AT Protocol provider", () => {
     await expect(verifyIdentity([provider], s, {}, ctxOf(down))).rejects.toThrow("could not be reached");
   });
 
+  it("keeps what this side's network saw from the contact: a server on any port that cannot be reached, fails, or is private", async () => {
+    // The DID document, the contact's, chooses the server and its port.
+    const net = testAtprotoNetwork();
+    const alice = net.account("alice", { pds: "https://pds.example.org:8443" });
+    const s = statementFor(alice.did);
+    publish(alice, s);
+    const provider = createAtprotoIdentityProvider({ host: () => undefined });
+    const down: IdentityFetch = async (url, init) => { if (url.includes("getRecord")) throw new TypeError("Failed to fetch"); return net.fetch(url, init); };
+    await expect(verifyIdentity([provider], s, {}, ctxOf(down))).rejects.toThrow(IdentityCheckUnavailable);
+    const failing: IdentityFetch = async (url, init) => url.includes("getRecord") ? { status: 502, contentType: "text/html", text: "", bytes: new Uint8Array() } : net.fetch(url, init);
+    await expect(verifyIdentity([provider], s, {}, ctxOf(failing))).rejects.toThrow(IdentityCheckUnavailable);
+    net.zone.a!["pds.example.org"] = ["10.1.2.3"];
+    await expect(verifyIdentity([provider], s, {}, ctxOf(net.fetch))).rejects.toThrow(IdentityCheckUnavailable);
+    // What the server says about the record is about the proof: the contact is told.
+    const gone: IdentityFetch = async (url, init) => url.includes("getRecord")
+      ? { status: 400, contentType: "application/json", text: JSON.stringify({ error: "RecordNotFound" }), bytes: new Uint8Array() } : net.fetch(url, init);
+    net.zone.a!["pds.example.org"] = ["203.0.113.9"];
+    const missing = await verifyIdentity([provider], s, {}, ctxOf(gone)).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+  });
+
   it("never contacts a server on a private network, whatever the DID document says", async () => {
     const net = testAtprotoNetwork();
     const alice = net.account("alice", { pds: "https://pds.lan.example" });
@@ -192,6 +213,14 @@ describe("AT Protocol resolution", () => {
     net.zone.a!["alice.example.com"] = ["203.0.113.11"];
     const doc = await resolveAtprotoDid(web.did, { fetch: net.fetch });
     expect(doc).toMatchObject({ did: "did:web:alice.example.com", pds: "https://pds.example.com", handle: "web.example.com" });
+    // The domain is the identity: once it has no address, the DID no longer resolves (not "could not run").
+    delete net.zone.a!["alice.example.com"];
+    const gone = await resolveAtprotoDid(web.did, { fetch: net.fetch }).catch((e: unknown) => e);
+    expect(gone).toBeInstanceOf(Error);
+    expect(gone).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect((gone as Error).message).toBe("The account's DID no longer resolves: alice.example.com has no address");
+    // No resolver answered: that one could not run.
+    await expect(resolveAtprotoDid(web.did, { fetch: async () => { throw new TypeError("Failed to fetch"); } })).rejects.toThrow(IdentityCheckUnavailable);
   });
 
   it("does not fetch a did:web document from a private network", async () => {

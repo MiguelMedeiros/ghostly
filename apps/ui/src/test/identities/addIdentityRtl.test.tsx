@@ -1,20 +1,25 @@
 import { screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { newIdentityBinding } from "@ghostly/core";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { AddIdentityDialog } from "../../components/identities/AddIdentityDialog";
+import { localProvider } from "../../lib/providerWords";
+import { translateWith } from "../../locales/translate";
+import { LOCALES } from "../i18n/locales";
 import { renderApp } from "../render";
 
 // covers: proofs.picker, proofs.ssh, app.i18n
 
 /**
  * A provider's name, summary, description, limits, privacy line, signer description and steps come from its module,
- * in English. In Arabic they keep their own direction (a <bdi>), or "(Settings → SSH keys)." showed as
- * ".… (Settings → SSH keys(", and the card follows the dialog's direction: its text at the start, its rounded
- * corners on the outside.
+ * said in the app's language (lib/providerWords.ts), with English names and tokens in them. In Arabic they keep their
+ * own direction (a <bdi>), or "(Settings → SSH keys)." showed as ".… (Settings → SSH keys(", and the card follows
+ * the dialog's direction: its text at the start, its rounded corners on the outside.
  */
-const WITHOUT_OIDC = IDENTITY_PROVIDERS.filter((p) => p.id !== "oidc");
-const SSH = IDENTITY_PROVIDERS.find((p) => p.id === "ssh")!;
+const ar = translateWith(LOCALES.ar, "ar");
+const WITHOUT_OIDC = IDENTITY_PROVIDERS.filter((p) => p.id !== "oidc").map((p) => localProvider(p, ar));
+const SSH = localProvider(IDENTITY_PROVIDERS.find((p) => p.id === "ssh")!, ar);
+const DID_KEY = "did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp";
 const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 
 const arabic = () => renderApp(<AddIdentityDialog onClose={() => {}} />, { language: "ar" });
@@ -61,5 +66,22 @@ describe("in Arabic, Identities → Add", () => {
     const items = within(steps).getAllByRole("listitem");
     expect(items.length).toBeGreaterThan(0);
     for (const item of items) expect(item.querySelector(":scope > p > bdi")).not.toBeNull();
+  });
+
+  it("a DID's preview shows its key left to right, and its sentence in the page's direction", async () => {
+    const { user } = arabic();
+    await user.click(screen.getByTestId("add-identity-advanced"));
+    await user.click(screen.getByTestId("add-identity-did"));
+    await user.type(screen.getByTestId("add-identity-subject"), DID_KEY);
+    await vi.waitFor(() => expect(screen.getByTestId("add-identity-preview")).toHaveAttribute("data-status", "ok"), { timeout: 3000 });
+    const [method, key] = screen.getByTestId("add-identity-preview").querySelectorAll("dd");
+    // "#z6Mk… (Ed25519)" (a did:dht's "#0 (Ed25519)"): its leading "#" and its brackets stay where they are.
+    const shown = within(key!).getByText("#z6MkiTBz1y…ooWp (Ed25519)");
+    expect(shown.tagName).toBe("BDI");
+    expect(shown).toHaveAttribute("dir", "ltr");
+    // "did:key، المفتاح هو المعرّف": the app's Arabic sentence, a Latin token first, keeps the page's direction.
+    expect(method).toHaveTextContent("did:key، ");
+    expect(method!.querySelector("bdi")).toBeNull();
+    expect(method).not.toHaveAttribute("dir");
   });
 });

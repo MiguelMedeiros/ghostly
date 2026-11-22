@@ -11,8 +11,12 @@
  * error the app stays on screen through is the app's own error screen's, and is forgotten. "Copy details" holds the
  * error, the browser's version and which APIs are there: no address fragment, no storage, nothing of a chat or a key.
  * The "Starting Ghostly…" first paint index.html puts in #root (#boot-shell) is not the app: with only it there the
- * page counts as empty, and the guard gives it the browser's language. As it runs, before anything is drawn, it puts
- * the person's theme on <html>, so the first paint is in their colours.
+ * page counts as empty, and the guard gives it the language the app will draw in (the profile's, or the browser's for a
+ * new one). As it runs, before anything is drawn, it puts the person's theme on <html>, so the first paint is in their
+ * colours.
+ * Where the browser says it has no network, it says the device is offline instead: a file the browser no longer keeps
+ * (iOS drops a site's data after days unused) cannot load then, and the browser is not to blame. Once the network
+ * is back it reloads by itself, as its Reload button would.
  *
  * A file of its own, not inline: the site's Content-Security-Policy allows scripts from this origin only.
  */
@@ -27,14 +31,14 @@
   var IOS_FLOOR = [16, 4];
 
   var TEXT = {
-    en: { starting: "Starting Ghostly…", title: "Ghostly could not start", slow: "Ghostly is taking long to start", why: "This browser may be too old, or it blocks something Ghostly needs.", "try": "Update your browser, or open Ghostly in another one.", android: "On Android, update Android System WebView and Chrome in Google Play.", ios: "On iPhone or iPad, update iOS.", reload: "Reload", copy: "Copy details", copied: "Copied" },
-    pt: { starting: "Iniciando o Ghostly…", title: "O Ghostly não conseguiu iniciar", slow: "O Ghostly está demorando para iniciar", why: "Este navegador pode ser antigo demais, ou bloqueia algo de que o Ghostly precisa.", "try": "Atualize o navegador, ou abra o Ghostly em outro.", android: "No Android, atualize o Android System WebView e o Chrome no Google Play.", ios: "No iPhone ou iPad, atualize o iOS.", reload: "Recarregar", copy: "Copiar detalhes", copied: "Copiado" },
-    es: { starting: "Iniciando Ghostly…", title: "Ghostly no pudo iniciarse", slow: "Ghostly está tardando en iniciarse", why: "Este navegador puede ser demasiado antiguo, o bloquea algo que Ghostly necesita.", "try": "Actualiza el navegador, o abre Ghostly en otro.", android: "En Android, actualiza Android System WebView y Chrome en Google Play.", ios: "En iPhone o iPad, actualiza iOS.", reload: "Recargar", copy: "Copiar detalles", copied: "Copiado" },
-    fr: { starting: "Démarrage de Ghostly…", title: "Ghostly n'a pas pu démarrer", slow: "Ghostly met du temps à démarrer", why: "Ce navigateur est peut-être trop ancien, ou il bloque quelque chose dont Ghostly a besoin.", "try": "Mettez le navigateur à jour, ou ouvrez Ghostly dans un autre.", android: "Sur Android, mettez à jour Android System WebView et Chrome dans Google Play.", ios: "Sur iPhone ou iPad, mettez iOS à jour.", reload: "Recharger", copy: "Copier les détails", copied: "Copié" },
-    it: { starting: "Avvio di Ghostly…", title: "Ghostly non è riuscito ad avviarsi", slow: "Ghostly ci sta mettendo molto ad avviarsi", why: "Questo browser potrebbe essere troppo vecchio, o blocca qualcosa che serve a Ghostly.", "try": "Aggiorna il browser, o apri Ghostly in un altro.", android: "Su Android, aggiorna Android System WebView e Chrome in Google Play.", ios: "Su iPhone o iPad, aggiorna iOS.", reload: "Ricarica", copy: "Copia dettagli", copied: "Copiato" },
-    zh: { starting: "正在启动 Ghostly…", title: "Ghostly 无法启动", slow: "Ghostly 启动时间较长", why: "此浏览器可能版本过旧，或拦截了 Ghostly 需要的功能。", "try": "请更新浏览器，或在其他浏览器中打开 Ghostly。", android: "在 Android 上，请在 Google Play 中更新 Android System WebView 和 Chrome。", ios: "在 iPhone 或 iPad 上，请更新 iOS。", reload: "重新加载", copy: "复制详情", copied: "已复制" },
-    ja: { starting: "Ghostly を起動しています…", title: "Ghostly を起動できませんでした", slow: "Ghostly の起動に時間がかかっています", why: "このブラウザは古すぎるか、Ghostly に必要な機能をブロックしている可能性があります。", "try": "ブラウザを更新するか、別のブラウザで Ghostly を開いてください。", android: "Android では、Google Play で Android System WebView と Chrome を更新してください。", ios: "iPhone または iPad では、iOS を更新してください。", reload: "再読み込み", copy: "詳細をコピー", copied: "コピーしました" },
-    ar: { starting: "جارٍ تشغيل Ghostly…", title: "تعذّر تشغيل Ghostly", slow: "Ghostly يستغرق وقتًا طويلًا للبدء", why: "قد يكون هذا المتصفح قديمًا جدًا، أو يحظر شيئًا يحتاجه Ghostly.", "try": "حدّث المتصفح، أو افتح Ghostly في متصفح آخر.", android: "على Android، حدّث Android System WebView و Chrome من Google Play.", ios: "على iPhone أو iPad، حدّث iOS.", reload: "إعادة التحميل", copy: "نسخ التفاصيل", copied: "تم النسخ" }
+    en: { starting: "Starting Ghostly…", title: "Ghostly could not start", slow: "Ghostly is taking long to start", why: "This browser may be too old, or it blocks something Ghostly needs.", "try": "Update your browser, or open Ghostly in another one.", offline: "This device is offline.", reconnect: "Connect and reload.", android: "On Android, update Android System WebView and Chrome in Google Play.", ios: "On iPhone or iPad, update iOS.", reload: "Reload", copy: "Copy details", copied: "Copied" },
+    pt: { starting: "Iniciando o Ghostly…", title: "O Ghostly não conseguiu iniciar", slow: "O Ghostly está demorando para iniciar", why: "Este navegador pode ser antigo demais, ou bloqueia algo de que o Ghostly precisa.", "try": "Atualize o navegador, ou abra o Ghostly em outro.", offline: "Este dispositivo está offline.", reconnect: "Conecte-se e recarregue.", android: "No Android, atualize o Android System WebView e o Chrome no Google Play.", ios: "No iPhone ou iPad, atualize o iOS.", reload: "Recarregar", copy: "Copiar detalhes", copied: "Copiado" },
+    es: { starting: "Iniciando Ghostly…", title: "Ghostly no pudo iniciarse", slow: "Ghostly está tardando en iniciarse", why: "Este navegador puede ser demasiado antiguo, o bloquea algo que Ghostly necesita.", "try": "Actualiza el navegador, o abre Ghostly en otro.", offline: "Este dispositivo está sin conexión.", reconnect: "Conéctate y recarga.", android: "En Android, actualiza Android System WebView y Chrome en Google Play.", ios: "En iPhone o iPad, actualiza iOS.", reload: "Recargar", copy: "Copiar detalles", copied: "Copiado" },
+    fr: { starting: "Démarrage de Ghostly…", title: "Ghostly n'a pas pu démarrer", slow: "Ghostly met du temps à démarrer", why: "Ce navigateur est peut-être trop ancien, ou il bloque quelque chose dont Ghostly a besoin.", "try": "Mettez le navigateur à jour, ou ouvrez Ghostly dans un autre.", offline: "Cet appareil est hors ligne.", reconnect: "Connectez-vous et rechargez.", android: "Sur Android, mettez à jour Android System WebView et Chrome dans Google Play.", ios: "Sur iPhone ou iPad, mettez iOS à jour.", reload: "Recharger", copy: "Copier les détails", copied: "Copié" },
+    it: { starting: "Avvio di Ghostly…", title: "Ghostly non è riuscito ad avviarsi", slow: "Ghostly ci sta mettendo molto ad avviarsi", why: "Questo browser potrebbe essere troppo vecchio, o blocca qualcosa che serve a Ghostly.", "try": "Aggiorna il browser, o apri Ghostly in un altro.", offline: "Questo dispositivo è offline.", reconnect: "Connettiti e ricarica.", android: "Su Android, aggiorna Android System WebView e Chrome in Google Play.", ios: "Su iPhone o iPad, aggiorna iOS.", reload: "Ricarica", copy: "Copia dettagli", copied: "Copiato" },
+    zh: { starting: "正在启动 Ghostly…", title: "Ghostly 无法启动", slow: "Ghostly 启动时间较长", why: "此浏览器可能版本过旧，或拦截了 Ghostly 需要的功能。", "try": "请更新浏览器，或在其他浏览器中打开 Ghostly。", offline: "此设备处于离线状态。", reconnect: "请连接网络后重新加载。", android: "在 Android 上，请在 Google Play 中更新 Android System WebView 和 Chrome。", ios: "在 iPhone 或 iPad 上，请更新 iOS。", reload: "重新加载", copy: "复制详情", copied: "已复制" },
+    ja: { starting: "Ghostly を起動しています…", title: "Ghostly を起動できませんでした", slow: "Ghostly の起動に時間がかかっています", why: "このブラウザは古すぎるか、Ghostly に必要な機能をブロックしている可能性があります。", "try": "ブラウザを更新するか、別のブラウザで Ghostly を開いてください。", offline: "このデバイスはオフラインです。", reconnect: "ネットワークに接続してから再読み込みしてください。", android: "Android では、Google Play で Android System WebView と Chrome を更新してください。", ios: "iPhone または iPad では、iOS を更新してください。", reload: "再読み込み", copy: "詳細をコピー", copied: "コピーしました" },
+    ar: { starting: "جارٍ تشغيل Ghostly…", title: "تعذّر تشغيل Ghostly", slow: "Ghostly يستغرق وقتًا طويلًا للبدء", why: "قد يكون هذا المتصفح قديمًا جدًا، أو يحظر شيئًا يحتاجه Ghostly.", "try": "حدّث المتصفح، أو افتح Ghostly في متصفح آخر.", offline: "هذا الجهاز غير متصل بالإنترنت.", reconnect: "اتصل بالإنترنت ثم أعد التحميل.", android: "على Android، حدّث Android System WebView و Chrome من Google Play.", ios: "على iPhone أو iPad، حدّث iOS.", reload: "إعادة التحميل", copy: "نسخ التفاصيل", copied: "تم النسخ" }
   };
 
   var started = Date.now();
@@ -45,10 +49,10 @@
   var poll = null;
   var observer = null;
 
+  /** The guard's words in the language the app will draw in (`appLanguage`), English for one it has no words for. */
   function language() {
-    var tag = "";
-    try { tag = String(navigator.language || "").slice(0, 2).toLowerCase(); } catch (e) { /* English */ }
-    return TEXT[tag] ? tag : "en";
+    var tag = appLanguage(TEXT);
+    return TEXT.hasOwnProperty(tag) ? tag : "en";
   }
 
   /** Text that may come from anywhere (an error's message): no invite, no long key-like run, no address fragment. */
@@ -114,7 +118,7 @@
     return !(root.childElementCount === 1 && root.firstElementChild && root.firstElementChild.id === "boot-shell");
   }
 
-  /** The first paint's words in the browser's language, once the page has been read (before the bundle runs). */
+  /** The first paint's words in the app's language, once the page has been read (before the bundle runs). */
   function speakShell() {
     var shell = document.getElementById("boot-shell");
     var words = shell && shell.getElementsByTagName("p")[0];
@@ -162,9 +166,11 @@
     var box = element("div", "max-width:420px;width:100%");
     box.appendChild(element("div", "font-size:48px", "👻"));
     box.appendChild(element("h1", "font-size:18px;font-weight:600;margin:12px 0 8px", reason === "error" ? text.title : text.slow));
-    box.appendChild(element("p", "margin:0 0 8px;color:#aebac1", text.why));
-    box.appendChild(element("p", "margin:0 0 8px", text["try"]));
-    var hint = platformHint(text);
+    // Offline, a file the browser no longer keeps cannot load: the network is what to fix, not the browser.
+    var noNetwork = offline();
+    box.appendChild(element("p", "margin:0 0 8px;color:#aebac1", noNetwork ? text.offline : text.why));
+    box.appendChild(element("p", "margin:0 0 8px", noNetwork ? text.reconnect : text["try"]));
+    var hint = noNetwork ? "" : platformHint(text);
     if (hint) {
       var hintLine = element("p", "margin:0 0 8px", hint);
       hintLine.setAttribute("data-testid", "boot-fallback-hint");
@@ -199,6 +205,18 @@
     document.body.appendChild(panel);
     // Without a MutationObserver, and as a second look with one: the app may draw after the guard showed.
     if (poll === null) poll = setInterval(check, 500);
+    if (noNetwork) window.addEventListener("online", backOnline);
+  }
+
+  /** The device says it has no network. Only "no" is trusted, as the app's useOnline: "yes" may be a captive portal. */
+  function offline() {
+    try { return navigator.onLine === false; } catch (e) { return false; }
+  }
+
+  /** Back online while the page says it is offline: the reload it asked for, once. */
+  function backOnline() {
+    window.removeEventListener("online", backOnline);
+    if (panel) location.reload();
   }
 
   /** Something drew: the guard steps aside. It is not "taking long" any more; an error that empties the page still counts. */
@@ -209,6 +227,7 @@
     poll = null;
     if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
     panel = null;
+    window.removeEventListener("online", backOnline);
     reason = "";
   }
 
@@ -277,13 +296,14 @@
   }
 
   /**
-   * The language the app will start in, as apps/ui/src/lib/settings.ts picks it: the one the default profile saved,
-   * or for a new profile the first of the browser's languages the app speaks. English is in the entry. Another
-   * profile chosen here may read in another language: then this file was asked for in vain, and the app asks for its own.
+   * The language the app will start in, as apps/ui/src/lib/settings.ts picks it: the one the profile the page starts as
+   * saved (`settingsKey`, a handoff's space included), or for a new profile the first of the browser's languages the app
+   * speaks. English is in the entry. Another profile chosen on the way in may read in another language: then this file
+   * was asked for in vain, and the app asks for its own.
    */
   function appLanguage(files) {
     try {
-      var saved = JSON.parse(localStorage.getItem("ghostly_app_settings") || "null");
+      var saved = JSON.parse(localStorage.getItem(settingsKey()) || "null");
       if (saved && typeof saved.language === "string") return saved.language;
     } catch (e) { /* no storage: a new profile */ }
     var tags = [];

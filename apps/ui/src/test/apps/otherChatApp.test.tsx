@@ -11,7 +11,7 @@ import type { RunningApp } from "../../lib/apps/broker";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const START = 1_700_000_000_000;

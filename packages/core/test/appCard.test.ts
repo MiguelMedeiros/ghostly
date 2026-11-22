@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { appCardId, checkStatusCard, readStatusCard, statusCardText, type AppCard } from "../src/index";
+import { appCardId, appCardUrl, checkStatusCard, readStatusCard, statusCardText, type AppCard } from "../src/index";
 import { appKey, matchVectorFile } from "./appVectors";
 import { readStatusCard as readStatusCard101 } from "./fixtures/statusCards-1.0.1";
 
@@ -100,6 +100,17 @@ describe("the app card", () => {
   it("is no card to a reader without the app kind (Ghostly up to 1.1), which shows the text and its link", () => {
     expect(readStatusCard101(opened)).toBeUndefined();
     expect(statusCardText(readStatusCard(opened)!).split("\n")[1]).toBe(RAW);
+  });
+
+  it("names its url without a query or fragment, sent or read: a private file's link carries its read token there", () => {
+    const token = "GHSAT0AAAAAACPRIVATEREADTOKEN";
+    const card = { ...opened, url: `${RAW}?token=${token}#top` };
+    expect(readStatusCard(card)).toEqual(readStatusCard(opened));
+    expect(checkStatusCard(card)).toEqual({ card: readStatusCard(opened) });
+    // The text is written from a card as it was made too, not only as a reader keeps it.
+    expect(statusCardText(card as AppCard)).toBe(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${RAW}`);
+    expect(appCardUrl(`${RAW}?token=${token}`)).toBe(RAW);
+    expect(appCardUrl("http://example.com/app.ghostlyapp")).toBeUndefined();
   });
 
   it("is sent only as a reader would keep it", () => {

@@ -48,7 +48,7 @@ const testSats = (p: Peer) => p.page.getByTestId("wallet-balance");
 test.describe("Cashu and Lightning", () => {
   test.describe.configure({ retries: 2 });
 
-  test("Cashu: test coins in, a Send in the chat, and a Request paid in the chat", { tag: ["@feature:wallet.test-coins", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {
+  test("Cashu: test coins in, a Send in the chat, and a Request paid in the chat", { tag: ["@journey", "@feature:wallet.test-coins", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["cashu-alice", "cashu-bob"]);
     await getTestCoins(alice);
     await expect(testSats(alice)).toHaveText(/^10,000\s*test sats/);
@@ -76,7 +76,7 @@ test.describe("Cashu and Lightning", () => {
   // A test mint marks its own invoices paid by itself, so its "paid" is nobody paying: Receive only makes the
   // invoice, and the balance stays where it was (the wallet waits for a payer's word, which a chat carries). Out,
   // the wallet pays an invoice the mint does not own.
-  test("Lightning: Receive only makes an invoice, out by paying someone else's invoice from Send", { tag: ["@feature:wallet.lightning.cashu-mint.receive", "@feature:wallet.lightning.cashu-mint.pay", "@feature:wallet.cashu.receive-lightning", "@feature:wallet.testnet.receive-held"] }, async ({ peer }) => {
+  test("Lightning: Receive only makes an invoice, out by paying someone else's invoice from Send", { tag: ["@journey", "@feature:wallet.lightning.cashu-mint.receive", "@feature:wallet.lightning.cashu-mint.pay", "@feature:wallet.cashu.receive-lightning", "@feature:wallet.testnet.receive-held"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["ln-alice", "ln-bob"]);
     await getTestCoins(alice);
     await expect(testSats(alice)).toHaveText(/^10,000\s*test sats/);
@@ -86,7 +86,7 @@ test.describe("Cashu and Lightning", () => {
     await bob.page.getByTestId("wallet-receive-amount").fill("25");
     await bob.page.getByTestId("wallet-create-invoice").click();
     await expect(bob.page.getByTestId("wallet-invoice")).toHaveText(/^\s*lnbc/);
-    await expect(bob.page.getByTestId("wallet-panel")).toContainText("counts only once a contact pays it in a chat");
+    await expect(bob.page.getByTestId("wallet-panel")).toContainText("share this one in a 1:1 chat: it counts only once a contact pays it there");
     // The mint reads it paid within a poll or two (4 s each): nothing comes of it.
     await bob.page.waitForTimeout(12_000);
     await expect(bob.page.getByTestId("wallet-paid")).toHaveCount(0);
@@ -324,12 +324,13 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
   await composer(alice, "usdt", "1");
   await alice.page.getByTestId("payment-request").click();
   // The chat Send above left the request Alice's app made for it; this is the new one, for 1.
-  const request = chat(bob).getByTestId("payment-bubble").filter({ hasText: "Requests" }).filter({ hasText: /(?<![\d.])1\s*TEST-USDT/ });
+  // Each USDT request asks a little more than typed (under a thousandth): its own amount.
+  const request = chat(bob).getByTestId("payment-bubble").filter({ hasText: "Requests" }).filter({ hasText: /(?<![\d.])1\.000\d*\s*TEST-USDT/ });
   await request.getByTestId("payment-pay").click();
   await request.getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(request.getByTestId("payment-state")).toHaveText("Paid", { timeout: 60_000 });
   await openWallet(alice, "usdt-testnet");
-  await expect(tokens(alice), "10 in, 2 out, 0.5 in, 1 in").toHaveText("9.5 TEST-USDT", { timeout: 30_000 });
+  await expect(tokens(alice), "10 in, 2 out, 0.5 in, 1 in").toHaveText(/^9\.50[0-1]\d* TEST-USDT$/, { timeout: 30_000 });
   await openWallet(bob, "usdt-testnet");
-  await expect(tokens(bob), "2 in, 0.5 out, 1 out").toHaveText("0.5 TEST-USDT", { timeout: 30_000 });
+  await expect(tokens(bob), "2 in, 0.5 out, 1 out").toHaveText(/^0\.49[89]\d* TEST-USDT$/, { timeout: 30_000 });
 });

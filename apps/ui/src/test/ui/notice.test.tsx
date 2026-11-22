@@ -33,6 +33,13 @@ describe("Notice: a few words, the rest behind the ⓘ", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Not enough sats");
   });
 
+  it("writes an error in danger's ink, which reads at 4.5:1 on every theme's dialogs, panels and pages", () => {
+    // Danger's own red read 4.44:1 on Monochrome dark's #1a1a1a (Add's refusal of a link), 3.6:1 on Classic dark's.
+    renderApp(<Notice tone="error" testId="e">Apps come only from GitHub</Notice>);
+    expect(screen.getByTestId("e")).toHaveClass("text-danger-ink");
+    expect(screen.getByTestId("e")).not.toHaveClass("text-danger");
+  });
+
   it("writes a warning in the warn ink, which the light themes darken to 4.5:1", () => {
     renderApp(<Notice tone="warning" testId="w">Experimental</Notice>);
     expect(screen.getByTestId("w").className).toContain("text-warn-ink");

@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { TranslateError } from "../../desktop/translate";
@@ -55,6 +55,22 @@ describe("the composer's Translate", () => {
     expect(onSend).toHaveBeenCalledWith("SEE YOU TOMORROW [en-it]", undefined, { translated: { to: "it", original: "see you tomorrow" } });
     expect(field).toHaveValue("");
     expect(screen.queryByTestId("translate-preview")).not.toBeInTheDocument();
+  });
+
+  it("Enter that confirms an input method's candidate in the preview sends nothing, in WebKit too", async () => {
+    const { user, field, onSend } = setup({ language: "ja", translate: capitals() });
+    await user.type(field, "see you tomorrow");
+    await user.click(screen.getByTestId("composer-translate"));
+    const shown = await screen.findByTestId("translate-text");
+    fireEvent.keyDown(shown, { key: "Enter", isComposing: true });
+    // WebKit: compositionend before the Enter that confirmed the candidate, which comes as 229, no longer composing.
+    fireEvent.compositionEnd(shown, { data: "明日" });
+    fireEvent.keyDown(shown, { key: "Enter", keyCode: 229 });
+    fireEvent.compositionEnd(shown, { data: "明日" });
+    fireEvent.keyDown(shown, { key: "Enter" });
+    fireEvent.keyDown(shown, { key: "Escape", isComposing: true });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByTestId("translate-preview")).toBeInTheDocument();
   });
 
   it("sends the translation as edited in the preview", async () => {
@@ -180,6 +196,17 @@ describe("the composer's Translate", () => {
     await bare.user.type(bare.field, "see you tomorrow");
     await act(async () => { await bare.user.click(screen.getByTestId("composer-translate")); });
     expect(await screen.findByRole("alert")).toHaveTextContent("English to Italian is not downloaded");
+  });
+
+  it("with nothing this computer could download for it, the composer says the model is missing", async () => {
+    const translate = vi.fn(async () => { throw new TranslateError("no-model", "Translation model not downloaded"); });
+    const askModel = vi.fn(async () => undefined);
+    const { user, field } = setup({ language: "it", translate, askModel });
+    await user.type(field, "see you tomorrow");
+    await act(async () => { await user.click(screen.getByTestId("composer-translate")); });
+    expect(await screen.findByRole("alert")).toHaveTextContent("English to Italian is not downloaded");
+    expect(askModel).toHaveBeenCalledTimes(1);
+    expect(field).toHaveValue("see you tomorrow");
   });
 
   it("on a computer with no translation runtime yet, the composer says translation is not installed", async () => {

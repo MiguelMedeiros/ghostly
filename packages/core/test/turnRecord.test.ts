@@ -170,6 +170,12 @@ describe("the turn record", () => {
     expect(turnName(`${"\u3164".repeat(6)}Ana`)).toBe("");
     // Beside something that shows they stay (names that fit the sixteen bytes).
     for (const name of ["👩\u200D💻", "नमस्", "علي", "e\u0301", "❤\uFE0F"]) expect(turnName(name)).toBe(name);
+    // Where they join nothing they go: at either end, beside a space, between Latin letters, a selector after a letter.
+    for (const [name, kept] of [["Phone‍", "Phone"], ["‍Phone", "Phone"], ["Pho‌ne", "Phone"], ["Phone️", "Phone"], ["Pho‍ne", "Phone"], ["Ana ‍👩‍💻", "Ana 👩‍💻"], ["Phone1️", "Phone1"], ["Mãe‌‍", "Mãe"], ["Пиксель‌", "Пиксель"], ["Ana‍👩", "Ana👩"]]) {
+      expect(turnName(name), JSON.stringify(name)).toBe(kept);
+    }
+    // Inside an emoji sequence, a word of a script that joins its letters or makes conjuncts, a keycap: they stay.
+    for (const name of ["🏳️‍🌈 A","👩🏽‍💻", "❤️‍🔥", "می‌خوام", "क्‍ष", "ශ්‍රී", "#️⃣ Desk", "≤︀"]) expect(turnName(name), JSON.stringify(name)).toBe(name);
     // What it makes, it reads as it is: a name made here is never changed by the next reader.
     for (const name of ["Ana 👩‍👩‍👧‍👧", "a name that ends \u202E in a cut", "\u200B Mac\u00ADBook Pro 16 "]) expect(turnName(turnName(name))).toBe(turnName(name));
   });

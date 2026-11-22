@@ -19,7 +19,7 @@ export const shell = {
       open: "Open app",
       openWays: "Ways to open Ghostly",
       web: { label: "Open in your browser", hint: "Nothing to install" },
-      download: { label: "Download the app", hint: "macOS, Windows, Linux or the extension" },
+      download: { label: "Download the app", hint: "macOS, Windows, Linux, Android or the extension" },
       menu: "Menu",
     },
     footer: {
@@ -30,6 +30,7 @@ export const shell = {
       links: {
         open: "Open in your browser",
         download: "Download",
+        android: "Android app",
         apps: "Apps",
         privacy: "Privacy",
         terms: "Terms",

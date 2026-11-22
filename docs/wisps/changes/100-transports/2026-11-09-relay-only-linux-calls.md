@@ -1,0 +1,1 @@
+Relay only, rule 4: the Linux Desktop's own call engine now keeps to the relay policy ([601](../../601-webrtc-media.md)), so the call media that places and answers no call while it is on is the CLI's alone. No wire change.

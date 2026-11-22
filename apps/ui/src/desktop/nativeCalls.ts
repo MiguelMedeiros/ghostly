@@ -1,5 +1,6 @@
 import { Channel, invoke, transformCallback } from "@tauri-apps/api/core";
 import { RTC_CONFIG, type CallMedia } from "@ghostly/core";
+import { CallRelayError } from "@ghostly/react";
 import { EMPTY_DEVICES, loadDeviceChoices, type DeviceKind, type DeviceList, type DeviceSource } from "../lib/mediaDevices";
 import { setCallLevels, type LevelSource } from "../lib/voiceLevels";
 
@@ -133,6 +134,21 @@ class CallChannel {
 /** How long a picture's decode may take before the next picture is drawn without it. */
 const DECODE_MS = 1000;
 
+let followingSight = false;
+
+/**
+ * Tells Rust each time the window goes out of sight and back (`native_pictures_shown`), from the first picture or
+ * meter on: out of sight it makes no JPEG past each picture's first, rather than make 15 a second of each for a page
+ * that draws none of them (`Picture.show`), and says no level to Settings' meter. Rust takes a new page as in sight.
+ */
+function followSight(): void {
+  if (followingSight) return;
+  followingSight = true;
+  const tell = () => void invoke("native_pictures_shown", { shown: !document.hidden }).catch(() => {});
+  document.addEventListener("visibilitychange", tell);
+  if (document.hidden) tell();
+}
+
 /** A canvas showing the last JPEG that came, and the video track that films it. */
 class Picture {
   private readonly canvas = document.createElement("canvas");
@@ -148,18 +164,29 @@ class Picture {
     this.canvas.width = 640;
     this.canvas.height = 480;
     this.track = this.canvas.captureStream(15).getVideoTracks()[0];
+    followSight();
   }
 
   /**
    * Frames that come while one is being decoded replace each other: only the newest is drawn. A decode that has
-   * not settled in `DECODE_MS` holds the next ones back no more, and is not drawn when it does.
+   * not settled in `DECODE_MS` holds the next ones back no more, and is not drawn when it does. While the window is
+   * out of sight, once a first frame is drawn, nothing is decoded: each frame replaces the one before, and the newest
+   * is drawn when the window is back (two pictures took a fifth of a core of WebKitGTK's, hidden, for nobody).
    */
   show(jpeg: Uint8Array): void {
     if (this.drawing) {
       this.waiting = jpeg;
       return;
     }
+    if (this.drawn && document.hidden) {
+      if (!this.waiting) document.addEventListener("visibilitychange", this.back);
+      this.waiting = jpeg;
+      return;
+    }
     this.drawing = true;
+    // Shown again before the window said so: what it held is older than this one.
+    document.removeEventListener("visibilitychange", this.back);
+    this.waiting = null;
     let over = false;
     const next = () => {
       if (over) return;
@@ -191,6 +218,15 @@ class Picture {
       .catch(() => {})
       .finally(next);
   }
+
+  /** The window is in sight again: the newest frame that came while it was not is drawn, unless the picture ended. */
+  private readonly back = () => {
+    if (document.hidden) return;
+    document.removeEventListener("visibilitychange", this.back);
+    const waiting = this.waiting;
+    this.waiting = null;
+    if (waiting && this.track.readyState !== "ended") this.show(waiting);
+  };
 }
 
 /** The camera behind each camera track this file made. */
@@ -201,6 +237,15 @@ const callOf = new WeakMap<MediaStreamTrack, NativePeerConnection>();
 const wantedOf = new WeakMap<MediaStreamTrack, string | null>();
 /** The device a track captures from, by name (null: the default), as Rust said. */
 const usedOf = new WeakMap<MediaStreamTrack, string | null>();
+
+/**
+ * Hide my IP from contacts: Rust made no call or no description, for want of a TURN server it can use or of a relay
+ * candidate from it (`NO_TURN`, `NO_RELAY` in native_call/engine.rs). To the call hook that is the relay not
+ * answering, as a browser's connection without a relay candidate: never a direct path instead.
+ */
+function relayFailure(error: unknown): never {
+  throw /^Hide my IP/.test(error instanceof Error ? error.message : String(error)) ? new CallRelayError("relay") : error;
+}
 
 function named(error: unknown, name: string): Error {
   return Object.assign(new Error(error instanceof Error ? error.message : String(error)), { name });
@@ -369,6 +414,19 @@ export class NativePeerConnection extends EventTarget {
   private described = false;
   /** The speaker the call was told to play on (`playOn`; null: the default), before Rust had it too. */
   private speaker: string | null | undefined;
+  /**
+   * The microphone track Rust sends, once it said so: a microphone failing mid-call is this one, not one picked that
+   * Rust is still opening (it sends the old one until the new one plays).
+   */
+  private sending: MediaStreamTrack | null = null;
+  /**
+   * Microphones picked while Rust starts the call: their `replaceTrack` settles once `catchUp` has switched Rust to
+   * the last one, rejected when Rust could not, as it is once the call is up. Resolved, it would have the call hook
+   * swap in a track naming a device Rust never sent (and stop the one it does).
+   */
+  private picking: { done: Promise<void>; settle: (failure: { error: unknown } | null) => void } | null = null;
+  /** `catchUp` has given Rust the microphone: a microphone picked from now on goes to Rust on its own. */
+  private microphoneUp = false;
   private closed = false;
   private muted = false;
   private offer: string | null = null;
@@ -380,13 +438,17 @@ export class NativePeerConnection extends EventTarget {
   /** How loud each side is, as Rust last said: our microphone (silence while muted) and the peer's sound. */
   private readonly levels = { mic: 0, peer: 0 };
   private readonly listeners = { mic: new Set<(level: number) => void>(), peer: new Set<(level: number) => void>() };
+  /** Rust was asked to say the levels (`wantLevels`). */
+  private levelsAsked = false;
 
   constructor(private readonly config: RTCConfiguration) {
     super();
     open.add(this);
     const events = new CallChannel();
     events.onmessage = (message) => this.heard(bytesOf(message));
-    this.opened = invoke("native_call_open", { id: this.id, events, iceServers: ownIceServers(config) });
+    // Hide my IP from contacts (`callRtcConfig`'s relay policy): Rust asks no STUN server and gathers relay
+    // candidates only, from the TURN servers here.
+    this.opened = invoke("native_call_open", { id: this.id, events, iceServers: ownIceServers(config), relayOnly: config.iceTransportPolicy === "relay" });
     const lane = (kind: "audio" | "video"): Lane => ({
       mid: null,
       direction: "sendrecv",
@@ -437,26 +499,50 @@ export class NativePeerConnection extends EventTarget {
     };
   }
 
-  /** Rust started the call: which microphone it is. */
-  private using(microphone: string | null): void {
-    const track = this.audio.sender.track;
+  /** Rust sends `track` now (it started the call with it, or switched to it): which microphone it is. */
+  private using(track: MediaStreamTrack | null, microphone: string | null): void {
+    this.sending = track;
     if (track) usedOf.set(track, microphone);
   }
 
   /**
-   * Rust started the call with `sent`: a camera turned on or switched, a microphone or a speaker picked while it did
-   * (up to its gathering's few seconds) had no call to go to, and goes now.
+   * Rust started the call with `sent` and sends `microphone` (by name, as it said): a camera turned on or switched, a
+   * microphone or a speaker picked while it did (up to its gathering's few seconds) had no call to go to, and goes now.
    */
-  private async catchUp(sent: Devices): Promise<void> {
+  private async catchUp(sent: Devices, microphone: string | null): Promise<void> {
     this.described = true;
     if (this.closed) return;
+    this.wantLevels();
     const now = this.devices();
-    // Each as its own command would have done it: one that fails leaves the call as Rust started it.
+    // Each as its own command would have done it: one that fails leaves the call as Rust started it. A camera or a
+    // speaker picked again during these awaits went to Rust on its own (`described`): the older pick does not follow
+    // it there. A microphone picked meanwhile waits with the others (`picking`) and goes below.
     if (now.camera !== sent.camera) await invoke("native_call_camera", { id: this.id, camera: now.camera }).catch(() => {});
-    if (now.speaker !== sent.speaker) await invoke("native_call_speaker", { id: this.id, device: now.speaker }).catch(() => {});
-    if (now.microphone !== sent.microphone) {
-      await invoke<string | null>("native_call_microphone", { id: this.id, device: now.microphone }).then((used) => this.using(used), () => {});
+    if (now.speaker !== sent.speaker && this.devices().speaker === now.speaker) await invoke("native_call_speaker", { id: this.id, device: now.speaker }).catch(() => {});
+    this.microphoneUp = true;
+    const picked = this.audio.sender.track;
+    if (this.closed || picked === this.sending) return this.picked(null);
+    const wanted = picked ? wantedOf.get(picked) ?? null : null;
+    // Picked again, the one Rust started with: that is what it sends, now in the picked track.
+    if (wanted === sent.microphone) {
+      this.using(picked, microphone);
+      return this.picked(null);
     }
+    try {
+      this.using(picked, await invoke<string | null>("native_call_microphone", { id: this.id, device: wanted }));
+      this.picked(null);
+    } catch (error) {
+      // Rust goes on with the one it started with: so does the call (a later offer asks for it, not the failed one).
+      if (this.audio.sender.track === picked) this.audio.sender.track = this.sending;
+      this.picked({ error });
+    }
+  }
+
+  /** Settles the `replaceTrack` of the microphones picked while Rust started the call: `failure` when Rust could not switch. */
+  private picked(failure: { error: unknown } | null): void {
+    const picking = this.picking;
+    this.picking = null;
+    picking?.settle(failure);
   }
 
   /**
@@ -487,7 +573,7 @@ export class NativePeerConnection extends EventTarget {
    * mute stay as they are (WISP 601, "Reconnecting").
    */
   async createOffer(options: RTCOfferOptions = {}): Promise<RTCSessionDescriptionInit> {
-    await this.opened;
+    await this.opened.catch(relayFailure);
     if (this.started) {
       if (!options.iceRestart) throw named("The call has started already", "InvalidStateError");
       const { sdp } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...this.devices(), restart: true }));
@@ -495,16 +581,25 @@ export class NativePeerConnection extends EventTarget {
     }
     this.started = true;
     const sent = this.devices();
-    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...sent }));
-    this.using(microphone);
+    const track = this.audio.sender.track;
+    // A try, not a `.catch`, which would add a tick before `catchUp` and change the order a device picked meanwhile has.
+    let made: Described;
+    try {
+      made = await this.hold(() => invoke<Described>("native_call_offer", { id: this.id, ...sent }));
+    } catch (error) {
+      this.startFailed();
+      relayFailure(error);
+    }
+    const { sdp, microphone } = made;
+    this.using(track, microphone);
     if (this.muted) await this.mute(true);
-    await this.catchUp(sent);
+    await this.catchUp(sent, microphone);
     return { type: "offer", sdp };
   }
 
   async createAnswer(): Promise<RTCSessionDescriptionInit> {
     if (!this.offer) throw named("There is no offer to answer", "InvalidStateError");
-    await this.opened;
+    await this.opened.catch(relayFailure);
     const offer = this.offer;
     // A second offer on a call that has started is the peer's ICE restart: answered on the same connection.
     if (this.started) {
@@ -513,10 +608,18 @@ export class NativePeerConnection extends EventTarget {
     }
     this.started = true;
     const sent = this.devices();
-    const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...sent }));
-    this.using(microphone);
+    const track = this.audio.sender.track;
+    let made: Described;
+    try {
+      made = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...sent }));
+    } catch (error) {
+      this.startFailed();
+      relayFailure(error);
+    }
+    const { sdp, microphone } = made;
+    this.using(track, microphone);
     if (this.muted) await this.mute(true);
-    await this.catchUp(sent);
+    await this.catchUp(sent, microphone);
     this.negotiated(offer);
     return { type: "answer", sdp };
   }
@@ -577,9 +680,27 @@ export class NativePeerConnection extends EventTarget {
     callOf.set(track, this);
     this.muted = !track.enabled;
     this.audio.sender.track = track;
-    if (!this.described || this.closed) return;
+    // Before the call starts, its offer or answer takes it.
+    if (this.closed || !this.started) return;
+    if (!this.microphoneUp) {
+      if (!this.picking) {
+        let settle!: (failure: { error: unknown } | null) => void;
+        const done = new Promise<void>((resolve, reject) => {
+          settle = (failure) => (failure ? reject(failure.error) : resolve());
+        });
+        this.picking = { done, settle };
+      }
+      return this.picking.done;
+    }
+    if (!this.described) return;
     const used = await invoke<string | null>("native_call_microphone", { id: this.id, device: wantedOf.get(track) ?? null });
-    usedOf.set(track, used);
+    this.using(track, used);
+  }
+
+  /** Rust could not start the call: there is none to switch a microphone picked meanwhile on, nor one picked later. */
+  private startFailed(): void {
+    this.microphoneUp = true;
+    this.picked(null);
   }
 
   /** Plays the call on the speaker named `device` (null: the default). */
@@ -597,7 +718,22 @@ export class NativePeerConnection extends EventTarget {
   listen(side: "mic" | "peer", heard: (level: number) => void): () => void {
     this.listeners[side].add(heard);
     heard(this.levels[side]);
-    return () => { this.listeners[side].delete(heard); };
+    this.wantLevels();
+    return () => {
+      this.listeners[side].delete(heard);
+      this.wantLevels();
+    };
+  }
+
+  /**
+   * Asks Rust for the levels while a ring listens, once it has the call, and lets them go when none does. A video
+   * call draws no ring, and Rust said a level at nearly every reading all the same: 20 evals a second for nobody.
+   */
+  private wantLevels(): void {
+    const want = this.listeners.mic.size + this.listeners.peer.size > 0;
+    if (want === this.levelsAsked || !this.described || this.closed) return;
+    this.levelsAsked = want;
+    void invoke("native_call_levels", { id: this.id, on: want }).catch(() => {});
   }
 
   private heard(bytes: Uint8Array): void {
@@ -607,8 +743,7 @@ export class NativePeerConnection extends EventTarget {
       return;
     }
     if (endedOf(bytes, "microphone")) {
-      const track = this.audio.sender.track;
-      if (track) lost(track);
+      if (this.sending) lost(this.sending);
       return;
     }
     let said: { ice?: unknown; levels?: unknown };
@@ -653,6 +788,8 @@ export class NativePeerConnection extends EventTarget {
     this.connectionState = "closed";
     this.signalingState = "closed";
     this.remote.track.stop();
+    // Hung up while Rust started the call: no switch failed, and the call hook lets go of the tracks it picked.
+    this.picked(null);
     void this.opened.then(() => invoke("native_call_close", { id: this.id })).catch(() => {});
   }
 }
@@ -687,6 +824,8 @@ export function nativeCallMedia(): CallMedia {
     screenUnavailable: SCREEN_UNAVAILABLE,
     choosesDevices: true,
     restartsIce: true,
+    // Hide my IP from contacts: Rust keeps the call to the TURN server under the relay policy (`relayOnly` above).
+    keepsToRelays: true,
   };
 }
 
@@ -727,6 +866,7 @@ export const nativeDevices: DeviceSource = {
     for (const call of open) void call.playOn(device).catch(() => {});
   },
   async meter(id, level) {
+    followSight();
     let live = true;
     const levels = new Channel<unknown>();
     levels.onmessage = (message) => {

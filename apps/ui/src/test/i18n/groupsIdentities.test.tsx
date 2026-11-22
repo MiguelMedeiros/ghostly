@@ -155,10 +155,13 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
     const joining = screen.getByTestId("group-joining");
     expect(within(joining).getByRole("heading")).toHaveTextContent(t(language, "group.join.answeredTitleCommunity"));
     expect(joining).toHaveTextContent(t(language, "group.join.answeredCommunity"));
+    // The steps reached say so in this language too (hidden on screen, where a ✓ says it).
+    const done = ` (${t(language, "pairing.done")})`;
     expect(within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.textContent!.replace("✓", ""))).toEqual([
-      t(language, "group.join.step.knockedCommunity"), t(language, "group.join.step.answeredCommunity"),
+      t(language, "group.join.step.knockedCommunity") + done, t(language, "group.join.step.answeredCommunity") + done,
       t(language, "group.join.step.admitted"), t(language, "group.join.step.inCommunity"),
     ]);
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent(t(language, "group.join.step.answeredCommunity"));
     expect(screen.getByTestId("group-joining-cancel")).toHaveTextContent(t(language, "group.join.cancel"));
     expect(container.textContent).not.toMatch(RAW_KEY);
   });

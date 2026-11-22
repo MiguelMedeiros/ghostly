@@ -1,0 +1,1 @@
+On the web, the services host SHOULD also be on the Public Suffix List, and the bridge expires each cookie its page sees for the whole services domain before it frames an app and when it clears one ([On the web](../../701-http-services.md#on-the-web)): a cookie set for that domain no longer reaches an app another chat or profile opens later.

@@ -1,0 +1,1 @@
+A GIF's `image` size is its logical screen widened to as far as its first image descriptor reaches (its left plus width, its top plus height), the size a browser decodes that frame at; a GIF whose first frame is not in the first 256 KiB has none. A GIF whose frame lies inside its screen is read as before.

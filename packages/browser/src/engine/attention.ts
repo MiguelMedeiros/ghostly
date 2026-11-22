@@ -11,7 +11,8 @@ import { groupCue } from "./cues";
  * catch-up past its first message: a member back in a group is handed what it missed oldest first, each message newer
  * than the last, and every one rang and notified, written up to hours before. The times
  * compared are the ones the senders say, never a row's place; a 1:1 chat's contact's is read by how far its clock
- * runs behind this one (`writtenAt`), and so is a group member's, told by what came straight from it. What never becomes a row is quiet
+ * runs behind this one (`writtenAt`), and so is a group member's, told by what came straight from it (or, in a community,
+ * what a hub says it passed on as it came: WISP 903 § Relaying). What never becomes a row is quiet
  * by construction: typing and a bot's status, edits, reactions, receipts, call signals, transport lines.
  */
 
@@ -44,6 +45,13 @@ export function writtenAt(message: Pick<StoredMessage, "timestamp" | "sentAt">, 
 
 const JOIN_NOTICE = /^👋 (?:.+ )?joined$/;
 
+/**
+ * The quiet "joined" line: a 1:1 contact's only when the engine took it as the chat's joined line (`joinLine`), since
+ * any later row of theirs in those words is a message like the rest; mine and a group's by their words.
+ */
+const joinLine = (type: "message" | "sent", message: StoredMessage) =>
+  type === "message" && !message.linkId.startsWith("group:") ? !!message.joinLine : JOIN_NOTICE.test(message.text);
+
 export interface MessageAttention { type: "message" | "sent"; mention: boolean; cue?: AttentionCue }
 
 export interface AttentionContext {
@@ -58,7 +66,7 @@ export interface AttentionContext {
 
 /** What a newly stored row says, or null when it is quiet. `type`: "message" for the contact's, "sent" for mine. */
 export function messageAttention(type: "message" | "sent", message: StoredMessage, { startedAt, newest, now, lateAt }: AttentionContext): MessageAttention | null {
-  if (message.timestamp < startedAt || message.file || message.paymentId || JOIN_NOTICE.test(message.text)) return null;
+  if (message.timestamp < startedAt || message.file || message.paymentId || joinLine(type, message)) return null;
   // A line of a group's history: only the one that says I made the group or joined it, as it always was.
   if (message.event) {
     const cue = groupCue(message);

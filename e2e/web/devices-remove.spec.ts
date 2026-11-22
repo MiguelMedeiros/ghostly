@@ -27,6 +27,12 @@ test("the active device removes the third device while the second is closed; the
   const dialog = desktop.page.getByTestId("device-remove");
   await expect(dialog).toContainText("Remove Tablet?");
   await dialog.getByTestId("device-remove-go").click();
+  // The moment the Removed row comes, the Tablet's own row (Standby · Connected, Move to, ⋮) is already gone, not
+  // seconds later at the next read of the set. Read in the page, at each frame, so no retry hides the overlap.
+  const atRemoved = await desktop.page.waitForFunction(() => document.querySelector('[data-testid="device-removed"]')
+    ? { tabletRows: [...document.querySelectorAll('[data-testid="device-row"]')].filter((row) => row.textContent?.includes("Tablet")).length }
+    : null, undefined, { timeout: 60_000 });
+  expect(await atRemoved.jsonValue()).toEqual({ tabletRows: 0 });
   const removed = desktop.page.getByTestId("device-removed");
   await expect(removed).toContainText("Tablet", { timeout: 60_000 });
   await expect(removed).toContainText("Removed");
@@ -42,8 +48,11 @@ test("the active device removes the third device while the second is closed; the
   await untilShown(phone.page, notice, { timeout: 240_000 });
   await expect(phone.page.getByTestId("device-set-notice-title")).toContainText("Phone");
   await expect(phone.page.getByTestId("device-set-notice-title")).not.toContainText("Tablet");
-  await phone.page.getByTestId("device-set-notice-ok").click();
+  // Answered from the keyboard: the focus stays on the button while it runs, then goes to Use here, not to the page.
+  await phone.page.getByTestId("device-set-notice-ok").focus();
+  await phone.page.keyboard.press("Enter");
   await expect(notice).toHaveCount(0);
+  await expect(phone.page.getByTestId("handoff-use-here")).toBeFocused();
   // It goes on as a standby of the new set, with a live link to the desktop that answers.
   const standby = phone.page.getByTestId("device-standby");
   await expect(standby).toHaveAttribute("data-state", "standby");

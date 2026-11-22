@@ -26,6 +26,6 @@ export function OpenInWallet({ uri, className, title, testId, children }: { uri:
       }}>
       {children}
     </a>
-    {error && <Notice problem={error} testId={testId ? `${testId}-error` : undefined} className="text-xs m-0 basis-full" ink />}
+    {error && <Notice problem={error} testId={testId ? `${testId}-error` : undefined} className="text-xs m-0 basis-full" />}
   </>;
 }

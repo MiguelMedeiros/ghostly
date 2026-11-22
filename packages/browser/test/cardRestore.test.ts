@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { APPS_CAPABILITY, DhtDelivery, GhostLink, STATUS_CARD_CAPABILITY, appCardId, createIdentity, createLink, createRelayPayload, identityFromSeedB64, parseRelayPayload, readStatusCard, statusCardText,
   type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
-import { GhostlyNode } from "../src/engine/node";
+import { CARD_RESTORE_EVERY_MS, GhostlyNode, cardRestoreTiming } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { CARD_RESTORE_GAP_MS } from "../src/engine/edits";
 import type { StoredMessage } from "../src/shared/types";
@@ -240,8 +240,46 @@ describe("a reconnect with many cards due does not burst", () => {
   }, 40_000);
 });
 
+describe("a session that opens with no card due", () => {
+  /** The whole-history reads `restoreCards` made since this was called (the node of the test is the only one). */
+  function restoreReads() {
+    const read = db.getMessages.bind(db);
+    let count = 0;
+    const spy = vi.spyOn(db, "getMessages").mockImplementation(async (chat: string) => {
+      if (new Error().stack?.includes("restoreCards")) count++;
+      return read(chat);
+    });
+    cleanup.push(async () => spy.mockRestore());
+    return () => count;
+  }
+  const delivered = (i: number): StoredMessage => ({ linkId: "", id: `me_${WIRE(String(i % 10))}${i}`, wireId: `${WIRE(String(i % 10))}${i}`, text: `text ${i}`, sender: "me",
+    timestamp: Date.now() - 600_000 + i, via: "datalink", delivery: "delivered" });
+
+  it("reads none of the chat's history for them, however long the chat", async () => {
+    const reads = restoreReads();
+    const t = await setup({ rows: Array.from({ length: 40 }, (_, i) => delivered(i)) });
+    await vi.waitFor(() => expect(t.view().sessionOffers?.peer).toContain("edit/1"));
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+    expect(reads()).toBe(0);
+    expect(t.contactEdits).toEqual([]);
+  }, 30_000);
+
+  it("once its cards went again, the next look reads no history either", async () => {
+    const reads = restoreReads();
+    const t = await setup({ rows: [floored("A", appCard)] });
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1), { timeout: 15_000 });
+    await vi.waitFor(async () => expect(await t.row(`me_${WIRE("A")}`)).toMatchObject({ cardRestore: "sent" }));
+    const before = reads();
+    await (t.node as unknown as { restoreCards(linkId: string): Promise<void> }).restoreCards(t.id);
+    expect(reads()).toBe(before);
+  }, 30_000);
+});
+
 describe("a contact that says edit/1 again and again", () => {
   it("costs one look through the history, not one per time: the flips coalesce, and a card due since still goes after the gap", async () => {
+    // The gap is 30 s, most of this file's run: a shorter one still holds the flips and the 2 s wait below.
+    cardRestoreTiming.everyMs = 6_000;
+    cleanup.push(async () => { cardRestoreTiming.everyMs = CARD_RESTORE_EVERY_MS; });
     const t = await setup({ rows: [floored("A", appCard)] });
     await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1), { timeout: 15_000 });
     const channel = (t.contact as unknown as { channel: { send(frame: string): void } }).channel;
@@ -254,8 +292,10 @@ describe("a contact that says edit/1 again and again", () => {
       channel.send(JSON.stringify({ t: "paired-capabilities", c: offered.filter(c => c !== "edit/1") }));
       channel.send(JSON.stringify({ t: "paired-capabilities", c: offered }));
     }
-    // A card that came due while the contact kept flipping: the look after the gap finds it.
-    await db.putMessage({ ...floored("T", taskCard), linkId: t.id });
+    // A card that came due while the contact kept flipping (it went on the DHT floor): the look after the gap finds it.
+    const bare = { ...floored("T", taskCard, { cardRestore: undefined }), linkId: t.id };
+    await db.putMessage(bare);
+    await (t.node as unknown as { cardWentBare(linkId: string, message: StoredMessage): Promise<void> }).cardWentBare(t.id, bare);
     await new Promise(resolve => setTimeout(resolve, 2_000));
     expect(t.view().sessionOffers?.peer).toContain("edit/1");
     expect(historyReads()).toBeLessThanOrEqual(1);

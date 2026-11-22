@@ -5,7 +5,7 @@ import { chosenResolver } from "../proofs/domain";
 import { readRelays } from "../nostr/relay";
 import { KIND_FOLLOWS, KIND_NOTE, newestOf, parseFollows, parseNote, plainText, type NostrNote } from "../nostr/social";
 import { AVATAR_MAX_BYTES, avatarSource, decodeFitted, fetchAvatar, POST_IMAGE_SIDE, type AvatarResult } from "./public";
-import { BLUESKY_APPVIEW, PUBKY_NEXUS, type ReaderContext } from "./readers";
+import { BLUESKY_APPVIEW, HostNotContacted, pictureMiss, PUBKY_NEXUS, type ReaderContext } from "./readers";
 
 /**
  * What a verified identity published, beyond its profile (docs/wisps/PUBLIC-PROFILES.md, "Posts and follows"): its
@@ -371,8 +371,10 @@ export async function readPostImage(source: PostImageSource, ctx: ReaderContext)
     const doc = await resolveAtprotoDid(source.did, resolve);
     server = new URL(doc.pds);
     await assertPublicServer(server.hostname, resolve);
-  } catch { return { miss: "the account's server could not be asked for it", hosts: [] }; }
-  const r = await ctx.fetch(`${server.origin}/xrpc/com.atproto.sync.getBlob?${new URLSearchParams({ did: source.did, cid: source.cid })}`, { maxBytes: AVATAR_MAX_BYTES, signal: ctx.signal }).catch(() => undefined);
+  } catch (e) { return { miss: pictureMiss(e, "the account's server could not be asked for it"), hosts: [] }; }
+  let refused: unknown;
+  const r = await ctx.fetch(`${server.origin}/xrpc/com.atproto.sync.getBlob?${new URLSearchParams({ did: source.did, cid: source.cid })}`, { maxBytes: AVATAR_MAX_BYTES, signal: ctx.signal }).catch((e: unknown) => { refused = e; return undefined; });
+  if (refused instanceof HostNotContacted) return { miss: refused.message, hosts: [] };
   if (!r) return { miss: `${server.host} could not be reached, or the picture is larger than ${AVATAR_MAX_BYTES / 1024 / 1024} MiB`, hosts: [server.host] };
   if (r.status !== 200) return { miss: `${server.host} answered ${r.status}`, hosts: [server.host] };
   return { ...(await decodeFitted(r.bytes)), hosts: [server.host] };

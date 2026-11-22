@@ -1,5 +1,6 @@
 import {useEffect, useRef, useState, type RefObject, type PointerEvent as ReactPointerEvent} from "react";
 import { openLayer } from "../lib/layerHistory";
+import { composingKey } from "./useComposition";
 
 const layers: RefObject<HTMLElement | null>[] = [];
 
@@ -82,8 +83,9 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
       }
       beganOutside = false;
     };
-    // The Escape that closes it is spent: a notice that also answers Escape stays.
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !blocked() && !e.defaultPrevented) { e.preventDefault(); callback.current(); } };
+    // The Escape that closes it is spent: a notice that also answers Escape stays. An input method's Escape (a candidate
+    // dropped in its search) is the input method's.
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !composingKey(e, null) && !blocked() && !e.defaultPrevented) { e.preventDefault(); callback.current(); } };
     document.addEventListener("pointerdown", down); document.addEventListener("pointerup", up); document.addEventListener("keydown", key);
     return () => {const index=layers.indexOf(ref); if(index>=0) layers.splice(index,1);document.removeEventListener("pointerdown", down);document.removeEventListener("pointerup", up);document.removeEventListener("keydown", key);};
   }, [open, ref, anchorRef]);
@@ -91,6 +93,9 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
 
 /** The open modals made of plain elements, the newest last: only the newest answers Escape and keeps Tab inside it. */
 const modals: RefObject<HTMLElement | null>[] = [];
+
+/** Whether a <dialog> (the app shows them modal only) is open over `panel` rather than holding it. */
+const dialogOver = (panel: HTMLElement | null) => [...document.querySelectorAll("dialog[open]")].some((dialog) => !dialog.contains(panel));
 
 /** What Tab can reach inside `root`, in order: enabled, shown, not taken out with tabindex="-1". */
 export function tabbables(root: HTMLElement): HTMLElement[] {
@@ -130,8 +135,11 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
     let away: HTMLElement | null = before;
     const focusIn = (e: FocusEvent) => { if (e.target instanceof HTMLElement && !panel?.contains(e.target)) away = e.target; };
     const key = (e: KeyboardEvent) => {
-      // Over another one, the newest answers: Escape closes it alone, Tab stays in it.
-      if (modals[modals.length - 1] !== ref) return;
+      // Over another one, the newest answers: Escape closes it alone, Tab stays in it. A <dialog> over it (the lock
+      // screen) has the keys: an Escape typed there left it closed, and what was in it lost, under the lock.
+      if (modals[modals.length - 1] !== ref || dialogOver(panel)) return;
+      // An input method's keys in one of its fields (Escape drops a candidate) are the input method's: the modal stays.
+      if (composingKey(e, null)) return;
       if (aside.current?.()) {
         const inside = !!panel?.contains(document.activeElement);
         if (e.defaultPrevented) return;
@@ -198,10 +206,11 @@ export function useTabTrap(ref: RefObject<HTMLElement | null>, on = true) {
 
 /**
  * Tab and Shift+Tab go round `root`'s own controls, and a Tab from the page's body goes into it. Focus in a layer of
- * its own (a select's list, a menu drawn over the page) keeps its Tab.
+ * its own (a select's list, a menu drawn over the page) keeps its Tab. By the key's place too: the Linux Desktop's
+ * WebKitGTK names a real Shift+Tab (GTK's ISO_Left_Tab) "Unidentified", with the code "Tab".
  */
 export function keepTabInside(e: KeyboardEvent, root: HTMLElement | null) {
-  if (e.key !== "Tab" || e.defaultPrevented || !root) return;
+  if ((e.key !== "Tab" && e.code !== "Tab") || e.defaultPrevented || !root) return;
   const active = document.activeElement;
   const inside = !!active && root.contains(active);
   if (!inside && active && active !== document.body) return;

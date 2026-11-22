@@ -38,6 +38,8 @@ export interface TakeoverPorts {
   proves(verifier: NonNullable<DeviceRecord["verifier"]>, password: string): Promise<boolean>;
   /** The turn keeper, or null where the turn cannot be read (offline, no turn path). */
   keeper(): Promise<TurnKeeper | null>;
+  /** A pull under way here ends, and the staging namespace the record names goes (`HandoffTaker.abandon`). */
+  dropStaging?(): Promise<void>;
   now?: () => number;
 }
 
@@ -78,7 +80,12 @@ export function verifierStands(record: DeviceRecord, latest: TurnRecord | null):
   return !stated || bytesEqual(stated, turnVerifierMark(record.verifier));
 }
 
-const sameName = (a: string, b: string) => a.normalize("NFC").trim().toLocaleLowerCase() === b.normalize("NFC").trim().toLocaleLowerCase();
+/** Whether the record names a pull's staging namespace apart from the profile's own (`handoff.ts`, `dropStaging`). */
+const staged = (record: DeviceRecord): boolean => record.handoff?.role === "taking" && !!record.handoff.staging && record.handoff.staging !== record.profile;
+
+/** A name as it is seen and typed: nobody types a joiner, a variation selector or a filler, which draw nothing. */
+const typedName = (name: string) => name.normalize("NFC").replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim().toLocaleLowerCase();
+const sameName = (a: string, b: string) => typedName(a) === typedName(b);
 
 /** One try at a time on this device, whoever asks: tries sent at once would all be checked against the same count. */
 let tries: Promise<unknown> = Promise.resolve();
@@ -126,6 +133,13 @@ export async function forceTakeover(ports: TakeoverPorts, request: TakeoverReque
   });
   const keeper = await ports.keeper();
   if (!keeper) throw new TakeoverRefusal("offline", "Go online to take over.");
+  // A pull's staging, before the takeover's note takes the place of the pull's: named by nothing after it, the drop at
+  // start and Remove this profile here would never find it. One the drop left is a reason not to take over now.
+  if (staged(record)) {
+    await ports.dropStaging?.().catch(() => {});
+    const now = await ports.read();
+    if (!now || staged(now)) throw new TakeoverRefusal("state", "A move to this device is still being undone. Try again.");
+  }
   // After the read the takeover acts on, before anything is written: the last record there is to know.
   const outcome = await keeper.raise({
     before: (latest) => { if (!verifierStands(record, latest)) throw new TakeoverRefusal("changed", `The lock password was changed${target ? ` on ${target}` : ""}. Use here moves the profile with the new one.`); },

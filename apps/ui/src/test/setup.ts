@@ -1,9 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { resetGifSearch } from "../lib/gifSearch";
 import { resetUnseenSats } from "../hooks/useUnseenSats";
 import { forgetPictures } from "../lib/pictureReads";
+import { forgetVoicePlayed } from "../lib/voicePlayback";
+import { forgetKeptEdits } from "../lib/keptEdits";
 import { fakeEngine, installFakeEngine } from "./fakeEngine";
 import type { Language } from "../lib/settings";
 import { loadLocale } from "../locales";
@@ -25,6 +27,21 @@ vi.mock("@ghostly/browser/platform/sync", async (importOriginal) => ({
 }));
 
 beforeAll(installFakeEngine);
+
+// What a test file leaves ticking stops with it. The real sync (in the files that unmock it) reconciles every 5 s for
+// as long as the page lives, and here the page is the file: a tick after its environment is gone (no localStorage), on
+// a runner still busy with the worker, failed the whole run.
+const intervals = new Set<ReturnType<typeof setInterval>>();
+const realSetInterval = globalThis.setInterval;
+globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+  const id = realSetInterval(...args);
+  intervals.add(id);
+  return id;
+}) as typeof setInterval;
+afterAll(() => {
+  for (const id of intervals) clearInterval(id);
+  intervals.clear();
+});
 
 // No test reaches the Internet Archive. GifCities limits requests per IP (with a 200 HTML page), and our own test runs
 // share the IPs people use: a test that opens the GIF panel mocks fetch (`gifCities` in chat/composer.test.tsx). One
@@ -50,6 +67,10 @@ beforeEach(() => {
   resetUnseenSats();
   // So are the pictures a chat read.
   forgetPictures();
+  // And the voice messages it played, read once from the storage just cleared.
+  forgetVoicePlayed();
+  // And the edits left open in a chat's composer (lib/keptEdits.ts), kept for the app session.
+  forgetKeptEdits();
   delete document.documentElement.dataset.reduceMotion;
   document.documentElement.removeAttribute("lang");
   document.documentElement.removeAttribute("dir");

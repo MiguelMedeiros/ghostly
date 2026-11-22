@@ -5,6 +5,7 @@ import { InputGroup } from "../layout";
 import { focusLost } from "../../lib/focus";
 import { useI18n } from "../../contexts/I18nContext";
 import { exactText } from "../../lib/exactText";
+import { holdSecureWindow } from "../../lib/secureWindow";
 
 type Open = "none" | "phrase" | "backup" | "restore";
 
@@ -34,6 +35,10 @@ export function BackupRows({ name, reveal, exportBackup, restorePhrase, restoreF
     el.scrollIntoView?.({ block: "center" });
     el.focus({ preventScroll: true });
   }, [focusFirst]);
+  // The phrase on screen keeps the window secure whatever the app lock (Android: out of the app switcher's picture,
+  // screenshots and screen recording).
+  const phraseShown = open === "phrase" && !!phrase;
+  useEffect(() => phraseShown ? holdSecureWindow() : undefined, [phraseShown]);
   // A block that closes when its work is done takes the focus of the button in it: the row's button that opened it gets it.
   const shownOpen = useRef(open);
   useEffect(() => {
@@ -47,7 +52,7 @@ export function BackupRows({ name, reveal, exportBackup, restorePhrase, restoreF
       <Row label={t("wallet.backup.phrase")} hint={t("wallet.backup.phraseHint")}>
         <Button ref={show} data-testid={`${slug}-recovery-show`} onClick={() => open === "phrase" ? toggle("none") : void run(async () => { setPhrase(await reveal()); setOpen("phrase"); }, "backup-show")} disabled={busy} loading={running === "backup-show"}>{open === "phrase" ? t("wallet.backup.hide") : t("wallet.backup.show")}</Button>
       </Row>
-      {open === "phrase" && phrase && <Block><p className="select-all text-sm text-text-primary font-mono leading-relaxed break-words" data-testid={`${slug}-recovery`}>{phrase}</p></Block>}
+      {phraseShown && <Block><p className="select-all text-sm text-text-primary font-mono leading-relaxed break-words" data-testid={`${slug}-recovery`}>{phrase}</p></Block>}
       <Row label={t("wallet.backup.file")} hint={t("wallet.backup.fileHint")}>
         <Button ref={download} onClick={() => toggle("backup")}>{open === "backup" ? t("common.cancel") : t("wallet.backup.download")}</Button>
       </Row>

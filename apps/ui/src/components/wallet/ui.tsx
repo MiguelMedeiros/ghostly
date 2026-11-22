@@ -1,8 +1,10 @@
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { PayExternally } from "../PayExternally";
 import { focusInPlace } from "../../lib/focus";
+import { radioGroupKeys, radioTabStop } from "../../lib/radioGroup";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useAmountText } from "../../hooks/useAmountText";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /** The same building blocks as Settings, so a wallet's options read like any other option. */
 export { Section, Row, Block } from "../layout/Section";
@@ -10,13 +12,32 @@ export { Section, Row, Block } from "../layout/Section";
 import { Notice } from "../ui/Notice";
 export { Notice };
 
-const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-border-bright"}`;
-const SwitchKnob = ({ checked }: { checked: boolean }) => <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-0"}`} />;
+/**
+ * Forced colors (Windows high contrast) replace every background with the page's, so a track and knob drawn by colour
+ * alone vanish there. In that mode only, both are drawn in system colours: an outlined track with a ButtonText knob when
+ * off, a Highlight track with a HighlightText knob when on. The knob moves in by the border's pixel so it stays centred.
+ */
+const switchTrack = (checked: boolean) => `relative w-12 h-6 rounded-full transition-colors shrink-0 ${checked ? "bg-accent" : "bg-switch-off"} forced-colors:forced-color-adjust-none forced-colors:border forced-colors:border-[color:ButtonText] ${checked ? "forced-colors:bg-[color:Highlight]" : "forced-colors:bg-[color:Canvas]"}`;
+const SwitchKnob = ({ checked }: { checked: boolean }) => <span className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${checked ? "translate-x-6" : "translate-x-0"} forced-colors:top-[3px] forced-colors:left-[3px] ${checked ? "forced-colors:bg-[color:HighlightText]" : "forced-colors:bg-[color:ButtonText]"}`} />;
 
-export function Switch({ checked, onChange, label, disabled, testId }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean; testId?: string }) {
+/**
+ * The chosen option of a row of choices in forced colors, where its `bg-accent` is replaced by the page's background
+ * and it would look like the others: system Highlight behind HighlightText, as a list's selected item.
+ */
+export const chosenInForcedColors = "forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]";
+
+/**
+ * An on/off switch. `unavailable`: it cannot be turned on here for now (`aria-disabled`, still reachable by the keys so
+ * its reason is read), with that reason in the element `describedBy` names. `busy`: the last press is being worked on;
+ * it looks as `disabled` does and takes no press, but is `aria-disabled` and `aria-busy`, not disabled: that would drop
+ * a keyboard's focus to the page (as Button's `loading`). A tap lands on 64 × 44 px around its 48 × 24 px track: a
+ * thumb's 44 px, as on every other control on a phone.
+ */
+export function Switch({ checked, onChange, label, disabled, unavailable, busy, describedBy, testId, ref }: { checked: boolean; onChange: (next: boolean) => void; label: string; disabled?: boolean; unavailable?: boolean; busy?: boolean; describedBy?: string; testId?: string; ref?: React.Ref<HTMLButtonElement> }) {
   return (
-    <button type="button" role="switch" data-testid={testId} aria-checked={checked} aria-label={label} disabled={disabled} onClick={() => onChange(!checked)}
-      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed before:absolute before:-inset-2 before:content-['']`}>
+    <button ref={ref} type="button" role="switch" data-testid={testId} aria-checked={checked} aria-label={label} aria-disabled={unavailable || busy || undefined} aria-busy={busy || undefined} aria-describedby={describedBy} disabled={disabled}
+      onClick={() => { if (!unavailable && !busy) onChange(!checked); }}
+      className={`${switchTrack(checked)} cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']`}>
       <SwitchKnob checked={checked} />
     </button>
   );
@@ -34,13 +55,19 @@ export function SwitchLook({ checked, className = "", testId }: { checked: boole
   );
 }
 
-/** One choice among a few. `compact`: the smaller one for a page header. Wraps when the options do not fit. */
+/**
+ * One choice among a few. `compact`: the smaller one for a page header. Wraps when the options do not fit. On a phone
+ * a tap lands on 44 px of an option's height (`tap-target`), drawn 32 px tall. A radio
+ * group: one Tab stop (the chosen option), the arrows, Home and End move; Space or Enter chooses, since choosing may be
+ * an action (a wallet's network replaces the wallet).
+ */
 export function Segmented<T extends string>({ options, value, onChange, label, disabled, compact }: { options: { value: T; label: string }[]; value: T; onChange: (next: T) => void; label: string; disabled?: boolean; compact?: boolean }) {
+  const stop = radioTabStop(options.map(option => ({ checked: value === option.value, disabled: !!disabled && value !== option.value })));
   return (
-    <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1 max-w-full">
-      {options.map((option) => (
-        <button key={option.value} type="button" role="radio" aria-checked={value === option.value} disabled={disabled && value !== option.value} onClick={() => { if (option.value !== value) onChange(option.value); }}
-          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? "bg-accent text-on-accent font-medium" : "text-text-secondary hover:text-text-primary"}`}>
+    <div role="radiogroup" aria-label={label} onKeyDown={radioGroupKeys} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1 max-w-full">
+      {options.map((option, i) => (
+        <button key={option.value} type="button" role="radio" aria-checked={value === option.value} tabIndex={i === stop ? 0 : -1} disabled={disabled && value !== option.value} onClick={() => { if (option.value !== value) onChange(option.value); }}
+          className={`${compact ? "px-2.5 min-h-8 text-[13px]" : "px-3 min-h-8 text-sm"} tap-target whitespace-nowrap rounded-md transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${value === option.value ? `bg-accent text-on-accent font-medium ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
           {option.label}
         </button>
       ))}
@@ -49,23 +76,27 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
 }
 
 const BUTTON = {
-  primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold",
+  // A border in forced colors only: there the fill is gone, and the button would read as bare text beside the others.
+  primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold forced-colors:border forced-colors:border-[color:ButtonText]",
   secondary: "bg-surface-alt text-text-primary hover:bg-surface-hover border border-border",
-  danger: "bg-transparent text-danger hover:bg-danger/10 border border-border",
+  danger: "bg-transparent text-danger-ink hover:bg-danger/10 border border-border",
 } as const;
 /**
  * `loading`: the click is being worked on. The button keeps its words, shows a turning ring before them, is busy for a
  * screen reader and takes no second click, so a press that takes a while (an install, a refresh) is seen to be going.
  * It is `aria-disabled`, not disabled (even when `disabled` is passed too): that would drop a keyboard's focus to the
  * page, and leave it there when the work fails. A press while loading, or a form's Enter on it, does nothing.
+ * An `aria-disabled` passed in is kept: the caller's own "off for now", whose press it ignores itself.
+ * `disabled` that comes while it has the focus (another button's work, a field now unchanged) keeps it too, until the
+ * focus leaves (FocusSafeButton).
  */
 export function Button({ variant = "secondary", className = "", loading = false, disabled, onClick, children, ...props }: React.ComponentPropsWithRef<"button"> & { variant?: keyof typeof BUTTON; loading?: boolean }) {
   return (
-    <button type="button" {...props} disabled={disabled && !loading} aria-disabled={loading || undefined} aria-busy={loading || undefined} data-loading={loading || undefined}
+    <FocusSafeButton type="button" {...props} disabled={disabled && !loading} aria-disabled={loading || props["aria-disabled"] || undefined} aria-busy={loading || undefined} data-loading={loading || undefined}
       onClick={(e) => { if (loading) e.preventDefault(); else onClick?.(e); }}
       className={`px-4 py-2 min-h-10 max-md:min-h-11 whitespace-nowrap rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress ${BUTTON[variant]} ${className}`}>
       {loading ? <span className="inline-flex items-center gap-2"><Spinner />{children}</span> : children}
-    </button>
+    </FocusSafeButton>
   );
 }
 
@@ -79,7 +110,7 @@ export function Spinner({ size = 14 }: { size?: number }) {
   );
 }
 
-export const input = "w-full min-w-0 bg-surface-alt text-text-primary px-3 py-2 max-md:min-h-11 rounded-lg border border-border text-sm placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";
+export const input = "w-full min-w-0 bg-surface-alt text-text-primary px-3 py-2 max-md:min-h-11 rounded-lg border border-field-border text-sm placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";
 
 export type Action = "receive" | "send" | "history";
 const ACTION_ICON: Record<Action, ReactNode> = {
@@ -93,19 +124,24 @@ const ACTION_KEY = { receive: "wallet.ui.receive", send: "wallet.ui.send", histo
 /**
  * The two (or three) things a wallet is for, as big equal buttons. Three in a column under 28rem (a phone, a desktop's
  * narrowest page) put the icon above the label: beside it, "Historique" and "Cronologia" did not fit a 375px phone.
+ * Under 19rem (rem follows the browser's text size: that phone at 150 %) a third of the width is still too narrow for
+ * them, so each takes a row of its own, the icon back beside the label.
  */
 export function Actions({ value, onChange, actions = ["receive", "send"] }: { value: Action; onChange: (next: Action) => void; actions?: Action[] }) {
   const i18n = useOptionalI18n();
-  const stack = actions.length > 2 ? "@max-md/actions:flex-col @max-md/actions:gap-1" : "";
+  const three = actions.length > 2;
+  const stack = three ? "@min-[19rem]/actions:@max-md/actions:flex-col @min-[19rem]/actions:@max-md/actions:gap-1" : "";
   return (
-    <div className="@container/actions grid gap-2" style={{ gridTemplateColumns: `repeat(${actions.length}, minmax(0, 1fr))` }} role="tablist">
-      {actions.map((action) => (
-        <button key={action} type="button" role="tab" aria-selected={value === action} data-testid={`wallet-${action === "send" ? "send" : action}`} onClick={() => onChange(action)}
-          className={`flex items-center justify-center gap-2 ${stack} min-w-0 px-2 py-2.5 min-h-10 max-md:min-h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${value === action ? "bg-accent text-on-accent border-accent" : "bg-surface text-text-secondary border-border hover:text-text-primary hover:border-border-bright"}`}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">{ACTION_ICON[action]}</svg>
-          <span className="truncate max-w-full">{i18n ? i18n.t(ACTION_KEY[action]) : ACTION_LABEL[action]}</span>
-        </button>
-      ))}
+    <div className="@container/actions">
+      <div className={`grid gap-2 grid-cols-[repeat(var(--actions),minmax(0,1fr))] ${three ? "@max-[19rem]/actions:grid-cols-1" : ""}`} style={{ "--actions": actions.length } as React.CSSProperties} role="tablist">
+        {actions.map((action) => (
+          <button key={action} type="button" role="tab" aria-selected={value === action} data-testid={`wallet-${action === "send" ? "send" : action}`} onClick={() => onChange(action)}
+            className={`flex items-center justify-center gap-2 ${stack} min-w-0 px-2 py-2.5 min-h-10 max-md:min-h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${value === action ? "bg-accent text-on-accent border-accent" : "bg-surface text-text-secondary border-border hover:text-text-primary hover:border-border-bright"}`}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">{ACTION_ICON[action]}</svg>
+            <span className="truncate max-w-full">{i18n ? i18n.t(ACTION_KEY[action]) : ACTION_LABEL[action]}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

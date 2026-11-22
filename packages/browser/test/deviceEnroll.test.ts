@@ -1,19 +1,19 @@
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import {
-  ENROLL_GRANT, enrollCancelFrame, fromBase64Url, randomBytes, readTurnPacket, signTurnPacket, toBase64Url, turnKeys,
+  DEVICE_INVITE_LIFETIME_S, ENROLL_GRANT, enrollCancelFrame, fromBase64Url, identityFromSeed, randomBytes, readTurnPacket, sign, signTurnPacket, toBase64Url, turnKeys,
   type DeviceFrame, type LinkParams, type Signer, type TurnRecord,
 } from "@ghostly/core";
 import {
-  EnrollCodeError, EnrollCrash, EnrollInviter, EnrollJoiner, EnrollRefusal, enrollmentUnfinished, finishEnrollment, recoverEnrollment,
+  ENROLL_DONE_TIMEOUT_MS, EnrollCodeError, EnrollCrash, EnrollInviter, EnrollJoiner, EnrollRefusal, enrollmentUnfinished, finishEnrollment, recoverEnrollment,
   type EnrollChannel, type EnrollChannelEvents, type EnrollCrashPoint, type OpenEnrollChannel,
 } from "../src/devices/enroll";
 import { viewOf } from "../src/devices/gate";
 import { deviceSetView } from "../src/devices/links";
 import { openTurnKeeper } from "../src/devices/setup";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, loadDeviceSigningKey } from "../src/devices/signingKey";
-import type { DeviceRecord } from "../src/devices/state";
+import { firstRecord, type DeviceRecord } from "../src/devices/state";
 import { closeDevicesDb, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
 import { dropDevicesDatabase, putDeviceRecord } from "./helpers/deviceRecord";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
@@ -325,17 +325,54 @@ describe("refusals", () => {
     expect(a.current()).toMatchObject({ step: "failed", reason: "proof" });
   });
 
-  it("a code past its ten minutes, a chat invite, and a device that already has a set are refused before anything is made", async () => {
+  it("a code a day past its ten minutes, a chat invite, and a device that already has a set are refused before anything is made", async () => {
     let now = Date.now();
     const a = new EnrollInviter({ profile: A, network, open: pipe.openInviter, didSeed: async () => didSeed, name: "MacBook", now: () => now, sleep: noSleep, forceSeed: true });
     const waiting = await a.start();
     if (waiting.step !== "waiting") throw new Error("no code");
-    now += 601_000;
+    // Only a day past: a new device's clock may run ahead of the inviter's, whose own check refuses a code past its ten minutes.
+    now += (DEVICE_INVITE_LIFETIME_S + 86_400) * 1000;
     const late = new EnrollJoiner({ profile: B, network, open: pipe.openJoiner, about: { name: "Phone", kind: "web", app: "1" }, now: () => now, forceSeed: true, install: null });
     await expect(late.start(waiting.code)).rejects.toMatchObject({ reason: "expired" });
     const chat = (await import("@ghostly/core")).createChatInvite().inviteCode;
     await expect(joiner().start(chat)).rejects.toMatchObject({ reason: "chat" });
     await a.cancel();
+  });
+
+  it("the inviter reads the clock, not only its timer: past the ten minutes it takes no hello and no answer", async () => {
+    // The timer did not run (the computer slept, the tab was throttled): the clock moved on without it.
+    let now = Date.now();
+    const late = () => new EnrollInviter({ profile: A, network, open: pipe.openInviter, didSeed: async () => didSeed, name: "MacBook", now: () => now, sleep: noSleep, timing: quick, forceSeed: true });
+    const a = late();
+    const waiting = await a.start();
+    if (waiting.step !== "waiting") throw new Error("no code");
+    now += 2 * 3_600_000;
+    // A joiner whose own clock is behind reads the code as still good.
+    const b = joiner();
+    await b.start(waiting.code);
+    await until(() => a.ended && b.ended);
+    expect(a.current()).toMatchObject({ step: "failed", reason: "expired" });
+    expect(b.current()).toMatchObject({ step: "failed", reason: "expired" });
+    expect(await readDeviceRecord(A)).toBeNull();
+    expect(await readDeviceRecord(B)).toBeNull();
+
+    // The hello came in time, the answer did not.
+    pipe = new Pipe();
+    now = Date.now();
+    const c = late();
+    const code = await c.start();
+    if (code.step !== "waiting") throw new Error("no code");
+    const d = joiner();
+    await d.start(code.code);
+    await until(() => c.current().step === "confirm");
+    now += 601_000;
+    await c.confirm(true);
+    await until(() => d.ended);
+    expect(c.current()).toMatchObject({ step: "failed", reason: "expired" });
+    expect(d.current()).toMatchObject({ step: "failed", reason: "expired" });
+    expect(pipe.frames.some((f) => f.frame.t === ENROLL_GRANT)).toBe(false);
+    expect(await readDeviceRecord(A)).toBeNull();
+    expect(await readDeviceRecord(B)).toBeNull();
   });
 
   it("a tab of a browser on iPhone or iPad is told to add Ghostly to the Home Screen first; the app there may join", async () => {
@@ -603,12 +640,103 @@ describe("what the security review asked for", () => {
     expect(b.current()).toMatchObject({ step: "done" });
   });
 
+  it("an enrollment that finishes on a record another slot forced takes only that slot of it, not a key swapped in elsewhere", async () => {
+    // The joiner (slot 2) was granted the set with the MacBook active. A holder of `D` in the phone's slot writes a
+    // record that lists the joiner and swaps a key of its own in for the MacBook's, under the MacBook's name.
+    const D = randomBytes(32);
+    const [mac, phone, joined, swapped] = [11, 12, 13, 14].map((n) => identityFromSeed(new Uint8Array(32).fill(n)));
+    const granted = [{ key: toBase64Url(mac.publicKey), name: "MacBook" }, { key: toBase64Url(phone.publicKey), name: "Phone" }, { key: toBase64Url(joined.publicKey), name: "Firefox" }, null];
+    await putDeviceRecord(firstRecord(B, "standby", { turn: 5, d: toBase64Url(D), deviceSet: granted, ownSlot: 2, activeSlot: 0 }));
+    network.seed(await signTurnPacket(turnKeys(D), {
+      turn: 6, rev: 0, author: 1, active: 1, instance: randomBytes(8),
+      slots: [{ key: swapped.publicKey, name: "MacBook" }, { key: phone.publicKey, name: "Phone" }, { key: joined.publicKey, name: "Firefox" }, null],
+    }, (bytes) => sign(bytes, phone.seed)));
+    expect(await finishEnrollment(B, network, { sleep: noSleep, rounds: 2 })).toBe(true);
+    expect((await readDeviceRecord(B))!).toMatchObject({ activeSlot: 1, deviceSet: granted });
+  });
+
   it("the new device gives up when no grant comes after the digits, and holds nothing", async () => {
     const a = inviter(), b = joiner();
     await toDigits(a, b);
     // The person never answers on the active device.
     await until(() => b.ended, 5_000);
     expect(b.current()).toMatchObject({ step: "failed", reason: "unanswered" });
+    expect(await readDeviceRecord(B)).toBeNull();
+    await a.cancel();
+  });
+});
+
+describe("a new device whose clock is off", () => {
+  const DAY = 86_400_000;
+  /** Both sides to the digits on fake timers, the joiner's clock `skew` ms from the inviter's, with no grant wait set. */
+  async function skewedToDigits(skew: number): Promise<{ a: EnrollInviter; b: EnrollJoiner }> {
+    const base = Date.now();
+    const a = new EnrollInviter({ profile: A, network, open: pipe.openInviter, didSeed: async () => didSeed, name: "MacBook", now: () => base, sleep: noSleep, timing: quick, forceSeed: true });
+    const b = new EnrollJoiner({
+      profile: B, network, open: pipe.openJoiner, about: { name: "Phone", kind: "web", app: "1.1.0" }, now: () => base + skew, sleep: shortSleep, forceSeed: true,
+      timing: { proofMs: quick.proofMs, finishRounds: quick.finishRounds, finishEveryMs: quick.finishEveryMs }, install: { userAgent: "Mozilla/5.0 (X11; Linux x86_64)" },
+    });
+    const waiting = await a.start();
+    if (waiting.step !== "waiting") throw new Error("no code");
+    await b.start(waiting.code);
+    for (let i = 0; i < 500 && b.current().step !== "confirm" && !b.ended; i++) await vi.advanceTimersByTimeAsync(5);
+    expect(b.current()).toMatchObject({ role: "joiner", step: "confirm" });
+    // The person never answers, and the active device's own end (its ten minutes) never reaches this one.
+    pipe.tamper = (frame, from) => (from === "inviter" ? null : frame);
+    return { a, b };
+  }
+  afterEach(() => { vi.useRealTimers(); });
+
+  for (const days of [30, 10]) {
+    it(`${days} days behind: it waits for the grant as long as a code lives, not until its own clock reaches the expiry`, async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const { a, b } = await skewedToDigits(-days * DAY);
+      const wait = DEVICE_INVITE_LIFETIME_S * 1000 + ENROLL_DONE_TIMEOUT_MS;
+      // Not failed right after the digits (a timer past 2^31 - 1 ms runs at once)...
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(b.current()).toMatchObject({ step: "confirm" });
+      await vi.advanceTimersByTimeAsync(wait - 2_000);
+      expect(b.current()).toMatchObject({ step: "confirm" });
+      // ...and not left waiting for days either: unanswered once a code's whole lifetime and the done wait are past.
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(b.current()).toMatchObject({ step: "failed", reason: "unanswered" });
+      expect(await readDeviceRecord(B)).toBeNull();
+      await a.cancel();
+    });
+  }
+
+  it("the same clock: it still waits for what is left of the code, and the done wait", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { a, b } = await skewedToDigits(0);
+    await vi.advanceTimersByTimeAsync(DEVICE_INVITE_LIFETIME_S * 1000 + ENROLL_DONE_TIMEOUT_MS - 3_000);
+    expect(b.current()).toMatchObject({ step: "confirm" });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(b.current()).toMatchObject({ step: "failed", reason: "unanswered" });
+    await a.cancel();
+  });
+
+  // Minutes ahead (a shortened wait on dev), and past the code's ten minutes (refused outright on dev).
+  for (const seconds of [300, 660, 3_600]) {
+    it(`${seconds} s ahead: it takes the code, and waits for the grant a code's lifetime from the moment it read it`, async () => {
+      // The monotonic clock too: the wait counts on it, never on either device's wall clock.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+      const { a, b } = await skewedToDigits(seconds * 1000);
+      await vi.advanceTimersByTimeAsync(DEVICE_INVITE_LIFETIME_S * 1000 + ENROLL_DONE_TIMEOUT_MS - 3_000);
+      expect(b.current()).toMatchObject({ step: "confirm" });
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(b.current()).toMatchObject({ step: "failed", reason: "unanswered" });
+      expect(await readDeviceRecord(B)).toBeNull();
+      await a.cancel();
+    });
+  }
+
+  it("a clock ahead, past the code's expiry: the code is refused before anything is made", async () => {
+    const base = Date.now();
+    const a = new EnrollInviter({ profile: A, network, open: pipe.openInviter, didSeed: async () => didSeed, name: "MacBook", now: () => base, sleep: noSleep, timing: quick, forceSeed: true });
+    const waiting = await a.start();
+    if (waiting.step !== "waiting") throw new Error("no code");
+    const ahead = new EnrollJoiner({ profile: B, network, open: pipe.openJoiner, about: { name: "Phone", kind: "web", app: "1" }, now: () => base + 30 * DAY, forceSeed: true, install: null });
+    await expect(ahead.start(waiting.code)).rejects.toMatchObject({ reason: "expired" });
     expect(await readDeviceRecord(B)).toBeNull();
     await a.cancel();
   });

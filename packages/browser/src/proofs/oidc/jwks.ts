@@ -5,6 +5,8 @@
  * cannot turn a contact's app into a request generator.
  */
 
+import { IdentityCheckUnavailable } from '@ghostly/core';
+
 export interface Jwk {
   kty: string; kid?: string; use?: string; alg?: string; key_ops?: string[];
   n?: string; e?: string; crv?: string; x?: string; y?: string;
@@ -25,7 +27,8 @@ const DEFAULT_TTL_MS = 60 * 60_000;
 /** A missing `kid` refetches at most this often per URL. */
 export const REFETCH_INTERVAL_MS = 60_000;
 
-interface Entry { keys: Jwk[]; expires: number; fetched: number }
+/** `tried`: the last early refetch for an unknown `kid`, answered or not, so a failing endpoint is not asked on every call. */
+interface Entry { keys: Jwk[]; expires: number; fetched: number; tried?: number }
 
 function allowedUrl(url: string): boolean {
   try {
@@ -59,9 +62,13 @@ export class JwksCache {
     if (running) return running;
     const task = (async () => {
       if (!allowedUrl(url)) throw new Error('Provider key URL refused');
-      const response = await fetcher(url, { maxBytes: JWKS_MAX_BYTES });
-      if (response.status !== 200) throw new Error(`Provider keys unavailable (${response.status})`);
-      const keys = parseKeys(response.text);
+      // Keys that could not be read (not reached, an error status, a page that is not a key set) say nothing of the token.
+      let response: Awaited<ReturnType<JwksFetch>>;
+      try { response = await fetcher(url, { maxBytes: JWKS_MAX_BYTES }); }
+      catch (e) { throw e instanceof IdentityCheckUnavailable ? e : new IdentityCheckUnavailable(`Provider keys could not be fetched: ${e instanceof Error ? e.message : String(e)}`); }
+      if (response.status !== 200) throw new IdentityCheckUnavailable(`Provider keys unavailable (${response.status})`);
+      let keys: Jwk[];
+      try { keys = parseKeys(response.text); } catch (e) { throw new IdentityCheckUnavailable((e as Error).message); }
       const fetched = this.now();
       const entry = { keys, fetched, expires: fetched + ttl(response.cacheControl) };
       this.entries.set(url, entry);
@@ -76,7 +83,9 @@ export class JwksCache {
     let entry = this.entries.get(url);
     if (!entry || entry.expires <= this.now()) entry = await this.load(url, fetcher);
     let found = entry.keys.find(k => k.kid === kid);
-    if (!found && this.now() - entry.fetched >= REFETCH_INTERVAL_MS) {
+    if (!found && this.now() - Math.max(entry.fetched, entry.tried ?? 0) >= REFETCH_INTERVAL_MS) {
+      // Counted before it is asked: a refetch that fails (an error status, the network down) still waits out the minute.
+      entry.tried = this.now();
       entry = await this.load(url, fetcher);
       found = entry.keys.find(k => k.kid === kid);
     }

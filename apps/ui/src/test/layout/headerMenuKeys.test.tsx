@@ -11,7 +11,7 @@ import { renderApp } from "../render";
 
 // covers: app.menus, app.keyboard, groups.leave
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const ID = "AbCdEfGhIjKlMnOpQrStUv";

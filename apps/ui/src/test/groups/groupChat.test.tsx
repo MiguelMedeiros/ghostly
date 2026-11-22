@@ -1,5 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
-import { Route, Routes, useNavigate } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { GroupJoinStage, GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { Sidebar } from "../../components/Sidebar";
@@ -48,7 +48,13 @@ describe("GroupChat: what the header says", () => {
 
   it("makes the members line under the name a 24 px tap target on a phone", () => {
     openGroup(active());
-    expect(screen.getByTestId("group-members").className.split(/\s+/)).toContain("max-md:min-h-6");
+    expect(screen.getByTestId("group-members").className.split(/\s+/)).toContain("max-md:min-h-[24px]");
+  });
+
+  it("makes ⋮ and the connection button 44 px on a phone, as the chat header's and the group's own Back", () => {
+    // They were 38 px (`max-md:p-2.5` around an 18 px icon) beside the 44 px Back.
+    openGroup(active());
+    for (const id of ["group-options", "group-connection-options"]) expect(screen.getByTestId(id)).toHaveClass("max-md:h-[44px]", "max-md:w-[44px]", "max-md:p-0");
   });
 
   it("names a group that has no name", () => {
@@ -62,15 +68,24 @@ describe("GroupChat: what the header says", () => {
     expect(screen.getByTestId("group-members").textContent).toBe("1 member");
   });
 
+  it("a community with nobody else in it says neither connecting nor relaying, as its connection icon says only you", () => {
+    // Its app is not a hub yet (its first beacon read, or the relays down): it said "connecting…" for as long as that lasted.
+    openGroup(active({ profile: "community", members: [members[0]], community: { hub: false, hubs: 0, connected: 0 } }));
+    expect(screen.getByTestId("group-members").textContent).toBe("1 member");
+    // A hub, alone: it relays for nobody.
+    act(() => fakeEngine.update({ groups: [active({ profile: "community", members: [members[0]], community: { hub: true, hubs: 1, connected: 0 } })] }));
+    expect(screen.getByTestId("group-members").textContent).toBe("1 member");
+  });
+
   it("says who invited me while it is an invitation, with Accept and Decline and nothing a member has", async () => {
     // On a phone the page is the only way in from the row: it was an empty chat with a field that took nothing.
     const { user, engine } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }));
     engine.on("acceptGroupInvitation", () => { throw new Error("The contact who invited you is not connected. Try again when they are."); }).on("declineGroupInvitation", () => undefined);
     expect(screen.getByTestId("group-chat")).toHaveAttribute("data-status", "invitation");
-    expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation from Alice");
+    expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation from \u2068Alice\u2069");
     const card = screen.getByTestId("group-invitation");
     expect(card).toHaveTextContent("Friends");
-    expect(card).toHaveTextContent("Invited by Alice · 3 members");
+    expect(card).toHaveTextContent("Invited by \u2068Alice\u2069 · 3 members");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("group-options"));
     expect(screen.queryByTestId("chat-search-open")).not.toBeInTheDocument();
@@ -78,7 +93,7 @@ describe("GroupChat: what the header says", () => {
     await user.keyboard("{Escape}");
     await user.click(within(card).getByTestId("group-accept"));
     expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
-    expect(await within(card).findByTestId("group-answer-refused")).toHaveTextContent("Alice is not connected yet. Try again in a moment.");
+    expect(await within(card).findByTestId("group-answer-refused")).toHaveTextContent("\u2068Alice\u2069 is not connected yet. Try again in a moment.");
     await user.click(within(card).getByTestId("group-decline"));
     expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
@@ -118,7 +133,7 @@ describe("GroupChat: what the header says", () => {
   it.each([["removed", "removed"], ["no status", undefined]] as const)("asks a member invited back over the history kept from before (%s)", async (_, status) => {
     openGroup(groupView({ status, canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }),
       [stored({ id: "old", text: "from before", member: ALICE })]);
-    expect(screen.getByTestId("group-invitation")).toHaveTextContent("Invited by Alice · 3 members");
+    expect(screen.getByTestId("group-invitation")).toHaveTextContent("Invited by \u2068Alice\u2069 · 3 members");
     expect(screen.getByTestId("group-accept")).toBeInTheDocument();
     expect(await screen.findByText("from before")).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
@@ -128,7 +143,7 @@ describe("GroupChat: what the header says", () => {
   it("says who took an invitation back, and what to do", () => {
     openGroup(takenBack);
     expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation taken back");
-    expect(screen.getByTestId("group-taken-back")).toHaveTextContent("Alice took back the invitation to Book club" + "Ask Alice for a new invitation or the group's link.");
+    expect(screen.getByTestId("group-taken-back")).toHaveTextContent("\u2068Alice\u2069 took back the invitation to \u2068Book club\u2069" + "Ask \u2068Alice\u2069 for a new invitation or the group's link.");
     expect(screen.queryByText("This group is gone from this device.")).not.toBeInTheDocument();
   });
 
@@ -136,14 +151,14 @@ describe("GroupChat: what the header says", () => {
     fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
     fakeEngine.update({ groups: [takenBack] });
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
-    expect(screen.getByTestId("group-taken-back")).toHaveTextContent("Alice retirou o convite para Book club" + "Peça a Alice um novo convite ou o link do grupo.");
+    expect(screen.getByTestId("group-taken-back")).toHaveTextContent("\u2068Alice\u2069 retirou o convite para \u2068Book club\u2069" + "Peça a \u2068Alice\u2069 um novo convite ou o link do grupo.");
   });
 
   it("says an invitation to a group with no name was taken back in a sentence of its own, not with \"A group\" mid-sentence", () => {
     const noName = (contact: string) => groupView({ name: "", canSend: false, invitation: { linkId: "link-1", contact, admin: ALICE, members: 3, accepted: false, takenBack: true } });
     fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
     for (const [contact, language, words] of [
-      ["Ana", "en", "Ana took back the invitation to the group"], ["Ana", "pt", "Ana retirou o convite para o grupo"],
+      ["Ana", "en", "\u2068Ana\u2069 took back the invitation to the group"], ["Ana", "pt", "\u2068Ana\u2069 retirou o convite para o grupo"],
       ["", "en", "The invitation to the group was taken back"], ["", "pt", "O convite para o grupo foi retirado"],
     ] as const) {
       fakeEngine.update({ groups: [noName(contact)] });
@@ -266,6 +281,42 @@ describe("GroupChat: joining through a link", () => {
     expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
 
+  it("Try again on a link nobody answered keeps the focus on the card, on its Cancel joining", async () => {
+    // Try again goes once the knock starts again: the focus went with it, to the page.
+    const joining = (unanswered: boolean) => groupView({ createdAt: Date.now() - 2 * 60 * 60_000, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocking", ...(unanswered && { unanswered }) } });
+    const { user, engine } = openGroup(joining(true));
+    engine.on("acceptGroupInvitation", () => { fakeEngine.update({ groups: [joining(false)] }); });
+    within(screen.getByTestId("group-joining")).getByTestId("group-link-retry").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("group-link-retry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-joining-cancel")).toHaveFocus();
+  });
+
+  it("a full community: says it is full (n of max), with the knock left, and never that the link may be old", async () => {
+    openGroup(groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "full", full: { n: 256, max: 256 } } }));
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This group is full");
+    expect(card).toHaveTextContent("It has 256 of 256 members. You get in once someone leaves: keep the app open.");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("This group is full");
+    expect(within(card).getByTestId("group-joining-steps").querySelector("li")).toHaveAttribute("data-state", "done");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+  });
+
+  it("a private group waiting for its members' updates: says so, with the knock left, and never that the link may be old", async () => {
+    openGroup(groupView({ createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "blocked", full: { n: 8, max: 32 } } }));
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This group is waiting for updates");
+    expect(card).toHaveTextContent("It takes new members again once everyone in it has an updated Ghostly.");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("This group is waiting for updates");
+    expect(within(card).getByTestId("group-joining-steps").querySelector("li")).toHaveAttribute("data-state", "done");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+  });
+
   it("a knock someone answered is not told the link may be old", () => {
     openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");
@@ -290,6 +341,14 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
   });
 
+  it("with Hide my IP on and no transport for group links, the joining card says Hide my IP is why", () => {
+    fakeEngine.update({ transport: { protocol: "webrtc/1", relays: [], webrtc: false, groupLinks: false }, settings: { ...fakeEngine.state.settings, relayOnly: true } });
+    openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }), profile: "community" });
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    expect(card).not.toHaveTextContent("web app");
+  });
+
   it("Cancel joining is a thumb's height on a phone", () => {
     // It was 24 px tall, the only way off the joining card.
     openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }), profile: "community" });
@@ -299,12 +358,96 @@ describe("GroupChat: joining through a link", () => {
   it("says when the admin's app answered", () => {
     openGroup(viaLink(ALICE));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining…");
-    expect(screen.getByTestId("group-joining")).toHaveTextContent("Joining Friends…");
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Joining ⁨Friends⁩…");
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app answered: getting the group's keys.");
+  });
+
+  it("the joining card's title keeps the group's name in its own direction", () => {
+    // It was put in as it is: in Arabic, "Book club!" read "!Book club" (the "!" taken by the line's direction).
+    openGroup({ ...viaLink(ALICE), name: "Book club!" });
+    expect(screen.getByRole("heading", { name: "Joining ⁨Book club!⁩…" })).toBeInTheDocument();
+  });
+
+  it("let into a community five minutes ago and still no keys: says no member could finish, and to ask for the current link", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // The welcome was lost and the link replaced since: nobody answers the old link's knocks any more.
+      const admitted = (admittedAt: number) => groupView({ profile: "community", canSend: false,
+        invitation: { linkId: "", contact: "", admin: ALICE, members: 0, accepted: true, viaLink: true, stage: "admitted", admittedAt } });
+      const stuck = "No member could finish letting you in. Ask someone in the group for the current link.";
+      const view = openGroup(admitted(Date.now()));
+      const card = screen.getByTestId("group-joining");
+      expect(card).toHaveTextContent("A member's app answered: getting the group's keys. You are in in a moment.");
+      act(() => { vi.advanceTimersByTime(5 * 60_000 - 1_000); });
+      expect(card).not.toHaveTextContent(stuck);
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(card).toHaveTextContent(stuck);
+      expect(card).not.toHaveTextContent("You are in in a moment");
+      expect(spoken()).toEqual([stuck]);
+      // It keeps knocking: the steps and Cancel joining stay.
+      expect(screen.getByTestId("group-joining-steps")).toHaveAttribute("data-stage", "admitted");
+      expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
+      // Let in again since (a member answered a later knock): the moment starts over.
+      act(() => view.engine.update({ groups: [admitted(Date.now())] }));
+      expect(card).toHaveTextContent("You are in in a moment");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("welcomed within five minutes: never told no member could finish", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const view = openGroup(groupView({ profile: "community", canSend: false,
+        invitation: { linkId: "", contact: "", admin: ALICE, members: 0, accepted: true, viaLink: true, stage: "admitted", admittedAt: Date.now() } }));
+      act(() => { vi.advanceTimersByTime(4 * 60_000); });
+      act(() => view.engine.update({ groups: [active()] }));
+      act(() => { vi.advanceTimersByTime(2 * 60_000); });
+      expect(document.body).not.toHaveTextContent("No member could finish letting you in");
+    } finally { vi.useRealTimers(); }
   });
 
   const staged = (stage: GroupJoinStage, admin = "") => groupView({ canSend: false, invitation: { linkId: "", contact: "", admin, members: 0, accepted: true, viaLink: true, stage } });
   const steps = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.getAttribute("data-state"));
+  /** The text of every live region on the page that says something now: what a screen reader is told. */
+  const spoken = () => [...document.querySelectorAll("[role=status], [role=alert], [role=log], [aria-live]")]
+    .filter(el => el.getAttribute("aria-live") !== "off" && !el.parentElement?.closest("[role=status], [role=alert], [role=log], [aria-live]"))
+    .map(el => el.textContent!.trim()).filter(Boolean);
+
+  it.each([
+    ["knocking", "", [], "Knock left for the admin's app", "Waiting to be let in"],
+    ["knocked", "", ["Knock left for the admin's app"], "The admin's app answered", "Knock left for the admin's app"],
+    ["answered", "", ["Knock left for the admin's app", "The admin's app answered"], "Let in: getting the group's keys", "The admin's app answered"],
+    ["admitted", ALICE, ["Knock left for the admin's app", "The admin's app answered", "Let in: getting the group's keys"], "Connecting to the members", "Let in: getting the group's keys"],
+  ] as const)("each join step says its state to a screen reader, and only the step just reached is said: %s", (stage, admin, done, current, said) => {
+    // Knocked just now: the two-minute hint is not due.
+    openGroup({ ...staged(stage, admin), createdAt: Date.now() });
+    const items = within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem");
+    // The step under way is the current one; the ones reached say so in words, not only with a hidden ✓.
+    expect(items.filter(li => li.getAttribute("aria-current") === "step").map(li => li.textContent)).toEqual([current]);
+    expect(items.filter(li => li.textContent!.endsWith(" (done)")).map(li => li.textContent!.replace("✓", "").replace(" (done)", ""))).toEqual(done);
+    // The card is no live region: one short line is, and Cancel joining is outside it.
+    expect(screen.getByTestId("group-joining")).not.toHaveAttribute("role");
+    expect(screen.getByTestId("group-joining-cancel").closest("[role=status], [aria-live]")).toBeNull();
+    expect(spoken()).toEqual([said]);
+  });
+
+  it("a stage change is said once, as the step just reached, not the whole card again", () => {
+    const view = openGroup({ ...staged("knocking"), profile: "community", createdAt: Date.now() });
+    const said: string[][] = [spoken()];
+    for (const stage of ["knocked", "answered", "admitted"] as const) {
+      act(() => view.engine.update({ groups: [{ ...staged(stage, stage === "admitted" ? ALICE : ""), profile: "community", createdAt: Date.now() }] }));
+      said.push(spoken());
+    }
+    expect(said).toEqual([["Waiting to be let in"], ["Knock sent to the group"], ["A member's app is answering"], ["Let in: getting the group's keys"]]);
+  });
+
+  it("a dead end or the two-minute hint is what the live line says", async () => {
+    const view = openGroup(groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }));
+    expect(spoken()).toEqual(["Knock sent to the group"]);
+    await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 });
+    expect(spoken()).toEqual(["Still no answer. If the link was replaced, ask for the new one."]);
+    act(() => view.engine.update({ groups: [{ ...staged("replaced"), profile: "community" }] }));
+    expect(spoken()).toEqual(["This link was replaced or turned off"]);
+  });
 
   it.each([
     ["knocking", "", "Leaving a knock where the admin's app looks for one", ["current", "todo", "todo", "todo"]],
@@ -317,6 +460,22 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-joining")).toHaveTextContent(text);
     expect(screen.getByTestId("group-joining-steps")).toHaveAttribute("data-stage", stage);
     expect(steps()).toEqual(states);
+  });
+
+  it("with others knocking just before, says the admin's app may be busy letting them in, not that it must be opened", () => {
+    const view = staged("knocked");
+    openGroup({ ...view, invitation: { ...view.invitation!, othersKnocked: true } });
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Others knocked too, so the admin's app may be busy letting them in. You can leave this page.");
+    expect(screen.getByTestId("group-joining")).not.toHaveTextContent("It happens once the admin's app is open");
+  });
+
+  it("with others knocking, two minutes on: says the group lets people in a few at a time, not that the link may be dead", async () => {
+    const view = staged("knocked");
+    openGroup({ ...view, createdAt: Date.now() - 2 * 60_000 + 400, invitation: { ...view.invitation!, othersKnocked: true } });
+    const hint = await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 });
+    expect(hint).toHaveTextContent("Still waiting: the group lets people in a few at a time.");
+    expect(screen.getByTestId("group-joining")).not.toHaveTextContent("link was replaced");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("Still waiting: the group lets people in a few at a time.");
   });
 
   it("says the link was replaced or turned off, with no steps left to wait on", () => {
@@ -332,7 +491,7 @@ describe("GroupChat: joining through a link", () => {
     const labels = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.textContent);
     openGroup({ ...staged("answered"), profile: "community" });
     expect(screen.getByTestId("group-joining")).toHaveTextContent("A member is letting you in");
-    expect(labels()).toEqual(["✓Knock sent to the group", "✓A member's app is answering", "Let in: getting the group's keys", "Connecting to the group"]);
+    expect(labels()).toEqual(["✓Knock sent to the group (done)", "✓A member's app is answering (done)", "Let in: getting the group's keys", "Connecting to the group"]);
     expect(steps()).toEqual(["done", "done", "current", "todo"]);
   });
 
@@ -359,6 +518,40 @@ describe("GroupChat: joining through a link", () => {
     await user.click(screen.getByTestId("group-joining-cancel"));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
     expect(screen.getByText("Chat list")).toBeInTheDocument();
+  });
+
+  /** A phone's shell: one screen at a time, the chat list mounted but hidden until home shows (App's mobile layout). */
+  function PhoneList() {
+    return <div hidden={useLocation().pathname !== "/"}><Sidebar /></div>;
+  }
+
+  it.each([["a desktop", false], ["a phone", true]] as const)(
+    "Cancel joining from the keyboard hands the focus to the next row of the list, or to New after the last, on %s", async (_, phone) => {
+    // It was left on the page's body once home: the next Tab started again from the top, and nothing was said.
+    if (phone) {
+      // As a browser does: a hidden element (the list, while the group's page fills the screen) takes no focus.
+      const focus = HTMLElement.prototype.focus;
+      vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, options?: FocusOptions) { if (!this.closest("[hidden]")) focus.call(this, options); });
+    }
+    const joiningOne = viaLink("");
+    const other = active({ id: "group-2", name: "Others" });
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    for (const [groups, next] of [[[joiningOne, other], "group-2"], [[joiningOne], undefined]] as const) {
+      fakeEngine.update({ groups: [...groups] });
+      const { user, engine, unmount } = renderApp(<UpdateProvider>{phone ? <PhoneList /> : <Sidebar />}<Routes>
+        <Route path="/" element={<p>Chat list</p>} />
+        <Route path="/group/:groupId" element={<GroupChat />} />
+      </Routes></UpdateProvider>, { route: "/group/group-1" });
+      engine.on("forgetGroup", () => { fakeEngine.update({ groups: groups.slice(1) }); });
+      screen.getByTestId("group-joining-cancel").focus();
+      await user.keyboard("{Enter}");
+      expect(engine.callsTo("forgetGroup").slice(-1)).toEqual([{ groupId: "group-1" }]);
+      expect(await screen.findByText("Chat list")).toBeInTheDocument();
+      await vi.waitFor(() => expect(screen.queryAllByTestId("group-row").map(r => r.dataset.group)).toEqual(next ? [next] : []));
+      const row = next && screen.getAllByTestId("group-row").find(r => r.dataset.group === next)!;
+      await vi.waitFor(() => expect(row ? within(row).getByTestId("group-row-open") : screen.getByTestId("sidebar-new-chat")).toHaveFocus());
+      unmount();
+    }
   });
 });
 
@@ -485,12 +678,24 @@ describe("GroupChat: out of the group", () => {
     expect(screen.getByTestId("group-options")).toHaveFocus();
   });
 
+  it("removed from a community and knocking again: Try again on a link nobody answered keeps the focus on the notice's Cancel joining", async () => {
+    // Try again goes once the knock starts again: the focus went with it, to the page.
+    const unanswered = () => ({ ...knockingAgain(), invitation: { ...knockingAgain().invitation!, unanswered: true } });
+    const { user, engine } = openGroup(unanswered());
+    engine.on("acceptGroupInvitation", () => { fakeEngine.update({ groups: [knockingAgain()] }); });
+    within(screen.getByTestId("group-notice")).getByTestId("group-link-retry").focus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    expect(screen.queryByTestId("group-link-retry")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-rejoin-cancel")).toHaveFocus();
+  });
+
   it("removed from a community and knocking again: a cancel the engine refuses is said, and the knock goes on", async () => {
     const { user, engine } = openGroup(knockingAgain());
     engine.on("declineGroupInvitation", () => { throw new Error("No invitation to decline"); });
     await user.click(within(screen.getByTestId("group-notice")).getByRole("button", { name: "Cancel joining" }));
     expect(await within(screen.getByTestId("group-notice")).findByRole("alert")).toBeInTheDocument();
-    expect(screen.getByTestId("group-chat")).toBeInTheDocument();
+    expect(within(screen.getByTestId("group-notice")).getByTestId("group-rejoin-cancel")).toBeInTheDocument();
   });
 
   it("names the status when the engine gave no reason, in the notice too", () => {
@@ -544,6 +749,53 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-rotate"));
     expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+  });
+
+  // Each rotation is a commit of its own (a fresh epoch every member fetches): a second press while the first is still
+  // going must not sign a second one.
+  describe("while a rotation is still going", () => {
+    const pending = (engine: typeof fakeEngine) => {
+      const calls: { resolve: () => void; reject: (e: Error) => void }[] = [];
+      engine.on("rotateGroup", () => new Promise<void>((resolve, reject) => { calls.push({ resolve, reject }); }));
+      return calls;
+    };
+    const rotateRow = async (user: ReturnType<typeof openGroup>["user"]) => {
+      await user.click(screen.getByTestId("group-options"));
+      return within(screen.getByTestId("group-options-menu")).getByTestId("group-rotate");
+    };
+
+    it("Rotate keys is busy and a second press sends nothing; once done it can be pressed again", async () => {
+      const { user, engine } = openGroup(active({ isAdmin: true }));
+      const calls = pending(engine);
+      await user.click(await rotateRow(user));
+      const again = await rotateRow(user);
+      await user.click(again);
+      expect(engine.callsTo("rotateGroup")).toHaveLength(1);
+      expect(again).toHaveAttribute("aria-disabled", "true");
+      expect(again).toHaveAttribute("aria-busy", "true");
+      // Busy, not disabled: the row keeps the focus it has and its place in the menu's arrow keys.
+      expect(again).not.toBeDisabled();
+      again.focus();
+      await user.keyboard("{Enter}");
+      expect(engine.callsTo("rotateGroup")).toHaveLength(1);
+      expect(again).toHaveFocus();
+      await act(async () => calls[0]!.resolve());
+      expect(again).not.toHaveAttribute("aria-disabled");
+      await user.click(again);
+      expect(engine.callsTo("rotateGroup")).toHaveLength(2);
+    });
+
+    it("a refused rotation says why and lets it be pressed again", async () => {
+      const { user, engine } = openGroup(active({ isAdmin: true }));
+      const calls = pending(engine);
+      await user.click(await rotateRow(user));
+      await act(async () => calls[0]!.reject(new Error("Bob is not reachable")));
+      expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+      const again = await rotateRow(user);
+      expect(again).not.toHaveAttribute("aria-disabled");
+      await user.click(again);
+      expect(engine.callsTo("rotateGroup")).toHaveLength(2);
+    });
   });
 
   // One page for every group (Root.tsx): a refusal in one group's notice is about that group, not the next one opened.
@@ -602,6 +854,18 @@ describe("GroupChat: the options menu", () => {
       expect(screen.getByTestId("group-name")).toHaveTextContent("Others");
       expect(screen.queryByTestId("group-notice")).not.toBeInTheDocument();
     });
+
+    it("a rotation still going in one group leaves Rotate keys free in the next", async () => {
+      const { user, engine } = open(other());
+      engine.on("rotateGroup", () => new Promise<void>(() => {}));
+      await rotate(user);
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      await user.click(screen.getByTestId("group-options"));
+      const row = within(screen.getByTestId("group-options-menu")).getByTestId("group-rotate");
+      expect(row).not.toHaveAttribute("aria-disabled");
+      await user.click(row);
+      expect(engine.callsTo("rotateGroup")).toEqual([{ groupId: "group-1" }, { groupId: "group-2" }]);
+    });
   });
 
   it("deletes the group from this device only after confirming, and says it leaves the group", async () => {
@@ -610,7 +874,8 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
+    // The name is a <bdi> of its own: read as text, as the testing library's accessible name puts a space after it.
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Delete Friends?");
     expect(dialog).toHaveTextContent("Deleting the group from this device also leaves it.");
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(engine.callsTo("forgetGroup")).toEqual([]);
@@ -683,11 +948,37 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: "Delete \u2068Friends\u2069?" })).toBeInTheDocument();
     expect(dialog).toHaveTextContent("The group and its history go from this device.");
     expect(dialog).not.toHaveTextContent("contact");
     await user.click(within(dialog).getByRole("button", { name: "Delete from this device" }));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
+  });
+
+  it.each(["removed", "left"] as const)(
+    "Delete from the keyboard on a %s group's page hands the focus to the next row of the list, or to New after the last", async status => {
+    // The ⋮ the dialog gives it back to goes with the page: it was left on the page's body once home.
+    const gone = active({ status, canSend: false });
+    const other = active({ id: "group-2", name: "Others" });
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    for (const [groups, next] of [[[gone, other], "group-2"], [[gone], undefined]] as const) {
+      fakeEngine.update({ groups: [...groups] });
+      const { user, engine, unmount } = renderApp(<UpdateProvider><Sidebar /><Routes>
+        <Route path="/" element={<p>Chat list</p>} />
+        <Route path="/group/:groupId" element={<GroupChat />} />
+      </Routes></UpdateProvider>, { route: "/group/group-1" });
+      engine.on("forgetGroup", () => { fakeEngine.update({ groups: groups.slice(1) }); });
+      screen.getByTestId("group-options").focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId("group-forget").focus();
+      await user.keyboard("{Enter}");
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Delete from this device" }).focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByText("Chat list")).toBeInTheDocument();
+      const row = next && screen.getAllByTestId("group-row").find(r => r.dataset.group === next)!;
+      await vi.waitFor(() => expect(row ? within(row).getByTestId("group-row-open") : screen.getByTestId("sidebar-new-chat")).toHaveFocus());
+      unmount();
+    }
   });
 
   it("deleting an invitation says its sender is told it was declined", async () => {
@@ -695,8 +986,8 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
-    expect(dialog).toHaveTextContent("The invitation goes from this device. Ana is told you declined.");
+    expect(within(dialog).getByRole("heading", { name: "Delete \u2068Friends\u2069?" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("The invitation goes from this device. \u2068Ana\u2069 is told you declined.");
     expect(dialog).not.toHaveTextContent("Your contact");
   });
 
@@ -718,7 +1009,7 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveTextContent("The invitation and the group's history go from this device. Ana is told you declined.");
+    expect(dialog).toHaveTextContent("The invitation and the group's history go from this device. \u2068Ana\u2069 is told you declined.");
     await user.click(within(dialog).getByRole("button", { name: "Delete from this device" }));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
   });
@@ -739,7 +1030,7 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Delete Friends?");
     expect(dialog).toHaveTextContent("Deleting the group from this device also leaves it.");
     expect(dialog).toHaveTextContent("to come back, open the group's link again");
     // A community is no chat with a contact: none of the chat dialog's words.
@@ -755,6 +1046,53 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     expect(within(screen.getByRole("dialog")).getByTestId("group-leave-successor")).toHaveTextContent("You are the admin: Alice becomes the admin when you leave.");
+  });
+
+  it("tells a community's admin when joiners through the link never answer, and asks before replacing the link", async () => {
+    // Every other New link asks first: the link shared so far, wherever it was posted, stops letting people in.
+    const entryLink = "ghostly://c/group-1";
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink, community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    engine.on("enableGroupLink", () => ({ link: entryLink }));
+    expect(screen.getByTestId("group-knocks-unanswered")).toHaveTextContent("People opening the link may not be getting in");
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    expect(screen.getByTestId("group-link-ask-dialog")).toHaveAttribute("data-kind", "reset");
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: "group-1", reset: true }]);
+    // The new link is to share again: its sheet opens.
+    expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+  });
+
+  it("keeps the link when the unanswered joiners' New link question is cancelled", async () => {
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink: "ghostly://c/group-1", community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    engine.on("enableGroupLink", () => ({ link: "ghostly://c/group-1" }));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    await user.click(within(screen.getByTestId("group-link-ask-dialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("group-link-ask-dialog")).toBeNull();
+    expect(engine.callsTo("enableGroupLink")).toEqual([]);
+    expect(screen.queryByTestId("group-share-dialog")).toBeNull();
+  });
+
+  it("replaces the link once when the unanswered joiners' New link is pressed again while it works", async () => {
+    // A reset seals a fresh key to every member, a slice at a time: the button is pressed again before it ends.
+    const entryLink = "ghostly://c/group-1";
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, entryLink, community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    let done = () => {};
+    engine.on("enableGroupLink", () => new Promise(resolve => { done = () => resolve({ link: entryLink }); }));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    await user.click(screen.getByTestId("group-knocks-reset"));
+    // Pressed while it works, it asks nothing again.
+    expect(screen.queryByTestId("group-link-ask-dialog")).toBeNull();
+    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: "group-1", reset: true }]);
+    expect(screen.getByTestId("group-knocks-reset")).toHaveAttribute("aria-busy", "true");
+    await act(async () => { done(); });
+    expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+  });
+
+  it("says nothing of unanswered joiners to a member, or with none", async () => {
+    openGroup(active({ profile: "community", community: { hub: true, hubs: 1, connected: 0, unansweredKnocks: 16 } }));
+    expect(screen.queryByTestId("group-knocks-unanswered")).toBeNull();
   });
 
   it("deletes a community nobody is connected to anyway, and says the others still list the person", async () => {
@@ -834,7 +1172,7 @@ describe("GroupChat: leaving", () => {
   it("says what leaving means before it happens, and can be called off", async () => {
     const { user, engine } = openGroup(active());
     const dialog = await leaveFromMenu(user);
-    expect(within(dialog).getByRole("heading", { name: "Leave Friends?" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading")).toHaveTextContent("Leave Friends?");
     expect(dialog).toHaveTextContent("The group and its history go from this device.");
     expect(within(dialog).queryByTestId("group-leave-successor")).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
@@ -849,6 +1187,19 @@ describe("GroupChat: leaving", () => {
   ] as const)("says how to come back to a %s group", async (profile, line) => {
     const { user } = openGroup(active({ profile }));
     expect(await leaveFromMenu(user)).toHaveTextContent(line);
+  });
+
+  // The last one in: nobody is left to answer the link or let anyone in, so leaving (or Delete) ends the group for good.
+  it.each([
+    ["mesh", "group-leave"], ["community", "group-leave"], ["mesh", "group-forget"], ["community", "group-forget"],
+  ] as const)("tells the last member of a %s group that it ends, not how to come back (%s)", async (profile, item) => {
+    const { user } = openGroup(active({ profile, isAdmin: true, members: [member({ key: ME, me: true, online: true, role: "admin" })] }));
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId(item));
+    const dialog = screen.getByTestId("group-leave-dialog");
+    expect(dialog).toHaveTextContent("You are the only member: the group and its history end here, and nobody can join it again.");
+    expect(dialog).not.toHaveTextContent("come back");
+    expect(within(dialog).getByTestId("group-leave-confirm")).toBeEnabled();
   });
 
   it("leaves, and goes back to the chat list: the group is gone from it", async () => {
@@ -968,7 +1319,8 @@ describe("GroupChat: history and sending", () => {
       stored({ id: "m2", member: "gone".padEnd(52, "y"), text: "bye" }),
       stored({ id: "m3", sender: "me", member: ME, text: "hello" }),
     ]);
-    expect(await screen.findByText("Alice joined")).toBeInTheDocument();
+    // Alice is the admin: her name in the line carries the admin's mark.
+    expect((await screen.findAllByTestId("group-event"))[0]).toHaveTextContent(/^Alice admin joined$/);
     expect(screen.getByText("You are now the admin")).toBeInTheDocument();
     expect(screen.getByText("~Alice")).toBeInTheDocument();
     // Someone no longer in the roster: named by their key.
@@ -994,7 +1346,7 @@ describe("GroupChat: history and sending", () => {
       stored({ id: "e2", event: "gone", member: gone, text: "Caio is no longer a member" }),
     ]);
     expect(await screen.findByText("~Caio")).toBeInTheDocument();
-    expect(screen.getByText("Caio joined")).toBeInTheDocument();
+    expect(screen.getAllByTestId("group-event")[0]).toHaveTextContent(/^Caio joined$/);
     expect(screen.queryByText(/Member goneyyyy/)).not.toBeInTheDocument();
   });
 

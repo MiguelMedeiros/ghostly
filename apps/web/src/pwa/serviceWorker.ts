@@ -1,6 +1,7 @@
-import { receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
+import { checkVersionFeed } from "@ghostly/browser/updateFeed";
+import { carryIncomingShare, incomingShare, receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
 import { activeProfileId, listProfiles, switchProfile } from "../../../ui/src/lib/profiles";
-import type { FromWorker, ToWorker } from "../sw/messages";
+import type { ChatTaken, FromWorker, ToWorker, WindowSays } from "../sw/messages";
 
 /*
  * The page's side of the service worker (`src/sw/sw.ts`): registering it, putting a new version in place when
@@ -45,43 +46,92 @@ export function prepareUpdate(): void {
 /**
  * The new worker once it is installed. Called after `update()` settled: a new script is `installing` by then, so
  * with neither a waiting nor an installing worker the active one is already the newest (another tab's Reload put it
- * in control of this page too) and there is nothing to wait for.
+ * in control of this page too) and there is nothing to wait for (`"none"`). `"failed"`: the new worker's install
+ * failed (it went redundant: a file of its precache missing, storage full, the network gone mid-way) or did not
+ * finish in time.
+ *
+ * One installing goes before one already waiting: `update()` found a deploy newer than the waiting one's (a worker
+ * waits while its banner is not pressed, and later deploys come). Told to skip waiting, the older one would take
+ * over with the newer one still filling its cache, and the newer one would take over again at the next start. Not
+ * done in time, the waiting one is still a whole newer build than the page's, and goes as before.
  */
-function installed(registration: ServiceWorkerRegistration, timeoutMs: number): Promise<ServiceWorker | null> {
-  if (registration.waiting) return Promise.resolve(registration.waiting);
+function installed(registration: ServiceWorkerRegistration, timeoutMs: number): Promise<ServiceWorker | "none" | "failed"> {
   const worker = registration.installing;
-  if (!worker) return Promise.resolve(null);
+  if (!worker) return Promise.resolve(registration.waiting ?? "none");
+  if (worker.state === "redundant") return Promise.resolve("failed");
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(registration.waiting), timeoutMs);
+    const timer = setTimeout(() => resolve(registration.waiting ?? "failed"), timeoutMs);
     worker.addEventListener("statechange", () => {
       if (worker.state === "installed") { clearTimeout(timer); resolve(worker); }
-      if (worker.state === "redundant") { clearTimeout(timer); resolve(null); }
+      if (worker.state === "redundant") { clearTimeout(timer); resolve("failed"); }
     });
   });
+}
+
+/** The build this page runs, as `/version.json` names it; null where the build does not say (the dev server, tests). */
+function runningBuild(): { version: string; build: string } | null {
+  return typeof __APP_VERSION__ === "string" && typeof __APP_BUILD__ === "string" ? { version: __APP_VERSION__, build: __APP_BUILD__ } : null;
+}
+
+/**
+ * Whether the server answers now with another build than this page's (a new version, a redeploy or a rollback).
+ * False whenever that is not sure: no answer (offline, a timeout, an error status), one that does not read as a
+ * version file, or a page that does not know its own build. `/version.json` always goes to the network (`policy.ts`).
+ */
+async function otherBuildOut(): Promise<boolean> {
+  const running = runningBuild();
+  if (!running) return false;
+  try {
+    return (await checkVersionFeed({
+      url: new URL("version.json", document.baseURI).toString(),
+      currentVersion: running.version,
+      currentBuild: running.build,
+      // Any other build than this one, whatever its version: the worker that failed to install was that build's.
+      buildGone: true,
+      apply: "reload",
+    })) !== null;
+  } catch {
+    return false;
+  }
 }
 
 /** This page pressed Reload and reloads on its own once the new worker takes it (not `followNewVersion`). */
 let applying = false;
 
 /**
- * Reload into the new version: the waiting worker (fetched now if it is not yet) takes over, then the page
- * reloads on it. The worker never does this on its own, so a deploy never swaps the app under a chat. With no
- * worker, none newer, or one that does not finish installing in time, it is a plain reload.
+ * Reload into the new version: the newest worker takes over (the one `update()` finds installing, waited for, else
+ * the one waiting), then the page reloads on it. The worker never does this on its own, so a deploy never swaps the
+ * app under a chat. With no worker or none newer, it is a plain reload.
+ *
+ * A new worker that cannot install (its fetch refused, its install failed, or not done in time) would leave the old
+ * one answering the reload with the old build's page, every time Reload is pressed. So once `/version.json` says
+ * another build is out, the old worker is unregistered first: the reload then loads the new build from the network,
+ * which registers its own worker again (`registerServiceWorker`), and only offline use waits for that one to install.
+ * Without that answer (offline, the server down, no other build) the old worker stays: it is what opens the app
+ * offline. The old build's caches stay too: the next worker's install takes the files they share from them, and its
+ * activation deletes them.
  */
 export async function applyUpdate({ timeoutMs = 60_000, reload = () => window.location.reload() } = {}): Promise<void> {
   const workers = container();
   const registration = await workers?.getRegistration().catch(() => undefined);
   if (workers && registration?.active && workers.controller) {
-    await registration.update().catch(() => {});
-    const next = await installed(registration, timeoutMs);
-    if (next) {
-      applying = true;
-      await new Promise<void>((resolve) => {
-        workers.addEventListener("controllerchange", () => resolve(), { once: true });
-        setTimeout(resolve, 10_000);
-        tell(next, { type: "skip-waiting" });
-      });
-      applying = false;
+    const fetched = await registration.update().then(() => true, () => false);
+    const found = await installed(registration, timeoutMs);
+    if ((found === "failed" || (found === "none" && !fetched)) && await otherBuildOut()) {
+      await registration.unregister().catch(() => false);
+    } else {
+      // The newer worker failed to install and the server could not say another build is out (offline): one that
+      // was already waiting is still a whole build newer than the page's, and goes as before.
+      const next = found === "failed" ? registration.waiting : found;
+      if (next && next !== "none") {
+        applying = true;
+        await new Promise<void>((resolve) => {
+          workers.addEventListener("controllerchange", () => resolve(), { once: true });
+          setTimeout(resolve, 10_000);
+          tell(next, { type: "skip-waiting" });
+        });
+        applying = false;
+      }
     }
   }
   reload();
@@ -157,26 +207,86 @@ export function openedForShare(): boolean {
 
 /**
  * What the worker tells this page, now and later. Shares: a share made while this tab is the app arrives here from
- * another tab that opened for it, and each goes to the "Share to…" picker. A wake-up notification tapped: its chat.
- * A file of this build gone from the server: the app's update check runs now (`onBuildGone`).
+ * another tab that opened for it, and each goes to the "Share to…" picker. A file of this build gone from the server:
+ * the app's update check runs now (`onBuildGone`). A wake-up notification tapped: `listenForTaps`. `peerLock`: the lock
+ * this page holds as its profile's peer, which the worker checks before it forwards a share here.
  */
-export function listenForShares(): void {
+export function listenForShares(peerLock?: string): void {
   const workers = container();
   if (!workers) return;
   workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
     const message = event.data;
-    if (message?.type === "open-chat") { openChat(message.path, message.profile); return; }
     if (message?.type === "build-gone") { noteBuildGone(); return; }
+    // The worker restarted since this page last said it takes shares, and has one to forward: said again, unfocused.
+    if (message?.type === "share-where") { here(); return; }
     if (message?.type !== "share" || !message.item) return;
     const { item } = message;
-    // The page restarts with it still in the picker (a profile switch): the worker holds it again for the next page.
-    const carry = () => {
+    // The page restarts with it still in the picker (a profile switch): the worker holds it again for the next page,
+    // with the count of those not kept that it shows.
+    const carry = (lost?: number) => {
       if (!workers.controller) return false;
-      tell(workers.controller, { type: "share-keep", item });
+      tell(workers.controller, { type: "share-keep", item, ...(typeof lost === "number" && lost > 0 && { dropped: lost }) });
       return true;
     };
-    receiveShare({ ...(item as IncomingShare), carry });
-    if (!openedForShare()) window.location.hash = "#/shared";
+    // Any website can post to the share target: a share waits behind one already in the picker, never in its place.
+    // The picker opens wherever it is not on screen, so the one it shows is never one left there unseen (the person
+    // went to a chat with it still waiting). Those the worker could not keep are said with it.
+    const dropped = typeof message.dropped === "number" && message.dropped > 0 ? message.dropped : 0;
+    receiveShare({ ...(item as IncomingShare), carry, ...(dropped > 0 && { dropped }) }, { queue: true });
+    if (incomingShare() && !openedForShare()) window.location.hash = "#/shared";
+  });
+  workers.startMessages();
+  // A share into this same window replaces this page with one opened for it: the shares still in the picker go back
+  // to the worker, which hands them to that page ahead of the new one, instead of going with this page.
+  // Said to the worker too, so it forwards no share to this page on its way out without waiting for its lock to go;
+  // a page that dies says nothing, and the lock the browser lets go of says it then.
+  addEventListener("pagehide", () => {
+    carryIncomingShare();
+    tell(workers.controller, { type: "share-away" });
+  });
+  // This page takes the shares forwarded to its profile: the worker gives one to the page of the profile in front last.
+  // With it, how Web Locks names this page as its holder (not the worker's id for the page, in Chromium): the worker
+  // forwards only to a page whose lock is still held, and the browser lets go of a dead page's without a word.
+  const holder = peerLock ? lockHolder(peerLock) : Promise.resolve(undefined);
+  const here = () => void holder.then((lock) => tellReady({ type: "share-here", profile: activeProfileId(), ...(lock && { lock }) }));
+  here();
+  addEventListener("focus", here);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") here(); });
+}
+
+/** The holder of the lock `name` this page holds, as `navigator.locks.query()` names it; undefined where it cannot tell. */
+async function lockHolder(name: string): Promise<string | undefined> {
+  const state = await Promise.resolve().then(() => navigator.locks.query()).catch(() => null);
+  return state?.held?.find((lock) => lock.name === name)?.clientId;
+}
+
+/** Tells the active worker, once there is one, even before it controls this page. */
+function tellReady(message: ToWorker): void {
+  const workers = container();
+  void workers?.ready.then((registration) => tell(workers.controller ?? registration.active, message)).catch(() => {});
+}
+
+/**
+ * A wake-up notification tapped, heard from the moment the page loads, whether it runs the app or waits behind another
+ * tab. The push worker first asks every window what it runs (`open-ask`), to tell the one that holds the notice's
+ * profile's peer to open the chat (`open-chat`). One that waits gets it only when no window answered for that profile
+ * (a new window it opened, or pages of an older build): of its own profile, the chat is where it starts once it takes
+ * over; of another, it runs nothing, so it switches. `peer`: whether this page holds its profile's peer yet.
+ *
+ * One that said nothing in time (frozen or busy) is told only on a guess (`silent`): holding another profile's peer, it
+ * stays that profile (WISP 04) and hands the chat back, and the worker opens a new window on it.
+ */
+export function listenForTaps(peer: () => boolean): void {
+  const workers = container();
+  if (!workers) return;
+  workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
+    const message = event.data;
+    if (message?.type === "open-ask") { event.ports[0]?.postMessage({ profile: activeProfileId(), peer: peer() } satisfies WindowSays); return; }
+    if (message?.type !== "open-chat") return;
+    if (!message.silent) { openChat(message.path, message.profile); return; }
+    const taken = message.profile === activeProfileId() || !peer();
+    if (taken) openChat(message.path, message.profile);
+    event.ports[0]?.postMessage({ taken } satisfies ChatTaken);
   });
   workers.startMessages();
 }
@@ -196,19 +306,55 @@ export function openChat(path: string, profile: string): void {
   if (listProfiles().some((p) => p.id === profile)) switchProfile(profile, { route: path });
 }
 
-/** This page holds the peer: ask the worker for the share it is holding for it. */
-export function askForShare(): void {
+/**
+ * This page holds the peer: ask the worker for the share it is holding for it. `opened`: whether this page was opened
+ * for one, when its address may no longer say so (a link reached it while it waited behind another tab).
+ */
+export function askForShare(opened = openedForShare()): void {
   const workers = container();
-  if (!workers || !openedForShare()) return;
-  void workers.ready.then((registration) => tell(workers.controller ?? registration.active, { type: "share-ready" })).catch(() => {});
+  if (!workers || !opened) return;
+  tellReady({ type: "share-ready", profile: activeProfileId() });
 }
 
 /** How long a tab opened for a share waits for the peer's lock before it hands the share to the tab that holds it. */
 export const SHARE_FORWARD_AFTER_MS = 3000;
 
-/** Another tab holds the peer: the worker hands the share to that one instead. */
-export function forwardShare(): void {
+/**
+ * Another tab of this profile holds the peer: the worker hands the share to that one instead, and to no other.
+ * `answered` hears what came of it: handed over (true), or nothing was held to forward (false). Told at once to the
+ * worker that controls this page, so it is said even from `pagehide`. `opened`: whether this page was opened for one,
+ * when its address may no longer say so.
+ */
+export function forwardShare(answered: (forwarded: boolean) => void = () => {}, opened = openedForShare()): void {
   const workers = container();
-  if (!workers || !openedForShare()) return;
-  void workers.ready.then((registration) => tell(workers.controller ?? registration.active, { type: "share-forward" })).catch(() => {});
+  if (!workers || !opened) return;
+  workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
+    const type = event.data?.type;
+    if (type === "share-forwarded" || type === "share-none") answered(type === "share-forwarded");
+  });
+  workers.startMessages();
+  const message: ToWorker = { type: "share-forward", profile: activeProfileId() };
+  if (workers.controller) tell(workers.controller, message);
+  else tellReady(message);
+}
+
+/**
+ * This tab opened for a share while another tab of its profile is the app: that tab gets it. Not at once: a share
+ * posted from this same window (the system opens the app's window for it) replaces a page that holds the lock a moment
+ * longer on its way out, so the share is forwarded after `afterMs`, unless this tab holds the peer by then (`peer`:
+ * it asks for it itself). Closed or left before that, it forwards as it goes. Either way the worker hands it only to a
+ * page that holds the peer's lock and still does a moment later, so never to the page on its way out; none, it keeps
+ * it for the next app page. `answered`: the worker handed it over, or there was none. A link that reaches this tab
+ * meanwhile takes its address (and the tab that is the app takes it out again): the share is forwarded all the same.
+ * `opened`: whether this page was opened for one, read as it opened (a link may have taken the address since).
+ */
+export function handShareOver(peer: () => boolean, answered: (state: "shared" | "shareNone") => void, opened = openedForShare(), afterMs = SHARE_FORWARD_AFTER_MS): void {
+  let asked = false;
+  const forward = () => {
+    if (asked || peer()) return;
+    asked = true;
+    forwardShare((forwarded) => { if (!peer()) answered(forwarded ? "shared" : "shareNone"); }, opened);
+  };
+  setTimeout(forward, afterMs);
+  addEventListener("pagehide", forward);
 }

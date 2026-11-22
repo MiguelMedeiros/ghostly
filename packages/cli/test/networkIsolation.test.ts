@@ -101,6 +101,10 @@ describe("the CLI's knobs for a private network", () => {
     expect(irohRelays({})).toBeNull();
     expect(irohRelays({ GHOSTLY_IROH_RELAYS: " http://127.0.0.1:4020 , https://iroh.lan/ ," })).toEqual(["http://127.0.0.1:4020", "https://iroh.lan/"]);
     expect(() => irohRelays({ GHOSTLY_IROH_RELAYS: "http://iroh.lan" })).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/GHOSTLY_IROH_RELAYS: Use an https:\/\/ relay/) }));
+    // The Iroh endpoint takes five at most: a sixth left the profile with no Iroh at all, each chat's endpoint refused.
+    const relays = (n: number) => Array.from({ length: n }, (_, i) => `https://iroh${i}.lan/`).join(",");
+    expect(irohRelays({ GHOSTLY_IROH_RELAYS: relays(5) })).toHaveLength(5);
+    expect(() => irohRelays({ GHOSTLY_IROH_RELAYS: relays(6) })).toThrow(expect.objectContaining({ code: "usage", message: "GHOSTLY_IROH_RELAYS: use at most 5 Iroh relays, not 6" }));
   });
 
   it("GHOSTLY_STUN=0: the apps' public STUN servers out, the profile's own kept", () => {

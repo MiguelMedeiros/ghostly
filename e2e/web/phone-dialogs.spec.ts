@@ -217,10 +217,14 @@ test("on an iPhone: a message's quick bar opened while typing puts the keyboard 
   await keyboard(page, KEYBOARD);
 
   const row = page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: "hold me while typing" }).last();
+  // The text shows at once in a row of its own (useChat's sending row), which takes no reaction; the engine's row takes
+  // its place once it has stored it. A press on the first is lost with it: pressed once the row that takes one is there.
+  await expect(row.getByTestId("message-react-action")).toBeAttached();
   const box = (await row.boundingBox())!;
   const at = { pointerType: "touch", button: 0, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2, bubbles: true };
   await row.dispatchEvent("pointerdown", at);
-  await page.waitForTimeout(700);
+  // Held until the bar is up, as a finger is.
+  await expect(page.getByTestId("reaction-bar")).toBeVisible();
   await row.dispatchEvent("pointerup", at);
   await expect(page.getByTestId("reaction-bar")).toBeVisible();
   await expect(input).not.toBeFocused();
@@ -282,3 +286,25 @@ for (const phone of [{ width: 390, height: 844, keyboard: 336 }, { width: 375, h
     await expect.poll(async () => { const box = (await page.getByTestId("apps-add-dialog").boundingBox())!; return Math.round(box.y + box.height); }).toBe(phone.height);
   });
 }
+
+test("on a phone, a sheet narrower than the screen stands in its middle", { tag: ["@feature:app.mobile-layout", "@feature:invite.qr.show"] }, async ({ peer }) => {
+  // A sheet whose dialog caps its width sat on the left edge, the page showing in the gap on its right: the invite QR
+  // (384px) on every upright phone from 390px, and on its side New wallet (576px), Add identity, Apps → Add.
+  const { page } = await peer("sheet-middle", { mobile: true, viewport: { width: 430, height: 932 } });
+  const centred = async (sheet: Locator, width: number) => {
+    await expect(sheet).toBeVisible();
+    await expect.poll(async () => { const box = (await sheet.boundingBox())!; return Math.abs(box.x - (width - box.x - box.width)) <= 1; }).toBe(true);
+  };
+  await page.getByTitle("New Chat").first().click();
+  await page.getByTestId("chat-options").click();
+  if (!(await page.getByTestId("chat-invite-qr").isVisible())) await page.getByTestId("chat-more-open").click();
+  await page.getByTestId("chat-invite-qr").click();
+  await centred(page.getByTestId("link-qr"), 430);
+  await page.keyboard.press("Escape");
+
+  await page.setViewportSize({ width: 667, height: 375 });
+  await page.goto("/#/");
+  await page.getByTestId("mobile-tabs").getByRole("button", { name: "Wallets" }).click();
+  await page.getByTestId("wallet-add").click();
+  await centred(page.getByTestId("new-wallet"), 667);
+});

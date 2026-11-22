@@ -118,11 +118,20 @@ test("Chess is on the Apps page of a new profile; its first open asks what it ma
   expect(bundles(asked)).toEqual([]);
 });
 
-test("Remove on a built-in app never opened takes it off the list for good", { tag: ["@feature:apps.built-in"] }, async ({ peer }) => {
+test("Remove on a built-in app never opened asks first, then takes it off the list for good", { tag: ["@feature:apps.built-in"] }, async ({ peer }) => {
   const ana = await peer("ana");
   const asked = await withBuiltIns(ana);
   await ana.page.getByTestId("account-apps").click();
   await ana.page.getByTestId("built-in-app").getByRole("button", { name: "Remove Chess" }).click();
+  // One press removes nothing: the question says it is not offered again, and Cancel keeps it.
+  const question = ana.page.getByTestId("built-in-app-remove-question");
+  await expect(question).toContainText("Remove Chess?");
+  await question.getByRole("button", { name: "Cancel" }).click();
+  await expect(ana.page.getByTestId("built-in-app-remove")).toBeFocused();
+  await ana.page.reload();
+  await expect(ana.page.getByTestId("built-in-app")).toContainText("Chess");
+  await ana.page.getByTestId("built-in-app").getByRole("button", { name: "Remove Chess" }).click();
+  await question.getByTestId("built-in-app-remove-confirm").click();
   await expect(ana.page.getByTestId("apps-none")).toBeVisible();
   await ana.page.reload();
   await expect(ana.page.getByTestId("apps-none")).toBeVisible();
@@ -145,7 +154,7 @@ test("in Arabic on a phone, Chess's row keeps Comes with Ghostly whole and its E
   expect(await inSight(hint, "Play chess")).toBe(true);
 });
 
-test("opened from a chat's Apps, Chess runs with the contact, whose card of it opens from their own build", { tag: ["@feature:apps.built-in", "@feature:apps.chat.card"] }, async ({ peer }) => {
+test("opened from a chat's Apps, Chess runs with the contact, whose card of it opens from their own build", { tag: ["@journey", "@feature:apps.built-in", "@feature:apps.chat.card"] }, async ({ peer }) => {
   const [ana, bob] = await Promise.all([peer("ana"), peer("bob")]);
   const [anaAsked, bobAsked] = await Promise.all([withBuiltIns(ana), withBuiltIns(bob)]);
   await setNickname(ana, "Ana");

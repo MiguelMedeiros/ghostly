@@ -11,13 +11,14 @@
  *   ---
  *   - Forward a message to up to five chats and groups at once.
  *
- * `section` names a "### " heading of "## Unreleased", and after " / " a **bold** group under it. A group that does
- * not exist yet is added at the end of its heading, and a heading in its place in the order Security, For users, Fixed,
- * For developers (another one after them). The body is one or more Markdown list items, added at the end of that
- * section, in the files' name order.
+ * `section` names a "### " heading of "## Unreleased" (Security, For users, Fixed or For developers, written so), and
+ * after " / " a **bold** group under it. A group that does not exist yet is added at the end of its heading, and a
+ * heading in its place in that order. The body is one or more Markdown list items (no line of it a heading or an HTML
+ * comment), added at the end of that section, in the files' name order.
  *
  * An optional `release: <major>.<minor>` holds an entry for that release: a bump to an older version (a 1.1.x patch
- * for `release: 1.2`) leaves the file where it is, and the first bump to 1.2.0 or later takes it.
+ * for `release: 1.2`) leaves the file where it is, and the first bump to 1.2.0 or later takes it. A release at or
+ * before the repository's major.minor (package.json) is out already, holds nothing, and the check refuses it.
  *
  *   node tools/scripts/changes.mjs                    check every file, held ones too (CI)
  *   node tools/scripts/changes.mjs --preview          print "## Unreleased" with every entry
@@ -68,15 +69,41 @@ export const RELEASE_GUARDS = [
 /** The only front matter keys a fragment has: a misspelled `release` would otherwise leave its entry unheld. */
 const KEYS = ["section", "release"];
 
+/**
+ * The order of a release's "### " headings: what people came for first. A heading that is not here goes after them.
+ * Without it the order was the files' name order, so holding one entry back could put "Fixed" above "For users".
+ * A fragment names one of these: 1.8.0 published its wallet features under "Changed" and "Added", after "For developers".
+ */
+const HEADINGS = ["Security", "For users", "Fixed", "For developers"];
+const headingRank = (heading) => (HEADINGS.includes(heading) ? HEADINGS.indexOf(heading) : HEADINGS.length);
+
 /** Groups written the other way, with the spelling the changelog uses: two spellings would make two bold groups. */
 const GROUP_SPELLINGS = { Chats: "Chat", Group: "Groups", Call: "Calls", Wallet: "Wallets", App: "Apps", File: "Files", Device: "Devices" };
+
+/** The changelog's groups, so one written in another case ("chat", "Cli") is not a second bold group. */
+const GROUPS = [
+  "Chat", "Groups", "Calls", "Files", "Wallets", "Apps", "Identities", "Devices", "Notifications", "Everywhere", "Android",
+  "Desktop", "Linux Desktop", "Web", "Extension", "CLI", "Website", "CI", "Settings", "Self-hosting", "Transports", "Relays",
+  "Languages", "App lock", "WISPs",
+];
+
+/** How the changelog writes a group: its own spelling, the known one in any case, or with a capital first letter. */
+function groupSpelling(group) {
+  if (Object.hasOwn(GROUP_SPELLINGS, group)) return GROUP_SPELLINGS[group];
+  const known = [...GROUPS, ...Object.keys(GROUP_SPELLINGS)].find((g) => g.toLowerCase() === group.toLowerCase());
+  if (known) return GROUP_SPELLINGS[known] ?? known;
+  return group[0].toUpperCase() + group.slice(1);
+}
 
 /**
  * A fragment's section and bullets, or a list of what is wrong with it. `version` is the repository's (package.json):
  * before a guard's `from`, an entry about that flag must be held for its release.
  */
-export function parseFragment(name, text, version) {
+export function parseFragment(name, saved, version) {
   const problems = [];
+  // Read as written whatever the editor saved: Git for Windows checks files out with CRLF, and some editors start a
+  // file with a byte order mark. Either one made every fragment "start with" the front matter it starts with.
+  const text = saved.replace(/^\uFEFF/, "").replaceAll("\r\n", "\n");
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return { problems: [`${name}: starts with a front matter block (---, section: ..., ---)`] };
   const fields = {};
@@ -88,26 +115,47 @@ export function parseFragment(name, text, version) {
     else fields[pair[1]] = pair[2];
   }
   const section = (fields.section ?? "").trim();
-  const [heading, group, ...rest] = section.split(" / ").map((part) => part.trim());
+  // "For users/Chat" or a no-break space beside the / would be a heading of its own.
+  const spaced = section.replace(/\s*\/\s*/g, " / ");
+  if (spaced !== section) problems.push(`${name}: "section" is written "${spaced}", with a space on each side of /`);
+  const [heading, group, ...rest] = spaced.split(" / ").map((part) => part.trim());
   if (!heading || rest.length || group === "") problems.push(`${name}: "section" is "<### heading>" or "<### heading> / <**group**>"`);
   if (/[#*]/.test(section)) problems.push(`${name}: "section" is the heading's words, without # or **`);
-  if (Object.hasOwn(GROUP_SPELLINGS, group)) problems.push(`${name}: the group is written "${GROUP_SPELLINGS[group]}", not "${group}"`);
+  if (heading && !HEADINGS.includes(heading)) {
+    const known = HEADINGS.find((h) => h.toLowerCase() === heading.toLowerCase());
+    const all = `${HEADINGS.slice(0, -1).join(", ")} or ${HEADINGS.at(-1)}`;
+    problems.push(known ? `${name}: the heading is written "${known}", not "${heading}"` : `${name}: "${heading}" is not a heading of the release notes: write ${all}`);
+  }
+  if (group && groupSpelling(group) !== group) problems.push(`${name}: the group is written "${groupSpelling(group)}", not "${group}"`);
   const body = match[2].trim();
   if (!body) problems.push(`${name}: no text after the front matter`);
   else if (!body.startsWith("- ")) problems.push(`${name}: the text is one or more list items ("- ...")`);
+  // The bump copies every line: "## 9.9.9" would be a release of its own, and "<!--" would stay in "## Unreleased" as its note.
+  for (const line of body.split("\n").slice(1)) {
+    if (/^\s*(#|<!--)/.test(line)) problems.push(`${name}: the line "${line}" would be a heading or a note in the changelog: write it as a list item ("- ...")`);
+  }
   if (/[–—]/.test(text)) problems.push(`${name}: no em or en dashes`);
   const release = fields.release === undefined ? undefined : fields.release.trim();
   const releaseOk = release !== undefined && /^\d+\.\d+$/.test(release);
   if (release !== undefined && !releaseOk) {
     problems.push(`${name}: "release" is the release that takes the entry, as <major>.<minor> (such as 1.2)`);
   }
+  let guarded = false;
   for (const guard of RELEASE_GUARDS) {
     if (version !== undefined && !versionBefore(version, guard.from)) continue;
     if (!guard.entry({ group, body })) continue;
     if (release === undefined || (releaseOk && versionBefore(release, guard.release))) {
       const ships = guard.flag ? `it ships with ${guard.flag} from ${guard.from}` : `it is in no release before ${guard.from}`;
       problems.push(`${name}: an ${guard.about} entry says "release: ${guard.release}" (${ships})`);
+      guarded = true;
     }
+  }
+  // A release already out holds nothing: every bump from here takes the entry, and a patch would announce it.
+  if (releaseOk && version !== undefined && !guarded && !heldFor(release, version)) {
+    const [major, minor] = numbers(version);
+    problems.push(
+      `${name}: "release: ${release}" is out (package.json is ${version}): drop the line, or name the release that ships it, such as ${major}.${minor + 1}`,
+    );
   }
   return { heading, group, body, release, problems };
 }
@@ -179,13 +227,6 @@ export function strayFragments(root = ROOT) {
   }
   return names.filter((name) => name.endsWith(".md") && name !== "README.md").sort().map((name) => `changes/${name}`);
 }
-
-/**
- * The order of a release's "### " headings: what people came for first. A heading that is not here goes after them.
- * Without it the order was the files' name order, so holding one entry back could put "Fixed" above "For users".
- */
-const HEADINGS = ["Security", "For users", "Fixed", "For developers"];
-const headingRank = (heading) => (HEADINGS.includes(heading) ? HEADINGS.indexOf(heading) : HEADINGS.length);
 
 /** CHANGELOG.md with every fragment's items at the end of its section of "## Unreleased". */
 export function assembleChangelog(changelog, fragments) {
@@ -263,6 +304,13 @@ export function releaseChangelog(changelog, fragments, version) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  const preview = args[0] === "--preview";
+  const version = preview ? args[1] : undefined;
+  if ((args.length && !preview) || args.length > 2 || (version !== undefined && !/^\d+\.\d+\.\d+$/.test(version))) {
+    console.error("usage: node tools/scripts/changes.mjs [--preview [<major.minor.patch>]]");
+    process.exit(2);
+  }
   const stray = strayFragments();
   if (stray.length) {
     console.error(`Changelog entries moved to ${CHANGES}/: move ${stray.join(", ")} there (git mv changes/*.md ${CHANGES}/).`);
@@ -275,12 +323,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     for (const p of problems) console.error(`  ${p}`);
     process.exit(1);
   }
-  const preview = process.argv.indexOf("--preview");
-  const version = preview < 0 ? undefined : process.argv[preview + 1];
-  if (version !== undefined && !/^\d+\.\d+\.\d+$/.test(version)) {
-    console.error("usage: node tools/scripts/changes.mjs [--preview [<major.minor.patch>]]");
-    process.exit(1);
-  }
   const { released, held } = version ? splitFragments(fragments, version) : { released: fragments, held: [] };
   let changelog;
   try {
@@ -289,7 +331,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error(`✗ ${error.message}`);
     process.exit(1);
   }
-  if (preview >= 0) {
+  if (preview) {
     const from = changelog.indexOf("## Unreleased");
     const to = changelog.indexOf("\n## ", from + 1);
     console.log(changelog.slice(from, to < 0 ? undefined : to));

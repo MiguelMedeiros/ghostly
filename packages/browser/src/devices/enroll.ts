@@ -1,5 +1,5 @@
 import {
-  turnInstance, DHT_POLL_INTERVALS, ENROLL_CAPABILITY, ENROLL_DONE, ENROLL_GRANT, ENROLL_HELLO, ENROLL_PROOF, GhostLink, classifyTurnRead, createDeviceInvite, deviceInviteJoinerParams, deviceKeyZ32,
+  turnInstance, DEVICE_INVITE_LIFETIME_S, DHT_POLL_INTERVALS, ENROLL_CAPABILITY, ENROLL_DONE, ENROLL_GRANT, ENROLL_HELLO, ENROLL_PROOF, GhostLink, classifyTurnRead, createDeviceInvite, deviceInviteJoinerParams, deviceKeyZ32,
   enrollCancelFrame, enrollCancelReason, enrollDigits, enrollDoneFrame, enrollGrantFrame, enrollHelloFrame, enrollProofFrame, firstDeviceSetSecret, fromBase64Url,
   nextTurnPosition, publicKeyFromZ32, randomBytes, readDeviceInvite, readEnrollGrant, readEnrollHello, signTurnPacket, toBase64Url, turnKeys, turnName, verifyEnrollProof,
   type DeviceFrame, type DeviceInviteRefusal, type DeviceKind, type EnrollCancelReason, type EnrollNetwork, type EnrollSlot, type LinkParams, type NativeEndpoint, type NativeTransport,
@@ -10,7 +10,7 @@ import { DeviceSetError, deviceIdentity, firstTurn, openTurnKeeper } from "./set
 import { createDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
 import { MAX_DEVICES, MAX_UNFINISHED_GRANTS, type DeviceRecord, type DeviceSlot, type UnfinishedGrant } from "./state";
 import { amendDevice, enrollDevice, readDeviceRecord } from "./store";
-import { deviceSetOf, type TurnKeeper } from "./turn";
+import { adoptedSet, deviceSetOf, type TurnKeeper } from "./turn";
 
 /*
  * Adding a device (WISP 06 § Adding a device): `enroll/1` over a one-time session that a device code opens.
@@ -154,8 +154,11 @@ interface Shared {
   /** Seconds and milliseconds since 1970: the code's expiry is in seconds. */
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
-  /** Runs after this device's record was written with the device set: the network settings go in, and the links start. */
-  afterWrite?: () => Promise<void>;
+  /**
+   * Runs after this device's record was written with the device set: the network settings go in, and the links start.
+   * `added`: on the inviter, the signing key (base64url) of the device it just added.
+   */
+  afterWrite?: (added?: string) => Promise<void>;
   /** A view changed. */
   onChange?: (view: EnrollView) => void;
   /** A stored seed in place of a non-extractable key (tests). */
@@ -292,6 +295,8 @@ export class EnrollInviter extends Enrollment {
   private seen = false;
   /** The person answered the digits: one answer is taken, before the record is read or written for it. */
   private answered = false;
+  /** When the code's ten minutes end, in ms. */
+  private expiresAt = 0;
 
   constructor(private readonly options: InviterOptions) {
     super(options, { role: "inviter", step: "waiting", code: "", expires: 0 });
@@ -338,7 +343,9 @@ export class EnrollInviter extends Enrollment {
         this.timer(this.options.timing?.proofMs ?? ENROLL_PROOF_TIMEOUT_MS, () => { if (this.view.step === "waiting") void this.fail("unreached"); });
       },
     });
-    // The ten minutes bound the admission: a code nobody confirmed by then is spent.
+    // The ten minutes bound the admission: a code nobody confirmed by then is spent. The timer may not run on time (a
+    // computer that slept, a throttled tab): the hello and the answer read the clock too.
+    this.expiresAt = side.invite.expires * 1000;
     this.timer(Math.max(0, side.invite.expires * 1000 - this.now()), () => { if (this.view.step === "waiting" || this.view.step === "confirm") void this.fail("expired", "expired"); });
     return this.view;
   }
@@ -348,6 +355,7 @@ export class EnrollInviter extends Enrollment {
     const cancelled = enrollCancelReason(frame);
     if (cancelled) { await this.fail(failureOf(cancelled), undefined, this.joiner?.name); return; }
     if (frame.t === ENROLL_HELLO && this.view.step === "waiting" && this.session && !this.joiner) {
+      if (this.now() >= this.expiresAt) { await this.fail("expired", "expired"); return; }
       const hello = readEnrollHello(frame, this.session.hash, this.key.publicKey, this.session.peerKey);
       if (!hello) { await this.fail("proof", "failed"); return; }
       // The first joiner that authenticated: the code is spent.
@@ -366,6 +374,7 @@ export class EnrollInviter extends Enrollment {
   async confirm(match: boolean): Promise<EnrollView> {
     if (this.over || this.answered || this.view.step !== "confirm" || !this.joiner) throw new Error("There are no digits to confirm");
     this.answered = true;
+    if (this.now() >= this.expiresAt) { await this.fail("expired", "expired", this.joiner.name); return this.view; }
     if (!match) { await this.fail("digits", "digits", this.joiner.name); return this.view; }
     const joiner = this.joiner;
     let slots: EnrollSlot[], ownSlot: number, turn: number, rev: number;
@@ -457,7 +466,7 @@ export class EnrollInviter extends Enrollment {
     }
     this.crash("inviter:after-put");
     const published = await confirmPublished(keeper, this.sleep);
-    await this.options.afterWrite?.().catch(() => {});
+    await this.options.afterWrite?.(toBase64Url(joiner.key)).catch(() => {});
     await this.end({ role: "inviter", step: "done", device: joiner.name, published });
   }
 }
@@ -502,6 +511,8 @@ export class EnrollJoiner extends Enrollment {
   private inviterName = "";
   /** The inviter's packet was seen on the link: a timeout with no session then means the two could not connect. */
   private seen = false;
+  /** When the code was read, on the monotonic clock: the wait for the grant counts from here. */
+  private readAt = 0;
 
   constructor(private readonly options: JoinerOptions) {
     super(options, { role: "joiner", step: "connecting" });
@@ -513,6 +524,7 @@ export class EnrollJoiner extends Enrollment {
     const reading = readDeviceInvite(code, Math.floor(this.now() / 1000));
     if (!reading.ok) throw new EnrollCodeError(reading.reason);
     this.invite = reading;
+    this.readAt = performance.now();
     if (await readDeviceRecord(this.options.profile)) throw new EnrollCodeError("set");
     this.key = await createDeviceSigningKey(this.options.profile, { forceSeed: this.options.forceSeed });
     this.crash("joiner:key-made");
@@ -549,8 +561,11 @@ export class EnrollJoiner extends Enrollment {
       if (!verifyEnrollProof(frame, this.hash, inviterKey, this.key.publicKey)) { await this.fail("proof", "failed"); return; }
       this.proven = true;
       // The person confirms on the other device within the code's ten minutes; no grant by then (and a little after),
-      // and the other device is gone: nothing was written here.
-      const grantMs = this.options.timing?.grantMs ?? Math.max(0, this.invite.invite.expires * 1000 - this.now()) + ENROLL_DONE_TIMEOUT_MS;
+      // and the other device is gone: nothing was written here. The code's expiry is in the other device's clock, and
+      // this one may be days behind it or hours ahead (WISP 06: the inviter enforces the ten minutes): the wait is a
+      // code's whole lifetime from the moment this device read it, on the monotonic clock, whatever either clock says.
+      const left = Math.max(0, DEVICE_INVITE_LIFETIME_S * 1000 - (performance.now() - this.readAt));
+      const grantMs = this.options.timing?.grantMs ?? left + ENROLL_DONE_TIMEOUT_MS;
       this.timer(grantMs, () => { if (!this.committed && this.view.step === "confirm") void this.fail("unanswered", "failed"); });
       this.show({ role: "joiner", step: "confirm", digits: enrollDigits(this.hash, inviterKey, this.key.publicKey) });
       return;
@@ -640,7 +655,7 @@ export async function finishEnrollment(profile: string, network: TurnNetwork, op
     if (read && read.result === "other" && read.record && read.payload && !read.record.tombstone && listsAt(read, ownKey, record.ownSlot)) {
       const seen = Number(read.record.sequence);
       await amendDevice(profile, {
-        turn: read.record.turn, rev: read.record.rev, turnPacket: toBase64Url(read.payload), activeSlot: read.record.active, deviceSet: deviceSetOf(read.record),
+        turn: read.record.turn, rev: read.record.rev, turnPacket: toBase64Url(read.payload), activeSlot: read.record.active, deviceSet: adoptedSet(record.deviceSet, null, read.record, record.activeSlot),
         ...(seen > (record.seenSequence ?? 0) ? { seenSequence: seen } : {}),
       });
       return true;

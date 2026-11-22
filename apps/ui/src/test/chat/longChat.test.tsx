@@ -26,7 +26,7 @@ vi.mock("../../lib/fileStatus", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../lib/fileStatus")>();
   return { ...real, canRetryFile: (...args: Parameters<typeof real.canRetryFile>) => { draws.files.push(args[0].id); return real.canRetryFile(...args); } };
 });
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const COUNT = 300;

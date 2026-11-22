@@ -25,6 +25,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # GitHub's ubuntu-24.04 runners refuse the unprivileged user namespaces Chromium's sandbox needs ("Chromium sandboxing
+  # failed!"): the e2e and site checks launch it without here, as before; our own machines keep it on (e2e/support/chromiumSandbox.ts).
+  E2E_CHROMIUM_SANDBOX: "0"
+
 jobs:
   # The web and extension suites in four shards, each on its own runner with its own build, mint and relay; the
   # report job merges them into one HTML report. On one runner they took 66-81 minutes (v1.5.0 to v1.7.3), and
@@ -86,14 +91,16 @@ jobs:
         # @release-skip: specs that have not passed on a GitHub runner yet and do not gate a release until they
         # do (the nightly E2E (full) still runs them). See the follow-up issue before adding one.
         # @network: the tests that need a service on the Internet; a release never waits on one.
-        run: npm run test:e2e -- --grep-invert "@release-skip|@network" --shard ${{ matrix.shard }}/4
+        # The shards split by recorded time (e2e/shard.mjs), not by Playwright's --shard: its equal counts in file
+        # order gave shard 2 every devices, dht and group story, 25 to 34 minutes against 15 to 22 for the others.
+        run: npm run build:extension && node e2e/shard.mjs ${{ matrix.shard }} 4 --grep-invert "@release-skip|@network"
 
       - name: Run end-to-end tests against ${{ inputs.web_url }}
         if: ${{ inputs.web_url }}
         env:
           E2E_WEB_URL: ${{ inputs.web_url }}
           E2E_MINT_URL: http://127.0.0.1:3338
-        run: npx playwright test -c e2e/playwright.config.ts --project=web --shard ${{ matrix.shard }}/4
+        run: node e2e/shard.mjs ${{ matrix.shard }} 4 --project=web
 
       # The shard's results with their traces, videos and screenshots (the config's blob reporter on CI), for the report job.
       - name: Upload the shard's results
@@ -138,6 +145,19 @@ jobs:
       # blob-report/: on CI the config's own blob reporter empties that folder when it ends.
       - name: Merge the report
         run: npx playwright merge-reports -c e2e/playwright.config.ts all-blob-reports
+
+      # Every test's time, for `node e2e/shard.mjs --record` after a spec is added or gets slower.
+      - name: Merge the times
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: e2e-results.json
+        run: npx playwright merge-reports --reporter json all-blob-reports
+
+      - name: Upload the times
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-results
+          path: e2e-results.json
+          retention-days: 14
 
       - name: Upload report
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -45,7 +45,19 @@ async function prepareSend(p: Peer, sats: number, memo?: string) {
   const composer = p.page.getByTestId("payment-composer");
   await p.page.getByTestId("payment-amount").fill(String(sats));
   if (memo) await composer.getByPlaceholder("What for? (optional)").fill(memo);
-  await p.page.getByTestId("payment-send").click();
+  const send = p.page.getByTestId("payment-send");
+  // A click the sheet takes shows at once: Send says "Preparing…" until the review or an error takes its place. On a host
+  // at a load of 13 to 17 with its swap full, one click on Send, enabled and in place as the turned card came to rest,
+  // changed nothing for a minute: no review, no error, Send as before. Only such a lost click is made again.
+  const taken = () => composer.evaluate((sheet) => {
+    const button = sheet.querySelector('[data-testid="payment-send"]');
+    return !button || button.textContent !== "Send" || !!sheet.querySelector('[data-testid="payment-review"], [data-tone]');
+  }).catch(() => true);
+  await expect(async () => {
+    if (await taken()) return;
+    await send.click({ timeout: 10_000 });
+    await expect.poll(taken, { timeout: 5_000 }).toBe(true);
+  }).toPass({ timeout: 30_000 });
   const review = composer.getByTestId("payment-review");
   // A review that never comes says what the sheet shows in its place (an error, Send still preparing, no sheet at all):
   // the round's log is all that is kept of a failure.
@@ -387,7 +399,8 @@ test("a payment from ecash spent somewhere else ends with that reason, and the b
 
   // "Copy backup", and the tokens redeemed outside Ghostly, straight at the mint.
   await alice.page.getByRole("button", { name: "Copy backup" }).click();
-  await expect(alice.page.getByText(/Backup copied/)).toBeVisible();
+  // The visible notice, below the button; a screen-reader status in the same section says the same words.
+  await expect(alice.page.getByTestId("wallet-backup").getByTestId("wallet-notice")).toContainText("Backup copied");
   const tokens = (await alice.page.evaluate(() => navigator.clipboard.readText())).split("\n").filter(Boolean);
   const { Wallet } = await import("@cashu/cashu-ts");
   const elsewhere = new Wallet(mintEndpoint(), { unit: "sat" });

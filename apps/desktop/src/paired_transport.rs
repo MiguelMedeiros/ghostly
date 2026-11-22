@@ -3,10 +3,14 @@
 use base64::Engine;
 use futures_util::{Stream, StreamExt};
 use ghostly_transports::iroh_transport as wire;
-use iroh::{endpoint::Connection, Endpoint, Watcher};
+use iroh::{
+    dns::{BoxIter, DnsError, DnsResolver, Resolver, TxtRecordData},
+    endpoint::Connection,
+    Endpoint, Watcher,
+};
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -28,6 +32,12 @@ pub enum Event {
         id: u64,
         text: String,
     },
+    /// A binary message (WISP 102 § Frames), in base64, as HyperDHT's (`hyperdht.rs`).
+    #[serde(rename = "frame")]
+    Binary {
+        id: u64,
+        bytes: String,
+    },
     Closed {
         id: u64,
     },
@@ -35,17 +45,63 @@ pub enum Event {
     Address {
         descriptor: wire::Address,
     },
+    /// The endpoint is connected to its home relay again, after it lost it (`tell_relay_back`).
+    RelayBack {},
 }
-/// A frame for the stream, and who hears once it is written there.
-type Outgoing = (String, oneshot::Sender<()>);
+/// A frame for the stream (its bytes, and whether it is a binary message), and who hears once it is written there.
+type Outgoing = (Vec<u8>, bool, oneshot::Sender<()>);
+
+/// Bytes of a connection's frames the page may have been handed and not taken yet (`paired_native_took`). Past it the
+/// connection is read no further: a contact faster than the page waits on QUIC's flow control, not in the WebView's
+/// queue, which a channel's `send` fills without ever waiting.
+const RECEIVE_CREDIT: u32 = 512 * 1024;
+/// What each frame costs of the credit besides its bytes: each is an event of its own for the page, however small.
+const FRAME_COST: u32 = 1024;
+
+/// What the page may still be handed on a connection, and what each frame it was handed and not taken cost, oldest
+/// first.
+struct Credit {
+    room: tokio::sync::Semaphore,
+    handed: Mutex<std::collections::VecDeque<u32>>,
+}
+impl Credit {
+    fn new() -> Self {
+        Credit {
+            room: tokio::sync::Semaphore::new(RECEIVE_CREDIT as usize),
+            handed: Mutex::default(),
+        }
+    }
+    /// Waits for room for a frame of `size` bytes, and its `FRAME_COST`, and counts it as handed.
+    async fn hand(&self, size: u32) -> Result<(), String> {
+        let size = size + FRAME_COST;
+        self.room
+            .acquire_many(size)
+            .await
+            .map_err(|_| "Native UI unavailable")?
+            .forget();
+        self.handed.lock().unwrap().push_back(size);
+        Ok(())
+    }
+    /// The page took the oldest `frames` it was handed (more than it was handed counts as all of them).
+    fn took(&self, frames: usize) {
+        let mut handed = self.handed.lock().unwrap();
+        let frames = frames.min(handed.len());
+        let bytes: u32 = handed.drain(..frames).sum();
+        self.room.add_permits(bytes as usize);
+    }
+}
+
 struct Socket {
     connection: Connection,
     tx: mpsc::Sender<Outgoing>,
+    credit: Arc<Credit>,
     /// The page's word for the app's exit on this connection (`paired_native_parting`), sent by `part`.
     parting: Option<String>,
 }
 struct Peer {
     endpoint: Endpoint,
+    /// The relays it was started on (none: n0's public ones), the only non-public ones a contact is dialled through.
+    relays: Vec<String>,
     events: Channel<Event>,
     listener: tokio::task::JoinHandle<()>,
     watcher: tokio::task::JoinHandle<()>,
@@ -61,6 +117,9 @@ impl Peer {
 /// How long an address is left to settle before the page is told: a network change moves the home relay and the
 /// direct addresses one after the other, and each word to the page is a record published again.
 const ADDRESS_SETTLES: Duration = Duration::from_secs(1);
+
+/// How many incoming connections an endpoint admits at once (a handshake, then a stream with its preface).
+const ADMITTING: usize = 4;
 
 /// Tells the page the endpoint's address each time it came to be another than the last one `said`, so the page
 /// never asks. `changes` yields when something about the address moved (Iroh's own watcher), `current` reads it.
@@ -82,6 +141,27 @@ async fn tell_address(
         }
     }
 }
+/// Tells the page each time the endpoint is connected to a home relay again after it lost every one: `connected` yields
+/// whether any is, each time that may have changed (Iroh's `home_relay_status`), and `up` is how it was at the start.
+async fn tell_relay_back(
+    mut connected: impl Stream<Item = bool> + Unpin,
+    mut up: bool,
+    events: Channel<Event>,
+) {
+    // Homing on a relay for the first time is not being back on one.
+    let mut ever = up;
+    while let Some(now) = connected.next().await {
+        if now && !up && ever {
+            crate::diagnostics::log("iroh: back on its home relay");
+            if events.send(Event::RelayBack {}).is_err() {
+                break;
+            }
+        }
+        ever |= now;
+        up = now;
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     peers: HashMap<u64, Peer>,
@@ -132,6 +212,7 @@ impl TransportState {
         .map_err(|_| "Native stream timed out")??;
         let id = self.next();
         let (tx, mut rx) = mpsc::channel::<Outgoing>(32);
+        let credit = Arc::new(Credit::new());
         {
             let mut inner = self.inner.lock().unwrap();
             if !inner.peers.contains_key(&peer)
@@ -147,6 +228,7 @@ impl TransportState {
                     Socket {
                         connection: connection.clone(),
                         tx,
+                        credit: credit.clone(),
                         parting: None,
                     },
                 ),
@@ -166,8 +248,10 @@ impl TransportState {
         let state = self.clone();
         tokio::spawn(async move {
             tokio::select! {
-                _ = async { while let Some((text, written)) = rx.recv().await { wire::write_frame(&mut send, text.as_bytes()).await?; let _ = written.send(()); } Ok::<(), String>(()) } => {},
-                _ = async { loop { let frame = wire::read_frame(&mut recv).await?; let text = String::from_utf8(frame).map_err(|_| "Non-text paired frame")?; events.send(Event::Frame { id, text }).map_err(|_| "Native UI unavailable")?; } #[allow(unreachable_code)] Ok::<(), String>(()) } => {},
+                // Its sender dropped with the socket still open (an exit, `shutdown`): the stream ends after what was
+                // queued on it, and the connection stays until the contact, having read it all, closes its end.
+                _ = async { while let Some((frame, binary, written)) = rx.recv().await { wire::write_message(&mut send, &frame, binary).await?; let _ = written.send(()); } send.finish().map_err(|e| e.to_string())?; std::future::pending::<Result<(), String>>().await } => {},
+                _ = async { loop { let (frame, binary) = wire::read_message(&mut recv).await?; credit.hand(frame.len() as u32).await?; let event = if binary { Event::Binary { id, bytes: base64::engine::general_purpose::STANDARD.encode(frame) } } else { Event::Frame { id, text: String::from_utf8(frame).map_err(|_| "Non-text paired frame")? } }; events.send(event).map_err(|_| "Native UI unavailable")?; } #[allow(unreachable_code)] Ok::<(), String>(()) } => {},
                 _ = connection.closed() => {},
             }
             state.close(id);
@@ -175,15 +259,24 @@ impl TransportState {
         });
         Ok(id)
     }
+    /// The page took the oldest `frames` it was handed on connection `id`: as many more bytes may come from it.
+    fn took(&self, id: u64, frames: usize) {
+        let credit = self
+            .inner
+            .lock()
+            .unwrap()
+            .sockets
+            .get(&id)
+            .map(|(_, socket)| socket.credit.clone());
+        if let Some(credit) = credit {
+            credit.took(frames);
+        }
+    }
     fn close(&self, id: u64) {
         if let Some((_, socket)) = self.inner.lock().unwrap().sockets.remove(&id) {
             socket.connection.close(0u32.into(), b"closed");
         }
     }
-    /// The app is exiting: every connection is closed and every endpoint stopped, so each contact's
-    /// app hears a close at once (QUIC's CONNECTION_CLOSE) instead of timing out 30 s later, and
-    /// starts watching for this app to come back. Bounded by `within`: exiting never waits on a
-    /// relay that does not answer.
     /// The app is about to exit: what the page left to be said on each connection (`paired_native_parting`, a call's
     /// hang-up) goes now, after whatever it sent, so the contact hears it even when the page is gone (a logout ends
     /// WebKit's processes with the app). Each goes once. Returns once every one is written on its stream.
@@ -198,16 +291,40 @@ impl TransportState {
             .collect();
         futures_util::future::join_all(partings.into_iter().map(|(tx, text)| async move {
             let (written, done) = oneshot::channel();
-            if tx.send((text, written)).await.is_ok() {
+            if tx.send((text.into_bytes(), false, written)).await.is_ok() {
                 let _ = done.await;
             }
         }))
         .await;
     }
+    /// The app is exiting: every connection is closed and every endpoint stopped, so each contact's
+    /// app hears a close at once (QUIC's CONNECTION_CLOSE) instead of timing out 30 s later, and
+    /// starts watching for this app to come back. Bounded by `within`: exiting never waits on a
+    /// relay that does not answer.
+    /// Each stream ends first, after what was written on it (a call's hang-up from `part`), and the
+    /// connection is closed once the contact closed its end, having read it all, or half of `within` passed:
+    /// a close at once threw away what QUIC had not yet sent, and the contact's read with it.
     pub async fn shutdown(&self, within: Duration) {
-        let peers = self.release(b"app exiting");
-        let closing = close_all(peers);
-        let _ = tokio::time::timeout(within, closing).await;
+        let (connections, peers) = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.page += 1;
+            let connections: Vec<Connection> = inner
+                .sockets
+                .drain()
+                .map(|(_, (_, socket))| socket.connection)
+                .collect();
+            let peers: Vec<Peer> = inner.peers.drain().map(|(_, peer)| peer).collect();
+            (connections, peers)
+        };
+        for peer in &peers {
+            peer.silence();
+        }
+        let ended = futures_util::future::join_all(connections.iter().map(Connection::closed));
+        let _ = tokio::time::timeout(within / 2, ended).await;
+        for connection in &connections {
+            connection.close(0u32.into(), b"app exiting");
+        }
+        let _ = tokio::time::timeout(within / 2, close_all(peers)).await;
     }
     /// Every connection closed and every endpoint off the books, now; the endpoints are the caller's to close.
     fn release(&self, why: &'static [u8]) -> Vec<Peer> {
@@ -264,10 +381,17 @@ impl TransportState {
             }
             inner.page
         };
+        let relays_given = relays.to_vec();
         let endpoint = if relays.is_empty() || local_only {
-            wire::endpoint(seed, local_only).await?
+            let own: Vec<String> = wire::default_relays()
+                .urls::<Vec<_>>()
+                .iter()
+                .map(|url| url.to_string())
+                .collect();
+            wire::endpoint(seed, local_only, Some(relay_dns(&own, DnsResolver::new()))).await?
         } else {
-            wire::endpoint_with_relays(seed, relays).await?
+            wire::endpoint_with_relays(seed, relays, Some(relay_dns(relays, DnsResolver::new())))
+                .await?
         };
         let id = self.next();
         let descriptor = wire::address(&endpoint);
@@ -275,21 +399,31 @@ impl TransportState {
         let listener_state = self.clone();
         let listener_events = events.clone();
         let listener = tokio::spawn(async move {
+            // Each connection is admitted beside the others, so one that stalls never holds the next. At most
+            // `ADMITTING` are unfinished at once, even before a socket exists: the oldest goes first. Stopping the
+            // listener drops the set, and every admission with it.
+            let mut admitting = tokio::task::JoinSet::new();
+            let mut order = VecDeque::new();
             while let Some(incoming) = listener_endpoint.accept().await {
-                // Serial admission bounds unfinished handshakes, even before a socket exists.
-                if let Ok(Ok(connection)) =
-                    tokio::time::timeout(Duration::from_secs(10), incoming).await
-                {
-                    let _ = listener_state
-                        .attach(
-                            id,
-                            listener_endpoint.clone(),
-                            connection,
-                            listener_events.clone(),
-                            true,
-                        )
-                        .await;
+                while admitting.try_join_next().is_some() {}
+                order.retain(|admission: &tokio::task::AbortHandle| !admission.is_finished());
+                if order.len() >= ADMITTING {
+                    if let Some(oldest) = order.pop_front() {
+                        oldest.abort();
+                    }
                 }
+                let (state, endpoint, events) = (
+                    listener_state.clone(),
+                    listener_endpoint.clone(),
+                    listener_events.clone(),
+                );
+                order.push_back(admitting.spawn(async move {
+                    if let Ok(Ok(connection)) =
+                        tokio::time::timeout(Duration::from_secs(10), incoming).await
+                    {
+                        let _ = state.attach(id, endpoint, connection, events, true).await;
+                    }
+                }));
             }
         });
         let mut inner = self.inner.lock().unwrap();
@@ -304,16 +438,31 @@ impl TransportState {
             return Err("Native endpoint limit reached".into());
         }
         let watched = endpoint.clone();
-        let watcher = tokio::spawn(tell_address(
-            endpoint.watch_addr().stream_updates_only(),
-            move || wire::address(&watched),
-            descriptor.clone(),
-            events.clone(),
-        ));
+        let mut relays = endpoint.home_relay_status();
+        let on_relay = |statuses: Vec<iroh::endpoint::RelayStatus>| {
+            statuses.iter().any(|status| status.is_connected())
+        };
+        let (address, relay_back) = (
+            tell_address(
+                endpoint.watch_addr().stream_updates_only(),
+                move || wire::address(&watched),
+                descriptor.clone(),
+                events.clone(),
+            ),
+            tell_relay_back(
+                relays.clone().stream_updates_only().map(on_relay),
+                on_relay(relays.get()),
+                events.clone(),
+            ),
+        );
+        let watcher = tokio::spawn(async move {
+            tokio::join!(address, relay_back);
+        });
         inner.peers.insert(
             id,
             Peer {
                 endpoint,
+                relays: relays_given,
                 events,
                 listener,
                 watcher,
@@ -351,6 +500,158 @@ fn iroh_relays(given: Option<Vec<String>>, env: Option<&str>) -> Vec<String> {
         .filter(|relay| !relay.is_empty())
         .map(String::from)
         .collect()
+}
+
+/// Whether a contact is dialled through the relay its descriptor names (none: its direct addresses alone). The contact
+/// chose it and this device opens it on its own, again on each redial: https at a public name or a public address, as
+/// a held item's address is (`isHoldUrl`, packages/core/src/storeForward.ts), or one of the endpoint's own relays
+/// (`own`: the person's, a private network's or a test's) in either spelling. The page checks the same
+/// (`dialableIrohRelay`, packages/core/src/pairedTransports.ts); this is what Rust holds to whoever asks.
+fn dialable_relay(relay: Option<&str>, own: &[String]) -> bool {
+    let Some(relay) = relay else { return true };
+    let spelled = |value: &str| {
+        let mut url = url::Url::parse(value).ok()?;
+        if let Some(url::Host::Domain(name)) = url.host() {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            url.set_host(Some(&name)).ok()?;
+        }
+        Some(url)
+    };
+    let Some(url) = spelled(relay) else {
+        return false;
+    };
+    let own: Vec<url::Url> = own.iter().filter_map(|mine| spelled(mine)).collect();
+    if own.contains(&url) {
+        return true;
+    }
+    // Another port or path at an own relay's name: that name resolves to whatever it answers (`relay_dns`).
+    if own.iter().any(|mine| mine.host() == url.host()) {
+        return false;
+    }
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Domain(name)) => {
+            name.contains('.') && !crate::local_names::under_local_suffix(name)
+        }
+        Some(url::Host::Ipv4(ip)) => crate::link_preview::is_public(ip.into()),
+        Some(url::Host::Ipv6(ip)) => crate::link_preview::is_public(ip.into()),
+        None => false,
+    }
+}
+
+/// The names an endpoint resolves (`system`'s answers), each held to where it may connect: a relay of its own (`own`,
+/// either spelling) to whatever its name answers, as the person set it; any other name, a contact's relay above all, only
+/// to public addresses. `dialable_relay` checks a contact's relay as written; this checks where its name leads each time
+/// Iroh connects there, again on each redial, as a held item's address is (`hold_fetch.rs`, `PublicOnly`). A family
+/// with any address that is not public is answered with none.
+fn relay_dns(own: &[String], system: DnsResolver) -> DnsResolver {
+    let own = own
+        .iter()
+        .filter_map(|relay| Some(host_name(url::Url::parse(relay).ok()?.host_str()?)))
+        .collect();
+    DnsResolver::custom(OwnOrPublic {
+        system,
+        own: Arc::new(own),
+    })
+}
+
+/// A host name as compared here: lowercase, without the trailing dot of a full domain name.
+fn host_name(host: &str) -> String {
+    host.trim_end_matches('.').to_ascii_lowercase()
+}
+
+#[derive(Debug, Clone)]
+struct OwnOrPublic {
+    system: DnsResolver,
+    own: Arc<Vec<String>>,
+}
+
+/// How long one lookup waits for the system's resolver; Iroh bounds the whole call itself as well.
+const LOOKUP_WAITS: Duration = Duration::from_secs(10);
+
+type Lookup<T> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<BoxIter<T>, DnsError>> + Send>>;
+
+impl OwnOrPublic {
+    fn checked<T: Into<std::net::IpAddr> + Copy + Send + 'static>(
+        &self,
+        host: &str,
+        found: Vec<T>,
+    ) -> BoxIter<T> {
+        let mine = self.own.contains(&host_name(host));
+        if mine
+            || found
+                .iter()
+                .all(|ip| crate::link_preview::is_public((*ip).into()))
+        {
+            Box::new(found.into_iter())
+        } else {
+            crate::diagnostics::log(
+                "iroh: a name that resolves to a non-public address is not connected to",
+            );
+            Box::new(std::iter::empty())
+        }
+    }
+}
+
+impl Resolver for OwnOrPublic {
+    fn lookup_ipv4(&self, host: String) -> Lookup<std::net::Ipv4Addr> {
+        let this = self.clone();
+        Box::pin(async move {
+            let found = this.system.lookup_ipv4(&host, LOOKUP_WAITS).await?;
+            let found = found
+                .filter_map(|ip| match ip {
+                    std::net::IpAddr::V4(ip) => Some(ip),
+                    std::net::IpAddr::V6(_) => None,
+                })
+                .collect();
+            Ok(this.checked(&host, found))
+        })
+    }
+
+    fn lookup_ipv6(&self, host: String) -> Lookup<std::net::Ipv6Addr> {
+        let this = self.clone();
+        Box::pin(async move {
+            let found = this.system.lookup_ipv6(&host, LOOKUP_WAITS).await?;
+            let found = found
+                .filter_map(|ip| match ip {
+                    std::net::IpAddr::V6(ip) => Some(ip),
+                    std::net::IpAddr::V4(_) => None,
+                })
+                .collect();
+            Ok(this.checked(&host, found))
+        })
+    }
+
+    fn lookup_txt(&self, host: String) -> Lookup<TxtRecordData> {
+        let system = self.system.clone();
+        Box::pin(async move {
+            let found: BoxIter<TxtRecordData> = Box::new(
+                system
+                    .lookup_txt(host, LOOKUP_WAITS)
+                    .await?
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+            );
+            Ok(found)
+        })
+    }
+
+    fn clear_cache(&self) {
+        self.system.clear_cache();
+    }
+
+    fn reset(&self) -> Box<dyn Resolver> {
+        self.system.reset();
+        Box::new(self.clone())
+    }
 }
 
 #[tauri::command]
@@ -392,6 +693,9 @@ pub async fn paired_iroh_connect(
     let (endpoint, events) = {
         let inner = state.inner.lock().unwrap();
         let peer = inner.peers.get(&endpoint_id).ok_or("Endpoint closed")?;
+        if !dialable_relay(descriptor.relay.as_deref(), &peer.relays) {
+            return Err("The contact's Iroh relay is not one this device dials".into());
+        }
         (peer.endpoint.clone(), peer.events.clone())
     };
     let connection = wire::connect(&endpoint, &descriptor).await?;
@@ -401,14 +705,26 @@ pub async fn paired_iroh_connect(
 }
 /// One frame, answered once it is written on the stream: on a link slower than the page sends, it waits there for
 /// room. So the page counts it against its send budget until then, and the engine sees the queue that is really
-/// there (files and apps keep to their share of it). Only a closed connection is an error.
+/// there (files and apps keep to their share of it). Only a closed connection is an error. The frame is `text`, or
+/// `bytes`: a binary message (WISP 102 § Frames) in base64, as HyperDHT's (`paired_hyperdht_send`).
 #[tauri::command]
 pub async fn paired_native_send(
     state: State<'_, TransportState>,
     connection_id: u64,
-    text: String,
+    text: Option<String>,
+    bytes: Option<String>,
 ) -> Result<(), String> {
-    if text.is_empty() || text.len() > wire::MAX_FRAME {
+    let (frame, binary) = match (text, bytes) {
+        (Some(text), None) => (text.into_bytes(), false),
+        (None, Some(bytes)) => (
+            base64::engine::general_purpose::STANDARD
+                .decode(bytes)
+                .map_err(|_| "Invalid binary frame")?,
+            true,
+        ),
+        _ => return Err("Invalid frame".into()),
+    };
+    if frame.is_empty() || frame.len() > wire::MAX_FRAME {
         return Err("Frame exceeds transport budget".into());
     }
     let tx = state
@@ -422,7 +738,7 @@ pub async fn paired_native_send(
         .tx
         .clone();
     let (written, done) = oneshot::channel();
-    tx.send((text, written))
+    tx.send((frame, binary, written))
         .await
         .map_err(|_| "Connection closed")?;
     done.await.map_err(|_| "Connection closed".into())
@@ -448,6 +764,11 @@ pub fn paired_native_parting(
         .ok_or("Connection closed")?;
     socket.parting = text;
     Ok(())
+}
+/// The page took `frames` more of the connection's frames (`RECEIVE_CREDIT`).
+#[tauri::command]
+pub fn paired_native_took(state: State<'_, TransportState>, connection_id: u64, frames: u32) {
+    state.took(connection_id, frames as usize);
 }
 #[tauri::command]
 pub fn paired_native_close(state: State<'_, TransportState>, connection_id: u64) {
@@ -526,6 +847,305 @@ mod tests {
         (started.id, started.descriptor, seen)
     }
 
+    /// A contact names the relay it is dialled through: never this machine or its network, unless it is one of the
+    /// endpoint's own relays.
+    #[test]
+    fn a_contact_is_dialled_through_a_public_relay_or_one_of_the_endpoints_own() {
+        let none: [String; 0] = [];
+        for relay in [
+            "http://127.0.0.1:4601",
+            "http://localhost:4601/",
+            "http://[::1]:4601/",
+            "https://10.0.0.1/",
+            "https://[::1]/",
+            "https://192.168.1.2/",
+            "https://169.254.169.254/",
+            "https://100.64.0.1/",
+            "https://[fd00::1]/",
+            "https://0x7f.1/",
+            "https://localhost/",
+            "https://router/",
+            "https://nas.local./",
+            "https://user@relay.test/",
+            "https://relay.test/?x=1",
+            "not a relay",
+        ] {
+            assert!(!dialable_relay(Some(relay), &none), "{relay}");
+        }
+        for relay in [
+            None,
+            Some("https://relay.test/"),
+            Some("https://use1-1.relay.n0.iroh.link./"),
+            Some("https://8.8.8.8/"),
+        ] {
+            assert!(dialable_relay(relay, &none), "{relay:?}");
+        }
+        let own = [
+            "http://127.0.0.1:4600".to_string(),
+            "https://10.0.0.1/".to_string(),
+            "https://relay.lan.example./".to_string(),
+        ];
+        for relay in [
+            "http://127.0.0.1:4600/",
+            "https://10.0.0.1",
+            "https://relay.lan.example/",
+        ] {
+            assert!(dialable_relay(Some(relay), &own), "{relay}");
+        }
+        for relay in [
+            "http://127.0.0.1:4601/",
+            "https://10.0.0.2/",
+            "https://relay.lan.example:22/",
+        ] {
+            assert!(!dialable_relay(Some(relay), &own), "{relay}");
+        }
+    }
+
+    /// A DNS that answers each name from a table, and nothing for any other: no lookup leaves this machine.
+    #[derive(Debug)]
+    struct Answers(Vec<(&'static str, std::net::IpAddr)>);
+    impl Answers {
+        fn of<T: Send + 'static>(
+            &self,
+            host: &str,
+            pick: impl Fn(std::net::IpAddr) -> Option<T>,
+        ) -> Lookup<T> {
+            let found: Vec<T> = self
+                .0
+                .iter()
+                .filter(|(name, _)| *name == host)
+                .filter_map(|(_, ip)| pick(*ip))
+                .collect();
+            Box::pin(async move { Ok(Box::new(found.into_iter()) as BoxIter<T>) })
+        }
+    }
+    impl Resolver for Answers {
+        fn lookup_ipv4(&self, host: String) -> Lookup<std::net::Ipv4Addr> {
+            self.of(&host, |ip| match ip {
+                std::net::IpAddr::V4(ip) => Some(ip),
+                _ => None,
+            })
+        }
+        fn lookup_ipv6(&self, host: String) -> Lookup<std::net::Ipv6Addr> {
+            self.of(&host, |ip| match ip {
+                std::net::IpAddr::V6(ip) => Some(ip),
+                _ => None,
+            })
+        }
+        fn lookup_txt(&self, _host: String) -> Lookup<TxtRecordData> {
+            Box::pin(async { Ok(Box::new(std::iter::empty()) as BoxIter<TxtRecordData>) })
+        }
+        fn clear_cache(&self) {}
+        fn reset(&self) -> Box<dyn Resolver> {
+            Box::new(Answers(self.0.clone()))
+        }
+    }
+
+    /// A name a contact's relay is at resolves, for this endpoint, only to public addresses; an own relay's name to
+    /// whatever it answers.
+    #[tokio::test]
+    async fn a_name_other_than_an_own_relays_resolves_only_to_public_addresses() {
+        let ip = |text: &str| text.parse::<std::net::IpAddr>().unwrap();
+        let system = DnsResolver::custom(Answers(vec![
+            ("relay.contact.example", ip("127.0.0.1")),
+            ("relay.contact.example", ip("::1")),
+            ("lan.contact.example", ip("192.168.1.10")),
+            ("mixed.contact.example", ip("8.8.8.8")),
+            ("mixed.contact.example", ip("10.0.0.1")),
+            ("public.contact.example", ip("8.8.8.8")),
+            ("public.contact.example", ip("2001:4860:4860::8888")),
+            ("relay.lan.example", ip("10.0.0.5")),
+            ("Relay.Lan.Example.", ip("10.0.0.6")),
+        ]));
+        let dns = relay_dns(&["https://relay.lan.example./".to_string()], system);
+        let wait = Duration::from_secs(1);
+        let both = |host: &'static str| {
+            let dns = dns.clone();
+            async move {
+                let mut found: Vec<std::net::IpAddr> =
+                    dns.lookup_ipv4(host, wait).await.unwrap().collect();
+                found.extend(dns.lookup_ipv6(host, wait).await.unwrap());
+                found
+            }
+        };
+        for host in [
+            "relay.contact.example",
+            "lan.contact.example",
+            "mixed.contact.example",
+        ] {
+            assert_eq!(both(host).await, Vec::<std::net::IpAddr>::new(), "{host}");
+        }
+        assert_eq!(
+            both("public.contact.example").await,
+            vec![ip("8.8.8.8"), ip("2001:4860:4860::8888")]
+        );
+        assert_eq!(both("relay.lan.example").await, vec![ip("10.0.0.5")]);
+        assert_eq!(both("Relay.Lan.Example.").await, vec![ip("10.0.0.6")]);
+    }
+
+    /// A contact names a relay at a public name whose DNS answers this machine: the endpoint never connects there, on
+    /// the first dial or a redial. A local TCP service counts what reaches it; the same dial with the system's answers
+    /// taken as they are does reach it, so the count would see one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_contacts_relay_whose_name_resolves_to_this_machine_is_not_connected_to() {
+        let service = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = service.local_addr().unwrap().port();
+        let reached = Arc::new(AtomicU64::new(0));
+        let count = reached.clone();
+        let serving = tokio::spawn(async move {
+            while let Ok((socket, _)) = service.accept().await {
+                count.fetch_add(1, Ordering::SeqCst);
+                drop(socket);
+            }
+        });
+        // The endpoint's own relay: one on this machine that nobody runs.
+        let dead = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let own = vec![format!(
+            "http://127.0.0.1:{}/",
+            dead.local_addr().unwrap().port()
+        )];
+        drop(dead);
+        let answers = || {
+            DnsResolver::custom(Answers(vec![(
+                "relay.contact.example",
+                "127.0.0.1".parse().unwrap(),
+            )]))
+        };
+        let contact = wire::Address {
+            id: iroh::SecretKey::from_bytes(&[52; 32]).public().to_string(),
+            relay: Some(format!("https://relay.contact.example:{port}/")),
+            addresses: vec![],
+        };
+        assert!(dialable_relay(contact.relay.as_deref(), &own));
+        let dial = |dns: DnsResolver, seed: u8| {
+            let (own, contact) = (own.clone(), contact.clone());
+            async move {
+                let endpoint = wire::endpoint_with_relays([seed; 32], &own, Some(dns))
+                    .await
+                    .unwrap();
+                for _ in 0..2 {
+                    let _ = tokio::time::timeout(
+                        Duration::from_secs(3),
+                        wire::connect(&endpoint, &contact),
+                    )
+                    .await;
+                }
+                endpoint.close().await;
+            }
+        };
+        dial(relay_dns(&own, answers()), 50).await;
+        assert_eq!(
+            reached.load(Ordering::SeqCst),
+            0,
+            "connected to this machine"
+        );
+        dial(answers(), 51).await;
+        assert!(
+            reached.load(Ordering::SeqCst) > 0,
+            "the dial is seen when it happens"
+        );
+        serving.abort();
+    }
+
+    /// A DNS that answers one name's TXT records, and nothing else: no lookup leaves this machine.
+    #[derive(Debug, Clone)]
+    struct Txt(String, Vec<String>);
+    impl Resolver for Txt {
+        fn lookup_ipv4(&self, _host: String) -> Lookup<std::net::Ipv4Addr> {
+            Box::pin(async { Ok(Box::new(std::iter::empty()) as BoxIter<std::net::Ipv4Addr>) })
+        }
+        fn lookup_ipv6(&self, _host: String) -> Lookup<std::net::Ipv6Addr> {
+            Box::pin(async { Ok(Box::new(std::iter::empty()) as BoxIter<std::net::Ipv6Addr>) })
+        }
+        fn lookup_txt(&self, host: String) -> Lookup<TxtRecordData> {
+            let found: Vec<TxtRecordData> = if host.trim_end_matches('.') == self.0 {
+                vec![TxtRecordData::from(self.1.clone())]
+            } else {
+                vec![]
+            };
+            Box::pin(async move { Ok(Box::new(found.into_iter()) as BoxIter<TxtRecordData>) })
+        }
+        fn clear_cache(&self) {}
+        fn reset(&self) -> Box<dyn Resolver> {
+            Box::new(self.clone())
+        }
+    }
+
+    /// A contact dialled by its id alone, with no relay and no address: the endpoint with no relays set never looks it
+    /// up elsewhere and dials the relay its own record there names, this machine. A local TCP service counts what
+    /// reaches it; the same dial from an endpoint with n0's address lookups does reach it, so the count would see one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_contact_with_no_relay_is_not_looked_up_and_dialled_where_its_own_record_says() {
+        let service = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = service.local_addr().unwrap().port();
+        let reached = Arc::new(AtomicU64::new(0));
+        let count = reached.clone();
+        let serving = tokio::spawn(async move {
+            while let Ok((socket, _)) = service.accept().await {
+                count.fetch_add(1, Ordering::SeqCst);
+                drop(socket);
+            }
+        });
+        let key = iroh::SecretKey::from_bytes(&[53; 32]).public();
+        let record = || {
+            DnsResolver::custom(Txt(
+                format!("_iroh.{}.dns.iroh.link", key.to_z32()),
+                vec![format!("relay=http://127.0.0.1:{port}/")],
+            ))
+        };
+        let own: Vec<String> = wire::default_relays()
+            .urls::<Vec<_>>()
+            .into_iter()
+            .map(|url| url.to_string())
+            .collect();
+        let contact = wire::Address {
+            id: key.to_string(),
+            relay: None,
+            addresses: vec![],
+        };
+        assert!(dialable_relay(contact.relay.as_deref(), &own));
+        let dial = |endpoint: iroh::Endpoint| {
+            let contact = contact.clone();
+            async move {
+                for _ in 0..2 {
+                    let _ = tokio::time::timeout(
+                        Duration::from_secs(3),
+                        wire::connect(&endpoint, &contact),
+                    )
+                    .await;
+                }
+                endpoint.close().await;
+            }
+        };
+        dial(
+            wire::endpoint([54; 32], false, Some(relay_dns(&own, record())))
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(
+            reached.load(Ordering::SeqCst),
+            0,
+            "connected to this machine"
+        );
+        dial(
+            iroh::Endpoint::builder(iroh::endpoint::presets::N0)
+                .relay_mode(iroh::RelayMode::Custom(wire::default_relays()))
+                .dns_resolver(relay_dns(&own, record()))
+                .secret_key(iroh::SecretKey::from_bytes(&[55; 32]))
+                .alpns(vec![wire::ALPN.to_vec()])
+                .bind()
+                .await
+                .unwrap(),
+        )
+        .await;
+        assert!(
+            reached.load(Ordering::SeqCst) > 0,
+            "the dial is seen when it happens"
+        );
+        serving.abort();
+    }
+
     #[test]
     fn iroh_relays_are_the_persons_then_the_environment_then_none() {
         let mine = Some(vec![
@@ -545,15 +1165,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_endpoint_takes_one_to_four_relays_of_its_own() {
+    async fn an_endpoint_takes_one_to_five_relays_of_its_own() {
         let app = app();
         let (events, _) = channel();
-        let five: Vec<String> = (0..5).map(|i| format!("https://r{i}.test/")).collect();
+        // Five is the browser build's limit too: n0's four plus Ghostly's own fit.
+        let six: Vec<String> = (0..6).map(|i| format!("https://r{i}.test/")).collect();
         let refused = app
             .state::<TransportState>()
-            .start([21; 32], events.clone(), false, &five)
+            .start([21; 32], events.clone(), false, &six)
             .await;
-        assert!(refused.is_err(), "more than four relays are refused");
+        assert!(refused.is_err(), "more than five relays are refused");
         // One relay that nobody runs: the endpoint binds all the same, and homes there when it answers.
         app.state::<TransportState>()
             .start(
@@ -644,8 +1265,51 @@ mod tests {
         telling.await.unwrap();
     }
 
-    fn tokio_stream(mut changes: mpsc::UnboundedReceiver<()>) -> impl Stream<Item = ()> + Unpin {
+    fn tokio_stream<T>(mut changes: mpsc::UnboundedReceiver<T>) -> impl Stream<Item = T> + Unpin {
         futures_util::stream::poll_fn(move |cx| changes.poll_recv(cx))
+    }
+
+    /// An Android phone back from Doze: its Iroh lost its relay while the network was cut and finds it again seconds after
+    /// the return. The page is told then, once, and a chat whose knock is still under way knocks again (ghostlink.ts).
+    #[tokio::test]
+    async fn the_page_is_told_when_the_endpoint_is_back_on_its_relay() {
+        let (status, statuses) = mpsc::unbounded_channel::<bool>();
+        let (events, seen) = channel();
+        let telling = tokio::spawn(tell_relay_back(tokio_stream(statuses), true, events));
+        let told = || async {
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            seen.lock().unwrap().clone()
+        };
+        // Still on it, then lost, and still lost: nothing.
+        for connected in [true, false, false] {
+            status.send(connected).unwrap();
+        }
+        assert!(told().await.is_empty());
+        // Back: one word; still on it: nothing more.
+        status.send(true).unwrap();
+        status.send(true).unwrap();
+        assert_eq!(told().await, vec![serde_json::json!({"type": "relayBack"})]);
+        // Lost and back once more: a second word.
+        status.send(false).unwrap();
+        status.send(true).unwrap();
+        assert_eq!(told().await.len(), 2);
+        drop(status);
+        telling.await.unwrap();
+    }
+
+    /// An endpoint that homes on its relay for the first time is not back on it: nothing is said.
+    #[tokio::test]
+    async fn an_endpoint_homing_first_is_not_back_on_its_relay() {
+        let (status, statuses) = mpsc::unbounded_channel::<bool>();
+        let (events, seen) = channel();
+        let telling = tokio::spawn(tell_relay_back(tokio_stream(statuses), false, events));
+        for connected in [false, true, true] {
+            status.send(connected).unwrap();
+        }
+        drop(status);
+        telling.await.unwrap();
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     /// A real endpoint is watched from its start, and no longer once it is stopped.
@@ -698,7 +1362,7 @@ mod tests {
         event(&bob_seen, kind("open")).await;
 
         assert_eq!(state.network_changed().await, 2);
-        paired_native_send(one.state(), sent, "after the change".into())
+        paired_native_send(one.state(), sent, Some("after the change".into()), None)
             .await
             .unwrap();
         let frame = event(&bob_seen, kind("frame")).await;
@@ -775,7 +1439,7 @@ mod tests {
         paired_native_parting(leaving.state(), to_bob, Some(hang_up.into())).unwrap();
         paired_native_parting(leaving.state(), to_carol, Some(hang_up.into())).unwrap();
         paired_native_parting(leaving.state(), to_carol, None).unwrap();
-        paired_native_send(leaving.state(), to_bob, "sent before".into())
+        paired_native_send(leaving.state(), to_bob, Some("sent before".into()), None)
             .await
             .unwrap();
 
@@ -808,6 +1472,41 @@ mod tests {
             .any(|e| e["type"] == "frame"));
     }
 
+    /// An exit nothing held for the page's goodbye (Cmd+Q on a Mac ends the app from `applicationWillTerminate`, and
+    /// only `RunEvent::Exit` runs): the call's hang-up the page left is still said, before the close, so the contact's
+    /// call ends at once instead of when its media gives up.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_exit_nothing_held_still_says_the_hang_up_before_the_close() {
+        let (leaving, staying) = (app(), app());
+        let (alice, _, _) = start(&leaving, 8).await;
+        let (_bob, bob_address, bob_seen) = start(&staying, 9).await;
+        let to_bob = connect(&leaving, alice, &bob_address).await.unwrap();
+        let from_alice = event(&bob_seen, kind("open")).await["id"].clone();
+        let hang_up = r#"{"t":"paired-call","s":"{\"t\":\"h\",\"ts\":1700000000002}"}"#;
+        paired_native_parting(leaving.state(), to_bob, Some(hang_up.into())).unwrap();
+
+        crate::leave(leaving.handle()).await;
+        event(&bob_seen, kind("closed")).await;
+        let frames: Vec<Value> = bob_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["type"] == "frame")
+            .cloned()
+            .collect();
+        assert_eq!(
+            frames,
+            vec![serde_json::json!({"type": "frame", "id": from_alice, "text": hang_up})]
+        );
+        assert!(leaving
+            .state::<TransportState>()
+            .inner
+            .lock()
+            .unwrap()
+            .peers
+            .is_empty());
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn frames_travel_both_ways_over_a_connection_bound_to_its_handshake() {
         let app = app();
@@ -829,7 +1528,7 @@ mod tests {
         );
         let incoming = accepted["id"].as_u64().unwrap();
 
-        paired_native_send(app.state(), outgoing, "hello bob".into())
+        paired_native_send(app.state(), outgoing, Some("hello bob".into()), None)
             .await
             .unwrap();
         let frame = event(&bob_seen, kind("frame")).await;
@@ -838,15 +1537,60 @@ mod tests {
             (Some(incoming), Some("hello bob"))
         );
         let largest = "x".repeat(wire::MAX_FRAME);
-        paired_native_send(app.state(), incoming, largest.clone())
+        paired_native_send(app.state(), incoming, Some(largest.clone()), None)
             .await
             .unwrap();
         let frame = event(&alice_seen, kind("frame")).await;
         assert_eq!(frame["text"].as_str().map(str::len), Some(wire::MAX_FRAME));
     }
 
-    /// A channel whose page takes no frame while `stalled` holds: a contact on a link slower than this side writes.
-    fn slow_channel(stalled: Arc<AtomicBool>) -> (Channel<Event>, Seen) {
+    /// A binary message (WISP 102 § Frames: a file's bytes where the session agreed `files/4`) crosses as bytes, in
+    /// base64 between the page and Rust as HyperDHT's, up to a text frame's budget, and a text after it is still text.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn binary_messages_travel_both_ways_beside_text() {
+        let app = app();
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        let (alice, _, alice_seen) = start(&app, 64).await;
+        let (_bob, bob_address, bob_seen) = start(&app, 65).await;
+        let outgoing = connect(&app, alice, &bob_address).await.unwrap();
+        let incoming = event(&bob_seen, kind("open")).await["id"].as_u64().unwrap();
+
+        // Not UTF-8: as text, this closed the connection ("Non-text paired frame").
+        let bytes = [0u8, 0xff, 0xfe, 0x80];
+        paired_native_send(app.state(), outgoing, None, Some(encode(&bytes)))
+            .await
+            .unwrap();
+        paired_native_send(app.state(), outgoing, Some("after the bytes".into()), None)
+            .await
+            .unwrap();
+        let frame = event(&bob_seen, kind("frame")).await;
+        assert_eq!(
+            (
+                frame["id"].as_u64(),
+                frame["bytes"].as_str(),
+                frame.get("text")
+            ),
+            (Some(incoming), Some(encode(&bytes).as_str()), None)
+        );
+        event(&bob_seen, |e| e["text"] == "after the bytes").await;
+
+        let largest = vec![0xffu8; wire::MAX_FRAME];
+        paired_native_send(app.state(), incoming, None, Some(encode(&largest)))
+            .await
+            .unwrap();
+        let frame = event(&alice_seen, kind("frame")).await;
+        assert_eq!(frame["bytes"].as_str(), Some(encode(&largest).as_str()));
+        assert!(!bob_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .chain(alice_seen.lock().unwrap().iter())
+            .any(|e| e["type"] == "closed"));
+    }
+
+    /// A channel whose page takes no frame while `stalled` holds: a contact on a link slower than this side writes. Each
+    /// frame it takes it tells `state` of, as the page does.
+    fn slow_channel(stalled: Arc<AtomicBool>, state: TransportState) -> (Channel<Event>, Seen) {
         let seen: Seen = Arc::default();
         let log = seen.clone();
         let channel = Channel::new(move |body| {
@@ -854,6 +1598,9 @@ mod tests {
                 let event: Value = serde_json::from_str(&json).unwrap();
                 while event["type"] == "frame" && stalled.load(Ordering::SeqCst) {
                     std::thread::sleep(Duration::from_millis(10));
+                }
+                if event["type"] == "frame" {
+                    state.took(event["id"].as_u64().unwrap(), 1);
                 }
                 log.lock().unwrap().push(event);
             }
@@ -867,7 +1614,7 @@ mod tests {
         id: u64,
         text: String,
     ) -> Result<(), String> {
-        paired_native_send(app.state(), id, text).await
+        paired_native_send(app.state(), id, Some(text), None).await
     }
 
     /// An app sending at its full rate over a link slower than that: each frame waits for room on the stream, in
@@ -878,7 +1625,10 @@ mod tests {
         let app = app();
         let (alice, _, alice_seen) = start(&app, 60).await;
         let stalled = Arc::new(AtomicBool::new(true));
-        let (events, bob_seen) = slow_channel(stalled.clone());
+        let (events, bob_seen) = slow_channel(
+            stalled.clone(),
+            app.state::<TransportState>().inner().clone(),
+        );
         let bob = app
             .state::<TransportState>()
             .start([61; 32], events, true, &[])
@@ -936,27 +1686,181 @@ mod tests {
             .any(|e| e["type"] == "closed"));
     }
 
+    /// A contact that writes faster than the page takes its frames: what Rust handed the page and the page did not take
+    /// stays within the connection's credit, and Rust reads no further meanwhile (the contact waits on QUIC's window).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_page_is_handed_no_more_than_it_took_and_its_credit() {
+        let app = app();
+        let (alice, _, _) = start(&app, 62).await;
+        let (events, bob_seen) = channel();
+        let bob = app
+            .state::<TransportState>()
+            .start([63; 32], events, true, &[])
+            .await
+            .unwrap();
+        let outgoing = connect(&app, alice, &bob.descriptor).await.unwrap();
+        let incoming = event(&bob_seen, kind("open")).await["id"].as_u64().unwrap();
+
+        // More than QUIC's stream window (`STREAM_WINDOW`) holds besides the credit: the contact has to wait.
+        let frames = 128;
+        let handle = app.handle().clone();
+        let sending = tokio::spawn(async move {
+            for i in 0..frames {
+                let text = format!("{i:05}{}", "x".repeat(wire::MAX_FRAME - 5));
+                send(&handle, outgoing, text).await?;
+            }
+            Ok::<(), String>(())
+        });
+        let handed = || {
+            bob_seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| e["type"] == "frame")
+                .map(|e| e["text"].as_str().unwrap().len())
+                .sum::<usize>()
+        };
+        let count = || {
+            bob_seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| e["type"] == "frame")
+                .count()
+        };
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(
+            handed() <= RECEIVE_CREDIT as usize,
+            "the page was handed {} bytes it never took",
+            handed()
+        );
+        assert!(!sending.is_finished(), "the contact waits for the page");
+
+        // The page takes them, a few at a time: the rest comes, in order, and the contact's sends all go.
+        let state = app.state::<TransportState>();
+        let mut told = 0;
+        for _ in 0..400 {
+            let taken = count();
+            paired_native_took(state.clone(), incoming, (taken - told) as u32);
+            told = taken;
+            if taken == frames {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        sending.await.unwrap().unwrap();
+        let order: Vec<String> = bob_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["type"] == "frame")
+            .map(|e| e["text"].as_str().unwrap()[..5].to_string())
+            .collect();
+        assert_eq!(
+            order,
+            (0..frames).map(|i| format!("{i:05}")).collect::<Vec<_>>()
+        );
+    }
+
+    /// A contact that writes the smallest frames there are, faster than the page takes them: each is an event of its
+    /// own for the page, so the credit counts frames as well as bytes, and the page is handed no more of them than it
+    /// allows. Once it takes them, the rest comes.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_page_is_handed_no_more_small_frames_than_its_credit_counts() {
+        let app = app();
+        let (alice, _, _) = start(&app, 64).await;
+        let (events, bob_seen) = channel();
+        let bob = app
+            .state::<TransportState>()
+            .start([65; 32], events, true, &[])
+            .await
+            .unwrap();
+        let outgoing = connect(&app, alice, &bob.descriptor).await.unwrap();
+        let incoming = event(&bob_seen, kind("open")).await["id"].as_u64().unwrap();
+
+        let frames = 4 * (RECEIVE_CREDIT / FRAME_COST) as usize;
+        let handle = app.handle().clone();
+        let sending = tokio::spawn(async move {
+            for _ in 0..frames {
+                send(&handle, outgoing, "x".into()).await?;
+            }
+            Ok::<(), String>(())
+        });
+        let count = || {
+            bob_seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| e["type"] == "frame")
+                .count()
+        };
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(
+            count() <= (RECEIVE_CREDIT / FRAME_COST) as usize,
+            "the page was handed {} frames it never took",
+            count()
+        );
+
+        let state = app.state::<TransportState>();
+        let mut told = 0;
+        for _ in 0..1000 {
+            let taken = count();
+            paired_native_took(state.clone(), incoming, (taken - told) as u32);
+            told = taken;
+            if taken == frames {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        sending.await.unwrap().unwrap();
+        assert_eq!(count(), frames);
+    }
+
     #[tokio::test]
     async fn refuses_frames_out_of_budget_and_unknown_connections() {
         let app = app();
         assert_eq!(
-            paired_native_send(app.state(), 1, String::new())
+            paired_native_send(app.state(), 1, Some(String::new()), None)
                 .await
                 .unwrap_err(),
             "Frame exceeds transport budget"
         );
         assert_eq!(
-            paired_native_send(app.state(), 1, "x".repeat(wire::MAX_FRAME + 1))
+            paired_native_send(app.state(), 1, Some("x".repeat(wire::MAX_FRAME + 1)), None)
                 .await
                 .unwrap_err(),
             "Frame exceeds transport budget"
         );
         assert_eq!(
-            paired_native_send(app.state(), 1, "x".into())
+            paired_native_send(app.state(), 1, Some("x".into()), None)
                 .await
                 .unwrap_err(),
             "Connection closed"
         );
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        for (text, bytes, error) in [
+            (None, None, "Invalid frame"),
+            (Some("x".to_string()), Some(encode(b"x")), "Invalid frame"),
+            (
+                None,
+                Some("not base64!".to_string()),
+                "Invalid binary frame",
+            ),
+            (None, Some(String::new()), "Frame exceeds transport budget"),
+            (
+                None,
+                Some(encode(&vec![0; wire::MAX_FRAME + 1])),
+                "Frame exceeds transport budget",
+            ),
+            (None, Some(encode(b"x")), "Connection closed"),
+        ] {
+            assert_eq!(
+                paired_native_send(app.state(), 1, text, bytes)
+                    .await
+                    .unwrap_err(),
+                error
+            );
+        }
         assert_eq!(
             paired_iroh_address(app.state(), 1).await.unwrap_err(),
             "Endpoint closed"
@@ -983,7 +1887,7 @@ mod tests {
         })
         .await;
         assert_eq!(
-            paired_native_send(app.state(), first, "late".into())
+            paired_native_send(app.state(), first, Some("late".into()), None)
                 .await
                 .unwrap_err(),
             "Connection closed"
@@ -996,7 +1900,7 @@ mod tests {
         })
         .await;
         assert_ne!(reopened["binding"]["context"], first_binding["context"]);
-        paired_native_send(app.state(), second, "again".into())
+        paired_native_send(app.state(), second, Some("again".into()), None)
             .await
             .unwrap();
         event(&bob_seen, |e| e["text"] == "again").await;
@@ -1119,7 +2023,7 @@ mod tests {
     async fn a_peer_must_speak_the_protocol() {
         let app = app();
         let (_, bob_address, bob_seen) = start(&app, 40).await;
-        let stranger = wire::endpoint([41; 32], true).await.unwrap();
+        let stranger = wire::endpoint([41; 32], true, None).await.unwrap();
 
         // Without the preface, the stream is never offered to the UI.
         let rude = wire::connect(&stranger, &bob_address).await.unwrap();
@@ -1160,6 +2064,58 @@ mod tests {
             e["type"] == "closed" && e["id"] == opened["id"]
         })
         .await;
+        stranger.close().await;
+    }
+
+    /// Connections that never open a stream wait out their own budget beside the next one: the contact still
+    /// gets in.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_connection_that_never_opens_a_stream_does_not_hold_the_next_one() {
+        let app = app();
+        let (alice, _, _) = start(&app, 42).await;
+        let (_, bob_address, bob_seen) = start(&app, 43).await;
+        let stranger = wire::endpoint([44; 32], true, None).await.unwrap();
+        let idle: Vec<_> = (0..3)
+            .map(|_| {
+                let (stranger, bob_address) = (stranger.clone(), bob_address.clone());
+                tokio::spawn(async move {
+                    let connection = wire::connect(&stranger, &bob_address).await?;
+                    connection.closed().await;
+                    Ok::<(), String>(())
+                })
+            })
+            .collect();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            connect(&app, alice, &bob_address).await.unwrap();
+            while !bob_seen.lock().unwrap().iter().any(kind("open")) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("the contact got in behind the idle connections");
+        for task in idle {
+            task.abort();
+        }
+        stranger.close().await;
+    }
+
+    /// Unfinished connections are few: one more than `ADMITTING` drops the oldest, long before its own budget ends.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn one_connection_too_many_waiting_drops_the_oldest() {
+        let app = app();
+        let (_, bob_address, _) = start(&app, 45).await;
+        let stranger = wire::endpoint([46; 32], true, None).await.unwrap();
+        let mut idle = Vec::new();
+        for _ in 0..=ADMITTING {
+            idle.push(wire::connect(&stranger, &bob_address).await.unwrap());
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        tokio::time::timeout(Duration::from_secs(5), idle[0].closed())
+            .await
+            .expect("the oldest was dropped");
+        assert!(idle[1..].iter().all(|c| c.close_reason().is_none()));
         stranger.close().await;
     }
 

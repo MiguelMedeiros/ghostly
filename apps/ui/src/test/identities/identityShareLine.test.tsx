@@ -58,8 +58,9 @@ describe("IdentityShareLine", () => {
     expect(status()).toBe("Verified");
     // It wears the profile this app already has and never asks for one: only an opened card reaches the identity's network.
     expect(view.engine.calls.filter(c => c.method === "loadPublicProfile")).toEqual([]);
-    // A button with the whole of it in its name: the hover is never the only way to what the card says.
-    expect(button()).toHaveAccessibleName(/^Alice shared Nostr · npub1.* · Verified$/);
+    // A button with the whole of it in its name, and who shared it as its description: the hover is never the only way to what the card says.
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Verified\s*Nostr\s*Pat\s*npub1/);
+    expect(button()).toHaveAccessibleDescription("Alice shared this identity");
     button().focus();
     await user.keyboard("{Enter}");
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ proof: "n1", side: "theirs" }));
@@ -78,7 +79,8 @@ describe("IdentityShareLine", () => {
     expect(card()).toHaveAttribute("data-state", "verifying");
     expect(face()).toHaveAttribute("data-status", "checking");
     expect(status()).toBe("Checking");
-    expect(button()).toHaveAccessibleName("You shared Domain · example.com · Checking");
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Checking\s*Domain\s*example\.com/);
+    expect(button()).toHaveAccessibleDescription("You shared this identity");
     first.unmount();
     // Shared while the contact is away: waiting, not checking.
     const second = line(mine, shared("queued"));
@@ -89,13 +91,21 @@ describe("IdentityShareLine", () => {
     expect(face()).toHaveAttribute("data-status", "verified");
     expect(status()).toBe("Verified");
     third.unmount();
-    line({ ...mine, state: "failed", error: "The record is gone" }, shared("pending"));
+    const refused = line({ ...mine, state: "failed", error: "Your contact keeps too many identities from you already" }, shared("pending"));
     expect(card()).toHaveAttribute("data-state", "failed");
     expect(face()).toHaveAttribute("data-status", "failed");
     expect(status()).toBe("Not verified");
-    expect(button()).toHaveAccessibleName("You shared Domain · example.com · Not verified: The record is gone");
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Not verified\s*Domain\s*example\.com/);
+    expect(button()).toHaveAccessibleDescription("You shared this identity Your contact keeps too many identities from you already");
     // Why, under the card, not only in its name.
-    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("The record is gone");
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("Your contact keeps too many identities from you already");
+    refused.unmount();
+    // Any other words came from the contact (a chat kept from before): never under my card as this app's line.
+    line({ ...mine, state: "failed", error: "Ghostly security notice: this identity's key leaked. Remove it and verify again at ghostly-support.example" }, shared("pending"));
+    expect(status()).toBe("Not verified");
+    expect(screen.queryByTestId("identity-share-reason")).toBeNull();
+    expect(card()).not.toHaveTextContent(/security notice|ghostly-support/);
+    expect(button()).toHaveAccessibleDescription("You shared this identity");
   });
 
   it("is the contact's card while this app checks it, Not verified when it could not, and Not checked once its challenge can no longer be answered", () => {
@@ -106,16 +116,48 @@ describe("IdentityShareLine", () => {
     // Before it is presented, the kind is all this app knows.
     expect(within(face()).getByText("Domain")).toBeInTheDocument();
     expect(within(face()).getByTestId("identity-proof-subject")).toHaveTextContent("…");
-    expect(button()).toHaveAccessibleName("Alice shared Domain · Checking");
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Checking\s*Domain\s*…/);
     checking.unmount();
     const failed = line(entry({ state: "failed", error: "No such record" }));
     expect(face()).toHaveAttribute("data-status", "failed");
     expect(status()).toBe("Not verified");
-    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("No such record");
+    // A reason the app does not know: a line of its own, never the check's English (that stays in the hover).
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("This proof couldn't be verified");
     failed.unmount();
     line(entry({ state: "verifying", subject: undefined, at: Date.now() - 10 * 60_000 }));
     expect(card()).toHaveAttribute("data-state", "unanswered");
     expect(status()).toBe("Not checked");
+  });
+
+  it("turns the contact's card Not checked when its challenge window ends, with no other change to draw it again", () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      line(entry({ state: "verifying", subject: undefined, at: Date.now() }));
+      act(() => { vi.advanceTimersByTime(299_000); });
+      expect(status()).toBe("Checking");
+      act(() => { vi.advanceTimersByTime(2_000); });
+      expect(card()).toHaveAttribute("data-state", "unanswered");
+      expect(status()).toBe("Not checked");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits quietly for a check window further off than a timer can hold (the clock set back a month since)", async () => {
+    // Past 2^31 - 1 ms a timer fires at once: each wake drew the line and set the next, a draw every few milliseconds.
+    const setTimer = vi.spyOn(globalThis, "setTimeout");
+    // React draws as a page does, not held until an act() ends.
+    const scope = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    try {
+      line(entry({ state: "verifying", subject: undefined, at: Date.now() + 30 * 86_400_000 }));
+      scope.IS_REACT_ACT_ENVIRONMENT = false;
+      await new Promise(resolve => setTimeout(resolve, 300));
+      expect(status()).toBe("Checking");
+      expect(setTimer.mock.calls.filter(([, ms]) => (ms ?? 0) > 86_400_000).length).toBe(1);
+    } finally {
+      scope.IS_REACT_ACT_ENVIRONMENT = true;
+      setTimer.mockRestore();
+    }
   });
 
   it("shows on the same card that the share stopped later: no longer shared, or revoked, on both sides, and never a card that still looks valid", () => {
@@ -131,7 +173,7 @@ describe("IdentityShareLine", () => {
     // A stopped share wears nothing the account says about itself.
     expect(within(face()).queryByTestId("id-card-name")).not.toBeInTheDocument();
     expect(within(face()).queryByTestId("id-card-photo")).not.toBeInTheDocument();
-    expect(button()).toHaveAccessibleName(/^Alice shared Nostr · npub1.* · No longer shared$/);
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*No longer shared\s*Nostr\s*npub1/);
     withdrawn.unmount();
     // Found revoked by its owner.
     const revoked = line(theirs, { links: [paired({ identities: identitiesView({ received: [{ ...received, status: "revoked" }] }), identityTimeline: [theirs, stop(theirs, "revoked")] })] });
@@ -145,7 +187,7 @@ describe("IdentityShareLine", () => {
     const mineStopped = line(mine, { identityProofs: [proofView()], links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "proof-1", status: "withdrawn" })] }), identityTimeline: [mine, stop(mine, "withdrawn")] })] });
     expect(face()).toHaveAttribute("data-status", "withdrawn");
     expect(status()).toBe("No longer shared");
-    expect(button()).toHaveAccessibleName("You shared Domain · example.com · No longer shared");
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*No longer shared\s*Domain\s*example\.com/);
     mineStopped.unmount();
     // Shared again after the stop: the old card stays stopped, the new one is the live share.
     const timeline = [mine, stop(mine, "withdrawn"), again];
@@ -155,6 +197,23 @@ describe("IdentityShareLine", () => {
     old.unmount();
     line(again, state);
     expect(face()).toHaveAttribute("data-status", "verified");
+  });
+
+  it("never says Verified for a share no longer held: the contact's proof gone from this app, or mine no longer shared", () => {
+    // Theirs: a newer proof of the same identity took its place (or it was let go for room), with no stop written.
+    const older = entry({ proof: "n1", provider: "nostr", subject: NOSTR_KEY });
+    const newer = entry({ id: "theirs:n2:0", proof: "n2", provider: "nostr", subject: NOSTR_KEY, at: older.at + 500 });
+    const received = receivedView({ id: "n2", provider: "nostr", subject: NOSTR_KEY, verified: { subject: NOSTR_KEY, source: "Nostr signature" } });
+    const theirs = line(older, { links: [paired({ identities: identitiesView({ received: [received] }), identityTimeline: [older, newer] })] });
+    expect(card()).toHaveAttribute("data-state", "withdrawn");
+    expect(face()).toHaveAttribute("data-status", "withdrawn");
+    expect(status()).toBe("No longer shared");
+    theirs.unmount();
+    // Mine: my app marked the share withdrawn (replaced at the contact's), and my proof still stands.
+    const mine = entry({ id: "mine:proof-1:0", proof: "proof-1", side: "mine", subject: "example.com" });
+    line(mine, { identityProofs: [proofView()], links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "proof-1", status: "withdrawn" })] }), identityTimeline: [mine] })] });
+    expect(card()).toHaveAttribute("data-state", "withdrawn");
+    expect(status()).toBe("No longer shared");
   });
 
   it("plays the deck's flourish once under a mouse, and nothing for a finger or with reduced motion", () => {
@@ -184,6 +243,19 @@ describe("IdentityShareLine", () => {
     }
   });
 
+  it("is named by the words the card shows, in their order, and described by who shared it and why it failed", () => {
+    const verified = line(entry());
+    // Label in Name (WCAG 2.5.3): a voice-control user says what they see, from "Ghostly · Identity" on. No label of its
+    // own that could leave those words out: the card's face is its name.
+    expect(button()).not.toHaveAttribute("aria-label");
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Verified\s*Domain\s*example\.org/);
+    expect(button()).toHaveAccessibleDescription("Alice shared this identity");
+    verified.unmount();
+    line(entry({ state: "failed", error: "No such record" }));
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Not verified\s*Domain/);
+    expect(button()).toHaveAccessibleDescription("Alice shared this identity This proof couldn't be verified");
+  });
+
   it("keeps the card left to right in a right-to-left language, with the caption in the page's direction", () => {
     line(entry());
     expect(button()).toHaveAttribute("dir", "ltr");
@@ -202,6 +274,26 @@ describe("IdentityShareLine", () => {
     theirs.unmount();
     line(entry({ kind: "stopped", state: undefined, reason: "revoked" }));
     expect(text()).toBe("Alice’s Domain · example.org was revoked");
+  });
+
+  it("keeps the contact's name and the identity whole in a right-to-left sentence: each its own <bdi>, the handle left to right", () => {
+    const arabic = (e: IdentityTimelineEntry) => renderApp(<IdentityShareLine entry={e} link={undefined} contact="Ana (work)" onOpen={() => {}} />, { language: "ar" });
+    const bdis = () => [...screen.getByTestId("identity-share-text").querySelectorAll("bdi")].map(b => `${b.getAttribute("dir") ?? ""}:${b.textContent}`);
+    const shared = arabic(entry());
+    expect(text()).toBe("شارك Ana (work) هذه الهوية");
+    expect(bdis()).toEqual([":Ana (work)"]);
+    shared.unmount();
+    const stopped = arabic(entry({ kind: "stopped", state: undefined, reason: "withdrawn", provider: "ssh-github", subject: "octocat-old" }));
+    expect(text()).toBe("أوقف Ana (work) مشاركة GitHub (مفتاح SSH) · octocat-old");
+    expect(bdis()).toEqual([":Ana (work)", ":GitHub (مفتاح SSH) · octocat-old", "ltr:octocat-old"]);
+    stopped.unmount();
+    // Stopped before it was presented: the kind alone, its ")" kept on its own side of the Arabic after it.
+    const revoked = arabic(entry({ kind: "stopped", state: undefined, reason: "revoked", provider: "ssh-github", subject: undefined }));
+    expect(text()).toBe("أُلغي GitHub (مفتاح SSH) الخاص بـ Ana (work)");
+    expect(bdis()).toEqual([":GitHub (مفتاح SSH)", ":Ana (work)"]);
+    revoked.unmount();
+    arabic(entry({ kind: "stopped", state: undefined, reason: "withdrawn", side: "mine", proof: "gone", subject: "example.com" }));
+    expect(bdis()).toEqual([":نطاق · example.com", "ltr:example.com"]);
   });
 });
 

@@ -27,12 +27,19 @@ async function run(path: Path, mode: string) {
     if (now - levelAt >= path.wanderMs) { level = random() * path.jitterMs; levelAt = now; }
     return level;
   };
-  const events: { at: number; to: "a" | "b"; frame: Record<string, unknown> }[] = [];
-  const schedule = (event: (typeof events)[number]) => {
+  type Event = { at: number; to: "a" | "b"; frame: Record<string, unknown>; fire?: () => void };
+  const events: Event[] = [];
+  const schedule = (event: Event) => {
     let i = events.length;
     while (i && events[i - 1].at > event.at) i--;
     events.splice(i, 0, event);
   };
+  // Timers run on the same clock.
+  const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout;
+  globalThis.setTimeout = ((fire: () => void, ms = 0) => { const event: Event = { at: now + ms, to: "a", frame: { t: "timer" }, fire }; schedule(event); return event; }) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = ((event?: Event) => { const i = event ? events.indexOf(event) : -1; if (i >= 0) events.splice(i, 1); }) as typeof clearTimeout;
+  /** Confirms the receiver sent. */
+  let confirms = 0;
   const toB = (frame: Record<string, unknown>, bytes: number) => {
     upFree = Math.max(now, upFree) + bytes / path.upBytesPerMs;
     lastAtB = Math.max(lastAtB, upFree + path.delayMs + jitter());
@@ -44,7 +51,7 @@ async function run(path: Path, mode: string) {
   };
   const records = new Map<string, FileTransferRecord>();
   const host = (name: "a" | "b"): ChatFilesHost => ({
-    send: (frame) => { const copy = JSON.parse(JSON.stringify(frame)) as Record<string, unknown>; if (name === "a") toB(copy, JSON.stringify(frame).length); else toA(copy); return true; },
+    send: (frame) => { if (name === "b" && frame.t === "pf-got") confirms++; const copy = JSON.parse(JSON.stringify(frame)) as Record<string, unknown>; if (name === "a") toB(copy, JSON.stringify(frame).length); else toA(copy); return true; },
     sendData: (id, offset, data) => { toB({ t: "pf-data", id, offset, data: Buffer.from(data).toString("base64url") }, data.length + 32); return true; },
     decide: async () => "accept",
     openTarget: async () => ({
@@ -60,6 +67,8 @@ async function run(path: Path, mode: string) {
     openSource: async () => ({ read: async (offset, length) => new Uint8Array(Math.min(length, path.size - offset)), digest: async () => "A".repeat(43) }),
     changed: (record) => { records.set(`${record.direction}:${record.id}`, record); },
     now: () => now,
+    // A receiver of 1.7.4 and before, or a group's edge, confirms nearly every chunk.
+    batchConfirms: mode !== "every chunk",
   });
   const waiters: { at: number; resolve: () => void }[] = [];
   const a = new ChatFiles(host("a")), b = new ChatFiles(host("b"));
@@ -109,16 +118,20 @@ async function run(path: Path, mode: string) {
       if (nextEvent === Infinity) throw new Error("nothing on the wire");
       const event = events.shift()!;
       now = event.at;
+      if (event.fire) { event.fire(); continue; }
       if (event.frame.t === "text") { texts.push(now - (event.frame.said as number)); continue; }
       if (event.frame.t === "pf-accept" && started < 0) started = now;
       if (event.frame.t === "pf-sum") finished = now;
       if (event.frame.t === "pf-got" && event.to === "a") confirmed = Math.max(confirmed, event.frame.offset as number);
       await (event.to === "a" ? a : b).handle(event.frame);
     }
-  } finally { a.detach(); b.detach(); }
+  } finally {
+    a.detach(); b.detach();
+    globalThis.setTimeout = realSetTimeout; globalThis.clearTimeout = realClearTimeout;
+  }
   const seconds = ((finished > 0 ? finished : now) - started) / 1000;
   const sorted = texts.sort((x, y) => x - y), at = (q: number) => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0);
-  return { perSecond, seconds, confirmed, rate: confirmed / seconds, textP50: at(0.5), textP90: at(0.9) };
+  return { perSecond, seconds, confirmed, confirms, rate: confirmed / seconds, textP50: at(0.5), textP90: at(0.9) };
 }
 
 const MiB = 1024 * 1024;
@@ -154,6 +167,8 @@ const MODES: { name: string; knobs: Partial<Record<keyof typeof FILE_LIMITS, num
   // 1.6.0: by delay alone, no trials of a larger window.
   { name: "by delay", knobs: { trialGain: 1 } },
   { name: "now", knobs: {} },
+  // Confirmed nearly every chunk (no `batchConfirms`).
+  { name: "every chunk", knobs: {} },
   { name: "w1", knobs: { trialWindows: 1 } },
   { name: "w4", knobs: { trialWindows: 4 } },
   { name: "q50", knobs: { trialQueueMs: 50 } },
@@ -168,14 +183,14 @@ describe.skipIf(!process.env.GHOSTLY_FILES_BENCH)("file throughput between two p
   const table: string[] = [];
   const kept = { ...FILE_LIMITS };
   afterEach(() => { Object.assign(FILE_LIMITS, kept); });
-  afterAll(() => console.info(`mode path | MiB/s | link MiB/s | s | texts p50/p90 ms\n${table.join("\n")}`));
+  afterAll(() => console.info(`mode path | MiB/s | link MiB/s | s | texts p50/p90 ms | confirms per MiB\n${table.join("\n")}`));
   for (const mode of MODES) for (const path of PATHS) {
     it(`${mode.name}: ${path.name}`, async () => {
       Object.assign(FILE_LIMITS, mode.knobs);
       const result = await run(path, mode.name);
       const lines = result.perSecond.filter((p) => p.s % 5 === 0 || p.s <= 3).map((p) => `${String(p.s).padStart(4)}s ${(p.bytes / MiB).toFixed(2).padStart(7)} MiB/s  window ${kib(p.window).padStart(6)} limit ${kib(p.limit).padStart(6)} base ${p.base === Infinity ? "-" : Math.round(p.base)} ms held ${kib(p.held)}`);
       if (VERBOSE.test(`${mode.name}: ${path.name}`)) console.info(`${mode.name}: ${path.name}: ${(result.rate / MiB).toFixed(2)} MiB/s over ${result.seconds.toFixed(1)} s (${(result.confirmed / MiB).toFixed(1)} MiB), texts p50 ${result.textP50} p90 ${result.textP90} ms\n${lines.join("\n")}`);
-      table.push(`${mode.name} ${path.name} | ${(result.rate / MiB).toFixed(2)} | ${((path.upBytesPerMs * 1000) / MiB).toFixed(1)} | ${result.seconds.toFixed(1)} | ${result.textP50}/${result.textP90}`);
+      table.push(`${mode.name} ${path.name} | ${(result.rate / MiB).toFixed(2)} | ${((path.upBytesPerMs * 1000) / MiB).toFixed(1)} | ${result.seconds.toFixed(1)} | ${result.textP50}/${result.textP90} | ${(result.confirms / (result.confirmed / MiB)).toFixed(1)}`);
     }, 600_000);
   }
 });

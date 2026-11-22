@@ -137,6 +137,7 @@
       "needsKey": "キーが必要",
       "noFederation": "フェデレーションなし",
       "noSource": "ソースなし",
+      "shared": "{{name}} の残高を使います",
       "unavailable": "利用不可"
     },
     "deck": {
@@ -159,6 +160,7 @@
       "usdtLocal": "ローカル EVM · テストトークン",
       "usdtSepolia": "Sepolia · テストトークン"
     },
+    "sameBalance": "{{name}} カードと同じ残高",
     "status": {
       "away": "別の場所",
       "checkSettings": "設定を確認",
@@ -176,7 +178,6 @@
   "cashu": {
     "add": "追加",
     "addMintPlaceholder": "ミントを追加：https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "ミントに問い合わせ中…",
     "backupCopied": "バックアップをコピーしました。このトークンを持つ人が sats を持ちます。",
     "contactHint": "連絡先に支払いますか？チャットの ⚡ を使ってください。",
@@ -190,7 +191,7 @@
       "perProofTest": "プルーフごとに {{fee}} テスト sat（支払い 1 回あたり約 1 テスト sat）"
     },
     "history": {
-      "fee": "手数料 {{amount}}",
+      "fee": "手数料 {{amount}} {{unit}}",
       "feesPaid": "支払った手数料：{{amount}} {{unit}}",
       "movements": "{{count}} 件の取引",
       "movementsOne": "1 件の取引",
@@ -212,8 +213,12 @@
     "paid": "支払いました。",
     "pastePlaceholder": "Lightning インボイス、Lightning アドレス、または ecash トークンを貼り付け",
     "payAmount": "{{amount}} {{unit}} を支払う",
+    "payFailed": "支払いに失敗しました。受取人には支払われていません。",
+    "payFailedBack": "この支払いのために取り置かれていた金額は残高に戻りました。",
+    "payFailedFee": "この支払いのために取り置かれていた金額は残高に戻りました。ただし、ミントが手数料として {{amount}} {{unit}} を差し引きました（履歴に記載）。",
     "payLine": "{{amount}} を支払う{{fees}}",
     "pendingMint": "支払いはまだミントで保留中です。",
+    "pendingMintNext": "支払いは自動的に確定し、二重に支払われることはありません。ミントが応答するまで、その金額は残高の下に取り置き中として表示されます。",
     "primary": "メイン",
     "received": "⚡ {{amount}} {{unit}} を受け取りました",
     "redeem": "ecash トークンを受け取る",
@@ -230,7 +235,7 @@
     "settings": "設定",
     "testBalance": "{{amount}} テスト sats（価値なし）",
     "testBalance_one": "{{amount}} テスト sat（価値なし）",
-    "testMintInvoice": "支払いを待っています… テスト用ミントはすべてのインボイスを自動で支払い済みにするため、このインボイスは連絡先がチャットで支払ったときだけ数えられます。今すぐテスト sats が必要なら、上の「テストコインを入手」を使ってください。",
+    "testMintInvoice": "支払いを待っています… テスト用ミントはすべてのインボイスを自動で支払い済みにするため、このインボイスは 1 対 1 のチャットで共有してください。連絡先がそこで支払ったときだけ数えられます。今すぐテスト sats が必要なら、上の「テストコインを入手」を使ってください。",
     "tokenHint": "ecash トークンを受け取りましたか？「送金」に貼り付けてください。",
     "tokenRedeemedFee": "{{amount}} sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
     "tokenRedeemedFeeTest": "{{amount}} テスト sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
@@ -382,7 +387,7 @@
     "cashuMints": "Cashu のミント",
     "cashuSettings": "Cashu の設定",
     "commentFor": "{{to}} へのコメント（任意）",
-    "confirmWhat": "{{amount}} sats（最大 {{fee}} の手数料を追加）",
+    "confirmWhat": "{{amount}} {{unit}}（最大 {{fee}} {{feeUnit}} の手数料を追加）",
     "connecting": "ソースに接続中…",
     "domainLine": "{{answered}}{{limits}}",
     "done": "完了",
@@ -611,6 +616,9 @@
     "paste": "貼り付け",
     "scan": "スキャン"
   },
+  "sentEcash": {
+    "title": "削除したチャットで送ったもの"
+  },
   "setup": {
     "failed": "{{wallet}}：{{reason}}",
     "progress": "Mainnet のウォレットを作成しています…",
@@ -669,6 +677,111 @@
       "onchainTestnet": "Testnet で使えるオンチェーン Bitcoin のプロバイダーはまだありません。"
     },
     "optional": "（任意）",
+    "providers": {
+      "bdk": {
+        "description": "このアプリ内の Bitcoin ウォレット（bitcoindevkit）: 鍵はあなたが持ち、Esplora サーバーがチェーンを伝えます。今はテストネットワークのみです。",
+        "fields": {
+          "esplora": {
+            "help": "空欄: Signet（blockstream.info、mempool.space）または Mutinynet（mutinynet.com）の公開サーバーのうち、応答したもの。Regtest には自分のサーバーが必要で、このアプリのオリジンを許可（CORS）している必要があります。",
+            "label": "Esplora サーバー",
+            "placeholder": "空欄: そのネットワークの公開サーバー",
+            "suggestions": {
+              "http_127_0_0_1_47002": "このコンピューター: e2e の regtest スタック（npm run e2e:infra:up）"
+            }
+          },
+          "mnemonic": {
+            "help": "BIP39、英語。新しいウォレットは Ghostly に作らせるか、復元するには自分のものを入力してください。",
+            "label": "リカバリーフレーズ",
+            "placeholder": "12 または 24 の単語"
+          },
+          "network": {
+            "label": "ネットワーク"
+          },
+          "script": {
+            "label": "アドレス",
+            "options": {
+              "bip84": "ネイティブ SegWit (BIP84, bc1q…)"
+            }
+          }
+        }
+      },
+      "bitcoind": {
+        "description": "自分の Bitcoin Core ノード上のウォレットに、その RPC で接続します。鍵はノードが持ち、署名します。デスクトップアプリが必要です。",
+        "fields": {
+          "password": {
+            "help": "rpcpassword、またはノードの .cookie ファイルの内容（bitcoind を再起動すると変わります）。",
+            "label": "RPC パスワードまたは cookie"
+          },
+          "url": {
+            "help": "ノードの rpcbind と rpcport: mainnet 8332、signet 38332、testnet4 48332、regtest 18443。",
+            "label": "RPC アドレス"
+          },
+          "user": {
+            "help": "下に .cookie ファイルを貼り付ける場合は空欄のままにします。",
+            "label": "RPC ユーザー"
+          },
+          "wallet": {
+            "help": "ノードに読み込まれたウォレット（bitcoin-cli listwallets）。空欄: ノードのデフォルトのウォレット。",
+            "label": "ウォレット名"
+          }
+        }
+      },
+      "breez": {
+        "description": "Breez SDK を使った、Spark 上のセルフカストディの Lightning ウォレット。リカバリーフレーズはこの端末に封印され、sats はあなたが持ちます。"
+      },
+      "cashu-mint": {
+        "description": "インボイスは Cashu の残高へ支払われ、そこから支払われます。sats は mint が保管します。"
+      },
+      "core-lightning": {
+        "description": "自分の Core Lightning ノードに、rune を使って Commando で接続します。sats はノードが持ちます。Web アプリからは wss:// でのみ接続できます。",
+        "fields": {
+          "nodeId": {
+            "help": "lightning-cli getinfo → id。接続はこれに対して認証されます。",
+            "label": "ノード ID",
+            "placeholder": "02… または 03…（16 進数 66 文字）"
+          },
+          "rune": {
+            "help": "制限のない rune は絶対に使わないでください。次のコマンドで作成します: {{command}}",
+            "placeholder": "Ghostly のメソッドに制限した rune"
+          },
+          "url": {
+            "help": "ノードの bind-addr=ws:… リスナー。Web アプリには wss:// プロキシ経由で、ws:// はこのマシンへの接続のみ。",
+            "label": "WebSocket アドレス"
+          }
+        }
+      },
+      "fedimint": {
+        "description": "参加したフェデレーション（ウォレット → Fedimint）: インボイスはそのゲートウェイを通じて、その ecash へ支払われ、そこから支払われます。sats はガーディアンが保管します。"
+      },
+      "lnd": {
+        "description": "自分の LND ノードに、その REST API で接続します。sats はノードが持ちます。",
+        "fields": {
+          "certificate": {
+            "help": "デスクトップのみ: ノードの tls.cert を固定します（ノードはまさにこの証明書を提示する必要があります）。公的な認証局の証明書なら空欄に。それ以外の環境では空欄のままにしてください。",
+            "label": "TLS 証明書"
+          },
+          "macaroon": {
+            "help": "管理者用 macaroon は絶対に使わないでください。{{command}} で作成します（受け取りのみなら invoices:… だけ）。"
+          },
+          "url": {
+            "help": "LND の REST ポート（restlisten、既定は 8080）。ブラウザーでは、ノードが restcors でこのアプリを許可し、ブラウザーが信頼する証明書を持っている必要があります。デスクトップアプリではどちらも不要です。",
+            "label": "REST アドレス"
+          }
+        }
+      },
+      "nwc": {
+        "description": "NWC URI で接続するウォレット（Alby Hub、ノードの NWC サービス、ホスト型ウォレット）。sats はそのウォレットが持ち、手数料の上限もウォレットが決めます。カストディアルかどうかはウォレット次第です。",
+        "fields": {
+          "uri": {
+            "help": "ウォレットのアプリ接続から取得します。インボイスの作成・支払い・照会と、残高の読み取りを許可してください。",
+            "label": "接続 URI"
+          }
+        }
+      },
+      "webln": {
+        "description": "このブラウザー内の Lightning ウォレット（Alby など）。sats はそのウォレットが持ち、支払う前にあなたに確認します。"
+      }
+    },
     "reconfigured": "{{name}} はそのサーバーを使うようになりました。",
     "reconfiguredUnnamed": "ソースはそのサーバーを使うようになりました。",
     "remove": "削除",
@@ -768,6 +881,22 @@
       "github": "GitHub へのログインが必要なので、Ghostly は代わりに問い合わせません。",
       "login": "ログインが必要なので、Ghostly は代わりに問い合わせません。"
     }
+  },
+  "total": {
+    "away": "{{device}} にあります。合計に含みません",
+    "federation": "フェデレーションが保管する ecash",
+    "info": "合計は、Ghostly が今読み取れた残高だけを足したものです。読み取れなかったカードは含まず、Testnet を Mainnet に足すことはありません。",
+    "label": "残高",
+    "mint": "あなたのミントが保管する ecash",
+    "none": "未設定",
+    "ready": "今すぐ使える額",
+    "shared": "{{name}} と同じ残高。1 回だけ数えます",
+    "title": "残高の内訳",
+    "total": "合計",
+    "uncounted": "{{count}} 枚のカードは合計に含みません",
+    "uncounted_one": "{{count}} 枚のカードは合計に含みません",
+    "unknown": "今は読み取れません。合計に含みません",
+    "waiting": "{{amount}} {{unit}} はまだ使えません"
   },
   "ui": {
     "amountIn": "{{unit}} での金額",

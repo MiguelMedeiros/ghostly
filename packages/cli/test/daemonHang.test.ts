@@ -123,7 +123,8 @@ describe("a daemon that accepts the socket but never answers", () => {
     await new Promise<void>((resolve) => server.listen(paths.socket, resolve));
     cleanups.push(() => { server.close(); rmSync(paths.socket, { force: true }); });
     const result = await within(8_000, ["--home", dir, "status"]);
-    expect(error(result, "unavailable", 1).message).toBe("The daemon went away");
+    // A read is asked once more; this daemon goes away again.
+    expect(error(result, "unavailable", 1).message).toBe("The daemon went away before it answered status, twice; a read changes nothing: run it again");
     expect(result.stderr).not.toContain("ECONNRESET");
   });
 
@@ -138,6 +139,9 @@ describe("a daemon that accepts the socket but never answers", () => {
     expect(answerWithin("file.wait", { file: "f1" })).toBe(310_000);
     expect(answerWithin("file.save", { file: "f1", wait: true })).toBe(310_000);
     expect(answerWithin("file.save", { file: "f1" })).toBeUndefined();
+    // A file sent with --wait sent waits as file wait does, not a text's 30 s.
+    expect(answerWithin("file.send", { chat: "bob", path: "/f", wait: "sent" })).toBe(310_000);
+    expect(answerWithin("file.send", { chat: "bob", path: "/f" })).toBeUndefined();
     expect(answerWithin("chat.send", { chat: "bob", text: "hi", wait: "sent" })).toBe(40_000);
     expect(answerWithin("chat.send", { chat: "bob", text: "hi", wait: "sent", timeout: 120 })).toBe(130_000);
     expect(answerWithin("chat.send", { chat: "bob", text: "hi", wait: "none" })).toBeUndefined();

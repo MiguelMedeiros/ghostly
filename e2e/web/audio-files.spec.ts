@@ -2,12 +2,14 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /** Two seconds of a 440 Hz tone, sent as a file (`tools/scripts/video-media/make-fixtures.mjs`). */
 const MP3 = fileURLToPath(new URL("../support/audio-fixtures/ghost-tune.mp3", import.meta.url));
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       // Headless has no one to click play first; the tests click anyway, this only keeps it steady under load.

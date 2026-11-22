@@ -299,3 +299,51 @@ export function openRequest(linkSeedB64: string, askerZ32: string, records: Ghos
     return { invite, name, text, issued: from, expires: until };
   } catch { return null; }
 }
+
+/**
+ * The asker's proof (WISP 8xx § Accept): in the chat a request started, the requester's app says on the live session
+ * that it holds the asker key the request came under. The invite a request carries is a bearer code, so whoever made
+ * the chat the owner joined may be someone other than the asker; until this proof comes, the request's text shows as
+ * not confirmed. Signed by *K* over the link key, *K*, and both sides' participation keys in that chat: the joiner's is
+ * new with the join, so a proof is made in the chat and for it, never before.
+ */
+export const CONTACT_ASKER_FRAME = "contact-asker";
+
+export interface ContactAskerFrame {
+  t: typeof CONTACT_ASKER_FRAME;
+  /** The link key and the asker key, z-base-32. */
+  l: string;
+  k: string;
+  /** Ed25519 by *K*, base64url. */
+  s: string;
+}
+
+/** Whose chat is whose: the inviter is the asker (it made the invite), the joiner the owner. */
+export interface ContactAskerChat {
+  inviter: string;
+  joiner: string;
+}
+
+function askerProofBytes(linkKeyZ32: string, askerZ32: string, chat: ContactAskerChat): Uint8Array {
+  return concatBytes(label("ghostly-contact/1 asker"), publicKeyFromZ32(linkKeyZ32), publicKeyFromZ32(askerZ32), publicKeyFromZ32(chat.inviter), publicKeyFromZ32(chat.joiner));
+}
+
+/** The requester's proof for the chat its request started. */
+export function contactAskerFrame(askerSeedB64: string, linkKeyZ32: string, chat: ContactAskerChat): ContactAskerFrame {
+  const asker = identityFromSeedB64(askerSeedB64);
+  return { t: CONTACT_ASKER_FRAME, l: linkKeyZ32, k: asker.pubKeyZ32, s: toBase64Url(ed25519.sign(askerProofBytes(linkKeyZ32, asker.pubKeyZ32, chat), asker.seed)) };
+}
+
+/**
+ * Whether a proof heard in a chat is the one the owner waits for there: the link and asker keys of the request it
+ * accepted, signed by that asker key for this chat's two participation keys. Anything else proves nothing.
+ */
+export function contactAskerHolds(frame: unknown, expected: { link: string; key: string }, chat: ContactAskerChat): boolean {
+  const f = frame as Partial<ContactAskerFrame> | null;
+  if (!f || typeof f !== "object" || f.t !== CONTACT_ASKER_FRAME || f.l !== expected.link || f.k !== expected.key) return false;
+  if (typeof f.s !== "string" || !/^[A-Za-z0-9_-]{86}$/.test(f.s)) return false;
+  if (![chat.inviter, chat.joiner].every(key => Z32_KEY.test(key))) return false;
+  try {
+    return ed25519.verify(fromBase64Url(f.s), askerProofBytes(f.l, f.k, chat), publicKeyFromZ32(f.k));
+  } catch { return false; }
+}

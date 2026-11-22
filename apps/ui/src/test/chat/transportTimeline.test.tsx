@@ -311,6 +311,9 @@ describe("the chat's connection control and its panel", () => {
     // This app has Iroh (the web on its Iroh relays) and it did not start: the relays are where to look, not another app.
     expect(transportOptions({ availableTransports: ["webrtc/1"], runnableTransports: ["webrtc/1", "iroh/1"] }).find(o => o.transport === "iroh/1"))
       .toEqual({ transport: "iroh/1", available: false, reason: "Iroh couldn't reach its relay · Settings, Network" });
+    // The same for HyperDHT on a HyperDHT relay that went away (its endpoint starting again): not "set a relay", one is set.
+    expect(transportOptions({ availableTransports: ["webrtc/1"], runnableTransports: ["webrtc/1", "hyperdht/1"] }).find(o => o.transport === "hyperdht/1"))
+      .toEqual({ transport: "hyperdht/1", available: false, reason: "HyperDHT couldn't reach its relay · Settings, Network" });
     // A native adapter that could not start says so in a few words, its next step left to the line below; Linux WebKitGTK has no WebRTC.
     expect(transportOptions({ availableTransports: ["hyperdht/1"], transportErrors: { "iroh/1": "All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now." } }).map(o => o.reason))
       .toEqual(["This app has no WebRTC", "All native connections in use", undefined]);
@@ -342,7 +345,7 @@ describe("the chat's connection control and its panel", () => {
       ["DHT only", "false", false],
     ]);
     // The longer word is the row's tooltip.
-    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Your contact's app doesn't support HyperDHT");
+    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "Your contact's app doesn't support HyperDHT");
     await user.click(within(panel()).getByTestId("connection-option-iroh"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "iroh/1" }]);
     // The panel stays open: the choice moves at once, and what is in use follows when the switch lands.
@@ -441,9 +444,21 @@ describe("the chat's connection control and its panel", () => {
     expect(within(panel()).getAllByRole("radio").map(r => [r.getAttribute("aria-label"), r.getAttribute("aria-checked"), (r as HTMLButtonElement).disabled])).toEqual([
       ["Automatic", "false", false], ["WebRTC", "false", true], ["Iroh", "false", false], ["HyperDHT", "false", false], ["DHT only", "true", false],
     ]);
-    expect(within(panel()).getByTestId("connection-option-webrtc")).toHaveAttribute("title", "WebRTC: This app has no WebRTC");
+    expect(within(panel()).getByTestId("connection-option-webrtc")).toHaveAttribute("title", "This app has no WebRTC");
     await user.click(within(panel()).getByTestId("connection-option-auto"));
     expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
+  });
+
+  it("on the Desktop with Hide my IP on, says that is why its own Iroh and HyperDHT are off, not that they need the Desktop", async () => {
+    // As the engine reports it (node.ts `nativeFactoriesFor`): the host's Iroh and HyperDHT left out for contacts, no HyperDHT relay set.
+    const { user, engine } = control({ availableTransports: ["webrtc/1"], runnableTransports: ["webrtc/1"], peerTransports: all, transportAutomatic: true });
+    act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: true } }));
+    await user.click(screen.getByTestId("connection-options"));
+    expect(within(panel()).getByTestId("connection-option-iroh")).toHaveAttribute("title", "Iroh: Off while Hide my IP is on · Settings, Network");
+    expect(within(panel()).getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "With Hide my IP on, HyperDHT needs a HyperDHT relay · Settings, Network");
+    // Off, it is the app that lacks them.
+    act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: undefined } }));
+    expect(within(panel()).getByTestId("connection-option-iroh")).toHaveAttribute("title", "Iroh needs Ghostly Desktop");
   });
 
   it("says when the contact chose DHT only", () => {

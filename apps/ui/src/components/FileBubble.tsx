@@ -4,21 +4,25 @@ import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
-import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../lib/fileStatus";
-import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
+import { canRetryFile, failedReason, fileHeld, filePercent, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../lib/fileStatus";
+import { knownPictureSize, MAX_EDGE, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import { forgetPicture, readPicture, type HeldPicture } from "../lib/pictureReads";
 import type { FileAction } from "../lib/platform";
 import { AvatarViewer } from "./AvatarViewer";
 import { Highlight } from "./chat/ChatSearch";
-import { RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
+import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import { useT } from "../contexts/I18nContext";
+import { NAME, SECOND_NAME, withNames } from "./apps/aroundName";
 import type { ChatFile } from "../lib/types";
 import { problemLine, saveProblemLine } from "../lib/problemText";
+import { roomHeld } from "../lib/filesComing";
+import { FilesStillComing } from "./chat/FilesStillComing";
 
 /** A press this long is the message's long press (`LONG_PRESS_MS` in MessageBubble.tsx), not a tap. */
 const HELD_MS = 500;
 
-const linkButton = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
+const linkButton = `text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
+const answerButton = `text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full border-none ${FORCED_EDGE} cursor-pointer`;
 
 /** A file in the chat: progress while it travels, then a preview (images) and a way to save it. */
 export function FileBubble({ file, peerName: named, highlight }: { file: ChatFile; peerName?: string; highlight?: string }) {
@@ -35,6 +39,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   /** The preview as it loaded, or that it could not be shown, for this URL. */
   const [loaded, setLoaded] = useState<{ url: string; ok: boolean } | null>(null);
   const [actionError, setActionError] = useState("");
+  // Accept refused for the files still coming: which ones, from which chat, show under the offer.
+  const [heldRoom, setHeldRoom] = useState(false);
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
@@ -132,7 +138,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
 
   const act = (action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(problemLine(error, t)));
+    setHeldRoom(false);
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => { setActionError(problemLine(error, t)); setHeldRoom(roomHeld(error)); });
   };
   /** The same path as Download in the message's menu: the system's save dialog where there is one, else a download. */
   const save = () => {
@@ -166,15 +173,15 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
 
   /** The picture is drawn, so it can open large. */
   const drawn = !!blobUrl && loaded?.url === blobUrl && loaded.ok;
-  const status = restoring ? t("chat.file.restoring", { size: statusSize(file.size) }) : fileStatus(file, transfer, named, missing, t);
+  const status = restoring ? t("chat.file.restoring", { size: statusSize(file.size, t) }) : fileStatus(file, transfer, named, missing, t);
   const moving = transfer?.state === "transferring";
   // A group's file (WISP 503) is downloaded or not: no Decline, no pause or cancel.
   const group = isGroupFile(file);
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
-  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
-  // Sent whole: too late to cancel, the contact keeps it.
+  // Sent whole: too late to pause or cancel, the contact keeps it.
+  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking" && !sentWhole(transfer);
   const canCancel = controls && !sentWhole(transfer);
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
@@ -195,7 +202,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       {box && (
         <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"} {...(gone && { "data-gone": "" })}
           className={`rounded-[4px] overflow-hidden mb-1 ${blobUrl && loaded?.url === blobUrl ? "" : "bg-black/10"}`}
-          style={{ width: box.width, maxWidth: "100%", aspectRatio: box.ratio }}>
+          style={{ width: box.width, maxWidth: "100%", maxHeight: MAX_EDGE, aspectRatio: box.ratio }}>
           {blobUrl && (
             // A tap opens it large. Not a <button>: a long press on a control is not the message's long press (the
             // reactions' bar), and on a picture it must stay one; the tap that ends a long press opens nothing.
@@ -232,12 +239,14 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </span>
         )}
         <div className="min-w-0 flex-1">
-          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. */}
-          <p dir="auto" className="text-[14px] leading-tight truncate m-0" title={file.name}>
+          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. Whole,
+              wrapping anywhere: cut with … at its end, a long name hid its extension on a phone (no tooltip there). */}
+          <p dir="auto" data-testid="file-name" className="chat-text-media-name leading-tight [overflow-wrap:anywhere] m-0" title={file.name}>
             <Highlight text={file.name} term={highlight} />
           </p>
-          {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). */}
-          <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
+          {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). At 75 %, as words
+              (4.5:1): at 65 % it read 3.8:1 on a sent bubble in Classic dark. */}
+          <p className={`flex items-center gap-1 chat-text-media-meta m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/75"}`}>
             <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="file-status">{status}</span>
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger={!!reason} />}
           </p>
@@ -249,7 +258,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
             type="button"
             onClick={save}
             data-testid="file-save"
-            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 border-none p-0 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
+            className={`tap-target w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 border-none p-0 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
             title={t("common.save")}
             aria-label={t("common.save")}
           >
@@ -263,26 +272,30 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       </div>
       {offered && group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
-          <button type="button" className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer"
-            data-testid="file-accept" onClick={() => act("accept")}>{t("chat.media.downloadSize", { size: formatFileSize(file.size) })}</button>
+          <button type="button" className={`${answerButton} bg-accent text-on-accent`}
+            data-testid="file-accept" onClick={() => act("accept")}>{t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}</button>
         </div>
       )}
       {offered && !group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
-          {/* A name with nothing to break at (one long word) wraps anywhere, or it runs out of the bubble. */}
-          <p className="text-[12px] m-0 mb-1 [overflow-wrap:anywhere]">
-            {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size) })}
+          {/* A name with nothing to break at (one long word) wraps anywhere, or it runs out of the bubble. The contact's
+              and the file's names keep their own direction in a line in the page's. */}
+          <p className="chat-text-media-line m-0 mb-1 [overflow-wrap:anywhere]">
+            {withNames(t("chat.file.wantsToSend", { name: NAME, file: SECOND_NAME, size: formatFileSize(file.size, t) }), [peerName, file.name])}
           </p>
           {typeof transfer.room === "number" && (
-            <p className={`text-[11px] m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="file-room">
-              {transfer.room < file.size ? t("chat.file.noRoomDevice", { size: formatFileSize(transfer.room) }) : t("chat.file.roomDevice", { size: formatFileSize(transfer.room) })}
+            <p className={`chat-text-media-meta m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="file-room">
+              {transfer.room < file.size ? t("chat.file.noRoomDevice", { size: formatFileSize(transfer.room, t) }) : t("chat.file.roomDevice", { size: formatFileSize(transfer.room, t) })}
             </p>
           )}
           <div className="flex gap-2">
-            <button type="button" className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer disabled:opacity-50"
-              data-testid="file-accept" disabled={typeof transfer.room === "number" && transfer.room < file.size} onClick={() => act("accept")}>{t("chat.file.accept")}</button>
-            <button type="button" className="text-xs px-3 py-1 rounded-full bg-black/20 text-inherit border-none cursor-pointer" data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
+            {/* Not turned off when the room shown is less than its size: that room may be old, and Accept reads it again
+                (the engine refuses one that does not fit, and says so under the bubble). */}
+            <button type="button" className={`${answerButton} bg-accent text-on-accent disabled:opacity-50`}
+              data-testid="file-accept" onClick={() => act("accept")}>{t("chat.file.accept")}</button>
+            <button type="button" className={`${answerButton} bg-black/20 text-inherit`} data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
           </div>
+          {(heldRoom || (typeof transfer.room === "number" && transfer.room < file.size)) && <FilesStillComing except={file.id} open={heldRoom} />}
         </div>
       )}
       {(controls && !offered && !group && (canPause || pausedHere || canCancel)) && (
@@ -294,9 +307,13 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="file-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {moving && transfer.stage !== "asking" && (
-        <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress">
+        // A progress bar to a screen reader too, named by its file, read as the status says it ("62% of 4.2 GB").
+        // Not live: what is said as it goes is each step it takes (MessageAnnouncer), never each percent.
+        <div className="progress-track h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress"
+          role="progressbar" aria-label={file.name} aria-valuemin={0} aria-valuemax={100} aria-valuenow={filePercent(transfer)}
+          aria-valuetext={t("chat.file.of", { done: `${filePercent(transfer)}%`, size: statusSize(file.size, t) })}>
           <div
-            className={`h-full origin-left rtl:origin-right ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
+            className={`progress-fill h-full origin-left rtl:origin-right ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
             style={{ transform: `scaleX(${Math.min(1, transfer.transferred / Math.max(1, transfer.size))})` }}
           />
         </div>

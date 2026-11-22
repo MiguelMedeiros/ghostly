@@ -1,0 +1,1 @@
+`pf-room` and the `room` of a `no-room` refusal are the free space rounded down to a power of two or one and a half of one, never the exact bytes, so the number is the same across many devices and over small changes. The receiver still decides on an offer by its real free space. No new frame.

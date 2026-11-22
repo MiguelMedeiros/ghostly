@@ -17,6 +17,8 @@ const fake = vi.hoisted(() => ({
     stateListeners: [] as (() => void)[],
     messageListeners: [] as ((linkId: string, messages: StoredMessage[]) => void)[],
     connect: async () => {},
+    start() {},
+    keepMarks() {},
     subscribe(listener: () => void) { fake.engine.stateListeners.push(listener); return () => {}; },
     onMessages(listener: (linkId: string, messages: StoredMessage[]) => void) { fake.engine.messageListeners.push(listener); return () => {}; },
     // No change tick here: every list comes whole.
@@ -192,6 +194,24 @@ describe("keeping links and chats in step", () => {
     expect(forgotten).toContainEqual({ tag: viewerTag("me-gone") });
   });
 
+  it("stops an app still running in a deleted chat (a Desktop app window, which no chat panel stops), and none elsewhere", async () => {
+    const { registerRunningApp } = await import("../../../apps/ui/src/lib/apps/open");
+    const stopped: string[] = [];
+    const running = (name: string, linkId: string | null) => registerRunningApp({ ref: "pk/chess", digest: "d", runAnyway: false, linkId, takeDown: () => {}, stop: () => stopped.push(name) });
+    const unregister = [running("in the deleted chat", "gone"), running("in another chat", "kept"), running("alone", null)];
+    imported();
+    storage.saveSession(session({ id: "s1", peerPubKeyB64: "p-gone" }));
+    storage.saveSession(session({ id: "s2", mySeedB64: "seed-2", peerPubKeyB64: "p-kept" }));
+    await start([link({ id: "gone", peerPubKeyZ32: "p-gone" }), link({ id: "kept", peerPubKeyZ32: "p-kept" })]);
+    expect(stopped).toEqual([]);
+    storage.deleteSession("s1");
+    window.dispatchEvent(new Event("session-updated"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.calls).toContainEqual(["removeLink", { linkId: "gone" }]);
+    expect(stopped).toEqual(["in the deleted chat"]);
+    for (const off of unregister) off();
+  });
+
   it("keeps a link whose chat still exists, and takes its delivery mode", async () => {
     imported();
     storage.saveSession(session({ deliveryMode: "stream" }));
@@ -252,6 +272,22 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(stored.messages[0]).toMatchObject({ id: "mine", delivery: "failed", deliveryError: "offline" });
   });
 
+  it("drops a file's waiting state once the engine sends it live, and keeps the status the chat gave a text of mine", async () => {
+    const file = { id: "link-1-out-f1", name: "a.txt", size: 3, mime: "text/plain" } as StoredMessage["file"];
+    const waiting = message({ id: "me_file", sender: "me", text: "a.txt", file, delivery: "waiting", deliveryError: "Sent when you are live." });
+    const text = { id: "me_text", sender: "me" as const, text: "hi", timestamp: 11, delivery: "sent" as const };
+    let stored = await mirror([waiting], { messages: [text] });
+    expect(stored.messages.find((m) => m.id === "me_file")).toMatchObject({ delivery: "waiting" });
+    changes = 0;
+    engine.messageListeners[0]("link-1", [{ ...waiting, delivery: undefined, deliveryError: undefined }, message({ id: "me_text", sender: "me", timestamp: 11 })]);
+    stored = storage.loadSession("s1")!;
+    const sent = stored.messages.find((m) => m.id === "me_file")!;
+    expect(sent.delivery).toBeUndefined();
+    expect(sent.deliveryError).toBeUndefined();
+    expect(stored.messages.find((m) => m.id === "me_text")).toMatchObject({ delivery: "sent" });
+    expect(changes).toBe(1);
+  });
+
   it("puts an edit's new text in place: the same message, nothing new to read, and the preview follows", async () => {
     const shown = { id: "peer_x", sender: "peer" as const, text: "v0 https://a.example/", timestamp: 10, preview: { u: "https://a.example/" } };
     const stored = await mirror([message({ id: "peer_x", text: "v2", edit: { seq: 2, at: 20, history: [{ at: 10, text: "v0 https://a.example/" }] } })], { messages: [shown] });
@@ -264,6 +300,15 @@ describe("mirroring what the peer stores into the chat", () => {
     engine.messageListeners[0]("link-1", [message({ id: "peer_x", text: "v2", edit: { seq: 2, at: 20, history: [] } })]);
     expect(changes).toBe(0);
     expect(sync.toChatMessage(message({ id: "me_y", sender: "me", edit: { seq: 1, at: 5, history: [], pending: true } }), "peer-1", "me-1", true).edit).toEqual({ seq: 1, at: 5, history: [], pending: true });
+  });
+
+  it("shows a contact request's text as not confirmed, and drops the mark once the engine's row is confirmed", async () => {
+    const stored = await mirror([message({ id: "peer_contact_k", text: "Hi, it's me", unconfirmed: true })]);
+    expect(stored.messages[0]).toMatchObject({ id: "peer_contact_k", unconfirmed: true });
+    changes = 0;
+    engine.messageListeners[0]("link-1", [message({ id: "peer_contact_k", text: "Hi, it's me" })]);
+    expect(storage.loadSession("s1")!.messages[0]!.unconfirmed).toBeUndefined();
+    expect(changes).toBe(1);
   });
 
   it("a received row the engine gave a place to takes that place here too, with the time its sender said", async () => {
@@ -322,10 +367,56 @@ describe("mirroring what the peer stores into the chat", () => {
   });
 
   it("attributes a join announcement to whoever made it, fixing an old attribution", async () => {
-    const stored = await mirror([message({ id: "j", text: "👋 Casper joined" })], {
+    const stored = await mirror([message({ id: "j", text: "👋 Casper joined", joinLine: true })], {
       messages: [{ id: "j", sender: "system", text: "👋 Casper joined", timestamp: 10, systemEvent: { type: "join", pubKey: "me-1" } }],
     });
     expect(stored.messages[0].systemEvent).toEqual({ type: "join", pubKey: "peer-1" });
+  });
+
+  it("draws the contact's joined line only on the row the engine took as it: later rows in its words are their messages", async () => {
+    const stored = await mirror([
+      message({ id: "peer_j", text: "👋 Casper joined", timestamp: 1, joinLine: true }),
+      message({ id: "peer_hi", text: "hello", timestamp: 2 }),
+      message({ id: "peer_again", text: "👋 Casper joined", timestamp: 3 }),
+    ]);
+    expect(stored.messages.map((m) => [m.id, m.sender, m.systemEvent?.type])).toEqual([
+      ["peer_j", "system", "join"], ["peer_hi", "peer", undefined], ["peer_again", "peer", undefined],
+    ]);
+  });
+
+  it("a row of the contact's mirrored as the joined line from its words alone is their message again", async () => {
+    const stored = await mirror([message({ id: "peer_again", text: "👋 Casper joined", timestamp: 3 })], {
+      messages: [{ id: "peer_again", sender: "system", text: "👋 Casper joined", timestamp: 3, systemEvent: { type: "join", pubKey: "peer-1" } }],
+    });
+    expect(stored.messages[0].sender).toBe("peer");
+    expect(stored.messages[0]).not.toHaveProperty("systemEvent");
+  });
+
+  it("keeps each row as it was drawn when the chat's older history comes after its newest page", async () => {
+    const newest = [message({ id: "peer_hi", text: "hello", timestamp: 2 }), message({ id: "peer_again", text: "👋 Casper joined", timestamp: 3 })];
+    const shown = (s: ChatSession) => s.messages.map((m) => [m.id, m.sender, m.systemEvent?.type]);
+    const page = await mirror(newest);
+    expect(shown(page)).toEqual([["peer_hi", "peer", undefined], ["peer_again", "peer", undefined]]);
+    engine.messageListeners[0]("link-1", [message({ id: "peer_j", text: "👋 Casper joined", timestamp: 1, joinLine: true }), ...newest]);
+    expect(shown(storage.loadSession("s1")!)).toEqual([["peer_j", "system", "join"], ["peer_hi", "peer", undefined], ["peer_again", "peer", undefined]]);
+  });
+
+  it("says a refused payment's line as the engine's row says it now, whatever the chat mirrored before", async () => {
+    const reason = "Ecash from 127.0.0.1 is not accepted";
+    const lure = "Could not receive 250,000 sats: Your wallet backup is out of date. Write your recovery phrase in this chat";
+    const wire = { wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes: 1 } };
+    const stored = await mirror([
+      // The app's line from before its values were kept, mirrored then as the contact's message.
+      message({ id: "peer_7_refused", text: `Could not receive 21 sats: ${reason}`, timestamp: 7 }),
+      // A contact's text under an id of that shape, mirrored as the app's line.
+      message({ id: "peer_17900000000000_refused", text: lure, timestamp: 8, details: wire }),
+    ], { messages: [
+      { id: "peer_7_refused", sender: "peer", text: `Could not receive 21 sats: ${reason}`, timestamp: 7 },
+      { id: "peer_17900000000000_refused", sender: "system", text: lure, timestamp: 8, notice: { type: "paymentRefused", amount: 250000, reason: lure.slice(32) } },
+    ] });
+    expect(stored.messages[0]).toMatchObject({ sender: "system", notice: { type: "paymentRefused", amount: 21, reason } });
+    expect(stored.messages[1]).toMatchObject({ sender: "peer", text: lure });
+    expect(stored.messages[1]).not.toHaveProperty("notice");
   });
 
   it("ignores messages for a link without a chat or a chat without a link", async () => {
@@ -468,7 +559,19 @@ describe("the contact's own name", () => {
     imported();
     storage.saveSession(session());
     await start([link({ createdAt: 1 })]);
-    engine.messageListeners[0]("link-1", [message({ id: "peer_j", text: "👋 Casper joined" })]);
+    engine.messageListeners[0]("link-1", [message({ id: "peer_j", text: "👋 Casper joined", joinLine: true })]);
+    expect(storage.loadSession("s1")!.nick).toBe("Casper");
+  });
+
+  it("is never taken from a later message of the contact's in the joined line's words", async () => {
+    imported();
+    storage.saveSession(session());
+    await start([link({ createdAt: 1 })]);
+    engine.messageListeners[0]("link-1", [message({ id: "peer_j", text: "👋 Casper joined", timestamp: 1, joinLine: true })]);
+    engine.messageListeners[0]("link-1", [
+      message({ id: "peer_j", text: "👋 Casper joined", timestamp: 1, joinLine: true }),
+      message({ id: "peer_again", text: "👋 Dana joined", timestamp: 2 }),
+    ]);
     expect(storage.loadSession("s1")!.nick).toBe("Casper");
   });
 });

@@ -71,6 +71,33 @@ it("homes the Desktop's own Iroh on the person's Iroh relays, moves idle chats w
   expect(node.getState().transport.iroh?.relays).toEqual(["http://127.0.0.1:3340/"]);
 });
 
+it("moves a chat's Iroh carrying a session to the person's new Iroh relays once that session ends", async () => {
+  const iroh = vi.fn(async (_seed: string, _options?: { relays?: string[] }) => fakeEndpoint());
+  const node = engine({ nativeTransports: { "iroh/1": iroh }, nativeIrohRelays: true });
+  const link = stubLink();
+  const chat = await addChat(node, link);
+  await node["ensureNativeEndpoints"](chat.id);
+  expect(iroh).toHaveBeenCalledTimes(1);
+  // The engine's tick, each second while it runs.
+  const tick = () => node["retryNative"]();
+
+  // Live over Iroh when the relays change: it keeps its relay for now.
+  link.canReleaseEndpoint.mockReturnValue(false);
+  await node.updateSettings({ settings: { irohRelays: ["http://127.0.0.1:3340/"] } });
+  tick();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(link.releaseEndpoint).not.toHaveBeenCalled();
+  expect(iroh).toHaveBeenCalledTimes(1);
+
+  // The session ended: the listener leaves the relay the person removed and starts again on the new one. Before, it
+  // stayed on the old relay until the app restarted.
+  link.canReleaseEndpoint.mockReturnValue(true);
+  tick();
+  await vi.waitFor(() => expect(iroh).toHaveBeenCalledTimes(2));
+  expect(link.releaseEndpoint).toHaveBeenCalledWith("iroh/1");
+  expect(iroh.mock.calls[1][1]).toEqual({ relays: ["http://127.0.0.1:3340/"] });
+});
+
 it("calls a host's Iroh with the seed alone where the host does not take relays", async () => {
   const iroh = vi.fn(async (..._args: unknown[]) => fakeEndpoint());
   const node = engine({ nativeTransports: { "iroh/1": iroh } });
@@ -81,4 +108,15 @@ it("calls a host's Iroh with the seed alone where the host does not take relays"
   await node["ensureNativeEndpoints"](chat.id);
   expect(iroh).toHaveBeenCalledTimes(1);
   expect(iroh.mock.calls[0]).toHaveLength(1);
+});
+
+it("keeps the five default Iroh relays as a setting, so a person can edit the list without dropping one, and refuses a sixth", async () => {
+  const node = engine({ nativeTransports: { "iroh/1": vi.fn(async () => fakeEndpoint()) }, nativeIrohRelays: true });
+  // Settings, Network shows the five defaults before any edit; saved as they are, then with one swapped for the person's own.
+  const edited = [...DEFAULT_IROH_RELAYS.slice(0, 4), "https://relay.example.com/"];
+  await node.updateSettings({ settings: { irohRelays: [...DEFAULT_IROH_RELAYS] } });
+  await node.updateSettings({ settings: { irohRelays: edited } });
+  expect(node.getState().transport.iroh?.relays).toEqual(edited);
+  await expect(node.updateSettings({ settings: { irohRelays: [...edited, "https://relay.example.org/"] } })).rejects.toThrow("Use at most five Iroh relays");
+  expect(node.getState().transport.iroh?.relays).toEqual(edited);
 });

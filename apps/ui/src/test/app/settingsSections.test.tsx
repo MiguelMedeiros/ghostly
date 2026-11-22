@@ -189,6 +189,19 @@ describe("Settings on a phone", () => {
     await user.type(screen.getByTestId("settings-search"), "nothing like this");
     expect(screen.getByTestId("settings-search-empty")).toHaveTextContent("No settings match");
   });
+
+  it("finds Hide my IP from contacts in Network", async () => {
+    windowIs(true);
+    const { user } = renderSettings();
+    await user.click(screen.getByRole("button", { name: "Settings tab" }));
+    await user.type(screen.getByTestId("settings-search"), "my IP");
+    const results = screen.getAllByTestId("settings-search-result");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toHaveTextContent("Hide my IP from contacts");
+    expect(results[0]).toHaveTextContent("Network");
+    await user.click(results[0]);
+    expect(where()).toBe("/settings/network");
+  });
 });
 
 describe("Password found by the search", () => {
@@ -270,6 +283,22 @@ describe("Settings on a wide screen", () => {
     await user.tab();
     await user.keyboard("{Enter}");
     expect(screen.getByTestId("delete-all-chats")).toHaveFocus();
+  });
+
+  it("Delete all chats' Confirm says the chats are gone, and hands the focus to the next control, not to the page", async () => {
+    windowIs(false);
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: "a".repeat(52), encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000 });
+    const { user } = renderSettings("/settings/storage");
+
+    const remove = await screen.findByTestId("delete-all-chats");
+    await vi.waitFor(() => expect(remove).toBeEnabled());
+    remove.focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Enter}");
+    // The result, not the button's words again.
+    expect(await screen.findByTestId("settings-notice")).toHaveTextContent("All chats deleted");
+    expect(screen.getByTestId("delete-all-chats")).toBeDisabled();
+    expect(screen.getByTestId("clear-all-data")).toHaveFocus();
   });
 
   it("an old address shows the whole page too", async () => {

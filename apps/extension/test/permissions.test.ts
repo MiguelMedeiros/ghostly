@@ -3,9 +3,9 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import manifest from "../public/manifest.json";
 import servicesAr from "../../ui/src/locales/ar/services.json";
-import { settle, type FakeWorld } from "./fakeChrome";
+import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { resetEngine } from "./fakeEngine";
-import { PEER, SERVICE, TAG, bootExtension } from "./extension";
+import { PEER, SERVICE, TAG, bootExtension, restartServiceWorker } from "./extension";
 
 // covers: extension.engine, services.add, app.updates.extension, proofs.oidc.callback.extension
 
@@ -24,7 +24,9 @@ afterEach(() => {
 
 describe("what the extension may do, as the manifest declares it", () => {
   it("asks only for what the peer needs up front", () => {
-    expect(manifest.permissions).toEqual(["offscreen", "storage", "debugger"]);
+    // `alarms` wakes the worker to bring the peer back (background.ts); Chrome shows no warning for it.
+    // `browsingData`: what a contact's app kept on its viewer origin goes with its chat or the profile (`forgetServices`).
+    expect(manifest.permissions).toEqual(["offscreen", "storage", "debugger", "alarms", "browsingData"]);
     expect(manifest.optional_permissions).toEqual(["notifications", "identity"]);
     expect(manifest).not.toHaveProperty("host_permissions");
   });
@@ -53,9 +55,26 @@ describe("what the extension may do, as the manifest declares it", () => {
   it("runs no code it did not ship", () => {
     const csp = manifest.content_security_policy.extension_pages;
     expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval';");
-    expect(csp).not.toMatch(/'unsafe-eval'|'unsafe-inline'|script-src[^;]*https?:/);
+    expect(csp).not.toMatch(/'unsafe-eval'|script-src[^;]*('unsafe-inline'|https?:)/);
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
+  });
+
+  it("loads nothing else from, and sends nothing to, a host it does not need", () => {
+    const directives = new Map(manifest.content_security_policy.extension_pages.split(";").map((part) => {
+      const [name, ...sources] = part.trim().split(/\s+/);
+      return [name, sources] as const;
+    }));
+    // A load with no directive of its own falls back to default-src: frames, media, fonts and styles stay on the extension.
+    expect(directives.get("default-src")).toEqual(["'self'"]);
+    expect(directives.get("style-src")).toEqual(["'self'", "'unsafe-inline'"]);
+    expect(directives.get("font-src")).toEqual(["'self'", "data:"]);
+    expect(directives.get("media-src")).toEqual(["'self'", "blob:"]);
+    expect(directives.get("frame-src")).toEqual(["'none'"]);
+    expect(directives.get("form-action")).toEqual(["'none'"]);
+    // Only the shipped scripts can connect (script-src above). The engine checks itself that plain HTTP and WS stay on
+    // this machine (pairedTransports, http.ts), which a policy cannot say: Chrome takes no [::1] in a source.
+    expect(directives.get("connect-src")).toEqual(["'self'", "https:", "wss:", "http:", "ws:", "data:", "blob:"]);
   });
 });
 
@@ -73,7 +92,7 @@ describe("the host the app page runs on", () => {
   it("says what went wrong when the worker refuses a payment link or a service", async () => {
     const { extensionHost } = await load();
     await expect(extensionHost.openPaymentLink!("https://evil.example")).rejects.toThrow("Not a payment link");
-    await expect(extensionHost.openService!("not-a-key", "atlas", "ybndrfg8ejkmcpqx")).rejects.toThrow("Invalid service");
+    await expect(extensionHost.openService!("not-a-key", "atlas", "ybndrfg8ejkmcpqx", false)).rejects.toThrow("Invalid service");
     await extensionHost.openPaymentLink!("lightning:lnbc1");
     expect(world.callsTo("tabs.create")).toEqual([["lightning:lnbc1"]]);
   });
@@ -84,11 +103,27 @@ describe("the host the app page runs on", () => {
     const { loadLocale } = await import("../../ui/src/locales");
     saveSettings({ ...loadSettings(), language: "ar" });
     await loadLocale("ar");
-    await extensionHost.openService!(PEER, SERVICE, TAG);
+    await extensionHost.openService!(PEER, SERVICE, TAG, false);
     const [tabId] = [...world.tabs.keys()];
     expect(world.session.get(`viewer:${tabId}`)).toMatchObject({
-      page: { lang: "ar", dir: "rtl", unreachable: servicesAr.window.unreachable, failed: servicesAr.window.failed },
+      page: { lang: "ar", dir: "rtl", unreachable: servicesAr.window.unreachable, failed: servicesAr.window.failed, upload: servicesAr.window.upload },
     });
+  });
+
+  it("hands the worker the app's name as the chat lists it, for when the contact takes it back", async () => {
+    const { extensionHost } = await load();
+    const { engine } = await world.load("page", () => import("@ghostly/browser/platform/engine"));
+    vi.spyOn(engine, "linkByPeer").mockReturnValue({ peerPubKeyZ32: PEER, peerServices: [{ id: SERVICE, name: "Atlas" }] } as unknown as ReturnType<typeof engine.linkByPeer>);
+    await extensionHost.openService!(PEER, SERVICE, TAG, false);
+    const [tabId] = [...world.tabs.keys()];
+    expect(world.session.get(`viewer:${tabId}`)).toMatchObject({ page: { app: "Atlas" } });
+  });
+
+  it("tells the worker Hide my IP from contacts is on, which opens no tab and says why", async () => {
+    // covers: settings.network.relay-only
+    const { extensionHost } = await load();
+    await expect(extensionHost.openService!(PEER, SERVICE, TAG, true)).rejects.toThrow("A contact's app does not open in the browser extension while Hide my IP from contacts is on");
+    expect(world.tabs.size).toBe(0);
   });
 
   it("reports the manifest's version", async () => {
@@ -175,5 +210,44 @@ describe("updates", () => {
     const updates = await load();
     await updates.install({ version: "0.5.0", apply: "restart" });
     expect(world.callsTo("runtime.reload")).toHaveLength(1);
+  });
+
+  it("brings the app back after Update and restart, at the pages that were open", async () => {
+    const app = world.chrome.runtime.getURL("app.html");
+    await world.chrome.tabs.create({ url: `${app}#/chat/abc` });
+    await world.chrome.tabs.create({ url: "https://example.com/" });
+    await world.chrome.tabs.create({ url: `${app}#/settings` });
+    const updates = await load();
+    await updates.install({ version: "0.5.0", apply: "restart" });
+
+    // The reload closes every page of the extension and forgets its session storage; the new version's worker starts.
+    for (const tab of [...world.tabs.values()]) if (tab.url.startsWith(app)) world.tabs.delete(tab.id);
+    world.session.clear();
+    await restartServiceWorker(world);
+    world.calls.length = 0;
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.4.0" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toEqual([[`${app}#/chat/abc`], [`${app}#/settings`]]);
+
+    // Only that once: an update nobody asked for here opens nothing.
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.5.0" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toHaveLength(2);
+  });
+
+  it("opens the app once after Update and restart even when no tab of it is found, and never another page", async () => {
+    const app = world.chrome.runtime.getURL("app.html");
+    world.local.set("ghostly_reopen_after_update", ["https://example.com/", `${app}#/chats`, "javascript:alert(1)"]);
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.4.0" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toEqual([[`${app}#/chats`]]);
+
+    world.tabs.clear();
+    const updates = await load();
+    await updates.install({ version: "0.5.0", apply: "restart" });
+    world.calls.length = 0;
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.4.0" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toEqual([[app]]);
   });
 });

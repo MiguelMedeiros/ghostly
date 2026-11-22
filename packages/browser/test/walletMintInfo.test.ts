@@ -34,6 +34,25 @@ function mintAnswering(meltMethods: object[]) {
   return quotes;
 }
 
+/** A real cashu-ts wallet in front of a mint whose bolt11 minting is written this way, as its /v1/info would. */
+function mintMaking(mintMethod: object) {
+  const quotes: { amount: number; description?: string }[] = [];
+  const answer = (body: object) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    if (path === "/v1/info") return answer({ name: "Test", version: "nutshell/0.15.0", nuts: { 4: { methods: [mintMethod], disabled: false }, 5: { methods: [], disabled: false } } });
+    if (path === "/v1/keysets") return answer({ keysets: [{ id: KEYSET, unit: "sat", active: true, input_fee_ppk: 0 }] });
+    if (path === "/v1/keys" || path === `/v1/keys/${KEYSET}`) return answer({ keysets: [{ id: KEYSET, unit: "sat", keys: KEYS }] });
+    if (path === "/v1/mint/quote/bolt11") {
+      const asked = JSON.parse(String(init?.body));
+      quotes.push(asked);
+      return answer({ quote: "q1", request: fakeInvoice(asked.amount, new Uint8Array(32).fill(4)), amount: asked.amount, unit: "sat", state: "UNPAID", expiry: 4_000_000_000 });
+    }
+    return new Response("not found", { status: 404 });
+  }));
+  return quotes;
+}
+
 const wallet = () => new CashuWallet(() => [MINT], { onChange: vi.fn(), onTestMintNeeded: vi.fn(async () => {}), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() }, () => [MINT]);
 
 beforeEach(() => {
@@ -63,5 +82,31 @@ describe("a mint's own words for an invoice with no amount", () => {
       await expect(wallet().quoteInvoice(ANY, undefined, 90)).rejects.toThrow("None of your mints can pay an invoice with no amount");
       expect(quotes).toEqual([]);
     }
+  });
+});
+
+// NUT-04's `description` is optional and false when left out: cashu-ts refuses to ask such a mint for an invoice with
+// one, so a description that is only a label must not stop Receive or the test coins there.
+describe("a mint that does not take an invoice description", () => {
+  const method = { method: "bolt11", unit: "sat", min_amount: 1, max_amount: 1_000_000 };
+
+  it("still makes an invoice, asked for with no description", async () => {
+    const quotes = mintMaking(method);
+    await expect(wallet().receiveLightning(10)).resolves.toMatchObject({ quote: "q1", mint: MINT, amount: 10 });
+    expect(quotes).toEqual([expect.not.objectContaining({ description: expect.anything() })]);
+  });
+
+  it("still gives test coins' invoice", async () => {
+    const quotes = mintMaking(method);
+    const test = new CashuWallet(() => ["https://testnut.cashu.space"], { onChange: vi.fn(), onTestMintNeeded: vi.fn(async () => {}), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() });
+    await test.testCoins(10).catch(() => {});
+    expect(quotes).toEqual([expect.objectContaining({ amount: 10 })]);
+    expect(quotes[0].description).toBeUndefined();
+  });
+
+  it("gets the label on its invoice when it says it takes one", async () => {
+    const quotes = mintMaking({ ...method, description: true });
+    await expect(wallet().receiveLightning(10)).resolves.toMatchObject({ quote: "q1", amount: 10 });
+    expect(quotes[0].description).toBe("Ghostly");
   });
 });

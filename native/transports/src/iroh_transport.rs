@@ -1,4 +1,5 @@
 use iroh::{
+    dns::DnsResolver,
     endpoint::{presets, Connection, QuicTransportConfig, VarInt},
     Endpoint, EndpointAddr, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
 };
@@ -62,14 +63,42 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, String> {
+/// Ghostly's own Iroh relay (`iroh-relay` 1.3 behind a Cloudflare tunnel), one more to home on after n0's. Its plain
+/// name: the tunnel finds it by the Host header and answers the dotted one with 404.
+pub const GHOSTLY_RELAY: &str = "https://iroh.miguelmedeiros.dev/";
+
+/// The relays an endpoint homes on when none are set: n0's four, then Ghostly's. Iroh homes on the one with the lowest
+/// latency it measures, so a relay out of reach is passed over. Ghostly's has no QUIC address discovery (its UDP does
+/// not cross the tunnel): it relays only.
+pub fn default_relays() -> RelayMap {
+    let relays = iroh::defaults::prod::default_relay_map();
+    let ours: RelayUrl = GHOSTLY_RELAY.parse().expect("Ghostly's relay URL");
+    relays.insert(
+        ours.clone(),
+        std::sync::Arc::new(RelayConfig::new(ours, None)),
+    );
+    relays
+}
+
+/// `dns`, when given, is what the endpoint resolves names with (relays among them) instead of the system's. No address
+/// lookup of n0's (`presets::N0`): a contact is dialled through what its descriptor says and the checks it passed, never
+/// a relay or an address its own record elsewhere names.
+pub async fn endpoint(
+    seed: [u8; 32],
+    local_only: bool,
+    dns: Option<DnsResolver>,
+) -> Result<Endpoint, String> {
     let builder = if local_only {
         Endpoint::builder(presets::Minimal)
             .clear_ip_transports()
             .bind_addr("127.0.0.1:0")
             .map_err(|e| e.to_string())?
     } else {
-        Endpoint::builder(presets::N0)
+        Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Custom(default_relays()))
+    };
+    let builder = match dns {
+        Some(dns) => builder.dns_resolver(dns),
+        None => builder,
     };
     builder
         .secret_key(SecretKey::from_bytes(&seed))
@@ -82,26 +111,54 @@ pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, Stri
 
 /// An endpoint homed on the given relays instead of n0's defaults: a
 /// self-hosted `iroh-relay`, or the e2e one. Direct paths are kept, so two
-/// native peers still hole-punch; a browser peer reaches it through the relay.
-pub async fn endpoint_with_relays(seed: [u8; 32], relays: &[String]) -> Result<Endpoint, String> {
-    if relays.is_empty() || relays.len() > 4 {
-        return Err("Between one and four relays are needed".into());
-    }
-    let urls = relays
-        .iter()
-        .map(|url| url.parse::<RelayUrl>())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| "Invalid Iroh relay URL")?;
-    Endpoint::builder(presets::Minimal)
-        .relay_mode(RelayMode::Custom(RelayMap::from_iter(
-            urls.into_iter().map(RelayConfig::from),
-        )))
+/// native peers still hole-punch; a browser peer reaches it through the relay. `dns` as in `endpoint`.
+pub async fn endpoint_with_relays(
+    seed: [u8; 32],
+    relays: &[String],
+    dns: Option<DnsResolver>,
+) -> Result<Endpoint, String> {
+    let builder =
+        Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Custom(relay_map(relays)?));
+    let builder = match dns {
+        Some(dns) => builder.dns_resolver(dns),
+        None => builder,
+    };
+    builder
         .secret_key(SecretKey::from_bytes(&seed))
         .alpns(vec![ALPN.to_vec()])
         .transport_config(transport())
         .bind()
         .await
         .map_err(|e| e.to_string())
+}
+
+/// The relays an endpoint is given, parsed: one to five, as many as the browser build (`iroh-web`) takes, so the
+/// Desktop homes on any list Settings, Network accepts.
+fn relay_urls(relays: &[String]) -> Result<Vec<RelayUrl>, String> {
+    if relays.is_empty() || relays.len() > 5 {
+        return Err("Between one and five relays are needed".into());
+    }
+    relays
+        .iter()
+        .map(|url| url.parse::<RelayUrl>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "Invalid Iroh relay URL".into())
+}
+
+/// The relays given, and which of them to ask for this endpoint's public address (QUIC address discovery, UDP 7842):
+/// n0's alone. Iroh homes on a relay only once each one asked has answered or waited 3 s, so on a relay that offers
+/// none every listener took 3 s to start. `iroh-relay` offers none unless set to, and never without TLS; Ghostly's
+/// cannot through its tunnel (`default_relays`).
+fn relay_map(relays: &[String]) -> Result<RelayMap, String> {
+    Ok(RelayMap::from_iter(relay_urls(relays)?.into_iter().map(
+        |url| {
+            let n0 = url
+                .host_str()
+                .is_some_and(|host| host.trim_end_matches('.').ends_with(".iroh.link"));
+            let quic = RelayConfig::from(url.clone()).quic.filter(|_| n0);
+            RelayConfig::new(url, quic)
+        },
+    )))
 }
 
 pub fn address(endpoint: &Endpoint) -> Address {
@@ -170,14 +227,74 @@ pub async fn read_frame(recv: &mut iroh::endpoint::RecvStream) -> Result<Vec<u8>
     Ok(frame)
 }
 
+/// The top bit of a frame's length word: the frame is a binary message, not text (WISP 102 § Frames, as 103's).
+const BINARY: u32 = 1 << 31;
+
+/// A session's frame after the preface: text, or a binary message (`binary`), its length word marked. An app before
+/// WISP 102's revision 2026-11-12 reads a marked frame as one over the budget and closes the stream, so a binary message
+/// goes only where the session agreed a capability that needs one.
+pub async fn write_message(
+    send: &mut iroh::endpoint::SendStream,
+    frame: &[u8],
+    binary: bool,
+) -> Result<(), String> {
+    if frame.is_empty() || frame.len() > MAX_FRAME {
+        return Err("Frame exceeds transport budget".into());
+    }
+    let mark = if binary { BINARY } else { 0 };
+    send.write_all(&(frame.len() as u32 | mark).to_be_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    send.write_all(frame).await.map_err(|e| e.to_string())
+}
+
+/// A session's frame after the preface, and whether it is a binary message. Text is the caller's to check as UTF-8.
+pub async fn read_message(
+    recv: &mut iroh::endpoint::RecvStream,
+) -> Result<(Vec<u8>, bool), String> {
+    let mut header = [0u8; 4];
+    recv.read_exact(&mut header)
+        .await
+        .map_err(|e| e.to_string())?;
+    let word = u32::from_be_bytes(header);
+    let length = (word & !BINARY) as usize;
+    if length == 0 || length > MAX_FRAME {
+        return Err("Frame exceeds transport budget".into());
+    }
+    let mut frame = vec![0; length];
+    recv.read_exact(&mut frame)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok((frame, word & BINARY != 0))
+}
+
 #[cfg(test)]
 mod tests {
     // covers: transport.iroh
     use super::*;
+    #[test]
+    fn takes_one_to_five_relays() {
+        let relays: Vec<String> = (0..6)
+            .map(|i| format!("http://127.0.0.1:{}/", 3340 + i))
+            .collect();
+        // n0's four plus Ghostly's own: the browser build's defaults, which Settings can hand the Desktop.
+        assert_eq!(relay_urls(&relays[..5]).map(|urls| urls.len()), Ok(5));
+        assert_eq!(relay_urls(&relays[..1]).map(|urls| urls.len()), Ok(1));
+        for wrong in [&relays[..0], &relays[..]] {
+            assert_eq!(
+                relay_urls(wrong),
+                Err("Between one and five relays are needed".to_string())
+            );
+        }
+        assert_eq!(
+            relay_urls(&["not a relay".to_string()]),
+            Err("Invalid Iroh relay URL".to_string())
+        );
+    }
     #[tokio::test]
     async fn real_quic_frames_exporter_and_reconnect() {
-        let a = endpoint([1; 32], true).await.unwrap();
-        let b = endpoint([2; 32], true).await.unwrap();
+        let a = endpoint([1; 32], true, None).await.unwrap();
+        let b = endpoint([2; 32], true, None).await.unwrap();
         let mut contexts = Vec::new();
         for _ in 0..2 {
             let addr = address(&b);
@@ -208,6 +325,49 @@ mod tests {
         assert_ne!(contexts[0], contexts[1]);
         a.close().await;
         b.close().await;
+    }
+
+    #[test]
+    fn default_relays_are_n0s_then_ghostlys_without_quic() {
+        let relays = default_relays();
+        let urls: Vec<String> = relays
+            .urls::<Vec<RelayUrl>>()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        for n0 in ["use1-1", "usw1-1", "euc1-1", "aps1-1"] {
+            let url = format!("https://{n0}.relay.n0.iroh.link./");
+            assert!(urls.contains(&url), "{url} kept in {urls:?}");
+        }
+        assert_eq!(urls.len(), 5);
+        // Plain: the tunnel in front of it answers the dotted name with 404.
+        let ours: RelayUrl = "https://iroh.miguelmedeiros.dev/".parse().unwrap();
+        let config = relays.get(&ours).expect("Ghostly's relay, plain name");
+        assert_eq!(
+            config.quic, None,
+            "no QUIC address discovery through the tunnel"
+        );
+    }
+
+    /// Iroh homes on a relay only once its address discovery has answered or waited 3 s: a listener on a relay that
+    /// offers none (Ghostly's, a lab one) took 3 s to start. Only n0's relays are asked.
+    #[test]
+    fn set_relays_ask_only_n0s_for_their_address() {
+        let relays: Vec<String> = [
+            "https://use1-1.relay.n0.iroh.link./",
+            "https://euc1-1.relay.n0.iroh.link/",
+            "https://iroh.miguelmedeiros.dev/",
+            "https://relay.example.com/",
+            "http://127.0.0.1:4980/",
+        ]
+        .map(String::from)
+        .to_vec();
+        let map = relay_map(&relays).unwrap();
+        let asked: Vec<bool> = relays
+            .iter()
+            .map(|url| map.get(&url.parse().unwrap()).unwrap().quic.is_some())
+            .collect();
+        assert_eq!(asked, [true, true, false, false, false]);
     }
 }
 
@@ -245,8 +405,8 @@ mod limits {
 
     #[tokio::test]
     async fn refuses_an_address_it_cannot_use_before_dialling() {
-        let a = endpoint([21; 32], true).await.unwrap();
-        let good = address(&endpoint([22; 32], true).await.unwrap());
+        let a = endpoint([21; 32], true, None).await.unwrap();
+        let good = address(&endpoint([22; 32], true, None).await.unwrap());
         assert_eq!(good.relay, None, "a local endpoint has no relay");
         assert!(!good.addresses.is_empty() && good.addresses.len() <= 8);
         assert!(good.addresses.iter().all(|a| a.starts_with("127.0.0.1:")));
@@ -303,6 +463,61 @@ mod limits {
         b.close().await;
     }
 
+    /// A binary message's length word has its top bit set (WISP 102 § Frames); its budget is the text's. The preface
+    /// is read as before, so a marked frame there is one over the budget, as an app before the revision reads any.
+    #[tokio::test]
+    async fn a_binary_message_is_marked_in_its_length_word_and_kept_to_the_budget() {
+        let (a, b, outgoing, incoming) = pair(ALPN).await;
+        let (mut tx, _rx) = outgoing.open_bi().await.unwrap();
+        let largest = vec![0xffu8; MAX_FRAME];
+        write_message(&mut tx, b"text", false).await.unwrap();
+        write_message(&mut tx, &[0, 0xff, 0xfe], true)
+            .await
+            .unwrap();
+        write_message(&mut tx, &largest, true).await.unwrap();
+        assert_eq!(
+            write_message(&mut tx, &vec![0; MAX_FRAME + 1], true)
+                .await
+                .unwrap_err(),
+            "Frame exceeds transport budget"
+        );
+        assert!(write_message(&mut tx, &[], true).await.is_err());
+        let (_tx_b, mut rx_b) = incoming.accept_bi().await.unwrap();
+        assert_eq!(
+            read_message(&mut rx_b).await.unwrap(),
+            (b"text".to_vec(), false)
+        );
+        assert_eq!(
+            read_message(&mut rx_b).await.unwrap(),
+            (vec![0, 0xff, 0xfe], true)
+        );
+        assert_eq!(read_message(&mut rx_b).await.unwrap(), (largest, true));
+
+        for header in [BINARY, BINARY | (MAX_FRAME as u32 + 1), u32::MAX] {
+            let (mut tx, _rx) = outgoing.open_bi().await.unwrap();
+            tx.write_all(&header.to_be_bytes()).await.unwrap();
+            tx.write_all(b"payload").await.unwrap();
+            let (_tx_b, mut rx_b) = incoming.accept_bi().await.unwrap();
+            assert_eq!(
+                read_message(&mut rx_b).await.unwrap_err(),
+                "Frame exceeds transport budget",
+                "{header}"
+            );
+        }
+        // Read as a preface (or by an app before the revision), a marked frame is over the budget.
+        let (mut tx, _rx) = outgoing.open_bi().await.unwrap();
+        write_message(&mut tx, b"ghostly/paired-chat/1", true)
+            .await
+            .unwrap();
+        let (_tx_b, mut rx_b) = incoming.accept_bi().await.unwrap();
+        assert_eq!(
+            read_frame(&mut rx_b).await.unwrap_err(),
+            "Frame exceeds transport budget"
+        );
+        a.close().await;
+        b.close().await;
+    }
+
     #[tokio::test]
     async fn a_connection_for_another_protocol_has_no_binding() {
         let (a, b, outgoing, incoming) = pair(b"someone-else/1").await;
@@ -316,8 +531,8 @@ mod limits {
     /// 1.25 MB held a file at 5.25 MiB/s on a 150 ms path), and no more than two such windows over all its streams.
     #[tokio::test]
     async fn a_contact_may_have_a_chats_files_in_flight_on_its_stream_and_no_more_in_all() {
-        let a = endpoint([13; 32], true).await.unwrap();
-        let b = endpoint([14; 32], true).await.unwrap();
+        let a = endpoint([13; 32], true, None).await.unwrap();
+        let b = endpoint([14; 32], true, None).await.unwrap();
         let addr = address(&b);
         let (outgoing, incoming) = tokio::time::timeout(Duration::from_secs(25), async {
             tokio::join!(connect(&a, &addr), async {

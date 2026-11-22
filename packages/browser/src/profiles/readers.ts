@@ -62,6 +62,27 @@ export const BLUESKY_APPVIEW = "https://public.api.bsky.app";
 /** Bluesky's avatar CDN: the AppView names avatars there. It sends no CORS header, so the picture is read from the account's own server. */
 const BLUESKY_CDN_AVATAR = /^https:\/\/cdn\.bsky\.app\/img\/avatar\/plain\/(did:[a-z]+:[A-Za-z0-9._:%-]+)\/(b[a-z2-7]{20,100})(@(jpeg|png))?$/;
 
+/** A request the readers did not make: Hide my IP from contacts is on and the host is one the contact chose. */
+export class HostNotContacted extends Error {}
+
+/**
+ * `fetch`, limited to the hosts this app names (Bluesky's AppView, the Pubky index, and the identity checks' fixed
+ * hosts): for a contact's identity while "Hide my IP from contacts" is on, so a server the contact chose (their AT
+ * Protocol server, a did:web's web server) never sees this device's IP address. Anything else is refused unasked.
+ */
+export function fixedHostsFetch(fetch: IdentityFetch): IdentityFetch {
+  return async (url, options) => {
+    const { fixedIdentityHosts } = await import("../proofs/fixedHosts");
+    const host = hostOf(url);
+    if (!fixedIdentityHosts().has(host) && host !== hostOf(BLUESKY_APPVIEW) && host !== hostOf(PUBKY_NEXUS)) {
+      throw new HostNotContacted(`Hide my IP from contacts is on: ${host}, a server your contact chose, was not contacted`);
+    }
+    return fetch(url, options);
+  };
+}
+/** Why a picture was not read: the refusal above says so; anything else is `fallback`. */
+export const pictureMiss = (e: unknown, fallback: string) => (e instanceof HostNotContacted ? e.message : fallback);
+
 const count = (value: unknown): number | undefined =>
   Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= MAX_COUNT ? value as number : undefined;
 const hostOf = (url: string) => new URL(url).host;
@@ -183,7 +204,7 @@ export const atprotoReader: PublicProfileReader = {
         const blob = await ctx.fetch(`${doc.pds}/xrpc/com.atproto.sync.getBlob?${new URLSearchParams({ did: subject, cid: cdn[2] })}`, { maxBytes: AVATAR_MAX_BYTES, signal: ctx.signal });
         picture = blob.status === 200 ? await decodeAvatar(blob.bytes, PROFILE_AVATAR_SIDE) : { miss: `${server.host} answered ${blob.status}` };
         hosts.push(server.host);
-      } catch { picture = { miss: "the account's server could not be asked for it" }; /* the name and counts still show; the picture falls back to the mark */ }
+      } catch (e) { picture = { miss: pictureMiss(e, "the account's server could not be asked for it") }; /* the name and counts still show; the picture falls back to the mark */ }
     } else if (typeof d.avatar === "string") picture = { miss: "Bluesky named it at an address this app does not read" };
     return profile({
       name: profileName(d.displayName),

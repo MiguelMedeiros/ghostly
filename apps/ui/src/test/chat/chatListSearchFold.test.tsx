@@ -58,4 +58,26 @@ describe("the chat list's search over the messages", () => {
     expect(screen.getAllByTestId("chat-row")).toHaveLength(1);
     expect(screen.getByTestId("chat-row")).toHaveTextContent("Bob");
   });
+
+  it("reads a message as the search inside the chat does: as it shows, a file by its name, no payment lines", async () => {
+    const voice: ChatMessage = { ...message("b", 3, "📎 Voice message 2026.webm"), file: { id: "f", name: "Voice message 2026.webm", size: 1, mime: "audio/webm", voice: { durationMs: 1_000, peaks: [] } as never } };
+    const pdf: ChatMessage = { ...message("b", 4, "here is the plan"), file: { id: "g", name: "report.pdf", size: 1, mime: "application/pdf" } };
+    saveSession(chat("a", "Alice", [message("a", 1, "*hello* world"), message("a", 2, "read [the plan](https://ghostly.tools/p) now")]));
+    saveSession(chat("b", "Bob", [{ ...message("b", 1, "Payment of 21 sats"), paymentId: "p1" }, voice, pdf]));
+    const { user } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+    const box = screen.getByPlaceholderText("Search chats...");
+    const rows = async (query: string) => {
+      await user.clear(box);
+      await user.type(box, query);
+      return screen.queryAllByTestId("chat-row").map((row) => (row.textContent?.includes("Alice") ? "Alice" : "Bob"));
+    };
+    expect(await rows("hello world")).toEqual(["Alice"]);
+    expect(await rows("the plan now")).toEqual(["Alice"]);
+    expect(await rows("ghostly.tools/p")).toEqual(["Alice"]);
+    expect(await rows("*hello*")).toEqual([]);
+    expect(await rows("Payment of")).toEqual([]);
+    expect(await rows("report.pdf")).toEqual(["Bob"]);
+    expect(await rows("here is the plan")).toEqual([]);
+    expect(await rows("voice message")).toEqual(["Bob"]);
+  });
 });

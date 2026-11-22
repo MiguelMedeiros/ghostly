@@ -115,12 +115,19 @@ impl Resolve for PublicOnly {
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?
                     .collect();
-            if addrs.is_empty() || addrs.iter().any(|a| !is_public(a.ip())) {
-                return Err("not a public address".into());
-            }
-            Ok(Box::new(addrs.into_iter()) as Addrs)
+            only_public(addrs)
         })
     }
+}
+
+/// A name's addresses as the resolver answered them, or an error when any of them is not public (or there are none).
+pub(crate) fn only_public(
+    addrs: Vec<SocketAddr>,
+) -> Result<Addrs, Box<dyn std::error::Error + Send + Sync>> {
+    if addrs.is_empty() || addrs.iter().any(|a| !is_public(a.ip())) {
+        return Err("not a public address".into());
+    }
+    Ok(Box::new(addrs.into_iter()))
 }
 
 /// The URL if this side may fetch it: http(s), no credentials, the default

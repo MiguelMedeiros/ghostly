@@ -1,13 +1,19 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { HashRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { BackupProgress } from "../../components/BackupProgress";
+import { CallOverlay } from "../../components/CallOverlay";
 import { DeleteChatDialog } from "../../components/DeleteChatDialog";
+import { IncomingCallNotification } from "../../components/IncomingCallNotification";
+import { Select } from "../../components/ui/Select";
 import { I18nProvider } from "../../contexts/I18nContext";
 import { SettingsProvider } from "../../contexts/SettingsContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { useBackCloses, useOutsideDismiss } from "../../hooks/useDismiss";
+import { reloadIntoGate } from "../../lib/devices";
+import { adoptEntry } from "../../lib/layerHistory";
 
 // covers: app.navigation.back
 
@@ -24,15 +30,45 @@ function Busy({ onClose }: { onClose(): void }) {
   return <div role="dialog" data-testid="busy"><button onClick={onClose}>Done</button></div>;
 }
 
+/** A panel over the chat that answers Back only (no Escape, no tap outside). */
+function Panel({ onClose }: { onClose(): void }) {
+  useBackCloses(onClose);
+  return <div data-testid="panel" />;
+}
+
+const LANGUAGES = [{ value: "en", label: "English" }, { value: "pt", label: "Português" }];
+
+/** A select on the page, as Settings' Language. */
+function Language() {
+  const [value, setValue] = useState("en");
+  return <Select aria-label="Language" value={value} options={LANGUAGES} onChange={setValue} />;
+}
+
+/** A dialog with a select in it, as New wallet's provider. */
+function Provider({ onClose }: { onClose(): void }) {
+  useBackCloses(onClose);
+  return <dialog open data-testid="provider"><Select aria-label="Provider" value="en" options={LANGUAGES} onChange={() => {}} /></dialog>;
+}
+
 function Chat() {
   const nav = useAppNavigation();
   const navigate = useNavigate();
   const [menu, setMenu] = useState(false);
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [panel, setPanel] = useState(false);
+  const [provider, setProvider] = useState(false);
+  const [ringing, setRinging] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [calling, setCalling] = useState(false);
   return (
     <>
       <h1>Chat</h1>
+      <Language />
+      <button onClick={() => setProvider(true)}>New wallet</button>
+      {provider && <Provider onClose={() => setProvider(false)} />}
+      <button onClick={() => setPanel(true)}>Panel</button>
+      {panel && <Panel onClose={() => setPanel(false)} />}
       <button onClick={() => setMenu(true)}>More</button>
       <button onClick={() => setAsking(true)}>Ask</button>
       <button onClick={() => setBusy(true)}>Send</button>
@@ -40,6 +76,13 @@ function Chat() {
       {menu && <ChatMenu onClose={() => setMenu(false)} onDelete={() => setAsking(true)} />}
       {asking && <DeleteChatDialog name="Bob" onClose={() => setAsking(false)} onConfirm={() => { setAsking(false); nav.home(); }} />}
       {busy && <Busy onClose={() => setBusy(false)} />}
+      <button onClick={() => setRinging(true)}>Ring</button>
+      {ringing && <IncomingCallNotification peerName="Bob" hasVideo={false} onAcceptAudio={() => {}} onAcceptVideo={() => {}} onReject={() => setRinging(false)} />}
+      <button onClick={() => setBackingUp(true)}>Back up</button>
+      {backingUp && <BackupProgress job={{ kind: "backup", sealed: true, stage: "writing", files: 1, filesTotal: 3, bytes: 10, bytesTotal: 30 }} onCancel={() => setBackingUp(false)} />}
+      <button onClick={() => setCalling(true)}>Call</button>
+      {calling && <CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff remoteHasVideo={false}
+        callStartedAt={Date.now()} peerName="Bob" onHangUp={() => setCalling(false)} onToggleMute={() => {}} onToggleVideo={() => {}} />}
     </>
   );
 }
@@ -78,8 +121,8 @@ async function inChat() {
 }
 
 afterEach(async () => {
-  // Off whatever entry a test left, so the next starts on its own.
-  await waitFor(() => expect(layerEntry()).toBe(false));
+  // A traversal a test left on its way lands before the next starts (each starts on an entry of its own: `inChat`).
+  await new Promise((resolve) => setTimeout(resolve, 100));
 });
 
 describe("Back with a layer open", () => {
@@ -98,12 +141,12 @@ describe("Back with a layer open", () => {
     await waitFor(() => expect(where()).toBe("/"));
   });
 
-  it("closed by Cancel, the dialog takes its entry with it: Back then goes home at once", async () => {
+  it("closed by Cancel, the dialog leaves its entry, but Back then goes home at once", async () => {
     const user = await inChat();
     await user.click(screen.getByRole("button", { name: "Ask" }));
     await waitFor(() => expect(layerEntry()).toBe(true));
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(layerEntry()).toBe(false));
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(where()).toBe("/chat/s1");
 
     await back();
@@ -128,6 +171,39 @@ describe("Back with a layer open", () => {
     await waitFor(() => expect(where()).toBe("/"));
   });
 
+  it("a select's open list closes alone, the focus staying on the select; the next Back leaves the chat", async () => {
+    const user = await inChat();
+    const select = screen.getByRole("combobox", { name: "Language" });
+    await user.click(select);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    await waitFor(() => expect(layerEntry()).toBe(true));
+
+    await back();
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(where()).toBe("/chat/s1");
+    expect(select).toHaveAttribute("aria-expanded", "false");
+    expect(select).toHaveFocus();
+    await back();
+    await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  it("in a dialog, Back closes the select's list only, and the next the dialog", async () => {
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "New wallet" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    const select = screen.getByRole("combobox", { name: "Provider" });
+    await user.click(select);
+    await waitFor(() => expect((history.state as Record<string, unknown>).ghostlyLayer).toBe(2));
+
+    await back();
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(screen.getByTestId("provider")).toBeInTheDocument();
+    expect(select).toHaveFocus();
+    await back();
+    await waitFor(() => expect(screen.queryByTestId("provider")).toBeNull());
+    expect(where()).toBe("/chat/s1");
+  });
+
   it("the app's own move from a dialog counts the pages only: Delete lands on the list", async () => {
     const user = await inChat();
     await user.click(screen.getByRole("button", { name: "Ask" }));
@@ -147,11 +223,71 @@ describe("Back with a layer open", () => {
     expect(screen.getByTestId("busy")).toBeInTheDocument();
     expect(where()).toBe("/chat/s1");
     await user.click(screen.getByRole("button", { name: "Done" }));
-    await waitFor(() => expect(layerEntry()).toBe(false));
+    await waitFor(() => expect(screen.queryByTestId("busy")).toBeNull());
     expect(where()).toBe("/chat/s1");
+    // Its entry stays (closed another way than Back), and Back from it leaves the chat in one press.
+    await back();
+    await waitFor(() => expect(where()).toBe("/"));
   });
 
-  it("a page opened over an open layer: Back from it lands on the chat, not on the layer's empty entry", async () => {
+  it.each([
+    ["an incoming call", "Ring", "incoming-call"],
+    ["backup progress", "Back up", "backup-progress"],
+  ])("Back over %s leaves it and the chat under it as they were: the next Back does too", async (_what, opens, testId) => {
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: opens }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    for (const _press of [1, 2]) {
+      await back();
+      await waitFor(() => expect(layerEntry()).toBe(true));
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
+      expect(where()).toBe("/chat/s1");
+    }
+  });
+
+  it("Back over a call shown full screen takes it to its small window, the chat under it kept; the next Back leaves the chat", async () => {
+    onTestFinished(() => localStorage.removeItem("ghostly_call_mini"));
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "Call" }));
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "false");
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    await back();
+    await waitFor(() => expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true"));
+    expect(where()).toBe("/chat/s1");
+    await back();
+    await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  it("Back over a call shown full screen is for that call only: the next call opens full screen again", async () => {
+    onTestFinished(() => localStorage.removeItem("ghostly_call_mini"));
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "Call" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    await back();
+    await waitFor(() => expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true"));
+    await user.click(screen.getByTitle("End call"));
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Call" }));
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "false");
+  });
+
+  it("Back from the entry a menu closed by Escape left, over a layer still open, goes to that layer, not out of the chat", async () => {
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "Panel" }));
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await waitFor(() => expect((history.state as Record<string, unknown>).ghostlyLayer).toBe(2));
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("menu")).toBeNull());
+    expect(screen.getByTestId("panel")).toBeInTheDocument();
+
+    await back();
+    await waitFor(() => expect(screen.queryByTestId("panel")).toBeNull());
+    expect(where()).toBe("/chat/s1");
+    await back();
+    await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  it("a page opened over an open layer: Back from it lands on the chat with the layer closed, and the next leaves it", async () => {
     const user = await inChat();
     await user.click(screen.getByRole("button", { name: "More" }));
     await waitFor(() => expect(layerEntry()).toBe(true));
@@ -161,9 +297,96 @@ describe("Back with a layer open", () => {
 
     await back();
     await waitFor(() => expect(where()).toBe("/chat/s1"));
-    await waitFor(() => expect(layerEntry()).toBe(false));
     expect(screen.queryByTestId("menu")).toBeNull();
     await back();
     await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  it("a page reloaded with a dialog open starts on its entry as the page's own: the app's next move runs at once", async () => {
+    // As a takeover reloads the page from its open dialog: the entry still carries the layer's mark, nothing is open.
+    history.replaceState({ ghostlyLayer: 1 }, "", "#/profile");
+    vi.resetModules();
+    const { afterLayers } = await import("../../lib/layerHistory");
+    const moved = vi.fn();
+    afterLayers(moved);
+    expect(moved).toHaveBeenCalledOnce();
+    expect(location.hash).toBe("#/profile");
+    expect(layerEntry()).toBe(false);
+  });
+
+  it("a layer closed another way than Back (Escape, Cancel) starts no traversal: a reload right after it is never cancelled", async () => {
+    await inChat();
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    const go = vi.spyOn(history, "go");
+    // Escape closes the menu, and the browser's reload starts before any timer of the page runs: on Chromium a
+    // traversal of the page's that lands then cancels the reload (net::ERR_ABORTED) or drops it (page.reload hangs).
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByTestId("menu")).toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(go).not.toHaveBeenCalled();
+    go.mockRestore();
+    // Its entry stays, a mark over the chat: Back from it still leaves the chat in one press.
+    expect(where()).toBe("/chat/s1");
+    await back();
+    await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  it("a page reloaded on the entry a closed layer left: the app's move back goes over the page's entries from before the reload", async () => {
+    let user = await inChat();
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    // The browser's reload: the page starts again on that entry, the chat's own entry from before it under it.
+    cleanup();
+    adoptEntry();
+    expect(layerEntry()).toBe(false);
+    user = userEvent.setup();
+    render(<HashRouter><SettingsProvider><I18nProvider><App /></I18nProvider></SettingsProvider></HashRouter>);
+    expect(where()).toBe("/chat/s1");
+
+    // Deleted from a dialog: the list, not the chat's entry from before the reload.
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await user.click(screen.getByRole("button", { name: /delete/i }));
+    await waitFor(() => expect(where()).toBe("/"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(where()).toBe("/");
+  });
+
+  it("a layer opened on the entry one closed another way left takes it: Back closes it, the next leaves the chat", async () => {
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    const push = vi.spyOn(history, "pushState");
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(push).not.toHaveBeenCalled();
+    push.mockRestore();
+
+    await back();
+    await waitFor(() => expect(screen.queryByTestId("menu")).toBeNull());
+    expect(where()).toBe("/chat/s1");
+    await back();
+    await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  // Last: the page is on its way out after it, and the history stays as it is.
+  it("a reload into the gate as the dialog under it goes (a move's last step) goes back over its entry first, never after the reload", async () => {
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    const go = vi.spyOn(history, "go");
+    const reload = vi.spyOn(window.location, "reload").mockImplementation(() => {});
+    // The page under the dialog gives way to the standby screen, whose reload starts at once.
+    cleanup();
+    await reloadIntoGate();
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+    await waitFor(() => expect(layerEntry()).toBe(false));
+    // A traversal after the reload started cancels it: the device stayed on "Moving to another device".
+    expect(go).toHaveBeenCalledOnce();
+    expect(go.mock.invocationCallOrder[0]).toBeLessThan(reload.mock.invocationCallOrder[0]);
+    go.mockRestore();
+    reload.mockRestore();
   });
 });

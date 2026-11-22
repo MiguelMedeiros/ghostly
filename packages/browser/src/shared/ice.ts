@@ -7,6 +7,7 @@ import type { IceServerSetting } from "./types";
 export function iceServerProblem(server: IceServerSetting): string | null {
   // A setting from outside the form (the CLI, `ghostly engine`, an import) may have no urls at all: before, a TypeError.
   if (typeof server?.urls !== "string") return "Each ICE server needs urls: one address, or several comma-separated (turn:host:port)";
+  if ([server.username, server.credential].some((value) => value !== undefined && typeof value !== "string")) return "A TURN server's username and credential are texts";
   const urls = server.urls.split(/[\s,]+/).filter(Boolean);
   if (!urls.length) return "Enter the TURN server address";
   for (const url of urls) {

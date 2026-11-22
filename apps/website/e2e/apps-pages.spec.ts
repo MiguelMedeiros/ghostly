@@ -3,7 +3,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { clientLabel } from "../content/apps";
+import { LAST_UPDATED_APPS } from "../app/privacy/updated";
+import { PERMISSIONS, apps, clientLabel } from "../content/apps";
 import { APPS_RELEASE, versionAtLeast } from "../lib/appsGate";
 import { VERSION } from "../lib/release";
 
@@ -172,7 +173,10 @@ test.describe("once the released Ghostly has Apps", () => {
       "Keep its own data on this device, separately in each chat",
       "Talk to the same app on your contact's side, while you are both in the chat",
     ]);
-    await expect(main).toContainText("No internet access. Its publisher may still learn your IP address and when you open it.");
+    // As the install screen warns there: in WebKit on the web an app can still reach a server it names (WISP 1200 · Threats).
+    await expect(main).toContainText(
+      "No internet access. Its publisher may still learn your IP address and when you open it. In Safari, and any browser on iPhone or iPad, an app can still contact other servers, which learn your IP address. The desktop app blocks them.",
+    );
     await expect(main).toContainText("Inside a one-to-one chat, with a contact who has it too.");
     await expect(main).toContainText("Made for: Web, Desktop.");
     const fingerprint = `${PREFIX.a.slice(0, 4)} ${PREFIX.a.slice(4, 8)} ${PREFIX.a.slice(8, 12)} ${PREFIX.a.slice(12, 16)}`;
@@ -184,6 +188,13 @@ test.describe("once the released Ghostly has Apps", () => {
     await expect.poll(() => main.locator("img.ap-icon").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(96);
     await expect(main).toContainText("Clocks for both players.");
     await expect(main).toContainText("Listed by Test Store, reviewed by its maintainers.");
+    // The publisher's description, under a heading that says whose words they are, after every block of Ghostly's own:
+    // drawn first, a line like "✓ Verified by Ghostly, no internet" read as the site's, above the permissions.
+    const description = main.getByRole("region", { name: "From the publisher" });
+    await expect(description.locator("p")).toHaveText(["A test app for the site's store pages.", "Two players, one board, moves sent over the chat."]);
+    await expect(description.locator("p").first()).toHaveAttribute("dir", "auto");
+    const blocks = await main.locator(".ap-main > .ap-block").evaluateAll((els) => els.map((el) => el.getAttribute("aria-labelledby")));
+    expect(blocks).toEqual(["ap-can", "ap-runs", "ap-install", "ap-from"]);
     expect(others()).toEqual([]);
   });
 
@@ -213,6 +224,13 @@ test.describe("once the released Ghostly has Apps", () => {
     expect(["web", "desktop", "extension"].map(clientLabel)).toEqual(["Web", "Desktop", "Browser extension"]);
     // Both pass WISP 1200's reader. CLIENTS is a plain object: `constructor` must not reach its prototype.
     for (const name of ["android", "constructor"]) expect(clientLabel(name)).toBe(name);
+  });
+
+  test("the files permission says what is picked stays with the app, not the chat it was picked in", () => {
+    // No app of the test store asks for files. Picks are kept per app (WISP 1200 · Keeping), and sharing them needs `chat`.
+    expect(PERMISSIONS.files.info).toBe(
+      "It reads only what you pick, without copying it. What you pick stays with the app, not with the chat: if it may also talk to your contact's app, it can share it in any chat you open it in.",
+    );
   });
 
   test("an app with the internet permission says so, and one without an icon shows its letter", async ({ page, request }) => {
@@ -257,7 +275,7 @@ test.describe("once the released Ghostly has Apps", () => {
     await expect(main).toContainText("Apps and stores.");
     await expect(main).toContainText("The apps pages.");
     await expect(main).toContainText("cdn.jsdelivr.net");
-    await expect(main).toContainText("Last updated: October 8, 2026");
+    await expect(main).toContainText(`Last updated: ${LAST_UPDATED_APPS}`);
   });
 
   test("a prerendered page keeps the build's gate until it is revalidated", async ({ page }) => {
@@ -318,6 +336,46 @@ test.describe("once the released Ghostly has Apps", () => {
       const box = (await value.boundingBox())!;
       expect.soft(box.x + box.width, (await value.textContent())!).toBeLessThanOrEqual(320);
     }
+  });
+
+  test("at 320 px a description line, a license and release notes of one long word, as long as the store takes, wrap inside the page", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    // The store's own limits (lib/store-core/appBundle.ts): a description of 2000 characters, whose one line may be a
+    // payment address or a link; 128 for a license, 500 for release notes. They ran past the screen's edge, where the
+    // page clips them (overflow-x: clip): a person read a cut-off address.
+    const description = "lnurl1".padEnd(2000, "dp68gurn8ghj7"), license = "LicenseRef-".padEnd(128, "Custom"), notes = "Fixed".padEnd(500, "Synchronizer");
+    await page.goto(LIVE + `/apps/${CHESS}`);
+    await page.locator(".ap-description p").first().evaluate((el, text) => { el.textContent = text; }, description);
+    // Every fact as long as release notes; the license as long as a license.
+    await page.locator(".ap-facts dd").evaluateAll((values, [license, notes]) => {
+      values.forEach((value, i) => { value.textContent = i === 0 ? license : notes; });
+    }, [license, notes]);
+    for (const part of [".ap-description p", ".ap-facts dd"]) {
+      for (const value of await page.locator(part).all()) {
+        const box = (await value.boundingBox())!;
+        expect.soft(box.x + box.width, part).toBeLessThanOrEqual(320);
+      }
+    }
+  });
+
+  test("at 320 px an install step naming a title of one long word, as long as the store takes, wraps inside the page", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    // Step 3 names the app by its title (40 characters, lib/store-core/appBundle.ts). One word that long grew the
+    // steps' grid to the word, and every step ran past the screen's edge, where the page clips it.
+    const title = "W".repeat(40);
+    await page.goto(LIVE + `/apps/${CHESS}`);
+    const step = apps.app.install.steps(title, "jmbf dj6x dr6m p3op", APPS_RELEASE)[2];
+    await page.locator(".ap-steps li").nth(2).evaluate((el, text) => { el.textContent = text; }, step);
+    // The text's own edge: a block keeps its box while the words in it run past.
+    const rights = await page.locator(".ap-steps li").evaluateAll((items) =>
+      items.map((item) => {
+        const range = document.createRange();
+        range.selectNodeContents(item);
+        return Math.max(range.getBoundingClientRect().right, item.getBoundingClientRect().right);
+      }),
+    );
+    expect(rights).toHaveLength(4);
+    for (const right of rights) expect.soft(right).toBeLessThanOrEqual(320);
   });
 
   test("axe finds nothing serious on either page", async ({ page }) => {

@@ -152,6 +152,26 @@ describe("a device set of its own, from moving", () => {
     expect(bytesEqual(read.payload!, fromBase64Url(winner.store.record.earlierSets.at(-1)!.tombstone))).toBe(true);
   });
 
+  it("the device that was active, closed by a tombstone another slot signed that does not list it, starts a set of its own", async () => {
+    // A stolen phone closed the address with a tombstone that lists itself alone.
+    const phoneTomb = (instance: number) => signTombstone(oldKeys, 1, [null, { key: signers[1]!.publicKey, name: NAMES[1]! }, null, null], (bytes) => signers[1]!.sign(bytes), { instance: new Uint8Array(8).fill(instance) });
+    const network = new FakeTurnNetwork();
+    network.seed(await phoneTomb(0x80));
+    const desktop = device(network, 0, { activeSlot: 0 });
+    expect(canStartOwnSet(desktop.store.record)).toBe(true);
+    // Nobody else to name: it believed itself active.
+    expect(await startOwnSet(desktop.ports, { password: PASSWORD, name: "" })).toBe("start");
+    expect(desktop.store.record).toMatchObject({ state: "active", activeSlot: 0, deviceSet: [slot(0), null, null, null] });
+    // The phone puts one of its own again, below this one, while it settles: still moving, never removed; it may try again.
+    const other = new FakeTurnNetwork();
+    other.seed(await phoneTomb(0x80));
+    const lowest = await phoneTomb(0);
+    const stubborn = device(other, 0, { activeSlot: 0 }, async () => { other.seed(lowest); });
+    expect(await startOwnSet(stubborn.ports, { password: PASSWORD, name: "" })).toBe("lost");
+    expect(stubborn.store.record.state).toBe("moving");
+    expect(canStartOwnSet(stubborn.store.record)).toBe(true);
+  });
+
   it("the remover's tombstone comes back on top: still moving, and it may try again", async () => {
     const network = await world();
     const removers = network.source("dht").held!;

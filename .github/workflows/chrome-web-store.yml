@@ -1,0 +1,96 @@
+name: Chrome Web Store
+
+# Puts a published release's extension zip (ghostly-browser-extension-<version>.zip, built and attached by
+# release.yml) on the Chrome Web Store item and submits it for review, through the Chrome Web Store API V2 as a
+# service account (tools/scripts/chrome-web-store.mjs).
+#
+# A person publishing the draft (docs/RELEASING.md, step 4) starts it. By hand, for a release already published:
+#   gh workflow run chrome-web-store.yml --ref main -f tag=v1.8.1
+#
+# A run uses the copy of this file on the ref it runs from, and a repository secret reaches every branch's copy. So
+# the store key is a secret of the `chrome-web-store` environment, which allows only main and v* tags (a published
+# release runs on its tag), and the job checks the ref too: a branch's own copy can drop the check here, never the
+# environment's.
+#
+# It does nothing until that environment has the secrets CWS_SERVICE_ACCOUNT_JSON and CWS_PUBLISHER_ID
+# (docs/RELEASING.md, "Chrome Web Store"): without them the first step writes a notice and every other step is
+# skipped. A draft, a pre-release (the translation runtime's) or a tag that is not vX.Y.Z is skipped the same way,
+# and so is a version the store already has or a newer one. It is a workflow of its own, so a refusal from the store
+# fails this run only, never the release.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published release whose extension zip goes to the store, e.g. v1.8.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-web-store
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    name: Upload and submit for review
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment: chrome-web-store
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      # The store item (public: it is in the store's address).
+      CWS_ITEM_ID: nbedaagicniejlmfcncndfjcejaidbcf
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: tools/scripts/chrome-web-store.mjs
+          sparse-checkout-cone-mode: false
+
+      # Only whether each secret is set reaches this step, never its value.
+      - name: Store credentials
+        id: credentials
+        env:
+          CWS_SERVICE_ACCOUNT_JSON: ${{ secrets.CWS_SERVICE_ACCOUNT_JSON != '' && 'set' || '' }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID != '' && 'set' || '' }}
+        run: node tools/scripts/chrome-web-store.mjs credentials
+
+      - name: Published release
+        id: release
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A draft has no release by tag here (404): the script reads that as "no published release".
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null > "$RUNNER_TEMP/release.json" || echo null > "$RUNNER_TEMP/release.json"
+          node tools/scripts/chrome-web-store.mjs release "$TAG" < "$RUNNER_TEMP/release.json"
+
+      - name: Download the extension zip
+        id: zip
+        if: steps.credentials.outputs.ready == 'true' && steps.release.outputs.go == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p "$RUNNER_TEMP/cws"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/cws" --pattern "ghostly-browser-extension-$version.zip"
+          echo "path=$RUNNER_TEMP/cws/ghostly-browser-extension-$version.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Upload and submit for review
+        if: steps.credentials.outputs.ready == 'true' && steps.release.outputs.go == 'true'
+        env:
+          CWS_SERVICE_ACCOUNT_JSON: ${{ secrets.CWS_SERVICE_ACCOUNT_JSON }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+          ZIP: ${{ steps.zip.outputs.path }}
+        run: node tools/scripts/chrome-web-store.mjs upload "$TAG" "$ZIP"

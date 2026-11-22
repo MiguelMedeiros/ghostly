@@ -4,6 +4,7 @@ import { generateSecretKey, type Event } from "nostr-tools/pure";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import type { CashuWallet } from "../src/engine/wallet";
 import { cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/providers/cashuMint";
+import { LightningCards } from "../src/engine/paymentAdapters/providers/lightningCards";
 import { LightningService, type LightningEvents } from "../src/engine/paymentAdapters/providers/lightningService";
 import { NoAnswer, NwcLightning, type NwcOptions } from "../src/engine/paymentAdapters/providers/nwc";
 import { nwc, parseNwcUri } from "../src/engine/paymentAdapters/providers/nwcProvider";
@@ -128,6 +129,10 @@ describe("talking to the wallet", () => {
     expect(noInfo.capabilities.send).toBe(true);
     const info = await (await connect(await wallet({ alias: "Test hub" }))).info();
     expect(info.alias).toBe(`Test hub via ${new URL(relay.url).host}`);
+    // The wallet's own name, without the characters that hide text or reorder it.
+    const hidden = await (await connect(await wallet({ alias: "\u202eTest\u200b hub\ufeff" }))).info();
+    expect(hidden.alias).toBe(`Test hub via ${new URL(relay.url).host}`);
+    expect((await (await connect(await wallet({ alias: "\u200b\u2066" }))).info()).alias).toBe(`NWC wallet via ${new URL(relay.url).host}`);
   });
 
   it("reads only answers signed by the wallet, about its request, of the method asked, and not oversized", async () => {
@@ -331,5 +336,27 @@ describe("NWC as the engine's Lightning source", () => {
     await expect(lightning.sources.set("nwc", { uri: fake.uri() })).rejects.toThrow("real money");
     expect(await settings()).toEqual([]);
     await lightning.stop();
+  });
+
+  it("a new card is named after the wallet, not cut in its relay's address; a long name ends on a whole word with …", async () => {
+    const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
+    const cashu = { balance: async () => 0 } as unknown as CashuWallet;
+    const descriptor = { ...nwc, create: async ({ secrets }: { secrets: Record<string, string> }, host: { signal: AbortSignal }) => NwcLightning.connect(secrets.uri, { requestMs: 1_500, payMs: 1_500, signal: host.signal }) };
+    const registry = new LightningCards("testnet", { descriptors: () => [cashuMint, descriptor], host: () => ({ platform: "web", cashu }), events, hasMints: () => true });
+    await registry.start();
+    try {
+      const named = async (alias: string) => {
+        const card = await registry.add("nwc", { uri: (await wallet({ alias })).uri() });
+        return registry.views().find((v) => v.card === card)?.name;
+      };
+      // The source's own alias still names the relay (the card's subtitle shows it); the card's name does not.
+      expect(new URL(relay.url).host).toMatch(/^127\.0\.0\.1:\d+$/);
+      expect(await named("Hub B")).toBe("Hub B (NWC)");
+      expect(await named("My Lightning Wallet At Home")).toBe("My Lightning Wallet… (NWC)");
+      expect(await named("Alby Hub on the living room shelf")).toBe("Alby Hub on the… (NWC)");
+      expect(await named("Supercalifragilisticexpialidocious")).toBe("Supercalifragilisti… (NWC)");
+      // A wallet that gives no name of its own is the source's short name, not "NWC wallet (NWC)".
+      expect(await named("")).toBe("NWC");
+    } finally { await registry.stop(); }
   });
 });

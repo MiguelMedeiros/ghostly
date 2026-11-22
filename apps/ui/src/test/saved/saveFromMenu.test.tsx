@@ -8,7 +8,7 @@ import { renderApp } from "../render";
 
 // covers: chat.saved
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 /** ⋮ Save / Unsave: a message saved on this device from its menu, which says Unsave once it is. */
 

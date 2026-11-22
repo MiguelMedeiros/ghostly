@@ -1,0 +1,1 @@
+While Hide my IP from contacts is on, `service open` is refused (`unavailable`, saying why), as `call start` and `call answer` are: the contact's app would run in an ordinary browser tab, where nothing keeps its page from making a WebRTC connection with a STUN server the contact names.

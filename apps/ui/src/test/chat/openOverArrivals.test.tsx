@@ -17,7 +17,7 @@ import { renderApp } from "../render";
  * bottom took the place of the row that drew it, closing it and leaving the focus on the page's body.
  */
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const wire = (i: number) => `w${String(i).padStart(21, "0")}`;

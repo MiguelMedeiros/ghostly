@@ -21,7 +21,7 @@ import { renderApp } from "../render";
 // covers: chats.mute
 
 const sound = vi.hoisted(() => ({ playSound: vi.fn((_name: string) => () => {}), notice: vi.fn(async (_id: string, _body: string) => {}) }));
-vi.mock("../../lib/sounds", () => ({ playSound: sound.playSound, startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: sound.playSound, startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 vi.mock("../../lib/notifications", () => ({ showPrivateNotification: sound.notice, onNotificationOpen: () => () => {}, clearChatNotification: () => {} }));
 
 const MIN = 60_000;
@@ -337,7 +337,8 @@ describe("a muted chat in the list", () => {
     expect(rows.map(r => within(r).getByTestId("chat-row-name").textContent)).toEqual(["Alice", "Bob"]);
     const [alice, bob] = rows;
     expect(alice).toHaveAttribute("data-muted", "true");
-    expect(within(alice).getByTestId("chat-row-muted")).toHaveAccessibleName("Notifications muted");
+    expect(within(alice).getByTestId("chat-row-muted")).toHaveAttribute("aria-hidden", "true");
+    expect(within(alice).getByTestId("chat-row-open")).toHaveAccessibleName("Alice, 2 unread messages, notifications muted");
     const badge = within(alice).getByTestId("chat-row-unread");
     expect(badge).toHaveTextContent("2");
     expect(badge).toHaveAttribute("data-muted", "true");
@@ -390,7 +391,7 @@ describe("a muted chat in the list", () => {
     expect(until - before).toBeGreaterThanOrEqual(60 * MIN);
     expect(until - before).toBeLessThan(60 * MIN + 5_000);
     expect(row).toHaveAttribute("data-muted", "true");
-    expect(within(row).getByTestId("chat-row-muted")).toHaveAccessibleName("Notifications muted");
+    expect(within(row).getByTestId("chat-row-open")).toHaveAccessibleName("Alice, notifications muted");
     expect(bell).toHaveAccessibleName(`Notifications muted until ${muteEndText(until, "en")}`);
     expect(bell).toHaveAttribute("title", `Notifications muted until ${muteEndText(until, "en")}`);
     expect(bell).toHaveAttribute("data-muted", "until");

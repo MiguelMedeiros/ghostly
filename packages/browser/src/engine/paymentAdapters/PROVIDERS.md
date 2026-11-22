@@ -21,13 +21,13 @@ Testnet) and on the platforms listed. "Experimental" is the descriptor's `experi
 |---|---|---|---|---|---|---|
 | `cashu-mint` | Lightning | [cashuMint.ts](providers/cashuMint.ts) | yes | the test mints | web, extension, desktop | not flagged |
 | `fedimint` | Lightning | [fedimint.ts](providers/fedimint.ts) | yes | signet, testnet, regtest, mutinynet | web, extension, desktop | experimental |
-| `breez` | Lightning | [breez.ts](providers/breez.ts) | yes (Breez API key required) | regtest (Breez and Lightspark's, no API key) | web, extension, desktop | experimental |
+| `breez` | Lightning | [breezProvider.ts](providers/breezProvider.ts), [breez.ts](providers/breez.ts) | yes (Breez API key required) | regtest (Breez and Lightspark's, no API key) | web, extension, desktop | experimental |
 | `nwc` | Lightning | [nwcProvider.ts](providers/nwcProvider.ts), [nwc.ts](providers/nwc.ts) | yes | testnet, signet, mutinynet, regtest | web, extension, desktop | not flagged |
-| `core-lightning` | Lightning | [coreLightning.ts](providers/coreLightning.ts) | yes | testnet, signet, regtest | web, extension, desktop | not flagged |
-| `webln` | Lightning | [webln.ts](providers/webln.ts) | yes | testnet, signet, mutinynet, regtest | web | experimental |
-| `lnd` | Lightning | [lnd.ts](providers/lnd.ts) | yes | testnet, signet, regtest | web, extension, desktop | experimental |
+| `core-lightning` | Lightning | [coreLightningProvider.ts](providers/coreLightningProvider.ts), [coreLightning.ts](providers/coreLightning.ts) | yes | testnet, signet, regtest | web, extension, desktop | not flagged |
+| `webln` | Lightning | [weblnProvider.ts](providers/weblnProvider.ts), [webln.ts](providers/webln.ts) | yes | testnet, signet, mutinynet, regtest | web | experimental |
+| `lnd` | Lightning | [lndProvider.ts](providers/lndProvider.ts), [lnd.ts](providers/lnd.ts) | yes | testnet, signet, regtest | web, extension, desktop | experimental |
 | `bitcoind` | On-chain | [bitcoindProvider.ts](providers/bitcoindProvider.ts), [bitcoind.ts](providers/bitcoind.ts) | yes | testnet, signet, regtest | desktop | experimental |
-| `bdk` | On-chain | [bdk.ts](providers/bdk.ts) | no (no phrase backup or fee bump yet) | signet, mutinynet, regtest | web, extension, desktop | experimental |
+| `bdk` | On-chain | [bdkProvider.ts](providers/bdkProvider.ts), [bdk.ts](providers/bdk.ts) | no (no phrase backup or fee bump yet) | signet, mutinynet, regtest | web, extension, desktop | experimental |
 
 The ways of paying that are not sources (Cashu, Ark through Arkade or Bark, Spark, Fedimint ecash, USDT) are
 wallets of their own, one per network, made with New; their networks are in
@@ -73,6 +73,12 @@ exports.
 
 2. Add it to `LIGHTNING_PROVIDERS` or `ONCHAIN_PROVIDERS` in [providers/registry.ts](providers/registry.ts).
    That is the only shared line you touch; keep the list in the order the picker should show.
+
+   The descriptor's lines are English. A built-in provider's description and its fields' label, help,
+   placeholder, options and suggestions are also translated in the app: keys under
+   `wallet.source.providers.<id>` in `apps/ui/src/locales/*/wallet.json` (`fields.<name>.<line>`; an option or
+   suggestion by its value), read by `providers/providerText.ts` in the UI. Technical names (Macaroon, Rune, hex,
+   NWC URI, RPC) and commands stay as they are; a line without a key, and every line of a plugin, shows its English.
 
 3. Only if the declared `fields` cannot express the form (a "Connect" button that asks a browser wallet, a
    QR scanner): register a component in `apps/ui/src/components/wallet/providers/forms.ts` under the provider id.

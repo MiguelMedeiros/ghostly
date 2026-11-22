@@ -20,6 +20,7 @@ import { yieldThread } from "@ghostly/core";
 import { MINI_APP_LIMITS, type MiniAppLinkedFile } from "@ghostly/core/miniApp";
 import { keepTabInside } from "../../hooks/useDismiss";
 import type { Translate } from "../../locales/translate";
+import { openLayer } from "../layerHistory";
 import type { LinkedFilesHost } from "../platform";
 import { PICK_AFTER_CANCEL_MS } from "./broker";
 
@@ -38,14 +39,20 @@ export interface PickSheetText {
   notNow: string;
 }
 
+/**
+ * The app's title and a picked folder's name, isolated in the sentence: in another direction than the person's language
+ * (a Hebrew title in English), a title starting the sentence turned the whole of Ghostly's words around.
+ */
+const isolate = (text: string) => `\u2068${text}\u2069`;
+
 /** The sheets' words from the person's translator. */
 export function pickSheetText(t: Translate): PickSheetText {
   return {
-    ask: (app, folder) => t(folder ? "apps.files.askFolder" : "apps.files.askFiles", { app }),
+    ask: (app, folder) => t(folder ? "apps.files.askFolder" : "apps.files.askFiles", { app: isolate(app) }),
     choose: (folder) => t(folder ? "apps.files.chooseFolder" : "apps.files.chooseFiles"),
-    note: (app) => t("apps.files.note", { app }),
+    note: (app) => t("apps.files.note", { app: isolate(app) }),
     cancel: t("common.cancel"),
-    askAgain: (app, name, more) => (more ? t("apps.files.askAgainMore", { app, name, count: more }) : t("apps.files.askAgain", { app, name })),
+    askAgain: (app, name, more) => (more ? t("apps.files.askAgainMore", { app: isolate(app), name: isolate(name), count: more }) : t("apps.files.askAgain", { app: isolate(app), name: isolate(name) })),
     allow: t("apps.files.allow"),
     notNow: t("apps.files.notNow"),
   };
@@ -139,14 +146,24 @@ const randomId = () => randomIds(1)[0]!;
 /** How many picked files a pick turns into links per turn of the thread: a pick of 100,000 lets the page answer between. */
 const PICK_CHUNK = 4096;
 
-/** Whether a path names something hidden: any of its parts starts with a dot. */
-const hidden = (path: string) => path.startsWith(".") || path.includes("/.");
+/**
+ * Whether a path names something hidden: any of its parts starts with a dot. A folder's paths start with its own name,
+ * which the person chose, so only those under it count (`.Films` links its files), as the Desktop's walk.
+ */
+const hidden = (path: string, folder: boolean) => {
+  const under = folder ? path.slice(path.indexOf("/") + 1) : path;
+  return under.startsWith(".") || under.includes("/.");
+};
 
+/** A file's extension in lower case (ASCII letters only, as the Desktop's walk), "" for none. */
 const extensionOf = (path: string) => {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  return dot > 0 ? name.slice(dot + 1).replace(/[A-Z]+/g, (letters) => letters.toLowerCase()) : "";
 };
+
+/** Whether `accept` names a file's extension: everything does when it names none. */
+const accepted = (path: string, accept: string[]) => !accept.length || accept.includes(extensionOf(path));
 
 type PermissionHandle = FileSystemHandle & {
   queryPermission?(options: { mode: "read" }): Promise<PermissionState>;
@@ -187,14 +204,18 @@ const factsOf = async (handle: FileSystemFileHandle) => {
   return { size, lastModified };
 };
 
-/** Everything under a folder, its name first in each path, hidden entries left out, at most `limit` files. */
-async function walk(dir: FileSystemDirectoryHandle, path: string, out: PickedFile[], limit: number): Promise<void> {
+/**
+ * The files under a folder that `accept` names (all when it names none), its name first in each path, hidden entries
+ * left out, as the Desktop's walk. A file left out is neither got nor counted: the walk stops one past `limit` kept
+ * files, so a folder past it is refused whole (`too-large`), never cut to the files met first.
+ */
+async function walk(dir: FileSystemDirectoryHandle, path: string, accept: string[], out: PickedFile[], limit: number): Promise<void> {
   for await (const handle of (dir as unknown as { values(): AsyncIterable<FileSystemHandle> }).values()) {
     if (out.length > limit) return;
     if (handle.name.startsWith(".")) continue;
     const at = `${path}/${handle.name}`;
-    if (handle.kind === "directory") await walk(handle as FileSystemDirectoryHandle, at, out, limit);
-    else out.push({ path: at, file: await factsOf(handle as FileSystemFileHandle) });
+    if (handle.kind === "directory") await walk(handle as FileSystemDirectoryHandle, at, accept, out, limit);
+    else if (accepted(handle.name, accept)) out.push({ path: at, file: await factsOf(handle as FileSystemFileHandle) });
   }
 }
 
@@ -210,7 +231,7 @@ export const handlePicker: BrowserPicker = async (folder, accept) => {
     if (folder) {
       const dir = await w.showDirectoryPicker!({ mode: "read" });
       const files: PickedFile[] = [];
-      await walk(dir, dir.name, files, MINI_APP_LIMITS.filesEntries);
+      await walk(dir, dir.name, accept, files, MINI_APP_LIMITS.filesEntries);
       return { files, keep: { dir } };
     }
     const handles = await w.showOpenFilePicker!({ multiple: true, ...(accept.length && { types: [{ accept: { "application/octet-stream": accept.map((e) => `.${e}`) } }] }) });
@@ -298,8 +319,8 @@ export function sheet(parts: { title: string; note?: string; secondary: string; 
     // No taller than the window, with its own scroll: its buttons are always within reach.
     box.className = "max-h-[90dvh] w-full max-w-sm overflow-y-auto rounded-lg border border-border bg-sidebar-bg p-4 text-text-primary shadow-lg";
     const title = document.createElement("h2");
+    // Ghostly's words, in the page's direction: `dir="auto"` took it from the app's title when the sentence starts with it.
     title.className = "m-0 text-base font-semibold [overflow-wrap:anywhere]";
-    title.dir = "auto";
     title.id = `app-files-${randomId()}`;
     title.textContent = parts.title;
     box.setAttribute("aria-labelledby", title.id);
@@ -307,7 +328,6 @@ export function sheet(parts: { title: string; note?: string; secondary: string; 
     if (parts.note) {
       const note = document.createElement("p");
       note.className = "mt-2 text-sm text-text-secondary [overflow-wrap:anywhere]";
-      note.dir = "auto";
       note.textContent = parts.note;
       box.append(note);
     }
@@ -334,9 +354,12 @@ export function sheet(parts: { title: string; note?: string; secondary: string; 
     const armed = setTimeout(() => { primary.disabled = false; }, SHEET_SETTLE_MS);
     const tab = (e: KeyboardEvent) => keepTabInside(e, box);
     const stopped = () => finish(null);
+    // Back (Android's back gesture) answers it as Cancel does, and the page under it stays where it was.
+    const closed = openLayer(() => finish(null));
     const finish = (value: unknown) => {
       if (done) return;
       done = true;
+      closed();
       clearTimeout(armed);
       document.removeEventListener("keydown", tab);
       parts.signal?.removeEventListener("abort", stopped);
@@ -494,7 +517,7 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       // In chunks, the thread let go between them: at 100,000 files the links took the page for half a second.
       for (let from = 0; from < picked.files.length; from += PICK_CHUNK) {
         if (from) await yieldThread();
-        const chunk = picked.files.slice(from, from + PICK_CHUNK).filter(({ path }) => !hidden(path) && (!accept.length || accept.includes(extensionOf(path))));
+        const chunk = picked.files.slice(from, from + PICK_CHUNK).filter(({ path }) => !hidden(path, folder) && accepted(path, accept));
         if (linksOf(ref).size + added.length + chunk.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
         const ids = randomIds(chunk.length);
         chunk.forEach(({ path, file, at }, i) => {
@@ -515,11 +538,11 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       }
       return added.map(({ entry }) => entry);
     },
-    async list(ref, title, signal) {
+    async list(ref, title, signal, ask = true) {
       await load(ref);
-      // Kept picks the browser asks about again (after a restart): the person is asked once on this page.
+      // Kept picks the browser asks about again (after a restart): the person is asked once on this page, by an app on screen.
       const waiting = [...picks.values()].filter((p) => p.stored.ref === ref && !p.granted);
-      if (waiting.length && !askedAgain.has(ref)) {
+      if (ask && waiting.length && !askedAgain.has(ref)) {
         askedAgain.add(ref);
         // The first of them by name and a count of the rest: a title of every name pushes the buttons off the window.
         const names = waiting.flatMap((p) => keptNames(p.stored.keep));

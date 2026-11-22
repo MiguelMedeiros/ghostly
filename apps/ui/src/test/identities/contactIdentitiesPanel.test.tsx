@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
@@ -5,6 +8,7 @@ import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/typ
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { axeViolations } from "../axe";
 import { DAY, identitiesView, now, receivedView } from "./views";
 
 // covers: proofs.badges, proofs.recheck, proofs.expiry, proofs.unverifiable, proofs.public-activity
@@ -68,7 +72,7 @@ describe("ContactIdentitiesPanel", () => {
         receivedView({ id: "r6", status: "previous-key" }),
         receivedView({ id: "r7", provider: "domain", subject: "example.org" }),
       ]));
-      expect(screen.getByRole("radiogroup", { name: "Identities shared by Alice" })).toBeInTheDocument();
+      expect(screen.getByRole("radiogroup", { name: "Identities shared by \u2068Alice\u2069" })).toBeInTheDocument();
       const faces = theirs().map(card => card.querySelector<HTMLElement>("[data-deck=face]")!);
       expect(faces.map(f => [f.dataset.status, f.querySelector(".id-card-status")!.textContent])).toEqual([
         ["verified", "Verified"],
@@ -102,7 +106,8 @@ describe("ContactIdentitiesPanel", () => {
       expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument();
       const card = await turnOver(user, 0);
       expect(card).toHaveAttribute("data-status", "failed");
-      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: DNS lookup failed$/);
+      // A reason the app does not know reads as its own line, never as the check's English.
+      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: This proof couldn't be verified$/);
       expect(card).toHaveTextContent("DNS TXT record for example.org");
       expect(within(card).getByTestId("chat-identity-checked")).toHaveTextContent(/^On this device /);
       expect(card).toHaveTextContent("Valid until");
@@ -137,6 +142,15 @@ describe("ContactIdentitiesPanel", () => {
       expect(status).not.toHaveTextContent(/No Ghostly|Algo deu errado/);
     });
 
+    it("says a check none of the resolvers answered in Arabic, without the English resolver line", async () => {
+      const { user, engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Bob" onClose={vi.fn()} />, { language: "ar" });
+      document.documentElement.dataset.reduceMotion = "true";
+      act(() => engine.update(withReceived([receivedView({ id: "r1", provider: "domain", status: "unconfirmed", error: "Quad9 could not be reached", verified: { subject: "example.org", source: "DNS" } })])));
+      const status = within(await turnOver(user, 0)).getByTestId("chat-identity-received-status");
+      expect(status).toHaveTextContent(/فشل التحقق/);
+      expect(status).not.toHaveTextContent(/could not be reached|Quad9/);
+    });
+
     it("says who vouches for an attested identity and that a key proof is the holder's own", async () => {
       const { user } = open(withReceived([
         receivedView({ id: "r1", provider: "domain" }),
@@ -157,6 +171,93 @@ describe("ContactIdentitiesPanel", () => {
       const card = await turnOver(user, 0);
       expect(card).toHaveTextContent("Domain · Alice Liddell");
       expect(within(card).getByTestId("chat-identity-received-name-source")).toHaveTextContent("Name: keys.openpgp.org");
+    });
+
+    it("says whole where a name came from: the caveat at its end is never cut", async () => {
+      // An OpenPGP key's user ID: one line with an ellipsis showed "Name: User ID on the key, written by its holder: not …".
+      const source = "User ID on the key, written by its holder: not proof that the name or email is theirs";
+      const { user } = open(withReceived([receivedView({ provider: "openpgp", display: { name: "Satoshi Nakamoto <satoshi@example.org>", source, fetchedAt: now() } })]));
+      const line = within(await turnOver(user, 0)).getByTestId("chat-identity-received-name-source");
+      expect(line).toHaveTextContent(`Name: ${source}`);
+      expect(line).toHaveClass("id-card-back-meta-whole");
+      const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/identities/composer-identities.css"), "utf8");
+      const rule = /\.id-card-back-meta-whole\{([^}]*)\}/.exec(css)?.[1] ?? "";
+      expect(rule).toContain("white-space:normal");
+      expect(rule).toContain("text-overflow:clip");
+    });
+
+    describe("says where a name came from, and the keyserver's button, in the app's language", () => {
+      const key = "0123456789ABCDEF0123456789ABCDEF01234567";
+      const backIn = async (language: "ar" | "pt", r: ReceivedIdentityView) => {
+        const { user, engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={vi.fn()} />, { language });
+        document.documentElement.dataset.reduceMotion = "true";
+        act(() => engine.update(withReceived([r])));
+        return turnOver(user, 0);
+      };
+      const pgp = (source: string) => receivedView({ provider: "openpgp", subject: key, verified: { subject: key, source: "OpenPGP signature" },
+        display: { name: "Satoshi Nakamoto <satoshi@example.org>", source, fetchedAt: now() } });
+      const google = (source: string) => receivedView({ provider: "oidc", subject: "https://accounts.google.com",
+        verified: { subject: "https://accounts.google.com#42", source: "ID token signed by accounts.google.com", attester: "accounts.google.com" },
+        display: { name: "alice@example.org", source, fetchedAt: now() } });
+      const nameLine = (card: HTMLElement) => within(card).getByTestId("chat-identity-received-name-source");
+
+      it("an OpenPGP key's user ID, and its lookup button, in Arabic", async () => {
+        const card = await backIn("ar", pgp("User ID on the key, written by its holder: not proof that the name or email is theirs"));
+        expect(nameLine(card)).toHaveTextContent("الاسم: معرّف المستخدم على المفتاح، كتبه صاحبه: ليس دليلًا على أن الاسم أو البريد الإلكتروني له");
+        expect(nameLine(card)).not.toHaveTextContent(/User ID|holder/);
+        expect(within(card).getByTestId("chat-identity-lookup")).toHaveTextContent("التحقق من البريد الإلكتروني عبر keys.openpgp.org");
+      });
+
+      it("an OpenPGP key's user ID, and its lookup button, in Portuguese", async () => {
+        const card = await backIn("pt", pgp("User ID on the key, written by its holder: not proof that the name or email is theirs"));
+        expect(nameLine(card)).toHaveTextContent("Nome: ID de usuário na chave, escrito por quem a tem: não prova que o nome ou o e-mail são dessa pessoa");
+        expect(within(card).getByTestId("chat-identity-lookup")).toHaveTextContent("Verificar e-mails com keys.openpgp.org");
+      });
+
+      it("an email keys.openpgp.org confirmed", async () => {
+        const card = await backIn("pt", pgp("Email confirmed to keys.openpgp.org by its owner: the keyserver's check, not Ghostly's"));
+        expect(nameLine(card)).toHaveTextContent("Nome: e-mail confirmado ao keys.openpgp.org por quem o tem: verificação do servidor de chaves, não do Ghostly");
+      });
+
+      it("a sign-in provider's name with an email it did not check, in Arabic", async () => {
+        const card = await backIn("ar", google("Signed by Google; email not verified by Google"));
+        expect(nameLine(card)).toHaveTextContent("الاسم: موقَّع من Google؛ لم تتحقق Google من البريد الإلكتروني");
+        expect(nameLine(card)).not.toHaveTextContent(/Signed|verified/);
+      });
+
+      it("a sign-in provider's name with an email it checked, in Portuguese", async () => {
+        const card = await backIn("pt", google("Signed by Google; email verified by Google"));
+        expect(nameLine(card)).toHaveTextContent("Nome: assinado por Google; e-mail verificado por Google");
+      });
+
+      it("a sign-in provider's name without an email", async () => {
+        const card = await backIn("pt", google("Signed by GitLab"));
+        expect(nameLine(card)).toHaveTextContent("Nome: assinado por GitLab");
+      });
+
+      it("a name the account set for itself, in Portuguese", async () => {
+        const card = await backIn("pt", google("Signed by Microsoft; name set on the account, not checked by Microsoft"));
+        expect(nameLine(card)).toHaveTextContent("Nome: assinado por Microsoft; nome definido na conta, não verificado por Microsoft");
+        expect(nameLine(card)).not.toHaveTextContent(/Signed|checked/);
+      });
+
+      it("a name the account set for itself, beside an email the provider checked, in Arabic", async () => {
+        const card = await backIn("ar", google("Signed by Google; email verified by Google; name set on the account, not checked by Google"));
+        expect(nameLine(card)).toHaveTextContent("الاسم: موقَّع من Google؛ تحققت Google من البريد الإلكتروني؛ الاسم مضبوط في الحساب، لم تتحقق منه Google");
+      });
+
+      it("any other source as written", async () => {
+        const card = await backIn("pt", google("Signed by Google; email verified by Microsoft"));
+        expect(nameLine(card)).toHaveTextContent("Nome: Signed by Google; email verified by Microsoft");
+      });
+
+      it("how a Nostr proof was checked, in Arabic", async () => {
+        const npub = "a".repeat(64);
+        const card = await backIn("ar", receivedView({ provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature (NIP-01, BIP-340)" } }));
+        const how = card.querySelector("dl")!.querySelector("bdi")!;
+        expect(how).toHaveTextContent("توقيع Nostr (NIP-01, BIP-340)");
+        expect(how).not.toHaveTextContent(/signature/);
+      });
     });
 
     it("checks again on request, but not what was withdrawn or revoked", async () => {
@@ -206,6 +307,24 @@ describe("ContactIdentitiesPanel", () => {
       for (const id of ["nostr-load-profile", "nostr-load-follows", "nostr-load-notes"]) expect(within(card).getByTestId(id)).toBeInTheDocument();
       expect(within(card).getByTestId("nostr-contact-note")).toHaveTextContent(/^Loading asks your relays \(.*\), which learn your IP address and this key\./);
     });
+
+    it("draws what the Nostr key published in its own direction: its name, @handle, NIP-05, about and posts", async () => {
+      const npub = "npub1example";
+      const fetched = { fetchedAt: now(), relays: ["wss://relay.one.example"], stale: false };
+      const nostr = { subject: npub, npub,
+        profile: { ...fetched, found: true, profile: { name: "محمد", handle: "alice", nip05: "_@example.com", about: "مرحبا بكم!", hasPicture: false, eventAt: now(), eventId: "e" } },
+        notes: { ...fetched, count: 1, more: false, hidden: 0, authorMuted: false } } as NonNullable<LinkView["nostr"]>[number];
+      const { user, engine } = open({ links: [paired({ identities: identitiesView({ received: [receivedView({ provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature" } })] }), nostr: [nostr] })] });
+      engine.on("nostrContactNotes", () => [{ id: "n1", createdAt: now(), content: "Hello (all)", reply: false }]);
+      const card = await turnOver(user, 0);
+      // In an Arabic app "@alice" after an Arabic name was drawn "alice@", and "_@example.com" as "example.com …@_"
+      // (measured in Chromium): each is a run of its own.
+      const name = within(card).getByTestId("nostr-profile-name");
+      expect([...name.querySelectorAll("bdi")].map(b => b.textContent)).toEqual(["محمد", "@alice"]);
+      expect(within(card).getByText("_@example.com")).toHaveAttribute("dir", "ltr");
+      expect(within(card).getByTestId("nostr-profile-about")).toHaveAttribute("dir", "auto");
+      expect((await within(card).findByText("Hello (all)"))).toHaveAttribute("dir", "auto");
+    });
   });
 
   describe("the chosen card's public data", () => {
@@ -232,9 +351,12 @@ describe("ContactIdentitiesPanel", () => {
       expect(engine.callsTo("loadPublicGraph")).toEqual([]);
     });
 
-    it("the panel closed asks nothing", () => {
-      renderApp(<p>no panel</p>).engine.update(withReceived([pubky()]));
-      expect(screen.queryByTestId("contact-activity")).not.toBeInTheDocument();
+    it("the panel closed asks nothing", async () => {
+      const { engine } = renderApp(<p>no panel</p>);
+      act(() => engine.update(withReceived([pubky()])));
+      await act(async () => {});
+      expect(engine.callsTo("loadPublicPosts")).toEqual([]);
+      expect(engine.callsTo("loadPublicGraph")).toEqual([]);
     });
 
     it("shows the engine's error for the chat", () => {
@@ -281,6 +403,7 @@ describe("ContactIdentitiesPanel", () => {
     const panel = screen.getByRole("complementary", { name: "Identities with Alice" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(panel).not.toHaveAttribute("aria-modal");
+    expect(await axeViolations(panel)).toEqual([]);
     expect(panel).toHaveFocus();
     const composer = screen.getByTestId("composer");
     for (let i = 0; i < 14 && document.activeElement !== composer; i++) await user.tab();
@@ -303,6 +426,8 @@ describe("ContactIdentitiesPanel", () => {
     const { user } = besideChat(false);
     const panel = screen.getByRole("dialog", { name: "Identities with Alice" });
     expect(panel).toHaveAttribute("aria-modal", "true");
+    // A role ARIA in HTML allows on its element: `dialog` on an <aside> is flagged by every checker.
+    expect(await axeViolations(panel)).toEqual([]);
     for (let i = 0; i < 14; i++) { await user.tab(); expect(panel).toContainElement(document.activeElement as HTMLElement); }
   });
 });

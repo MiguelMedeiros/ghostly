@@ -9,13 +9,15 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useBackCloses } from "../hooks/useDismiss";
 import { InstallMenuItem } from "./InstallApp";
 import { openJoinAnother } from "../lib/devices";
+import { listText } from "../lib/listText";
+import { StatusMenuItem } from "./StatusPicker";
 
 const LockIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
 );
 
 /**
- * The switcher itself: the active profile on top in its colors, which opens the Profile page; the others
+ * The switcher itself: the active profile on top in its colors, which opens the Profile page, and its status (StatusPicker.tsx); the others
  * below with their picture, what they left unread and whether something new waits for them, one tap each; then Add a profile and Manage profiles,
  * and Install app while the web app can be installed.
  * A popover over the account bar on a wide screen, a sheet from the bottom on a phone. Arrow keys, Home/End,
@@ -34,8 +36,8 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
   const { current, others } = glances;
   const items = () => [...(menuRef.current?.querySelectorAll<HTMLElement>("[role^='menuitem']") ?? [])];
 
-  // The most likely next step has focus: the first other profile, or adding one.
-  useEffect(() => { items()[1]?.focus(); }, []);
+  // The most likely next step has focus: the first other profile, or adding one (past this profile and its status).
+  useEffect(() => { items()[2]?.focus(); }, []);
   // Back (Android's back gesture) closes it alone, as every other menu and sheet.
   useBackCloses(() => onClose());
   useEffect(() => {
@@ -79,20 +81,23 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
       </div>
 
       <button type="button" role="menuitem" data-testid="profile-switcher-current"
-        aria-label={`${current.name}, ${nickname}, ${t("profileSwitcher.current")}. ${t("profileSwitcher.open")}`}
+        aria-label={t("common.sentences", { first: listText([current.name, nickname, t("profileSwitcher.current")], t), second: t("profileSwitcher.open") })}
         onClick={() => go("/profile")} className={`${itemClass} min-h-14 py-2`}>
         <span className="shrink-0 rounded-full" style={{ boxShadow: `0 0 0 2px var(--theme-panel-header), 0 0 0 4px ${color}` }}>
           <ProfileBadge entry={current} size={38} avatar={myAvatar} />
         </span>
-        <span className="flex-1 min-w-0">
-          <span className="block truncate text-sm font-semibold text-text-primary">{current.name}</span>
-          <span className="block truncate text-xs text-text-muted">{nickname}</span>
+        {/* The person's own words, in their own direction, on the box that cuts them, as a chat's name: a Latin name in
+            Arabic is cut at its end, not its start. Each box is as wide as its words, so a short one stays at the start. */}
+        <span className="flex-1 min-w-0 flex flex-col items-start">
+          <span dir="auto" className="max-w-full truncate text-sm font-semibold text-text-primary">{current.name}</span>
+          <span dir="auto" className="max-w-full truncate text-xs text-text-muted">{nickname}</span>
         </span>
         <span className="shrink-0 flex items-center gap-0.5 text-xs text-text-secondary" aria-hidden="true">
           {t("profileSwitcher.open")}
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="m9 6 6 6-6 6" /></svg>
         </span>
       </button>
+      <StatusMenuItem className={itemClass} onClose={onClose} />
 
       {others.length > 0 && <div role="none" className="my-1 border-t border-border" />}
       {others.map((other) => {
@@ -100,15 +105,15 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
         const unread = glance?.unread ?? 0, fresh = glance?.fresh ?? 0;
         const status = glance?.locked ? t("profileSwitcher.locked")
           : glance?.standby ? t("profileSwitcher.standby")
-          : [fresh ? t("profileSwitcher.new") : "", unread ? t("profileSwitcher.unread", { count: unread }) : ""].filter(Boolean).join(", ");
+          : listText([fresh ? t("profileSwitcher.new") : "", unread ? t("profileSwitcher.unread", { count: unread }) : ""].filter(Boolean), t);
         return (
           <button key={entry.id || "default"} type="button" role="menuitemradio" aria-checked="false" data-testid="profile-switcher-item"
-            aria-label={`${t("profileSwitcher.switchTo", { name: entry.name })}${status ? `, ${status}` : ""}`}
+            aria-label={listText([t("profileSwitcher.switchTo", { name: entry.name }), ...(status ? [status] : [])], t)}
             onClick={() => switchTo(other)} className={`${itemClass} min-h-12 py-1.5`}>
             <span className="shrink-0 rounded-full" style={{ boxShadow: `0 0 0 2px ${THEME_COLOR[themeOf(entry.id)]}66` }}>
               <ProfileBadge entry={entry} size={32} avatar={glance?.avatar} />
             </span>
-            <span className="flex-1 min-w-0 truncate text-sm text-text-primary">{entry.name}</span>
+            <span className="flex-1 min-w-0 flex"><span dir="auto" className="min-w-0 truncate text-sm text-text-primary">{entry.name}</span></span>
             {glance?.locked
               ? <span className="shrink-0 text-text-muted" title={t("profileSwitcher.locked")} data-testid="profile-switcher-locked"><LockIcon /></span>
               : glance?.standby

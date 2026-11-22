@@ -1,5 +1,5 @@
 import {
-  DOMAIN_FILE_MAX_BYTES, decodeDnsResponse, dnsProofName, encodeDnsQuery, isPublicAddress, nip05RootKey, normalizeDomain,
+  DOMAIN_FILE_MAX_BYTES, decodeDnsResponse, dnsProofName, encodeDnsQuery, IdentityCheckUnavailable, isPublicAddress, nip05RootKey, normalizeDomain,
   recordsFromTxt, recordsFromWellKnown, recordsName, toBase64Url, txtValue, wellKnownUrl,
   type DnsResponse, type DnsType, type DomainMethod, type DomainRecord,
 } from '@ghostly/core';
@@ -63,9 +63,16 @@ export interface DomainLookupOptions {
 export class DomainCheckError extends Error {}
 
 /** A resolver that gave no DNS answer at all: not reached, or it refused the request. The next one may answer. */
-class ResolverUnavailable extends DomainCheckError {}
+class ResolverUnavailable extends IdentityCheckUnavailable {}
 
-/** One RFC 8484 GET to one resolver. The query has ID 0 and no client subnet, so it carries only the name. */
+/*
+ * What this side's resolver, or the network between it and a host, did (no answer, an error, an HTTP status other
+ * than the file or its absence) is IdentityCheckUnavailable: the contact is told only that the check could not be
+ * finished, never the host, port or status seen here.
+ */
+
+/** One RFC 8484 GET to one resolver. The query has ID 0 and a client subnet of 0/0, so it carries only the name and
+ * the resolver passes no part of this device's address on to the name's servers. */
 async function askResolver(resolver: DohResolver, name: string, type: DnsType, options: DomainLookupOptions): Promise<DnsResponse> {
   let response: Awaited<ReturnType<DomainFetch>>;
   try {
@@ -73,14 +80,14 @@ async function askResolver(resolver: DohResolver, name: string, type: DnsType, o
       headers: { accept: 'application/dns-message' }, maxBytes: DNS_MAX_BYTES, signal: options.signal, redirect: 'error' });
   } catch (e) {
     throw /too large/i.test(String(e))
-      ? new DomainCheckError(`${resolver.name} sent an answer that is too large`)
+      ? new IdentityCheckUnavailable(`${resolver.name} sent an answer that is too large`)
       : new ResolverUnavailable(`${resolver.name} could not be reached`);
   }
   if (response.status !== 200 || !/^application\/dns-message\b/i.test(response.contentType))
     throw new ResolverUnavailable(`${resolver.name} refused the lookup`);
   let answer: DnsResponse;
-  try { answer = decodeDnsResponse(response.bytes, name, type); } catch { throw new DomainCheckError(`${resolver.name} sent an unusable answer`); }
-  if (answer.rcode !== 0 && answer.rcode !== 3) throw new DomainCheckError(`${resolver.name} could not resolve ${name}`);
+  try { answer = decodeDnsResponse(response.bytes, name, type); } catch { throw new IdentityCheckUnavailable(`${resolver.name} sent an unusable answer`); }
+  if (answer.rcode !== 0 && answer.rcode !== 3) throw new IdentityCheckUnavailable(`${resolver.name} could not resolve ${name}`);
   return answer;
 }
 
@@ -91,7 +98,7 @@ async function askResolver(resolver: DohResolver, name: string, type: DnsType, o
  */
 export async function dohQuery(name: string, type: DnsType, options: DomainLookupOptions): Promise<DnsResponse & { resolver: DohResolverId }> {
   const chosen = resolverById(options.resolver);
-  let first: DomainCheckError | undefined;
+  let first: IdentityCheckUnavailable | undefined;
   for (const resolver of [chosen, ...DOH_RESOLVERS.filter(r => r !== chosen)]) {
     try { return { ...await askResolver(resolver, name, type, options), resolver: resolver.id }; }
     catch (e) {
@@ -107,12 +114,14 @@ export async function dohQuery(name: string, type: DnsType, options: DomainLooku
  * contacted, so a proof cannot make a contact's app probe their own network.
  * The browser resolves again when it fetches; a name that changes its answer in
  * between (rebinding) is not fully excluded by this check — see the draft.
+ * No address at all (the name does not exist, or has no A or AAAA record) is the resolver's answer about the
+ * domain, not something this side's network did: a DomainCheckError, so a re-check stops confirming the proof.
  */
 export async function assertPublicHost(domain: string, options: DomainLookupOptions): Promise<void> {
   const [v4, v6] = await Promise.all([dohQuery(domain, 'A', options), dohQuery(domain, 'AAAA', options)]);
   const addresses = [...v4.answers, ...v6.answers].map(a => a.data);
   if (!addresses.length) throw new DomainCheckError(`${domain} has no address`);
-  if (!addresses.every(isPublicAddress)) throw new DomainCheckError(`${domain} points to a private network address, so it was not contacted`);
+  if (!addresses.every(isPublicAddress)) throw new IdentityCheckUnavailable(`${domain} points to a private network address, so it was not contacted`);
 }
 
 /** A well-known file: https only, no redirects, bounded. `undefined` when the server says it is not there. */
@@ -123,12 +132,12 @@ export async function fetchWellKnown(domain: string, method: 'https' | 'nip05', 
   try {
     response = await options.fetch(url, { headers: { accept: 'application/json' }, maxBytes: DOMAIN_FILE_MAX_BYTES, signal: options.signal, redirect: 'error' });
   } catch (e) {
-    throw new DomainCheckError(/too large/i.test(String(e)) ? `${url} is too large`
-      : `${domain} could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *`);
+    if (/too large/i.test(String(e))) throw new DomainCheckError(`${url} is too large`);
+    throw new IdentityCheckUnavailable(`${domain} could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *`);
   }
   if (response.status === 404 || response.status === 410) return;
-  if (response.status >= 300 && response.status < 400) throw new DomainCheckError(`${domain} answered with a redirect; the file must be served at exactly ${url}`);
-  if (response.status !== 200) throw new DomainCheckError(`${domain} answered ${response.status}`);
+  if (response.status >= 300 && response.status < 400) throw new IdentityCheckUnavailable(`${domain} answered with a redirect; the file must be served at exactly ${url}`);
+  if (response.status !== 200) throw new IdentityCheckUnavailable(`${domain} answered ${response.status}`);
   try { return new TextDecoder('utf-8', { fatal: true }).decode(response.bytes); } catch { throw new DomainCheckError(`${url} is not text`); }
 }
 

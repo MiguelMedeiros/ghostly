@@ -90,6 +90,27 @@ describe("danger's words on danger's tint", () => {
     expect(failures).toEqual([]);
   });
 
+  it("read at WCAG AA (4.5:1) in danger's ink on a menu (surface-alt) and its row under the pointer, in every theme", () => {
+    const failures = list.flatMap(({ name, vars }) => ["surface-alt", "surface-hover"].map((surface) => {
+      const ratio = contrast(rgb(vars["theme-danger-ink"]), rgb(vars[`theme-${surface}`]));
+      return ratio < 4.5 ? `${name}: ${vars["theme-danger-ink"]} on ${surface} is ${ratio.toFixed(2)}:1` : null;
+    })).filter(Boolean);
+    expect(failures).toEqual([]);
+  });
+
+  it("read at WCAG AA (4.5:1) in danger's ink on every page, panel and dialog surface, and under a red button's hover tint in a dialog, in every theme", () => {
+    // An error notice (Add's refusal of a link) or a red button (an app's Uninstall) on a dialog, a panel or a page:
+    // danger's own red read 4.44:1 on Monochrome dark's #1a1a1a, and a red button's hover (bg-danger/10) took it to 4.04:1.
+    const failures = list.flatMap(({ name, vars }) => [
+      ...["surface", "surface-alt", "app-bg", "panel-header", "sidebar-bg"].map((surface) => ({ on: surface, under: rgb(vars[`theme-${surface}`]) })),
+      ...["surface", "surface-alt"].map((surface) => ({ on: `danger/10 over ${surface}`, under: over(vars["theme-danger"], 0.1, vars[`theme-${surface}`]) })),
+    ].map(({ on, under }) => {
+      const ratio = contrast(rgb(vars["theme-danger-ink"]), under);
+      return ratio < 4.5 ? `${name}: ${vars["theme-danger-ink"]} on ${on} is ${ratio.toFixed(2)}:1` : null;
+    })).filter(Boolean);
+    expect(failures).toEqual([]);
+  });
+
   it("are never danger's own red anywhere in apps/ui/src/: they take text-danger-ink", () => {
     const offenders = sources(SRC).flatMap((file) =>
       classLists(file)

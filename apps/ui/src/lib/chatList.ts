@@ -5,13 +5,12 @@ import { invoicePreview, moreMoneyPreview } from "./parse/money-preview";
 import { englishT, type Translate } from "../locales/translate";
 import { formatAt } from "./time";
 import type { Language } from "./settings";
-import type { ChatFile } from "./types";
 
 /**
  * A voice message's or a video's line in the person's language: the history keeps it in English (`fileMessageText`).
- * Undefined for any other file, whose line is its name.
+ * Undefined for any other file, whose line is its name. A message's file, or its length as a reaction's note keeps it.
  */
-export function filePreview(file: ChatFile | undefined, t: Translate): string | undefined {
+export function filePreview(file: { voice?: { duration: number }; video?: { duration: number } } | undefined, t: Translate): string | undefined {
   if (file?.voice) return t("chat.preview.voice", { duration: formatVoiceDuration(file.voice.duration) });
   if (file?.video) return t("chat.preview.video", { duration: formatVideoDuration(file.video.duration) });
   return undefined;
@@ -40,7 +39,7 @@ function readPreview(text: string, t: Translate): string {
   const money = findMoney(text);
   if (!money) return plainText(text);
   if (money.type === "cashu") return t("chat.preview.ecash");
-  if (money.type === "onchain" || money.type === "bolt12" || money.type === "ark" || money.type === "usdt") return moreMoneyPreview(money, t);
+  if (money.type === "onchain" || money.type === "bolt12" || money.type === "ark" || money.type === "usdt" || money.type === "monero") return moreMoneyPreview(money, t);
   if (money.type === "lnurl") return `⚡ ${money.destination.kind === "address" ? t("chat.preview.lightningAddress") : "LNURL"} · ${money.destination.text}`;
   return invoicePreview(money.invoice, t);
 }

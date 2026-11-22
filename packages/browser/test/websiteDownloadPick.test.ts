@@ -3,8 +3,8 @@ import { defaultInstaller } from "../../../apps/website/lib/release";
 
 /*
  * The download panel of ghostly.tools marks one installer as the reader's (apps/website/lib/release.ts, read by
- * components/home/Finale.tsx). A phone or a tablet gets none: there is no Ghostly installer for it, so the browser
- * button leads. Safari on an iPad asks for the desktop site and sends a Mac's strings, and only its touch points tell
+ * components/home/Finale.tsx). An Android phone gets the release's APK; an iPhone or a tablet gets none: there is no
+ * Ghostly installer for it, so the browser button leads. Safari on an iPad asks for the desktop site and sends a Mac's strings, and only its touch points tell
  * it from a Mac: a Mac reports 0, an iPad 5.
  */
 
@@ -24,9 +24,9 @@ describe("website download pick", () => {
     expect(defaultInstaller(MAC_SAFARI, "MacIntel", "x86", 0)).toBe("macIntel");
   });
 
-  it("marks no installer on a phone", () => {
+  it("marks no installer on an iPhone, and the Android APK on an Android phone", () => {
     expect(defaultInstaller(IPHONE, "iPhone", undefined, 5)).toBeUndefined();
-    expect(defaultInstaller(ANDROID, "Linux armv81", undefined, 5)).toBeUndefined();
+    expect(defaultInstaller(ANDROID, "Linux armv81", undefined, 5)).toBe("androidApk");
   });
 
   it("keeps the Windows installer on a Windows machine with a touch screen", () => {

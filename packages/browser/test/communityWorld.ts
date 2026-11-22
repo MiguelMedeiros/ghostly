@@ -1,7 +1,8 @@
 import { DiscoveryBudgetError, identityFromSeedB64, type GhostRecord } from "@ghostly/core";
 import { Groups, meshEdgeScale, type GroupStore, type GroupsHost } from "../src/engine/groups";
+import { communityEdgeScale } from "../src/engine/communityEdgePace";
 import { COMMUNITY_TIMINGS, type CommunityTimings } from "../src/engine/community";
-import type { StoredGroup, StoredMessage } from "../src/shared/types";
+import type { GroupLight, GroupLive, StoredGroup, StoredMessage } from "../src/shared/types";
 
 /**
  * Headless peers running the real group engine (`Groups` → `Communities` → `CommunitySession`),
@@ -85,6 +86,17 @@ export interface Peer {
   host: GroupsHost;
 }
 
+/** A map that says when what it holds changes (`changed`): the world's peers and their links, which `counterpart` indexes. */
+class Watched<K, V> extends Map<K, V> {
+  changed?: () => void;
+  override set(key: K, value: V): this { this.changed?.(); return super.set(key, value); }
+  override delete(key: K): boolean { this.changed?.(); return super.delete(key); }
+  override clear(): void { this.changed?.(); super.clear(); }
+}
+
+/** Where a link sits in the world's index: its kind, its group and both ends. */
+const linkKey = (kind: Edge["kind"], g: string, me: string, peer: string) => `${kind} ${g} ${me} ${peer}`;
+
 /** Numbers in [0, 1) from a seed (xorshift32): the same ones every run. */
 export function seededRandom(seed: number): () => number {
   let x = Math.imul(seed, 2654435761) >>> 0 || 1;
@@ -129,18 +141,33 @@ export function sameRun(world: CommunityWorld, seed: number, start = Date.UTC(20
   };
 }
 
+/** With the private groups' small rows (`GroupLive`) and pin and deletion rows (`GroupLight`), as the engine's database keeps them. */
 function memoryStore(messages: StoredMessage[]): GroupStore {
-  const groups = new Map<string, StoredGroup>();
+  const groups = new Map<string, StoredGroup>(), live = new Map<string, GroupLive>(), light = new Map<string, GroupLight>();
   return {
     getGroups: async () => [...groups.values()].map(g => structuredClone(g)),
-    putGroup: async g => { groups.set(g.id, structuredClone(g)); },
-    deleteGroup: async id => { groups.delete(id); for (let i = messages.length - 1; i >= 0; i--) if (messages[i].linkId === `group:${id}`) messages.splice(i, 1); },
+    putGroup: async (g, row) => {
+      groups.set(g.id, structuredClone(g));
+      if (row !== undefined) light.delete(g.id);
+      if (row) live.set(g.id, structuredClone(row)); else if (row === null) live.delete(g.id);
+    },
+    deleteGroup: async id => { groups.delete(id); live.delete(id); light.delete(id); for (let i = messages.length - 1; i >= 0; i--) if (messages[i].linkId === `group:${id}`) messages.splice(i, 1); },
     getMessages: async linkId => messages.filter(m => m.linkId === linkId).sort((a, b) => a.timestamp - b.timestamp),
+    getGroupLive: async () => structuredClone(live),
+    putGroupLive: async (id, row) => { live.set(id, structuredClone(row)); },
+    getGroupLight: async () => structuredClone(light),
+    putGroupLight: async (id, row) => { light.set(id, structuredClone(row)); },
   };
 }
 
 export class CommunityWorld {
-  readonly peers = new Map<string, Peer>();
+  readonly peers = new Watched<string, Peer>();
+  /**
+   * Every peer's links by kind, group and both ends (`linkKey`), in the order `counterpart` walked them, made again
+   * after a link or a peer came or went. It walked every link of every peer for each frame sent and each `linkReady`,
+   * a third of the load test's time at 128 members (bug hunt, 2026-11-12).
+   */
+  private linkIndex: Map<string, { peer: Peer; linkId: string }[]> | null = null;
   readonly pkarr = new Map<string, GhostRecord[]>();
   now = Date.now();
   pkarrOps = 0;
@@ -195,7 +222,9 @@ export class CommunityWorld {
   private readonly slowed = new Map<string, { per: number; frames: (() => void)[] }>();
   private pending: Promise<unknown>[] = [];
 
-  constructor(private readonly timings: CommunityTimings = { ...COMMUNITY_TIMINGS, hubJitterMs: 0 }, readonly network: NetworkModel | null = null, private readonly random: () => number = Math.random) {}
+  constructor(private readonly timings: CommunityTimings = { ...COMMUNITY_TIMINGS, hubJitterMs: 0 }, readonly network: NetworkModel | null = null, private readonly random: () => number = Math.random) {
+    this.peers.changed = () => { this.linkIndex = null; };
+  }
 
   /** One Pkarr request of `cost`, if the app's budget allows it (always, without a `NetworkModel`). */
   /** Sees every request the network model charges (or refuses), with what it was for. */
@@ -226,14 +255,14 @@ export class CommunityWorld {
    * (a hub of large private groups), or one from before hubs.
    */
   add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>, app: { staysOnline?: boolean; legacy?: boolean; unmetered?: boolean; peerBudget?: number; heldElsewhere?: number; clock?: number } = {}): Peer {
-    const links = new Map<string, Edge>();
+    const links = this.watch(new Map<string, Edge>());
     const messages: StoredMessage[] = [];
     const places = new Map<number, string>();
     const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, known: new Map(), heldUntil: new Map(), host: null as unknown as GroupsHost, ...app };
     const host: GroupsHost = {
       sendOnLink: (linkId, frame) => {
         const edge = links.get(linkId), there = edge && this.counterpart(edge);
-        if (!edge || !there || !this.up(peer, edge, there.peer)) throw new Error("link down");
+        if (!edge || !there || !this.up(peer, edge, there)) throw new Error("link down");
         const data = JSON.stringify(frame);
         peer.sent.frames++; peer.sent.bytes += data.length;
         const copy = JSON.parse(data) as Record<string, unknown>;
@@ -248,7 +277,7 @@ export class CommunityWorld {
         queue.frames.push(deliver);
       },
       // Version 4 (hubs) only between two apps that announce it.
-      linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there.peer) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
+      linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
       // Its app runs and its packets reach this one: an app that closed, or one cut off, publishes nothing this one reads,
       // and what it published before is fresh only half a minute (`otherEndSeen`).
       linkSeen: linkId => {
@@ -358,13 +387,30 @@ export class CommunityWorld {
    * same end (two hubs answering one joiner with the link's entry key) collide on the same rendezvous
    * identity, as they would on Pkarr: then nobody gets through.
    */
+  private indexLinks(): Map<string, { peer: Peer; linkId: string }[]> {
+    const index = new Map<string, { peer: Peer; linkId: string }[]>();
+    for (const peer of this.peers.values()) {
+      // A peer a test put in the world by hand, with links of its own: watched from now on.
+      if (!(peer.links instanceof Watched)) peer.links = this.watch(new Map(peer.links));
+      for (const [linkId, e] of peer.links) {
+        const key = linkKey(e.kind, e.g, e.me, e.peer);
+        index.set(key, [...index.get(key) ?? [], { peer, linkId }]);
+      }
+    }
+    return index;
+  }
+
+  private watch(links: Map<string, Edge>): Watched<string, Edge> {
+    const watched = new Watched<string, Edge>(links);
+    watched.changed = () => { this.linkIndex = null; };
+    return watched;
+  }
+
   private counterpart(edge: Edge): { peer: Peer; linkId: string } | undefined {
     const want = edge.kind === "edge" ? "edge" : edge.kind === "host" ? "guest" : "host";
-    const found: { peer: Peer; linkId: string }[] = [];
-    for (const peer of this.peers.values()) for (const [linkId, e] of peer.links) {
-      if (e.kind === want && e.g === edge.g && e.me === edge.peer && e.peer === edge.me) found.push({ peer, linkId });
-    }
-    const same = [...this.peers.values()].flatMap(peer => [...peer.links.values()].filter(e => e.kind === edge.kind && e.g === edge.g && e.me === edge.me && e.peer === edge.peer));
+    const index = this.linkIndex ??= this.indexLinks();
+    const found = index.get(linkKey(want, edge.g, edge.peer, edge.me)) ?? [];
+    const same = index.get(linkKey(edge.kind, edge.g, edge.me, edge.peer)) ?? [];
     if (this.entryWinner && edge.kind !== "edge") {
       const winner = this.entryWinner;
       if (edge.kind === "guest") return found.find(f => f.peer === winner) ?? (found.length === 1 ? found[0] : undefined);
@@ -379,7 +425,7 @@ export class CommunityWorld {
    */
   sendFiles(peer: Peer, linkId: string, frame: Record<string, unknown>): boolean {
     const edge = peer.links.get(linkId), there = edge && this.counterpart(edge);
-    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there.peer)) return false;
+    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there)) return false;
     const data = JSON.stringify(frame);
     peer.sent.frames++; peer.sent.bytes += data.length;
     const copy = JSON.parse(data) as Record<string, unknown>;
@@ -391,7 +437,7 @@ export class CommunityWorld {
   /** A file's bytes on an edge as a binary message (files/4): the receiver's app hears the `pf-data` frame with them as bytes. */
   sendData(peer: Peer, linkId: string, id: string, offset: number, bytes: Uint8Array): boolean {
     const edge = peer.links.get(linkId), there = edge && this.counterpart(edge);
-    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there.peer)) return false;
+    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there)) return false;
     peer.sent.frames++; peer.sent.bytes += 2 + id.length + 8 + bytes.length;
     const frame = { t: "pf-data", id, offset, data: bytes.slice() };
     if (this.drop?.(peer, there.peer, frame)) return true;
@@ -399,15 +445,17 @@ export class CommunityWorld {
     return true;
   }
 
-  /** Both ends online and reachable, and (with a `NetworkModel`) signaling done on both sides. */
-  private up(peer: Peer, edge: Edge, there: Peer): boolean {
+  /**
+   * Both ends online and reachable, and (with a `NetworkModel`) signaling done on both sides. `other` is the caller's
+   * `counterpart(edge)`, not looked up again: that walks every link of every peer, and this runs for every frame sent.
+   */
+  private up(peer: Peer, edge: Edge, other: { peer: Peer; linkId: string }): boolean {
+    const there = other.peer;
     if (!peer.online || !there.online || !this.sameSide(peer, there)) return false;
     if (edge.kind === "edge" && this.holdEdge?.(peer, there)) return false;
-    const other = this.counterpart(edge);
     // Up at once with no model: it was up, for `linkBack`, as when its signaling is done.
-    if (!this.network) { edge.wasUp = true; if (other) there.links.get(other.linkId)!.wasUp = true; return true; }
+    if (!this.network) { edge.wasUp = true; there.links.get(other.linkId)!.wasUp = true; return true; }
     if (edge.upAt !== undefined) return true;
-    if (!other) return false;
     const theirs = there.links.get(other.linkId)!;
     if (edge.polls < this.network.signalPolls || theirs.polls < this.network.signalPolls) return false;
     edge.upAt = theirs.upAt = this.now;
@@ -437,9 +485,11 @@ export class CommunityWorld {
         const there = this.counterpart(edge);
         // The other side closed, or its app did (its data link dropped): signaling starts over.
         if (edge.upAt !== undefined && (!there || !there.peer.online || !this.sameSide(peer, there.peer))) { edge.upAt = undefined; edge.polls = 0; edge.sawPeer = edge.signaled = false; }
-        // A private group's edges look more slowly as it grows (`meshEdgeIntervals`).
+        // A private group's edges look more slowly as it grows (`meshEdgeIntervals`); a community's connected ones, as
+        // this app holds more edges there (`communityEdgeIntervals`).
         const mesh = edge.kind === "edge" && !peer.groups.isCommunityGroup(edge.g), size = mesh ? peer.groups.meshSize(edge.g) : 0;
-        const every = edge.upAt !== undefined ? net.connectedPollMs * (mesh ? meshEdgeScale(size) : 1)
+        const held = edge.kind === "edge" && !mesh ? [...peer.links.values()].filter(e => e.kind === "edge" && e.g === edge.g).length : 0;
+        const every = edge.upAt !== undefined ? net.connectedPollMs * (mesh ? meshEdgeScale(size) : held ? communityEdgeScale(held) : 1)
           : this.now < edge.fastUntil ? net.fastPollMs : net.backgroundPollMs * (mesh ? meshEdgeScale(size, false) : 1);
         if (this.now - edge.lastPoll < every) continue;
         edge.lastPoll = this.now;
@@ -462,7 +512,7 @@ export class CommunityWorld {
       for (const [linkId, edge] of peer.links) {
         const there = this.counterpart(edge);
         if (edge.done && !there) { peer.links.delete(linkId); continue; }
-        const up = !!there && this.up(peer, edge, there.peer);
+        const up = !!there && this.up(peer, edge, there);
         if (up && !edge.announced) {
           edge.announced = true;
           // An edge's session agrees files/3 as it agrees groups (group files, WISP 503).

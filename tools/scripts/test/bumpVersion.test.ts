@@ -37,6 +37,8 @@ describe("bump-version", () => {
     it("sets one new version in every workspace, the lockfile and the other places", { timeout: 120_000 }, () => {
       const files = [
         ...versionedJson(root),
+        // The npm settings the release's bump runs with (legacy-peer-deps): without them npm adds peers the lock leaves out.
+        ".npmrc",
         "package-lock.json",
         "apps/desktop/Cargo.toml",
         "Cargo.lock",
@@ -57,7 +59,10 @@ describe("bump-version", () => {
       // And one held for a release after the bump's: it stays in the folder, out of the changelog.
       writeFileSync(join(copy, "docs/changelog/unreleased/bump-held.md"), "---\nsection: Fixed\nrelease: 99.0\n---\n- A held entry.\n");
 
-      const env = { ...process.env, npm_config_offline: "true", npm_config_audit: "false", npm_config_fund: "false" };
+      // An empty npm cache of its own, offline: the bump must need nothing the lockfile does not hold, whatever this
+      // machine's cache happens to have (a package's peer that the lock leaves out passed only where it was cached).
+      const cache = join(copy, ".npm-cache");
+      const env = { ...process.env, npm_config_offline: "true", npm_config_cache: cache, npm_config_audit: "false", npm_config_fund: "false" };
       const next = "9.9.9";
       execFileSync(process.execPath, [join(copy, "tools/scripts/bump-version.mjs"), next], { cwd: copy, stdio: "pipe", env });
 
@@ -89,6 +94,53 @@ describe("bump-version", () => {
       expect(after.indexOf("## 99.0.0\n")).toBeLessThan(after.indexOf("- A held entry."));
       expect(after.indexOf("- A held entry.")).toBeLessThan(after.indexOf(`## ${next}\n`));
       expect(existsSync(join(copy, "docs/changelog/unreleased/bump-held.md"))).toBe(false);
+    });
+  });
+
+  // A patch cut on a release branch and merged into main only: dev still holds its entries and its old version, so a
+  // bump there would announce them again under the new version and leave the patch out of the changelog.
+  describe("a release the tree has not merged", () => {
+    const dirs: string[] = [];
+    afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+    const repository = (version: string, tags: string[]) => {
+      const dir = mkdtempSync(join(tmpdir(), "ghostly-skip-"));
+      dirs.push(dir);
+      for (const file of ["tools/scripts/bump-version.mjs", "tools/scripts/changes.mjs", "packages/browser/src/shared/features.ts"]) {
+        mkdirSync(dirname(join(dir, file)), { recursive: true });
+        cpSync(join(root, file), join(dir, file));
+      }
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "ghostly", version }));
+      writeFileSync(join(dir, "CHANGELOG.md"), `# Changelog\n\n## Unreleased\n\n## ${version}\n`);
+      const git = (...args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.email=t@t", "-c", "user.name=t", ...args], { stdio: "pipe" });
+      git("init", "-q");
+      git("add", "-A");
+      git("commit", "-qm", "base");
+      for (const tag of tags) git("tag", tag);
+      return dir;
+    };
+    const bump = (dir: string, next: string) => {
+      try {
+        execFileSync(process.execPath, [join(dir, "tools/scripts/bump-version.mjs"), next], { cwd: dir, stdio: "pipe" });
+        return { status: 0, stderr: "" };
+      } catch (e) {
+        const error = e as { status?: number; stderr?: Buffer };
+        return { status: error.status, stderr: String(error.stderr) };
+      }
+    };
+
+    it("stops a bump past a released version the tree is still before, before any file changes", () => {
+      const dir = repository("1.7.3", ["v1.7.2", "v1.7.3", "v1.7.4"]);
+      const before = readFileSync(join(dir, "package.json"), "utf8");
+      const { status, stderr } = bump(dir, "1.8.0");
+      expect(status).toBe(1);
+      expect(stderr).toMatch(/v1\.7\.4 is released.*1\.7\.3.*merge main/);
+      expect(readFileSync(join(dir, "package.json"), "utf8")).toBe(before);
+    });
+
+    it("lets a patch of an older line go while a newer release exists", () => {
+      // 1.6.1 → 1.6.2 skips no release: v1.7.4 is after it. It stops later, on files this copy lacks, not on the tags.
+      const { stderr } = bump(repository("1.6.1", ["v1.6.1", "v1.7.4"]), "1.6.2");
+      expect(stderr).not.toMatch(/is released/);
     });
   });
 

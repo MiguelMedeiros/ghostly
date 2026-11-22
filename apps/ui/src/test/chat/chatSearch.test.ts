@@ -16,6 +16,24 @@ describe("foldText", () => {
   });
 });
 
+describe("a received text its bubble shows translated", () => {
+  const translated = (m: ChatMessage) => (m.id === "t1" ? "Let's go to the **movies** tomorrow" : undefined);
+  const items = searchable([
+    message("t1", "Vamos ao cinema amanhã"),
+    message("t2", "Amanhã?"),
+    message("t3", "📎 amanhã.pdf", { file: file("amanhã.pdf") }),
+  ], undefined, translated);
+
+  it("is found by the words shown, read as its bubble reads them, and not by the original's", () => {
+    expect(searchMessages(items, "the movies tomorrow")).toEqual(["t1"]);
+    expect(searchMessages(items, "cinema")).toEqual([]);
+  });
+
+  it("leaves the texts shown as they are, and files, as they were", () => {
+    expect(searchMessages(items, "amanha")).toEqual(["t3", "t2"]);
+  });
+});
+
 describe("searchMessages", () => {
   const items = searchable([
     message("m1", "Vamos ao café amanhã?"),
@@ -45,6 +63,37 @@ describe("searchMessages", () => {
   it("finds nothing for an empty or blank query", () => {
     expect(searchMessages(items, "")).toEqual([]);
     expect(searchMessages(items, "   ")).toEqual([]);
+  });
+});
+
+describe("a formatted message, by the words its bubble shows", () => {
+  const KEY = "A".repeat(40) + "b".repeat(40) + "9".repeat(10);
+  const items = searchable([
+    message("b1", "**hello** world"),
+    message("i1", "I _really_ mean it"),
+    message("s1", "~~old~~ new plan"),
+    message("c1", "run `npm ci` now"),
+    message("l1", "read [the docs](https://example.com/guide) first"),
+    message("k1", `my key: ${KEY}`),
+  ]);
+
+  it("finds words that run across the formatting, as they read", () => {
+    expect(searchMessages(items, "hello world")).toEqual(["b1"]);
+    expect(searchMessages(items, "really mean")).toEqual(["i1"]);
+    expect(searchMessages(items, "old new")).toEqual(["s1"]);
+    expect(searchMessages(items, "npm ci now")).toEqual(["c1"]);
+    expect(searchMessages(items, "the docs first")).toEqual(["l1"]);
+  });
+
+  it("does not find the markers, which the bubble does not show", () => {
+    expect(searchMessages(items, "**")).toEqual([]);
+    expect(searchMessages(items, "_really_")).toEqual([]);
+    expect(searchMessages(items, "~~")).toEqual([]);
+  });
+
+  it("still finds a link's address and a long key whole", () => {
+    expect(searchMessages(items, "example.com/guide")).toEqual(["l1"]);
+    expect(searchMessages(items, KEY)).toEqual(["k1"]);
   });
 });
 

@@ -36,6 +36,7 @@ export const apps = {
     can: "What it can do",
     runs: "Where it runs",
     madeFor: "Made for",
+    fromPublisher: "From the publisher",
     install: {
       title: "Install it in Ghostly",
       steps: (title: string, fingerprint: string, release: string) => [
@@ -69,7 +70,8 @@ export const PERMISSIONS: Record<AppPermission | "storage", { label: string; inf
   name: { label: "See your name in the chat it is opened in" },
   files: {
     label: "Read files and folders you pick",
-    info: "It reads only what you pick, without copying it, and can share it with your contact in the chat.",
+    // Picks are kept per app, not per chat (WISP 1200 · Keeping), and sharing them needs `chat` too.
+    info: "It reads only what you pick, without copying it. What you pick stays with the app, not with the chat: if it may also talk to your contact's app, it can share it in any chat you open it in.",
   },
   internet: {
     label: "Use the internet",
@@ -77,8 +79,12 @@ export const PERMISSIONS: Record<AppPermission | "storage", { label: string; inf
   },
 };
 
-/** Said of every app without the internet permission (WISP 1200 · Permissions). */
-export const NO_INTERNET = "No internet access. Its publisher may still learn your IP address and when you open it.";
+/**
+ * Said of every app without the internet permission (WISP 1200 · Permissions). Its last part is the install screen's
+ * warning in WebKit on the web (WISP 1200 · Threats): the site can't tell which browser the app will run in.
+ */
+export const NO_INTERNET =
+  "No internet access. Its publisher may still learn your IP address and when you open it. In Safari, and any browser on iPhone or iPad, an app can still contact other servers, which learn your IP address. The desktop app blocks them.";
 
 export const VIEWS: Record<AppViewMode, string> = {
   chat: "Inside a one-to-one chat, with a contact who has it too.",

@@ -34,6 +34,13 @@ export const LEGACY_SERVICES: ServiceAd[] = [
   { id: "video", type: "video" },
 ];
 
+/**
+ * How many of its web apps one contact may be granted: a chat not paired yet tells chat, voice and video first, and a
+ * contact keeps only the first `MAX_SERVICES` of a list (`servicesFromWire`). A grant past it would read as shared here
+ * and never reach the contact.
+ */
+export const MAX_SHARED_APPS = MAX_SERVICES - LEGACY_SERVICES.length;
+
 export function isValidServiceId(id: string): boolean {
   return SERVICE_ID_PATTERN.test(id);
 }
@@ -61,7 +68,7 @@ export function serviceIdFromName(name: string, taken: Iterable<string> = []): s
       .toLowerCase()
       .normalize("NFKD")
       .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
+      .replace(/^-|-$/g, "")
       .slice(0, 24) || "service";
   let id = base;
   for (let n = 2; used.has(id) || LEGACY_SERVICES.some((s) => s.id === id); n++) id = `${base}-${n}`;

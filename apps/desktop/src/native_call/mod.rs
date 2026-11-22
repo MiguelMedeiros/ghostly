@@ -22,6 +22,8 @@ pub mod engine;
 #[cfg(any(target_os = "linux", test))]
 pub mod gather;
 pub mod ice;
+#[cfg(all(test, target_os = "linux"))]
+mod turn_lab;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +61,8 @@ struct Calls {
     meters: HashMap<u32, engine::Meter>,
     next_meter: u32,
     calls: HashMap<String, Live>,
+    /// Which page of the Ghostly window this is, counted from the app's start (`page_started`).
+    page: u64,
 }
 
 #[cfg(target_os = "linux")]
@@ -69,6 +73,8 @@ struct Live {
     camera: Option<u32>,
     /// The profile's own ICE servers (a TURN server, typically), the usable ones.
     ice: Vec<ice::IceServer>,
+    /// Hide my IP from contacts: the call keeps to their TURN servers.
+    relay_only: bool,
 }
 
 #[cfg(target_os = "linux")]
@@ -87,6 +93,18 @@ fn logged<T>(what: &str, result: Result<T, String>) -> Result<T, String> {
         crate::diagnostics::log(&format!("native call: {what} failed: {error}"));
     }
     result
+}
+
+/// Held by a test (`write`) while it lets a page go: a camera or a meter opening meanwhile waits here, still
+/// opening, however soon its device would have opened.
+#[cfg(all(test, target_os = "linux"))]
+static OPENS_HELD: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+/// Where a camera's or a meter's open starts: in tests, it waits while a test holds opens (`OPENS_HELD`).
+#[cfg(target_os = "linux")]
+fn opening() {
+    #[cfg(test)]
+    drop(OPENS_HELD.read().unwrap_or_else(|e| e.into_inner()));
 }
 
 /// Blocking work (opening or stopping a camera) off the IPC thread.
@@ -151,7 +169,9 @@ pub async fn native_camera_open(
 ) -> Result<OpenCamera, String> {
     #[cfg(target_os = "linux")]
     {
+        let page = calls().lock().unwrap().page;
         let open = move || {
+            opening();
             engine::Camera::open(
                 engine::fake_media(),
                 device.as_deref(),
@@ -160,11 +180,29 @@ pub async fn native_camera_open(
         };
         let camera = logged("the camera", blocking(open).await)?;
         let device = camera.device.clone();
-        let mut calls = calls().lock().unwrap();
-        calls.next_camera += 1;
-        let id = calls.next_camera;
-        calls.cameras.insert(id, Arc::new(camera));
-        Ok(OpenCamera { camera: id, device })
+        let kept = {
+            let mut calls = calls().lock().unwrap();
+            if calls.page == page {
+                calls.next_camera += 1;
+                let id = calls.next_camera;
+                calls.cameras.insert(id, Arc::new(camera));
+                Ok(id)
+            } else {
+                Err(camera)
+            }
+        };
+        match kept {
+            Ok(id) => Ok(OpenCamera { camera: id, device }),
+            // The page that asked is gone (another one started while the camera was opening): nobody holds its id.
+            Err(camera) => {
+                blocking(move || {
+                    drop(camera);
+                    Ok(())
+                })
+                .await?;
+                Err("The page that asked for this camera is gone".into())
+            }
+        }
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -220,7 +258,9 @@ pub async fn native_microphone_meter(
 ) -> Result<OpenMeter, String> {
     #[cfg(target_os = "linux")]
     {
+        let page = calls().lock().unwrap().page;
         let open = move || {
+            opening();
             engine::Meter::open(
                 engine::fake_media(),
                 device.as_deref(),
@@ -229,11 +269,29 @@ pub async fn native_microphone_meter(
         };
         let meter = logged("the microphone's meter", blocking(open).await)?;
         let device = meter.device.clone();
-        let mut calls = calls().lock().unwrap();
-        calls.next_meter += 1;
-        let id = calls.next_meter;
-        calls.meters.insert(id, meter);
-        Ok(OpenMeter { meter: id, device })
+        let kept = {
+            let mut calls = calls().lock().unwrap();
+            if calls.page == page {
+                calls.next_meter += 1;
+                let id = calls.next_meter;
+                calls.meters.insert(id, meter);
+                Ok(id)
+            } else {
+                Err(meter)
+            }
+        };
+        match kept {
+            Ok(id) => Ok(OpenMeter { meter: id, device }),
+            // As for a camera: the page that asked is gone.
+            Err(meter) => {
+                blocking(move || {
+                    drop(meter);
+                    Ok(())
+                })
+                .await?;
+                Err("The page that asked for this microphone is gone".into())
+            }
+        }
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -284,12 +342,14 @@ pub async fn native_speaker_test(device: Option<String>) -> Result<Option<String
 /// A call with this id, its events (JSON: `{"ice": state}`, `{"ended":"microphone"}`) and the peer's picture
 /// (JPEG) on `events`.
 /// `ice_servers`: the profile's own ICE servers (Settings, Network), used after the built-in STUN server; one
-/// that is not usable is left out ([`ice::usable`]).
+/// that is not usable is left out ([`ice::usable`]). `relay_only`: Hide my IP from contacts, the call uses their
+/// TURN servers alone and gathers relay candidates only (WISP 601, Relay only).
 #[tauri::command]
 pub fn native_call_open(
     id: String,
     events: Channel<InvokeResponseBody>,
     ice_servers: Option<Vec<ice::IceServer>>,
+    relay_only: Option<bool>,
 ) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
@@ -301,13 +361,14 @@ pub fn native_call_open(
                 call: None,
                 camera: None,
                 ice,
+                relay_only: relay_only.unwrap_or(false),
             },
         );
         Ok(())
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (id, sink(events), ice_servers);
+        let _ = (id, sink(events), ice_servers, relay_only);
         Err(ELSEWHERE.into())
     }
 }
@@ -335,13 +396,13 @@ async fn media(
     camera: Option<u32>,
     devices: engine::Devices,
 ) -> Result<Arc<engine::Call>, String> {
-    let (events, ice) = {
+    let (events, ice, relay_only) = {
         let calls = calls().lock().unwrap();
         let live = calls.calls.get(id).ok_or("No such call")?;
         if live.call.is_some() {
             return Err("The call has started already".into());
         }
-        (live.events.clone(), live.ice.clone())
+        (live.events.clone(), live.ice.clone(), live.relay_only)
     };
     let events = Arc::new(sink(events));
     let call = Arc::new(
@@ -351,6 +412,7 @@ async fn media(
             engine::fake_media(),
             devices,
             &ice,
+            relay_only,
             events,
         )
         .await?,
@@ -529,6 +591,38 @@ pub fn native_call_mute(id: String, muted: bool) -> Result<(), String> {
     }
 }
 
+/// The page draws who is speaking, or no longer does: the call says each side's level only while it does
+/// ([`engine::Call::set_levels`]).
+#[tauri::command]
+pub fn native_call_levels(id: String, on: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        call(&id)?.set_levels(on);
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (id, on);
+        Err(ELSEWHERE.into())
+    }
+}
+
+/// The page is in sight, or out of it (`document.hidden`): out of sight, the cameras' previews and the call's
+/// pictures are not made JPEGs for it past the first ([`engine::PAGE_HIDDEN`]).
+#[tauri::command]
+pub fn native_pictures_shown(shown: bool) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        engine::PAGE_HIDDEN.store(!shown, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = shown;
+        Err(ELSEWHERE.into())
+    }
+}
+
 /// Sends this camera's picture in the call, or none (`camera` null).
 #[tauri::command]
 pub fn native_call_camera(id: String, camera: Option<u32>) -> Result<(), String> {
@@ -617,5 +711,169 @@ pub async fn native_call_close(id: String) -> Result<(), String> {
     {
         let _ = id;
         Ok(())
+    }
+}
+
+/// A document takes the Ghostly window's place (`page_started` in `lib.rs`): the page before it held its cameras,
+/// meters and calls here by ids only it knew, and nothing would close them. They close as `native_call_close`,
+/// `native_camera_close` and `native_microphone_meter_close` close them, and its device watch stops being told.
+/// The ids go on counting: an id the page before had is never the next one's. A camera or meter still opening for
+/// the page before is closed as it opens (`page`). The new page is taken as in sight until it says otherwise.
+pub fn page_started() {
+    #[cfg(target_os = "linux")]
+    {
+        devices::page_started();
+        engine::PAGE_HIDDEN.store(false, std::sync::atomic::Ordering::Relaxed);
+        let (cameras, meters, live) = {
+            let mut calls = calls().lock().unwrap();
+            calls.page += 1;
+            (
+                std::mem::take(&mut calls.cameras),
+                std::mem::take(&mut calls.meters),
+                std::mem::take(&mut calls.calls),
+            )
+        };
+        if cameras.is_empty() && meters.is_empty() && live.is_empty() {
+            return;
+        }
+        for camera in cameras.values() {
+            camera.attach(None);
+        }
+        // Stopping a pipeline waits for its threads: not on the thread loading the page.
+        tauri::async_runtime::spawn(async move {
+            for call in live.into_values().filter_map(|l| l.call) {
+                call.close().await;
+            }
+            let _ = blocking(move || {
+                drop((cameras, meters));
+                Ok(())
+            })
+            .await;
+        });
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    // covers: calls.linux-native
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    fn counting(count: &Arc<AtomicU64>) -> engine::Sink {
+        let count = count.clone();
+        Arc::new(move |_| {
+            count.fetch_add(1, Ordering::Relaxed);
+        })
+    }
+
+    fn until(what: &str, done: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done() {
+            assert!(Instant::now() < deadline, "{what}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// The tests share `calls()`: one at a time.
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        static SERIAL: Mutex<()> = Mutex::new(());
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Nothing more comes on this count for half a second.
+    fn quiet(count: &Arc<AtomicU64>) -> bool {
+        let before = count.load(Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(500));
+        count.load(Ordering::Relaxed) == before
+    }
+
+    /// The page goes while Settings' camera preview and meter are still opening (a camera takes a second or so):
+    /// they close as they open, and the next page finds neither, rather than a camera and a microphone left on
+    /// under ids nobody holds until the app quits.
+    #[test]
+    fn a_camera_and_a_meter_still_opening_as_the_page_goes_are_closed() {
+        use std::future::Future;
+        use std::task::{Context, Waker};
+        if let Some(missing) = engine::missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let _serial = serial();
+        std::env::set_var("GHOSTLY_FAKE_MEDIA", "1");
+        let (frames, levels) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let channel = |count: &Arc<AtomicU64>| {
+            let count = count.clone();
+            Channel::new(move |_| {
+                count.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            })
+        };
+        let mut camera = Box::pin(native_camera_open(channel(&frames), None));
+        let mut meter = Box::pin(native_microphone_meter(channel(&levels), None));
+        // Each asked, and opening until the page has gone: the test tone opens in moments, and on a busy machine it
+        // was open before its first poll, kept by the page that was still there (CI, 2026-11-05).
+        let held = OPENS_HELD.write().unwrap_or_else(|e| e.into_inner());
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(camera.as_mut().poll(&mut cx).is_pending());
+        assert!(meter.as_mut().poll(&mut cx).is_pending());
+
+        page_started();
+        drop(held);
+
+        let camera = tauri::async_runtime::block_on(camera);
+        let meter = tauri::async_runtime::block_on(meter);
+        assert!(camera.is_err(), "the camera went to a page that is gone");
+        assert!(meter.is_err(), "the meter went to a page that is gone");
+        {
+            let calls = calls().lock().unwrap();
+            assert!(calls.cameras.is_empty(), "a camera stayed open");
+            assert!(calls.meters.is_empty(), "a meter stayed open");
+        }
+        until("the camera kept running", || quiet(&frames));
+        until("the microphone kept running", || quiet(&levels));
+    }
+
+    /// The page goes with a camera's preview, Settings' meter and a call open: the next one finds none of them,
+    /// and the camera and the microphone stop. Skipped where the GStreamer plugins are missing.
+    #[test]
+    fn a_new_page_closes_the_cameras_meters_and_calls_of_the_one_before() {
+        if let Some(missing) = engine::missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let _serial = serial();
+        let (frames, levels) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let camera = engine::Camera::open(true, None, counting(&frames)).unwrap();
+        let meter = engine::Meter::open(true, None, counting(&levels)).unwrap();
+        {
+            let mut calls = calls().lock().unwrap();
+            calls.cameras.insert(1, Arc::new(camera));
+            calls.meters.insert(1, meter);
+            calls.calls.insert(
+                "call".into(),
+                Live {
+                    events: Channel::new(|_| Ok(())),
+                    call: None,
+                    camera: Some(1),
+                    ice: Vec::new(),
+                    relay_only: false,
+                },
+            );
+        }
+        until("no frames", || frames.load(Ordering::Relaxed) > 0);
+        until("no levels", || levels.load(Ordering::Relaxed) > 0);
+
+        page_started();
+
+        {
+            let calls = calls().lock().unwrap();
+            assert!(calls.cameras.is_empty(), "a camera stayed open");
+            assert!(calls.meters.is_empty(), "a meter stayed open");
+            assert!(calls.calls.is_empty(), "a call stayed open");
+        }
+        // Stopped, not just forgotten: nothing more comes from either.
+        until("the camera kept running", || quiet(&frames));
+        until("the microphone kept running", || quiet(&levels));
     }
 }

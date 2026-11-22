@@ -1,16 +1,17 @@
 import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
+import { useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import { decodeCommunityLink, decodeGroupEntryLink, readDeviceInvite } from "@ghostly/core";
 import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedImage } from "../lib/pastedFiles";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformDroppedImage, platformPastedImage } from "../lib/pastedFiles";
 import { rawError } from "../lib/errorText";
 import { touchOnly } from "../lib/touchOnly";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
 import { problemText, type Problem } from "../lib/problemText";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 import { Notice } from "./ui/Notice";
 import { ReloadButton } from "./ui/ReloadButton";
 import { QR_IMAGE_MAX as IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrFrameReader, qrReaderFailures, readQrImage, scanQrFrames } from "../lib/qrReader";
@@ -24,14 +25,17 @@ import { QR_IMAGE_MAX as IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrFrameReader, 
  * is refused here, with the way to that chat (`onOpenChat`); one it already joined by opens that chat.
  */
 /**
- * `autoScan`: the camera starts at once (the installed app's "Scan invite" shortcut). `onDevice`: the dialog reads the
+ * `focusScan`: Scan has the focus, not Paste (the installed app's "Scan invite" shortcut); the camera still starts only on
+ * a press, since any site can open the shortcut's address. `onDevice`: the dialog reads the
  * code that adds this device to a profile (WISP 06) instead of a chat invite, and waits for it to be taken.
  */
-export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose, autoScan = false }: { onJoin?(keys: SessionKeys): void; onOpenChat?(sessionId: string): void; onJoinGroup?(link: string): Promise<void>; onDevice?(code: string): Promise<void>; onClose(): void; autoScan?: boolean }) {
+export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose, focusScan = false }: { onJoin?(keys: SessionKeys): void; onOpenChat?(sessionId: string): void; onJoinGroup?(link: string): Promise<void>; onDevice?(code: string): Promise<void>; onClose(): void; focusScan?: boolean }) {
   const { t } = useI18n();
   const closed = useRef(false);
   const busyRef = useRef(false);
-  const primary = useRef<HTMLButtonElement>(null);
+  const primary = useRef<HTMLButtonElement>(null), scanButton = useRef<HTMLButtonElement>(null), cancelButton = useRef<HTMLButtonElement>(null);
+  /** Scan or the camera's Cancel had the focus as it was pressed: the one that takes its place gets it. */
+  const focusSwap = useRef<"scan" | "cancel" | null>(null);
   const manualInput = useRef<HTMLTextAreaElement>(null);
   const [manual, setManual] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -66,7 +70,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     closed.current = false;
     const previous = document.activeElement as HTMLElement | null;
     dialog.current?.showModal();
-    primary.current?.focus();
+    (focusScan ? scanButton : primary).current?.focus();
     return () => {
       closed.current = true;
       // This counter deliberately tracks work begun after mounting.
@@ -75,8 +79,26 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       stream.current?.getTracks().forEach(track => track.stop());
       if (previous?.isConnected) previous.focus();
     };
+    // Once, on opening: the focus a press would move from is not taken back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  useEffect(() => { if (manual) manualInput.current?.focus(); }, [manual]);
+  // A refused paste is left in the field, caret at its end, to be checked in place; a second one takes the focus back.
+  const [pastes, setPastes] = useState(0);
+  const errorId = useId();
+  useEffect(() => {
+    const field = manualInput.current;
+    if (!manual || !field || joined.current || busyRef.current) return;
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+  }, [manual, pastes]);
+  // Scan and the camera's Cancel take each other's place: the keys that were on one go to the other.
+  const camera = scanning || starting;
+  useEffect(() => {
+    const next = focusSwap.current === "cancel" && camera ? cancelButton : focusSwap.current === "scan" && !camera ? scanButton : null;
+    if (!next) return;
+    focusSwap.current = null;
+    next.current?.focus();
+  }, [camera]);
   const accept = (value: string) => {
     if (joined.current || closed.current) return;
     if (onDevice) {
@@ -129,7 +151,14 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       const touch = touchOnly();
       // A device code is not an invite: the words say which one to paste.
       if (value === null) { setError(said(touch ? t("join.clipboardUnavailableTouch") : t(onDevice ? "devices.join.codeUnavailable" : "join.clipboardUnavailable", { keys: pasteShortcut() }))); setManual(true); return; }
-      if (!value.trim()) { setError(said(touch ? t(onDevice ? "devices.join.codeEmptyTouch" : "join.emptyTouch") : t(onDevice ? "devices.join.codeEmpty" : "join.empty", { keys: pasteShortcut() }))); setManual(true); return; }
+      if (!value.trim()) {
+        const empty = () => { setError(said(touch ? t(onDevice ? "devices.join.codeEmptyTouch" : "join.emptyTouch") : t(onDevice ? "devices.join.codeEmpty" : "join.empty", { keys: pasteShortcut() }))); setManual(true); };
+        // No text, but the app may hold a picture there (a screenshot of the QR): read as Ctrl+V on the dialog reads one.
+        const picture = platformPastedImage(IMAGE_MAX);
+        if (picture) readHeld(picture, false, empty); else empty();
+        return;
+      }
+      setInput(value.trim()); setPastes(count => count + 1);
       accept(value.trim());
     } finally {
       if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); }
@@ -137,6 +166,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   };
   const scan = async () => {
     if (busyRef.current || joined.current || closed.current) return;
+    focusSwap.current = document.activeElement === scanButton.current ? "cancel" : null;
     stop(); busyRef.current = true; setError(null); setOwn(null); setStarting(true);
     const current = generation.current;
     // The decoder loads while the camera starts.
@@ -155,9 +185,6 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       setError(cause instanceof QrReaderNotLoaded ? readerFailed() : { tone: "error", title: t(onDevice ? "devices.join.cameraUnavailable" : "join.cameraUnavailable") }); setManual(true);
     } finally { decode.close(); }
   };
-  // Once, on opening, after the dialog is up; `scan` itself stops anything a closed dialog started.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (autoScan) void scan(); }, []);
   // `weighed`: a picture the app read from the clipboard, already checked there (`platformPastedImage`).
   const readImage = async (file?: File, weighed = false) => {
     if (!file || busyRef.current || joined.current || closed.current) return;
@@ -184,8 +211,13 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     const reading = platformPastedImage(IMAGE_MAX);
     if (!reading) return;
     event.preventDefault();
+    readHeld(reading, picture || pasteNamesFiles(event.clipboardData));
+  };
+  // A picture the app holds (pasted, or dropped from another app), weighed as it was read. `named`: files or a picture
+  // were offered, so finding none is said; otherwise `none` says it, if anything.
+  const readHeld = (reading: NonNullable<ReturnType<typeof platformPastedImage>>, named: boolean, none?: () => void) => {
     stop(); setError(null); busyRef.current = true; setBusy(true);
-    const current = generation.current, named = picture || pasteNamesFiles(event.clipboardData);
+    const current = generation.current;
     const ended = () => { if (current !== generation.current || closed.current) return false; busyRef.current = false; setBusy(false); return true; };
     reading.then(found => {
       if (!ended()) return;
@@ -194,22 +226,31 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       else if (found) void readImage(found, true);
       // Copied files with no picture among them are said, as a dropped one is; an empty clipboard stays quiet.
       else if (named) setError(said(t("join.imageFailed")));
+      else none?.();
     }, (cause: unknown) => {
       // In the dialog's own words: the composer's point at its +, which Join has none of.
       if (ended()) setError(said(t(rawError(cause) === "That picture is too large to paste" ? "join.pastedTooLarge" : "join.imageFailed")));
     });
   };
+  const draggedOver = (event: DragEvent) => {
+    if (!dragCarriesFiles(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
   const droppedImage = (event: DragEvent) => {
-    if (!dragHasFiles(event.dataTransfer)) return;
+    if (!dragCarriesFiles(event.dataTransfer)) return;
     // Taken here, so the window does not open the file in place of the app.
     event.preventDefault();
+    // Another app's files the Linux app's webview names by address only: the app holds them, and reads the picture.
+    const held = busyRef.current || joined.current || closed.current ? null : platformDroppedImage(event.dataTransfer, IMAGE_MAX);
+    if (held) { readHeld(held, true); return; }
     const file = droppedFiles(event.dataTransfer)[0];
     if (file?.type.startsWith("image/")) void readImage(file);
     else if (file) setError({ tone: "error", title: t("join.imageFailed") });
   };
   const button = "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed";
   return <dialog ref={dialog} {...backdrop} onCancel={event => { event.preventDefault(); close(); }}
-    onPaste={pastedImage} onDragOver={event => { if (dragHasFiles(event.dataTransfer)) event.preventDefault(); }} onDrop={droppedImage}
+    onPaste={pastedImage} onDragOver={draggedOver} onDrop={droppedImage}
     onKeyDown={event => {
       if (event.key !== "Tab") return;
       const elements = Array.from(dialog.current?.querySelectorAll<HTMLElement>("button:not(:disabled), textarea, input:not(:disabled)") ?? []).filter(element => element.getClientRects().length);
@@ -218,38 +259,41 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }}
     aria-labelledby="join-title" className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[85dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
-    <div className="mb-4 flex items-center justify-between">
-      <h2 id="join-title" className="font-semibold">{onDevice ? t("devices.join.addThis") : t("join.title")}</h2>
-      <button onClick={close} aria-label={t(onDevice ? "common.close" : "join.close")} className="h-10 w-10 cursor-pointer rounded-lg text-xl hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">×</button>
+    <div className="mb-4 flex items-center justify-between gap-3">
+      <h2 id="join-title" className="min-w-0 break-words font-semibold">{onDevice ? t("devices.join.addThis") : t("join.title")}</h2>
+      <button onClick={close} aria-label={t(onDevice ? "common.close" : "join.close")} className="tap-target h-10 w-10 shrink-0 cursor-pointer rounded-lg text-xl hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">×</button>
     </div>
     <video ref={video} muted playsInline aria-label={t("join.cameraPreview")} className={`${scanning ? "block" : "hidden"} mb-3 aspect-square w-full rounded-xl bg-black object-cover`} />
-    {scanning || starting ? <button onClick={stop} className={`${button} mb-3 w-full border border-border`}>{t("common.cancel")}</button> : <>
-      <button ref={primary} disabled={busy} onClick={() => void paste()} className={`${button} min-h-12 w-full bg-accent text-panel-header`}>
+    {camera ? <button ref={cancelButton} onClick={() => { focusSwap.current = document.activeElement === cancelButton.current ? "scan" : null; stop(); }} className={`${button} mb-3 w-full border border-border`}>{t("common.cancel")}</button> : <>
+      {/* Busy, not disabled: a press from the keys keeps the focus here through a refusal, as `paste` ignores a second one. */}
+      <button ref={primary} aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={() => void paste()} className={`${button} min-h-12 w-full bg-accent text-panel-header forced-colors:border forced-colors:border-[color:ButtonText] aria-disabled:opacity-40 aria-disabled:cursor-progress`}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 12h8M8 16h5"/></svg>
         {t("join.paste")}
       </button>
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <button disabled={busy} onClick={() => void scan()} className={`${button} border border-border text-text-secondary`}>
+      {/* Side by side while each word fits its half; stacked once a larger text size (or a long word) would cut one. */}
+      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3">
+        <FocusSafeButton ref={scanButton} disabled={busy} onClick={() => void scan()} className={`${button} border border-border text-text-secondary`}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><path d="M14 14h3v3h-3z"/></svg>
           {t("join.scan")}
-        </button>
+        </FocusSafeButton>
+        {/* Busy, not disabled: picked from the keys, the field keeps the focus while the picture is read and after a refusal. */}
         <label className={`${button} border border-border text-text-secondary focus-within:ring-2 focus-within:ring-accent ${busy ? "opacity-40" : ""}`}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-          {t("join.image")}<input disabled={busy} aria-label={t("join.image")} type="file" accept="image/*" className="sr-only" onChange={event => { void readImage(event.target.files?.[0]); event.target.value = ""; }} />
+          {t("join.image")}<input aria-disabled={busy || undefined} aria-label={t("join.image")} type="file" accept="image/*" className="sr-only" onClick={event => { if (busyRef.current) event.preventDefault(); }} onChange={event => { void readImage(event.target.files?.[0]); event.target.value = ""; }} />
         </label>
       </div>
       <p className="mt-2 text-center text-xs text-text-secondary">{t("join.pasteScreenshot")}</p>
     </>}
-    {error && <Notice problem={error} className="mt-3 text-sm" />}
-    {/* A chat's Join comes back open, the camera on (`#/scan`, the "Scan invite" shortcut); a device's code where it was. */}
+    {error && <div id={errorId}><Notice problem={error} className="mt-3 text-sm" /></div>}
+    {/* A chat's Join comes back open, Scan focused (`#/scan`, the "Scan invite" shortcut); a device's code where it was. */}
     {error && error === reloadProblem && <ReloadButton testId="join-reload" to={onDevice ? undefined : "#/scan"} className={`${button} mt-3 w-full border border-border aria-disabled:opacity-60 aria-disabled:cursor-not-allowed`} noteClassName="mt-2 text-center text-sm text-text-secondary" />}
     {own && <div data-testid="join-own-invite" className="mt-3 rounded-lg border border-border bg-input-bg p-3">
       <p role="alert" className="text-sm text-text-primary">{t("join.own")}</p>
-      <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header`}>{t("join.openChat")}</button>
+      <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header forced-colors:border forced-colors:border-[color:ButtonText]`}>{t("join.openChat")}</button>
     </div>}
     {manual && <form className="mt-3" onSubmit={event => { event.preventDefault(); if (!busyRef.current) accept(input.trim()); }}>
-      <textarea ref={manualInput} aria-label={onDevice ? t("devices.join.code") : t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} value={input} onChange={event => { setInput(event.target.value); setError(null); }} placeholder={onDevice ? t("devices.join.codePlaceholder") : t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
-      <div className="mt-3 grid grid-cols-2 gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><button disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{onDevice ? t("devices.join.anotherButton") : t("join.submit")}</button></div>
+      <textarea ref={manualInput} aria-label={onDevice ? t("devices.join.code") : t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-invalid={error && input.trim() ? true : undefined} aria-describedby={error ? errorId : undefined} value={input} onChange={event => { setInput(event.target.value); setError(null); }} placeholder={onDevice ? t("devices.join.codePlaceholder") : t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
+      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><FocusSafeButton disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{onDevice ? t("devices.join.anotherButton") : t("join.submit")}</FocusSafeButton></div>
     </form>}
   </dialog>;
 }

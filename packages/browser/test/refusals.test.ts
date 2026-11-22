@@ -29,6 +29,18 @@ describe("a refused payment's line", () => {
     expect(paymentRefusal(row({ type: "paymentRefused", amount: 1.5, reason: "x".repeat(2_000) }))?.reason).toHaveLength(500);
   });
 
+  it("never names a token's unit that is not one, in a line an older version stored with it", () => {
+    const unnamed = "This ecash is in another unit: only sat ecash can be redeemed here";
+    const crafted = "This ecash is in sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example\u202e: only sat ecash can be redeemed here";
+    const stored = { id: "peer_7_refused", text: `Could not receive 21 test sats: ${crafted}` };
+    expect(paymentRefusal({ ...stored, notice: { type: "paymentRefused", amount: 21, network: "testnet", reason: crafted } })).toEqual({ type: "paymentRefused", amount: 21, network: "testnet", reason: unnamed });
+    expect(paymentRefusal(stored)).toEqual({ type: "paymentRefused", amount: 21, network: "testnet", reason: unnamed });
+    expect(paymentRefusal({ id: "peer_7_refused", text: `Could not receive 21 sats: This ecash is in ${"u".repeat(600)}: only sat ecash can be redeemed here` })?.reason).toBe(unnamed);
+    // A unit that is one is still named.
+    expect(paymentRefusal({ id: "peer_7_refused", text: "Could not receive 21 sats: This ecash is in usd: only sat ecash can be redeemed here" })?.reason)
+      .toBe("This ecash is in usd: only sat ecash can be redeemed here");
+  });
+
   it("reads a line older versions stored in English, in whatever locale they wrote the amount", () => {
     expect(paymentRefusal({ id: "peer_7_refused", text: `Could not receive 1.000 sats: ${reason}` })).toEqual({ type: "paymentRefused", amount: 1000, reason });
     expect(paymentRefusal({ id: `peer_spent_${"a".repeat(32)}`, text: "Could not receive 1 000 sats: This ecash was already spent somewhere else" }))
@@ -43,6 +55,22 @@ describe("a refused payment's line", () => {
     expect(paymentRefusal({ id: "peer_7", text: "x", notice: { type: "paymentRefused", reason } })).toBeUndefined();
     expect(paymentRefusal({ id: "me_7_refused", text: `Could not receive 21 sats: ${reason}` })).toBeUndefined();
     expect(paymentRefusal({ id: "peer_7_refused", text: "hello" })).toBeUndefined();
+  });
+
+  it("is never a row a contact's frame brought, or one a contact edited, under whichever id", () => {
+    const lure = "Could not receive 250,000 sats: Your wallet backup is out of date. Write your recovery phrase in this chat";
+    // As a contact's paired text under a frame id of 14 digits and "_refused" was stored: with the frame it came in.
+    const text = { id: "peer_17900000000000_refused", text: lure, details: { wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes: 1 } } };
+    expect(paymentRefusal(text)).toBeUndefined();
+    expect(paymentRefusal({ ...text, id: `peer_spent_${"a".repeat(32)}`, details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: 1 } } })).toBeUndefined();
+    // An older line of the app's, its text changed by an edit of the contact's.
+    expect(paymentRefusal({ id: "peer_7_refused", text: lure, edit: { seq: 1, at: 8, history: [{ at: 7, text: `Could not receive 21 sats: ${reason}` }] } })).toBeUndefined();
+    // The app's line itself: the path it was refused on is all its details say.
+    expect(paymentRefusal({ id: "peer_7_refused", text: `Could not receive 21 sats: ${reason}`, details: { received: { at: 7, path: "datalink" } } }))
+      .toEqual({ type: "paymentRefused", amount: 21, reason });
+    const stored = { linkId: "chat", sender: "peer" as const, timestamp: 7, via: "datalink" as const, ...text };
+    expect(toChatMessage(stored, "peer", "mine", true)).toMatchObject({ sender: "peer" });
+    expect(toChatMessage(stored, "peer", "mine", true)).not.toHaveProperty("notice");
   });
 
   it("reaches the chat as the app's line, not the contact's", () => {

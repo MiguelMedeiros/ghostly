@@ -20,13 +20,17 @@ async function meshOf(names: string[]): Promise<{ world: CommunityWorld; peers: 
   return { world, peers, id };
 }
 
-/** Counts the writes of `peer`'s group records from now on, and their bytes as JSON. */
+/** Counts the writes of `peer`'s group records and their small rows from now on, and their bytes as JSON. */
 function writes(peer: Peer) {
   const seen = { count: 0, bytes: 0 };
-  const put = peer.store.putGroup.bind(peer.store);
-  peer.store.putGroup = async group => { seen.count++; seen.bytes += JSON.stringify(group).length; await put(group); };
+  const put = peer.store.putGroup.bind(peer.store), putLive = peer.store.putGroupLive!.bind(peer.store);
+  peer.store.putGroup = async (group, live) => { seen.count++; seen.bytes += JSON.stringify(group).length; await put(group, live); };
+  peer.store.putGroupLive = async (id, live) => { seen.count++; seen.bytes += JSON.stringify(live).length; await putLive(id, live); };
   return seen;
 }
+/** What `peer` saved it saw of each member in the group, the highest number per member (its small row holds it). */
+const savedSeen = async (peer: Peer, id: string) =>
+  Object.values((await peer.store.getGroupLive!()).get(id)!.state.seen).map(epochs => Math.max(...Object.values(epochs).map(e => e.high)));
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 describe("a private group's record is written once for the messages that come together", { timeout: 120_000 }, () => {
@@ -43,8 +47,7 @@ describe("a private group's record is written once for the messages that come to
     // What is due is written within the wait.
     await pause(GROUP_LIMITS.saveWithinMs + 200);
     expect(seen.count).toBeLessThan(20);
-    const stored = (await carol.store.getGroups()).find(g => g.id === id)!;
-    expect(Object.values(stored.state!.seen).map(epochs => Math.max(...Object.values(epochs).map(e => e.high))).sort()).toEqual([29, 29]);
+    expect((await savedSeen(carol, id)).sort()).toEqual([29, 29]);
   });
 
   it("an app that quits right after the messages has them in its record, and takes none again", async () => {
@@ -54,8 +57,7 @@ describe("a private group's record is written once for the messages that come to
     await world.settle();
     expect(world.texts(bob, id).filter(t => t.startsWith("line "))).toHaveLength(5);
     await world.restart(bob);
-    const stored = (await bob.store.getGroups()).find(g => g.id === id)!;
-    expect(Object.values(stored.state!.seen).map(epochs => Math.max(...Object.values(epochs).map(e => e.high)))).toEqual([4]);
+    expect(await savedSeen(bob, id)).toEqual([4]);
     await world.run(5_000);
     expect(world.texts(bob, id).filter(t => t.startsWith("line "))).toHaveLength(5);
   });

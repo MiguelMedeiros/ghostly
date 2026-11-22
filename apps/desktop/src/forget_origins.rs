@@ -16,30 +16,71 @@
 //!   Until then the origin is on a list in the app's data folder; it leaves the list once its files are gone, and the
 //!   list goes once empty, since it too names contacts.
 //!
-//! On Windows, WebView2 names the origin `http://ghostly-svc.<service>.<peer>.<tag>`, and the webview's DevTools
-//! protocol clears one origin of every kind of storage at once (`Storage.clearDataForOrigin`), the files and folders
-//! named after it included. WebView2's own files shared by every origin (its Local Storage log, its quota database)
-//! keep traces of it until WebView2 compacts them.
+//! On Windows, WebView2 names the origin `http://ghostly-svc.<service>.<peer>.<tag>`, and a profile's files shared by
+//! every origin (its Local Storage log, its quota database, its history, its preferences) keep an origin's records
+//! after any clear, through every later launch: LevelDB reuses its log at each one. So each contact's app opens in a
+//! WebView2 profile of its own (`app_folder`), and forgetting it removes that folder once its window closed. An app
+//! opened before it had one kept its storage in the Ghostly window's profile: when that profile holds the origin, the
+//! webview's DevTools protocol clears it there (`Storage.clearDataForOrigin`), the files and folders named after it
+//! included.
+//!
+//! An app opened before the page kept its list was never noted: the page names the chat instead (its tag alone), and
+//! every origin of that chat (`*.<tag>`) goes, by what is on the disk. On Linux and macOS at the next launch, as above;
+//! on Windows from the Ghostly window's profile, where every app opened before then kept its storage.
 
 use serde::Deserialize;
 use tauri::{AppHandle, Runtime};
 
 use crate::viewer::{self, is_label_safe, is_tag};
 
-/// One origin to forget, as the page noted it when it opened the app (`viewer::open` takes the same three).
+/// One origin to forget, as the page noted it when it opened the app (`viewer::open` takes the same three), or with
+/// no service and no contact, every origin of the chat.
 #[derive(Debug, Deserialize)]
 pub struct ServiceOrigin {
-    service: String,
-    peer: String,
+    #[serde(default)]
+    service: Option<String>,
+    #[serde(default)]
+    peer: Option<String>,
     tag: String,
 }
 
+/// What one `ServiceOrigin` names.
+#[derive(Debug, PartialEq)]
+// Android and iOS clear none (below): a chat's tag is read nowhere there.
+#[cfg_attr(
+    not(any(target_os = "linux", target_os = "macos", windows)),
+    allow(dead_code)
+)]
+enum Target {
+    /// One origin's host, `<service>.<peer>.<tag>`.
+    Origin(String),
+    /// Every origin of the chat with this tag.
+    Chat(String),
+}
+
 impl ServiceOrigin {
-    /// The origin's host, `<service>.<peer>.<tag>`; none for an origin `viewer::open` would never have opened.
-    fn host(&self) -> Option<String> {
-        (is_label_safe(&self.service) && is_label_safe(&self.peer) && is_tag(&self.tag))
-            .then(|| format!("{}.{}.{}", self.service, self.peer, self.tag))
+    /// None for an origin `viewer::open` would never have opened.
+    fn target(&self) -> Option<Target> {
+        if !is_tag(&self.tag) {
+            return None;
+        }
+        match (&self.service, &self.peer) {
+            (Some(service), Some(peer)) => (is_label_safe(service) && is_label_safe(peer))
+                .then(|| Target::Origin(format!("{service}.{peer}.{}", self.tag))),
+            (None, None) => Some(Target::Chat(self.tag.clone())),
+            _ => None,
+        }
     }
+}
+
+/// Whether `host` is an origin of the chat with `tag`: `<service>.<peer>.<tag>`.
+#[cfg(any(target_os = "linux", target_os = "macos", windows, test))]
+fn of_chat(host: &str, tag: &str) -> bool {
+    let labels: Vec<&str> = host.split('.').collect();
+    labels.len() == 3
+        && is_label_safe(labels[0])
+        && is_label_safe(labels[1])
+        && labels[2].eq_ignore_ascii_case(tag)
 }
 
 /// Forgets what the apps on `origins` kept: their windows close, then each origin is cleared (Linux, macOS, Windows).
@@ -49,12 +90,19 @@ pub async fn forget_service_origins<R: Runtime>(
     app: AppHandle<R>,
     origins: Vec<ServiceOrigin>,
 ) -> Result<Vec<bool>, String> {
-    let hosts = origins
+    let targets = origins
         .iter()
-        .map(ServiceOrigin::host)
+        .map(ServiceOrigin::target)
         .collect::<Option<Vec<_>>>()
         .ok_or("Invalid service")?;
-    // A window still showing the app would go on writing there.
+    // A window still showing the app would go on writing there. One the page never noted was never opened by it.
+    let hosts: Vec<String> = targets
+        .iter()
+        .filter_map(|target| match target {
+            Target::Origin(host) => Some(host.clone()),
+            Target::Chat(_) => None,
+        })
+        .collect();
     viewer::close_showing(&app, &hosts);
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
@@ -64,35 +112,71 @@ pub async fn forget_service_origins<R: Runtime>(
             .app_data_dir()
             .map_err(|e| e.to_string())?
             .join(webkit::LIST_FILE);
-        let mut cleared = Vec::with_capacity(hosts.len());
-        for host in &hosts {
-            cleared.push(webkit::clear_in_window(&app, &list, host).await);
+        let mut cleared = Vec::with_capacity(targets.len());
+        for target in &targets {
+            cleared.push(match target {
+                Target::Origin(host) => webkit::clear_in_window(&app, &list, host).await,
+                Target::Chat(tag) => webkit::clear_chat_at_launch(&app, &list, tag).await,
+            });
         }
         Ok(cleared)
     }
     #[cfg(windows)]
     {
-        let mut cleared = Vec::with_capacity(hosts.len());
-        for host in &hosts {
-            cleared.push(windows::clear(&app, host).await);
+        let mut cleared = Vec::with_capacity(targets.len());
+        for target in &targets {
+            cleared.push(match target {
+                Target::Origin(host) => windows::clear(&app, host).await,
+                Target::Chat(tag) => windows::clear_chat(&app, tag).await,
+            });
         }
         Ok(cleared)
     }
     // Android and iOS open no viewer window (`viewer` is Desktop's): nothing to clear.
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
-        let _ = app;
-        Ok(vec![false; hosts.len()])
+        let _ = (app, hosts);
+        Ok(vec![false; targets.len()])
     }
+}
+
+/// The hosts of the chat with `tag` that `bytes` names as WebView2 writes an origin, `[http://]ghostly-svc.<host>`, in
+/// a file's name or in its bytes (a Local Storage key), once each.
+#[cfg(any(windows, test))]
+fn chat_hosts_in(bytes: &[u8], tag: &str) -> Vec<String> {
+    let prefix = format!("{}.", viewer::SCHEME);
+    let mut hosts = Vec::new();
+    let mut at = 0;
+    while let Some(found) = bytes[at..]
+        .windows(prefix.len())
+        .position(|w| w.eq_ignore_ascii_case(prefix.as_bytes()))
+    {
+        let start = at + found + prefix.len();
+        let end = bytes[start..]
+            .iter()
+            .position(|b| !(b.is_ascii_alphanumeric() || *b == b'-' || *b == b'.'))
+            .map_or(bytes.len(), |n| start + n);
+        let host = String::from_utf8_lossy(&bytes[start..end]).to_ascii_lowercase();
+        if of_chat(&host, tag) && !hosts.contains(&host) {
+            hosts.push(host);
+        }
+        at = end.max(start);
+    }
+    hosts
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use webkit::{clean_at_launch, serve, ForgetState};
 
 #[cfg(windows)]
+pub use windows::app_folder;
+
+#[cfg(windows)]
 mod windows {
+    use std::path::PathBuf;
     use std::time::Duration;
 
+    use sha2::{Digest, Sha256};
     use tauri::{AppHandle, Manager, Runtime};
     use tokio::sync::oneshot;
     use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
@@ -100,13 +184,138 @@ mod windows {
 
     use crate::viewer::SCHEME;
 
-    /// How long WebView2 may take to clear one origin before the rest goes on without it.
+    /// How long WebView2 may take to clear one origin, or to let go of an app's folder, before the rest goes on
+    /// without it.
     const CLEAR_TIMEOUT: Duration = Duration::from_secs(10);
+    /// The contacts' apps' profiles, in the app's local data folder beside the Ghostly window's.
+    const APPS_FOLDER: &str = "apps";
 
-    /// Clears every kind of storage `host`'s origin has, through the Ghostly window's webview: they share one
-    /// profile, so the call reaches the contact's app's storage with no window of its origin. True once WebView2
-    /// said it cleared.
+    /// The WebView2 profile of `host`'s app (`<service>.<peer>.<tag>`): a folder of its own, named by a hash of the
+    /// host. Short, since Chromium's own paths inside it take most of Windows' 260 characters (IndexedDB fails to
+    /// open past them), and it names no contact.
+    pub fn app_folder<R: Runtime>(app: &AppHandle<R>, host: &str) -> Option<PathBuf> {
+        let digest = Sha256::digest(host.to_ascii_lowercase().as_bytes());
+        let name: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+        Some(
+            app.path()
+                .app_local_data_dir()
+                .ok()?
+                .join(APPS_FOLDER)
+                .join(name),
+        )
+    }
+
+    /// Forgets what `host`'s app kept: its own profile, and what it kept in the Ghostly window's before it had one.
     pub async fn clear<R: Runtime>(app: &AppHandle<R>, host: &str) -> bool {
+        let shared = !held_in_shared(app, host) || clear_shared(app, host).await;
+        remove_folder(app, host).await && shared
+    }
+
+    /// Forgets what every app of the chat with `tag` kept in the Ghostly window's profile: those opened before the
+    /// page noted them, which had no profile of their own either. True once each origin found there was cleared.
+    pub async fn clear_chat<R: Runtime>(app: &AppHandle<R>, tag: &str) -> bool {
+        let Ok(local) = app.path().app_local_data_dir() else {
+            return false;
+        };
+        let mut hosts: Vec<String> = Vec::new();
+        let mut folders = vec![local.join("EBWebView")];
+        while let Some(folder) = folders.pop() {
+            for path in std::fs::read_dir(&folder)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.path())
+            {
+                let mut found = path
+                    .file_name()
+                    .map(|n| super::chat_hosts_in(n.to_string_lossy().as_bytes(), tag))
+                    .unwrap_or_default();
+                if path.is_dir() {
+                    folders.push(path);
+                } else if path.components().any(|c| c.as_os_str() == "Local Storage") {
+                    if let Ok(bytes) = std::fs::read(&path) {
+                        found.extend(super::chat_hosts_in(&bytes, tag));
+                    }
+                }
+                for host in found {
+                    if !hosts.contains(&host) {
+                        hosts.push(host);
+                    }
+                }
+            }
+        }
+        let mut cleared = true;
+        for host in &hosts {
+            cleared &= clear_shared(app, host).await;
+        }
+        cleared
+    }
+
+    /// Whether the Ghostly window's profile holds anything of `host`'s origin: a file or folder named after it, or
+    /// a record in its Local Storage. Clearing an origin it never held would write its name there all the same
+    /// (LevelDB notes each key it deletes). Always with WEBVIEW2_USER_DATA_FOLDER, which puts every webview in one
+    /// profile.
+    fn held_in_shared<R: Runtime>(app: &AppHandle<R>, host: &str) -> bool {
+        if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_some() {
+            return true;
+        }
+        let Ok(local) = app.path().app_local_data_dir() else {
+            return true;
+        };
+        let needle = host.to_ascii_lowercase();
+        let mut folders = vec![local.join("EBWebView")];
+        while let Some(folder) = folders.pop() {
+            for path in std::fs::read_dir(&folder)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.path())
+            {
+                let named = path
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().contains(&needle));
+                if named {
+                    return true;
+                }
+                if path.is_dir() {
+                    folders.push(path);
+                    continue;
+                }
+                let recorded = path.components().any(|c| c.as_os_str() == "Local Storage")
+                    && std::fs::read(&path).is_ok_and(|bytes| {
+                        bytes
+                            .windows(needle.len())
+                            .any(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+                    });
+                if recorded {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Removes `host`'s app's profile. WebView2's processes for it hold its files a moment after its window closed.
+    /// True once it is gone, or was never there.
+    async fn remove_folder<R: Runtime>(app: &AppHandle<R>, host: &str) -> bool {
+        let Some(folder) = app_folder(app, host) else {
+            return false;
+        };
+        let deadline = tokio::time::Instant::now() + CLEAR_TIMEOUT;
+        loop {
+            if std::fs::remove_dir_all(&folder).is_ok() || !folder.exists() {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+
+    /// Clears every kind of storage `host`'s origin has in the Ghostly window's profile, through its webview: the
+    /// call reaches the origin with no window of its own. True once WebView2 said it cleared.
+    async fn clear_shared<R: Runtime>(app: &AppHandle<R>, host: &str) -> bool {
         let Some(window) = app.get_webview_window("main") else {
             return false;
         };
@@ -284,6 +493,28 @@ mod webkit {
         cleared
     }
 
+    /// Notes the chat with `tag` for the next launch, which removes the files of each of its origins. Its apps the
+    /// page never noted have no window open, and their origins are not known before their files are read. True once
+    /// noted.
+    pub async fn clear_chat_at_launch<R: Runtime>(
+        app: &AppHandle<R>,
+        list: &Path,
+        tag: &str,
+    ) -> bool {
+        let state = app.state::<ForgetState>();
+        let Some(window) = app.get_webview_window("main") else {
+            return false;
+        };
+        let Some(folders) = folders(&window).await else {
+            return false;
+        };
+        let Ok(_one) = state.list.lock() else {
+            return false;
+        };
+        note_chat(list, folders, tag);
+        true
+    }
+
     fn open_hidden<R: Runtime>(
         app: &AppHandle<R>,
         label: &str,
@@ -394,6 +625,25 @@ mod webkit {
         folders: Folders,
         /// `<service>.<peer>.<tag>`.
         hosts: Vec<String>,
+        /// The tags of chats each of whose origins goes.
+        #[serde(default)]
+        chats: Vec<String>,
+    }
+
+    /// Whose files go: one origin's (`<service>.<peer>.<tag>`), or those of every origin of one chat (its tag).
+    #[derive(Clone, Copy)]
+    enum Whose<'a> {
+        Origin(&'a str),
+        Chat(&'a str),
+    }
+
+    impl Whose<'_> {
+        fn owns(self, host: &str) -> bool {
+            match self {
+                Whose::Origin(own) => host.eq_ignore_ascii_case(own),
+                Whose::Chat(tag) => super::of_chat(host, tag),
+            }
+        }
     }
 
     fn read(list: &Path) -> Option<Forgotten> {
@@ -410,7 +660,7 @@ mod webkit {
 
     /// Writes the list, or removes it once it names no origin.
     fn write(list: &Path, forgotten: &Forgotten) {
-        if forgotten.hosts.is_empty() {
+        if forgotten.hosts.is_empty() && forgotten.chats.is_empty() {
             let _ = std::fs::remove_file(list);
             return;
         }
@@ -418,11 +668,29 @@ mod webkit {
             return;
         };
         let staged = list.with_extension("json.tmp");
+        // It names contacts: the user's alone, as the log and the files are, on a machine whose home folders others
+        // may enter.
         if let Some(dir) = list.parent() {
             let _ = std::fs::create_dir_all(dir);
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
         }
-        if std::fs::write(&staged, text).is_ok() {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        let Ok(mut out) = options.open(&staged) else {
+            return;
+        };
+        // A staged file an older build left keeps its mode when opened again.
+        use std::os::unix::fs::PermissionsExt;
+        let written = out
+            .set_permissions(std::fs::Permissions::from_mode(0o600))
+            .and_then(|()| std::io::Write::write_all(&mut out, &text));
+        drop(out);
+        if written.is_ok() {
             let _ = std::fs::rename(&staged, list);
+        } else {
+            let _ = std::fs::remove_file(&staged);
         }
     }
 
@@ -435,8 +703,17 @@ mod webkit {
         write(list, &forgotten);
     }
 
+    fn note_chat(list: &Path, folders: Folders, tag: &str) {
+        let mut forgotten = read(list).unwrap_or_default();
+        forgotten.folders = folders;
+        if !forgotten.chats.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+            forgotten.chats.push(tag.to_string());
+        }
+        write(list, &forgotten);
+    }
+
     /// At launch, before any window: the files of every origin on the list go, and each origin whose files are all
-    /// gone leaves it. Nothing holds them open yet.
+    /// gone leaves it, as does each chat none of whose origins has a file left. Nothing holds them open yet.
     pub fn clean_at_launch<R: Runtime>(app: &AppHandle<R>) {
         if let Ok(dir) = app.path().app_data_dir() {
             clean_list(&dir.join(LIST_FILE));
@@ -450,23 +727,55 @@ mod webkit {
         let folders = forgotten.folders.clone();
         forgotten
             .hosts
-            .retain(|host| !remove_files_of(&folders, host));
+            .retain(|host| !remove_files_of(&folders, Whose::Origin(host)));
+        forgotten
+            .chats
+            .retain(|tag| !remove_files_of(&folders, Whose::Chat(tag)));
         write(list, &forgotten);
     }
 
-    /// How WebKit writes an origin in an `origin` file: the scheme, then the host, each as its length (4 bytes,
-    /// little-endian), 1 (8-bit characters) and the characters. The length keeps `xatlas.<…>` from passing for
-    /// `atlas.<…>`.
-    fn names_origin(bytes: &[u8], host: &str) -> bool {
-        let mut written = Vec::new();
-        for part in [SCHEME, host] {
-            written.extend_from_slice(&(part.len() as u32).to_le_bytes());
-            written.push(1);
-            written.extend_from_slice(part.as_bytes());
+    /// The hosts an `origin` file names under the app's scheme. WebKit writes the scheme, then the host, each as its
+    /// length (4 bytes, little-endian), 1 (8-bit characters) and the characters. The length keeps `xatlas.<…>` from
+    /// passing for `atlas.<…>`.
+    fn origin_hosts(bytes: &[u8]) -> Vec<String> {
+        let mut scheme = (SCHEME.len() as u32).to_le_bytes().to_vec();
+        scheme.push(1);
+        scheme.extend_from_slice(SCHEME.as_bytes());
+        let mut hosts = Vec::new();
+        for (at, _) in bytes
+            .windows(scheme.len())
+            .enumerate()
+            .filter(|(_, window)| window.eq_ignore_ascii_case(&scheme))
+        {
+            let rest = &bytes[at + scheme.len()..];
+            let Some(len) = rest
+                .get(..4)
+                .map(|n| u32::from_le_bytes([n[0], n[1], n[2], n[3]]) as usize)
+            else {
+                continue;
+            };
+            if rest.get(4) == Some(&1) {
+                if let Some(host) = rest.get(5..5 + len) {
+                    hosts.push(String::from_utf8_lossy(host).into_owned());
+                }
+            }
         }
-        bytes
-            .windows(written.len())
-            .any(|window| window.eq_ignore_ascii_case(&written))
+        hosts
+    }
+
+    #[cfg(test)]
+    fn names_origin(bytes: &[u8], host: &str) -> bool {
+        origin_hosts(bytes)
+            .iter()
+            .any(|named| named.eq_ignore_ascii_case(host))
+    }
+
+    /// The host a localStorage file (`ghostly-svc_<host>_0.localstorage…`) or an IndexedDB folder
+    /// (`ghostly-svc_<host>_0`) is named after. A host has no `_`.
+    fn host_named(name: &str) -> Option<&str> {
+        let rest = name.strip_prefix(&format!("{SCHEME}_"))?;
+        rest.strip_suffix("_0")
+            .or_else(|| rest.split_once("_0.localstorage").map(|(host, _)| host))
     }
 
     fn entries(dir: &Path) -> Vec<PathBuf> {
@@ -491,20 +800,21 @@ mod webkit {
         removed.is_ok() || !path.exists()
     }
 
-    fn holds_origin(dir: &Path, host: &str) -> bool {
+    fn holds_origin(dir: &Path, whose: Whose) -> bool {
         dir.is_dir()
-            && std::fs::read(dir.join("origin")).is_ok_and(|bytes| names_origin(&bytes, host))
+            && std::fs::read(dir.join("origin"))
+                .is_ok_and(|bytes| origin_hosts(&bytes).iter().any(|host| whose.owns(host)))
     }
 
-    /// Removes every file and folder of `host`'s origin: its localStorage file (and its journal), its IndexedDB
+    /// Removes every file and folder of `whose` origins: each one's localStorage file (and its journal), its IndexedDB
     /// folder, its Cache Storage folder and its storage folder, and on macOS its tracking prevention row. True once
     /// none is left.
-    fn remove_files_of(folders: &Folders, host: &str) -> bool {
-        let named = format!("{SCHEME}_{host}_0").to_ascii_lowercase();
+    fn remove_files_of(folders: &Folders, whose: Whose) -> bool {
+        let named = |path: &Path| host_named(&name_of(path)).is_some_and(|host| whose.owns(host));
         let mut gone = true;
         if let Some(dir) = &folders.local_storage {
             for file in entries(dir) {
-                if name_of(&file).starts_with(&format!("{named}.localstorage")) {
+                if name_of(&file).contains(".localstorage") && named(&file) {
                     gone &= remove(&file);
                 }
             }
@@ -512,7 +822,7 @@ mod webkit {
         if let Some(dir) = &folders.indexeddb {
             for version in entries(dir).into_iter().filter(|v| v.is_dir()) {
                 for database in entries(&version) {
-                    if name_of(&database) == named {
+                    if named(&database) {
                         gone &= remove(&database);
                     }
                 }
@@ -520,7 +830,7 @@ mod webkit {
         }
         if let Some(dir) = &folders.cache_storage {
             for origin in entries(dir) {
-                if holds_origin(&origin, host) {
+                if holds_origin(&origin, whose) {
                     gone &= remove(&origin);
                 }
             }
@@ -529,7 +839,7 @@ mod webkit {
             // `storage/<top origin>/<origin>`: the top folder goes with its last origin.
             for top in entries(dir).into_iter().filter(|t| t.is_dir()) {
                 for origin in entries(&top) {
-                    if holds_origin(&origin, host) {
+                    if holds_origin(&origin, whose) {
                         gone &= remove(&origin);
                     }
                 }
@@ -540,7 +850,10 @@ mod webkit {
         }
         #[cfg(target_os = "macos")]
         if let Some(db) = &folders.observed {
-            gone &= observed::forget(db, host);
+            gone &= match whose {
+                Whose::Origin(host) => observed::forget(db, host),
+                Whose::Chat(tag) => observed::forget_chat(db, tag),
+            };
         }
         gone
     }
@@ -626,7 +939,7 @@ mod webkit {
         /// Takes `host` out of the database at `path`. True once it is not there: removed, or no database (or no
         /// such table) at all.
         pub fn forget(path: &Path, host: &str) -> bool {
-            // A host `ServiceOrigin::host` made: letters, digits, `-` and `.`, nothing to quote.
+            // A host `ServiceOrigin::target` made: letters, digits, `-` and `.`, nothing to quote.
             if host.is_empty()
                 || !host
                     .chars()
@@ -634,6 +947,22 @@ mod webkit {
             {
                 return false;
             }
+            delete_where(
+                path,
+                &format!("registrableDomain = '{host}' COLLATE NOCASE"),
+            )
+        }
+
+        /// Takes every origin of the chat with `tag` out of the database at `path`, as `forget` does one.
+        pub fn forget_chat(path: &Path, tag: &str) -> bool {
+            // A tag `is_tag` took: z-base-32, nothing to quote and no `LIKE` wildcard.
+            if !crate::viewer::is_tag(tag) {
+                return false;
+            }
+            delete_where(path, &format!("registrableDomain LIKE '%.{tag}'"))
+        }
+
+        fn delete_where(path: &Path, condition: &str) -> bool {
             if !path.exists() {
                 return true;
             }
@@ -646,7 +975,7 @@ mod webkit {
                     path,
                     &format!(
                         "PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON; \
-                         DELETE FROM ObservedDomains WHERE registrableDomain = '{host}' COLLATE NOCASE;"
+                         DELETE FROM ObservedDomains WHERE {condition};"
                     ),
                 )
                 .is_some(),
@@ -823,6 +1152,53 @@ mod webkit {
         }
 
         #[test]
+        fn the_launch_removes_every_origin_of_a_forgotten_chat_and_no_other_chats() {
+            // covers: services.desktop-viewer
+            let dir = scratch("chat");
+            let (data, cache) = (dir.join("data"), dir.join("cache"));
+            // Two apps of the chat, opened before the page noted them, and the same contact's app in another chat.
+            let gone = [
+                format!("keeper.{PEER}.{TAG}"),
+                format!("notes.{}.{TAG}", "b".repeat(52)),
+            ];
+            let kept = format!("keeper.{PEER}.ot1uwisza345h769");
+            lay_out(&data, &cache, &gone[0], "H1");
+            lay_out(&data, &cache, &gone[1], "H2");
+            lay_out(&data, &cache, &kept, "H3");
+            let kept_files = named_anywhere(&dir, &kept);
+            assert_eq!(kept_files.len(), 6, "{kept_files:?}");
+
+            let list = dir.join(LIST_FILE);
+            note_chat(&list, folders(&data, &cache), TAG);
+            note_chat(&list, folders(&data, &cache), &TAG.to_ascii_uppercase());
+            assert_eq!(read(&list).unwrap().chats, [TAG], "noted once");
+
+            clean_list(&list);
+            for host in &gone {
+                assert_eq!(named_anywhere(&dir, host), Vec::<String>::new(), "{host}");
+            }
+            assert_eq!(named_anywhere(&dir, &kept), kept_files);
+            assert!(!data.join("storage/H1").exists());
+            assert!(!list.exists(), "the list goes once empty");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn a_list_an_older_build_wrote_reads_with_no_chats() {
+            let dir = scratch("older");
+            let list = dir.join(LIST_FILE);
+            std::fs::write(
+                &list,
+                format!("{{\"folders\": {{}}, \"hosts\": [\"keeper.{PEER}.{TAG}\"]}}"),
+            )
+            .unwrap();
+            let forgotten = read(&list).unwrap();
+            assert_eq!(forgotten.hosts.len(), 1);
+            assert!(forgotten.chats.is_empty());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
         fn an_origin_whose_files_could_not_go_stays_on_the_list() {
             let dir = scratch("stays");
             let (data, cache) = (dir.join("data"), dir.join("cache"));
@@ -846,6 +1222,30 @@ mod webkit {
             clean_list(&list);
             assert!(!list.exists());
             assert_eq!(named_anywhere(&dir, &host), Vec::<String>::new());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn the_list_and_its_folder_are_the_users_alone() {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = scratch("modes");
+            let (data, cache) = (dir.join("data"), dir.join("cache"));
+            let app = dir.join("app");
+            std::fs::create_dir_all(&app).unwrap();
+            std::fs::set_permissions(&app, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let list = app.join(LIST_FILE);
+            // A staged file an older build left readable.
+            let staged = list.with_extension("json.tmp");
+            std::fs::write(&staged, b"{}").unwrap();
+            std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o644)).unwrap();
+            note(
+                &list,
+                folders(&data, &cache),
+                &format!("keeper.{PEER}.{TAG}"),
+            );
+            let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&list), 0o600);
+            assert_eq!(mode(&app), 0o700);
             let _ = std::fs::remove_dir_all(&dir);
         }
 
@@ -946,6 +1346,35 @@ mod webkit {
             let _ = std::fs::remove_dir_all(&dir);
         }
 
+        #[test]
+        fn on_macos_the_launch_removes_the_folders_of_a_forgotten_chat_and_no_other() {
+            // covers: services.desktop-viewer
+            let dir = scratch("mac-chat");
+            let folders = mac_folders(&dir, "tools.ghostly.e2e.forget").unwrap();
+            let default = folders.storage.clone().unwrap();
+            let gone = [
+                mac_lay_out(&default, &format!("keeper.{PEER}.{TAG}"), "G1"),
+                mac_lay_out(&default, &format!("notes.{PEER}.{TAG}"), "G2"),
+            ];
+            let kept_folder =
+                mac_lay_out(&default, &format!("keeper.{PEER}.ot1uwisza345h769"), "K1");
+            let kept_files = files(&kept_folder);
+
+            let list = dir.join(LIST_FILE);
+            note_chat(&list, folders, TAG);
+            clean_list(&list);
+            for folder in &gone {
+                assert!(!folder.parent().unwrap().exists(), "{folder:?}");
+            }
+            assert_eq!(
+                files(&kept_folder),
+                kept_files,
+                "another chat's folder stays whole"
+            );
+            assert!(!list.exists());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
         /// WebKit's tracking prevention tables, as macOS 15's `observations.db` has them (the part that names sites).
         #[cfg(target_os = "macos")]
         const OBSERVED_SCHEMA: &str = "PRAGMA journal_mode = WAL;
@@ -1014,8 +1443,8 @@ mod tests {
 
     fn origin(service: &str, peer: &str, tag: &str) -> ServiceOrigin {
         ServiceOrigin {
-            service: service.into(),
-            peer: peer.into(),
+            service: Some(service.into()),
+            peer: Some(peer.into()),
             tag: tag.into(),
         }
     }
@@ -1023,8 +1452,8 @@ mod tests {
     #[test]
     fn only_an_origin_a_viewer_could_have_opened_is_taken() {
         assert_eq!(
-            origin("keeper", PEER, TAG).host().as_deref(),
-            Some(format!("keeper.{PEER}.{TAG}").as_str())
+            origin("keeper", PEER, TAG).target(),
+            Some(Target::Origin(format!("keeper.{PEER}.{TAG}")))
         );
         let long = "a".repeat(65);
         for (service, peer, tag) in [
@@ -1040,11 +1469,69 @@ mod tests {
             ("keeper", PEER, "ybndrfg8.jkmcpqx"),
         ] {
             assert_eq!(
-                origin(service, peer, tag).host(),
+                origin(service, peer, tag).target(),
                 None,
                 "{service} {peer} {tag}"
             );
         }
+    }
+
+    #[test]
+    fn a_chat_alone_names_every_origin_of_that_chat() {
+        let chat = |json: serde_json::Value| {
+            serde_json::from_value::<ServiceOrigin>(json)
+                .unwrap()
+                .target()
+        };
+        assert_eq!(
+            chat(serde_json::json!({ "tag": TAG })),
+            Some(Target::Chat(TAG.into()))
+        );
+        // Never half an origin, nor a tag `viewerTag` would not make.
+        assert_eq!(
+            chat(serde_json::json!({ "tag": TAG, "service": "keeper" })),
+            None
+        );
+        assert_eq!(chat(serde_json::json!({ "tag": TAG, "peer": PEER })), None);
+        assert_eq!(chat(serde_json::json!({ "tag": "ybndrfg8.jkmcpqx" })), None);
+        assert_eq!(chat(serde_json::json!({ "tag": "%" })), None);
+
+        assert!(of_chat(&format!("keeper.{PEER}.{TAG}"), TAG));
+        assert!(of_chat(
+            &format!("Notes.{PEER}.{}", TAG.to_ascii_uppercase()),
+            TAG
+        ));
+        for host in [
+            format!("keeper.{PEER}.ot1uwisza345h769"),
+            format!("keeper.{PEER}.x{TAG}"),
+            format!("keeper.{TAG}"),
+            format!("a.keeper.{PEER}.{TAG}"),
+            format!("kee_per.{PEER}.{TAG}"),
+        ] {
+            assert!(!of_chat(&host, TAG), "{host}");
+        }
+    }
+
+    #[test]
+    fn webview2_names_the_chats_origins_in_its_files() {
+        let keeper = format!("keeper.{PEER}.{TAG}");
+        let notes = format!("notes.{PEER}.{TAG}");
+        let other = format!("keeper.{PEER}.ot1uwisza345h769");
+        // A Local Storage log's records, and the IndexedDB folder's name.
+        let mut log = Vec::new();
+        for host in [&keeper, &other, &keeper, &notes] {
+            log.extend_from_slice(format!("_http://ghostly-svc.{host}\0\x01probe-k").as_bytes());
+        }
+        assert_eq!(chat_hosts_in(&log, TAG), [keeper.clone(), notes]);
+        assert_eq!(
+            chat_hosts_in(
+                format!("http_ghostly-svc.{keeper}_0.indexeddb.leveldb").as_bytes(),
+                TAG
+            ),
+            [keeper]
+        );
+        assert_eq!(chat_hosts_in(other.as_bytes(), TAG), Vec::<String>::new());
+        assert_eq!(chat_hosts_in(b"ghostly-svc.", TAG), Vec::<String>::new());
     }
 
     #[test]
@@ -1161,12 +1648,12 @@ r.onsuccess = () => {
     #[ignore = "needs a display and a process of its own (GTK, WebView2)"]
     fn what_a_contacts_app_kept_is_gone_and_no_file_names_it() {
         // covers: services.desktop-viewer
-        let home =
-            std::env::temp_dir().join(format!("ghostly-forget-display-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(&home).unwrap();
         #[cfg(target_os = "linux")]
-        {
+        let home = {
+            let home =
+                std::env::temp_dir().join(format!("ghostly-forget-display-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&home);
+            std::fs::create_dir_all(&home).unwrap();
             std::env::set_var("HOME", &home);
             for (name, folder) in [
                 ("XDG_CONFIG_HOME", ".config"),
@@ -1175,10 +1662,20 @@ r.onsuccess = () => {
             ] {
                 std::env::set_var(name, home.join(folder));
             }
-        }
-        // WebView2 keeps every webview's storage here instead of the app's own data folder.
+            home
+        };
+        // The app's own local data folder, where WebView2 keeps the Ghostly window's profile and each contact's
+        // app's, under an id of the test's own. Not WEBVIEW2_USER_DATA_FOLDER: it puts every webview in one profile.
+        #[allow(unused_mut)]
+        let mut context = tauri::generate_context!(test = true);
         #[cfg(windows)]
-        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &home);
+        let home = {
+            const ID: &str = "tools.ghostly.test.forget";
+            context.config_mut().identifier = ID.into();
+            let home = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap()).join(ID);
+            let _ = std::fs::remove_dir_all(&home);
+            home
+        };
         let host = format!("keeper.{PEER}.{TAG}");
 
         let builder = tauri::Builder::default()
@@ -1194,8 +1691,10 @@ r.onsuccess = () => {
                     responder.respond(viewer::handle(app, label, request).await);
                 });
             })
-            .build(tauri::generate_context!(test = true))
+            .build(context)
             .expect("app");
+        #[cfg(windows)]
+        assert_eq!(app.path().app_local_data_dir().unwrap(), home);
 
         // The main window's part: the contact's app is the page above, and what it says comes back here.
         let (said, heard) = mpsc::channel::<String>();
@@ -1246,6 +1745,7 @@ r.onsuccess = () => {
                     TAG.into(),
                     "Keeper".into(),
                     None,
+                    None,
                 )
                 .unwrap()
             };
@@ -1260,16 +1760,18 @@ r.onsuccess = () => {
             };
             assert_eq!(windows("svc-"), 1);
 
-            let cleared = tauri::async_runtime::block_on(forget_service_origins(
-                handle.clone(),
-                vec![ServiceOrigin {
-                    service: "keeper".into(),
-                    peer: PEER.into(),
-                    tag: TAG.into(),
-                }],
-            ))
-            .unwrap();
-            assert_eq!(cleared, [true]);
+            let forget = || {
+                tauri::async_runtime::block_on(forget_service_origins(
+                    handle.clone(),
+                    vec![ServiceOrigin {
+                        service: Some("keeper".into()),
+                        peer: Some(PEER.into()),
+                        tag: TAG.into(),
+                    }],
+                ))
+                .unwrap()
+            };
+            assert_eq!(forget(), [true]);
             std::thread::sleep(Duration::from_millis(500));
             assert_eq!(windows("svc-"), 0, "the app's window closed");
             #[cfg(target_os = "linux")]
@@ -1281,6 +1783,9 @@ r.onsuccess = () => {
             let read = wait("/read");
             assert_eq!(read, "/read?ls=null&idb=&caches=");
             std::thread::sleep(Duration::from_millis(500));
+            // Its visit to read is forgotten too: then nothing on the disk may name it.
+            #[cfg(windows)]
+            assert_eq!(forget(), [true]);
         });
         #[cfg(target_os = "linux")]
         let list = app
@@ -1291,24 +1796,24 @@ r.onsuccess = () => {
         app.run_return(|_, _| {});
         steps.join().unwrap();
 
-        // WebView2's processes let go of the folder once they are gone.
+        // WebView2's processes let go of the folder once they are gone. No file of the app's folder names the
+        // origin or holds what the app kept, the Ghostly window's profile included: the files WebView2 shares
+        // between a profile's origins (its Local Storage log, its quota database, its history, its preferences)
+        // keep an origin's records after any clear, through every later launch.
         #[cfg(windows)]
         {
             std::thread::sleep(Duration::from_secs(3));
             let (by_name, by_bytes) = named_anywhere(&home, &host);
+            let (_, kept) = named_anywhere(&home, "probe-");
             eprintln!("files: {:#?}", files(&home));
-            eprintln!("named after the origin: {by_name:#?}");
-            eprintln!("holding its name: {by_bytes:#?}");
+            let _ = std::fs::remove_dir_all(&home);
             assert_eq!(
                 by_name,
                 Vec::<String>::new(),
                 "no file or folder is named after the origin"
             );
-            // Not asserted: WebView2 keeps the profile's own records (its Local Storage log, its quota database)
-            // in files shared by every origin, until it compacts them.
-            let (_, kept) = named_anywhere(&home, "probe-");
-            eprintln!("holding what the app kept: {kept:#?}");
-            let _ = std::fs::remove_dir_all(&home);
+            assert_eq!(by_bytes, Vec::<String>::new(), "no file holds its name");
+            assert_eq!(kept, Vec::<String>::new(), "no file holds what it kept");
         }
 
         // The files still named after the origin, until the next launch: at least its folders' `origin` files.

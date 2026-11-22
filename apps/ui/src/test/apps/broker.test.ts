@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, STOP_REQUESTS_PER_SECOND, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, PING_EVERY_MS, STOP_REQUESTS_PER_SECOND, UNRESPONSIVE_AFTER_MS, hasLoneSurrogate, jsonValueOf, runnerFor, watchApp, withoutLoneSurrogates, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -13,7 +13,7 @@ import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 const REF = "pubkeyalpha/chess";
 const LINK = "link-1";
 
-function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byReference = false, serving }: { byReference?: boolean; serving?: (on: boolean) => void } = {}) {
+function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byReference = false, serving, pong }: { byReference?: boolean; serving?: (on: boolean) => void; pong?: (n: number) => void } = {}) {
   const host = memoryHost();
   const posted: { message: Record<string, unknown>; transfer?: Transferable[] }[] = [];
   const stops: AppStopReason[] = [];
@@ -25,6 +25,7 @@ function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byRefere
     stopped: (reason) => stops.push(reason),
     byReference,
     serving,
+    pong,
     now: () => clock.t,
   });
   let next = 1;
@@ -108,6 +109,104 @@ describe("the start, and the loads of the frame", () => {
   });
 });
 
+describe("the watchdog: an app that holds its thread past the bound is stopped", () => {
+  /** A watch on a clock the test moves, ticking as `startApp`'s interval would. */
+  function watching({ boundMs = UNRESPONSIVE_AFTER_MS }: { boundMs?: number } = {}) {
+    const clock = { t: 0, shown: true };
+    const pings: number[] = [];
+    let hung = 0;
+    const watch = watchApp({ ping: (n) => pings.push(n), hung: () => { hung++; }, boundMs, now: () => clock.t, shown: () => clock.shown });
+    /** One tick, `ms` after the last. */
+    const tick = (ms = PING_EVERY_MS) => { clock.t += ms; watch.tick(); };
+    return { clock, pings, watch, tick, hung: () => hung };
+  }
+
+  it("an app that answers each ping is never stopped, and is asked again only once it answered", () => {
+    const { pings, watch, tick, hung } = watching();
+    for (let i = 0; i < 60; i++) {
+      tick();
+      watch.pong(pings[pings.length - 1]!);
+    }
+    expect(pings).toHaveLength(60);
+    expect(hung()).toBe(0);
+  });
+
+  it("a ping unanswered for the bound, on time-keeping ticks (the frame has a thread of its own), stops it at the bound and not before", () => {
+    const { pings, tick, hung } = watching();
+    tick();
+    expect(pings).toEqual([1]);
+    for (let i = 1; i < UNRESPONSIVE_AFTER_MS / PING_EVERY_MS; i++) tick();
+    expect(hung()).toBe(0);
+    // Still the one ping: an app that answers nothing is not asked again.
+    expect(pings).toEqual([1]);
+    tick();
+    expect(hung()).toBe(1);
+  });
+
+  it("a tick that comes the bound late (the page's own thread held, as where frames share it) stops the app, though its ping was answered", () => {
+    const { pings, watch, tick, hung } = watching();
+    tick();
+    watch.pong(pings[0]!);
+    tick(UNRESPONSIVE_AFTER_MS - 1);
+    expect(hung()).toBe(0);
+    watch.pong(pings[pings.length - 1]!);
+    tick(UNRESPONSIVE_AFTER_MS);
+    expect(hung()).toBe(1);
+  });
+
+  it("an answer to an older ping is not an answer", () => {
+    const { clock, pings, watch, tick, hung } = watching();
+    tick();
+    clock.shown = false;
+    tick();
+    clock.shown = true;
+    tick();
+    expect(pings).toEqual([1, 2]);
+    watch.pong(1);
+    for (let i = 0; i < UNRESPONSIVE_AFTER_MS / PING_EVERY_MS; i++) tick();
+    expect(hung()).toBe(1);
+  });
+
+  it("what the page waited through while hidden (a frozen tab, a phone asleep) is not the app's: it is asked again once shown", () => {
+    const { clock, pings, watch, tick, hung } = watching();
+    tick();
+    // Hidden with the ping out; the page frozen for a minute; its timers come back late.
+    watch.hidden();
+    clock.shown = false;
+    tick(60_000);
+    clock.shown = true;
+    tick(30_000);
+    expect(hung()).toBe(0);
+    expect(pings).toEqual([1, 2]);
+    // The `visibilitychange` came, but no tick saw the page hidden: still excused.
+    watch.pong(2);
+    watch.hidden();
+    tick(60_000);
+    expect(hung()).toBe(0);
+    // Then judged as ever.
+    watch.pong(3);
+    tick(UNRESPONSIVE_AFTER_MS);
+    expect(hung()).toBe(1);
+  });
+
+  it("the broker hands the runner's `{pong}` to the watch, answers nothing, and counts it with the requests", () => {
+    const pongs: number[] = [];
+    const { broker, run, posted, stops } = setup({}, { t: 1_000 }, { pong: (n) => pongs.push(n) });
+    run();
+    const before = posted.length;
+    broker.message({ pong: 7 });
+    expect(pongs).toEqual([7]);
+    expect(posted.length).toBe(before);
+    // Not a pong: one with an id is a request (and not JSON a request takes), one that is not a whole number is nothing.
+    broker.message({ pong: 8, id: 3 });
+    broker.message({ pong: 1.5 });
+    expect(pongs).toEqual([7]);
+    // A flood of pongs is a flood: stopped as any other far past the rate.
+    for (let i = 0; i <= STOP_REQUESTS_PER_SECOND; i++) broker.message({ pong: i });
+    expect(stops).toEqual(["protocol"]);
+  });
+});
+
 describe("the app is its port: nothing it says names it", () => {
   it("storage goes to this app in this chat, whatever the request claims", async () => {
     const { host, run, ask } = setup();
@@ -138,6 +237,21 @@ describe("the app is its port: nothing it says names it", () => {
     expect(await ask("storage.get", [""])).toMatchObject({ ok: false, error: "bad-key" });
     expect(await ask("storage.get", [7])).toMatchObject({ ok: false, error: "bad-key" });
     expect(await ask("storage.set", ["k", "x".repeat(MINI_APP_LIMITS.storageValueBytes)])).toMatchObject({ ok: false, error: "too-large" });
+    // A set with no value was answered too-large.
+    expect(await ask("storage.set", ["k"])).toMatchObject({ ok: false, error: "bad-request" });
+  });
+
+  it("takes a value of 64 KiB under the longest key: the request has room for both", async () => {
+    // The request carries the value with its key and {"id","type","args"} around them, so a 64 KiB request refused a
+    // value a few dozen bytes short of the 64 KiB WISP 1200 promises. The longest key is 256 control characters,
+    // six bytes each in JSON.
+    const { host, run, ask } = setup();
+    run();
+    const key = "\u0001".repeat(MINI_APP_LIMITS.storageKeyBytes);
+    const value = "x".repeat(MINI_APP_LIMITS.storageValueBytes - 2);
+    expect(await ask("storage.set", [key, value])).toMatchObject({ ok: true });
+    expect(host.stored.get(`${REF} ${LINK}`)?.get(key)).toBe(value);
+    expect(await ask("storage.set", [key, `${value}x`])).toMatchObject({ ok: false, error: "too-large" });
   });
 
   it("an engine refusal reaches the app by its code: a full storage is `full`, a missing file `no-file`", async () => {
@@ -181,7 +295,7 @@ describe("requests", () => {
     expect(posted.filter((p) => p.message.id === undefined || (p.message.id as number) < 0)).toEqual([]);
   });
 
-  it("refuses a request over 64 KiB before anything sees it", async () => {
+  it("refuses a request over 66 KiB before anything sees it", async () => {
     const { host, run, ask } = setup();
     run();
     const before = host.calls.length;
@@ -191,7 +305,7 @@ describe("requests", () => {
 
   it("refuses a huge or binary request without writing it as JSON first", () => {
     // A structured clone carries what JSON.stringify takes seconds to write (a 16 MiB Uint8Array took 1.6 s on the
-    // page's thread): it is refused from a count that stops at 64 KiB, and binary data from its type alone.
+    // page's thread): it is refused from a count that stops at 66 KiB, and binary data from its type alone.
     const { broker, posted, run } = setup();
     run();
     // Counted by hand: a spy would keep (and print) what it was called with.
@@ -222,6 +336,37 @@ describe("requests", () => {
     expect(posted.slice(-requests.length).map((p) => p.message)).toEqual(requests.map(([, , error], i) => ({ id: 100 + i, ok: false, error })));
   });
 
+  it("checks each number and member of a request within the limits once, not once per walk", async () => {
+    // A storage.set of 32k zeros took 4-8 ms on the page's thread, an object of 6k members up to 12 ms: each number was
+    // asked whether it was binary data, then checked twice, and each member defined one by one.
+    const { broker, host, posted, run } = setup();
+    run();
+    const numbers = Array.from({ length: 1_000 }, (_, i) => i);
+    const members = Object.fromEntries(numbers.map((i) => [`k${i}`, i]));
+    // Counted by hand, as JSON.stringify above.
+    const { isView } = ArrayBuffer;
+    const { isFinite } = Number;
+    const { defineProperty } = Object;
+    const count = { isView: 0, isFinite: 0, defineProperty: 0 };
+    ArrayBuffer.isView = ((value: unknown) => { count.isView++; return isView(value); }) as typeof isView;
+    Number.isFinite = ((value: unknown) => { count.isFinite++; return isFinite(value); }) as typeof isFinite;
+    Object.defineProperty = ((...args: Parameters<typeof defineProperty>) => { count.defineProperty++; return defineProperty(...args); }) as typeof defineProperty;
+    try {
+      broker.message({ id: 1, type: "storage.set", args: ["numbers", numbers] });
+      broker.message({ id: 2, type: "storage.set", args: ["members", members] });
+    } finally {
+      ArrayBuffer.isView = isView;
+      Number.isFinite = isFinite;
+      Object.defineProperty = defineProperty;
+    }
+    expect(count.isView).toBeLessThan(10);
+    expect(count.isFinite).toBe(2 * numbers.length);
+    expect(count.defineProperty).toBe(0);
+    await vi.waitFor(() => expect(posted.filter((p) => p.message.id === 1 || p.message.id === 2).map((p) => p.message.ok)).toEqual([true, true]));
+    expect(host.stored.get(`${REF} ${LINK}`)?.get("numbers")).toEqual(numbers);
+    expect(host.stored.get(`${REF} ${LINK}`)?.get("members")).toEqual(members);
+  });
+
   it("answers at most 50 requests a second, malformed ones counted", async () => {
     const { broker, host, run, posted, clock } = setup();
     run();
@@ -242,7 +387,7 @@ describe("requests", () => {
     const { broker, host, run, posted, stops, clock } = setup();
     run();
     clock.t += 1_001;
-    for (let id = 1; id <= STOP_REQUESTS_PER_SECOND; id++) broker.message({ id, type: "storage.keys", args: [] });
+    for (let id = 1; id <= STOP_REQUESTS_PER_SECOND; id++) broker.message({ id, type: "storage.get", args: ["k"] });
     expect(stops).toEqual([]);
     expect(broker.phase).toBe("running");
     // The one over: read by nothing (a getter on it would throw), the app stopped, its chat closed.
@@ -251,11 +396,11 @@ describe("requests", () => {
     expect(stops).toEqual(["protocol"]);
     expect(broker.phase).toBe("stopped");
     const before = posted.length;
-    for (let id = 1_000; id < 2_000; id++) broker.message({ id, type: "storage.keys", args: [] });
+    for (let id = 1_000; id < 2_000; id++) broker.message({ id, type: "storage.get", args: ["k"] });
     await new Promise((done) => setTimeout(done, 0));
     expect(posted.length).toBe(before);
     expect(posted.filter((p) => p.message.error === "too-fast").length).toBe(STOP_REQUESTS_PER_SECOND - MINI_APP_LIMITS.requestsPerSecond);
-    expect(host.calls.filter((c) => c.op === "storage.keys").length).toBe(MINI_APP_LIMITS.requestsPerSecond);
+    expect(host.calls.filter((c) => c.op === "storage.get").length).toBe(MINI_APP_LIMITS.requestsPerSecond);
     expect(host.calls.filter((c) => c.op === "chat.close").length).toBe(1);
     expect(stops).toEqual(["protocol"]);
   });
@@ -368,6 +513,32 @@ describe("requests", () => {
     await vi.waitFor(() => expect(posted.find((p) => p.message.id === 100)?.message).toMatchObject({ ok: true }));
   });
 
+  it("storage.keys answers count in the same budget, by their JSON with its escapes", async () => {
+    // A full scope of 256-byte keys of control characters: one byte each kept, six each as JSON, ~3.7 MB a list.
+    // Uncounted, 50 lists a second made the page (and on Desktop the main thread) write ~185 MB of JSON a second.
+    const { host, broker, run, posted, clock } = setup();
+    run();
+    const keys = Array.from({ length: 2_400 }, (_, i) => String(i).padStart(4, "0") + "\u0001".repeat(MINI_APP_LIMITS.storageKeyBytes - 4));
+    for (const key of keys) await host.storage.set(REF, LINK, key, 1);
+    const listJson = JSON.stringify(keys).length;
+    expect(listJson).toBeGreaterThan(3_600_000);
+    clock.t += 1_001;
+    for (let id = 1; id <= 50; id++) broker.message({ id, type: "storage.keys", args: [] });
+    await vi.waitFor(() => expect(posted.filter((p) => (p.message.id as number) >= 1).length).toBe(50));
+    const answers = posted.filter((p) => (p.message.id as number) >= 1).map((p) => p.message);
+    // Each list that starts under 16 MiB is answered whole: five, the rest refused unread.
+    const lists = Math.ceil(MINI_APP_LIMITS.fileBytesPerSecond / listJson);
+    expect(answers.filter((a) => a.ok === true).length).toBe(lists);
+    expect(answers.filter((a) => a.error === "too-fast").length).toBe(50 - lists);
+    expect(host.calls.filter((c) => c.op === "storage.keys").length).toBe(lists);
+    const written = answers.reduce((sum, a) => sum + JSON.stringify(a).length, 0);
+    expect(written).toBeLessThan(MINI_APP_LIMITS.fileBytesPerSecond + listJson + 50 * 100);
+    // A second later the budget is whole again.
+    clock.t += 1_001;
+    broker.message({ id: 100, type: "storage.keys", args: [] });
+    await vi.waitFor(() => expect(posted.find((p) => p.message.id === 100)?.message).toMatchObject({ ok: true }));
+  });
+
   it("close ends the app, and closes it in the chat", async () => {
     const { host, run, ask, stops } = setup();
     run();
@@ -429,7 +600,7 @@ describe("chat", () => {
     expect(JSON.stringify(stored.get("flat"))).toBe(JSON.stringify(flat));
     expect(JSON.stringify(host.sent[host.sent.length - 1]!.data)).toBe(JSON.stringify(nested));
     // Plain JSON still, with no prototype of the app's anywhere in it.
-    expect(isJsonValue(stored.get("dict"))).toBe(true);
+    expect(jsonValueOf(stored.get("dict"))).toEqual(stored.get("dict"));
     expect(Object.getPrototypeOf((stored.get("dict") as { words: object }).words)).toBe(Object.prototype);
   });
 
@@ -479,15 +650,8 @@ describe("chat", () => {
   });
 });
 
-it("isJsonValue takes plain JSON only", () => {
-  expect(isJsonValue({ a: [1, "x", null, true, { b: 2 }] })).toBe(true);
-  for (const bad of [undefined, Number.POSITIVE_INFINITY, () => 1, new Date(), new Map(), Symbol("x"), 1n]) expect(isJsonValue(bad)).toBe(false);
-  let deep: unknown = 1;
-  for (let i = 0; i < 100; i++) deep = [deep];
-  expect(isJsonValue(deep)).toBe(false);
-});
-
 it("jsonValueOf writes a value as JSON.stringify does, or refuses it", () => {
+  expect(jsonValueOf({ a: [1, "x", null, true, { b: 2 }] })).toEqual({ a: [1, "x", null, true, { b: 2 }] });
   expect(jsonValueOf({ a: 1, b: undefined, c: [undefined, { d: undefined }] })).toEqual({ a: 1, c: [null, {}] });
   const proto = JSON.parse('{"__proto__":{"x":1},"y":[{"__proto__":2}]}') as unknown;
   expect(JSON.stringify(jsonValueOf(proto))).toBe(JSON.stringify(proto));
@@ -533,6 +697,42 @@ it("asks the engine as the version it runs: every call goes to the platform of i
   await vi.waitFor(() => expect(bound.calls.map((c) => c.op)).toEqual(expect.arrayContaining(["chat.open", "storage.set", "chat.send"])));
   expect(digests).toEqual(["digest-7"]);
   expect(platform.calls).toEqual([]);
+});
+
+it("the read lane asks as the version it runs too: serves, reads and answers go to the platform of its digest", async () => {
+  const platform = memoryHost();
+  const bound = memoryHost();
+  platform.running = () => bound;
+  const posted: Record<string, unknown>[] = [];
+  const broker = createBroker({
+    host: platform,
+    launch: { ref: REF, digest: "digest-7", version: "1.0.0", title: "Cinema", permissions: ["chat", "files"], entry: "<p>app</p>", chat: { linkId: LINK } },
+    view: { theme: () => "dark", locale: () => "en" },
+    post: (message) => posted.push(message as Record<string, unknown>),
+    stopped: () => {},
+  });
+  const ask = async (id: number, type: string, args: unknown[] = []) => {
+    broker.message({ id, type, args });
+    await vi.waitFor(() => expect(posted.some((p) => p.id === id)).toBe(true));
+    return posted.find((p) => p.id === id)!;
+  };
+  broker.load();
+  broker.message({ id: 0, type: "writing", args: [] });
+  broker.load();
+  // Linked files are kept by the client, not a version: they stay on the outer platform.
+  const film = new Uint8Array(100).fill(7);
+  platform.nextPick = [{ path: "Films/Up.mp4", bytes: film }];
+  const id = ((await ask(1, "files.pick")).value as { id: string }[])[0]!.id;
+  await ask(2, "context");
+  const serve = (await ask(3, "files.serve", [id])).value as string;
+  const SERVE = "s".repeat(22);
+  bound.remote.set(SERVE, film);
+  expect(await ask(4, "remote.read", [SERVE, { offset: 0, length: 5 }])).toMatchObject({ ok: true });
+  expect(await ask(5, "remote.stat", [SERVE])).toMatchObject({ ok: true, value: { size: film.length } });
+  const app = memoryAppId(LINK, REF);
+  expect(await bound.askRange(LINK, { app, request: 6, serve, file: id, offset: 0, length: 5 })).toEqual({ app, request: 6, bytes: film.subarray(0, 5), size: film.length });
+  expect(bound.calls.map((c) => c.op)).toEqual(expect.arrayContaining(["ranges.serve", "ranges.read"]));
+  expect(platform.calls.map((c) => c.op).filter((op) => op.startsWith("ranges."))).toEqual([]);
 });
 
 describe("linked files (WISP 1200 · Linked files)", () => {
@@ -960,5 +1160,75 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     expect(await ask("files.list")).toMatchObject({ ok: true });
     expect(await ask("files.serve", [id])).toMatchObject({ ok: true });
     expect(reads).toBe(2);
+  });
+});
+
+// WISP 1200 § The broker's messages: Desktop's IPC is read with serde_json, which refuses half a surrogate pair, so one
+// rule on both runners. The web took a request holding one, Desktop answered it `failed`; an answer holding one never
+// reached a Desktop app, which waited a minute. Desktop's runner and opener: desktopRunner.test.ts, desktopOpener.test.ts.
+describe("a lone surrogate (half an emoji)", () => {
+  const half = "\u{1F600}".slice(0, 1);
+  const low = "\u{1F600}".slice(1);
+
+  it("refuses a request holding one in a value or a member name as bad-request, and passes a whole emoji", async () => {
+    const { host, run, ask } = setup();
+    run();
+    await vi.waitFor(() => expect(host.calls).toContainEqual({ op: "chat.open", ref: REF, linkId: LINK }));
+    host.receive(LINK, { app: memoryAppId(LINK, REF), o: "open", v: "1.2.0" });
+    for (const args of [[`k${half}`, "v"], ["k", `v${half}`], ["k", { [`m${half}`]: 1 }], ["k", { a: [{ b: low }] }]]) {
+      expect(await ask("storage.set", args), JSON.stringify(args)).toMatchObject({ ok: false, error: "bad-request" });
+    }
+    expect(await ask("storage.get", [`k${half}`])).toMatchObject({ ok: false, error: "bad-request" });
+    expect(await ask("chat.send", [{ text: `hi ${half}` }])).toMatchObject({ ok: false, error: "bad-request" });
+    expect(host.calls.filter((c) => c.op === "storage.set" || c.op === "storage.get")).toEqual([]);
+    expect(host.sent).toEqual([]);
+    // A member left out (undefined) is not sent, so its name is not read.
+    expect(await ask("storage.set", ["k", { [`m${half}`]: undefined, n: 1 }])).toMatchObject({ ok: true });
+    expect(await ask("storage.set", ["\u{1F600}", { "\u{1F600}": "\u{1F600}" }])).toMatchObject({ ok: true });
+    expect(await ask("chat.send", ["\u{1F600}"])).toMatchObject({ ok: true });
+    expect(host.sent).toEqual([{ linkId: LINK, ref: REF, data: "\u{1F600}" }]);
+  });
+
+  it("answers a stored value holding one at once, with U+FFFD in its place", async () => {
+    // Stored before this rule (a restored backup, a web client that took it): it cannot be refused now.
+    const { host, run, ask } = setup();
+    host.stored.set(`${REF} ${LINK}`, new Map<string, unknown>([["game", { [`m${half}`]: [`v${low}`, "\u{1F600}"] }], [`k${half}`, 1]]) as never);
+    run();
+    expect((await ask("storage.get", ["game"])).value).toEqual({ "m\uFFFD": ["v\uFFFD", "\u{1F600}"] });
+    expect((await ask("storage.keys")).value).toEqual(["game", "k\uFFFD"]);
+  });
+
+  it("hands the app a contact's message holding one with U+FFFD in its place", async () => {
+    const { host, run, posted } = setup();
+    run();
+    await vi.waitFor(() => expect(host.calls).toContainEqual({ op: "chat.open", ref: REF, linkId: LINK }));
+    await Promise.resolve();
+    host.receive(LINK, { app: memoryAppId(LINK, REF), o: "open", v: "1.2.0" });
+    host.receive(LINK, { app: memoryAppId(LINK, REF), d: { move: `e4${half}`, [`${low}`]: true } });
+    await vi.waitFor(() => expect(posted.map((p) => p.message).filter((m) => m.event === "chat.message")).toEqual([
+      { event: "chat.message", data: { move: "e4\uFFFD", "\uFFFD": true } },
+    ]));
+  });
+
+  it("is found in strings and member names, nested, and replaced only there", () => {
+    expect(hasLoneSurrogate(half)).toBe(true);
+    expect(hasLoneSurrogate({ a: [{ [low]: 1 }] })).toBe(true);
+    expect(hasLoneSurrogate([1, null, true, { a: `x${low}${half}` }])).toBe(true);
+    for (const fine of ["\u{1F600}", `${half}${low}`, { "\u{1F600}": ["\u{1F600}"] }, 1, null, new Uint8Array([0xd8, 0x3d])]) expect(hasLoneSurrogate(fine)).toBe(false);
+    expect(typeof jsonValueOf({ a: half })).toBe("symbol");
+    expect(typeof jsonValueOf({ [half]: 1 })).toBe("symbol");
+    expect(typeof jsonValueOf([low])).toBe("symbol");
+    expect(typeof jsonValueOf({ [low]: 1 })).toBe("symbol");
+    expect(jsonValueOf({ a: "\u{1F600}" })).toEqual({ a: "\u{1F600}" });
+    // Nothing to replace: the very same value, its bytes and transfer list untouched.
+    const bytes = new ArrayBuffer(4);
+    const answer = { id: 1, ok: true, value: bytes };
+    expect(withoutLoneSurrogates(answer)).toBe(answer);
+    const fixed = withoutLoneSurrogates({ id: 2, ok: true, value: { [`${half}x`]: [half, bytes, "\u{1F600}"] } });
+    expect(fixed).toEqual({ id: 2, ok: true, value: { "\uFFFDx": ["\uFFFD", bytes, "\u{1F600}"] } });
+    expect(fixed.value["\uFFFDx"]![1]).toBe(bytes);
+    const proto = withoutLoneSurrogates(JSON.parse(`{"__proto__":{"a":"\\ud83d"}}`) as Record<string, unknown>);
+    expect(Object.keys(proto)).toEqual(["__proto__"]);
+    expect(Object.getOwnPropertyDescriptor(proto, "__proto__")!.value).toEqual({ a: "\uFFFD" });
   });
 });

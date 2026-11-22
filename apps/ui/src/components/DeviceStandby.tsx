@@ -1,12 +1,15 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { DeviceGateView } from "@ghostly/browser/devices/gate";
+import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
 import { useLockPassedNow } from "../contexts/LockScreenContext";
-import { listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
+import { DEVICE_SET_EVERY_MS, listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
 import { TakeoverDialog } from "./devices/TakeoverDialog";
+import { RemoveHereDialog } from "./devices/RemoveHereDialog";
 import { DeviceGlyph } from "./devices/DeviceGlyph";
 import { SCREEN_BUTTON, SCREEN_QUIET } from "./devices/DeviceDialog";
 import { InfoButton } from "./layout/Section";
@@ -14,6 +17,7 @@ import { useHandoffView } from "../lib/handoff";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 import { deviceWakeWords, useStandbyPush } from "../lib/wakePush";
 import { useComputerAwake } from "../lib/keepAwake";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { said } from "../lib/notices";
 import { fillNames } from "../lib/fillNodes";
 import { problemText, type Problem } from "../lib/problemText";
@@ -22,6 +26,8 @@ import { Notice } from "./ui/Notice";
 const LINK = "min-h-11 px-2 text-sm text-text-muted underline underline-offset-2 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded";
 /** A part of the screen with more than a line in it: an offer, the progress of a move, the new device list. */
 const PANEL = "rounded-xl border border-border bg-surface p-4 text-start text-sm";
+/** A button that waits on the engine looks off, and keeps the keyboard focus: `aria-disabled`, not `disabled`. */
+const BUSY = "aria-disabled:opacity-40 aria-disabled:cursor-progress";
 
 /**
  * The standby screen (WISP 06 § User experience, "What a standby shows"): the state this device is in for the profile
@@ -29,19 +35,49 @@ const PANEL = "rounded-xl border border-border bg-surface p-4 text-start text-sm
  * progress of a move, a takeover), the person's other devices and their links, and the other profiles of this device,
  * one click away. Nothing of the profile itself is on it.
  */
-export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
+export function DeviceStandby({ gate: asked }: { gate: DeviceGateView }) {
   const { t } = useI18n();
+  // A view that asks for the reload (a move's copy installed, or the move done) says nothing of where the device stands:
+  // the taking device read "Active on another device, on standby" until the page went. The screen stays as it was; a
+  // page whose first view is a reload says that one.
+  const [shown, setShown] = useState(asked);
+  if (!asked.reload && shown !== asked) setShown(asked);
+  const gate = asked.reload ? { ...shown, reload: asked.reload, keepUnlocked: asked.keepUnlocked } : asked;
   const lockPassedNow = useLockPassedNow();
   const [open, setOpen] = useState(false);
   const id = useId();
   const others = otherProfiles();
   const unfinished = gate.state === "standby" && !!gate.unfinished;
-  const takeover = useTakeoverInfo(gate.state);
+  const takeover = useTakeoverInfo(gate.state, gate.activeDevice);
   // A copy restored from a backup where the profile is active elsewhere (WISP 06 § A backup restored where a device set
   // exists): it starts nothing until the person takes over or removes it.
   const restored = gate.state === "standby" && takeover?.copy === "restored";
   // Out of its set for good (WISP 06 § Removing a device): nothing it can accept brings it back, or it was removed.
   const reenroll = !!gate.reenroll && (gate.state === "moving" || gate.state === "removed");
+  const offersReenroll = reenroll || gate.state === "removed";
+  const reenrollButton = useRef<HTMLButtonElement>(null);
+  const [removingHere, setRemovingHere] = useState(false);
+  // Removed while this screen was open: what had the keyboard focus (Use here, its dialog, a Check connection) went with
+  // that change. The focus goes to Add this device, not to the page; a screen that opens removed leaves it where it is.
+  const offered = useRef(offersReenroll);
+  useEffect(() => {
+    const was = offered.current;
+    offered.current = offersReenroll;
+    if (was || !offersReenroll) return;
+    if (!document.activeElement || document.activeElement === document.body) reenrollButton.current?.focus();
+  }, [offersReenroll]);
+  // The new device list answered (This is right): its button went with it. The focus goes to Use here, else to the title.
+  // This is wrong removes the device, and the effect above gives it to Add this device.
+  const root = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const noticed = useRef(!!gate.notice);
+  useEffect(() => {
+    const was = noticed.current;
+    noticed.current = !!gate.notice;
+    if (!was || gate.notice) return;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    (root.current?.querySelector<HTMLElement>('[data-testid="handoff-use-here"]') ?? heading.current)?.focus();
+  }, [gate.notice]);
   const title = unfinished ? t("devices.standby.unfinished.title")
     : reenroll ? t("devices.standby.reenroll.title")
     : restored ? (gate.activeDevice ? fillNames(t("devices.restore.activeOn"), { device: gate.activeDevice }) : t("devices.restore.activeOnUnnamed"))
@@ -66,12 +102,12 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   // Desktop: a handoff that runs here (this device takes the profile, or gives it in pass 2) keeps the computer awake.
   useComputerAwake();
   return (
-    <main data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh w-full min-w-0 flex-1 overflow-y-auto bg-chat-bg">
+    <main ref={root} data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh w-full min-w-0 flex-1 overflow-y-auto bg-chat-bg">
       <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center gap-5 px-4 py-8 text-center">
         <div className="space-y-2">
           <div className="text-5xl" aria-hidden="true">👻</div>
           {/* The state is the only thing read aloud when it changes: a live region around the whole screen read all of it again at each change of a link or of a move. */}
-          <h1 data-testid="device-standby-title" aria-live="polite" className="text-lg font-semibold text-text-primary break-words">{title}</h1>
+          <h1 ref={heading} tabIndex={-1} data-testid="device-standby-title" aria-live="polite" className="text-lg font-semibold text-text-primary break-words outline-none">{title}</h1>
           <p className="flex items-start justify-center gap-1.5 text-sm text-text-secondary">
             <span data-testid="device-standby-hint" aria-live="polite" className="min-w-0 break-words">{hint}</span>
             <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId="device-standby-info" className="mt-px" />
@@ -88,19 +124,25 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
         )}
         {unfinished && <Unfinished />}
         {gate.state === "standby" && gate.notice && <SetNotice names={gate.notice} />}
-        {(reenroll || gate.state === "removed") && (
-          <Actions><button type="button" data-testid="device-standby-reenroll" onClick={() => reenrollHere()} className={SCREEN_BUTTON}>{t("devices.join.addThis")}</button></Actions>
+        {offersReenroll && (
+          <Actions>
+            <button ref={reenrollButton} type="button" data-testid="device-standby-reenroll" onClick={() => reenrollHere()} className={SCREEN_BUTTON}>{t("devices.join.addThis")}</button>
+            {/* The frozen copy this device keeps is not encrypted (WISP 06 § Removing a device): it can be taken off here. */}
+            <button type="button" data-testid="device-standby-remove-here" onClick={() => setRemovingHere(true)} className={SCREEN_QUIET}>{t("devices.standby.removeHere.button")}</button>
+          </Actions>
         )}
+        {removingHere && <RemoveHereDialog onClose={() => setRemovingHere(false)} />}
         {!unfinished && !restored && (gate.state === "standby" || gate.state === "superseded" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
         {!unfinished && takeover?.offered && <Takeover gate={gate} info={takeover} />}
-        {gate.state !== "unreadable" && gate.state !== "removed" && !unfinished && <Links />}
+        {/* Out of its set, the set this device kept is an old one: its Active device may not be the one in use now. */}
+        {gate.state !== "unreadable" && !offersReenroll && !unfinished && <Links />}
         {others.length > 0 && (
           <nav aria-label={t("devices.standby.others")} className="space-y-2 border-t border-border pt-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("devices.standby.others")}</p>
             <div className="flex flex-wrap justify-center gap-2">
               {others.map((profile) => (
                 <button key={profile.id} type="button" data-testid="device-standby-switch" onClick={() => switchProfile(profile.id, { route: "/" })} className={SCREEN_QUIET}>
-                  {t("profileSwitcher.switchTo", { name: profile.name })}
+                  {withName(t("profileSwitcher.switchTo", { name: NAME }), profile.name)}
                 </button>
               ))}
             </div>
@@ -122,8 +164,10 @@ function Actions({ children }: { children: ReactNode }) {
  */
 function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   const { t } = useI18n();
-  const view = useHandoffView();
   const [asking, setAsking] = useState(false);
+  // This screen stays up for hours with no move: asked as often as the set, not twice a second. Use here's dialog closing
+  // asks at once, so a pull it started shows its steps, not Use here again.
+  const view = useHandoffView(!asking, DEVICE_SET_EVERY_MS);
   const device = gate.activeDevice ?? t("devices.join.otherDevice");
   // Released, and the other device's word that it took the profile not heard yet: Use here stays (WISP 06 § What a standby
   // shows), and reads the turn first. That word can be lost, and this screen would otherwise wait for it for good.
@@ -136,9 +180,17 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   useEffect(() => {
     if (!follow || !running) return;
     setFollow(false);
-    if (document.activeElement && document.activeElement !== document.body) return;
-    (box.current?.querySelector<HTMLElement>('[data-testid="handoff-cancel"]') ?? box.current?.querySelector<HTMLElement>('[data-testid="handoff-progress"]'))?.focus();
+    focusMove(box.current);
   }, [follow, running]);
+  // The offer answered (Use here, Not now) or taken back by the other device: its buttons go with it, and the keyboard
+  // focus goes the same way (the move's Cancel, else its steps, else Use here), not to the page.
+  const offered = view?.step === "offer";
+  const wasOffered = useRef(offered);
+  useEffect(() => {
+    const was = wasOffered.current;
+    wasOffered.current = offered;
+    if (was && !offered) focusMove(box.current);
+  }, [offered]);
   if (!view && gate.state === "releasing") return null;
   // Not while the new device list waits for an answer: "If this list looks wrong, do not use this device". A replaced
   // device takes the profile back the same way (WISP 06 § User experience): what only it holds stays, in Data and storage.
@@ -157,6 +209,13 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
       {asking && <UseHereDialog device={device} onClose={() => setAsking(false)} onStarted={() => setFollow(true)} />}
     </div>
   );
+}
+
+/** The keyboard focus that went to the page goes to the move in `box`: its Cancel, else its steps, else Use here. */
+function focusMove(box: HTMLElement | null): void {
+  if (document.activeElement && document.activeElement !== document.body) return;
+  const find = (testId: string) => box?.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  (find("handoff-cancel") ?? find("handoff-progress") ?? find("handoff-use-here"))?.focus();
 }
 
 /** How often coming back to the front may read the turn: the relays' budget is shared with everything else. */
@@ -180,17 +239,18 @@ function useTurnReadOnReturn(on: boolean): void {
 type TakeoverInfo = { offered: boolean; device?: string; copy?: "frozen" | "restored"; password?: boolean; ownSet?: true };
 
 /**
- * Whether this device offers a forced takeover, and how (`deviceTakeoverInfo`): read once the screen shows. On a
- * `moving` device it is a device set of its own, for when the device that removed another is gone for good.
+ * Whether this device offers a forced takeover, and how (`deviceTakeoverInfo`): read once the screen shows, and again
+ * when the active device's name changes (a rename there): the name the dialog asks for is the one the engine checks. On
+ * a `moving` device it is a device set of its own, for when the device that removed another is gone for good.
  */
-function useTakeoverInfo(state: DeviceGateView["state"]): TakeoverInfo | null {
+function useTakeoverInfo(state: DeviceGateView["state"], activeDevice: string | undefined): TakeoverInfo | null {
   const [info, setInfo] = useState<TakeoverInfo | null>(null);
   useEffect(() => {
     if (state !== "standby" && state !== "superseded" && state !== "moving") { setInfo(null); return; }
     let live = true;
     void engine.call("deviceTakeoverInfo").then((next) => { if (live) setInfo(next); }, () => { if (live) setInfo(null); });
     return () => { live = false; };
-  }, [state]);
+  }, [state, activeDevice]);
   return info;
 }
 
@@ -220,19 +280,21 @@ function Takeover({ gate, info }: { gate: DeviceGateView; info: TakeoverInfo }) 
 function SetNotice({ names }: { names: string[] }) {
   const { t, language } = useI18n();
   const [list, named] = listNamesFor(names, language);
-  const [busy, setBusy] = useState(false);
+  // The answer under way. Its buttons stay focusable while it runs (a disabled one drops the keyboard focus to the page).
+  const [busy, setBusy] = useState<"wrong" | "ok" | null>(null);
   const [error, setError] = useState<Problem | null>(null);
   const answer = (wrong: boolean) => {
-    setBusy(true); setError(null);
-    void engine.call("deviceSetNoticeSeen", { wrong }).catch((cause: unknown) => setError(problemText(cause, t))).finally(() => setBusy(false));
+    if (busy) return;
+    setBusy(wrong ? "wrong" : "ok"); setError(null);
+    void engine.call("deviceSetNoticeSeen", { wrong }).catch((cause: unknown) => setError(problemText(cause, t))).finally(() => setBusy(null));
   };
   return (
     <div className={`${PANEL} space-y-3`} data-testid="device-set-notice">
       <p data-testid="device-set-notice-title" className="font-semibold text-text-primary break-words">{fillNames(t("devices.standby.notice.title", { devices: list }), named)}</p>
       <p className="text-text-secondary">{t("devices.standby.notice.hint")}</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <button type="button" data-testid="device-set-notice-wrong" disabled={busy} onClick={() => answer(true)} className={`${SCREEN_QUIET} sm:order-1`}>{t("devices.standby.notice.wrong")}</button>
-        <button type="button" data-testid="device-set-notice-ok" disabled={busy} onClick={() => answer(false)} className={`${SCREEN_BUTTON} max-sm:order-first sm:order-2`}>{t("devices.standby.notice.ok")}</button>
+        <button type="button" data-testid="device-set-notice-wrong" aria-disabled={!!busy || undefined} aria-busy={busy === "wrong" || undefined} onClick={() => answer(true)} className={`${SCREEN_QUIET} ${BUSY} sm:order-1`}>{t("devices.standby.notice.wrong")}</button>
+        <button type="button" data-testid="device-set-notice-ok" aria-disabled={!!busy || undefined} aria-busy={busy === "ok" || undefined} onClick={() => answer(false)} className={`${SCREEN_BUTTON} ${BUSY} max-sm:order-first sm:order-2`}>{t("devices.standby.notice.ok")}</button>
       </div>
       {error && <Notice problem={error} testId="device-set-notice-error" className="" />}
     </div>
@@ -246,21 +308,23 @@ function SetNotice({ names }: { names: string[] }) {
  */
 function Unfinished() {
   const { t } = useI18n();
-  const [busy, setBusy] = useState(false);
+  // The press under way; its buttons stay focusable, so a refusal leaves the focus on the one pressed, not on the page.
+  const [busy, setBusy] = useState<"finish" | "remove" | null>(null);
   // What a press that changed nothing came to: the other device has not listed this one yet, or the engine's refusal.
   const [problem, setProblem] = useState<Problem | null>(null);
-  const act = (work: () => Promise<boolean>) => {
-    setBusy(true); setProblem(null);
+  const act = (press: "finish" | "remove", work: () => Promise<boolean>) => {
+    if (busy) return;
+    setBusy(press); setProblem(null);
     void work().then(
-      (done) => { if (done) return tryAgain(); setProblem(said("devices.join.unfinished", t)); setBusy(false); },
-      (cause: unknown) => { setProblem(problemText(cause, t)); setBusy(false); },
+      (done) => { if (done) return tryAgain(); setProblem(said("devices.join.unfinished", t)); setBusy(null); },
+      (cause: unknown) => { setProblem(problemText(cause, t)); setBusy(null); },
     );
   };
   return (
     <div className="space-y-3">
       <Actions>
-        <button type="button" data-testid="device-standby-finish" disabled={busy} onClick={() => act(async () => (await engine.call("deviceEnrollFinish")).finished)} className={SCREEN_BUTTON}>{t("devices.standby.unfinished.retry")}</button>
-        <button type="button" data-testid="device-standby-remove" disabled={busy} onClick={() => act(async () => { await engine.call("deviceEnrollRemove"); return true; })} className={SCREEN_QUIET}>{t("devices.standby.unfinished.remove")}</button>
+        <button type="button" data-testid="device-standby-finish" aria-disabled={!!busy || undefined} aria-busy={busy === "finish" || undefined} onClick={() => act("finish", async () => (await engine.call("deviceEnrollFinish")).finished)} className={`${SCREEN_BUTTON} ${BUSY}`}>{t("devices.standby.unfinished.retry")}</button>
+        <button type="button" data-testid="device-standby-remove" aria-disabled={!!busy || undefined} aria-busy={busy === "remove" || undefined} onClick={() => act("remove", async () => { await engine.call("deviceEnrollRemove"); return true; })} className={`${SCREEN_QUIET} ${BUSY}`}>{t("devices.standby.unfinished.remove")}</button>
       </Actions>
       {problem && <Notice problem={problem} testId="device-standby-unfinished-notice" className="text-sm" />}
     </div>
@@ -278,28 +342,38 @@ function Links() {
     <section aria-label={t("devices.standby.links")} className="space-y-2 text-start">
       <p className="text-center text-xs font-semibold uppercase tracking-wide text-text-muted">{t("devices.standby.links")}</p>
       <ul className="divide-y divide-border rounded-xl bg-surface text-sm" data-testid="device-standby-links">
-        {others.map((device) => {
-          const live = device.status === "live";
-          return (
-            <li key={device.key} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center gap-3 px-4 py-3">
-              <DeviceGlyph name={device.name} active={device.active} />
-              <div className="min-w-0 flex-1">
-                <p dir="auto" className="truncate text-text-primary">{device.name}</p>
-                <p className="text-xs text-text-muted">
-                  {device.active ? `${t("devices.section.active")} · ` : ""}
-                  <span className="inline-flex items-center gap-1">
-                    <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${live ? "bg-accent" : "bg-text-muted"}`} />
-                    {live ? t("devices.section.live") : t("devices.section.connecting")}
-                  </span>
-                  {answer[device.key] && <span data-testid="device-standby-check-result" role="status" className="block">{answer[device.key]}</span>}
-                </p>
-              </div>
-              {live && <button type="button" data-testid="device-standby-check" onClick={() => void check(device.key)} className="min-h-10 max-md:min-h-11 rounded-lg border border-border px-3 text-xs text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{t("devices.section.check")}</button>}
-            </li>
-          );
-        })}
+        {others.map((device) => <LinkRow key={device.key} device={device} answer={answer[device.key]} onCheck={() => void check(device.key)} />)}
       </ul>
     </section>
+  );
+}
+
+/**
+ * One of those devices. Check connection is there only while its link is connected: when the link drops under the
+ * keyboard focus, the focus goes to this line, which now says Not connected, not to the page. The name keeps its
+ * width (only one longer than the row is cut): on a narrow phone the button goes to a line of its own instead.
+ */
+function LinkRow({ device, answer, onCheck }: { device: DeviceSetView["devices"][number]; answer?: string; onCheck(): void }) {
+  const { t } = useI18n();
+  const row = useRef<HTMLLIElement>(null);
+  useFocusKept(row);
+  const live = device.status === "live";
+  return (
+    <li ref={row} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center gap-3 px-4 py-3">
+      <DeviceGlyph name={device.name} active={device.active} />
+      <div className="max-w-full flex-1">
+        <p dir="auto" className="truncate text-text-primary">{device.name}</p>
+        <p className="text-xs text-text-muted">
+          {device.active ? `${t("devices.section.active")} · ` : ""}
+          <span className="inline-flex items-center gap-1">
+            <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${live ? "bg-accent" : "bg-text-muted"}`} />
+            {live ? t("devices.section.live") : t("devices.section.connecting")}
+          </span>
+          {answer && <span data-testid="device-standby-check-result" role="status" className="block">{answer}</span>}
+        </p>
+      </div>
+      {live && <button type="button" data-testid="device-standby-check" onClick={onCheck} className="ms-auto min-h-10 max-md:min-h-11 rounded-lg border border-border px-3 text-xs text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{t("devices.section.check")}</button>}
+    </li>
   );
 }
 

@@ -1,0 +1,1 @@
+§ Raised counters: the own name record of each private group (902 § Messages, "The name record") is in the table. A copy started from older state signs it again once, the name unchanged, at `v = max(clock, v + 1)`, when the group floor is above the one the record was signed under, so members with no edge to it stop showing a newer name the lost device took.

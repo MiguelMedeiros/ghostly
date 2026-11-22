@@ -61,6 +61,20 @@ export function bolt12Offer(fields: { chains?: (keyof typeof GENESIS)[]; amountM
 /** BOLT 12's own minimal offer vector (description "Test vectors", issuer id only). */
 export const BOLT12_SPEC_MINIMAL = "lno1pgx9getnwss8vetrw3hhyuckyypwa3eyt44h6txtxquqh7lz5djge4afgfjn7k4rgrkuag0jsd5xvxg";
 
+/** Monero's own: the mainnet standard address of tests/unit_tests/base58.cpp (`test_keys_addr_str`). */
+export const XMR_MAINNET = "4AzKEX4gXdJdNeM6dfiBFL7kqund3HYGvMBF3ttsNd9SfzgYB6L7ep1Yg1osYJzLdaKAYSLVh6e6jKnAuzj3bw1oGy9kXCb";
+/** The Monero General Fund's donation address (getmonero.org/get-started/contributing), a mainnet subaddress. */
+export const XMR_SUBADDRESS = "888tNkZrPN6JsEgekjMnABU4TBzc2Dt29EPAvkRxbANsAnjyPbb3iQ1YBRk1UXcdRsiKc9dhwMVgN5S9cQUiyoogDavup3H";
+/** Monero's tests/functional_tests/integrated_address.py: a mainnet integrated address, payment ID 0123456789abcdef. */
+export const XMR_INTEGRATED = "4CMe2PUhs4J4886T7196doS9GPMzexD9gXpsZJDwVjeRVdFCSoHnv7KPbBeGpzJBzHRCAs9UxqeoyFQMYbqSWYTfSbLRB61BQVATzerHGj";
+/** getmonero.org's wallet RPC guide (get_address, make_integrated_address): stagenet standard, subaddress, integrated. */
+export const XMR_STAGENET = "55LTR8KniP4LQGJSPtbYDacR7dz8RBFnsfAKMaMuwUNYX6aQbBcovzDPyrQF9KXF9tVU6Xk3K8no1BywnJX6GvZX8yJsXvt";
+export const XMR_STAGENET_SUBADDRESS = "7BnERTpvL5MbCLtj5n9No7J5oE5hHiB3tVCK5cjSvCsYWD2WRJLFuWeKTLiXo5QJqt2ZwUaLy2Vh1Ad51K7FNgqcHgjW85o";
+export const XMR_STAGENET_INTEGRATED = "5F38Rw9HKeaLQGJSPtbYDacR7dz8RBFnsfAKMaMuwUNYX6aQbBcovzDPyrQF9KXF9tVU6Xk3K8no1BywnJX6GvZXCkbHUXdPHyiUeRyokn";
+/** Monero's tests/unit_tests/uri.cpp: testnet standard and integrated (`TEST_ADDRESS`, `TEST_INTEGRATED_ADDRESS`). */
+export const XMR_TESTNET = "9tTLtauaEKSj7xoVXytVH32R1pLZBk4VV4mZFGEh4wkXhDWqw1soPyf3fGixf1kni31VznEZkWNEza9d5TvjWwq5PaohYHC";
+export const XMR_TESTNET_INTEGRATED = "A4A1uPj4qaxj7xoVXytVH32R1pLZBk4VV4mZFGEh4wkXhDWqw1soPyf3fGixf1kni31VznEZkWNEza9d5TvjWwq5acaPMJfMbn3ReTsBpp";
+
 /** EIP-55 examples: a checksummed address, and the same with one letter's case flipped. */
 export const EVM = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
 export const EVM_BAD_CASE = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAeD";

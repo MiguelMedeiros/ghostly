@@ -45,4 +45,19 @@ test("on a phone at a doubled text size, each store's Refresh and Remove are on 
     .map((el) => el.dataset.testid ?? el.className.toString().slice(0, 60)));
   expect(await sideways()).toEqual([]);
   await stores.last().getByTestId("app-store-remove").scrollIntoViewIfNeeded();
-  expect(await sideways()).toEqual([]);});
+  expect(await sideways()).toEqual([]);
+
+  // Remove asks first: the question in place of the buttons fits the screen too, and Cancel keeps the store.
+  const added = stores.filter({ hasText: store.storeName });
+  await added.getByTestId("app-store-remove").click();
+  const question = added.getByTestId("app-store-remove-question");
+  await expect(question).toContainText(store.storeName);
+  for (const button of await question.getByRole("button").all()) {
+    const { left, right } = await button.evaluate((el) => el.getBoundingClientRect());
+    expect.soft(left, `${await button.textContent()} starts on the screen`).toBeGreaterThanOrEqual(0);
+    expect.soft(right, `${await button.textContent()} ends on the screen`).toBeLessThanOrEqual(PHONE.width);
+  }
+  expect(await sideways()).toEqual([]);
+  await question.getByRole("button", { name: "Cancel" }).click();
+  await expect(added.getByTestId("app-store-remove")).toBeFocused();
+});

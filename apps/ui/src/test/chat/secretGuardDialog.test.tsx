@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { findSecret } from "../../lib/parse/secrets";
 import { getSessionDraft, setStorageProfile as setProfile } from "../../lib/storage";
 import { renderApp } from "../render";
 
@@ -9,6 +10,8 @@ import { renderApp } from "../render";
 
 /** BIP39's test vector for entropy 0x7f repeated: it has never held anything. */
 const SEED = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+/** The same entropy in BIP39's Portuguese list. */
+const SEED_PT = "imitador vinheta sogro xerife veleiro pomar volumoso tratador imitador vinheta sogro xingar";
 /** A cashuB token for 8 + 13 sat on http://mint.test (test secrets, no mint behind it). */
 const CASHU_21 = "cashuBo2FtcGh0dHA6Ly9taW50LnRlc3RhdWNzYXRhdIGiYWlIAJofKTJT5B5hcIKjYWEIYXNtdGVzdC1zZWNyZXQtYWFjWCECERERERERERERERERERERERERERERERERERERERERERGjYWENYXNtdGVzdC1zZWNyZXQtYmFjWCECIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI";
 
@@ -49,6 +52,16 @@ describe("the secret guard", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(field()).toHaveValue(SEED);
     expect(field()).toHaveFocus();
+  });
+
+  it("asks before a seed in BIP39's Portuguese list, which the composer loads as it opens", async () => {
+    const { user } = composer();
+    // Nothing here loads the lists but the composer itself.
+    await waitFor(() => expect(findSecret(SEED_PT)).toEqual({ kind: "mnemonic" }));
+    await write(user, SEED_PT);
+    await user.keyboard("{Enter}");
+    expect(guard()).toHaveAttribute("data-kind", "mnemonic");
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("the dialog's cancel (Escape) keeps the draft, and Tab stays between its two buttons", async () => {
@@ -92,6 +105,7 @@ describe("the secret guard", () => {
     ["an nsec", "nsec1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqstywftw", "Send a Nostr private key?"],
     ["a WIF key", "KwFfNUhSDaASSAwtG7ssQM1uVX8RgX5GHWnnLfhfiQDigjioWXHH", "Send a private key?"],
     ["a hex key with its label", `private key: ${"01".repeat(32)}`, "Send a private key?"],
+    ["a bitcoind cookie", `__cookie__:${"01".repeat(32)}`, "Send a login to your node?"],
   ])("words the question for %s", async (_, text, title) => {
     const { user } = composer();
     await write(user, text);

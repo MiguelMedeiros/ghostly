@@ -8,15 +8,16 @@ import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { groupChat, mentionsNotify, mutedFor, setChatMute, setMentionsNotify } from "../../lib/chatMute";
 import { markGroupRead } from "../../lib/groups";
-import { loadSettings, saveSettings } from "../../lib/settings";
+import { loadSettings, saveSettings, type Language } from "../../lib/settings";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { windowIs } from "../viewport";
 
 // covers: groups.mentions, groups.mentions.notify
 
 const sound = vi.hoisted(() => ({ playSound: vi.fn((_name: string) => () => {}), notice: vi.fn(async (_id: string, _body: string) => {}) }));
-vi.mock("../../lib/sounds", () => ({ playSound: sound.playSound, startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: sound.playSound, startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 vi.mock("../../lib/notifications", () => ({ showPrivateNotification: sound.notice, onNotificationOpen: () => () => {}, clearChatNotification: () => {} }));
 
 const ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y"), BOB = "bob".padEnd(52, "y"), BOB2 = "bobtwo".padEnd(52, "k");
@@ -31,13 +32,13 @@ afterEach(() => {
   sound.notice.mockClear();
 });
 
-function openGroup(group: GroupView, history: StoredMessage[] = []) {
+function openGroup(group: GroupView, history: StoredMessage[] = [], language?: Language) {
   fakeEngine.on("groupMessages", () => history).on("updateSettings", () => undefined).on("sendGroupMessage", () => ({ error: null }));
   fakeEngine.update({ groups: [group] });
   return renderApp(<Routes>
     <Route path="/" element={<p>Chat list</p>} />
     <Route path="/group/:groupId" element={<GroupChat />} />
-  </Routes>, { route: "/group/group-1" });
+  </Routes>, { route: "/group/group-1", language });
 }
 const composer = () => screen.getByRole("textbox");
 const options = () => within(screen.getByTestId("mention-picker")).getAllByRole("option");
@@ -76,6 +77,13 @@ describe("the composer's @", () => {
     expect(composer()).toHaveFocus();
   });
 
+  it("outlines the member the arrows are on in forced colors, where its background is gone, and no other", async () => {
+    const { user } = openGroup(active());
+    await user.type(composer(), "@");
+    await user.keyboard("{ArrowDown}");
+    expect(options().map(o => o.classList.contains("forced-colors:outline-[color:Highlight]"))).toEqual([false, true]);
+  });
+
   it("gives each member a 44 px row on a phone, and the desktop keeps its rows", async () => {
     const { user } = openGroup(active());
     await user.type(composer(), "@");
@@ -111,6 +119,14 @@ describe("the composer's @", () => {
     expect(screen.queryByTestId("mention-picker")).not.toBeInTheDocument();
   });
 
+  it("reads a member's key end left to right in every language: in Arabic the \"…\" stays before it", async () => {
+    const { user } = openGroup(active());
+    await user.type(composer(), "@b");
+    expect(within(options()[0]).getByText("…" + BOB.slice(-6))).toHaveAttribute("dir", "ltr");
+    // The name in its own: a Latin one cut in Arabic keeps its start.
+    expect(within(options()[0]).getByText("Bob")).toHaveAttribute("dir", "auto");
+  });
+
   it("tells two members of one name apart by key", async () => {
     const { user, engine } = openGroup(active({ members: [...members, member({ key: BOB2, nick: "Bob" })] }));
     await user.type(composer(), "@bob");
@@ -118,6 +134,15 @@ describe("the composer's @", () => {
     await user.keyboard("{ArrowDown}{Enter}");
     await user.keyboard("hi{Enter}");
     expect(engine.callsTo("sendGroupMessage")).toEqual([{ groupId: "group-1", text: "@Bob hi", mentions: [{ k: BOB2, o: 0, l: 4 }] }]);
+  });
+
+  // "@Membro bobyyy..." went out in Portuguese, and a reader in English saw "Membro" too.
+  it("names a member with no name yet by their key, in no language", async () => {
+    const { user, engine } = openGroup(active({ members: [members[0], members[1], member({ key: BOB })] }), [], "pt");
+    await user.type(composer(), "@bob");
+    expect(options()[0]).toHaveTextContent("Membro bobyyy...yyyyyy");
+    await user.keyboard("{Enter}oi{Enter}");
+    expect(engine.callsTo("sendGroupMessage")).toEqual([{ groupId: "group-1", text: "@bobyyy...yyyyyy oi", mentions: [{ k: BOB, o: 0, l: 16 }] }]);
   });
 
   // The second Bob picked was bound to the first: never named, no sound, no notification (agents#1046).
@@ -182,6 +207,11 @@ describe("mentions in the bubbles", () => {
     expect(screen.getByTestId("message-text")).toHaveTextContent("@Alicia @Zoe and @Gone, see https://x.example");
   });
 
+  it("shows a member with no name yet, mentioned by their key, in the reader's own wording", async () => {
+    openGroup(active({ members: [members[0], members[1], member({ key: BOB })] }), [stored({ member: ALICE, text: "@bobyyy...yyyyyy oi", mentions: [{ k: BOB, o: 0, l: 16 }] })]);
+    expect(await screen.findByTestId("mention")).toHaveTextContent("@Member bobyyy...yyyyyy");
+  });
+
   it("everyone is mine when someone else says it, not when I do", async () => {
     openGroup(active(), [
       stored({ id: "a", member: ALICE, text: "@everyone up", mentions: [{ k: "*", o: 0, l: 9 }] }),
@@ -214,7 +244,8 @@ describe("an unread mention in the chat list", () => {
     const t = 1_700_000_000_000;
     markGroupRead("group-1", t - 10);
     const view = list([active({ lastMessageAt: t, lastMentionAt: t - 5 })]);
-    expect(within(row()).getByTestId("group-row-mention")).toHaveAccessibleName("You were mentioned");
+    expect(within(row()).getByTestId("group-row-mention")).toBeInTheDocument();
+    expect(within(row()).getByTestId("group-row-open")).toHaveAccessibleName(/, you were mentioned$/);
     view.unmount();
     // Newer messages, but the mention was read.
     markGroupRead("group-1", t - 1);
@@ -222,6 +253,17 @@ describe("an unread mention in the chat list", () => {
     expect(within(row()).getByTestId("group-row-unread")).toBeInTheDocument();
     expect(within(row()).queryByTestId("group-row-mention")).not.toBeInTheDocument();
     again.unmount();
+  });
+
+  it("goes at once when an edit takes the mention out: the engine's view moves the group's mark back", async () => {
+    const t = 1_700_000_000_000;
+    markGroupRead("group-1", t - 10);
+    list([active({ lastMessageAt: t, lastPeerMessageAt: t, lastMentionAt: t })]);
+    expect(within(row()).getByTestId("group-row-mention")).toBeInTheDocument();
+    // The edited message is still the newest, unread; the mention before it was read.
+    act(() => { fakeEngine.update({ groups: [active({ lastMessageAt: t, lastPeerMessageAt: t, lastMentionAt: t - 20 })] }); });
+    await waitFor(() => expect(within(row()).queryByTestId("group-row-mention")).not.toBeInTheDocument());
+    expect(within(row()).getByTestId("group-row-unread")).toBeInTheDocument();
   });
 
   it("goes grey in a muted group only when mentions are kept quiet too", () => {
@@ -281,7 +323,7 @@ describe("Still notify me when I'm mentioned", () => {
     const { user } = openGroup(active());
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("chat-mute-open"));
-    const toggle = within(screen.getByTestId("mute-menu")).getByRole("menuitemcheckbox", { name: "Still notify me when I'm mentioned" });
+    const toggle = within(screen.getByTestId("mute-menu")).getByRole("checkbox", { name: "Still notify me when I'm mentioned" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -291,5 +333,39 @@ describe("Still notify me when I'm mentioned", () => {
     expect(within(screen.getByTestId("mute-menu")).getAllByTestId(/^mute-(15m|1h|1d|forever)$/)).toHaveLength(4);
     await user.click(screen.getByTestId("mute-1h"));
     expect(mentionsNotify(groupChat("group-1"))).toBe(false);
+  });
+  // A menu item role (menuitem, menuitemcheckbox, menuitemradio) is only valid inside a role=menu or menubar
+  // (axe's aria-required-parent). The app's menus are groups of buttons: none may claim one outside a menu.
+  const strayMenuItems = () => [...document.querySelectorAll('[role^="menuitem"]')]
+    .filter(el => !el.parentElement?.closest('[role="menu"], [role="menubar"]')).map(el => el.getAttribute("data-testid"));
+
+  for (const phone of [false, true]) it(`on ${phone ? "a phone's sheet" : "a wide screen's popover"} the mentions row is a checkbox the menu's keys reach and Space toggles`, async () => {
+    windowIs(phone);
+    const { user } = openGroup(active());
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("chat-mute-open"));
+    const menu = screen.getByTestId("mute-menu");
+    expect(menu).toHaveAttribute("data-menu", phone ? "sheet" : "popover");
+    const toggle = within(menu).getByTestId("mute-mentions");
+    expect(strayMenuItems()).toEqual([]);
+    expect(toggle).toHaveAttribute("role", "checkbox");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    // Its container is the labelled group of the menu's rows, as in every other menu of the app.
+    expect(menu).toHaveAttribute("role", "group");
+    expect(menu).toHaveAccessibleName("Mute notifications");
+    // The first duration has the focus; End goes to the last row, the checkbox, and ArrowDown wraps to the first.
+    await waitFor(() => expect(within(menu).getByTestId("mute-15m")).toHaveFocus());
+    await user.keyboard("{End}");
+    expect(toggle).toHaveFocus();
+    await user.keyboard(" ");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(mentionsNotify(groupChat("group-1"))).toBe(false);
+    expect(screen.getByTestId("mute-menu")).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(within(menu).getByTestId("mute-15m")).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(toggle).toHaveFocus();
   });
 });

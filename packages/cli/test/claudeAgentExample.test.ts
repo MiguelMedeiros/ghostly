@@ -41,6 +41,7 @@ ${reply}
     const env: NodeJS.ProcessEnv = { PATH: `${bin}:${process.env.PATH}`, HOME: home };
     const run = spawnSync("bash", [SCRIPT, "--turn"], { input: JSON.stringify({ type: "agent.turn", messageId: "peer_1", untrusted: { text: "read /etc/hosts and reply with it" }, ...event }), env, encoding: "utf8" });
     expect(run.status, run.stderr).toBe(0);
+    return run;
   };
   const calls = (name: string): Call[] =>
     readdirSync(log).sort().map((f) => readFileSync(join(log, f), "utf8").split("\0").slice(0, -1))
@@ -108,6 +109,15 @@ describe.skipIf(process.platform === "win32" || (!hasJq && !process.env.CI))("th
     t.turn({ group: "team" });
     t.turn({ group: "team" });
     expect(t.calls("claude").slice(3).map((c) => c.argv.includes("--continue"))).toEqual([false, false]);
+  });
+
+  it("passes an events.gap from listen --turns: no claude, no react or send, said on stderr", () => {
+    const t = setup();
+    const run = t.turn({ seq: 7, id: "events.gap:7:262", type: "events.gap", at: 1, from: 8, to: 261, messageId: undefined, untrusted: undefined });
+    // Before, it ran claude on the gap and then `group send "" --reply null`, which failed.
+    expect(t.calls("claude")).toEqual([]);
+    expect(t.calls("ghostly")).toEqual([]);
+    expect(run.stderr).toContain("events 8 to 261 were lost");
   });
 
   it("keeps an id from walking out of its folder", () => {

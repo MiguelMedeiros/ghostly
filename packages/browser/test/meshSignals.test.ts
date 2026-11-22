@@ -110,10 +110,16 @@ describe("edge signaling through members", () => {
     const alice = net.add("alice", "admin"), bob = net.add("bob"), carol = net.add("carol");
     net.link(bob, carol, "edge", false);
     expect(bob.signals.carry(G, carol.key, bytes("offer")).taken).toBe(0);
+    // Said before a packet is signed for it (`CarriedHooks.canCarry`).
+    expect(bob.signals.canCarry(G, carol.key)).toBe(false);
     net.link(alice, bob, "edge", true, false); net.link(alice, carol, "edge");
     expect(bob.signals.carry(G, carol.key, bytes("offer")).taken).toBe(0);
+    expect(bob.signals.canCarry(G, carol.key)).toBe(false);
     expect(bob.signals.carry(G, createIdentity().pubKeyZ32, bytes("to nobody in the group")).taken).toBe(0);
+    expect(bob.signals.canCarry(G, createIdentity().pubKeyZ32)).toBe(false);
     expect(bob.signals.carry(G, bob.key, bytes("to myself")).taken).toBe(0);
+    expect(bob.signals.canCarry(G, bob.key)).toBe(false);
+    expect(alice.signals.canCarry(G, bob.key)).toBe(true);
   });
 
   it("is passed on once, and only by the member its sender handed it to", () => {

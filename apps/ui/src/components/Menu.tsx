@@ -1,8 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useOutsideDismiss } from "../hooks/useDismiss";
+import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
+import { safeAreaInsets } from "../hooks/useFloatingBox";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type { MenuPoint } from "../lib/contextMenu";
+import { working } from "../lib/focus";
 
 /** Space kept between a menu and the edges of the window. */
 const MARGIN = 8;
@@ -10,12 +12,17 @@ const MARGIN = 8;
 const GAP = 4;
 /** A field the on-screen keyboard types into. */
 const TYPED = "input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=file]), textarea, select, [contenteditable]:not([contenteditable=false])";
+/**
+ * Whether the rows are in a phone's sheet. There a row's hint wraps: cut, the rest of it showed only in the row's
+ * `title`, which a touch screen never shows (the French New menu at a larger text size).
+ */
+const InSheet = createContext(false);
 
 /**
  * A dropdown of actions. Every row is one line in every language: the menu is as wide as its longest row
  * (between a floor and the window), and only a row wider than that is cut, with the full text on hover.
  * On a wide screen it drops from its opener and moves over, or up, to stay in the window; on a phone it is a
- * sheet from the bottom with full-width rows. Outside clicks and Escape close it; the arrow keys, Home and End
+ * sheet from the bottom with full-width rows, where a row's hint wraps. Outside clicks and Escape close it; the arrow keys, Home and End
  * move between the rows that can be used.
  */
 export function Menu(props: MenuProps) {
@@ -38,6 +45,8 @@ type MenuProps = {
   focusFirst?: boolean;
   /** What a screen reader calls the menu. */
   label?: string;
+  /** With `label`: the id of a note inside the menu that says what its rows do, said with the group as the focus enters it. */
+  describedBy?: string;
   /**
    * On a wide screen too, drawn over the whole page (placed by its opener, and following it on scroll) rather than
    * inside the opener's wrapper: for an opener in a scrolling list or a row, which would cut the popover off or
@@ -54,16 +63,29 @@ type MenuProps = {
    * its opener's edge, down and towards the line's end as the webview's menu would, and follows the opener on scroll.
    */
   at?: MenuPoint;
+  /**
+   * How high it is drawn, as a popover over the whole page or a phone's sheet: the menus' usual `z-50`, or higher for
+   * an opener that is itself over everything (a call over a video filling the window).
+   */
+  stack?: string;
+  /**
+   * Where a popover over the whole page or a phone's sheet hangs: the page's body, or a modal window its opener is in
+   * (a whole-window call), which a screen reader reads alone. On the body, the menu was outside it, out of its reach.
+   */
+  host?: HTMLElement | null;
   className?: string;
   children: ReactNode;
 };
 
-function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, className = "", children }: MenuProps) {
+function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, describedBy, portal, within, at, stack = "z-50", host, className = "", children }: MenuProps) {
   const pointed = !!at && !!portal;
   const align = pointed ? "start" : edge, prefer = pointed ? "down" : wanted;
   const phone = useIsMobile();
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, open, onClose, anchorRef);
+  // A phone's sheet covers the page with its backdrop, as a dialog does: Tab and Shift+Tab go round its rows. They went
+  // on to the page behind it, the sheet still open (the composer's + there opened a second sheet over it).
+  useTabTrap(ref, open && phone);
   const [place, setPlace] = useState<{ shift: number; up: boolean; room?: number }>({ shift: 0, up: prefer === "up" });
   const [fixed, setFixed] = useState<{ left: number; top: number; room?: number }>();
 
@@ -93,12 +115,14 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
       const menu = ref.current, anchor = anchorRef.current;
       if (!menu || !anchor) return;
       const box = bounds(anchor, within);
-      // Measured at its own height, without a cap from an earlier fit.
-      const cap = menu.style.maxHeight;
+      // Measured at its own height, without a cap from an earlier fit. Uncapped it has nothing to scroll, so a menu
+      // scrolled to its last rows went back to its top: its scroll is put back with the cap.
+      const cap = menu.style.maxHeight, scrolled = menu.scrollTop;
       menu.style.maxHeight = "";
       if (portal) {
         const rect = menu.getBoundingClientRect(), opener = opening(anchor);
         menu.style.maxHeight = cap;
+        menu.scrollTop = scrolled;
         const { up, room } = side(opener, rect.height, box);
         const height = room ?? rect.height;
         // Lined up with the opener's start or end edge (the end is the left one in a right-to-left page), kept in the bounds.
@@ -116,14 +140,17 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
       const { up, room } = side(opener, rect.height, box);
       menu.style.translate = before;
       menu.style.maxHeight = cap;
+      menu.scrollTop = scrolled;
       setPlace(was => was.shift === shift && was.up === up && was.room === room ? was : { shift, up, room });
     };
+    // A scroll of the page under it moves its opener; one of its own rows (the wheel, its scrollbar, End) moves nothing.
+    const pageScrolled = (e: Event) => { if (!(e.target instanceof Node && ref.current?.contains(e.target))) fit(); };
     fit();
     window.addEventListener("resize", fit);
-    if (portal) window.addEventListener("scroll", fit, true);
+    if (portal) window.addEventListener("scroll", pageScrolled, true);
     return () => {
       window.removeEventListener("resize", fit);
-      window.removeEventListener("scroll", fit, true);
+      window.removeEventListener("scroll", pageScrolled, true);
     };
   }, [open, phone, anchorRef, prefer, portal, align, within, at]);
 
@@ -144,8 +171,10 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   // had it as the menu opened, its button. A row that moved the focus elsewhere keeps it there, and a field is left
   // alone (on a phone the keyboard would come back up). In the layout phase, as the menu leaves: a dialog a row opens
   // then finds the button focused, and gives the focus back there when it closes. Before, it all went to the page.
+  const openedFrom = useRef<Element | null>(null);
   useLayoutEffect(() => {
     const opener = document.activeElement, menu = ref.current;
+    openedFrom.current = opener;
     return () => {
       if (!(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected || opener.matches(TYPED)) return;
       if (menu?.contains(document.activeElement)) opener.focus({ preventScroll: true });
@@ -156,6 +185,18 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
 
   const keys = (e: KeyboardEvent<HTMLDivElement>) => {
     const rows = usable(ref.current);
+    // Hung on the page's body, a portal's popover comes last in the Tab order: Tab past its last row went to the top of
+    // the page, behind whatever layer it opened from (a whole-window call), the menu still open. It takes the place a
+    // menu beside its button has: Tab goes on from the button, Shift+Tab goes back to it, and the menu closes.
+    if (portal && !phone && (e.key === "Tab" || e.code === "Tab") && rows.length) {
+      const opener = openedFrom.current;
+      const leaving = e.shiftKey ? document.activeElement === rows[0] : document.activeElement === rows[rows.length - 1];
+      if (!leaving || !(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected) return;
+      opener.focus({ preventScroll: true });
+      if (e.shiftKey) e.preventDefault();
+      onClose();
+      return;
+    }
     if (!rows.length || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     const at = rows.indexOf(document.activeElement as HTMLElement);
@@ -165,23 +206,23 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   };
 
   if (phone) return createPortal(<>
-    <div aria-hidden="true" data-testid="menu-backdrop" className="fixed inset-0 z-50 bg-black/40 animate-fade-in" />
-    <div ref={ref} id={id} data-testid={testId} data-menu="sheet" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
-      className={`menu-sheet fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface-alt px-1 pt-2 pb-safe shadow-2xl animate-fade-in ${className}`}>
+    <div aria-hidden="true" data-testid="menu-backdrop" className={`fixed inset-0 ${stack} bg-black/40 animate-fade-in`} />
+    <div ref={ref} id={id} data-testid={testId} data-menu="sheet" role={label ? "group" : undefined} aria-label={label} aria-describedby={describedBy} onKeyDown={keys}
+      className={`menu-sheet fixed inset-x-0 bottom-0 ${stack} max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface-alt px-1 pt-2 pb-safe shadow-2xl animate-fade-in ${className}`}>
       <div aria-hidden="true" className="mx-auto mb-2 h-1 w-9 rounded-full bg-border-bright" />
-      {children}
+      <InSheet.Provider value>{children}</InSheet.Provider>
     </div>
-  </>, document.body);
+  </>, host ?? document.body);
 
   if (portal) return createPortal(
-    <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
+    <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} aria-describedby={describedBy} onKeyDown={keys}
       style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0, maxHeight: fixed?.room }}
-      className={`fixed z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
+      className={`fixed ${stack} w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
       {children}
-    </div>, document.body);
+    </div>, host ?? document.body);
 
   return (
-    <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
+    <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} aria-describedby={describedBy} onKeyDown={keys}
       style={{ translate: place.shift ? `${place.shift}px 0` : undefined, maxHeight: place.room } as CSSProperties}
       className={`absolute ${align === "start" ? "start-0" : "end-0"} z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${place.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${place.up ? "bottom-full mb-1" : "top-full mt-1"} ${className}`}>
       {children}
@@ -191,10 +232,15 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
 
 type Rect = { left: number; right: number; top: number; bottom: number };
 
-/** The window, or the part of it the opener's `within` ancestor covers. */
+/**
+ * The window's safe area, or the part of it the opener's `within` ancestor covers. On a phone on its side the notch's
+ * side, the rounded corners and the home indicator are off limits: with larger text a menu kept to the window's edges
+ * reached into them.
+ */
 function bounds(anchor: HTMLElement, within?: string): Rect {
   const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
-  const box = { left: 0, top: 0, right: width, bottom: height };
+  const safe = safeAreaInsets();
+  const box = { left: safe.left, top: safe.top, right: width - safe.right, bottom: height - safe.bottom };
   const area = within ? anchor.closest(within)?.getBoundingClientRect() : undefined;
   // An ancestor with no size (not laid out) bounds nothing.
   if (!area?.width || !area.height) return box;
@@ -211,33 +257,50 @@ function titleIfCut(row: HTMLElement) {
   else row.removeAttribute("title");
 }
 
-export function MenuItem({ icon, children, hint, onClick, danger, disabled, title, testId, className = "", data, checked }: {
+export function MenuItem({ icon, children, hint, onClick, danger, disabled, busy, title, testId, className = "", data, checked, radio }: {
   icon?: ReactNode;
   children: ReactNode;
-  /** A second, quieter line under the label; one line too. */
+  /** A second, quieter line under the label; one line too in a popover, wrapped in a phone's sheet. */
   hint?: ReactNode;
   onClick: () => void;
   danger?: boolean;
   /** A row that cannot be used now; its `title` (and hint) say why. */
   disabled?: boolean;
+  /**
+   * A row whose action is still under way: said busy and unavailable (`working`, lib/focus.ts), a press does nothing.
+   * Not `disabled`: it keeps its place in the menu's arrow keys and the focus it has.
+   */
+  busy?: boolean;
   /** A hover text kept whether or not the row is cut. */
   title?: string;
   testId?: string;
   className?: string;
   /** `data-*` attributes for the row. */
   data?: Record<`data-${string}`, string | number | undefined>;
-  /** A row that turns something on or off (a menu checkbox): whether it is on. */
+  /**
+   * A row that turns something on or off: whether it is on. A checkbox (`role="checkbox"`, `aria-checked`), not a
+   * `menuitemcheckbox`: that role is only valid inside a `role="menu"`, and these menus are groups of buttons (no
+   * `menuitem` rows, a note or a field among them), so a screen reader heard a menu item checkbox with no menu around
+   * it (axe's aria-required-parent). The keys stay the menu's: arrows, Home and End move to it; Space or Enter toggle.
+   */
   checked?: boolean;
+  /**
+   * With `checked`: a row of a pick-one list (a device, a language, a folder), the one picked checked. A radio
+   * (`role="radio"`), so a screen reader does not say the others could be on too; wrap the list in a `role="radiogroup"`
+   * named for what it picks where the menu holds more than one.
+   */
+  radio?: boolean;
 }) {
+  const sheet = useContext(InSheet);
   const fitTitle = (row: HTMLElement) => { if (!title) titleIfCut(row); };
   return (
-    <button type="button" data-testid={testId} data-menu-item onClick={onClick} disabled={disabled} title={title} {...data}
-      {...(checked === undefined ? {} : { role: "menuitemcheckbox", "aria-checked": checked })}
+    <button type="button" data-testid={testId} data-menu-item onClick={() => { if (!busy) onClick(); }} disabled={disabled} title={title} {...data} {...working(!!busy)}
+      {...(checked === undefined ? {} : { role: radio ? "radio" : "checkbox", "aria-checked": checked })}
       onPointerEnter={e => fitTitle(e.currentTarget)} onFocus={e => fitTitle(e.currentTarget)}
-      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
+      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed data-[loading]:cursor-progress data-[loading]:opacity-80 max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
       {hint
-        ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className="block truncate text-xs text-text-muted">{hint}</span></span>
+        ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className={`block ${sheet ? "whitespace-normal break-words" : "truncate"} text-xs text-text-muted`}>{hint}</span></span>
         : <span data-menu-text className="min-w-0 truncate">{children}</span>}
     </button>
   );

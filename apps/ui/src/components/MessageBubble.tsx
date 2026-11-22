@@ -1,5 +1,5 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import React, { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import React, { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { sameValue } from "../lib/sameValue";
 import { clockTime } from "../lib/time";
 import { useI18n } from "../contexts/I18nContext";
@@ -20,7 +20,7 @@ import { RichText } from "./rich/RichText";
 import { EntityCards } from "./chat/EntityCards";
 import { MessageLinkCards } from "./LinkPreviewBubble";
 import { CardTime, StatusCardView } from "./chat/StatusCard";
-import { STATUS_TONE, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
+import { STATUS_TONE, appCardsShown, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { ConverterNotLoaded, downloadFile, downloadName, downloadState, Unconverted, type DownloadFormat } from "../lib/fileDownload";
@@ -29,13 +29,14 @@ import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
+import { useEngineValue } from "../lib/engineState";
 import { useFocusKept } from "../hooks/useFocusKept";
-import { useTransfer } from "../hooks/useServicesPlatform";
+import { useTransfer, useTransferValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { holdRow } from "../hooks/useRowWindow";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
-import { paymentRefusal } from "@ghostly/browser/shared/refusals";
-import { refusedLine } from "../lib/refusedLine";
+import { refusedLine, shownRefusal } from "../lib/refusedLine";
 import { callLineCount } from "../lib/storage";
 import { formatCallLength } from "../lib/messageDetails";
 import type { QuoteView } from "../lib/replies";
@@ -48,12 +49,14 @@ import { myReaction, reactionChips } from "../lib/reactions";
 import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
-import { copyText } from "../lib/shareLink";
+import { MessageCopyNote } from "./chat/MessageCopy";
+import { useMessageCopy } from "../hooks/useMessageCopy";
 import { originalMentions, setShowsOriginal, showsOriginal, useSentOriginal, type SentOriginal } from "../lib/sentOriginals";
 import { languageName } from "../lib/documentLanguage";
 import { translateEnabled } from "../lib/translateFlag";
 import { pictureLinkRead, pictureLinkUrl, type PictureRead } from "../lib/pictureLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
+import { AdminMark } from "./chat/AdminMark";
 import { useMemberText } from "../contexts/MemberColorsContext";
 import { AppCardView } from "./apps/AppCardView";
 import { useAppsAvailable } from "../lib/apps/flag";
@@ -119,6 +122,11 @@ interface MessageBubbleProps {
   author?: MessageAuthor;
   /** Opens what the chat knows of `author` (the group's members, theirs marked): a tap on their name or picture. */
   onOpenAuthor?: () => void;
+  /**
+   * In a group, the contact who wrote the message (`author`, when they are one): told when an invoice in it is paid from
+   * its card, as a 1:1 chat's contact is. Their choice of ways of paying is not this chat's, so nothing else reads it.
+   */
+  payee?: string;
   /**
    * A bot's buttons under the message (WISP 406 · Message Buttons), as the chat's history has them (`buttonsViews`).
    * Left out, a message with buttons shows them, and none of them answers.
@@ -259,6 +267,21 @@ function SelectGlyph() {
   );
 }
 
+/**
+ * "Not confirmed" above a contact request's text until the requester's app confirms, in the chat, that it sent it
+ * (WISP 8xx § Accept): the chat is whoever made the request's invite, who may not be who asked.
+ */
+function UnconfirmedMark() {
+  const { t } = useI18n();
+  return (
+    <div data-testid="message-unconfirmed" title={t("chat.unconfirmed.hint")}
+      className="chat-text-mark italic text-text-primary/65 mb-[2px] px-[3px]">
+      <span>{t("chat.unconfirmed.label")}</span>
+      <span className="sr-only">{t("chat.unconfirmed.hint")}</span>
+    </div>
+  );
+}
+
 /** "Forwarded" above a forwarded message (WISP 400 § Forwards), "Forwarded many times" past a few hops. Never from whom. */
 function ForwardedMark({ hops }: { hops?: number }) {
   const { t } = useI18n();
@@ -266,7 +289,7 @@ function ForwardedMark({ hops }: { hops?: number }) {
   if (!label) return null;
   return (
     <div data-testid="message-forwarded" data-many={label === "chat.forward.many" || undefined}
-      className="flex items-center gap-1 text-[12px] leading-[18px] italic text-text-primary/65 mb-[2px] px-[3px]">
+      className="flex items-center gap-1 chat-text-mark italic text-text-primary/65 mb-[2px] px-[3px]">
       <ForwardGlyph size={13} />
       <span>{t(label)}</span>
     </div>
@@ -283,13 +306,13 @@ function EditGlyph() {
 
 /**
  * "edited" beside the time of an edited text (WISP 400 § Edits); the time of the edit on hover, or that the contact has
- * not been shown it yet. The earlier versions are in the message's details.
+ * not been shown it yet. The earlier versions are in the message's details. On a picture's dark chip, light as its time.
  */
-function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean }) {
+function EditedMark({ edit, group, onPicture }: { edit: NonNullable<ChatMessage["edit"]>; group?: boolean; onPicture?: boolean }) {
   const { t, language } = useI18n();
   const time = clockTime(edit.at, language);
   return (
-    <span data-testid="message-edited" data-pending={edit.pending || undefined} className="text-[11px] leading-none text-text-primary/65 italic"
+    <span data-testid="message-edited" data-pending={edit.pending || undefined} className={`chat-text-tag italic ${onPicture ? "text-[hsla(0,0%,100%,0.9)]" : "text-text-primary/65"}`}
       title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
       {t("chat.message.edited")}
     </span>
@@ -303,7 +326,7 @@ function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; g
  */
 function TranslatedMark({ translation }: { translation: ShownTranslation }) {
   const { t, dir } = useI18n();
-  const quiet = "text-[11px] leading-[16px] text-text-primary/65";
+  const quiet = "chat-text-note text-text-primary/65";
   if (translation.long) {
     return (
       <div dir={dir} className={`mt-[2px] ${quiet}`}>
@@ -333,10 +356,11 @@ function TranslatedMark({ translation }: { translation: ShownTranslation }) {
 function SentTranslationLine({ sent, showing, onToggle }: { sent: SentOriginal; showing: boolean; onToggle: () => void }) {
   const { t, language, dir } = useI18n();
   return (
-    <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] text-[11px] leading-[16px] text-text-primary/65 italic">
+    <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] chat-text-note text-text-primary/65 italic">
       <span>{t("chat.sentTranslation.line", { language: languageName(sent.to, language) })}</span>
       <span aria-hidden="true"> · </span>
-      <button type="button" data-testid="message-show-original" aria-pressed={showing} onClick={onToggle} className="italic cursor-pointer hover:underline">
+      {/* Named for what it does next, so it is no toggle: "Show translation, pressed" read with the original shown. */}
+      <button type="button" data-testid="message-show-original" onClick={onToggle} className="italic cursor-pointer hover:underline">
         {t(showing ? "chat.translated.showTranslation" : "chat.translated.showOriginal")}
       </button>
     </div>
@@ -357,7 +381,8 @@ function ReplyAction({ onReply }: { onReply: () => void }) {
 
 const IMAGE_URL_RE =
   /^https:\/\/\S+\.(gif|png|jpe?g|webp)(\?\S*)?$/i;
-const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\//i;
+/** The whole message, as the other picture links: words after the link would show on neither side under a picture. */
+const GIPHY_RE = /^https:\/\/media\d*\.giphy\.com\/\S+$/i;
 /** A Wayback Machine capture of a GIF: `/web/`, an optional timestamp (and `im_`/`id_`), then the archived http(s) URL. */
 const WAYBACK_GIF_PATH_RE = /^\/web\/(?:\d{1,14}(?:im_|id_)?\/)?https?:\/\/[^/?#\s]+\/[^?#\s]*\.gif$/i;
 
@@ -429,17 +454,20 @@ const emojiCount = (text: string) => {
   return parts.filter((part) => part.trim()).length;
 };
 
-/** Up to 6 emoji and nothing else show big. */
+/**
+ * Up to 6 emoji and nothing else show big. Besides the pictures: a keycap (a digit, # or * with U+20E3) and a tag
+ * sequence's tags (the flags of England, Scotland and Wales), which the emoji panel offers too.
+ */
 function isOnlyEmojis(text: string): boolean {
   const emojiPattern =
-    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200d|\uFE0F|\s)+$/u;
+    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|[0-9#*]\uFE0F?\u20E3|[\u{E0020}-\u{E007F}]|\u200d|\uFE0F|\s)+$/u;
   return emojiPattern.test(text.trim()) && emojiCount(text) <= 6;
 }
 
 function TailSvg({ side }: { side: "left" | "right" }) {
   if (side === "right") {
     return (
-      <span className="absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
+      <span className="bubble-tail absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
         <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
           <path d="M5 0H0V13C0 13 1.8 8.5 5 4.5C6.4 2.7 8 1 8 1L5 0Z" className="fill-sent-bg" />
         </svg>
@@ -447,7 +475,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
     );
   }
   return (
-    <span className="absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
+    <span className="bubble-tail absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
       <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
         <path d="M3 0H8V13C8 13 6.2 8.5 3 4.5C1.6 2.7 0 1 0 1L3 0Z" className="fill-received-bg" />
       </svg>
@@ -532,7 +560,7 @@ function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean })
 export const MESSAGE_LIST = "[data-message-list]";
 
 /** The ⋮ of the message after the one `from` is in, then of the one before it: where the focus goes once it is deleted. */
-function neighbourOptions(from: HTMLElement | null): HTMLElement[] {
+export function neighbourOptions(from: HTMLElement | null): HTMLElement[] {
   const list = from?.closest(MESSAGE_LIST);
   if (!from || !list) return [];
   const options = [...list.querySelectorAll<HTMLElement>("[data-message-row] [data-testid=message-options]")];
@@ -693,8 +721,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
     setOpen(true);
   });
   const side = align === "left" ? "end" : "start";
-  // A delete takes this row away with its ⋮, where the confirmation gives the focus back: once the row is gone, the
-  // focus goes to the ⋮ of the message now in its place (the one before it at the end), not to the page.
+  // A delete (or Cancel sending, which asks nothing) takes this row away with its ⋮, where the confirmation gives the
+  // focus back: once the row is gone, the focus goes to the ⋮ of the message now in its place (the one before it at the
+  // end), not to the page.
   const after = useRef<HTMLElement[]>([]);
   useEffect(() => () => {
     const next = after.current;
@@ -706,6 +735,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
   const deleteHint = confirm === "everyone" ? t(group ? "chat.deleteForEveryoneGroupHint" : "chat.deleteForEveryoneHint") : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
     : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
   const confirmed = confirm === "everyone" ? onDeleteForEveryone : onDelete;
+  // The hint describes the confirmation and its Delete: the focus lands on Cancel, and a screen reader said only the
+  // group's name and the button, never what the delete does to the other side.
+  const hintId = useId();
   const trash = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>;
 
   return (
@@ -720,8 +752,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
         aria-expanded={open}
         onClick={() => { setPointed(undefined); setOpen((v) => !v); }}
         // Faint but always reachable by touch; on a pointer it waits for the message to be hovered. The pseudo-element takes
-        // its 22 px to the 24 px a finger needs without moving the row.
-        className={`relative p-1 rounded-full before:absolute before:-inset-px before:content-[''] transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
+        // its 22 px to the 24 px a finger needs without moving the row, and on a phone to a thumb's 44 px: away from the
+        // message, which is drawn over its own side.
+        className={`relative p-1 rounded-full before:absolute before:-inset-px max-md:before:-inset-y-3 ${align === "left" ? "max-md:before:-start-[22px]" : "max-md:before:-end-[22px]"} before:content-[''] transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
           open || confirm ? "text-text-primary opacity-100" : "text-text-muted max-md:opacity-40 md:opacity-0"
         }`}
       >
@@ -758,7 +791,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 16v-4M12 8h.01" /></svg>}>
           {t("chat.message.details")}
         </MenuItem>
-        {onCancelSend && <MenuItem testId="message-cancel-sending" danger onClick={() => { setOpen(false); onCancelSend(); }} icon={cancelIcon}>
+        {onCancelSend && <MenuItem testId="message-cancel-sending" danger onClick={() => { setOpen(false); after.current = neighbourOptions(ref.current); onCancelSend(); }} icon={cancelIcon}>
           {t("chat.message.cancelSending")}
         </MenuItem>}
         {onDelete && !onCancelSend && <MenuItem testId="message-delete" danger onClick={() => { setOpen(false); setConfirm("here"); }} icon={trash}>
@@ -769,9 +802,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
         </MenuItem>}
       </Menu>
       {confirmed && (
-        <Menu open={!!confirm} onClose={() => setConfirm(null)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t(confirm === "everyone" ? "chat.deleteForEveryone" : "chat.deleteMessage")}>
+        <Menu open={!!confirm} onClose={() => setConfirm(null)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t(confirm === "everyone" ? "chat.deleteForEveryone" : "chat.deleteMessage")} describedBy={hintId}>
           <div className="px-3 py-2 md:w-[210px]">
-            <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
+            <p id={hintId} className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
             <div className="flex items-center justify-end gap-2">
               {/* Rows of the menu: Cancel takes the focus as it opens (Enter at once never deletes), the arrow keys move. */}
               <button
@@ -786,6 +819,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
                 type="button"
                 data-menu-item
                 data-testid="message-delete-confirm"
+                aria-describedby={hintId}
                 onClick={() => {
                   setConfirm(null);
                   playCue("deleted", { chat });
@@ -834,9 +868,9 @@ export function MessageBubble(props: MessageBubbleProps) {
     onToggle: () => latest.current.selection?.onToggle?.(),
     reactionName: (by: string) => latest.current.reactionName?.(by) ?? by.slice(0, 8),
   }), []);
-  const { message, peerAck = 0, selection } = props;
+  const { message, selection } = props;
   // Only a message of mine without its own delivery state reads the contact's acknowledgement: one number per bubble.
-  const acked = message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+  const acked = ackedBy(props);
   const names = message.reactions ? Object.keys(message.reactions).map(stable.reactionName).join("\n") : "";
   return (
     <SameBubble
@@ -844,7 +878,7 @@ export function MessageBubble(props: MessageBubbleProps) {
       peerPubKey={props.peerPubKey} peerNick={props.peerNick} contactName={props.contactName} linkId={props.linkId} quote={props.quote} names={names}
       onDelete={props.onDelete && stable.onDelete} onDeleteForEveryone={props.onDeleteForEveryone && stable.onDeleteForEveryone} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
       onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
-      onPin={props.onPin && stable.onPin} pinned={props.pinned} onSave={props.onSave && stable.onSave} saved={props.saved} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor}
+      onPin={props.onPin && stable.onPin} pinned={props.pinned} onSave={props.onSave && stable.onSave} saved={props.saved} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor} payee={props.payee}
       reactionName={stable.reactionName} highlight={props.highlight} buttons={props.buttons} compactPress={props.compactPress}
       selection={selection && { selected: selection.selected, ...(selection.onToggle && { onToggle: stable.onToggle }) }}
     />
@@ -853,12 +887,30 @@ export function MessageBubble(props: MessageBubbleProps) {
 
 const CALLBACKS = ["onDelete", "onDeleteForEveryone", "onReply", "onEdit", "onReact", "onForward", "onSelect", "onPin", "onSave", "onOpenAuthor"] as const;
 
-/** The same bubble to draw: see `MessageBubble`. */
-function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
+/** What both comparisons below read alike: everything a bubble draws with but its acknowledgement and reactions' names. */
+function sameShown(a: MessageBubbleProps, b: MessageBubbleProps): boolean {
+  return a.peerPubKey === b.peerPubKey && a.payee === b.payee && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
+}
+
+/** The same bubble to draw: see `MessageBubble`. */
+function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
+  return a.peerAck === b.peerAck && a.names === b.names && sameShown(a, b);
+}
+
+/** Whether the contact's acknowledgement covers this message of mine: what `MessageBubble` draws of `peerAck`. */
+const ackedBy = ({ message, peerAck = 0 }: MessageBubbleProps) => message.sender === "me" && !message.delivery && peerAck >= message.timestamp;
+
+/**
+ * The same `MessageBubble` to draw again, for a list that keeps its rows from drawing when nothing of them changed
+ * (`memo(MessageBubble, sameMessageRow)`). As `sameBubble`, callbacks only by whether they are there, so the list's
+ * callbacks must do what the list says when called (one function for its life, or one closing over the row's values),
+ * not what it said when the row was last drawn. `reactionName` by identity: the names it answers are drawn.
+ */
+export function sameMessageRow(a: MessageBubbleProps, b: MessageBubbleProps): boolean {
+  return ackedBy(a) === ackedBy(b) && a.reactionName === b.reactionName && sameShown(a, b);
 }
 
 const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
@@ -870,7 +922,7 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection, names, highlight, author, onOpenAuthor, buttons, compactPress }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection, names, highlight, author, onOpenAuthor, payee, buttons, compactPress }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
   const onPin = choosing ? undefined : pinIt, onSave = choosing ? undefined : saveIt;
@@ -893,15 +945,29 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const [details, setDetails] = useState(false);
   // Its row stays in the page while its details are open, however many messages come meanwhile.
   useEffect(() => (details ? holdRow(message.id) : undefined), [details, message.id]);
-  // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it.
+  // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it. The
+  // same rule (`appCardsShown`) says what its quote, the pinned bar, the chat list, Saved and the screen reader read.
   const appsOn = useAppsAvailable();
-  const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
+  const appCard = message.card?.kind === "app" && appCardsShown(linkId, appsOn) ? message.card : undefined;
   // Installed here: the card names the installed app, so its name for a screen reader does too (never the sender's).
   const cardApp = useInstalledApp(appCard?.ref);
   const rowRef = useRef<HTMLDivElement>(null);
   // A control of the message taken out by its own press (my reaction's chip taken back, the red mark sent again): the
   // focus stays on the message, so Tab goes on from it.
   useFocusKept(rowRef);
+  // The message taken out of the chat by someone else (the contact's delete for everyone) while the focus is on it or
+  // in what it opened (its ⋮ menu, the delete confirmation, the reaction bar, the details): the focus goes where a
+  // delete of mine leaves it (`MessageMenu`), to the ⋮ of the message now in its place, not to the page. React's focus
+  // events come through the portals the menus and the details are drawn in; the row is still in the page when its
+  // layout effects end, and gone when its passive ones do.
+  const holds = useRef<EventTarget | null>(null);
+  const goneTo = useRef<HTMLElement[]>([]);
+  useLayoutEffect(() => () => {
+    if (holds.current && holds.current === document.activeElement) goneTo.current = neighbourOptions(rowRef.current);
+  }, []);
+  useEffect(() => () => {
+    if (goneTo.current.length && focusLost()) goneTo.current.find((el) => el.isConnected)?.focus({ preventScroll: true });
+  }, []);
   const openDetails = () => setDetails(true);
   // A plain double or triple click is the words' own: it selects a word or the line, as anywhere else. Ctrl+double
   // click (⌘ on a Mac) opens the details. On a control in the message (a file's Accept, Pause or Save, a player's
@@ -914,6 +980,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   };
   // What Copy under a long press copies: a message's own words, not a file's name, a payment's or a card's.
   const copyable = message.file || message.paymentId || pressed || showsCard(message.card) ? "" : message.text.trim();
+  const optionsButton = () => rowRef.current?.querySelector<HTMLElement>("[data-testid=message-options]") ?? rowRef.current;
+  const [copyNote, copy, closeCopyNote] = useMessageCopy(optionsButton);
   // The reactions' quick bar: from the React button or the ⋮ (`button`), or a long press (`press`, with Details under it).
   const [bar, setBar] = useState<"button" | "press" | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -927,10 +995,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `names` is what `reactionName` answers
   const chips = useMemo(() => reactionChips(message.reactions, by => reactionName?.(by) ?? by.slice(0, 8), t("chat.reply.you")), [message.reactions, reactionName, t, names]);
   const swipe = useSwipeReply(onReply);
-  const [imgError, setImgError] = useState(false);
-  const [revealed, setRevealed] = useState(false);
+  // Both name the address they were for: an edit to another one asks again, and is read again.
+  /** The picture link that could not be read or drawn. */
+  const [failed, setFailed] = useState<string | null>(null);
+  /** The picture link Show picture was pressed for: never another, even of the same host (each read says the chat is open). */
+  const [revealed, setRevealed] = useState<string | null>(null);
   /** The picture link whose picture has loaded: until it has, its box keeps a placeholder's height. */
   const [pictureLoaded, setPictureLoaded] = useState<string | null>(null);
+  const relayOnly = useEngineValue((state) => state?.settings.relayOnly === true);
   const isMe = message.sender === "me";
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
@@ -943,12 +1015,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // The original in place of the sent text, with its own mention places: the message's are the translation's.
   const original = sent && showingOriginal ? sent.original.trim() : undefined;
   const originalMarks = useMemo(() => original === undefined ? undefined : originalMentions(original, message.text, message.mentions), [original, message.text, message.mentions]);
-  const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
   // One whose copy into this device failed never left it: the red mark too, but nothing to send again.
-  const fileRetry = !!message.file && canRetryFile(message.file, transfer, platform);
-  const fileUnsent = !!message.file && fileNeverSent(transfer);
+  // So only a transfer that failed is read here: read while it moved, each step of its progress drew the whole
+  // message again (its mark, reactions and menu), up to 20 a second.
+  const failedTransfer = useTransferValue(isMe ? message.file?.id : undefined, (transfer) => (transfer?.state === "failed" ? transfer : null));
+  const fileRetry = !!message.file && canRetryFile(message.file, failedTransfer, servicesPlatform);
+  const fileUnsent = !!message.file && fileNeverSent(failedTransfer);
   const fileFailed = fileRetry || fileUnsent;
   const shown = fileFailed ? "failed" as const : message.delivery;
   // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
@@ -962,7 +1036,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
    */
   const retry = async () => {
     setRefused(null);
-    if (fileRetry) { await platform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
+    if (fileRetry) { await servicesPlatform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
     const link = engine.linkByPeer(peerPubKey);
     if (!link) return;
     await engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch((error: unknown) => {
@@ -984,7 +1058,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     void Promise.resolve(onDeleteForEveryone()).catch(refuse(shown));
   });
   const refusal = isMe && refused && refused.on === shown && (
-    <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 text-[11px]" />
+    <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 chat-text-note" />
   );
   // The ⋮ has no mark to say a full storage on: it is said under the message, as any other refusal.
   const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" && !fileUnsent ? { onRetry: () => void retry().catch(refuse(shown)) } : {};
@@ -993,12 +1067,19 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // What the sender's clock said, never later than when the message came (WISP 400, requirement 10).
   const shownAt = shownTime(message);
   const time = clockTime(shownAt, language);
-  const contentType = imgError || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  const detected = failed === message.text.trim() || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  const linked = detected === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  // Hide my IP from contacts: a picture link someone else chose is never read, as a contact's public profile pictures
+  // are not (engine/publicProfiles.ts): its server would learn this device's address. It stays a link that says why.
+  const hiddenIp = linked !== null && relayOnly && (!isMe || !!message.forwarded) && !needsNoClick(linked);
+  const contentType = hiddenIp ? "text" : detected;
   // The picture this bubble shows, if it shows one (a card or a system line never does).
-  const picture = contentType === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  const picture = hiddenIp ? null : linked;
+  // Whether a picture waits for Show picture: a contact's, or a copy of one I forwarded (mine here, never asked for).
+  const asks = picture !== null && (!isMe || !!message.forwarded) && revealed !== picture && !needsNoClick(picture);
   // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
   // itself, once asked (my own at once), and the bubble shows what came (lib/pictureLink.ts).
-  const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed || needsNoClick(picture)) ? picture : null;
+  const readHere = picture !== null && !autoLoads(picture) && !asks ? picture : null;
   const [pictureRead, setPictureRead] = useState<{ link: string; read: PictureRead } | null>(null);
   useEffect(() => {
     if (!readHere) return;
@@ -1006,7 +1087,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     void pictureLinkUrl(readHere).then((read) => {
       if (!shown) return;
       if (read) setPictureRead({ link: readHere, read });
-      else setImgError(true);
+      else setFailed(readHere);
     });
     return () => { shown = false; };
   }, [readHere]);
@@ -1028,14 +1109,15 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const detailsPanel = details && (
     <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}
       picture={contentType === "image"} onClose={() => setDetails(false)}
-      returnFocus={rowRef.current?.querySelector<HTMLElement>("[data-testid=message-options]") ?? rowRef.current} />
+      returnFocus={optionsButton()} />
   );
+  const onFocus = (e: React.FocusEvent) => { holds.current = e.target; };
   const rowProps = choosing ? {
-    ref: rowRef, "data-message-id": message.id, "data-selected": selection.selected || undefined,
+    ref: rowRef, onFocus, "data-message-id": message.id, "data-selected": selection.selected || undefined,
     // A click anywhere on the row (a player's button included) chooses it or not; nothing inside it runs.
     onClickCapture: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); selection.onToggle?.(); },
   } : {
-    ref: rowRef, onDoubleClick: detailsOnDoubleClick, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
+    ref: rowRef, onFocus, onDoubleClick: detailsOnDoubleClick, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
     // The second click of a Ctrl+double click would select a word of the message under the details.
     onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1 && detailsKey(e)) e.preventDefault(); },
   };
@@ -1049,12 +1131,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   );
 
   // A payment of the contact's this app refused: the app's own line, centred as a call's, never a bubble of theirs.
-  // From the row's values, or the English an older version stored under the same id (shared/refusals.ts).
-  const refusedPayment = paymentRefusal(message);
+  // From the values the mirror put on the row (lib/refusedLine.ts `shownRefusal`).
+  const refusedPayment = shownRefusal(message);
   if (refusedPayment) {
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
-        <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
+        <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg chat-text-system bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <span>{refusedLine(refusedPayment, t)}</span>
           <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
@@ -1073,8 +1155,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const pubKeyShort = joiner ? publicKeyLabel(joiner) : "";
 
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
-        <div data-testid="join-line" title={joiner || undefined} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
+        <div data-testid="join-line" title={joiner || undefined} className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg chat-text-system bg-blue-500/10 text-link ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
           <svg
             width="14"
             height="14"
@@ -1111,9 +1193,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const isMissed = type === "call_missed" || type === "call_rejected" || type === "call_failed" || type === "call_unanswered";
     
     return (
-      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x system-row-x ${enter}`}>
         <div
-          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
+          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg chat-text-system ${
             isMissed
               ? "bg-danger/10 text-danger-ink"
               : "bg-surface-alt/80 text-text-secondary"
@@ -1138,14 +1220,21 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const nick = own && !isMe && (!author || author.first) ? `${contactName === undefined ? "~" : ""}${own}` : "";
   // Isolated, as on a routine row (RoutineCard.tsx): in a right-to-left chat a Latin name read "Carol~".
   const nickRun = <bdi>{nick}</bdi>;
-  const nickEl = nick ? (
+  const opensAuthor = !!author && !!onOpenAuthor && !choosing;
+  const nameEl = nick ? (
     // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
-    <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
-      {author && onOpenAuthor && !choosing
-        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">{nickRun}</button>
+    // One line, cut with an ellipsis inside the bubble, the whole name in the tooltip (as a chat's row and header do):
+    // a long one-word name ran past the bubble and off a phone's screen. The box that cuts it takes the name's own
+    // direction (as the header and a reply's quote do), on the side the app's language puts it: in Arabic a Latin
+    // name's ellipsis was on its left, where the name starts, and the bubble showed only its end.
+    <div data-testid="message-nick" data-key={author?.key} title={nick} dir={opensAuthor ? undefined : "auto"} className={`${author ? memberText(author.key) : "text-accent-hover"} chat-text-nick font-medium mb-[2px] min-w-0 truncate [text-align:match-parent]`}>
+      {opensAuthor
+        ? <button type="button" data-testid="message-nick-open" dir="auto" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="block max-w-full truncate cursor-pointer [text-align:match-parent] hover:underline">{nickRun}</button>
         : nickRun}
     </div>
   ) : null;
+  // The admin's mark beside their name, out of it: a member can take the admin's name, never this.
+  const nickEl = nameEl && author?.admin ? <div className="flex items-center gap-1.5">{nameEl}<AdminMark testId="message-nick-admin" /></div> : nameEl;
   const menu = !choosing && (
     <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? deleteForEveryone : undefined} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
       onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />
@@ -1219,11 +1308,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
 
   // The float and its gap follow the text beside them (the body's `dir="auto"`), what is inside the app's: on one box,
   // an Arabic message in the English app floated the time to its left with the gap on the far side, the time touching it.
+  // A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is.
+  const edit = message.edit && (!buttonsView || !!message.edit.history?.length) ? message.edit : undefined;
   const timestampEl = (
     <span className="msg-meta flex float-end relative top-[4px] ms-[8px] select-none">
       <span dir={dir} className="inline-flex items-center gap-[3px]">
-        {/* A question's buttons marked or closed by its bot is its normal life, not an edit to point out; a new text is. */}
-        {message.edit && (!buttonsView || !!message.edit.history?.length) && <EditedMark edit={message.edit} group={linkId?.startsWith("group:")} />}
+        {edit && <EditedMark edit={edit} group={linkId?.startsWith("group:")} />}
         <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
           {time}
         </span>
@@ -1281,6 +1371,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         {/* In a group, the name is over the first message of a run only. */}
         {nickEl}
 
+        {message.unconfirmed && !isMe && <UnconfirmedMark />}
         <ForwardedMark hops={message.forwarded} />
         {quote && !pressed && <ReplyQuote quote={quote} />}
 
@@ -1291,7 +1382,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : message.paymentId ? (
           <div className="clearfix">
-            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} />
+            {/* Whom a payment of mine went to is the chat's contact; my own name is over mine in a group. */}
+            <PaymentBubble paymentId={message.paymentId} peerPubKey={peerPubKey} fallbackText={message.text} mine={isMe} contact={(isMe ? contactName : own) || undefined} />
             {timestampEl}
           </div>
         ) : message.file?.voice ? (
@@ -1316,15 +1408,15 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : money ? (
           <div className="clearfix">
-            <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} />
+            <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} payee={payee} />
             {timestampEl}
           </div>
-        ) : contentType === "image" && !isMe && !revealed && !needsNoClick(message.text.trim()) ? (
+        ) : asks ? (
           // Loading a picture tells its server this device's address: from anywhere but the GIF sources,
           // a contact's picture waits for a click.
           <div className="clearfix">
-            <button type="button" data-testid="image-reveal" onClick={() => setRevealed(true)}
-              className="text-sm text-link underline decoration-dotted cursor-pointer break-all text-start">
+            <button type="button" data-testid="image-reveal" onClick={() => setRevealed(picture)}
+              className="chat-text-link text-link underline decoration-dotted cursor-pointer break-all text-start">
               {t("chat.showPicture", { host: hostOf(message.text.trim()) })}
             </button>
             {timestampEl}
@@ -1342,13 +1434,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
                 style={{ ...(linkPicture && linkPictureBox(linkPicture)), ...(isWaybackGif(message.text.trim()) && { imageRendering: "pixelated" }) }}
                 loading="lazy"
                 onLoad={() => setPictureLoaded(message.text.trim())}
-                onError={() => setImgError(true)}
+                onError={() => setFailed(message.text.trim())}
               />
             ) : (
               // Being read: the placeholder a picture has until it loads.
               <div data-testid="picture-link-reading" aria-busy="true" className="rounded-[4px] w-[120px] h-[120px] bg-black/10" />
             )}
             <span data-picture-time className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
+              {edit && <EditedMark edit={edit} group={linkId?.startsWith("group:")} onPicture />}
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
@@ -1357,7 +1450,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : bigEmoji ? (
           <div className="clearfix">
-            <span className="text-[42px] leading-[50px] block text-center py-[2px]">
+            <span className="chat-text-emoji block text-center py-[2px]">
               {message.text}
             </span>
             {timestampEl}
@@ -1367,11 +1460,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           // one in the English app right to left), with the time at its end; the cards and the time keep the app's.
           <div className="clearfix" dir="auto" data-testid="message-body">
             {/* A translation's words are its own: the original's mentions do not fall on them. */}
-            <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="chat-text-message wrap-break-word whitespace-pre-wrap" />
             {translation && <TranslatedMark translation={translation} />}
+            {hiddenIp && <span data-testid="picture-hidden-ip" className="block text-[12px] text-text-secondary">{t("chat.pictureHiddenIp")}</span>}
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
             <div dir={dir} className="contents">
-              <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
+              <EntityCards text={message.text} mine={isMe} forwarded={!!message.forwarded} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
               <MessageLinkCards text={message.text} preview={message.preview} />
             </div>
             {sent && <SentTranslationLine sent={sent} showing={showingOriginal} onToggle={toggleOriginal} />}
@@ -1381,6 +1475,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       </div>
       {buttonsView && <MessageButtons view={buttonsView} messageId={message.id} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)} />}
       {refusal}
+      <MessageCopyNote note={copyNote} onClose={closeCopyNote} />
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
       {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
@@ -1388,8 +1483,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bar === "button" ? reactRef : bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
         align={barAlign} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined}
-        onCopy={bar === "press" && copyable ? () => void copyText(copyable).catch(() => {}) : undefined}
-        onCopyOriginal={bar === "press" && copyable && sent ? () => void copyText(sent.original.trim()).catch(() => {}) : undefined} />}
+        onCopy={bar === "press" && copyable ? () => copy(copyable) : undefined}
+        onCopyOriginal={bar === "press" && copyable && sent ? () => copy(sent.original.trim()) : undefined} />}
       {detailsPanel}
     </div>
   );

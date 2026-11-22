@@ -1,41 +1,71 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { hasVisible } from "@ghostly/core";
 import { InputGroup, LinkRow, Page } from "../components/layout";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { listSessions } from "../lib/storage";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
+import { knownChatKeys, ownsKey } from "../lib/storage";
 import { type ColorScheme } from "../lib/settings";
 import { ColorSwatches } from "../components/ColorSwatches";
-import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
+import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, onOwnThemeSaved, registryKey, renameProfile, settingsKeyFor, switchProfile, type ProfileEntry } from "../lib/profiles";
 import { askNameIn } from "../lib/nameStep";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
 import { DevicesSection } from "../components/devices/DevicesSection";
-import { useEngineState } from "../lib/engineState";
+import { useEngineValue } from "../lib/engineState";
 import { useIdentityAttention } from "../lib/identities";
 import { DeleteProfileDialog } from "../components/DeleteProfileDialog";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { setMyAvatar, setShareProfile, useMyAvatar, useShareProfile } from "../hooks/useAvatars";
 import { avatarFromFile } from "../lib/avatarImage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { useStoredSessions } from "../hooks/useStoredSessions";
 import { formatAmount } from "../lib/amount";
 import { useComposition } from "../hooks/useComposition";
 import { useOwnNameField } from "../hooks/useOwnNameField";
 import { useFittedNameField } from "../hooks/useGroupNameField";
+import { useFocusLanding } from "../hooks/useFocusLanding";
 import { openJoinAnother } from "../lib/devices";
 import { problemText, type Problem } from "../lib/problemText";
+import { incomingShare } from "../lib/incomingShare";
+
+/**
+ * Another tab's write the page shows: the registry, a profile's settings (its colour in the list), this profile's own
+ * keys, or the storage cleared. Not another profile's chats: its tab stores them a few times per text it gets.
+ */
+const showsKey = (key: string | null) =>
+  key === null || key === registryKey() || ownsKey(key) || listProfiles().some((entry) => key === settingsKeyFor(entry.id));
 
 /** Profiles change outside React (another component, another tab); re-read them when they do. */
 function useProfiles() {
   const [, bump] = useState(0);
   useEffect(() => {
     const changed = () => bump((n) => n + 1);
-    for (const name of ["profiles-updated", "settings-updated", "storage"]) window.addEventListener(name, changed);
-    return () => { for (const name of ["profiles-updated", "settings-updated", "storage"]) window.removeEventListener(name, changed); };
+    const stored = (event: StorageEvent) => { if (showsKey(event.key)) changed(); };
+    window.addEventListener("profiles-updated", changed);
+    window.addEventListener("storage", stored);
+    // This profile's settings: the page draws with them already; only its colour is read from the saved copy.
+    const stopTheme = onOwnThemeSaved(changed);
+    return () => {
+      window.removeEventListener("profiles-updated", changed);
+      window.removeEventListener("storage", stored);
+      stopTheme();
+    };
   }, []);
   return { current: currentProfile(), all: listProfiles() };
 }
+
+/** The chats, counted by their keys as `listSessions` counts them: no chat's stored copy, messages and all, is parsed per draw. */
+const chatCount = () => knownChatKeys().length;
+
+/** Whether profiles can be switched here, the wallets' balance (undefined with none) and how many services are shared. */
+const platformCounts = () => ({
+  canSwitch: !!servicesPlatform?.features.profiles,
+  balance: servicesPlatform?.wallet?.getState()?.balance,
+  services: servicesPlatform?.features.shareLocalServices ? servicesPlatform.getSharedServices().length : 0,
+});
 
 /**
  * The active local profile (WISP 04), as a page beside the chat list: its name and look, what belongs to
@@ -46,18 +76,22 @@ export function Profile() {
   const { t, language } = useI18n();
   const { settings, updateColorScheme, randomizeNickname } = useSettings();
   const nickname = useOwnNameField();
-  const platform = useServicesPlatform();
+  // What the page shows of the platform, drawn again when that changes, not on every engine state.
+  const { canSwitch, balance, services } = usePlatformValue(platformCounts);
   const { current, all } = useProfiles();
   const myAvatar = useMyAvatar();
   const shareProfile = useShareProfile();
-  const identities = useEngineState()?.identityProofs.length ?? 0;
+  // The count only: on the whole state, the page drew again on every engine state (up to 20 a second while a file moves).
+  const identities = useEngineValue(state => state?.identityProofs.length ?? 0);
   const identityAttention = useIdentityAttention();
   // The field edits the name only: a restored profile's word for it is the tag beside the field, never text in it.
   const plain = baseProfileName(current.id) ?? current.name;
   const [name, setName] = useState(plain);
+  // A rename is said once, in the status line beside the field; typing again takes it away.
+  const [nameSaved, setNameSaved] = useState(false);
   const nameComposition = useComposition();
   // Both name fields keep what the name takes, between whole characters (`fitsProfileName`).
-  const nameField = useFittedNameField(name, setName, fitsProfileName);
+  const nameField = useFittedNameField(name, (next) => { setName(next); setNameSaved(false); }, fitsProfileName);
   // "Add a profile" in the account switcher lands here with the form open.
   const location = useLocation();
   const navigate = useNavigate();
@@ -67,35 +101,49 @@ export function Profile() {
   const wantsBackup = !!asked?.backupProfile;
   const [creating, setCreating] = useState(wantsNew), [newName, setNewName] = useState("");
   const newNameField = useFittedNameField(newName, setNewName, fitsProfileName);
+  // The new profile opens after a moment (`switchProfile`): another submit until the reload made a second one.
+  const opening = useRef(false), [opened, setOpened] = useState(false);
+  // Cancel goes with the form: the focus goes back to New profile, which takes its place, not to the page.
+  const [cancelled, setCancelled] = useState(false);
+  useFocusLanding(cancelled ? "[data-testid='profile-new']" : null, () => setCancelled(false));
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
   // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
   // opens, with what it holds, a backup first and its name to confirm (WISP 05 § Restoring on the same device).
   const replacing = new URLSearchParams(location.search).get("replace");
+  // A share that came along with the copy waits in its Share to… picker (`takeReplaceStep`): offered once this is done.
+  const shareAfter = useRef(false);
   useEffect(() => {
     if (!replacing) return;
     const original = listProfiles().find((entry) => entry.id === replacing);
-    if (original && original.id && original.id !== currentProfile().id) setDeleting(original);
+    const offered = !!original && !!original.id && original.id !== currentProfile().id;
+    if (offered) { setDeleting(original); shareAfter.current = !!incomingShare(); }
     // Once: a reload, or Back, does not open it again.
-    navigate("/profile", { replace: true });
+    navigate(!offered && incomingShare() ? "/shared" : "/profile", { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per arrival
   }, [replacing]);
+  const closeDeleting = () => {
+    setDeleting(null);
+    if (!shareAfter.current) return;
+    shareAfter.current = false;
+    if (incomingShare()) navigate("/shared");
+  };
   const [error, setError] = useState<Problem | null>(null);
   useEffect(() => setName(plain), [plain]);
 
-  const canSwitch = !!platform?.features.profiles;
-  const wallet = platform?.wallet?.getState();
-  const services = platform?.features.shareLocalServices ? platform.getSharedServices() : [];
-  const chats = listSessions().length;
+  // Its groups are chats too, as the chat list shows them.
+  const groups = useEngineValue(state => state?.groups.length ?? 0);
+  const chats = useStoredSessions(chatCount, Object.is) + groups;
   const attempt = (work: () => void) => { try { work(); setError(null); } catch (e) { setError(problemText(e, t)); } };
-  const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => renameProfile(current.id, name)); };
+  const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => { renameProfile(current.id, name); setNameSaved(true); }); };
   const schemes: { value: ColorScheme; label: string }[] = [{ value: "light", label: t("settings.colorSchemes.light") }, { value: "dark", label: t("settings.colorSchemes.dark") }, { value: "system", label: t("settings.colorSchemes.system") }];
 
   return (
     <Page title={t("settings.profile")} width="md" testId="profile-page">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {/* The picture goes to paired contacts with the name: a fresh 128×128 JPEG, nothing of the file. */}
-        <label className="relative shrink-0 cursor-pointer group rounded-full focus-within:ring-2 focus-within:ring-accent" title={myAvatar ? t("profile.changePictureHint") : t("profile.addPictureHint")}>
+        {/* With no picture the badge is the accent itself: its ring sits past a gap of the page's colour, or it is not seen. */}
+        <label className="relative shrink-0 cursor-pointer group rounded-full focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-chat-bg" title={myAvatar ? t("profile.changePictureHint") : t("profile.addPictureHint")}>
           <ProfileBadge entry={{ ...current, name: name || plain }} size={52} avatar={myAvatar} />
           <span aria-hidden="true" className="absolute inset-0 rounded-full bg-black/45 grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
@@ -103,9 +151,12 @@ export function Profile() {
           <input data-testid="profile-avatar-input" type="file" accept="image/*" aria-label={myAvatar ? t("profile.changePicture") : t("profile.addPicture")} className="sr-only"
             onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void avatarFromFile(file).then(setMyAvatar).then(() => setError(null), (err: unknown) => setError(problemText(err, t))); }} />
         </label>
-        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={saveName}
-          onCompositionEnd={(e) => { nameComposition.inputProps.onCompositionEnd(e); nameField.onCompositionEnd(e); }} onKeyDown={(e) => !nameComposition.composing(e) && e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
-          className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-transparent hover:border-border focus:border-accent focus:outline-none" />
+        {/* Enter saves in place: blurring it dropped the keyboard's focus to the page. */}
+        {/* Left empty, it shows the saved name again, which an empty name does not replace (as the nickname field does). */}
+        {/* With the focus, a ring as the other fields have: its border's turn to the accent alone was 1.1-1.3:1 from the muted one. */}
+        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={() => { if (name.trim()) saveName(); else setName(plain); }}
+          onCompositionEnd={(e) => { nameComposition.inputProps.onCompositionEnd(e); nameField.onCompositionEnd(e); }} onKeyDown={(e) => { if (!nameComposition.composing(e) && e.key === "Enter") saveName(); }}
+          className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-field-border focus:border-accent focus:outline-2 focus:outline-offset-1 focus:outline-focus-ring" />
         {current.restored && (
           <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
             {t("profile.restoredTag")}
@@ -116,6 +167,8 @@ export function Profile() {
           </span>
         )}
         {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
+        {/* There before it fills, so a screen reader says it; a refused name shows the Notice below instead. */}
+        <span role="status" data-testid="profile-name-saved" className="text-accent text-sm shrink-0">{nameSaved ? t("profile.nameSaved") : ""}</span>
       </div>
       {error && <Notice problem={error} />}
 
@@ -124,7 +177,7 @@ export function Profile() {
         <Row label={t("profile.mode")}><Segmented label={t("profile.mode")} value={settings.colorScheme} options={schemes} onChange={updateColorScheme} /></Row>
         <Row label={t("profile.nameInChats")}>
           <input data-testid="account-nickname" aria-label={t("settings.nicknamePlaceholder")} className={`${input} w-44 flex-1`} placeholder={t("common.anonymous")} {...nickname} />
-          <button type="button" onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">↻</button>
+          <button type="button" onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")} className="tap-target grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">↻</button>
         </Row>
         {/* Per profile: contacts are told at once, or told there is nothing to show (WISP 401 § name and picture). */}
         <Row label={t("settings.shareProfile")} hint={t("settings.shareProfileHint")}>
@@ -138,8 +191,8 @@ export function Profile() {
         <LinkRow testId="profile-identities-link" label={<span className="inline-flex items-center gap-2">{t("tabs.identities")}{identityAttention && <><span className="nav-dot-inline" aria-hidden="true" /><span className="sr-only">, {t("identities.attention")}</span></>}</span>}
           value={identities ? identities : undefined} onClick={() => nav.open("/identities")} />
         <LinkRow label={t("tabs.chats")} value={chats === 1 ? t("profile.chatOne") : t("profile.chatCount", { count: chats })} onClick={nav.home} />
-        <LinkRow label={t("tabs.wallets")} value={wallet ? t("profile.sats", { amount: formatAmount(wallet.balance, language) }) : undefined} onClick={() => nav.open("/wallet")} />
-        <LinkRow label={t("tabs.services")} value={services.length ? services.length : undefined} onClick={() => nav.open("/services")} />
+        <LinkRow label={t("tabs.wallets")} value={balance !== undefined ? t("profile.sats", { amount: formatAmount(balance, language) }) : undefined} onClick={() => nav.open("/wallet")} />
+        <LinkRow label={t("tabs.services")} value={services ? services : undefined} onClick={() => nav.open("/services")} />
         <LinkRow label={t("settings.title")} onClick={() => nav.open("/settings")} />
       </Section>
 
@@ -151,7 +204,8 @@ export function Profile() {
         {all.map((entry) => (
           <div key={entry.id || "default"} className="flex items-center gap-3 px-4 py-2.5 min-h-14" data-testid="profile-row">
             <ProfileBadge entry={entry} size={30} avatar={entry.id === current.id ? myAvatar : undefined} />
-            <p className="flex-1 min-w-0 text-sm text-text-primary truncate">{entry.name}</p>
+            {/* In its own direction, on the box that cuts it, as wide as the name: see ProfileSwitcher. */}
+            <p className="flex-1 min-w-0 flex"><span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{entry.name}</span></p>
             {entry.id === current.id ? <span className="text-xs text-accent shrink-0">{t("profile.inUse")}</span> : <>
               <Button data-testid="profile-switch" disabled={!canSwitch} onClick={() => attempt(() => switchProfile(entry.id))}>{t("profile.switch")}</Button>
               {entry.id && (
@@ -164,10 +218,10 @@ export function Profile() {
         ))}
         {!canSwitch ? <Block><Notice>{t("profile.oneOnly")}</Notice></Block> : creating ? (
           <Block>
-            <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); }); }}>
+            <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); if (!opening.current) attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); opening.current = true; setOpened(true); }); }}>
               <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} value={newName} {...newNameField} />
-              <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim()}>{t("profile.create")}</Button>
-              <Button onClick={() => { setCreating(false); setNewName(""); }}>{t("common.cancel")}</Button>
+              <Button type="submit" variant="primary" data-testid="profile-create" disabled={!hasVisible(newName) || opened}>{t("profile.create")}</Button>
+              <Button onClick={() => { setCreating(false); setNewName(""); setCancelled(true); }}>{t("common.cancel")}</Button>
             </InputGroup>
           </Block>
         ) : (
@@ -178,7 +232,7 @@ export function Profile() {
           <button data-testid="profile-join-another" onClick={() => openJoinAnother()} className="w-full px-4 py-3 min-h-12 text-start text-sm text-text-secondary hover:text-accent hover:bg-surface-alt transition-colors cursor-pointer rounded-b-xl">{t("devices.join.another")}</button>
         )}
       </Section>
-      {deleting && <DeleteProfileDialog entry={deleting} onClose={() => setDeleting(null)} />}
+      {deleting && <DeleteProfileDialog entry={deleting} onClose={closeDeleting} />}
     </Page>
   );
 }

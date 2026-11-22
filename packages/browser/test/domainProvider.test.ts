@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { schnorr } from "@noble/curves/secp256k1.js";
 import {
-  createIdentity, domainTxtRecord, domainWellKnownFile, identityStatement, newIdentityBinding, type DomainRecord, type IdentityStatement,
+  createIdentity, domainTxtRecord, domainWellKnownFile, IdentityCheckUnavailable, identityStatement, newIdentityBinding, type DomainRecord, type IdentityStatement,
 } from "@ghostly/core";
 import type { IdentityFetch, VerifyContext } from "../src/proofs/contract";
 import { domain, shortDomain, type DomainEvidence } from "../src/proofs/providers/domain";
@@ -121,6 +121,51 @@ describe("domain provider", () => {
     net.files.set("/.well-known/ghostly.json", domainWellKnownFile([recordFor(s)]));
     await expect(verifyIdentity([domain], s, { method: "https" }, ctx(net.fetch))).rejects.toThrow(/private network/);
     expect(net.asked.some(u => u.startsWith(`https://${SUBJECT}/`))).toBe(false);
+  });
+
+  it("keeps what this side's network saw from the contact: an unreachable server, its status, a resolver that failed", async () => {
+    const s = statement();
+    for (const status of [403, 451, 500, 301]) {
+      clearDomainCache();
+      const net = testNetwork();
+      const fetch: IdentityFetch = async (url, o) => url.startsWith(`https://${SUBJECT}/`) ? { status, contentType: "text/html", text: "", bytes: new Uint8Array() } : net.fetch(url, o);
+      const failure = await verifyIdentity([domain], s, { method: "https" }, ctx(fetch)).catch((e: unknown) => e);
+      expect(failure, String(status)).toBeInstanceOf(IdentityCheckUnavailable);
+    }
+    clearDomainCache();
+    const net = testNetwork();
+    const down: IdentityFetch = async (url, o) => url.startsWith(`https://${SUBJECT}/`) ? Promise.reject(new TypeError("Failed to fetch")) : net.fetch(url, o);
+    await expect(verifyIdentity([domain], s, { method: "https" }, ctx(down))).rejects.toThrow(IdentityCheckUnavailable);
+    for (const method of ["dns", "https"] as const) {
+      clearDomainCache();
+      const noResolver: IdentityFetch = async () => { throw new TypeError("Failed to fetch"); };
+      await expect(verifyIdentity([domain], s, { method }, ctx(noResolver)), method).rejects.toThrow(IdentityCheckUnavailable);
+    }
+    // A record that is not there is about the proof: the contact is told.
+    clearDomainCache();
+    const missing = await verifyIdentity([domain], s, { method: "dns" }, ctx(testNetwork().fetch)).catch((e: unknown) => e);
+    expect(missing).toBeInstanceOf(Error);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+  });
+
+  it("tells the contact a domain that no longer exists, or has no address, by every method: the resolver answered", async () => {
+    const s = statement(), signer = schnorr.utils.randomSecretKey();
+    const evidence: Record<string, DomainEvidence> = { dns: { method: "dns" }, https: { method: "https" }, nip05: { method: "nip05", event: signNostr(s, signer) } };
+    // Gone (NXDOMAIN for every type), or a name left with no A or AAAA record.
+    for (const zone of [{ a: {}, txt: {} }, { a: {}, txt: { [SUBJECT]: ["v=spf1 -all"] } }]) {
+      for (const method of ["dns", "https", "nip05"] as const) {
+        clearDomainCache();
+        const net = testNetwork();
+        Object.assign(net.zone, zone);
+        net.files.set("/.well-known/ghostly.json", domainWellKnownFile([recordFor(s)]));
+        net.files.set("/.well-known/nostr.json?name=_", JSON.stringify({ names: { _: hex(schnorr.getPublicKey(signer)) } }));
+        const failure = await verifyIdentity([domain], s, evidence[method], ctx(net.fetch)).catch((e: unknown) => e);
+        expect(failure, method).toBeInstanceOf(Error);
+        expect(failure, method).not.toBeInstanceOf(IdentityCheckUnavailable);
+        if (method !== "dns") expect(String(failure), method).toMatch(`${SUBJECT} has no address`);
+        expect(net.asked.some(u => u.startsWith(`https://${SUBJECT}/`)), method).toBe(false);
+      }
+    }
   });
 
   it("refuses a statement whose domain is not canonical, before any lookup", async () => {

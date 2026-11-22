@@ -9,9 +9,13 @@ import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { installFakeAudio, installFakeMedia, removeFakeMedia } from "../voice/fakeMedia";
 
+/** A 1x1 PNG and JPEG the sender's metadata strip reads as pictures (it refuses bytes that are not one). */
+const TINY_PNG = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 73, 69, 78, 68, 0, 0, 0, 0]);
+const TINY_JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, 0, 1, 0, 1, 1, 1, 0x11, 0, 0xff, 0xda, 0, 8, 1, 1, 0, 0, 63, 0, 0x12, 0x34, 0xff, 0xd9]);
+
 // covers: chat.replies, files.voice.record
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p"), WIRE = "A".repeat(22), MINE = "B".repeat(22);
 const lunch: ChatMessage = { id: `peer_${WIRE}`, text: "lunch at noon?", sender: "peer", timestamp: 1_700_000_000_000 };
@@ -121,7 +125,7 @@ describe("a voice message or file sent while replying (Miguel: voice notes arriv
     const { engine } = openChat();
     await screen.findByText("lunch at noon?");
     await replyTo(lunch.id, "lunch at noon?");
-    const picture = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+    const picture = new File([TINY_PNG], "shot.png", { type: "image/png" });
     fireEvent.paste(screen.getByPlaceholderText("Message…"), { clipboardData: { files: [picture], items: [{ kind: "file", type: "image/png", getAsFile: () => picture }], types: ["Files"], getData: () => "" } });
     const sheet = await screen.findByTestId("attachment-sheet");
     fireEvent.change(within(sheet).getByTestId("attachment-caption"), { target: { value: "here it is" } });
@@ -134,7 +138,7 @@ describe("a voice message or file sent while replying (Miguel: voice notes arriv
     const { engine } = openChat();
     await screen.findByText("lunch at noon?");
     await replyTo(lunch.id, "lunch at noon?");
-    const photo = new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" });
+    const photo = new File([TINY_JPEG], "photo.jpg", { type: "image/jpeg" });
     fireEvent.change(screen.getByTestId("camera-input"), { target: { files: [photo] } });
     await vi.waitFor(() => expect(engine.callsTo("sendFile").map((c) => [c.file.name, c.replyTo])).toEqual([["photo.jpg", lunch.id]]));
   });

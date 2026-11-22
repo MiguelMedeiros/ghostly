@@ -17,6 +17,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useAppsState } from "../lib/apps/flag";
 import { AppGlyph } from "./apps/AppIcon";
 import { initial } from "../lib/initial";
+import { listText } from "../lib/listText";
 
 
 /**
@@ -104,9 +105,13 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
   // Where there is one profile only, the place is the way to the Profile page.
   const switcher = useProfileSwitcher(canSwitch);
   const glances = useProfileGlances();
-  const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? t("services.online") : t("services.offline")}${
-    canSwitch && glances.othersFresh ? `, ${t("profileSwitcher.othersNew")}` : canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
-  const walletLabel = `${unseenSatsLabel(t("tabs.wallets"), unseen, t)}${backupDue ? `, ${t("wallet.backupReminder.label")}` : ""}`;
+  const others = canSwitch && glances.othersFresh ? t("profileSwitcher.othersNew") : canSwitch && glances.othersUnread ? t("profileSwitcher.othersUnread") : "";
+  const profileLabel = t("common.labelValue", { label: t("settings.profile"), value: listText([profile.name, name || t("common.anonymous"), online ? t("services.online") : t("services.offline"), others].filter(Boolean), t) });
+  const walletLabel = listText([unseenSatsLabel(t("tabs.wallets"), unseen, t), backupDue ? t("wallet.backupReminder.label") : ""].filter(Boolean), t);
+
+  // The place open now, in forced colors (index.css `current-mark`): a bar under it while the places sit in a row, at its
+  // start side when the rail stacks them.
+  const mark = rail ? "current-mark" : "current-mark current-mark-under";
 
   return (
     <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar" data-rail={rail || undefined}>
@@ -117,8 +122,8 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
           {...(canSwitch ? { "data-switcher-opener": "", "aria-haspopup": "menu" as const, "aria-expanded": switcher.open, "aria-keyshortcuts": SWITCHER_SHORTCUT } : {})}
           aria-label={profileLabel}
           aria-current={onProfile ? "page" : undefined}
-          className={`account-action select-none ${onProfile ? "bg-surface-hover" : "hover:bg-surface-alt"}`}
-          title={`${t("settings.profile")}: ${profile.name}`}
+          className={`account-action ${mark} select-none ${onProfile ? "bg-surface-hover" : "hover:bg-surface-alt"}`}
+          title={t("common.labelValue", { label: t("settings.profile"), value: profile.name })}
         >
           <span className="relative w-[23px] h-[23px] shrink-0 flex items-center justify-center">
             {/* The active profile's initial in its own color: which profile this is, at a glance. Drawn by CSS, so the
@@ -138,7 +143,7 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
             {canSwitch && (glances.othersUnread > 0 || glances.othersFresh > 0) && <span data-testid="account-profile-others" aria-hidden="true" className="profile-others-ring" />}
             {canSwitch && glances.othersFresh > 0 && <span data-testid="account-profile-others-new" aria-hidden="true" className="profile-others-new" />}
           </span>
-          <span className="account-label" data-name="">{profileName}</span>
+          <span className="account-label" data-name="" dir="auto">{profileName}</span>
         </button>
 
         {wallet && (
@@ -147,7 +152,7 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
             onClick={() => (onWallet ? nav.home() : nav.place("/wallet"))}
             aria-label={walletLabel}
             aria-current={onWallet ? "page" : undefined}
-            className={`account-action relative ${
+            className={`account-action ${mark} relative ${
               onWallet ? "bg-surface-hover text-accent" : "text-text-secondary hover:text-text-primary"
             }`}
             title={walletLabel}
@@ -165,9 +170,9 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
         <button
           data-testid="account-identities"
           onClick={() => (onIdentities ? nav.home() : nav.place("/identities"))}
-          aria-label={`${t("tabs.identities")}${identityAttention ? `, ${t("identities.attention")}` : ""}`}
+          aria-label={identityAttention ? listText([t("tabs.identities"), t("identities.attention")], t) : t("tabs.identities")}
           aria-current={onIdentities ? "page" : undefined}
-          className="account-action text-text-muted hover:text-text-primary hover:bg-surface-alt"
+          className={`account-action ${mark} text-text-muted hover:text-text-primary hover:bg-surface-alt`}
           title={t("tabs.identities")}
         >
           <span className="relative shrink-0 flex">
@@ -184,7 +189,7 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
             onClick={() => (location.pathname === "/apps" ? nav.home() : nav.place("/apps"))}
             aria-label={t("apps.title")}
             aria-current={location.pathname === "/apps" ? "page" : undefined}
-            className={`account-action ${
+            className={`account-action ${mark} ${
               location.pathname === "/apps" ? "bg-surface-hover text-accent" : "text-text-muted hover:text-text-primary hover:bg-surface-alt"
             }`}
             title={t("apps.title")}
@@ -200,7 +205,7 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
             onClick={() => (location.pathname === "/services" ? nav.home() : nav.place("/services"))}
             aria-label={t("tabs.services")}
             aria-current={location.pathname === "/services" ? "page" : undefined}
-            className={`account-action ${
+            className={`account-action ${mark} ${
               location.pathname === "/services" ? "bg-surface-hover text-accent" : "text-text-muted hover:text-text-primary hover:bg-surface-alt"
             }`}
             title={t("tabs.services")}
@@ -218,7 +223,7 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
           aria-label={t("sidebar.settings")}
           aria-current={location.pathname === "/settings" || location.pathname.startsWith("/settings/") ? "page" : undefined}
           onClick={() => nav.place("/settings")}
-          className="account-action text-text-muted hover:text-text-primary hover:bg-surface-alt"
+          className={`account-action ${mark} text-text-muted hover:text-text-primary hover:bg-surface-alt`}
           title={t("sidebar.settings")}
         >
           <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

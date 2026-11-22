@@ -6,6 +6,7 @@ import {
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import { DEVICES_DB, closeDevicesDb, enrollDevice, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
+import { canStartOwnSet } from "../src/devices/ownSet";
 import { TurnKeeper, TurnStaleReadError, type TurnStore } from "../src/devices/turn";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
 import type { TurnNetwork } from "@ghostly/core";
@@ -398,17 +399,42 @@ describe("the active device", () => {
     expect(opened(network.source("dht").held)).toMatchObject({ turn: 41, rev: 1, release: { from: 0, to: 0 } });
   });
 
-  it("a tombstone sends it to moving while it is listed, and to removed when it is not; nothing is put", async () => {
-    const listed = await started(0, network, 40);
-    network.seed(await tombstone(1, [0, 1]));
-    network.calls.length = 0;
-    expect(await listed.keeper.check(false)).toMatchObject({ kind: "gated", state: "moving", reload: true });
+  it("a tombstone another slot signed stops it, listed or not, and leaves it moving with its copy and a set of its own to start; nothing is put", async () => {
+    for (const held of [[0, 1], [1], [1, 2]]) {
+      const other = new FakeTurnNetwork();
+      const made = await started(0, other, 40);
+      other.seed(await tombstone(1, held));
+      other.calls.length = 0;
+      expect(await made.keeper.check(false), `listing ${held}`).toMatchObject({ kind: "gated", state: "moving", reload: true });
+      expect(made.store.record).toMatchObject({ state: "moving", copy: "frozen", activeSlot: 0 });
+      expect(made.store.record!.reenroll).toBeUndefined();
+      expect(canStartOwnSet(made.store.record)).toBe(true);
+      expect(other.puts()).toEqual([]);
+      expect(made.store.record!.seenSequence).toBe(TOMBSTONE_SEQUENCE);
+      // Read again, it stays so: only the device it believes active ends it.
+      expect(await made.keeper.check(true)).toMatchObject({ kind: "stay", awaits: "set-update" });
+      expect(made.store.record!.state).toBe("moving");
+    }
+  });
+
+  it("a tombstone the device it believes active signed sends it to moving while it is listed, and to removed when it is not", async () => {
+    const standby = () => recordOf(1, "standby", 40, [0, 1, 2], { activeSlot: 0 });
+    const listed = device(1, network, standby());
+    network.seed(await tombstone(0, [0, 1]));
+    expect(await listed.keeper.check(false)).toMatchObject({ kind: "gated", state: "moving" });
     const other = new FakeTurnNetwork();
-    const gone = await started(0, other, 40);
-    other.seed(await tombstone(1, [1, 2]));
-    expect(await gone.keeper.check(true)).toMatchObject({ kind: "gated", state: "removed", reload: false });
-    expect(network.puts()).toEqual([]);
+    const gone = device(1, other, standby());
+    other.seed(await tombstone(0, [0, 2]));
+    expect(await gone.keeper.check(false)).toMatchObject({ kind: "gated", state: "removed", reload: false });
     expect(gone.store.record!.seenSequence).toBe(TOMBSTONE_SEQUENCE);
+    // The same tombstone signed by another slot: it waits for the device it believes active.
+    const third = new FakeTurnNetwork();
+    const waits = device(1, third, standby());
+    third.seed(await tombstone(2, [0, 2]));
+    expect(await waits.keeper.check(false)).toMatchObject({ kind: "gated", state: "moving" });
+    // Not removed. It does not list this device, which holds no copy: it may be the real one of a move this device
+    // missed, so Add this device is offered until the believed device's frame arrives.
+    expect(waits.store.record!.reenroll).toBe(true);
   });
 
   it("signed junk just under the tombstone's sequence closes the address only while it is there: it is never kept as the mark", async () => {
@@ -604,11 +630,11 @@ describe("a standby", () => {
     expect(network.puts()).toEqual([]);
   });
 
-  it("reads a tombstone: moving while listed, removed when not", async () => {
+  it("reads a tombstone of the device it believes active: moving while listed, removed when not", async () => {
     network.seed(await tombstone(0, [0, 1]));
-    const listed = device(1, network, recordOf(1, "standby", 40));
+    const listed = device(1, network, recordOf(1, "standby", 40, [0, 1, 2], { activeSlot: 0 }));
     expect(await listed.keeper.check(true)).toMatchObject({ kind: "gated", state: "moving" });
-    const gone = device(2, network, recordOf(2, "standby", 40));
+    const gone = device(2, network, recordOf(2, "standby", 40, [0, 1, 2], { activeSlot: 0 }));
     expect(await gone.keeper.check(true)).toMatchObject({ kind: "gated", state: "removed" });
     // Moving, it waits for the set-update; removed, it stays, and may be added again.
     expect(await listed.keeper.check(true)).toMatchObject({ kind: "stay", awaits: "set-update" });
@@ -623,7 +649,7 @@ describe("a taking device", () => {
   /** Device 1 holds device 0's release of turn 41, stored its own record of that turn, and has put it or not. */
   async function taker(put: boolean, undo = async () => {}) {
     network.seed(await packet(40, 3, 0));
-    const made = device(1, network, { ...recordOf(1, "standby", 40), state: "taking" }, { undo });
+    const made = device(1, network, { ...recordOf(1, "standby", 40, [0, 1, 2], { activeSlot: 0 }), state: "taking" }, { undo });
     const read = (await made.keeper.read())!;
     const report = (await made.keeper.write(put ? read.conditions : {}, { turn: 41, release: await releaseTo(41, 0, 1) }))!;
     return { ...made, report };
@@ -674,6 +700,8 @@ describe("a taking device", () => {
   it("a tombstone ends the taking: staging undone, standby, then moving or removed", async () => {
     let undone = 0;
     const { keeper, store } = await taker(true, async () => { undone++; });
+    // The tombstone of the device it takes the turn from.
+    store.record = { ...store.record!, handoff: { role: "taking", step: "staged", peer: toBase64Url(devices[0].publicKey) } };
     network.seed(await tombstone(0, [0, 2]));
     expect(await keeper.check(true)).toMatchObject({ kind: "gated", state: "removed" });
     expect(undone).toBe(1);

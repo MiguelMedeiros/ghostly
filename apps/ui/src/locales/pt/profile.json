@@ -130,7 +130,11 @@
   "name": "Nome",
   "nameInChats": "Nome nas conversas",
   "nameLabel": "Nome do perfil",
+  "nameSaved": "Nome salvo",
   "nameStep": {
+    "full": "Esse é o máximo: {{count}} letras.",
+    "limit": "Até {{count}} letras.",
+    "needName": "Digite um nome para continuar.",
     "placeholder": "Seu nome",
     "save": "Continuar",
     "skip": "Pular",

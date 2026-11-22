@@ -144,10 +144,19 @@ function parseWeb(id: string): WebDid {
 }
 
 /**
- * A did:web (or one of its URLs) with the port's `%3a` written `%3A`, as `parseDid` writes it: percent-encoding is
- * case-insensitive (RFC 3986), so a document may write either. The fragment is left as it is.
+ * A did:web (or one of its URLs) as `parseDid` writes it: the domain in lowercase, the port's `%3a` written `%3A`.
+ * A domain and percent-encoding are case-insensitive (RFC 3986), so a document may write either, and parseDid
+ * lowercased what the person typed. The path and the fragment are left as they are; one parseDid refuses too.
  */
-const webPortForm = (value: string) => value.startsWith("did:web:") ? value.replace(/^[^#]*/, part => part.replace(/%3a/g, "%3A")) : value;
+const webForm = (value: string) => {
+  if (!value.startsWith("did:web:")) return value;
+  const at = value.indexOf("#");
+  const part = at < 0 ? value : value.slice(0, at);
+  let did: string;
+  // parseDid trims what was typed: a space in a document's id stays, and so it names no key.
+  try { did = /^[\x21-\x7e]+$/.test(part) ? parseDid(part).did : part; } catch { did = part.replace(/%3a/g, "%3A"); }
+  return at < 0 ? did : did + value.slice(at);
+};
 
 const web = (did: string): WebDid => {
   const parsed = parseDid(did);
@@ -179,7 +188,7 @@ export function didWebFileNames(text: string, did: string, statement: string): b
   if (typeof text !== "string" || utf8Encode(text).length > DID_FILE_MAX_BYTES) return false;
   let body: unknown;
   try { body = JSON.parse(text); } catch { return false; }
-  return isObject(body) && body.ghostly === 1 && typeof body.did === "string" && webPortForm(body.did) === did && body.statement === statement;
+  return isObject(body) && body.ghostly === 1 && typeof body.did === "string" && webForm(body.did) === did && body.statement === statement;
 }
 
 /** The service entry a did.json can carry instead of the file. */
@@ -275,7 +284,7 @@ export function staticDidDocument(did: string): DidDocumentView {
 /** An id as absolute `<did>#<fragment>`, from `#frag` or the absolute form; undefined for another DID's. */
 function methodId(did: string, id: unknown): string | undefined {
   if (typeof id !== "string" || id.length > DID_MAX_LENGTH + 128) return undefined;
-  const absolute = id.startsWith("#") ? `${did}${id}` : webPortForm(id);
+  const absolute = id.startsWith("#") ? `${did}${id}` : webForm(id);
   return absolute.startsWith(`${did}#`) && absolute.length > did.length + 1 && /^[\x21-\x7e]+$/.test(absolute) ? absolute : undefined;
 }
 
@@ -313,7 +322,7 @@ const list = (value: unknown, name: string): unknown[] => {
  */
 export function parseDidDocument(did: string, raw: unknown): DidDocumentView {
   if (!isObject(raw)) throw new DidError("The DID document is not a JSON object");
-  if (typeof raw.id !== "string" || webPortForm(raw.id) !== did) throw new DidError(typeof raw.id === "string" ? `The DID document is for another DID (${raw.id.slice(0, 80)})` : "The DID document has no id");
+  if (typeof raw.id !== "string" || webForm(raw.id) !== did) throw new DidError(typeof raw.id === "string" ? `The DID document is for another DID (${raw.id.slice(0, 80)})` : "The DID document has no id");
   const keys = new Map<string, DidKey>();
   const unusable = new Set<string>();
   let skipped = 0;
@@ -384,7 +393,8 @@ export function parseDidJws(input: string): DidJws {
   } catch { throw new DidError("The JWS header is not base64url JSON"); }
   if (!isObject(header)) throw new DidError("The JWS header is not a JSON object");
   const alg = header.alg;
-  if (typeof alg !== "string" || !DID_JWS_ALGS[alg]) throw new DidError(`The JWS uses ${typeof alg === "string" ? alg.slice(0, 16) : "no algorithm"}: Ghostly checks EdDSA, ES256K and ES256`);
+  // The reasons here are shown on the checking side: never a word the signer chose (alg, kid, key ids), only what is wrong.
+  if (typeof alg !== "string" || !DID_JWS_ALGS[alg]) throw new DidError(`The JWS uses ${typeof alg === "string" ? "another algorithm" : "no algorithm"}: Ghostly checks EdDSA, ES256K and ES256`);
   if (header.kid !== undefined && (typeof header.kid !== "string" || header.kid.length > DID_MAX_LENGTH + 128)) throw new DidError("The JWS kid is not a key id");
   if (header.b64 !== undefined && typeof header.b64 !== "boolean") throw new DidError("The JWS b64 header is not true or false");
   const crit = header.crit;
@@ -415,7 +425,7 @@ function verifyWith(key: DidKey, signature: Uint8Array, message: Uint8Array, for
 
 export interface DidSignatureCheck { key: DidKey; alg: string }
 
-const refusedKey = (key: DidKey) => new DidError(`Signed by ${key.id}, which the DID document does not list under authentication or assertionMethod`);
+const refusedKey = () => new DidError("Signed by a key the DID document does not list under authentication or assertionMethod");
 
 /**
  * Which key of `doc` made this JWS over one of `messages` (the statement, and the statement with a
@@ -427,9 +437,9 @@ export function checkDidJws(input: string, messages: Uint8Array[], doc: DidDocum
   let candidates = doc.keys.filter(k => k.curve === jws.curve);
   if (jws.kid !== undefined) {
     const kid = methodId(doc.did, jws.kid);
-    if (!kid) throw new DidError(`The JWS names key ${jws.kid.slice(0, 100)}, which is not a key of ${doc.did}`);
+    if (!kid) throw new DidError(`The JWS names a key that is not a key of ${doc.did}`);
     candidates = candidates.filter(k => k.id === kid);
-    if (!candidates.length) throw new DidError(doc.keys.some(k => k.id === kid) ? `Key ${kid} is not a ${jws.curve} key: the JWS says ${jws.alg}` : `The DID document lists no key ${kid}`);
+    if (!candidates.length) throw new DidError(doc.keys.some(k => k.id === kid) ? `The key the JWS names is not a ${jws.curve} key: the JWS says ${jws.alg}` : "The DID document does not list the key the JWS names");
   }
   if (!candidates.length) throw new DidError(`The DID document lists no ${jws.curve} key for ${jws.alg}`);
   let inputs: Uint8Array[];
@@ -442,7 +452,7 @@ export function checkDidJws(input: string, messages: Uint8Array[], doc: DidDocum
     if (!key.relationships.length) { refused ??= key; continue; }
     return { key, alg: jws.alg };
   }
-  if (refused) throw refusedKey(refused);
+  if (refused) throw refusedKey();
   throw new DidError("The JWS signature does not match: sign exactly the statement shown, with a key of this DID");
 }
 
@@ -455,9 +465,9 @@ export function checkDidSignature(signature: Uint8Array, messages: Uint8Array[],
   let candidates = doc.keys;
   if (vm !== undefined) {
     const id = methodId(doc.did, vm);
-    if (!id) throw new DidError(`${vm.slice(0, 100)} is not a key of ${doc.did}`);
+    if (!id) throw new DidError(`The proof names a key that is not a key of ${doc.did}`);
     candidates = candidates.filter(k => k.id === id);
-    if (!candidates.length) throw new DidError(`The DID document lists no key ${id}`);
+    if (!candidates.length) throw new DidError("The DID document does not list the key the proof names");
   }
   const der = signature.length !== 64 && signature[0] === 0x30;
   if (signature.length !== 64 && !der) throw new DidError("A signature is 64 bytes (or DER, for ECDSA)");
@@ -469,7 +479,7 @@ export function checkDidSignature(signature: Uint8Array, messages: Uint8Array[],
     const canonical = der ? (key.curve === "secp256k1" ? secp256k1 : p256).Signature.fromBytes(signature, "der").toBytes("compact") : signature;
     return { key, alg: key.curve === "Ed25519" ? "Ed25519" : `ECDSA ${key.curve}`, signature: canonical };
   }
-  if (refused) throw refusedKey(refused);
+  if (refused) throw refusedKey();
   throw new DidError("The signature does not match: sign exactly the statement shown, with a key of this DID");
 }
 

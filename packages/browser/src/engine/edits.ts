@@ -22,12 +22,15 @@ export const CARD_RESTORE_GAP_MS = 2 * EDIT_RATE_WINDOW_MS / EDIT_SEND_LIMIT;
 /** What makes a card the same card across messages: a new message may reuse a card's id, and the newest stands for it. */
 const cardKey = (message: StoredMessage) => message.card && `${message.card.kind}\n${message.card.id}`;
 
+/** A row of mine with an edit (or a removal) on its way to the contact. */
+const waits = (m: StoredMessage) => m.sender === "me" && !!m.edit?.pending;
+
 export interface EditQueueDeps {
   read(): Promise<StoredMessage[]>;
   /**
    * Rows by their ids, in the order asked, in one read (`db.getMessagesById`). With it the queue reads the chat's whole
-   * history once (and once per new session) to learn which rows have an edit on its way, and from then on those rows
-   * alone: an edit costs what it does in a short chat, however long this one is.
+   * history once per run (none when given a read already made, `learn`) to learn which rows have an edit on its way,
+   * and from then on those rows alone: an edit costs what it does in a short chat, however long this one is.
    */
   rows?(ids: string[]): Promise<(StoredMessage | undefined)[]>;
   /** Says one edit of this message: an error when it could not go now (it is tried again later). */
@@ -57,7 +60,7 @@ export class EditQueue {
   private readonly wires = new Map<string, string>();
   private readonly dhtIds = new Map<string, string>();
   private tick = 0;
-  /** The chat's history was read for the rows with an edit on its way: `known` has them all, until the next session. */
+  /** The chat's history was read for the rows with an edit on its way: `known` has them all from then on (`edited`). */
   private learnt = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private flushing: Promise<void> | null = null;
@@ -89,10 +92,25 @@ export class EditQueue {
    * A new session: what the last one sent without a confirmation may go again at once, with a fresh count of attempts.
    * Said once, as the session opens and before anything goes on it: said again later, it would send a second time what
    * this session already sent (two flushes of one opening, each starting over, sent a restored question's edit twice).
+   * What it learnt stays: every edit of this run is told (`edited`), so the rows it knows are still all of them, and a
+   * session that opened read the chat's whole history to find none (agents#2468). A new run learns them once.
    */
   reopened(): void {
     this.sent.clear();
-    this.learnt = false;
+  }
+
+  /**
+   * The chat's whole history as read elsewhere in this run (the start reads each chat once): the rows with an edit on
+   * their way are known from it, so the first look reads those rows alone instead of the history again. Only with rows
+   * read by their id; without, every look reads the history anyway. An edit made since that read is told (`edited`).
+   */
+  learn(history: readonly StoredMessage[]): void {
+    if (!this.deps.rows) return;
+    for (const m of history) if (waits(m)) {
+      if (!this.known.has(m.id)) this.known.set(m.id, this.tick);
+      if (m.wireId) this.wires.set(m.id, m.wireId);
+    }
+    this.learnt = true;
   }
 
   /** This row has an edit to send (it was just written so): the next look reads it. */
@@ -106,7 +124,6 @@ export class EditQueue {
    * alone, in one read, and one that waits no more is forgotten, unless it was told again while it was read.
    */
   private async pending(only?: string[]): Promise<{ rows: StoredMessage[]; all?: StoredMessage[] }> {
-    const waits = (m: StoredMessage) => m.sender === "me" && !!m.edit?.pending;
     const read = this.deps.rows;
     if (!read || !this.learnt) {
       const all = await this.deps.read(), rows = all.filter(waits);

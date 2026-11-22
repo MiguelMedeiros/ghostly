@@ -1,10 +1,15 @@
+import { spawnSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { p256 } from "@noble/curves/nist.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { base58 } from "@scure/base";
 import {
-  createIdentity, didDhtDocument, didGhostlyServiceEntry, didWebFile, encodeDidDhtPacket, identityStatement, newIdentityBinding, sign, signDidDhtPacket,
+  createIdentity, didDhtDocument, didGhostlyServiceEntry, IdentityCheckUnavailable, didWebFile, encodeDidDhtDeactivated, encodeDidDhtPacket, identityStatement, newIdentityBinding, sign, signDidDhtPacket,
   toBase64Url, utf8Encode, type DidDhtDocument, type IdentityStatement,
 } from "@ghostly/core";
 import type { IdentityFetch, IdentityFetchOptions, IdentityProofProvider, VerifyContext } from "../src/proofs/contract";
@@ -277,6 +282,31 @@ describe("the DID provider", () => {
     expect(secpSteps.map(x => x.copy ?? "").join("\n")).not.toMatch(/jose/);
     expect(secpSteps.map(x => x.copy ?? "").join("\n")).toMatch(/secp256k1\.js[\s\S]*openssl dgst -sha256 -sign/);
   });
+
+  // The real OpenSSL 3, with nothing else on PATH: the command must not need xxd (vim's, missing on many Linux systems).
+  const [bash, openssl] = spawnSync("bash", ["-c", "command -v bash; command -v openssl"], { encoding: "utf8" }).stdout.trim().split("\n");
+  const openssl3 = !!openssl && /^OpenSSL 3\./.test(spawnSync(openssl, ["version"], { encoding: "utf8" }).stdout ?? "");
+  it.skipIf(!openssl3)("prints an OpenSSL command that needs OpenSSL alone, and whose output is accepted", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-did-openssl-"));
+    try {
+      symlinkSync(openssl, join(dir, "openssl"));
+      for (const curve of ["Ed25519", "P-256", "secp256k1"] as const) {
+        const pair = curve === "Ed25519" ? generateKeyPairSync("ed25519") : generateKeyPairSync("ec", { namedCurve: curve === "P-256" ? "prime256v1" : "secp256k1" });
+        const jwk = pair.publicKey.export({ format: "jwk" });
+        const x = Buffer.from(jwk.x!, "base64url"), y = jwk.y ? Buffer.from(jwk.y, "base64url") : undefined;
+        const pub = y ? Uint8Array.from([y[y.length - 1] & 1 ? 3 : 2, ...x]) : Uint8Array.from(x);
+        const prefix = { Ed25519: [0xed, 0x01], secp256k1: [0xe7, 0x01], "P-256": [0x80, 0x24] }[curve];
+        const s = statementFor(`did:key:z${base58.encode(Uint8Array.from([...prefix, ...pub]))}`);
+        writeFileSync(join(dir, "key.pem"), pair.privateKey.export({ format: "pem", type: "pkcs8" }));
+        const steps = (signer as { instructions(s: IdentityStatement): { steps: { text: string; copy?: string }[] } }).instructions(s).steps;
+        const command = steps.map(x => x.copy ?? "").find(c => c.includes("openssl"))!;
+        const run = spawnSync(bash, ["-c", command], { cwd: dir, encoding: "utf8", env: { PATH: dir } });
+        expect(run.stderr, curve).toBe("");
+        const evidence = await signer.parse(run.stdout, s);
+        await expect(verifyIdentity([did], s, evidence, ctxOf(refuse)), curve).resolves.toMatchObject({ source: expect.stringContaining(`${curve === "Ed25519" ? "Ed25519" : `ECDSA ${curve}`} signature`) });
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });
 
 describe("resolving a did:web", () => {
@@ -296,6 +326,32 @@ describe("resolving a did:web", () => {
     net.files.set("/.well-known/did.json", JSON.stringify(document(WEB, [{ fragment: "k", jwk: k.jwk }])));
     await expect(resolveDid(WEB, opts(net.fetch))).rejects.toThrow(/private network/);
     expect(net.asked.some(a => a.url.startsWith(`https://${HOST}/`))).toBe(false);
+  });
+
+  it("keeps what this side's network saw from the contact: any host and port, unreachable, an error status, a redirect, a private address", async () => {
+    // The contact chooses the did:web, so the host and the port: their answers here are only this side's to see.
+    const web = `did:web:${HOST}%3A8443`;
+    const net = webNetwork();
+    const unreachable = await resolveDid(`did:web:${HOST}%3A22`, opts(async (url, o) => url.includes(":22/") ? Promise.reject(new TypeError("Failed to fetch")) : net.fetch(url, o))).catch((e: unknown) => e);
+    expect(unreachable).toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(unreachable)).toMatch(/could not be reached/);
+    for (const [status, message] of [[403, /answered 403/], [451, /answered 451/], [302, /redirect/]] as const) {
+      clearDidCache();
+      net.files.set("/.well-known/did.json", { status } as never);
+      const failure = await resolveDid(web, opts(net.fetch)).catch((e: unknown) => e);
+      expect(failure, String(status)).toBeInstanceOf(IdentityCheckUnavailable);
+      expect(String(failure), String(status)).toMatch(message);
+    }
+    clearDidCache();
+    net.zone.a = { [HOST]: ["10.0.0.8"] };
+    await expect(resolveDid(web, opts(net.fetch))).rejects.toThrow(IdentityCheckUnavailable);
+    // What the owner's server says about its own file is about the proof, and still said.
+    clearDidCache();
+    net.zone.a = { [HOST]: ["203.0.113.7"] };
+    net.files.delete("/.well-known/did.json");
+    const missing = await resolveDid(web, opts(net.fetch)).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(missing)).toMatch(/No DID document/);
   });
 
   it("refuses an oversize document, a missing one, one that is not JSON, and one for another DID", async () => {
@@ -332,5 +388,40 @@ describe("resolving a did:dht", () => {
     clearDidCache();
     const deactivated = async () => ({ document: net.document, metadata: { versionId: "1", updated: "", deactivated: true as const }, relay: "x" });
     await expect(resolveDid(net.didDht, { fetch: net.fetch, dht: deactivated })).rejects.toThrow(/deactivated/);
+  });
+
+  it("refuses a DID deactivated on a relay that answers later than one still holding the live record", async () => {
+    vi.useFakeTimers();
+    try {
+      const net = dhtNetwork();
+      const ended = signDidDhtPacket(net.identity, encodeDidDhtDeactivated(net.identity.publicKey), 1_800_000_000);
+      const live = signDidDhtPacket(net.identity, encodeDidDhtPacket(net.document), 1_700_000_000);
+      const fetch: IdentityFetch = async url => {
+        const late = url.startsWith("https://pkarr.pubky.app/");
+        await new Promise(resolve => setTimeout(resolve, late ? 3_500 : 0));
+        return { status: 200, contentType: "application/pkarr.org/relays#payload", text: "", bytes: late ? ended : live };
+      };
+      const resolving = resolveDid(net.didDht, { fetch });
+      const refused = expect(resolving).rejects.toThrow(/deactivated/);
+      await vi.advanceTimersByTimeAsync(3_500);
+      await refused;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("marks relays it could not read as this side's network, not the DID's record: none reached, or none answering", async () => {
+    const net = dhtNetwork();
+    net.publish(net.document);
+    const down: IdentityFetch = async () => { throw new TypeError("Failed to fetch"); };
+    await expect(resolveDid(net.didDht, { fetch: down })).rejects.toThrow(IdentityCheckUnavailable);
+    clearDidCache();
+    const failing: IdentityFetch = async () => ({ status: 503, contentType: "", text: "", bytes: new Uint8Array() });
+    await expect(resolveDid(net.didDht, { fetch: failing })).rejects.toThrow(IdentityCheckUnavailable);
+    // A relay that answers "not here" is an answer about the DID.
+    clearDidCache();
+    const missing = await resolveDid(`did:dht:${createIdentity().pubKeyZ32}`, { fetch: net.fetch }).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect(String(missing)).toMatch(/No document is published/);
   });
 });

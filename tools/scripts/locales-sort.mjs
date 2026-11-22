@@ -16,10 +16,23 @@ export function sortKeys(value) {
   return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sortKeys(value[key])]));
 }
 
+/**
+ * The characters that change the direction text is drawn in (Arabic letter mark, left-to-right and right-to-left
+ * marks, embeddings, overrides and isolates). Invisible, so they are written escaped (`\u2066`), never raw: a reviewer
+ * then sees where a string's direction changes.
+ */
+const DIRECTION_MARKS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+const escaped = (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`;
+
 /** A locale file's text as it must be written. */
-export const formatLocale = (text) => `${JSON.stringify(sortKeys(JSON.parse(text)), null, 2)}\n`;
+export const formatLocale = (text) => `${JSON.stringify(sortKeys(JSON.parse(text)), null, 2).replace(DIRECTION_MARKS, escaped)}\n`;
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  // No check mode: it writes. An argument it does not take (--check) must not sort the files instead.
+  if (process.argv.length > 2) {
+    console.error("usage: npm run locales:sort (no arguments: it sorts the files in place)");
+    process.exit(2);
+  }
   let changed = 0;
   for (const language of readdirSync(LOCALES, { withFileTypes: true }).filter((d) => d.isDirectory())) {
     for (const file of readdirSync(join(LOCALES, language.name)).filter((f) => f.endsWith(".json"))) {

@@ -1,7 +1,8 @@
 import type { Locator } from "@playwright/test";
 import { expect, test, type Peer } from "../support/fixtures";
 import { injectNostrSigner } from "../support/nostrSigner";
-import { closeIdentities, openIdentities, shareIdentity, theirFace, turnTheirs } from "../support/identities";
+import { closeIdentities, openIdentities, shareIdentity, theirFace, turnMine, turnTheirs } from "../support/identities";
+import { choose } from "../support/select";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
 import { INTERFACE_NOTES, NOTE, heard, listen } from "../support/sounds";
@@ -95,7 +96,9 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   await expect(faceOf(mine).getByTestId("identity-proof-subject")).toContainText("npub1");
   await expect(mine).toHaveAttribute("data-state", "verified", { timeout: 60_000 });
   await expect(faceOf(mine)).toHaveAttribute("data-status", "verified");
-  await expect(cardOf(mine)).toHaveAccessibleName(/^You shared Nostr · npub1.* · Verified$/);
+  // Named by the words its face shows, in their order (Label in Name); who shared it describes it.
+  await expect(cardOf(mine)).toHaveAccessibleName(/^Ghostly · Identity\s*Verified\s*Nostr.*npub1/);
+  await expect(cardOf(mine)).toHaveAccessibleDescription("You shared this identity");
   // At rest it is still; under the mouse it lifts, and it settles back once the mouse leaves.
   await alice.page.mouse.move(2, 2);
   await expect.poll(() => moved(mine)).toBe("none");
@@ -111,7 +114,8 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   await expect(faceOf(theirs)).toContainText("Nostr");
   await expect(faceOf(theirs).getByTestId("identity-proof-subject")).toContainText("npub1");
   await expect(faceOf(theirs)).toHaveAttribute("data-status", "verified");
-  await expect(cardOf(theirs)).toHaveAccessibleName(/ shared Nostr · npub1.* · Verified$/);
+  await expect(cardOf(theirs)).toHaveAccessibleName(/^Ghostly · Identity\s*Verified\s*Nostr.*npub1/);
+  await expect(cardOf(theirs)).toHaveAccessibleDescription(/ shared this identity$/);
   // The keys reach it too: focused, it comes up as under a mouse.
   await cardOf(theirs).focus();
   await bob.page.keyboard.press("Shift+Tab");
@@ -254,4 +258,43 @@ test("an identity is added, shared and withdrawn from the chat's composer, and b
   }
   const card = await picker.boundingBox();
   expect(card!.y).toBeGreaterThanOrEqual(0);
+});
+
+test("on a 320 px phone the title and validity of an ID card's back are whole in every language, mine and the contact's", { tag: ["@feature:proofs.composer", "@feature:proofs.deck", "@feature:app.i18n", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const phone = { mobile: true, viewport: { width: 320, height: 640 } };
+  const [alice, bob] = await Promise.all([peer("cid-narrow-alice", phone), peer("cid-narrow-bob", phone)]);
+  await injectNostrSigner(alice);
+  await pair(alice, bob);
+  const [withBob, withAlice] = await Promise.all([chatId(alice), chatId(bob)]);
+  await go(alice, "#/identities");
+  await alice.page.getByTestId("identities-new").click();
+  const add = alice.page.getByTestId("add-identity");
+  await add.getByTestId("add-identity-nostr").click();
+  await add.getByTestId("add-identity-start").click();
+  await expect(add).toHaveCount(0);
+  await go(alice, withBob);
+  await shareIdentity(alice, "Nostr");
+
+  /** The back's title and validity line cut to an ellipsis: wider than their box. */
+  const cut = (back: Locator) => back.locator(".id-card-back-title, .id-card-back-meta").evaluateAll((all) => all.filter((t) => t.scrollWidth > t.clientWidth + 1).map((t) => t.textContent));
+  for (const language of ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"]) {
+    for (const [p, chat] of [[alice, withBob], [bob, withAlice]] as const) {
+      // A phone's Settings is a list of sections: the language is in Appearance.
+      await go(p, "#/settings/appearance");
+      await choose(p.page.getByTestId("settings-language"), language);
+      await go(p, chat);
+      await expect(p.page.getByTestId("connection-options")).toHaveAttribute("data-state", "connected");
+    }
+    // Mine, turned over in the composer's picker: what the contact sees.
+    const mine = await turnMine(alice, "Nostr");
+    await expect(mine.getByTestId("composer-identity-back").locator(".id-card-back-title")).toBeVisible();
+    expect(await cut(mine.getByTestId("composer-identity-back")), `${language}: my card's back`).toEqual([]);
+    await closeIdentities(alice);
+    // The contact's, turned over beside the chat: how it was checked.
+    await openIdentities(bob);
+    const theirs = await turnTheirs(bob);
+    await expect(theirs.locator(".id-card-back-title")).toBeVisible();
+    expect(await cut(theirs), `${language}: the contact's card's back`).toEqual([]);
+    await closeIdentities(bob);
+  }
 });

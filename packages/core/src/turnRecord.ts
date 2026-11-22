@@ -5,7 +5,7 @@ import { bytesEqual, concatBytes, fromBase64Url, randomBytes, toBase64Url, utf8E
 import { decodeDnsAnswers, decodeTxtPacket, encodeTxtPacket } from "./dns";
 import { identityFromSeed, verify, type Identity } from "./identity";
 import { openRelayPayload, signRelayPayload } from "./pkarr";
-import { hasVisible, stripHidden } from "./text";
+import { dropLoneJoiners, hasVisible, stripHidden } from "./text";
 
 /*
  * The turn record (WISP 06 § The turn, § Record): one Pkarr packet under a key only holders of the device-set secret
@@ -192,11 +192,11 @@ const isZero = (bytes: Uint8Array): boolean => bytes.every((b) => b === 0);
  * A device's name as its slot holds it: UTF-8, cut at a character boundary to 16 bytes, and with no NUL (the padding).
  * A character is what a person sees as one (a grapheme), so a cut never leaves half an emoji or a lone joiner.
  * A name is display text a device chooses for itself and every device of the set shows: it is cleaned as a nickname is
- * (`sanitizeDisplayText`: no control, invisible or direction-changing character, and empty when nothing of it shows)
- * and trimmed, made and read alike.
+ * (`sanitizeDisplayText`: no control, invisible or direction-changing character, and empty when nothing of it shows),
+ * without a joiner or variation selector that joins nothing (`dropLoneJoiners`), and trimmed, made and read alike.
  */
 export function turnName(name: string): string {
-  const clean = stripHidden(name).trim();
+  const clean = dropLoneJoiners(stripHidden(name)).trim();
   const Segmenter = typeof Intl === "undefined" ? undefined
     : (Intl as unknown as { Segmenter?: new (locale: undefined, options: { granularity: "grapheme" }) => { segment(text: string): Iterable<{ segment: string }> } }).Segmenter;
   const characters = Segmenter ? Array.from(new Segmenter(undefined, { granularity: "grapheme" }).segment(clean), (s) => s.segment) : Array.from(clean);
@@ -208,7 +208,8 @@ export function turnName(name: string): string {
     length += size;
   }
   // A name with nothing to see in it is no name: whoever shows it falls back, as for an empty one.
-  return hasVisible(out) ? out.trimEnd() : "";
+  // A cut inside a word can leave a joiner with nothing after it.
+  return hasVisible(out) ? dropLoneJoiners(out).trimEnd() : "";
 }
 
 function u32(value: number): Uint8Array {

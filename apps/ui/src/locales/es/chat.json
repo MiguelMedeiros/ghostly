@@ -1,10 +1,24 @@
 {
   "announce": {
+    "fileAccepted": "{{name}} aceptó {{file}}",
+    "fileArrived": "{{file}} llegó, listo para guardar",
+    "fileCancelled": "{{name}} canceló {{file}}",
+    "fileDeclined": "{{name}} rechazó {{file}}",
+    "fileDelivered": "{{name}} recibió {{file}}",
+    "fileFailed": "{{file}}: {{status}}",
+    "fileOffer": "{{name}} quiere enviar {{file}} ({{size}}) · esperando tu respuesta",
+    "filePaused": "{{name}} pausó {{file}}",
+    "fileResumed": "{{name}} reanudó {{file}}",
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensajes nuevos",
     "messagesFrom": "{{count}} mensajes nuevos de {{name}}",
+    "notSent": "Tu mensaje «{{text}}» no se envió",
+    "notSentCount": "{{count}} mensajes no enviados",
+    "paymentState": "{{payment}} · {{state}}",
     "pinMoved": "Movido al puesto {{place}} de {{count}} chats fijados",
-    "rowMoved": "Ahora en el puesto {{place}} de {{count}}"
+    "rowMoved": "Ahora en el puesto {{place}} de {{count}}",
+    "waiting": "Tu mensaje «{{text}}» está esperando a que tu contacto esté en línea",
+    "waitingCount": "{{count}} mensajes esperando a que tu contacto esté en línea"
   },
   "audio": {
     "cantPlay": "Este dispositivo no puede reproducir este audio ({{format}}). Descárgalo para escucharlo.",
@@ -100,6 +114,7 @@
     "lookupLocal": "Comprobado en este dispositivo: la clave es el identificador.",
     "lookupPubky": "Buscarlo pregunta a los relays Pkarr de Pubky ({{relays}}), que conocen así tu dirección IP y esta clave.",
     "lookupWeb": "Buscarlo pregunta a tu resolvedor DNS-over-HTTPS por {{host}} y descarga su did.json desde allí: ese servidor conoce así tu dirección IP.",
+    "lookupWebHiddenIp": "Ocultar mi IP está activado, así que {{host}}, un servidor que eligió tu contacto, no se contacta.",
     "muted": "Oculto por tu lista de silenciados de Nostr.",
     "nip05": "(NIP-05, tal como lo escribió, sin verificar)",
     "noDids": "Esta app no puede resolver DIDs",
@@ -139,6 +154,11 @@
     "busyDone": "Ocupado, se reintenta pronto · {{done}} hecho",
     "busySize": "Ocupado, se reintenta pronto · {{size}}",
     "cancelled": "Cancelado",
+    "comingCancel": "Cancelar {{file}}",
+    "comingList": "Archivos que aún están llegando ({{count}})",
+    "comingRow": "{{file}} de {{chat}}: faltan {{left}}",
+    "comingTitle": "Estos archivos que aceptaste aún están llegando y ocupan el espacio. Cancela uno para hacer espacio:",
+    "comingUnnamed": "Un archivo",
     "damaged": "Llegó dañado · {{size}}",
     "daySpent": "Ya compartieron todo lo que pueden hoy, llega de otro miembro o mañana · {{size}}",
     "decline": "Rechazar",
@@ -148,7 +168,7 @@
     "leftHoursMinutes": "quedan {{hours}} h {{minutes}} min",
     "leftMinutes": "quedan {{minutes}} min",
     "leftUnderMinute": "menos de un minuto restante",
-    "noRoomDevice": "No hay espacio suficiente: {{size}} libres en este dispositivo",
+    "noRoomDevice": "No hay espacio suficiente: quedan {{size}} en este dispositivo",
     "nobodyHas": "Nadie con quien estás conectado tiene este archivo todavía",
     "nobodyHasHint": "Llega solo cuando un miembro que lo tiene esté en línea.",
     "notDownloaded": "{{size}} · sin descargar",
@@ -164,7 +184,9 @@
     "resendHint": "Lo ofrece de nuevo. Sigue desde lo que tu contacto ya tiene.",
     "restoring": "Cargando… · {{size}}",
     "resume": "Reanudar",
-    "roomDevice": "{{size}} libres en este dispositivo",
+    "roomDevice": "Quedan {{size}} en este dispositivo",
+    "senderOnly": "Aún no está en tus conexiones",
+    "senderOnlyHint": "En un grupo tan grande, tu app se conecta a través de unos pocos miembros, no con quien lo envió. Llega solo cuando uno de ellos lo descargue, o pide a quien lo envió que te lo mande en un chat.",
     "stalled": "Detenido · {{progress}}",
     "verifying": "Comprobando el archivo… {{size}}",
     "verifyingThere": "Llegó, {{name}} lo está comprobando… {{size}}",
@@ -179,12 +201,20 @@
   "forward": {
     "forward": "Reenviar",
     "forwarded": "Reenviado",
+    "found": "{{count}} chats",
+    "found_one": "{{count}} chat",
+    "found_other": "{{count}} chats",
+    "limit": "Puedes reenviar a {{count}} chats a la vez",
+    "limit_one": "Puedes reenviar a {{count}} chat a la vez",
     "many": "Reenviado muchas veces",
     "messages": "{{count}} mensajes",
+    "more": "{{count}} más",
     "noChats": "Aún no hay chats",
     "noMatch": "Ningún chat con ese nombre",
     "partial": "{{sent}} de {{count}} enviados",
     "pick": "Elige hasta {{count}}",
+    "refused": "{{name}}: {{error}}",
+    "refusedPartial": "{{name}} ({{partial}}): {{error}}",
     "search": "Buscar chats",
     "select": "Seleccionar",
     "selected": "{{count}} seleccionados",
@@ -220,7 +250,6 @@
     "newOne": "1 mensaje nuevo, desplazar al final"
   },
   "keyChanged": "Este chat se detuvo: la clave de tu contacto cambió.",
-  "lastSeen": "Última vez {{time}}",
   "listTime": {
     "days": "{{count}} d",
     "hours": "{{count}} h",
@@ -236,11 +265,11 @@
   },
   "media": {
     "downloadSize": "Descargar {{size}}",
-    "noRoom": "No hay espacio suficiente: {{size}} libres",
+    "noRoom": "No hay espacio suficiente: quedan {{size}}",
     "noRoomToPlay": "No hay espacio libre en disco para reproducirlo aquí. Descárgalo.",
     "notYet": "Se reproduce cuando se haya enviado.",
     "positionOf": "{{position}} de {{duration}}",
-    "wantsToSend": "{{name}} quiere enviarlo · {{size}} libres"
+    "wantsToSend": "{{name}} quiere enviarlo · quedan {{size}}"
   },
   "menu": {
     "continueNew": "Continuar en un chat nuevo",
@@ -257,8 +286,10 @@
   "message": {
     "cancelSending": "Cancelar envío",
     "copied": "Copiado",
+    "copyFailed": "No se pudo copiar. Selecciona el texto de abajo y cópialo.",
     "copyHint": "Clic para copiar",
     "copyJson": "Copiar todo como JSON",
+    "copyText": "Texto del mensaje",
     "details": "Detalles",
     "detailsClose": "Cerrar",
     "detailsTitle": "Detalles del mensaje",
@@ -291,17 +322,33 @@
   "online": "en línea",
   "options": "Opciones",
   "payments": {
-    "needLive": "Los pagos necesitan una conexión directa",
+    "needLive": "Enviar necesita a tu contacto en línea: el ecash nunca espera en una cola. Una solicitud puede esperar a que vuelva.",
     "noWallet": "Tu contacto aún no tiene monedero",
     "off": "Desactivado en este chat: activa una forma en Aceptar",
     "offOrOld": "Tu contacto tiene los pagos desactivados en este chat o necesita actualizar Ghostly"
   },
+  "pictureHiddenIp": "No se muestra con Ocultar mi IP activado",
   "pinned": {
     "bar": "Mensaje fijado",
     "info": "Un mensaje fijado por chat, visible para todos en él. Uno nuevo reemplaza al anterior. En una comunidad, solo el admin fija.",
     "notHere": "No está en este dispositivo",
     "pin": "Fijar",
     "unpin": "Desfijar"
+  },
+  "presence": {
+    "availability": {
+      "away": "Ausente",
+      "busy": "Ocupado",
+      "dnd": "No molestar"
+    },
+    "dot": {
+      "away": "En línea, ausente",
+      "busy": "En línea, ocupado",
+      "dnd": "En línea, no molestar",
+      "idle": "En línea, inactivo",
+      "online": "En línea"
+    },
+    "status": "Estado: {{status}}"
   },
   "preview": {
     "arkAddress": "Dirección Ark",
@@ -310,6 +357,7 @@
     "invoice": "⚡ Factura Lightning",
     "lightningAddress": "Dirección Lightning",
     "lightningOffer": "⚡ Oferta Lightning",
+    "moneroAddress": "Dirección Monero",
     "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "Dinero real",
     "sats": "{{amount}} sats",
@@ -352,7 +400,10 @@
     "copied": "Copiado",
     "copy": "Copiar",
     "copyCode": "Copiar código",
+    "hiddenChars": "Este código tiene caracteres ocultos o que cambian la dirección del texto, mostrados como {{marker}}. Copiar código también los copia.",
     "localTime": "{{time}} en tu hora",
+    "notCopied": "No copiado",
+    "notCopiedHint": "No copiado. Selecciona el texto y cópialo.",
     "showAll": "Mostrar todo",
     "showLess": "Mostrar menos",
     "spoiler": "Texto oculto. Toca para mostrarlo",
@@ -442,10 +493,13 @@
     "showTranslation": "Ver traducción",
     "translate": "Traducir"
   },
-  "typeMessage": "Escribe un mensaje...",
   "typing": "escribiendo…",
   "typingRecording": "grabando audio…",
   "typingThinking": "pensando…",
+  "unconfirmed": {
+    "hint": "Enviado con una solicitud de contacto. Su app aún no ha confirmado que lo envió.",
+    "label": "Sin confirmar"
+  },
   "video": {
     "arriving": "Llegando",
     "cantPlay": "Este dispositivo no puede reproducir este vídeo ({{format}}). Descárgalo para verlo.",
@@ -457,6 +511,7 @@
     "tooLarge": "Demasiado grande para reproducirlo aquí. Descárgalo para verlo."
   },
   "voice": {
+    "callPaused": "Mensaje de voz en pausa por la llamada",
     "cancelled": "Mensaje de voz cancelado",
     "cantPlay": "Este dispositivo no reproduce grabaciones {{format}}. Guárdala para oírla en otro lugar.",
     "couldNotPlay": "No se pudo reproducir esta grabación.",
@@ -469,6 +524,7 @@
     "limit": "Los mensajes de voz duran como máximo {{minutes}} minutos",
     "message": "Mensaje de voz",
     "micDenied": "Sin acceso al micrófono. Permítelo en los ajustes del navegador o del sistema.",
+    "micDeniedAndroid": "Sin acceso al micrófono. Permítelo cuando Android lo pida, o en los ajustes de Android para Ghostly.",
     "micUnavailable": "No hay micrófono. Conecta uno, o cierra la app que lo usa.",
     "micUnsupported": "Este navegador no puede grabar mensajes de voz.",
     "pause": "Pausar mensaje de voz",
@@ -481,6 +537,7 @@
     "recordHint": "Mantén pulsado para grabar o haz clic para grabar sin manos",
     "recorded": "Grabado {{time}}",
     "recording": "Grabando",
+    "resumeAfterCall": "Reanudar después de la llamada",
     "sent": "Mensaje de voz enviado",
     "slideCancel": "Desliza para cancelar",
     "speed": "Velocidad {{speed}}",

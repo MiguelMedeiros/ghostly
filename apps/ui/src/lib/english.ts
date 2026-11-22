@@ -1,4 +1,5 @@
 import en from "../locales/en";
+import { fillParams } from "../locales/translate";
 import type { Translate } from "../contexts/I18nContext";
 
 /**
@@ -9,7 +10,6 @@ import type { Translate } from "../contexts/I18nContext";
 export const english: Translate = (key, params) => {
   let value: unknown = en;
   for (const part of key.split(".")) value = value && typeof value === "object" ? (value as Record<string, unknown>)[part] : undefined;
-  let text = typeof value === "string" ? value : key;
-  if (params) for (const [k, v] of Object.entries(params)) text = text.replace(new RegExp(`{{${k}}}`, "g"), String(v));
-  return text;
+  const text = typeof value === "string" ? value : key;
+  return params ? fillParams(text, params) : text;
 };

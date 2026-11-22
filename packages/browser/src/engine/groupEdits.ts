@@ -30,6 +30,8 @@ export interface GroupEditsHost {
   changed(chat: string, id: string): Promise<void> | void;
   /** My key in an active group, who is in it now, whether it is a community, and whether I am its admin. */
   membership(groupId: string): { me: string; members: ReadonlySet<string>; community: boolean; admin?: boolean } | undefined;
+  /** Why I am not in the group any more, as it shows it ("You were removed from this group"); undefined when it says none. */
+  notMember?(groupId: string): string | undefined;
   /**
    * A member deleted its message for everyone (WISP 400 § Delete for everyone): it goes from this device with its file,
    * and its id is kept so a copy that comes again stays gone. Also for a message not here yet.
@@ -41,6 +43,8 @@ export interface GroupEditsHost {
    * that opens.
    */
   removeMine(chat: string, message: StoredMessage, removal: Removal): Promise<void>;
+  /** A member's edit took my mention out of its message (`row`, as it is now): the group's "@" in the list goes back. */
+  unmentioned?(chat: string, row: StoredMessage): Promise<void>;
   /** Says an edit to the group (a private group's: to member `to` alone, when given). An error when it could not go now. */
   send(groupId: string, edit: GroupEdit, to?: string): Promise<string | null>;
   /**
@@ -51,8 +55,12 @@ export interface GroupEditsHost {
   now?(): number;
 }
 
-/** What `edit` answers: `refused` when it is not something to edit (the page says so and keeps the edit open). */
-export interface GroupEditResult { error: string | null; refused?: boolean; messageId?: string }
+/**
+ * What `edit` answers: `refused` when it is not something to edit (the page says so and keeps the edit open). `e`: a
+ * removal's edit number (`removeMine`), what `Groups.taken` counts it by. `missing`, with a refusal once the message
+ * was looked for: whether the group has no message of that id (the CLI says "not found" without reading for it again).
+ */
+export interface GroupEditResult { error: string | null; refused?: boolean; missing?: boolean; messageId?: string; e?: number }
 
 /** My edits said again on an edge in one window (`GROUP_EDIT_RESEND_WINDOW_MS`): below what a receiver takes in one. */
 export const GROUP_EDIT_RESEND = 16;
@@ -70,6 +78,11 @@ const chatOf = (groupId: string) => `group:${groupId}`;
 const said = (m: StoredMessage): GroupEdit => m.removed ? { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, rm: true }
   : { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, ...(m.mentions?.length && { k: m.mentions }), ...(m.card && { sc: m.card }) };
 const resendKey = (groupId: string, member: string) => `${groupId}\n${member}`;
+/**
+ * A row of mine in a private group written under a member key I no longer hold: removed, then invited back, I came in
+ * with a new key, and the group knows my lines from before by the old one. Its session refuses their edits.
+ */
+const underOldKey = (message: StoredMessage, membership: { me: string; community: boolean }) => !membership.community && !message.id.startsWith(`${membership.me}:`);
 
 export class GroupEdits {
   private readonly now: () => number;
@@ -117,13 +130,17 @@ export class GroupEdits {
    * of the new version, already checked (WISP 405 · Status Cards); a card message then takes `STATUS_CARD_LIMITS.edits`.
    */
   async edit(groupId: string, messageId: string, raw: string, added: readonly GroupMention[] = [], card?: StatusCard): Promise<GroupEditResult> {
-    const refuse = (error: string) => ({ error, refused: true });
+    const looked: { missing?: boolean } = {};
+    const refuse = (error: string) => ({ error, refused: true, ...looked });
     const membership = this.host.membership(groupId);
-    if (!membership) return refuse("You are not in this group");
+    if (!membership) return refuse(this.notMember(groupId));
     if (typeof messageId !== "string" || typeof raw !== "string") return refuse("No message to edit");
     const chat = chatOf(groupId);
     const message = await this.find(chat, messageId);
+    looked.missing = !message;
     if (!message || !canEditInGroup(message)) return refuse("Only your own text messages can be edited");
+    // Mine, but under the key I had before: said as such, not as someone else's (a reply was offered for it).
+    if (underOldKey(message, membership)) return refuse("This message is from before you were removed and invited back, and can't be edited now");
     const text = raw.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
     if (isJoinNotice(text)) return refuse("An edit cannot read as a join notice.");
@@ -154,15 +171,23 @@ export class GroupEdits {
    */
   async removeMine(groupId: string, messageId: string): Promise<GroupEditResult> {
     const refuse = (error: string) => ({ error, refused: true });
-    if (!this.host.membership(groupId)) return refuse("You are not in this group");
+    const membership = this.host.membership(groupId);
+    if (!membership) return refuse(this.notMember(groupId));
     const chat = chatOf(groupId);
     const message = typeof messageId === "string" ? await this.find(chat, messageId) : undefined;
     if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id)) return refuse("Only your own messages can be deleted for everyone");
+    if (underOldKey(message, membership)) return refuse("This message is from before you were removed and invited back, and can't be deleted for everyone now");
     if (!canRemove(message)) return refuse("A payment, a request or a notice cannot be deleted for everyone");
-    await this.host.removeMine(chat, message, { id: message.id, e: removalNumber(message.edit?.seq), at: this.now(), pending: true });
+    const e = removalNumber(message.edit?.seq);
+    await this.host.removeMine(chat, message, { id: message.id, e, at: this.now(), pending: true });
     if (this.host.message) this.told(groupId).set(messageId, ++this.tick);
     await this.flush(groupId).catch(() => {});
-    return { error: null, messageId };
+    return { error: null, messageId, e };
+  }
+
+  /** What an edit or a removal in a group I am not in is refused with: the group's reason, as a message or a reaction is. */
+  private notMember(groupId: string): string {
+    return this.host.notMember?.(groupId) ?? "You are not in this group";
   }
 
   /** Says my pending edits in a group, oldest first, at the pace allowed; what waits goes when the window has room. */
@@ -240,13 +265,14 @@ export class GroupEdits {
 
   /**
    * An edit from a member, authenticated as `sender` by the group. Believed only while the sender is in the group (a
-   * removed member's edits are dropped) and only of the sender's own message; the highest number wins. One of a message
+   * removed member's edits are dropped) and only of the sender's own message; the highest number wins. In a private
+   * group a removal stands once its author is out too (`outlives`): the group took it under the epoch rules. One of a message
    * not here yet waits a minute for it. Past `EDIT_RECEIVE_LIMIT` a window from one member, the rest wait for the next
    * window (`hold`): a catch-up hands back every edit of an author at once, and one dropped is never handed again.
    */
   async receive(groupId: string, sender: string, edit: GroupEdit): Promise<"applied" | "stale" | "waiting" | "dropped"> {
     const membership = this.host.membership(groupId);
-    if (!membership?.members.has(sender) || sender === membership.me || !edit.id.startsWith(`${sender}:`)) return "dropped";
+    if (!membership || !(membership.members.has(sender) || outlives(membership, edit)) || sender === membership.me || !edit.id.startsWith(`${sender}:`)) return "dropped";
     const key = `${groupId}\n${sender}`;
     let pace = this.receivePace.get(key);
     if (!pace) this.receivePace.set(key, pace = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS, this.now));
@@ -257,7 +283,8 @@ export class GroupEdits {
 
   /**
    * An edit past what a member's window takes: kept, the highest number per message, `GROUP_EDITS_HELD` messages a
-   * group at most (the oldest go first), and taken when the window has room. The work stays what the window allows.
+   * group at most (the oldest of the member holding the most go first), and taken when the window has room. The work
+   * stays what the window allows.
    */
   private hold(groupId: string, sender: string, edit: GroupEdit, pace: RateWindow): "waiting" | "dropped" {
     const key = `${groupId}\n${sender}`;
@@ -271,10 +298,17 @@ export class GroupEdits {
     waiting.set(edit.id, edit);
     let count = 0;
     for (const member of group.values()) count += member.size;
-    for (const [member, edits] of group) {
-      if (count <= GROUP_EDITS_HELD) break;
-      while (count > GROUP_EDITS_HELD && edits.size) { edits.delete(edits.keys().next().value!); count--; }
-      if (!edits.size && member !== key) group.delete(member);
+    // Past the cap the member holding the most loses its oldest (the one just held on a tie), a removal last, so one
+    // member's flood never pushes out another's waiting edits or deletions for everyone.
+    while (count > GROUP_EDITS_HELD) {
+      let most = key;
+      for (const [member, edits] of group) if (edits.size > group.get(most)!.size) most = member;
+      const edits = group.get(most)!;
+      let oldest = edits.keys().next().value!;
+      for (const [id, held] of edits) if (!held.rm) { oldest = id; break; }
+      edits.delete(oldest);
+      count--;
+      if (!edits.size && most !== key) group.delete(most);
     }
     if (!this.heldTimers.has(key) && !this.stopped) this.heldTimers.set(key, setTimeout(() => { void this.takeHeld(groupId, sender).catch(() => {}); }, Math.max(50, pace.wait())));
     return waiting.has(edit.id) ? "waiting" : "dropped";
@@ -288,8 +322,9 @@ export class GroupEdits {
     if (this.stopped || !group || !waiting || !pace) return;
     for (const [id, edit] of [...waiting]) {
       const membership = this.host.membership(groupId);
-      // Out of the group meanwhile (the member, or me): nothing of it is believed.
-      if (!membership?.members.has(sender)) { waiting.clear(); break; }
+      // Out of the group meanwhile (the member, or me): nothing of it is believed, but for a private group's removals.
+      if (!membership) { waiting.clear(); break; }
+      if (!membership.members.has(sender) && !outlives(membership, edit)) { waiting.delete(id); continue; }
       if (!pace.take()) break;
       // Unless a higher one took its place while the last was applied.
       if (waiting.get(id) !== edit) continue;
@@ -331,13 +366,17 @@ export class GroupEdits {
     const takes = (m: StoredMessage) => takesPeerEdit(m, edit.m) && m.member === sender;
     if (!takes(message)) return "dropped";
     if ((message.edit?.seq ?? 0) >= edit.e) return "stale";
+    let wasMentioned = false;
     const updated = await this.host.patch(chat, message.id, current => {
       if (!takes(current) || (current.edit?.seq ?? 0) >= edit.e) return null;
-      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), text: edit.m, card: edit.sc });
+      wasMentioned = !!current.mentioned;
+      const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), heardAt: this.now(), text: edit.m, card: edit.sc });
       // Who it names now shows as such; an edit that names me is never a new mention (no sound, no @ in the list).
       return { text: next.text, edit: next.edit, card: next.card, mentions: edit.k?.length ? edit.k : undefined, mentioned: mentionsMember(edit.k, me) ? true : undefined };
     });
     if (!updated) return "stale";
+    // One that names me no more takes its "@" out of the list too, as a restart reads it from the history.
+    if (wasMentioned && !updated.mentioned) await this.host.unmentioned?.(chat, updated);
     await this.host.changed(chat, message.id);
     return "applied";
   }
@@ -373,7 +412,9 @@ export class GroupEdits {
     this.keptMine.delete(key);
     if (this.stopped || edge === undefined || !membership || membership.community || !membership.members.has(to)) return;
     const mine = paced && kept?.edge === edge ? kept.mine : (await (this.host.history ? this.host.history(chat) : this.host.messages(chat)))
-      .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m))
+      // Not those under a member key I held before I was removed and invited back: the group refuses them, and each
+      // took a place in the pace ahead of my edits since.
+      .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m) && !underOldKey(m, membership))
       .sort((a, b) => a.edit!.at - b.edit!.at || (a.id < b.id ? -1 : 1));
     const last = this.heard.get(key);
     const after = (m: StoredMessage) => !last || m.edit!.at > last.at || (m.edit!.at === last.at && m.id > last.id);
@@ -440,4 +481,13 @@ export class GroupEdits {
     for (const [key, timer] of this.heldTimers) if (groupId === undefined || key.startsWith(`${groupId}\n`)) { clearTimeout(timer); this.heldTimers.delete(key); }
     if (groupId === undefined) this.held.clear(); else this.held.delete(groupId);
   }
+}
+
+/**
+ * A private group's removal (WISP 902 § Edits): it stands once its author left or was removed, since it only takes
+ * away what the author wrote while in. The group's session checked it (signed by the author, for an epoch the author
+ * and I were both in, handed on by a member). A community's member out of it edits nothing at all.
+ */
+function outlives(membership: { community: boolean }, edit: GroupEdit): boolean {
+  return edit.rm === true && !membership.community;
 }

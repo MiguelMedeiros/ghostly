@@ -1,0 +1,1 @@
+A name record counts against the 4 new ones of its member a minute only once its signature holds (§ Messages, "The name record"): records another member seals of that member and cannot sign no longer use up its places and keep its own records out. No change on the wire.
