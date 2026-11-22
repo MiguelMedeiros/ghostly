@@ -223,6 +223,8 @@
     "received": "⚡ {{amount}} {{unit}} reçus",
     "redeem": "Encaisser le jeton ecash",
     "redeemed": "{{amount}} {{unit}} encaissés.",
+    "redeemed_one": "{{amount}} {{unit}} encaissé.",
+    "redeemed_other": "{{amount}} {{unit}} encaissés.",
     "remove": "Retirer",
     "removeLastMint": "C’est le dernier mint du portefeuille : le retirer supprime le portefeuille {{label}} et sa carte Lightning.",
     "removeMint": "Retirer {{name}}",
