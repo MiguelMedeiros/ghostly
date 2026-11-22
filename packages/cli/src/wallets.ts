@@ -255,8 +255,9 @@ function notPaidYet(ctx: ApiContext, n: WalletNetwork, source: string, amount: n
   if (source !== CASHU_MINT_SOURCE) {
     return `Not paid yet: your Lightning source has not confirmed this payment (it is pending, or its answer was lost). It is asked again${running} and never paid twice: \`ghostly wallet list\` shows the card's balance once it settles.`;
   }
-  const sats = `${amount + feeReserve} ${n === "testnet" ? "test sats" : "sats"}`;
-  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} are set aside for it, out of the balance: they leave with the payment, or come back to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet history\` lists it once paid, and \`ghostly wallet list\` shows the balance.`;
+  const total = amount + feeReserve, one = total === 1;
+  const sats = `${total} ${n === "testnet" ? "test sat" : "sat"}${one ? " is" : "s are"}`;
+  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} set aside for it, out of the balance: ${one ? "it leaves with the payment, or comes back" : "they leave with the payment, or come back"} to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet history\` lists it once paid, and \`ghostly wallet list\` shows the balance.`;
 }
 
 function badMintUrl(error: unknown): boolean {

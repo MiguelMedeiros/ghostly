@@ -212,7 +212,8 @@ export class AudioSocket {
     }
     let self: AudioSocket | null = null;
     let probe: ((socket: Socket) => void) | null = null;
-    const server = createServer((socket) => self ? self.accept(socket, handlers) : probe ? probe(socket) : socket.destroy());
+    // Half-open: a program that ends its side after a clip (`shutdown(SHUT_WR)`) still hears the call until it ends.
+    const server = createServer({ allowHalfOpen: true }, (socket) => self ? self.accept(socket, handlers) : probe ? probe(socket) : socket.destroy());
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(path, () => { server.off("error", reject); resolve(); });
@@ -283,6 +284,8 @@ export class AudioSocket {
       }
       if (this.client === socket) handlers.onAudio(chunk);
     });
+    // The program ended its side: it stays on and keeps hearing the call. One that never proved itself never will.
+    socket.on("end", () => { if (this.unproven.has(socket)) socket.destroy(); });
     socket.on("close", () => {
       if (timer) clearTimeout(timer);
       this.unproven.delete(socket);

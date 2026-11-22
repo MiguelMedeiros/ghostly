@@ -1771,7 +1771,15 @@ describe("auto-answer from the chats named", () => {
 
   it("takes a chat by its id, its contact's key or this side's label", () => {
     const calls = manager();
-    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-mallory", "chat-real-alice"]);
+    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-real-alice"]);
+  });
+
+  it("keeps each chat once", () => {
+    // Found in a bug hunt: 50,000 refs from a script were each resolved (8 s of the daemon's thread) and all kept in
+    // calls.json (900 KB), read again on each incoming call.
+    const calls = manager();
+    expect(calls.setAuto({ on: true, from: Array(50_000).fill("chat-mallory") }).from).toEqual(["chat-mallory"]);
+    expect(JSON.parse(readFileSync(saved(calls), "utf8")).autoAnswer.from).toEqual(["chat-mallory"]);
   });
 
   it("refuses a chat named only by its contact's own name or a prefix of its id, and keeps nothing", () => {
@@ -1791,6 +1799,13 @@ describe("auto-answer from the chats named", () => {
     calls.forgetChat("chat-real-alice");
     expect(calls.getAuto()).toEqual({ on: false, from: [], rate: 48000 });
     expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: false, from: [], rate: 48000 } });
+  });
+
+  it("answers at 48000 when turned on again without --rate, whatever rate it had before", () => {
+    const calls = manager();
+    calls.setAuto({ on: true, rate: 16000 });
+    expect(calls.setAuto({ on: true, from: ["alice"] })).toEqual({ on: true, from: ["chat-real-alice"], rate: 48000 });
+    expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: true, from: ["chat-real-alice"], rate: 48000 } });
   });
 
   it("leaves auto-answer from anyone on when a chat is removed", () => {
