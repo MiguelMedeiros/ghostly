@@ -72,6 +72,16 @@ describe.skipIf(process.platform === "win32")("--key given a file that is not a 
     expect(error(await ghostly(["store", "sign", index, "--key", pem]), "bad_request", 1).message).toBe(publicWords(pem, "store"));
   }, 60_000);
 
+  it("refuses a private key ghostly does not read, next to its public key, that others may read", async () => {
+    const dir = await appDir();
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const encrypted = privateKey.export({ type: "pkcs8", format: "pem", cipher: "aes-256-cbc", passphrase: "throwaway" }) as string;
+    const spki = publicKey.export({ type: "spki", format: "pem" }) as string;
+    // As `openssl pkey -pubout >> key.pem` leaves it: a private key, so no public key, and a mode that may have shown it.
+    const open = keyFile("publisher.pem", encrypted + spki, 0o644);
+    expect(error(await ghostly(["app", "publish", dir, "--key", open]), "refused", 1).message).toBe(`${open} may be read by others (mode 644): run chmod 600 ${open}, and think whether the key was seen`);
+  }, 60_000);
+
   it("names an OpenSSH private key as one, and refuses it others may read as before", async () => {
     const dir = await appDir();
     const { openSsh } = throwawayKey();
