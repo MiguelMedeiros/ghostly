@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 /** A desk whose device has `free()` bytes left, its files in IndexedDB, and three chats with an open session. */
-function desk(free: () => number) {
+function desk(free: () => number, groupsComing?: () => number) {
   vi.stubGlobal("navigator", { storage: { estimate: async () => ({ quota: 1000 * MiB, usage: 1000 * MiB - free() }) } });
   resetFileBytes(["idb"]);
   const sent: { link: string; frame: Record<string, unknown> }[] = [];
@@ -32,6 +32,7 @@ function desk(free: () => number) {
     storeMessage: async () => {},
     transfers,
     changed: () => {},
+    ...(groupsComing && { groupsComing }),
   });
   for (const link of ["chat-a", "chat-b", "chat-c"]) files.session(link, true);
   /** The local id of a file offered here, once the person is asked about it and its offer shows a room. */
@@ -90,5 +91,24 @@ it("an offer waiting shows the room a file taken without asking will use", async
   await t.files.handle("chat-a", { t: "pf-offer", id: "wUnasked002", name: "small.mp4", mime: "video/mp4", size: 20 * MiB, ts: 1_700_000_000_000 });
   await vi.waitFor(() => expect(t.accepted()).toEqual(["wUnasked002"]));
   await vi.waitFor(() => expect(t.transfers.get(big)?.room).toBe(80 * MiB));
+  for (const link of ["chat-a", "chat-b", "chat-c"]) t.files.drop(link);
+});
+
+/**
+ * The group files this device fetches fill the same room: the offers waiting show the room left beside them, read
+ * again when one starts and when it ends (`comingChanged`). Before, a 1:1 file alone read them again, and an offer kept
+ * showing the room from before a group file was asked for.
+ */
+it("an offer waiting shows the room a group file still coming will use, from when it starts until it ends", async () => {
+  let groups = 0;
+  const t = desk(() => 100 * MiB, () => groups);
+  const big = await t.offered("chat-b", "wGroups0001", 60 * MiB);
+  expect(t.transfers.get(big)?.room).toBe(100 * MiB);
+  groups = 50 * MiB;
+  t.files.comingChanged();
+  await vi.waitFor(() => expect(t.transfers.get(big)?.room).toBe(50 * MiB));
+  groups = 0;
+  t.files.comingChanged();
+  await vi.waitFor(() => expect(t.transfers.get(big)?.room).toBe(100 * MiB));
   for (const link of ["chat-a", "chat-b", "chat-c"]) t.files.drop(link);
 });

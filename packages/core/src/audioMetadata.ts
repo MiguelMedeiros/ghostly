@@ -16,6 +16,7 @@
  * - WAV (RIFF, RF64 or BW64): every chunk but its format, data and the ones of the sound itself (`fact`, `cue `,
  *   `smpl`, `inst`, an RF64's `ds64`) becomes `JUNK`, zeroed (an INFO list, an `id3 ` chunk, a broadcast `bext` with
  *   its date and originator, iXML, XMP).
+ * - WAV and Ogg: tags a tagger appended after the RIFF or the last page are emptied as an MP3's.
  * - AIFF and AIFF-C: every chunk but its sound's (`COMM`, `SSND`, `FVER`, `MARK`, `INST`, `AESD`, `chan`) becomes
  *   `JUNK`, zeroed (NAME, AUTH, ANNO, `(c) `, COMT, an `ID3 ` chunk, an app's `APPL`).
  * - CAF: every chunk but its sound's (`desc`, `data`, `pakt`, `kuki`, `chan`, `peak`, `ovvw`) becomes `free`, zeroed
@@ -110,9 +111,10 @@ async function emptyId3(read: Read, size: number, at: number, head: Uint8Array, 
 
 /**
  * The tags at the end of an MP3 or AAC file (after `start`): an ID3v1 (and its extended part), then any of an APEv2
- * tag, a Lyrics3v2 tag and an ID3v2 tag with a footer, in any order. Each found is emptied where it is.
+ * tag, a Lyrics3v2 tag and an ID3v2 tag with a footer, in any order. Each found is emptied where it is. Returns where
+ * the first of them starts (`size`: none).
  */
-async function trailingTags(read: Read, size: number, start: number, patches: VideoPatch[]): Promise<void> {
+async function trailingTags(read: Read, size: number, start: number, patches: VideoPatch[]): Promise<number> {
   let end = size;
   if (end - 128 >= start && text(await read(end - 128, 3), 0, 3) === "TAG") {
     // Its fields zeros, its genre none.
@@ -165,7 +167,7 @@ async function trailingTags(read: Read, size: number, start: number, patches: Vi
         continue;
       }
     }
-    return;
+    return end;
   }
 }
 
@@ -290,6 +292,11 @@ async function ogg(read: Read, size: number, patches: VideoPatch[]): Promise<voi
   const count = counter();
   for (let at = 0; at < size;) {
     count();
+    if (at && (size - at < 4 || text(await read(at, 4), 0, 4) !== "OggS")) {
+      // Tags a tagger appended after the last page (an ID3v1, APE, Lyrics3), emptied as an MP3's; anything else is refused.
+      check(await trailingTags(read, size, at, patches) === at);
+      break;
+    }
     const head = await read(at, 27);
     check(text(head, 0, 4) === "OggS" && head[4] === 0);
     const lacing = await read(at + 27, head[26]!);
@@ -352,6 +359,17 @@ async function wav(read: Read, size: number, rf64: boolean, patches: VideoPatch[
     dataSize = u32le(ds64, 16) + u32le(ds64, 20) * 2 ** 32;
   }
   const count = counter();
+  /** Whether a chunk starts at `at`: its ID four letters, its body within the file (but the sound's, which may run to its end); or the file's end. */
+  const isChunk = async (at: number) => {
+    if (at + 8 > size) return true;
+    const head = await read(at, 8), id = text(head, 0, 4);
+    return /^[\x20-\x7e]{4}$/.test(id) && (id === "data" || at + 8 + u32le(head, 4) <= size);
+  };
+  /** The tags a tagger appended after the RIFF (an ID3v1, APE, Lyrics3) when they are all there is from `at` to the end, emptied as an MP3's. */
+  const tagsFrom = async (at: number) => {
+    const found: VideoPatch[] = [];
+    return await trailingTags(read, size, at, found) === at ? found : undefined;
+  };
   for (let at = 12; at + 8 <= size;) {
     count();
     const head = await read(at, 8);
@@ -365,6 +383,15 @@ async function wav(read: Read, size: number, rf64: boolean, patches: VideoPatch[
       if (length) patches.push({ start: at + 8, end: at + 8 + length });
     }
     at = Math.min(end, size);
+    if (await isChunk(at)) continue;
+    // Tags after the RIFF, or the next chunk right after an odd one with no pad byte (ffmpeg and libsndfile read these).
+    // Neither: the walk goes on and refuses what is there.
+    let tags = await tagsFrom(at);
+    if (!tags && length % 2 && end <= size) {
+      if (await isChunk(end - 1)) { at = end - 1; continue; }
+      tags = await tagsFrom(end - 1);
+    }
+    if (tags) { patches.push(...tags); return; }
   }
 }
 

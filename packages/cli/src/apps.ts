@@ -1,6 +1,6 @@
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { closeSync, existsSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { closeSync, existsSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppHash, isAppLine, isAppUrl, readAppBundle,
@@ -120,9 +120,29 @@ function makeKey(kind: KeyKind): LoadedKey {
   return { signer, key: toZ32(signer.publicKey), created: true, pem: `${KEY_HEADER[kind]}\n${privateKey.export({ type: "pkcs8", format: "pem" }) as string}` };
 }
 
+/**
+ * A --key that is a symbolic link to nothing (a key on a drive that is not mounted) or a ring of links: `existsSync`
+ * follows the link and says no, so the run makes a key, which is never written over the link. Before, Node's raw
+ * "EEXIST: file already exists" when it was written. The words name the link, where it leads, and that no key was made.
+ */
+function refuseKeyLink(path: string): void {
+  let target: string;
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return;
+    target = resolve(dirname(path), readlinkSync(path));
+  } catch { return; } // nothing there: the key is made at the path
+  let code: unknown;
+  try { statSync(path); return; } catch (error) { code = (error as { code?: unknown }).code; }
+  if (code === "ELOOP") throw new CliError("engine", `${path} is a symbolic link whose links go round in a loop (to ${target}): no key was made. Fix the link, or name another --key`);
+  if (code === "ENOENT" || code === "ENOTDIR") {
+    throw new CliError("engine", `${path} is a symbolic link to ${target}, which is not there (a drive that is not mounted?): no key was made. Make the link's target reachable, or name another --key`);
+  }
+}
+
 /** Writes a key this run made: owner-only from the start, never over a file that is there. */
 function saveKey(path: string, key: LoadedKey): void {
   if (!key.pem) return;
+  refuseKeyLink(path);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const fd = openSync(path, "wx", 0o600);
   try { writeSync(fd, key.pem); } finally { closeSync(fd); }
@@ -213,6 +233,13 @@ function saidUrl(url: string): string {
     return query ? `${said}?…` : said;
   } catch { return url; }
 }
+
+/**
+ * The first link a client fetches with a query or fragment: a private repository's raw link carries its read token
+ * there, and a bundle or a store index is public, so signed in, the token is published with it (as `app serve --url`
+ * refuses on a card).
+ */
+const tokenLink = (urls: readonly string[]) => urls.find((url) => /[?#]/.test(url));
 
 /**
  * A bundle at an https URL, as a client fetches one: `https:` only, no user or password, jsDelivr only at a full
@@ -565,6 +592,10 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     const said = checked.reason === "missing-key" ? { ...checked, detail: `${checked.detail} in ${APP_SOURCE}` } : checked;
     throw refused(`${sourcePath} and the folder's files make no valid manifest`, said, checked.detail ? { detail: checked.detail } : {});
   }
+  const source = tokenLink(checked.manifest.sources ?? []);
+  if (source) {
+    throw refused(`${sourcePath} lists the source ${saidUrl(source)}, whose query or fragment is where a private repository's token rides, and a bundle is public: list the app's link in a public repository, with no query`, { reason: "private-link", detail: "sources" });
+  }
 
   const { bytes: manifestBytes, signature } = await signAppObject(APP_PREFIXES.app, checked.manifest, key.signer);
   const bundle = assembleAppBundle(manifestBytes, canonicalJsonBytes(signature), contents.map((f) => f.bytes));
@@ -751,6 +782,10 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
 
   const valid = checkAppStoreIndex(index, { strict: true }, checked);
   if (!valid.ok) throw refused(`${indexPath} is not a valid store index`, valid);
+  for (const listing of (index as unknown as AppStoreIndex).apps) {
+    const url = tokenLink(listing.urls);
+    if (url) throw refused(`${indexPath} lists ${saidUrl(url)} for ${listing.ref}, whose query or fragment is where a private repository's token rides, and a store index is public: list the app's link in a public repository, with no query`, { reason: "private-link", detail: "apps: urls" });
+  }
   const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer, checked);
   const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);

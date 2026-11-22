@@ -26,7 +26,7 @@ describe("when it runs", () => {
 
   it("pull requests into dev, main and the release branches, pushes to main, a daily run of dev, and by hand", () => {
     expect(on).toContain("  push:\n    branches: [main]\n");
-    expect(on).toContain('  pull_request:\n    branches: [main, dev, "release/**"]\n');
+    expect(on).toContain('  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n    branches: [main, dev, "release/**"]\n');
     expect(on).toMatch(/\n {2}schedule:\n {4}- cron: "\d+ \d+ \* \* \*"\n/);
     expect(on).toContain("\n  workflow_dispatch:\n");
   });
@@ -99,12 +99,20 @@ process.stdout.write(Buffer.concat(files.flatMap((f) => [z ? Buffer.from(f) : qu
 `;
   writeFileSync(join(dir, "git"), fake);
   chmodSync(join(dir, "git"), 0o755);
+  // A gh that answers `api <PR_URL> --jq .draft` with DRAFT, or fails when DRAFT is "fail".
+  const gh = `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args.join(" ") !== \`api \${process.env.PR_URL} --jq .draft\` || process.env.DRAFT === "fail") process.exit(1);
+process.stdout.write(process.env.DRAFT + "\\n");
+`;
+  writeFileSync(join(dir, "gh"), gh);
+  chmodSync(join(dir, "gh"), 0o755);
 
-  /** head: the pull request's branch, and the repository it comes from (this one unless a fork's). */
-  const plan = (files: string[] | null, event = "pull_request", head = { ref: "issue-1-a-fix", repo: "o/ghostly" }): string[] => {
+  /** head: the pull request's branch, and the repository it comes from (this one unless a fork's). draft: what the API says. */
+  const plan = (files: string[] | null, event = "pull_request", head = { ref: "issue-1-a-fix", repo: "o/ghostly" }, draft = "false"): string[] => {
     const output = join(dir, "github-output");
     writeFileSync(output, "");
-    const pull = event === "pull_request" ? { HEAD_REF: head.ref, HEAD_REPO: head.repo } : {};
+    const pull = event === "pull_request" ? { HEAD_REF: head.ref, HEAD_REPO: head.repo, PR_URL: "repos/o/ghostly/pulls/7", DRAFT: draft } : {};
     execFileSync("bash", ["-e", "-o", "pipefail", "-c", script], {
       env: { PATH: `${dir}:${process.env.PATH ?? ""}`, EVENT: event, REPO: "o/ghostly", ...pull, FILES: files ? JSON.stringify(files) : "", FAIL: files ? "" : "1", GITHUB_OUTPUT: output },
       stdio: "ignore",
@@ -168,6 +176,18 @@ process.stdout.write(Buffer.concat(files.flatMap((f) => [z ? Buffer.from(f) : qu
     const batch = { ref: "batch/dev-20261113-0912", repo: "o/ghostly" };
     expect(plan(["apps/ui/src/App.tsx", "apps/desktop/src/viewer.rs", ".github/workflows/ci.yml"], "pull_request", batch)).toEqual([]);
     expect(plan(null, "pull_request", batch)).toEqual([]);
+  });
+
+  it("a draft analyses nothing, as the API says it is now; a ready one, or one whose state cannot be read, is analysed", () => {
+    const head = { ref: "issue-1-a-fix", repo: "o/ghostly" };
+    const files = ["apps/ui/src/App.tsx", "apps/desktop/src/viewer.rs", ".github/workflows/ci.yml"];
+    expect(plan(files, "pull_request", head, "true")).toEqual([]);
+    expect(plan(null, "pull_request", head, "true")).toEqual([]);
+    expect(plan(files, "pull_request", head, "false")).toEqual(ALL);
+    expect(plan(files, "pull_request", head, "fail")).toEqual(ALL);
+    expect(step).toContain("          GH_TOKEN: ${{ github.token }}\n");
+    expect(step).toContain("          PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}\n");
+    expect(job("plan")).toContain("    permissions:\n      contents: read\n      pull-requests: read\n    outputs:");
   });
 
   it("a fork's pull request is analysed whatever its branch is called, and so is a branch that only looks like a batch's", () => {
