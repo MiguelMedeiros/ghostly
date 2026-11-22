@@ -61,15 +61,19 @@
       "sent": "Inviato. Ancora nessuna conferma.",
       "sentGroup": "Inviato al gruppo. I gruppi non hanno conferme.",
       "waiting": "Parte da solo quando il tuo contatto è online.",
+      "waitingBehind": "Parte da solo dopo i messaggi precedenti.",
       "waitingLiveContact": "I file richiedono una connessione diretta. La chat del tuo contatto è in Solo DHT: parte quando la consente di nuovo.",
-      "waitingLiveYou": "I file richiedono una connessione diretta. Questa chat è in Solo DHT: cambialo dall'icona di connessione."
+      "waitingLiveYou": "I file richiedono una connessione diretta. Questa chat è in Solo DHT: cambialo dall'icona di connessione.",
+      "waitingPaced": "Il tuo contatto riceve un numero limitato di messaggi alla volta. Parte da solo quando può riceverne altri."
     },
     "offline": "Sei offline",
     "retry": "Non inviato. Invia di nuovo",
     "sending": "Invio in corso",
     "sent": "Inviato",
     "waiting": "In attesa che il tuo contatto sia online",
-    "waitingLive": "In attesa di una connessione diretta"
+    "waitingBehind": "In attesa dei messaggi precedenti",
+    "waitingLive": "In attesa di una connessione diretta",
+    "waitingPaced": "In attesa che il tuo contatto possa ricevere altri messaggi"
   },
   "disabledPlaceholder": "Messaggio…",
   "edit": {
