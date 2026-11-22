@@ -78,8 +78,17 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
   }));
 }
 
-/** A file's size as a person reads it: "40 MB", "26.2 MB". */
-const megabytes = (size: number) => `${Math.round(size / 100_000) / 10} MB`;
+/**
+ * A file's size as a person reads it: "40 MB", "26.2 MB"; under a megabyte "49 KB" or "512 B", as a nearly full disk's
+ * room is met (`noRoomWords`): "0 MB free" beside "(0.1 MB)" said neither. `round` is the way to the step: up for
+ * what a file needs and down for the room, so a file that does not fit never reads as if it did. The unit is chosen
+ * after it, so 999_001 B needed reads "1 MB", not "1000 KB".
+ */
+const megabytes = (size: number, round = Math.round) => {
+  if (size < 1000) return `${size} B`;
+  const kb = round(size / 1000);
+  return kb < 1000 ? `${kb} KB` : `${round(size / 100_000) / 10} MB`;
+};
 
 /**
  * Where an unfinished transfer stands, in words, for a person reading a timeout: the stage's id ("asking", "waiting")
@@ -415,9 +424,9 @@ function noRoomWords(fileId: string, name: string | undefined, size: number, roo
   const named = holders.slice(0, HOLDERS_NAMED).map((h) => `${h.name ?? "a file"} from ${h.chat} (${megabytes(h.left)} to come: ghostly file cancel ${shellWord(h.id, "<file>")})`);
   const more = holders.length > HOLDERS_NAMED ? ` and ${holders.length - HOLDERS_NAMED} more` : "";
   const which = named.length ? `: ${named.join(", ")}${more}` : "";
-  const rest = coming > 0 ? `, and ${megabytes(coming)} of files still coming need it first${which}` : "";
+  const rest = coming > 0 ? `, and ${megabytes(coming, Math.ceil)} of files still coming need it first${which}` : "";
   const out = coming > 0 && named.length ? "Free some space or cancel one of them" : "Free some space";
-  return `${name ?? "The file"} (${megabytes(size)}) does not fit: ${megabytes(room)} free${rest}. ${out}, then ghostly file accept ${fileId} again (or file decline)`;
+  return `${name ?? "The file"} (${megabytes(size, Math.ceil)}) does not fit: ${megabytes(room, Math.floor)} free${rest}. ${out}, then ghostly file accept ${fileId} again (or file decline)`;
 }
 
 /** A received file that waits for this person's `file accept` (`file wait`, `file save`): said naming the command. */

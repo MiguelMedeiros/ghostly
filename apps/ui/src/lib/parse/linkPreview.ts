@@ -2,7 +2,6 @@ import { canonicalUrl, linksIn, type LinkPreview } from "@ghostly/core";
 import { isLocalHost } from "../localHost";
 import { parseMessage } from "./blocks";
 import { findEntities } from "./entities";
-import { linkEnd } from "./links";
 import { findLocation } from "./location";
 import type { Block, Segment } from "./types";
 
@@ -127,7 +126,7 @@ const IMAGE_LINK = /\.(gif|png|jpe?g|webp|svg|avif)(\?\S*)?$/i;
  * themselves), a place (the location card draws those, and asks nothing) or a Ghostly invite or group link (their
  * card comes from the code, and the page says nothing more), on a public host, and one the bubble draws as a link with
  * that same address, outside a spoiler: none in code, and none a card would read longer or shorter than the bubble
- * opens it ("~~https://a.example/x~~", "[DC](https://…/Washington,_D.C.)"), or the card would open another page.
+ * opens it ("[DC](https://…/Washington,_D.C.)"), or the card would open another page.
  * Not one a spoiler hides either (its card would say what the spoiler covers). Null when none.
  */
 export function previewableLink(text: string): string | null {
@@ -177,17 +176,19 @@ function bubbleLinks(text: string): { shown: Set<string>; hidden: Set<string> } 
 function spoiledLinks(text: string): (link: string) => boolean {
   if (!text.includes("||")) return () => false;
   const { shown, hidden } = bubbleLinks(text);
-  // `linksIn` keeps a spoiler's closing "||" on its link; the bubble's link ends before it.
-  return (link) => { const url = linkEnd(link); return hidden.has(url) && !shown.has(url); };
+  return (link) => hidden.has(link) && !shown.has(link);
 }
 
 const hasSpoiler = (segments: Segment[]): boolean =>
   segments.some((s) => s.type === "span" && (s.style === "spoiler" || hasSpoiler(s.children)));
 
-/** A received preview, unless its link shows only inside a spoiler (an older app makes one for it). */
+/**
+ * A received preview, if it is of a link the text shows outside a spoiler. An older app makes one for a link only a
+ * spoiler shows, and one for "~~https://a.example/x~~" that opens /x~~, another page than the bubble's link.
+ */
 export function shownPreview(text: string, preview: LinkPreview | undefined): LinkPreview | undefined {
   if (!preview) return undefined;
   const hidden = spoiledLinks(text);
   const links = linksIn(text).filter((link) => canonicalUrl(link) === preview.u);
-  return links.length && links.every(hidden) ? undefined : preview;
+  return links.length && !links.every(hidden) ? preview : undefined;
 }

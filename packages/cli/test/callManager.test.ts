@@ -39,7 +39,7 @@ type IceServers = { urls: string; username?: string; credential?: string }[];
 /** `builds`: the engine states the side's manager built whole (`getState`, a view of every chat). */
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView>; builds: number }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; relayOnlyB?: boolean; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number; otherChatB?: boolean } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; relayOnlyB?: boolean; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number; otherChatB?: boolean; checkingRedialMs?: number } = {}): { a: Side; b: Side } {
   // Each side's clock: the same one unless `nowB` gives the second side its own.
   const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
@@ -60,7 +60,7 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () 
       getState: () => { me.builds++; return state(); },
     };
   };
-  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs, quickRedialMs: stacks.quickRedialMs });
+  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs, quickRedialMs: stacks.quickRedialMs, checkingRedialMs: stacks.checkingRedialMs });
   b.calls = new CallManager({ engine: engine(b, () => a, nowA, stacks.iceServersB, stacks.relayOnlyB, stacks.otherChatB ? [other] : []), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.b, now: stacks.nowB ?? stacks.now, maxRedials: stacks.maxRedials, earlyAnswerMs: stacks.earlyAnswerMs, quickRedialMs: stacks.quickRedialMs });
   return { a, b };
 }
@@ -128,6 +128,38 @@ function refusingStack(refuse: number, ending: "throws" | "fails" = "throws"): (
     return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
   };
   return Object.assign(stack, { refused: () => refused });
+}
+
+/**
+ * The real media stack, but the first `stuck` connections whose answer goes in never connect and say nothing more: as
+ * ICE that stays "checking" because none of the contact's checks arrive (a macOS runner's WKWebView, whose host
+ * address is an mDNS name this side does not look up). The answer is taken and the connection closed unheard.
+ */
+function stuckStack(stuck: number): (() => Promise<CallStack | string>) & { stuck: () => number } {
+  let count = 0;
+  const stack = async () => {
+    const real = await loadCallStack();
+    if (typeof real === "string") return real;
+    const Real = real.ndc.PeerConnection;
+    function PeerConnection(...args: ConstructorParameters<typeof Real>) {
+      const pc = new Real(...args);
+      const apply = pc.setRemoteDescription.bind(pc);
+      const listen = pc.onStateChange.bind(pc);
+      let silent = false;
+      Object.defineProperty(pc, "setRemoteDescription", {
+        value: (sdp: string, type: Parameters<typeof apply>[1]) => {
+          if (type !== "answer" || count >= stuck) return apply(sdp, type);
+          count++;
+          silent = true;
+          pc.close();
+        },
+      });
+      Object.defineProperty(pc, "onStateChange", { value: (cb: Parameters<typeof listen>[0]) => listen((state) => { if (!silent) cb(state); }) });
+      return pc;
+    }
+    return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+  };
+  return Object.assign(stack, { stuck: () => count });
 }
 
 /**
@@ -1725,6 +1757,29 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("an answered call still not connected a while after its answer offers again: it connects on the new connection, on the same sockets", async () => {
+    // CI run 44619228595: the bot's ICE said "checking" for 23 s after the Mac app's answer, the app waited 8 s for a
+    // newer offer (RESTART_GRACE_MS), none came, and it hung up.
+    const stack = stuckStack(1);
+    const { a, b } = pairOfManagers({ a: stack, checkingRedialMs: 1000 });
+    b.calls.setAuto({ on: true });
+    const placed = await a.calls.start("chat-ab", {}) as { call: string; audio: { socket: string } };
+    await Promise.all([
+      until(() => a.events.find((e) => e.type === "call.connected")),
+      until(() => b.events.find((e) => e.type === "call.connected")),
+    ]).catch(diagnose(a, b));
+    expect(stack.stuck()).toBe(1);
+    expect(signalsOf(a, "o")).toHaveLength(2);
+    expect(signalsOf(b, "a")).toHaveLength(2);
+    expect(signalsOf(a, "h")).toHaveLength(0);
+    expect(signalsOf(b, "h")).toHaveLength(0);
+    expect(a.events.map((e) => e.type)).toEqual(["call.outgoing", "call.connected"]);
+    expect(b.events.map((e) => e.type)).toEqual(["call.incoming", "call.connected"]);
+    expect(a.calls.list()).toMatchObject([{ call: placed.call, state: "connected", audio: { socket: placed.audio.socket } }]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("answers refused past the last start-over end the call as failed, and the contact is told", async () => {
     // The first offer and MAX_REDIALS more, each answer refused.
     const { a, b } = pairOfManagers({ a: refusingStack(MAX_REDIALS + 1) });
@@ -1771,7 +1826,15 @@ describe("auto-answer from the chats named", () => {
 
   it("takes a chat by its id, its contact's key or this side's label", () => {
     const calls = manager();
-    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-mallory", "chat-real-alice"]);
+    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-real-alice"]);
+  });
+
+  it("keeps each chat once", () => {
+    // Found in a bug hunt: 50,000 refs from a script were each resolved (8 s of the daemon's thread) and all kept in
+    // calls.json (900 KB), read again on each incoming call.
+    const calls = manager();
+    expect(calls.setAuto({ on: true, from: Array(50_000).fill("chat-mallory") }).from).toEqual(["chat-mallory"]);
+    expect(JSON.parse(readFileSync(saved(calls), "utf8")).autoAnswer.from).toEqual(["chat-mallory"]);
   });
 
   it("refuses a chat named only by its contact's own name or a prefix of its id, and keeps nothing", () => {

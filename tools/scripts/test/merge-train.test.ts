@@ -2954,6 +2954,22 @@ describe("a queue:priority pull request while CI Success on the base itself is r
     expect(readState(repo.batch()!.body)).toMatchObject({ baseSha: "s13" });
   });
 
+  it("says the base's CI is still running in the flying one's comment too, once dev's failed jobs are re-run", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true, behind: true });
+    await repo.run();
+    expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/ahead of #9000, which the train holds while CI Success on `dev` itself is red/);
+    repo.runs.set("dev0", running); // someone re-ran dev's failed jobs, as the hold's help asks
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is still running/);
+    expect(repo.alone(13)).toMatchObject({ past: 9000 });
+    expect(said(repo, 11)).toMatch(/CI Success on `dev` itself is still running/);
+    const flying = repo.comments.get(13)!.at(-1)!.body;
+    expect(flying).toMatch(/ahead of #9000, which the train holds while CI Success on `dev` itself is still running/);
+    // It is not held itself: still waiting for its own CI, with no hold of its own.
+    expect(flying).toMatch(/waiting for CI Success on /);
+    expect(flying).not.toMatch(/The train is on hold/);
+  });
+
   it("lands ahead of a held red lone pull request, which keeps its flight and is rebased onto the new tip", async () => {
     const repo = await heldLone();
     const held = repo.pulls.get(11)!.sha;
@@ -3737,7 +3753,7 @@ describe("a green CI run planned for other files", () => {
     const yml = readFileSync(resolve(import.meta.dirname, "../../../.github/workflows/ci.yml"), "utf8");
     // Each job's name and condition: `  <id>:`, then `    name: ...` and, within its first lines, `    if: needs.changes.outputs.<gate> == 'true'`.
     const gated = [...yml.matchAll(/^ {2}[\w-]+:\n {4}name: (.+)\n(?: {4}.+\n){0,3}? {4}if: needs\.changes\.outputs\.(\w+) == 'true'$/gm)].map((m) => ({ name: m[1], gate: m[2] }));
-    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "lint", "packages", "packages", "rust", "website", "website_e2e"]);
+    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "lint", "packages", "packages", "packages", "rust", "website", "website_e2e"]);
     // The draft tier's job is skipped in every full run: it is no path gate.
     for (const { name, gate } of gated) expect([name, gateOf(name)]).toEqual([name, gate === "affected" ? undefined : gate]);
     expect(Object.keys(PLANNED_JOBS).filter((start) => !gated.some((j) => j.name.startsWith(start)))).toEqual([]);

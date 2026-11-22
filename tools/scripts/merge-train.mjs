@@ -324,6 +324,7 @@ export const PLANNED_JOBS = {
   "Frontend lint and types": "lint",
   "Frontend tests (app)": "full",
   "Frontend tests (packages ": "packages",
+  "Integration tests": "packages",
   "CLI on Linux ARM64": "packages",
   "Frontend builds": "full",
   "Tauri Backend": "rust",
@@ -564,7 +565,8 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * for, and from when it leaves anyway (a fixed time, so the comment does not change from run to run; it leaves at the
  * train's first run after it, which the workflow starts at that time). `stuck` is the base's
  * commit once a hold for its red has lasted HOLD_HELP: the comment then says what a person can do. A lone pull request
- * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so; one whose has `refused`, GitHub's
+ * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so (its `held` is the base's CI that
+ * holds that one, not a hold of its own); one whose has `refused`, GitHub's
  * refusal of the push of its rebase, says that. One with that label that may not go ahead (`cannot`: `canGoAlone`
  * refuses its branch) says why, and its help leaves that advice out. One with `pr.behind` ({ batch,
  * with }) merges cleanly onto the base but conflicts with `with`, aboard the batch in flight: it waits for the next.
@@ -586,12 +588,13 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
   if (alone) {
     const again = alone.retried ? " (a second run, after a red one)" : "";
     // A push GitHub refused (`refused`, its message): the branch never got that commit, so no CI Success is coming.
+    // One going ahead of a hold (`past`) is not held itself: `held` there is what holds the one it goes past.
     const where = alone.refused
       ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}, but GitHub refused the push of that rebase to its branch: ${escapeMark(alone.refused)}. The train tries once more at its next run; refused again, it leaves the line.`
-      : held ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
-    const past = alone.past ? ` It goes ahead of #${alone.past}, which the train holds while CI Success on \`${base}\` itself is red (\`${LABEL.priority}\`).` : "";
+      : held && !alone.past ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
+    const past = alone.past ? ` It goes ahead of #${alone.past}, which the train holds while CI Success on \`${base}\` itself is ${held ?? "red"} (\`${LABEL.priority}\`).` : "";
     // GitHub's message may hold any text: escaped (JSON.parse reads it back) so none ends the mark.
-    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${hold}`;
+    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${alone.past ? "" : hold}`;
   }
   if (batch) {
     const note = own ? ` Its own full CI is not needed: the batch's CI is its gate, so the train cancels that run if it is still going.${cancelled}` : "";
@@ -1640,7 +1643,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // Whoever is still in line passed the head checks above: its head is the one `queue` (or the train) vouches for.
     const text =
       past?.number === p.number
-        ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone)
+        ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held)
         : inFlight?.alone && inFlight.number === p.number
           ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held, null, stuck)
           : aboard.has(p.number)
