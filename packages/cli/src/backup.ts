@@ -96,13 +96,24 @@ const finished = (...paths: string[]) => {
 };
 
 /**
+ * The name a backup is written under in `folder` until it is whole: hidden, and of one length whatever --out is. It was
+ * `<path>.partial-<pid>-<hex>`, ~28 bytes over --out's name, and a name of 227 to 255 bytes, which the file system
+ * takes, was refused as too long. Its own name too: two backups to one path in one daemon shared `<path>.partial-<pid>`,
+ * the second removed the first's half-written file as one left by a stopped backup, and the first gave the path the
+ * second's file.
+ */
+const partialName = (folder: string) => join(folder, `.ghostly-backup-${process.pid}-${randomBytes(6).toString("hex")}.partial`);
+const PARTIAL = /^\.ghostly-backup-(\d+)-[0-9a-f]{12}\.partial$/;
+
+/**
  * The half-written backups beside `path` that a process gone since left (killed, or older than the handling above):
  * nothing else removes them, and one with no passphrase starts with the store in the clear. A live process's stays.
  */
 async function removeDeadPartials(path: string): Promise<void> {
   const prefix = `${basename(path)}.partial-`;
   for (const entry of await readdir(dirname(path)).catch(() => [])) {
-    const pid = Number(/^(\d+)(-[0-9a-f]{12})?$/.exec(entry.startsWith(prefix) ? entry.slice(prefix.length) : "")?.[1]);
+    // As this CLI names it (`partialName`), any backup's into this folder, and as an older one did, `<path>.partial-<pid>`.
+    const pid = Number((PARTIAL.exec(entry) ?? /^(\d+)(-[0-9a-f]{12})?$/.exec(entry.startsWith(prefix) ? entry.slice(prefix.length) : ""))?.[1]);
     if (!pid || pid === process.pid) continue;
     let alive = true;
     try { process.kill(pid, 0); } catch (error) { alive = (error as NodeJS.ErrnoException).code === "EPERM"; }
@@ -162,7 +173,9 @@ export const BACKUP_METHODS: Record<string, Method> = {
     const asked = str(params, "path", true), path = resolve(asked);
     // A folder is no name for the backup: one there was "exists: choose another name", as if a file were in the way,
     // and one with a separator at its end and no folder there became a file of that name (resolve() drops the slash).
-    if (asked.endsWith("/") || asked.endsWith(sep) || (await stat(path).catch(() => undefined))?.isDirectory()) {
+    // A name too long for the file system is refused here, not once the whole backup is written and cannot take it.
+    const there = await stat(path).catch((error: NodeJS.ErrnoException) => { if (error.code === "ENAMETOOLONG") throw localFileError(error, path) ?? error; });
+    if (asked.endsWith("/") || asked.endsWith(sep) || there?.isDirectory()) {
       throw new CliError("bad_request", `${path} names a folder: name the backup's file in it, e.g. --out ${join(path, "<name>.ghostly-backup")} (path over the socket)`);
     }
     // `refused`, not `confirm` (exit 5, "pass --force"): backup takes no flag that writes over a file.
@@ -187,9 +200,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       const text = await readSetting(paths.dir, name);
       if (text !== null) settings.push({ name, text });
     }
-    // Its own name too: two backups to one path in one daemon shared `<path>.partial-<pid>`, the second removed the
-    // first's half-written file as one left by a stopped backup, and the first gave the path the second's file.
-    const partial = `${path}.partial-${process.pid}-${randomBytes(6).toString("hex")}`;
+    const partial = partialName(folder);
     let out: FileHandle | null = null, writing = false;
     // From its export on, the store (every message and key in the clear) goes however the backup ends: an export cut
     // short, a failure before the backup is written, and a process that leaves first (Ctrl-C on a one-shot), the
@@ -249,15 +260,22 @@ export const BACKUP_METHODS: Record<string, Method> = {
       try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
       return { path, bytes: written, files: copied, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
     } catch (error) {
+      // The name it is written under is never typed and gone after: an error on it (a folder it may not write) names
+      // --out's file. Before, `Not allowed to write or read <path>.partial-<pid>-<hex>`, a file that is never there.
+      const failed = error as NodeJS.ErrnoException;
+      if (failed instanceof Error && failed.path === partial) {
+        failed.path = path;
+        failed.message = failed.message.replaceAll(partial, path);
+      }
       // A write into the backup that found its disk full names the backup, not Node's bare "write". The store's export
       // writes into the profile, maybe on another disk: not named as the backup.
-      const code = (error as NodeJS.ErrnoException)?.code;
+      const code = failed?.code;
       if (writing && (code === "ENOSPC" || code === "EDQUOT")) throw localFileError(error, path) ?? error;
       throw error;
     } finally {
       await out?.close().catch(() => {});
-      // Each on its own, the store first: one that cannot be removed (a name the disk takes whose `.partial-…` is too
-      // long for it) neither keeps the store nor takes the place of the backup's own error.
+      // Each on its own, the store first: one that cannot be removed neither keeps the store nor takes the place of the
+      // backup's own error.
       await rm(store, { force: true }).catch(() => {});
       await rm(partial, { force: true }).catch(() => {});
       finished(store, partial);
