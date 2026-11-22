@@ -83,6 +83,45 @@ describe("relay transport: packets queued for a relay", () => {
     expect(r.seq(SMALL, k.pubKeyZ32)).toBeGreaterThan(r.seq(A, k.pubKeyZ32));
   });
 
+  it("a relay taken off the list gets none of the packets queued for it", async () => {
+    const r = relays();
+    const relay = new RelayTransport({ relays: [A, SMALL], fetch: r.fetch, log: () => {} });
+    // The small relay's minute spent.
+    for (let i = 0; i < 5; i++) await publish(relay, createIdentity(), "other");
+    const k = createIdentity();
+    // a.test takes it, the small relay's budget holds it: queued for it.
+    await publish(relay, k, "p1");
+    expect(r.last(A, k.pubKeyZ32)).toBeDefined();
+    // The person removes the small relay in Settings.
+    relay.setRelays([A]);
+    await vi.advanceTimersByTimeAsync(180_000);
+    // Without the listed-relay check in `refusal`: the queued packet still went to the relay removed.
+    expect(r.last(SMALL, k.pubKeyZ32)).toBeUndefined();
+  });
+
+  it("a copy on its way as its relay is taken off the list is not queued again", async () => {
+    const r = relays();
+    let refuse = false, sent = 0;
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (refuse && new URL(String(input)).origin === SMALL) {
+        sent++;
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+        return new Response(null, { status: 429, headers: { "retry-after": "1" } });
+      }
+      return r.fetch(input, init);
+    }) as typeof fetch;
+    const relay = new RelayTransport({ relays: [A, SMALL], fetch: fetchFn, log: () => {} });
+    for (let i = 0; i < 5; i++) await publish(relay, createIdentity(), "other");
+    await publish(relay, createIdentity(), "p1");
+    // The queued copy goes out; the small relay answers 2 s later that it is rate limiting.
+    refuse = true;
+    while (sent === 0) await vi.advanceTimersByTimeAsync(500);
+    relay.setRelays([A]);
+    await vi.advanceTimersByTimeAsync(600_000);
+    // Without the listed-relay check in `refusal`: the 429 queued it again, and the relay removed got it 5 times more.
+    expect(sent).toBe(1);
+  });
+
   it("another background write waits behind the queue, told a minute at most, and goes once it drained", async () => {
     const r = relays();
     // Payloads signed elsewhere (the CLI's DHT took them): queued for a.test (`putLater`).

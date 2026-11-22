@@ -254,7 +254,9 @@
     "forget": "Supprimer de cet appareil",
     "leave": "Quitter le groupe",
     "members": "Membres…",
-    "rotate": "Renouveler les clés"
+    "rotate": "Renouveler les clés",
+    "rotated": "Clés renouvelées : les membres reçoivent les nouvelles clés",
+    "rotating": "Renouvellement des clés…"
   },
   "others": {
     "body": "Qui connaît l'identifiant d'un groupe peut créer son propre groupe avec, et un seul d'entre eux peut être sur cet appareil. Gardez celui-ci ou passez à l'autre : changer quitte celui-ci et le supprime de cet appareil.",

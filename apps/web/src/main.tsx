@@ -52,6 +52,10 @@ setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: c
 // GNOME Web and other WebKitGTK browsers before 2.52 keep the sounds' output running: waking it froze the page.
 gateSounds();
 
+// Read once, as the page opened and before anything is awaited: a link that reaches it later (while it starts, or
+// waits behind another tab) takes the address, the share is still this page's.
+const sharing = openedForShare();
+
 // The chosen local profile (WISP 04): its own chats, database, settings and single-peer lock. The
 // default profile keeps the original names, so nothing existing moves. A profile a handoff moved whose pointer was lost
 // is pointed at its state again before anything opens storage. Its language is on <html> before the first paint (the
@@ -82,8 +86,6 @@ const missing = await missingEssentials();
 if (missing.length) await cannotRun(missing);
 
 const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
-// Read once, as the page opened: a link that reaches it later takes the address, the share is still this page's.
-const sharing = openedForShare();
 /** What stops handing links on, once this tab holds the lock; it returns the links no tab answered yet, oldest first. */
 let stopLink = (): string[] => [];
 await becomeThePeer(peerLock, () => {
