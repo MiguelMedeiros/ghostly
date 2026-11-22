@@ -155,7 +155,7 @@ export const home = {
         icon: "video",
         title: "Be a little closer.",
         body: "Voice, video and screen sharing, one to one. Turn the camera on or share your screen without calling again.",
-        extra: "In the browser, the extension and the desktop app, Linux included. Screen sharing needs a computer, not Linux yet. A call rings while the chat is live, not over the DHT. Group calls in communities, through the node their admin names, but not from the desktop app on Linux yet.",
+        extra: "In the browser, the extension and the desktop app, Linux included. Screen sharing needs a computer, not Linux yet. A call rings while the chat is live, not over the DHT. Group calls in communities, through the node their admin names, but not from the desktop app on Linux or the CLI yet.",
       },
       {
         id: "sats",

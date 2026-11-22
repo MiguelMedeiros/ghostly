@@ -37,18 +37,33 @@ test("/roadmap shows calls in communities as available and plans only calls in p
   for (const i of calls.filter((i) => i.level !== "available")) assert.match(i.text, /\bprivate groups?\b/i, `${i.level}: ${i.text}`);
 });
 
+test("the roadmap's inventory rows have calls in communities since 1.12, not from Linux or the CLI, and calls in private groups next", () => {
+  const row = (name) => file("docs/wisps/ADAPTER-ROADMAP.md").split("\n").find((line) => line.startsWith(`| ${name}`));
+  const sentence = (text, start) => text.split(/(?<=\.)\s/).find((s) => s.startsWith(start)) ?? "";
+  const media = row("Voice/video");
+  assert.match(sentence(media, "Group calls in communities since 1.12"), /\bLinux\b.*\bCLI\b/, "Voice/video row");
+  assert.match(media, /Private groups have no calls/, "Voice/video row");
+  const groups = row("Private groups");
+  assert.match(groups, /Calls in communities since 1\.12/, "Private groups row");
+  assert.match(sentence(groups, "Next:"), /\bcalls in private groups\b/, "Private groups row");
+});
+
 test("WISP 602's header says group calls are built and available", () => {
   const header = Object.fromEntries(headerRows(file("docs/wisps/602-group-calls.md")));
   assert.equal(header.Availability, "Available");
   assert.doesNotMatch(header.Implementation, /not built/i);
 });
 
-test("where the site names group calls, it names the Linux desktop app, which cannot join them", () => {
+test("where the site says what group calls do, the same sentence names the Linux desktop app and the CLI, which cannot join them", () => {
   assert.match(read("apps/ui/src/desktop/groupCallSupport.ts"), /GROUP_CALLS_NOT_ON_LINUX/, "groupCallSupport refuses the Linux Desktop");
   for (const file of CONTENT) {
-    const said = [...read(file).matchAll(/[^"]*\bgroup calls?\b[^"]*/gi)].map((m) => m[0]);
+    // One sentence of one string at a time, so another string's "CLI" does not count. The plural only: "(group call --sfu)" is the CLI command, not a claim about who joins.
+    const said = read(file).split(/(?<=\.)\s|"/).filter((s) => /\bgroup calls\b/i.test(s));
     assert.ok(said.length > 0, `${file} says what group calls do`);
-    for (const text of said) assert.match(text, /\bLinux\b/, `${file}: ${text.slice(0, 80)}`);
+    for (const s of said) {
+      assert.match(s, /\bLinux\b/, `${file}: ${s.slice(0, 80)}`);
+      assert.match(s, /\bCLI\b/, `${file}: ${s.slice(0, 80)}`);
+    }
   }
 });
 

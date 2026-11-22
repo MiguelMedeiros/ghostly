@@ -30,7 +30,7 @@ Media transport is negotiated for its actual properties, not assumed to work bec
 
 ## Compatibility, privacy and open decisions
 
-The implemented profile depends conditionally on 101. Other media adapters, group calls, SFU topology, congestion policy and end-to-end media encryption through a forwarding service require separate validation within this draft/900. Do not equate group transport encryption to end-to-end encryption against the forwarding node. No group media guarantee is made here.
+The implemented profile depends conditionally on 101. Group calls through a forwarding node, and their end-to-end encryption, are [602](602-group-calls.md); other media adapters, SFU topology and congestion policy require separate validation. Do not equate group transport encryption to end-to-end encryption against the forwarding node. No group media guarantee is made here.
 
 ## Conformance
 
