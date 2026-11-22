@@ -34,12 +34,13 @@ async function setup() {
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
   let contactState: PairingState = { status: "connecting" };
+  const frames: Record<string, unknown>[] = [];
   const contact = new GhostLink({
-    params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
+    params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: true,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
-    events: { onPairingState: state => { contactState = state; }, onMessage: () => {} },
+    events: { onPairingState: state => { contactState = state; }, onMessage: () => {}, onFilesFrame: frame => { frames.push(frame); } },
   });
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));
   cleanup.push(async () => { await contact.stop(false); await node.shutdown(); await db.deleteLink(id); });
@@ -53,7 +54,7 @@ async function setup() {
   /** Waits for a text the contact sent after the frames under test: those came before it, on the same session. */
   const after = async (text: string) => vi.waitFor(async () => expect((await messages()).find(m => m.text === text)).toBeDefined());
   const hold = (node as unknown as { hold: { host: HoldHost } }).hold.host;
-  return { id, contact, hold, messages, after };
+  return { id, contact, hold, messages, after, frames };
 }
 
 describe("a contact's message under the wire id of one of mine", () => {
@@ -72,6 +73,20 @@ describe("a contact's message under the wire id of one of mine", () => {
     expect(rows.map(m => m.id).filter(id => id.startsWith("peer_"))).toEqual([`peer_${"d".repeat(22)}`]);
     expect(rows.find(m => m.text === "done")?.replyTo).toMatchObject({ messageId: `me_${live}`, from: "me", snippet: "mine a" });
     expect(refused).not.toBeNull();
+    expect((await fileStore.listForLink(t.id)).filter(f => f.direction === "in")).toEqual([]);
+  });
+
+  it("offered as a file over the open session, is refused, and a quote of that id still shows mine", async () => {
+    const t = await setup();
+    const mine = "c".repeat(22);
+    await db.putMessage({ linkId: t.id, id: `me_${mine}`, wireId: mine, text: "mine c", sender: "me", timestamp: 1_790_000_000_001, via: "datalink" });
+    expect(t.contact.sendFilesFrame({ t: "pf-offer", id: mine, name: "theirs.txt", mime: "text/plain", size: 2, ts: 1_790_000_000_010 })).toBe(true);
+    expect(await t.contact.sendMessage("done", 1_790_000_000_011, "e".repeat(22), undefined, { i: mine, s: "mine c", f: "recipient" })).toBeNull();
+    await t.after("done");
+    const rows = await t.messages();
+    expect(rows.map(m => m.id).filter(id => id.startsWith("peer_"))).toEqual([`peer_${"e".repeat(22)}`]);
+    expect(rows.find(m => m.text === "done")?.replyTo).toMatchObject({ messageId: `me_${mine}`, from: "me", snippet: "mine c" });
+    await vi.waitFor(() => expect(t.frames.find(f => f.t === "pf-refuse" && f.id === mine)).toBeDefined());
     expect((await fileStore.listForLink(t.id)).filter(f => f.direction === "in")).toEqual([]);
   });
 });

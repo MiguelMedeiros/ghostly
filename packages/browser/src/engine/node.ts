@@ -1185,6 +1185,7 @@ export class GhostlyNode implements EngineImplementation {
     wireIds: (linkId) => this.links.get(linkId)?.files.wireIds,
     deleted: (linkId, messageId) => !!this.links.get(linkId)?.stored.deletedIds?.includes(messageId),
     messageExists: (linkId, messageId) => db.hasMessage(linkId, messageId),
+    namesMine: (linkId, wireId) => this.namesMine(linkId, wireId),
     storeMessage: (message) => this.storeMessage(message),
     patchMessage: async (linkId, messageId, change) => { if (await db.patchMessage(linkId, messageId, change)) await this.messagesChanged(linkId, [messageId]); },
     place: (linkId) => {
@@ -10915,7 +10916,8 @@ export class GhostlyNode implements EngineImplementation {
     // Whether it may be the chat's joined line, decided before anything is awaited: rows are taken in the order they come.
     const first = live ? this.firstContactRow(live, message) : false;
     // A paired contact knows my wire ids, and what names one (a pin, a quote, a reaction) looks for their row first: a
-    // text of theirs under one is never stored, as a removal naming one does nothing (`namesMine`). Files: as they come.
+    // text of theirs under one is never stored, as a removal naming one does nothing (`namesMine`). Files: by their offer
+    // (`FileDesk.weigh`), the hold (`receiveFile`) and the DHT floor (`fileAnnounced`).
     const mine = live?.stored.profile && !live.stored.group && message.sender === "peer" && !message.file && message.id.startsWith("peer_")
       ? this.namesMine(chat, message.id.slice("peer_".length)).catch(() => false) : false;
     // A reply's original, looked for in this chat only: one named from elsewhere is simply not found here.

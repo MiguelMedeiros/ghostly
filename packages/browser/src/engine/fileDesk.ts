@@ -39,6 +39,8 @@ export interface FileDeskDeps {
   deleted(linkId: string, messageId: string): boolean;
   /** A message the chat holds already (a new file must not take the id of the contact's text, say). */
   messageExists?(linkId: string, messageId: string): Promise<boolean>;
+  /** A wire id that names a message of mine in the chat (`GhostlyNode.namesMine`): a contact's file never takes it. */
+  namesMine?(linkId: string, wireId: string): Promise<boolean>;
   storeMessage(message: StoredMessage): Promise<void>;
   /** Changes a stored message in place (`db.patchMessage`); nothing happens to one that is not there. */
   patchMessage?(linkId: string, messageId: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<void>;
@@ -510,6 +512,7 @@ export class FileDesk {
     // Offered again, the file is this chat's already (its id is in use by it); new, its id must be new.
     if (!again && !said && used.has(file.id)) return { refuse: "invalid" };
     if (!again && !said && await this.deps.messageExists?.(linkId, `peer_${file.id}`)) return { refuse: "invalid" };
+    if (!again && !said && await this.deps.namesMine?.(linkId, file.id)) return { refuse: "invalid" };
     const room = await (await fileBytes()).room().catch(() => null);
     if (room !== null && file.size > room) return { refuse: "no-room", room };
     // Beside what the files already taken still need: one that fits only without them is asked about.
