@@ -100,7 +100,7 @@ export function DeleteProfileDialog({ entry, onClose }: { entry: ProfileEntry; o
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" onClick={onClose} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>
           <FocusSafeButton type="button" data-testid="delete-profile-go" disabled={busy || typed.trim() !== plain || (locked && (!lockPassword || waitSeconds > 0))} onClick={() => void run(async () => { await deleteProfile(entry.id, lockPassword); onClose(); })}
-            className={`${button} bg-danger-fill text-white font-semibold`}>{busy ? t("profile.delete.deleting") : t("common.delete")}</FocusSafeButton>
+            className={`${button} bg-danger-fill text-white font-semibold forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText]`}>{busy ? t("profile.delete.deleting") : t("common.delete")}</FocusSafeButton>
         </div>
       </div>
     </div>

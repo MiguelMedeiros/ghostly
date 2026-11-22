@@ -144,7 +144,8 @@ ghostly listen --turns --from alice --group <group id> --cursor ~/.ghostly/agent
 - `--exec '<command>'` runs once per turn, in order, with the turn on **stdin** (never in its arguments). It gets
   `GHOSTLY_PROFILE` and `GHOSTLY_HOME` of the listen (`--profile` and `--home` too), so the hook's `ghostly send`
   answers from the same profile. Or
-  `--webhook http://127.0.0.1:<port>/…` POSTs each turn to a local bridge (loopback only).
+  `--webhook http://127.0.0.1:<port>` POSTs each turn to a local bridge (loopback only); a URL with the bridge's
+  token in its path or query goes in `GHOSTLY_WEBHOOK` instead, which `ps` does not show.
 - `--cursor <file>` remembers the last event handled, so a restarted listener resumes where it stopped. Dedupe on `id`.
   A `--webhook` bridge that is down holds the stream until it is back (nothing is lost); an `--exec` that exits
   non-zero, or a 4xx from the bridge, passes its event.
