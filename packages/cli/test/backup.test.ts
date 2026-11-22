@@ -315,9 +315,9 @@ it("a backup from a passphrase with more than one line says on stderr that every
   const made = await ghostly(["--home", dir, "profile", "backup", "--out", out, "--passphrase-file", file], { env: NO_PASS });
   expect(ok(made)).toMatchObject({ path: out, protection: "passphrase" });
   expect(made.stderr).toContain(`ghostly: the passphrase file ${file} has 2 lines; all 2 are the passphrase. A restore needs all of them. Use a one-line file (e.g. pass show x | head -1).\n`);
-  // Made as before: both lines open it, the first alone does not (`--copy`: the backup is of this home's own profile).
-  expect(ok(await ghostly(["--home", dir, "profile", "restore", out, "copy", "--copy", "--passphrase-file", file], { env: NO_PASS }))).toMatchObject({ restored: "copy" });
-  expect(error(await ghostly(["--home", dir, "profile", "restore", out, "first-line", "--copy"], { env: PASS }), "refused", 1).message).toMatch(/^Wrong passphrase/);
+  // Made as before: both lines open it, the first alone does not.
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", out, "copy", "--passphrase-file", file], { env: NO_PASS }))).toMatchObject({ restored: "copy" });
+  expect(error(await ghostly(["--home", dir, "profile", "restore", out, "first-line"], { env: PASS }), "refused", 1).message).toMatch(/^Wrong passphrase/);
   // Stdin with CRLF lines, and the environment.
   const piped = await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "piped.ghostly-backup"), "--passphrase-file", "-"], { env: NO_PASS, input: `${pass}\r\nline two\r\nline three\r\n` });
   ok(piped);
