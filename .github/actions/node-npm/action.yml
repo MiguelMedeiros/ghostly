@@ -1,0 +1,36 @@
+name: Node.js and dev's npm cache
+description: >-
+  Node.js, and the npm cache dev saved for the lock file (or for an older one), restored but never saved. Run before
+  npm ci.
+
+# setup-node's own `cache: "npm"` saves the cache whenever its key misses, in any run. A pull request can restore dev's
+# entries but not another pull request's, so after each lock file change every pull request saved its own copy (about
+# 350 MB on ARM64, 235 MB on x64, 206 MB on macOS): 6.5 GB of the repository's 10 GB cache, which GitHub empties by last
+# use, so dev's costly Cargo caches went first. Only ci.yml's npm-cache job saves this, on a push to dev, under the
+# exact key and path below. On a miss the newest entry for an older lock file is restored: npm ci fetches only what
+# changed.
+inputs:
+  node-version:
+    description: The Node.js version
+    required: false
+    default: "22"
+  lock:
+    description: The lock file npm ci installs from, from the repository's root
+    required: false
+    default: package-lock.json
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        package-manager-cache: false
+
+    - name: Restore the npm cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.npm
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.lock }}-${{ hashFiles(inputs.lock) }}
+        restore-keys: |
+          npm-${{ runner.os }}-${{ runner.arch }}-${{ inputs.lock }}-

@@ -583,6 +583,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The faucet did not pay: empty", `${BROWSER}/engine/paymentAdapters/testCoins.ts`, "The faucet did not pay: "],
   ["This signature was made by another key (0123ABCD), not the public key given.", `${BROWSER}/proofs/openpgp.ts`, "This signature was made by another key ("],
   ["That signature was made by SHA256:abc, not the key you entered (SHA256:def)", `${BROWSER}/proofs/providers/ssh.ts`, ", not the key you entered ("],
+  ["The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again", `${BROWSER}/proofs/providers/ssh.ts`],
   ["No Ghostly TXT record at _ghostly.example.com (DNS changes can take a few minutes)", `${BROWSER}/proofs/domain.ts`, "No Ghostly TXT record at ${"],
   ["https://example.com/.well-known/ghostly.json was not found", `${BROWSER}/proofs/domain.ts`, " was not found`"],
   ["https://example.com/.well-known/ghostly/ab12.json was not found: it was deleted, or not uploaded yet", `${BROWSER}/proofs/providers/did.ts`, " was not found: it was deleted, or not uploaded yet"],
@@ -1082,7 +1083,7 @@ describe("errors in the app's language", () => {
   it("the \"Error: \" String(error) adds on the way through the extension goes, and an unknown message stays as it came", () => {
     expect(rawError("Error: The Ghostly peer did not start. Reopen the extension to retry.")).toBe("The Ghostly peer did not start. Reopen the extension to retry.");
     expect(errorText(new Error("Error: Ghostly needs your permission to reach that local address"), translators.pt))
-      .toBe("O Ghostly precisa da sua permissão para acessar esse endereço local");
+      .toBe("O Ghostly precisa da sua permissão para acessar esse endereço local. Tente de novo e escolha Permitir quando for perguntado.");
     expect(errorText(new Error("Relay said: rate limited"), translators.pt)).toBe("Relay said: rate limited");
     expect(errorText("plain", translators.fr)).toBe("plain");
     expect(errorText(42, translators.fr)).toBe("42");
@@ -1119,6 +1120,14 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
       expect(`${parts!.title} ${parts!.next ?? ""}`).not.toContain("{{");
     }
     expect(errorText("Could not reach mint.example.com. Check the address: it should be a Cashu mint.", english)).toBe("Can't reach mint.example.com. Check the address: it should be a Cashu mint.");
+  });
+
+  it("ecash of a unit that is not one is said without it, in the language; a unit that is one is named", () => {
+    expect(problemLine("This ecash is in another unit: only sat ecash can be redeemed here", translators.pt)).toBe("Este ecash está em outra unidade: aqui só dá para resgatar ecash em sat");
+    expect(problemLine("This ecash is in usd: only sat ecash can be redeemed here", translators.pt)).toBe("Este ecash está em usd: aqui só dá para resgatar ecash em sat");
+    // Contact text in the unit's place is never put inside the app's translated line.
+    const crafted = "This ecash is in sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example: only sat ecash can be redeemed here";
+    expect(problemLine(crafted, translators.pt)).not.toContain("Este ecash está em");
   });
 
   it("a reviewed payment's refusals and outcomes are said in the language too", () => {

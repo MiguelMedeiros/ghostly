@@ -2,7 +2,8 @@ import { useId } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { fillNames } from "../../lib/fillNodes";
 import { isolate } from "../../lib/ownStatus";
-import { BADGE_LIMITS, contactBadges, isGood, takeBadges, useReceived } from "./contactBadges";
+import { BADGE_LIMITS, contactBadges, isGood, marksText, takeBadges, useReceived } from "./contactBadges";
+import { providerLabel } from "../../lib/identities";
 import { BadgeMark } from "./BadgeMark";
 import { MenuItem } from "../Menu";
 import { GHOSTLY } from "./idCard";
@@ -38,7 +39,7 @@ export function ContactMarks({ peerKey, testId = "contact-marks" }: { peerKey: s
   const { tip, handlers, swallow } = useMarkTip(key => loadShownProfiles(pick(key)));
   if (!badges.length) return null;
   const { shown, more } = takeBadges(badges, BADGE_LIMITS.row);
-  const label = t("identities.badge.listLabel", { list: badges.map(b => b.label).join("; ") });
+  const label = t("identities.badge.listLabel", { list: marksText(badges, t) });
   const inTip = tip ? pick(tip.key) : [];
   return (
     <>
@@ -74,7 +75,7 @@ export function IdentityStack({ peerKey, name, onOpen, open, footer }: { peerKey
   const pick = (key: string) => (key === ALL_MARKS ? badges : badges.filter(b => b.id === key));
   // A mark named on screen is a card on screen: its public profile's name comes into the card once read.
   const { tip, handlers, swallow } = useMarkTip(key => loadShownProfiles(pick(key)));
-  const label = ghostly ?? badges.map(b => b.label).join("; ");
+  const label = ghostly ?? marksText(badges, t);
   // Worked out on every render, so a profile read while the card is open shows itself there.
   const inTip = tip && !ghostly ? pick(tip.key) : [];
   return (
@@ -121,7 +122,7 @@ export function FaceCorner({ face }: { face: ContactFace }) {
   const { t } = useI18n();
   const icon = providerIcon(face.provider, face.subject);
   return (
-    <span role="img" aria-label={t("identities.face.profileOf", { provider: face.providerName })} data-testid="contact-face-corner" data-provider={face.provider}
+    <span role="img" aria-label={t("identities.face.profileOf", { provider: providerLabel(face.provider, t) })} data-testid="contact-face-corner" data-provider={face.provider}
       className={`face-corner forced-color-adjust-none ${icon?.tile ?? "badge-mark-plain"}`}>{icon?.mark(10)}</span>
   );
 }

@@ -432,7 +432,7 @@ describe("viewer tabs", () => {
     expect(reply).toEqual({ ok: false, error: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
-    expect(world.session.size).toBe(0);
+    expect([...world.session.keys()].filter((key) => key.startsWith("viewer:"))).toEqual([]);
     // A page that says anything but true counts as off.
     const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
     expect(world.tabs.get(shown)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
@@ -668,7 +668,7 @@ describe("viewer tabs", () => {
     const { default: ar } = await import("../../ui/src/locales/ar/services.json");
     // Arabic's chunk transformed once here, so the peer's own `loadLocale` is not slower than `pauseRequest` waits.
     await import("../../ui/src/locales/ar/index.ts");
-    const named = (text: string) => text.replace("{{app}}", "&#60;b&#62;Atlas&#60;/b&#62;");
+    const named = (text: string) => text.replace("{{app}}", "⁨&#60;b&#62;Atlas&#60;/b&#62;⁩");
 
     // The contact's machine answered in place of their app, which is not running there (docs/PROTOCOL.md "Host errors").
     engineControl().respond = async () =>
@@ -691,7 +691,7 @@ describe("viewer tabs", () => {
       okResponse("This peer does not share that service.\n", 404, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unknown-service"]]);
     const gone = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
     expect(gone.params).toMatchObject({ responseCode: 404 });
-    expect(bodyText(gone.params)).toContain(">Atlas is no longer shared with you.<");
+    expect(bodyText(gone.params)).toContain(">⁨Atlas⁩ is no longer shared with you.<");
   });
 
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {

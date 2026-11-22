@@ -378,3 +378,42 @@ for (const screen of [{ name: "a small phone", width: 667, height: 375, keyboard
     }
   });
 }
+
+test("a small phone on its side with the keyboard up, offline: a reply leaves the message field above the keyboard", { tag: ["@feature:app.mobile-layout", "@feature:app.pwa.offline", "@feature:chat.replies"] }, async ({ peer }) => {
+  // The offline line under the header and the reply bar between it and the field: the list was 0px tall and the
+  // field's bottom 6px under the keyboard (89-181 of 175 visible at 667×375).
+  const screen = { width: 667, height: 375, keyboard: 200 };
+  const visible = screen.height - screen.keyboard;
+  const [alice, bob] = await Promise.all([peer("side-offline-a"), peer("side-offline-b", { mobile: true, viewport: { width: screen.width, height: screen.height } })]);
+  await pair(alice, bob);
+  for (let i = 0; i < 3; i++) { await say(alice, `From alice ${i}`); await say(bob, `From bob ${i}`); }
+  const page = bob.page;
+  const row = (text: string) => page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: text }).last();
+  await expect(row("From alice 2")).toBeVisible();
+  await iosKeyboard(page);
+  await expect(row("From alice 2")).toBeVisible();
+  const input = page.getByPlaceholder("Message…");
+  const banner = page.getByTestId("chat-offline-banner");
+  const fits = async () => { const box = (await page.locator("[data-composer]").boundingBox())!; return box.y + box.height <= visible + 1; };
+
+  await page.context().setOffline(true);
+  try {
+    await expect(banner).toBeVisible();
+    await row("From alice 2").hover();
+    await row("From alice 2").getByTestId("message-options").click({ force: true });
+    await page.getByTestId("message-reply").click();
+    await input.focus();
+    await keyboard(page, screen.keyboard);
+    await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+    await expect.poll(fits).toBe(true);
+    // The offline line waits behind the keyboard, as the pinned bar does, and the list keeps some room.
+    await expect(banner).toBeHidden();
+    expect((await page.locator(".chat-wallpaper").boundingBox())!.height).toBeGreaterThan(0);
+    // Keyboard down: it says so again.
+    await keyboard(page, 0);
+    await input.blur();
+    await expect(banner).toBeVisible();
+  } finally {
+    await page.context().setOffline(false);
+  }
+});

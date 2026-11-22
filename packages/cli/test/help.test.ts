@@ -163,6 +163,11 @@ describe("help", () => {
       [["message", "pin", "bob", "m1"], "Unknown command: message pin (ghostly pin <chat> <message>; ghostly help pin)"],
       [["message", "forward", "bob", "m1"], "Unknown command: message forward (ghostly forward <chat> <message> --to <chat>; ghostly help forward)"],
       [["help", "unpin"], "Unknown command: unpin (ghostly pin <chat> --remove; ghostly help pin)"],
+      // Before: `group pin`, `group unpin` and `group members` answered only the group's own list.
+      [["group", "pin", "Tea", "m1"], "Unknown command: group pin (ghostly pin <group> <message>; ghostly help pin)"],
+      [["group", "unpin", "Tea"], "Unknown command: group unpin (ghostly pin <group> --remove; ghostly help pin)"],
+      [["group", "members", "Tea"], "Unknown command: group members (ghostly group show <group>; ghostly help group show)"],
+      [["help", "group", "members"], "Unknown command: group members (ghostly group show <group>; ghostly help group show)"],
       [["search", "hi"], "Unknown command: search (the CLI has no search yet: ghostly chat history <chat> --limit n | jq …; ghostly help chat history)"],
       [["chat", "search", "bob", "hi"], "Unknown command: chat search (the CLI has no search yet: ghostly chat history <chat> --limit n | jq …; ghostly help chat history)"],
     ] as const) {

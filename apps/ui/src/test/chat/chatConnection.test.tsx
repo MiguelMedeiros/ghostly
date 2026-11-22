@@ -5,6 +5,7 @@ import { ChatConnection } from "../../components/ChatConnection";
 import { SAID_QUIET_MS } from "../../hooks/useSaidSettled";
 import { connectionSummary, liveAttemptText, transportLineDetails, transportLineText, transportOptions, type TransportEntry, transportEventText, transportWaitText, type TransportEvent } from "../../lib/transportEvents";
 import { linkView, type StatePatch } from "../fakeEngine";
+import { plainSpaces } from "../timeSpaces";
 import { renderApp } from "../render";
 import { clockOffAmount } from "../../lib/clockOff";
 import { NetworkSettings } from "../../components/NetworkSettings";
@@ -805,8 +806,8 @@ describe("ChatConnection: how contacts are found", () => {
     const block = screen.getByTestId("connection-discovery");
     expect(screen.getByTestId("connection-details")).toContainElement(block);
     expect(screen.getByTestId("connection-discovery-path")).toHaveTextContent("DHT direct");
-    const time = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    expect(within(block).getAllByTestId("connection-relay").map(r => [r.dataset.state, r.textContent, r.title])).toEqual([
+    const time = plainSpaces(new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+    expect(within(block).getAllByTestId("connection-relay").map(r => [r.dataset.state, plainSpaces(r.textContent!), r.title])).toEqual([
       ["ok", "pkarr.pubky.org ok", ""],
       ["throttled", `pkarr.pubky.app throttled until ${time}`, "rate limited (429)"],
       ["failing", `relay.pkarr.org failing until ${time}`, "no answer"],

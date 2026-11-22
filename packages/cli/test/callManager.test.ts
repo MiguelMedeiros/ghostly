@@ -39,7 +39,7 @@ type IceServers = { urls: string; username?: string; credential?: string }[];
 /** `builds`: the engine states the side's manager built whole (`getState`, a view of every chat). */
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView>; builds: number }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; relayOnlyB?: boolean; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number; otherChatB?: boolean } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; relayOnlyB?: boolean; earlyAnswerMs?: number; callPaceMs?: number; quickRedialMs?: number; otherChatB?: boolean; checkingRedialMs?: number } = {}): { a: Side; b: Side } {
   // Each side's clock: the same one unless `nowB` gives the second side its own.
   const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
@@ -60,7 +60,7 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () 
       getState: () => { me.builds++; return state(); },
     };
   };
-  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs, quickRedialMs: stacks.quickRedialMs });
+  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs, quickRedialMs: stacks.quickRedialMs, checkingRedialMs: stacks.checkingRedialMs });
   b.calls = new CallManager({ engine: engine(b, () => a, nowA, stacks.iceServersB, stacks.relayOnlyB, stacks.otherChatB ? [other] : []), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.b, now: stacks.nowB ?? stacks.now, maxRedials: stacks.maxRedials, earlyAnswerMs: stacks.earlyAnswerMs, quickRedialMs: stacks.quickRedialMs });
   return { a, b };
 }
@@ -128,6 +128,38 @@ function refusingStack(refuse: number, ending: "throws" | "fails" = "throws"): (
     return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
   };
   return Object.assign(stack, { refused: () => refused });
+}
+
+/**
+ * The real media stack, but the first `stuck` connections whose answer goes in never connect and say nothing more: as
+ * ICE that stays "checking" because none of the contact's checks arrive (a macOS runner's WKWebView, whose host
+ * address is an mDNS name this side does not look up). The answer is taken and the connection closed unheard.
+ */
+function stuckStack(stuck: number): (() => Promise<CallStack | string>) & { stuck: () => number } {
+  let count = 0;
+  const stack = async () => {
+    const real = await loadCallStack();
+    if (typeof real === "string") return real;
+    const Real = real.ndc.PeerConnection;
+    function PeerConnection(...args: ConstructorParameters<typeof Real>) {
+      const pc = new Real(...args);
+      const apply = pc.setRemoteDescription.bind(pc);
+      const listen = pc.onStateChange.bind(pc);
+      let silent = false;
+      Object.defineProperty(pc, "setRemoteDescription", {
+        value: (sdp: string, type: Parameters<typeof apply>[1]) => {
+          if (type !== "answer" || count >= stuck) return apply(sdp, type);
+          count++;
+          silent = true;
+          pc.close();
+        },
+      });
+      Object.defineProperty(pc, "onStateChange", { value: (cb: Parameters<typeof listen>[0]) => listen((state) => { if (!silent) cb(state); }) });
+      return pc;
+    }
+    return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
+  };
+  return Object.assign(stack, { stuck: () => count });
 }
 
 /**
@@ -342,6 +374,9 @@ describe("the audio socket", () => {
     const socket = await AudioSocket.open(path, 48000, { onAudio: () => {} });
     expect(statSync(join(path, "..")).mode & 0o777).toBe(0o700);
     await socket.close();
+    // Its folder goes with its last socket; a shared one made in its place is refused.
+    expect(existsSync(join(path, ".."))).toBe(false);
+    mkdirSync(join(path, ".."), { mode: 0o755 });
     chmodSync(join(path, ".."), 0o755);
     await expect(AudioSocket.open(path, 48000, { onAudio: () => {} })).rejects.toThrow(/not a folder of this user's alone/);
     rmSync(join(path, ".."), { recursive: true, force: true });
@@ -519,6 +554,21 @@ describe("a call to a contact who is away", () => {
         details: { chat: "chat-ab" },
       });
     }
+  });
+
+  // Found in a bug hunt: a chat on DHT only (either side's choice) said the contact's app was not connected, with a
+  // `chat wait --until live` that waited 60 s and failed, where `chat connect` names whose choice it is.
+  it("on a chat on DHT only, says whose choice it is instead of a wait that never ends", async () => {
+    const dht = (fields: Partial<LinkView>) => ({ id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Calls need a live connection", ...fields }) as unknown as LinkView;
+    const start = (link: LinkView) => new CallManager({ engine: engineOf(() => ({ links: [link] }) as unknown as EngineState), emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {});
+    await expect(start(dht({ deliveryMode: "dht" }))).rejects.toMatchObject({
+      code: "unavailable", details: { chat: "chat-ab", reason: "dht-only" },
+      message: "Calls need a live connection. This chat is on DHT only on this side: choose a live method first (chat transport auto)",
+    });
+    await expect(start(dht({ dhtDelivery: { peerMode: "dht" } } as Partial<LinkView>))).rejects.toMatchObject({
+      code: "unavailable", details: { chat: "chat-ab", reason: "peer-dht-only" },
+      message: "Calls need a live connection. Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT",
+    });
   });
 
   it("keeps the engine's own words for a chat that cannot call for another reason", async () => {
@@ -1707,6 +1757,29 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("an answered call still not connected a while after its answer offers again: it connects on the new connection, on the same sockets", async () => {
+    // CI run 44619228595: the bot's ICE said "checking" for 23 s after the Mac app's answer, the app waited 8 s for a
+    // newer offer (RESTART_GRACE_MS), none came, and it hung up.
+    const stack = stuckStack(1);
+    const { a, b } = pairOfManagers({ a: stack, checkingRedialMs: 1000 });
+    b.calls.setAuto({ on: true });
+    const placed = await a.calls.start("chat-ab", {}) as { call: string; audio: { socket: string } };
+    await Promise.all([
+      until(() => a.events.find((e) => e.type === "call.connected")),
+      until(() => b.events.find((e) => e.type === "call.connected")),
+    ]).catch(diagnose(a, b));
+    expect(stack.stuck()).toBe(1);
+    expect(signalsOf(a, "o")).toHaveLength(2);
+    expect(signalsOf(b, "a")).toHaveLength(2);
+    expect(signalsOf(a, "h")).toHaveLength(0);
+    expect(signalsOf(b, "h")).toHaveLength(0);
+    expect(a.events.map((e) => e.type)).toEqual(["call.outgoing", "call.connected"]);
+    expect(b.events.map((e) => e.type)).toEqual(["call.incoming", "call.connected"]);
+    expect(a.calls.list()).toMatchObject([{ call: placed.call, state: "connected", audio: { socket: placed.audio.socket } }]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("answers refused past the last start-over end the call as failed, and the contact is told", async () => {
     // The first offer and MAX_REDIALS more, each answer refused.
     const { a, b } = pairOfManagers({ a: refusingStack(MAX_REDIALS + 1) });
@@ -1753,7 +1826,15 @@ describe("auto-answer from the chats named", () => {
 
   it("takes a chat by its id, its contact's key or this side's label", () => {
     const calls = manager();
-    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-mallory", "chat-real-alice"]);
+    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-real-alice"]);
+  });
+
+  it("keeps each chat once", () => {
+    // Found in a bug hunt: 50,000 refs from a script were each resolved (8 s of the daemon's thread) and all kept in
+    // calls.json (900 KB), read again on each incoming call.
+    const calls = manager();
+    expect(calls.setAuto({ on: true, from: Array(50_000).fill("chat-mallory") }).from).toEqual(["chat-mallory"]);
+    expect(JSON.parse(readFileSync(saved(calls), "utf8")).autoAnswer.from).toEqual(["chat-mallory"]);
   });
 
   it("refuses a chat named only by its contact's own name or a prefix of its id, and keeps nothing", () => {
@@ -1773,6 +1854,13 @@ describe("auto-answer from the chats named", () => {
     calls.forgetChat("chat-real-alice");
     expect(calls.getAuto()).toEqual({ on: false, from: [], rate: 48000 });
     expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: false, from: [], rate: 48000 } });
+  });
+
+  it("answers at 48000 when turned on again without --rate, whatever rate it had before", () => {
+    const calls = manager();
+    calls.setAuto({ on: true, rate: 16000 });
+    expect(calls.setAuto({ on: true, from: ["alice"] })).toEqual({ on: true, from: ["chat-real-alice"], rate: 48000 });
+    expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: true, from: ["chat-real-alice"], rate: 48000 } });
   });
 
   it("leaves auto-answer from anyone on when a chat is removed", () => {

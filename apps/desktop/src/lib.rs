@@ -47,6 +47,7 @@ mod linked_files;
 mod lnd;
 mod local_access;
 mod local_fetch;
+mod local_names;
 mod microphone;
 // Android and iOS: the Desktop-only modules' commands, refusing (`commands!` is one list for every platform).
 #[cfg(mobile)]
@@ -151,6 +152,7 @@ macro_rules! commands {
             commands::generate_enc_key,
             commands::get_profile,
             commands::get_public_key,
+            commands::group_call_fetch,
             commands::hide_from_switcher,
             commands::hold_fetch,
             commands::link_preview_fetch,
@@ -410,6 +412,7 @@ pub fn run() {
             let files = file_store::FileStore::new(app.path().app_data_dir()?.join("files"));
             files.keep_private();
             files.remove_staged_saves();
+            files.remove_unfinished_saves();
             app.manage(files);
             // A video's Full screen button works in the Ghostly window (WKWebView has it off, WebView2 fills only
             // the webview).
@@ -691,8 +694,8 @@ fn exit_on_signals(quit: impl FnOnce() + Send + 'static) {
 ///   through.
 /// - Every exit, those or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
 ///   from `applicationWillTerminate`): a call's hang-up the page left is said, the native connections close, so each
-///   contact sees its close (`leave`), and on Linux the app's notifications go from the desktop's list
-///   (`notifications::exit`).
+///   contact sees its close (`leave`), on Linux the app's notifications go from the desktop's list
+///   (`notifications::exit`), and a save cut short leaves no partial copy (`FileStore::remove_unfinished_saves`).
 fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
     match event {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
@@ -710,6 +713,11 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => app_window::show_main(app),
         tauri::RunEvent::Exit => {
+            // A Save a copy still running ends with the app (its copy runs on a thread exit does not wait for): its
+            // hidden partial copy goes from the folder the person chose.
+            if let Some(files) = app.try_state::<file_store::FileStore>() {
+                files.remove_unfinished_saves();
+            }
             tauri::async_runtime::block_on(leave(app));
             notifications::exit();
             // Ghostly launched again while this app was leaving: that launch starts now, a window of its own.

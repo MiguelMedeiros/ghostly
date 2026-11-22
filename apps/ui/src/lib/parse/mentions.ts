@@ -7,8 +7,12 @@ import type { Atom, Detector } from "./types";
  * member's key. A bubble then shows each mention with the member's name as it is now.
  */
 
-/** A member the picker offers: `name` as the group shows them, `tag` a short piece of their key. */
-export interface MentionCandidate { key: string; name: string; tag: string }
+/**
+ * A member the picker offers: `name` as the group shows them, `tag` a short piece of their key, and `label` what their
+ * token says when it is not their name (one with no name yet goes by their key: the "Member" around it is the
+ * sender's language, and every reader shows their own).
+ */
+export interface MentionCandidate { key: string; name: string; tag: string; label?: string }
 /**
  * What the composer inserted: `@${label}` for `key` (`MENTION_EVERYONE` for everyone), at `at` (the UTF-16 index of its
  * "@" in the field, moved along as the text changes: `moveChosen`). Without `at`, every place the token stands is it.

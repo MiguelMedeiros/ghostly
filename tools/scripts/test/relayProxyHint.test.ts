@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { startRelay as startHyperdhtRelay } from "../../../infra/services/hyperdht-relay/relay.mjs";
-import { startRelay as startPushRelay } from "../../../infra/services/push-relay/relay.mjs";
+import { nearbyAddress, startRelay as startHyperdhtRelay } from "../../../infra/services/hyperdht-relay/relay.mjs";
+import { nearbyAddress as pushNearbyAddress, startRelay as startPushRelay } from "../../../infra/services/push-relay/relay.mjs";
 
 // covers: push.wake.send, transport.hyperdht-relay
 
@@ -57,9 +57,13 @@ describe("the relays' hint that proxy headers arrive untrusted (infra/services)"
   const missing = (header: string, setting: string) => `requests arrive without ${header} though ${setting} is set: each counts as the proxy, so have the proxy write it or leave the setting out`;
   // The header there with fewer entries than the setting (GHOSTLY_RELAY_PROXIES=2 behind one proxy): "without" would
   // send the operator to a proxy that does write it, and leaving the setting out would count every client as the proxy.
-  const fewer = (entries: number, proxies: number) => `requests carry ${entries} X-Forwarded-For ${entries === 1 ? "entry" : "entries"} though GHOSTLY_RELAY_PROXIES is ${proxies}: each counts as the proxy, so set it to the number of proxies that write the header`;
+  // A client writing the header itself could choose its address until then; from then on the relay reads no deeper.
+  const before = "until now a client writing the header itself could choose the address it counts as";
+  const fewer = (entries: number, proxies: number) => entries
+    ? `requests carry ${entries} X-Forwarded-For ${entries === 1 ? "entry" : "entries"} though GHOSTLY_RELAY_PROXIES is ${proxies}: ${before}; from now on each counts by entry ${entries} from the end, so set it to the number of proxies that write the header`
+    : `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set: ${before}; from now on the header is ignored and each counts as the proxy, so have the proxy write it or leave the setting out`;
 
-  it("the push relay told of a proxy says once per start that requests arrive without the X-Forwarded-For entry it counts by", async () => {
+  it("the push relay told of a proxy says each time a request arrives with fewer X-Forwarded-For entries than it reads", async () => {
     const run = async (proxies: number, sent: Record<string, string>[]) => {
       const lines: string[] = [];
       const relay = await startPushRelay({ proxies, log: (...words: unknown[]) => lines.push(words.join(" ")) });
@@ -70,15 +74,15 @@ describe("the relays' hint that proxy headers arrive untrusted (infra/services)"
       }
       return lines.filter((line) => line.startsWith("requests arrive") || line.includes("X-Forwarded-For entr"));
     };
-    expect(await run(1, [{}, {}, {}])).toEqual([missing("X-Forwarded-For", "GHOSTLY_RELAY_PROXIES")]);
-    // Fewer entries than proxies counts by the socket too, and the line says how many came.
-    expect(await run(2, [{ "X-Forwarded-For": "198.51.100.1" }, {}])).toEqual([fewer(1, 2)]);
-    expect(await run(3, [{ "X-Forwarded-For": "198.51.100.1, 203.0.113.9" }])).toEqual([fewer(2, 3)]);
+    expect(await run(1, [{}, {}, {}])).toEqual([fewer(0, 1)]);
+    // Fewer entries than proxies: the line says how many came, and again when fewer still come (at most `proxies` lines).
+    expect(await run(2, [{ "X-Forwarded-For": "198.51.100.1" }, { "X-Forwarded-For": "198.51.100.2" }, {}])).toEqual([fewer(1, 2), fewer(0, 2)]);
+    expect(await run(3, [{ "X-Forwarded-For": "198.51.100.1, 203.0.113.9" }, { "X-Forwarded-For": "198.51.100.2" }])).toEqual([fewer(2, 3), fewer(1, 3)]);
     expect(await run(1, [{ "X-Forwarded-For": "198.51.100.1" }, { "X-Forwarded-For": "198.51.100.2" }])).toEqual([]);
     expect(await run(0, [{}, {}])).toEqual([]);
   });
 
-  it("the HyperDHT relay told of a proxy or Cloudflare says once per start that requests arrive without the header it counts by", async () => {
+  it("the HyperDHT relay told of a proxy or Cloudflare says when requests arrive without the header it counts by", async () => {
     const run = async (options: Record<string, unknown>, headers: Record<string, string>[]) => {
       const lines: string[] = [];
       const relay = await startHyperdhtRelay({ testnet: 3, ...options, log: (...words: unknown[]) => lines.push(words.join(" ")) });
@@ -99,12 +103,68 @@ describe("the relays' hint that proxy headers arrive untrusted (infra/services)"
       }
       return lines.filter((line) => line.startsWith("requests arrive") || line.includes("X-Forwarded-For entr"));
     };
-    expect(await run({ proxies: 1 }, [{}, {}])).toEqual([missing("X-Forwarded-For", "GHOSTLY_RELAY_PROXIES")]);
-    expect(await run({ proxies: 2 }, [{ "x-forwarded-for": "198.51.100.1" }, {}])).toEqual([fewer(1, 2)]);
+    expect(await run({ proxies: 1 }, [{}, {}])).toEqual([fewer(0, 1)]);
+    expect(await run({ proxies: 2 }, [{ "x-forwarded-for": "198.51.100.1" }, { "x-forwarded-for": "198.51.100.2" }])).toEqual([fewer(1, 2)]);
     expect(await run({ cloudflare: true }, [{}, { "x-forwarded-for": "198.51.100.1" }])).toEqual([missing("CF-Connecting-IP", "GHOSTLY_RELAY_CLOUDFLARE")]);
     // Cloudflare's header missing but the proxies' entry there: the client still counts by its own address.
     expect(await run({ cloudflare: true, proxies: 1 }, [{ "x-forwarded-for": "198.51.100.1" }])).toEqual([]);
     expect(await run({ proxies: 1 }, [{ "x-forwarded-for": "198.51.100.1" }])).toEqual([]);
     expect(await run({}, [{}, {}])).toEqual([]);
   }, 60_000);
+
+  // A proxy that writes no header and that the relay was not told about: every browser comes from the proxy's own
+  // loopback or private address, no header makes the hints above fire, and the 17th browser was refused with only
+  // `refused address` in the log.
+  const nearby = "clients refused at GHOSTLY_RELAY_CLIENTS_PER_ADDRESS (2) come from a loopback or private address: if they come through a proxy, have it write X-Forwarded-For and set GHOSTLY_RELAY_PROXIES (GHOSTLY_RELAY_CLOUDFLARE behind Cloudflare), or every client counts as the proxy";
+
+  it("the HyperDHT relay with no proxy setting says once that clients refused at one address's limit come from a loopback or private address", async () => {
+    const run = async (options: Record<string, unknown>, headers: Record<string, string>) => {
+      const lines: string[] = [];
+      const relay = await startHyperdhtRelay({ testnet: 3, ...options, limits: { clientsPerAddress: 2 }, log: (...words: unknown[]) => lines.push(words.join(" ")) });
+      const sockets: WebSocket[] = [];
+      const statuses: number[] = [];
+      try {
+        for (let i = 0; i < 5; i++) {
+          statuses.push(await new Promise<number>((resolve) => {
+            const ws = new WebSocket(relay.url, { headers });
+            sockets.push(ws);
+            ws.once("open", () => resolve(101));
+            ws.once("unexpected-response", (_request, response) => resolve(response.statusCode ?? 0));
+            ws.once("error", () => resolve(0));
+          }));
+        }
+      } finally {
+        for (const ws of sockets) ws.terminate();
+        await relay.close();
+      }
+      return { statuses, hints: lines.filter((line) => line.startsWith("clients refused")) };
+    };
+    expect(await run({}, {})).toEqual({ statuses: [101, 101, 429, 429, 429], hints: [nearby] });
+    // A header there: its own hint names the setting, this one stays quiet.
+    expect((await run({}, { "x-forwarded-for": "198.51.100.1" })).hints).toEqual([]);
+    // Told of a proxy: `requests arrive without` covers it.
+    expect((await run({ proxies: 1 }, {})).hints).toEqual([]);
+  }, 60_000);
+
+  it("the push relay with no proxy setting says once that requests refused at the rate come from a loopback or private address", async () => {
+    const run = async (proxies: number) => {
+      const lines: string[] = [];
+      const relay = await startPushRelay({ proxies, limits: { perMinute: 1 }, log: (...words: unknown[]) => lines.push(words.join(" ")) });
+      try {
+        for (let i = 0; i < 4; i++) await fetch(`http://127.0.0.1:${relay.port}/`, { method: "POST", headers: { Origin: "https://app.ghostly.tools" }, body: "{}" });
+      } finally {
+        await relay.close();
+      }
+      return lines.filter((line) => line.startsWith("requests refused"));
+    };
+    expect(await run(0)).toEqual(["requests refused at the rate of 1 a minute from one address come from a loopback or private address: if they come through a proxy, have it write X-Forwarded-For and set GHOSTLY_RELAY_PROXIES, or every client shares that rate"]);
+    expect(await run(1)).toEqual([]);
+  });
+
+  it("counts loopback, private and link-local addresses as nearby, and public ones not", () => {
+    for (const nearbyOf of [nearbyAddress, pushNearbyAddress]) {
+      for (const address of ["127.0.0.1", "::1", "::ffff:127.0.0.1", "10.1.2.3", "172.17.0.1", "192.168.1.20", "100.64.0.1", "fd12::1", "fe80::1"]) expect(nearbyOf(address), address).toBe(true);
+      for (const address of ["203.0.113.7", "8.8.8.8", "172.32.0.1", "2001:db8::1", "::ffff:198.51.100.1", "", undefined]) expect(nearbyOf(address), String(address)).toBe(false);
+    }
+  });
 });

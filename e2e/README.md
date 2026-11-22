@@ -49,6 +49,11 @@ the extension, runs the whole Playwright suite with every gate on, and removes t
 on Ctrl-C too. Safe to run twice in a row. It exits non-zero if either the contracts or the browsers failed, and
 prints how long each phase took.
 
+The container names are fixed, so one machine runs one stack at a time: while another checkout's stack runs, or
+something else holds one of its ports, `e2e:full` waits (up to 20 minutes, `e2e/infra/free.mjs`) rather than
+removing that stack or failing on "address already in use". If the room never comes, it ends `NOT RUN` with the
+reason, and leaves the other stack alone.
+
 To work on one suite, keep the environment up and run what you want against it:
 
 ```bash

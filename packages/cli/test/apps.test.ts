@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash, generateKeyPairSync } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -114,6 +115,19 @@ describe("app publish", () => {
     error(await ghostly(["app", "publish", dir, "--key", join(keys, "typo.pem")]), "not_found", 3);
     expect(existsSync(join(keys, "typo.pem"))).toBe(false);
     expect(readAppBundle(new Uint8Array(readFileSync(join(dir, "app.ghostlyapp"))))).toMatchObject({ ok: true, bundle: { manifest: { sequence: 2 } } });
+  }, 60_000);
+
+  it("publishes sources all on hosts no client reads from, and says clients find no update there", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    const elsewhere = appFolder({ ...manifest, sources: ["https://github.com/o/r/releases/download/v1/app.ghostlyapp"] }, files);
+    const published = await ghostly(["app", "publish", elsewhere, "--key", key]);
+    expect(ok(published)).toMatchObject({ sequence: 1 });
+    expect(published.stderr).toContain("no source a client reads from");
+    // One readable source is enough, and no sources at all says nothing.
+    const readable = appFolder({ ...manifest, sources: ["https://github.com/o/r/app.ghostlyapp", "https://raw.githubusercontent.com/o/r/HEAD/app.ghostlyapp"] }, files);
+    expect((await ghostly(["app", "publish", readable, "--key", key])).stderr).not.toContain("a client reads from");
+    expect((await ghostly(["app", "publish", appFolder(manifest, files), "--key", key])).stderr).not.toContain("a client reads from");
   }, 60_000);
 
   it("a bundle published into another --out never holds the one an earlier publish left in the folder", async () => {
@@ -274,6 +288,21 @@ describe("app publish", () => {
     expect(performance.now() - started).toBeLessThan(3_000);
     const leaky = appFolder(manifest, new Map([...files, ["fixtures/cut.pem", new TextEncoder().encode(cut + readFileSync(key, "utf8"))]]));
     await expect(publishApp(leaky, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "fixtures/cut.pem" } });
+  }, 60_000);
+
+  it("refuses a source with a query or fragment, where a private repository's link carries its token, and writes no bundle", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    for (const source of ["https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?token=GHSAT0SECRET", "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp#GHSAT0SECRET"]) {
+      const dir = appFolder({ ...manifest, sources: [source] }, files);
+      const refusal = error(await ghostly(["app", "publish", dir, "--key", key]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+      expect(refusal.details).toMatchObject({ reason: "private-link", detail: "sources" });
+      expect(refusal.message).toContain("https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?…");
+      expect(refusal.message).not.toContain("GHSAT0SECRET");
+      expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
+    }
+    // A homepage's query is no token: no client reads it.
+    expect(await publishApp(appFolder({ ...manifest, homepage: "https://ana.example/chess?ref=ghostly" }, files), key)).toMatchObject({ files: ["index.html"] });
   }, 60_000);
 
   it("lists a folder's files in the manifest's order when a file and a folder share a prefix", async () => {
@@ -572,6 +601,48 @@ describe("app verify", () => {
   }, 60_000);
 });
 
+describe("a file that is not a regular one, in a bundle's place or its folder", () => {
+  // A device or a FIFO says size 0 and never ends: read, it held the command (and a daemon serving it) until killed.
+  const notFile = async (run: Promise<unknown>) => {
+    const refusal = await run.then(() => null, (e: unknown) => e);
+    expect(refusal).toBeInstanceOf(CliError);
+    expect((refusal as CliError).code).toBe("bad_request");
+    expect((refusal as CliError).message).toContain("is not a file");
+  };
+
+  it("refuses a bundle that links to a device or is a FIFO, unread", async () => {
+    if (process.platform === "win32") return;
+    const dir = tmp();
+    symlinkSync("/dev/zero", join(dir, "app.ghostlyapp"));
+    await notFile(verifyApp(join(dir, "app.ghostlyapp")));
+    execFileSync("mkfifo", [join(dir, "fifo.ghostlyapp")]);
+    await notFile(verifyApp(join(dir, "fifo.ghostlyapp")));
+  });
+
+  it("reads a ghostly-revoke.json beside a bundle that links to a device as no revocation", async () => {
+    if (process.platform === "win32") return;
+    const { vector } = chess();
+    const dir = tmp();
+    writeFileSync(join(dir, "app.ghostlyapp"), fromSegments(vector.bytes));
+    symlinkSync("/dev/zero", join(dir, "ghostly-revoke.json"));
+    expect(await verifyApp(join(dir, "app.ghostlyapp"))).toMatchObject({ valid: true, digest: vector.read.digest });
+  });
+
+  it("refuses to publish a folder whose ghostly-app.json or ghostly-revoke.json links to a device", async () => {
+    if (process.platform === "win32") return;
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    const revoke = appFolder(manifest, files);
+    symlinkSync("/dev/zero", join(revoke, "ghostly-revoke.json"));
+    await notFile(publishApp(revoke, key));
+    expect(existsSync(join(revoke, "app.ghostlyapp"))).toBe(false);
+    const source = appFolder(manifest, files);
+    rmSync(join(source, "ghostly-app.json"));
+    symlinkSync("/dev/zero", join(source, "ghostly-app.json"));
+    await notFile(publishApp(source, key));
+  });
+});
+
 describe("app verify <url>", () => {
   afterEach(() => { vi.unstubAllGlobals(); });
   const { vector } = chess();
@@ -679,7 +750,7 @@ describe("app verify <url>", () => {
   it("reads the ghostly-revoke.json beside each of the manifest's sources too, as a client does, each once", async () => {
     const { manifest, files } = chess();
     const head = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
-    const dir = appFolder({ ...manifest, sources: [head, `${head}?again=1`] }, files);
+    const dir = appFolder({ ...manifest, sources: [head, head.replace("app.ghostlyapp", "chess-2.ghostlyapp")] }, files);
     const key = vectorKey(tmp(), "publisher");
     ok(await ghostly(["app", "publish", dir, "--key", key]));
     ok(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--reason", "Leaked a test move list"]));
@@ -790,6 +861,19 @@ describe("store sign", () => {
     expect(signed).toMatchObject({ sequence: JSON.parse(vector.index).sequence, previous: null, keyCreated: false });
   }, 60_000);
 
+  it("refuses a listing's link with a query or fragment, where a private repository's link carries its token, and writes no index", async () => {
+    const dir = tmp();
+    const { key: _key, ...index } = JSON.parse(vector.index) as { key?: string; apps: { ref: string; urls: string[] }[] };
+    index.apps[0]!.urls = [...index.apps[0]!.urls, "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?token=GHSAT0SECRET"];
+    writeFileSync(join(dir, "index.json"), JSON.stringify(index));
+    const refusal = error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", vectorKey(tmp(), "store")]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+    expect(refusal.details).toMatchObject({ reason: "private-link", detail: "apps: urls" });
+    expect(refusal.message).toContain(`?… for ${index.apps[0]!.ref}`);
+    expect(refusal.message).not.toContain("GHSAT0SECRET");
+    expect(existsSync(join(dir, "ghostly-store.json"))).toBe(false);
+    expect(existsSync(join(dir, "ghostly-store.sig"))).toBe(false);
+  }, 60_000);
+
   it("never makes or reads a --key inside the folder it signs into, which is published, a symlinked name for it too", async () => {
     const dir = tmp();
     const { key: _key, ...index } = JSON.parse(vector.index) as Record<string, unknown>;
@@ -819,6 +903,19 @@ describe("store sign", () => {
     // Beside the index but outside --out: the index's folder is not published.
     ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", join(dir, "store.key"), "--out", join(tmp(), "site")]));
     expect(existsSync(join(dir, "store.key"))).toBe(true);
+  }, 60_000);
+
+  it("signs a listing with no URL on a host a client reads from, and says it cannot be installed", async () => {
+    const dir = tmp();
+    const index = JSON.parse(vector.index) as { apps: { ref: string; urls: string[] }[] };
+    const [chessListing] = index.apps;
+    writeFileSync(join(dir, "index.json"), JSON.stringify({ ...index, apps: [{ ...chessListing, urls: ["https://github.com/o/r/releases/download/v1/app.ghostlyapp"] }] }));
+    const signed = await ghostly(["store", "sign", join(dir, "index.json"), "--key", vectorKey(tmp(), "store")]);
+    expect(ok(signed)).toMatchObject({ apps: 1 });
+    expect(signed.stderr).toContain(`${chessListing.ref} has no URL a client reads from`);
+    // One readable URL among others is enough: no word.
+    writeFileSync(join(dir, "index.json"), vector.index);
+    expect((await ghostly(["store", "sign", join(dir, "index.json"), "--key", vectorKey(tmp(), "store"), "--out", tmp()])).stderr).not.toContain("a client reads from");
   }, 60_000);
 
   it("refuses a lower sequence, the same one with other content, another key and a publisher key", async () => {

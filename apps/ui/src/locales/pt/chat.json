@@ -61,15 +61,19 @@
       "sent": "Enviada. Sem confirmação ainda.",
       "sentGroup": "Enviada ao grupo. Grupos não têm confirmação.",
       "waiting": "Envia sozinha quando seu contato estiver online.",
+      "waitingBehind": "Envia sozinha depois das mensagens anteriores.",
       "waitingLiveContact": "Arquivos precisam de conexão direta. A conversa do seu contato está em Só DHT: o arquivo vai quando ele permitir de novo.",
-      "waitingLiveYou": "Arquivos precisam de conexão direta. Esta conversa está em Só DHT: mude no ícone de conexão."
+      "waitingLiveYou": "Arquivos precisam de conexão direta. Esta conversa está em Só DHT: mude no ícone de conexão.",
+      "waitingPaced": "Seu contato recebe um número limitado de mensagens por vez. Envia sozinha quando ele puder receber mais."
     },
     "offline": "Você está offline",
     "retry": "Não enviada. Enviar de novo",
     "sending": "Enviando",
     "sent": "Enviada",
     "waiting": "Aguardando seu contato ficar online",
-    "waitingLive": "Aguardando uma conexão direta"
+    "waitingBehind": "Aguardando as mensagens anteriores",
+    "waitingLive": "Aguardando uma conexão direta",
+    "waitingPaced": "Aguardando seu contato poder receber mais mensagens"
   },
   "disabledPlaceholder": "Mensagem…",
   "edit": {
@@ -154,6 +158,11 @@
     "busyDone": "Ocupado, tentando de novo em breve · {{done}} concluído",
     "busySize": "Ocupado, tentando de novo em breve · {{size}}",
     "cancelled": "Cancelado",
+    "comingCancel": "Cancelar {{file}}",
+    "comingList": "Arquivos ainda chegando ({{count}})",
+    "comingRow": "{{file}} de {{chat}}: faltam {{left}}",
+    "comingTitle": "Estes arquivos que você aceitou ainda estão chegando e ocupam o espaço. Cancele um para liberar espaço:",
+    "comingUnnamed": "Um arquivo",
     "damaged": "Chegou danificado · {{size}}",
     "daySpent": "Já compartilharam tudo o que podem hoje, vem de outro membro ou amanhã · {{size}}",
     "decline": "Recusar",
@@ -407,6 +416,7 @@
   "search": {
     "close": "Fechar busca",
     "count": "{{current}} de {{total}}",
+    "found": "{{position}}: {{name}}, {{text}}",
     "info": "Busca nas mensagens e nomes de arquivos guardados neste aparelho. Nada sai dele.",
     "newer": "Resultado mais novo (Shift+Enter)",
     "none": "Nenhum resultado",

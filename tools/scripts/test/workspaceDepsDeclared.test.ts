@@ -13,7 +13,10 @@ import { expect, it } from "vitest";
  * browser's code got, and nothing recorded it. The website's deps-used test checks the other way round.
  *
  * The shared UI in apps/ui is no workspace: every app builds its `src/` from the root, so the root's package.json is
- * its manifest. It imported highlight.js and hast through lowlight, the one the root declared.
+ * its manifest. It imported highlight.js and hast through lowlight, the one the root declared. The same goes for every
+ * other file with no package.json nearer than the root's, tests included (apps/ui's tests, e2e, tools): those imported
+ * fake-indexeddb, nostr-tools, hyperdht, ethers and more that only workspaces declared, and axe-core, which only came
+ * with the root's @axe-core/playwright.
  *
  * A workspace's tests and build config may also use what the root declares (vitest, vite, the testing libraries), but
  * not what only another package depends on: packages/cli's vite config resolved openpgp, which only packages/browser
@@ -45,7 +48,9 @@ const imports = (file: string, text: string) => {
       if (ts.isLiteralTypeNode(argument) && ts.isStringLiteral(argument.literal)) found.push(argument.literal.text);
     } else if (ts.isCallExpression(node) && node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])) {
       const callee = node.expression;
+      // `require.resolve(x, { paths })` looks from another package's folder (bogon from hyperdht's), not this file's.
       const resolves =
+        node.arguments.length === 1 &&
         ts.isPropertyAccessExpression(callee) &&
         callee.name.text === "resolve" &&
         ((ts.isIdentifier(callee.expression) && callee.expression.text === "require") ||
@@ -81,7 +86,7 @@ const workspaces = (): string[] =>
 /** Folders that install from a lock of their own, outside the root's workspaces. */
 const standalone = (): string[] => tracked("apps/website/package.json", ":(glob)native/**/package.json").map(folderOf);
 
-/** Folders whose `src/` the root's package.json answers for: the shared UI every app builds. */
+/** Folders the root's package.json answers for though they hold one of their own: apps/ui's only lists sideEffects. */
 const rootOwned = ["apps/ui"];
 
 const declaredIn = (path: string) => {
@@ -155,10 +160,11 @@ it("every package the website and the native runtimes import is declared in thei
   ).toEqual([]);
 }, 30_000);
 
-it("every package the shared UI's src imports is declared in the root's package.json", () => {
-  expect(
-    rootOwned.flatMap((folder) =>
-      undeclared(folder, codeFiles(folder).filter(isShipped(folder)), new Set(declaredIn("package.json"))),
-    ),
-  ).toEqual([]);
+it("every package a file with no package.json nearer than the root's imports is declared in the root's", () => {
+  const files = [...codeFiles("."), ...rootOwned.flatMap(codeFiles)];
+  expect(files).toEqual(
+    expect.arrayContaining(["apps/ui/src/main.tsx", "apps/ui/src/test/axe.ts", "e2e/playwright.config.ts"]),
+  );
+  expect(files.some((file) => file.startsWith("packages/"))).toBe(false);
+  expect(undeclared("root", files, new Set(declaredIn("package.json")))).toEqual([]);
 }, 30_000);
