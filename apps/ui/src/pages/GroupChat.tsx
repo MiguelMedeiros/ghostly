@@ -744,6 +744,17 @@ export function GroupChat() {
   // its header is drawn (the engine's state, then the group).
   const headingRef = useRef<HTMLHeadingElement>(null);
   useOpenedHeading(headingRef, started && group ? groupId : null);
+  // The admin role handed to me while the group is open, said once: the timeline's "You are now the admin" is an event,
+  // which the message announcer leaves out. Not for a group opened with the role mine already, nor another one opened.
+  const known = !!group, isAdmin = !!group?.isAdmin;
+  const adminWas = useRef<{ id: string; admin: boolean } | null>(null);
+  const [roleSaid, setRoleSaid] = useState("");
+  useEffect(() => {
+    if (!known) return;
+    const was = adminWas.current;
+    adminWas.current = { id: groupId, admin: isAdmin };
+    setRoleSaid(said => was?.id !== groupId || !isAdmin ? "" : !was.admin ? t("group.event.adminYou") : said);
+  }, [known, groupId, isAdmin, t]);
   if (!started) return null;
   const back = <button onClick={nav.up} className="md:hidden w-[44px] h-[44px] flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
@@ -892,6 +903,7 @@ export function GroupChat() {
       {/* A member's message that comes while the group is open, read out once to a screen reader. A note shown by my own
           bubble instead is not: the bubble's payment says its step. */}
       <MessageAnnouncer chat={groupId} linkId={`group:${groupId}`} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} noteLine={note => ownNotes.has(note.id) ? null : groupPayNoteLine(note, group, t)} ready={historyIn} />
+      <p role="status" data-testid="group-role-live" className="sr-only">{roleSaid}</p>
       {/* On a phone its buttons are sized in px, as the name is (and as a chat's header, pages/Chat.tsx): in rem they grew
           with the browser's text size and left the name 23px at 150%, the members line under the connection button. */}
       {/* A size container: Share keeps its label by the header's width, not the window's. By the window, a phone on its
@@ -983,12 +995,16 @@ export function GroupChat() {
           void act(async () => { await engine.call("enableGroupLink", { groupId, reset: true }); setSharing("share"); }).finally(() => setResetting(false));
         }} />}
       </div>}
-      {(error || (group.status && group.status !== "active")) && <div ref={noticeRef} tabIndex={-1} role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
-        {error && <Notice problem={error} className="text-xs" />}
+      {/* Knocking again, not a live region as a whole (as the first join's card): it re-read its title, its body and
+          Cancel joining at every step. Its error, when there is one, is said by a region of its own. */}
+      {(error || (group.status && group.status !== "active")) && <div ref={noticeRef} tabIndex={-1} role={knockingAgain ? undefined : "status"} data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
+        {knockingAgain ? <div role="status">{error && <Notice problem={error} className="text-xs" />}</div> : error && <Notice problem={error} className="text-xs" />}
         {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}
         {knockingAgain ? <div className={`flex items-center justify-between gap-3${error ? " mt-2" : ""}`}>
           <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
             {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{staleText}</span>}</p>
+          {/* Said once per change, politely, as the first join's card says it: the step just reached, or the two-minute hint. */}
+          <p role="status" data-testid="group-rejoin-live" className="sr-only">{joinAnnouncement}</p>
           {linkUnanswered && <button data-testid="group-link-retry" onClick={e => tryAgain(e.currentTarget)}
             className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
           {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}

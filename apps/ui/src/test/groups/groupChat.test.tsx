@@ -698,6 +698,39 @@ describe("GroupChat: out of the group", () => {
     expect(within(screen.getByTestId("group-notice")).getByTestId("group-rejoin-cancel")).toBeInTheDocument();
   });
 
+  // The whole notice was the live region: each step read its title, its body and Cancel joining again.
+  it("removed from a community and knocking again: one hidden line says each step, not the notice and its button", () => {
+    // Knocking since now: not yet the two-minute line.
+    const at = (stage: GroupJoinStage) => ({ ...knockingAgain(stage), invitation: { ...knockingAgain(stage).invitation!, since: Date.now() } });
+    const view = openGroup(at("knocking"));
+    const notice = screen.getByTestId("group-notice");
+    expect(notice).not.toHaveAttribute("role");
+    const live = within(notice).getByTestId("group-rejoin-live");
+    expect(live).toHaveAttribute("role", "status");
+    expect(live).toHaveTextContent("Waiting to be let in");
+    for (const [stage, said] of [["knocked", "Knock sent to the group"], ["answered", "A member's app is answering"]] as const) {
+      act(() => view.engine.update({ groups: [at(stage)] }));
+      expect(screen.getByTestId("group-rejoin-live")).toBe(live);
+      expect(live.textContent).toBe(said);
+    }
+    for (const region of document.querySelectorAll("[role=status], [role=alert], [aria-live]")) expect(region.querySelector("button")).toBeNull();
+  });
+
+  // The timeline's "You are now the admin" is an event, which the message announcer leaves out.
+  it("says once that I am now the admin when the role comes to me while the group is open", () => {
+    const view = openGroup(active());
+    expect(screen.getByTestId("group-role-live")).toBeEmptyDOMElement();
+    const mine = active({ isAdmin: true, members: members.map(m => ({ ...m, role: m.me ? "admin" as const : "member" as const })) });
+    act(() => view.engine.update({ groups: [mine] }));
+    expect(screen.getByTestId("group-role-live")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("group-role-live")).toHaveTextContent("You are now the admin");
+  });
+
+  it("says nothing of the admin role for a group opened with it already mine", () => {
+    openGroup(active({ isAdmin: true }));
+    expect(screen.getByTestId("group-role-live")).toBeEmptyDOMElement();
+  });
+
   it("names the status when the engine gave no reason, in the notice too", () => {
     openGroup(active({ status: "left", canSend: false }));
     expect(screen.getByTestId("group-members")).toHaveTextContent("left");

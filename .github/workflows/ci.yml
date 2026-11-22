@@ -197,6 +197,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The test map reads what a pull request adds against the merge commit's first parent.
+          fetch-depth: 2
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -237,15 +240,27 @@ jobs:
         run: node tools/scripts/quarantine.mjs
 
       # Runs no test: reads e2e/features.json and what every test says it covers (docs/TESTING.md). The map goes to
-      # the run's summary page: it is not committed.
+      # the run's summary page: it is not committed. On a pull request, what it adds (a test file, a feature) is checked
+      # against its base, the merge commit's first parent (the checkout's second commit).
       - name: Test map (every feature has a test)
-        run: npm run test:map -- --summary
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+        run: npm run test:map -- --summary ${BASE:+--base=$BASE}
 
+  # npm run test:app in three shards of about the same time, as the packages' below (tools/scripts/test-shards.mjs
+  # --app): one runner took it in 9-13 minutes, the UI's tests 11 of them, the longest job of a ready run. The name
+  # keeps "Frontend tests (app)" at its start, the name the merge train knows the job by.
   frontend-tests:
-    name: Frontend tests (app)
+    name: Frontend tests (app) ${{ matrix.shard }}/3
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The 3 below and in the name must match this list.
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -257,7 +272,8 @@ jobs:
           cache: "npm"
 
       # `npm test` is test:packages (the shards below) then test:app (here). A test added beside the two would run
-      # nowhere; tools/scripts/test-shards.mjs checks test:packages is a list of workspaces it knows how to split.
+      # nowhere; tools/scripts/test-shards.mjs checks test:packages is a list of workspaces it knows how to split, and
+      # test:app a list of `vitest run -c <config>` scripts.
       - name: The two halves are all of npm test
         run: |
           test="$(node -p 'require("./package.json").scripts.test')"
@@ -269,8 +285,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Unit tests (npm run test:app)
-        run: npm run test:app
+      - name: Unit tests (npm run test:app, shard ${{ matrix.shard }} of 3)
+        run: node tools/scripts/test-shards.mjs --app ${{ matrix.shard }} 3 --report-dir "$RUNNER_TEMP/test-reports"
+
+      # Each file's time, for `node tools/scripts/test-shards.mjs --record` after a test file gets slower.
+      - name: Keep the test times
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-test-reports-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-reports
+          retention-days: 14
+          if-no-files-found: ignore
 
   # The packages' unit tests (npm run test:packages) in four shards of about the same time, each on its own runner
   # (tools/scripts/test-shards.mjs, by tools/scripts/test-durations.json). One runner took them in 6.5 minutes, package after
@@ -359,8 +385,9 @@ jobs:
   # ============================================
   # The shards above run on x64 only. Here: the CLI packed as npm publishes it, installed into an empty folder the way
   # `npm install -g @ghostlytools/cli` does (its dependencies from npm, so node-datachannel's linux-arm64 build comes
-  # from its own optional package), must start a daemon with WebRTC and calls on. Then the CLI's whole test suite, the
-  # two-peer story included: pairing, messages, files and a voice call over libdatachannel, on arm64.
+  # from its own optional package), must start a daemon with WebRTC and calls on. The CLI's whole test suite on arm64
+  # (the two-peer story, a voice call over libdatachannel) runs nightly in cli-arm64-nightly.yml: on x64 the packages
+  # shards above already run it on every pull request.
   # No Rust: the Iroh WebAssembly the CLI bundles is committed (packages/iroh-web/pkg).
   cli-linux-arm64:
     name: CLI on Linux ARM64
@@ -368,7 +395,7 @@ jobs:
     if: needs.changes.outputs.packages == 'true'
     runs-on: ubuntu-24.04-arm
     # A daemon that never exits would otherwise hold the runner for 6 hours.
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -420,15 +447,6 @@ jobs:
           '
           $ghostly daemon stop
           trap - EXIT
-
-      # The CLI's own suite, as the packages shards run it on x64 (its Vitest builds dist/ again first). Skipped here as
-      # on x64: fedimint (a regtest federation) and payments (a test mint), which need the Docker e2e services, the long
-      # chat bench, and the ffmpeg comparisons in voicePeaks when ffmpeg is missing.
-      - name: jq for the Claude Code agent example
-        run: command -v jq || { sudo apt-get update && sudo apt-get install -y jq; }
-
-      - name: CLI tests
-        run: npm run test -w @ghostlytools/cli
 
   frontend-build:
     name: Frontend builds
