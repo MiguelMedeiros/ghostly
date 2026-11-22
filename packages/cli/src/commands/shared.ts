@@ -501,10 +501,13 @@ function writtenDay(text: string): [number, number, number] | undefined {
   return year && word ? [Number(year[1]), MONTHS.indexOf(word.toLowerCase()) + 1, Number(day)] : undefined;
 }
 
-/** A time of day, with its AM/PM and the zone offset after it if there are: `10:00`, `01:00:00.5`, `10:00 PM -3`, `10:00 GMT+0200`, `10:00 +2`, `01:00+02:00`. */
-const TIME_OF_DAY = /\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*[ap]m)?(?:\s*(?:gmt|utc|ut|z)?\s*[+-]\d{1,2}(?::?\d{2})?)?/gi;
-/** A named zone's offset with no time before it (`UTC+3`, `GMT+0300`), and a comment in parentheses, which `Date.parse` skips (`(UTC-3)`). */
-const ZONE = /\([^)]*\)|\b(?:gmt|utc|ut)\s*[+-]\d{1,2}(?::?\d{2})?/gi;
+/**
+ * A time of day, with its AM/PM and the zone offsets after it if there are: `10:00`, `1:2`, `01:00:00.5`, `10:00:00:00`,
+ * `10:00 PM -3`, `10:00 GMT+0200`, `10:00 EST +2`, `10:00 +02 +03`, `01:00+02:00`.
+ */
+const TIME_OF_DAY = /\d{1,2}(?::\d{1,2})+(?:\.\d+)?(?:\s*[ap]m)?(?:\s*(?:gmt|utc|ut|z|[ecmp][sd]t)?\s*[+-]\d{1,2}(?::?\d{2})?)*/gi;
+/** A named zone's offset with no time before it (`UTC+3`, `GMT+0300`, `EST-5`), and a comment in parentheses, which `Date.parse` skips (`(UTC-3)`). */
+const ZONE = /\([^)]*\)|\b(?:gmt|utc|ut|[ecmp][sd]t)\s*[+-]\d{1,2}(?::?\d{2})?/gi;
 const MONTH_NAME = new RegExp(`\\b(?:${MONTHS.join("|")})`, "i");
 
 /**
