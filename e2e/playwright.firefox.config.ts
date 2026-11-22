@@ -2,8 +2,9 @@ import { defineConfig, devices } from "@playwright/test";
 
 /**
  * The web app in Firefox, for the specs whose answer depends on each engine: the mini-app sandbox
- * (apps-sandbox.spec.ts, WISP 1200), and a contact's shared app opened on the web (services-web-open.spec.ts). The main
- * suite's fixtures are written for Chromium, and CI installs Chromium only, so it runs locally:
+ * (apps-sandbox.spec.ts, WISP 1200), and a contact's shared app opened on the web (services-web-open.spec.ts: Firefox's
+ * `Request` has no body stream, so the services worker reads what the app sends another way). The main suite's fixtures
+ * are written for Chromium, and CI installs Chromium only, so it runs locally:
  *
  *   npx playwright install firefox
  *   E2E_WEB_PORT=50310 npx playwright test -c e2e/playwright.firefox.config.ts
