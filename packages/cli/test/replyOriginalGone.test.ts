@@ -102,7 +102,7 @@ describe("a reply whose original was edited", () => {
     const crew = await callApi(ctx, "group.history", { group: "Crew" }) as Page;
     expect(quote(crew, "mine:1:1")).toMatchObject({ snippet: "on friday (edited)", found: true });
 
-    Object.assign(node, { savedMessages: vi.fn(async () => [{ savedAt: 20, message: rows[4]! }, { savedAt: 21, message: rows[9]! }]) });
+    Object.assign(node, { savedMessages: vi.fn(async () => [{ savedAt: 20, message: rows[4]! }, { savedAt: 21, message: rows[9]! }]), startDeferredChat: vi.fn(async () => {}) });
     const { saved } = await callApi(ctx, "saved.list", {}) as { saved: { message: { replyTo?: Record<string, unknown> } }[] };
     expect(saved.map((s) => s.message.replyTo?.snippet)).toEqual(["hello bob (edited)", "on friday (edited)"]);
   });
