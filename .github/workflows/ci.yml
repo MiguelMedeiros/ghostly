@@ -299,8 +299,7 @@ jobs:
 
   # The packages' unit tests (npm run test:packages) in four shards of about the same time, each on its own runner
   # (tools/scripts/test-shards.mjs, by tools/scripts/test-durations.json). One runner took them in 6.5 minutes, package after
-  # package. The CLI's two-peer story (about 2 minutes of designed waits, one test after another) runs first on its
-  # shard with nothing beside it; that shard runs other tests after it.
+  # package. The ones that start real peers, daemons or a DHT are integration-tests', below.
   packages-tests:
     name: Frontend tests (packages ${{ matrix.shard }}/4)
     needs: changes
@@ -332,6 +331,41 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages-test-reports-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-reports
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # The package tests that start real peers, daemons or a DHT (tools/scripts/integration-tests.json: about 40% of the
+  # packages' time, and most of their flakes). The shards above and the draft tier leave them out (GHOSTLY_INTEGRATION=0,
+  # tools/vitest.shared.ts); they run here, on one runner, wherever the shards run: a batch, a ready pull request at its
+  # base's tip (a queued one behind it rides its batch's run), a merge group. Nightly on dev in e2e-full.yml. The CLI's
+  # two-peer story (about 2 minutes of designed waits, one test after another) runs first, with nothing beside it.
+  integration-tests:
+    name: Integration tests
+    needs: changes
+    if: needs.changes.outputs.packages == 'true'
+    runs-on: ubuntu-24.04
+    # A daemon that never exits would otherwise hold the runner for 6 hours.
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: ./.github/actions/node-npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Integration tests (tools/scripts/integration-tests.json)
+        run: node tools/scripts/test-shards.mjs --integration 1 1 --report-dir "$RUNNER_TEMP/test-reports"
+
+      # Each file's time, for `node tools/scripts/test-shards.mjs --record` after a test file gets slower.
+      - name: Keep the test times
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integration-test-reports
           path: ${{ runner.temp }}/test-reports
           retention-days: 14
           if-no-files-found: ignore
@@ -979,7 +1013,7 @@ jobs:
   ci-success:
     name: ${{ needs.changes.outputs.draft == 'true' && 'CI Success (draft)' || 'CI Success' }}
     runs-on: ubuntu-24.04
-    needs: [changes, frontend-checks, frontend-tests, packages-tests, affected-tests, cli-linux-arm64, frontend-build, tauri, website, website-e2e, desktop-media, desktop-macos]
+    needs: [changes, frontend-checks, frontend-tests, packages-tests, integration-tests, affected-tests, cli-linux-arm64, frontend-build, tauri, website, website-e2e, desktop-media, desktop-macos]
     # Not always(): that also runs in a run cancelled by a newer push, where it would mark the superseded commit
     # failed. A failed job still gets here, and fails this one.
     if: ${{ !cancelled() }}
@@ -1003,6 +1037,7 @@ jobs:
           FRONTEND_CHECKS: ${{ needs.frontend-checks.result }}
           FRONTEND_TESTS: ${{ needs.frontend-tests.result }}
           PACKAGES_TESTS: ${{ needs.packages-tests.result }}
+          INTEGRATION_TESTS: ${{ needs.integration-tests.result }}
           AFFECTED: ${{ needs.affected-tests.result }}
           CLI_ARM64: ${{ needs.cli-linux-arm64.result }}
           FRONTEND_BUILD: ${{ needs.frontend-build.result }}
@@ -1045,13 +1080,14 @@ jobs:
           check "Frontend builds" "$FRONTEND_BUILD" "$FULL"
           check "Affected unit tests (draft 1/4 to 4/4)" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"
           check "Frontend tests (packages)" "$PACKAGES_TESTS" "$PACKAGES"
+          check "Integration tests" "$INTEGRATION_TESTS" "$PACKAGES"
           check "CLI on Linux ARM64" "$CLI_ARM64" "$PACKAGES"
           check "Tauri Backend" "$TAURI" "$RUST"
           check "Website" "$WEBSITE" "$WEBSITE_GATE"
           check "Website browser checks" "$WEBSITE_E2E" "$WEBSITE_E2E_GATE"
           check "Desktop media" "$DESKTOP_MEDIA" "$APP"
           check "Desktop on macOS" "$DESKTOP_MACOS" "$APP"
-          summary="draft=$DRAFT tested=$TESTED changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS affected-tests=$AFFECTED cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
+          summary="draft=$DRAFT tested=$TESTED changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS integration-tests=$INTEGRATION_TESTS affected-tests=$AFFECTED cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
           if (( failed )); then
             echo "One or more jobs failed: $summary"
             exit 1

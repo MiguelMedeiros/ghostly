@@ -324,6 +324,7 @@ export const PLANNED_JOBS = {
   "Frontend lint and types": "lint",
   "Frontend tests (app)": "full",
   "Frontend tests (packages ": "packages",
+  "Integration tests": "packages",
   "CLI on Linux ARM64": "packages",
   "Frontend builds": "full",
   "Tauri Backend": "rust",
