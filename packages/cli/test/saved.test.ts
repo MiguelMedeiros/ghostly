@@ -18,6 +18,7 @@ function fake(result: { error: string | null } = { error: null }, saved: SavedMe
     chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice", peerNick: "Alice" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     saveMessage: vi.fn(async () => result),
     savedMessages: vi.fn(async () => saved),
+    startDeferredChat: vi.fn(async () => {}),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;

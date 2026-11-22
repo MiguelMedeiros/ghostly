@@ -48,25 +48,29 @@ describe("a backup that fails", () => {
     expect(readdirSync(paths.db)).toEqual([]);
   });
 
-  // A name the disk takes whose half-written file's (`.partial-<pid>-<hex>`, ~28 bytes longer) it does not: the
-  // backup fails to open it, and removing it fails the same way. That kept the store from being removed.
-  const long = (paths: ReturnType<typeof profile>) => join(paths.dir, "b".repeat(240));
+  // A folder it may not write: the backup fails to open its half-written file there, after the store's export. A name
+  // too long for that file (`<path>.partial-<pid>-<hex>`, as it was) also failed to remove it, and kept the store.
+  const locked = (paths: ReturnType<typeof profile>) => {
+    mkdirSync(join(paths.dir, "ro"), { mode: 0o500 });
+    return join(paths.dir, "ro", "out.ghostly-backup");
+  };
 
-  it("to a name too long for its half-written file leaves no store behind, and fails with the open's error", async () => {
-    const paths = profile("backup-long-name");
+  it("into a folder it may not write leaves no store behind, and fails with the open's error on --out's name", async () => {
+    const paths = profile("backup-locked-folder");
     const store = { exportSnapshot: async (path: string) => writeFileSync(path, "STORE", { mode: 0o600 }) };
-    await expect(BACKUP_METHODS["profile.backup"]({ runtime: { paths, store } } as unknown as ApiContext, { path: long(paths), noPassphrase: true }))
-      .rejects.toMatchObject({ code: "ENAMETOOLONG", syscall: "open" });
+    const out = locked(paths);
+    await expect(BACKUP_METHODS["profile.backup"]({ runtime: { paths, store } } as unknown as ApiContext, { path: out, noPassphrase: true }))
+      .rejects.toMatchObject({ code: "EACCES", syscall: "open", path: out });
     expect(readdirSync(paths.db)).toEqual([]);
-    expect(readdirSync(paths.dir).sort()).toEqual(["db", "files"]);
+    expect(readdirSync(join(paths.dir, "ro"))).toEqual([]);
   });
 
-  it("to a name too long for its half-written file, the process leaving meanwhile, still removes the store", async () => {
-    const paths = profile("backup-long-name-exit");
+  it("into a folder it may not write, the process leaving meanwhile, still removes the store", async () => {
+    const paths = profile("backup-locked-folder-exit");
     let exported!: () => void, release!: () => void;
     const ready = new Promise<void>((done) => { exported = done; }), gate = new Promise<void>((done) => { release = done; });
     const exportSnapshot = async (path: string) => { writeFileSync(path, "STORE", { mode: 0o600 }); exported(); await gate; };
-    const running = BACKUP_METHODS["profile.backup"]({ runtime: { paths, store: { exportSnapshot } } } as unknown as ApiContext, { path: long(paths), noPassphrase: true });
+    const running = BACKUP_METHODS["profile.backup"]({ runtime: { paths, store: { exportSnapshot } } } as unknown as ApiContext, { path: locked(paths), noPassphrase: true });
     running.catch(() => {});
     await ready;
     // What the process's exit runs, the backup still under way.
@@ -83,13 +87,15 @@ describe("a backup's start", () => {
   it("removes a half-written backup beside --out that a process gone since left, and not a live one's", async () => {
     const paths = profile("backup-partial-dead");
     const out = join(paths.dir, "out.ghostly-backup");
-    // As an older CLI named it, and as this one does; a live process's (this one's parent) stays.
+    // As older CLIs named it, and as this one does (any backup's into the folder); a live process's (this one's parent) stays.
     writeFileSync(`${out}.partial-999999999`, "STORE", { mode: 0o600 });
     writeFileSync(`${out}.partial-999999999-0a1b2c3d4e5f`, "STORE", { mode: 0o600 });
+    writeFileSync(join(paths.dir, ".ghostly-backup-999999999-0a1b2c3d4e5f.partial"), "STORE", { mode: 0o600 });
     writeFileSync(`${out}.partial-${process.ppid}-0a1b2c3d4e5f`, "LIVE", { mode: 0o600 });
+    writeFileSync(join(paths.dir, `.ghostly-backup-${process.ppid}-0a1b2c3d4e5f.partial`), "LIVE", { mode: 0o600 });
     writeFileSync(join(paths.dir, "other.partial-999999999-0a1b2c3d4e5f"), "OTHER", { mode: 0o600 });
     await backup(paths, { exportSnapshot: async (path) => writeFileSync(path, "STORE", { mode: 0o600 }) });
-    expect(readdirSync(paths.dir).sort()).toEqual(["db", "files", "other.partial-999999999-0a1b2c3d4e5f", `out.ghostly-backup`, `out.ghostly-backup.partial-${process.ppid}-0a1b2c3d4e5f`]);
+    expect(readdirSync(paths.dir).sort()).toEqual([`.ghostly-backup-${process.ppid}-0a1b2c3d4e5f.partial`, "db", "files", "other.partial-999999999-0a1b2c3d4e5f", `out.ghostly-backup`, `out.ghostly-backup.partial-${process.ppid}-0a1b2c3d4e5f`]);
   });
 });
 
@@ -139,7 +145,7 @@ describe("a one-shot backup stopped", { timeout: 120_000 }, () => {
     mkdirSync(outDir);
     const run = new Running(["--home", dir, "profile", "backup", "--out", join(outDir, "b.ghostly-backup"), "--no-passphrase"], { NODE_OPTIONS: `--require "${slow}"` });
     const until = Date.now() + 60_000;
-    while (!readdirSync(outDir).some((name) => name.includes(".partial-"))) {
+    while (!readdirSync(outDir).some((name) => name.endsWith(".partial"))) {
       if (run.child.exitCode !== null || Date.now() > until) throw new Error(`no backup under way\n${run.stderr}\n${JSON.stringify(run.lines)}`);
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
