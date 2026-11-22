@@ -24,10 +24,11 @@ run-name: >-
 
 on:
   schedule:
-    # Every 5 minutes (GitHub's shortest), which GitHub keeps only loosely (10 to 30 minutes apart on 2026-10-19). A
-    # batch that waits for company leaves at a deadline (MAX_WAIT in the script) that no event may come to wake: the
-    # `wake` job below starts the train at that time.
-    - cron: "*/5 * * * *"
+    # Only a backstop: the train is driven by its events below (a label, CI ending, a push), and a batch that waits for
+    # company leaves at a deadline (MAX_WAIT in the script) that the `wake` job below starts the train at. Every 15
+    # minutes, not GitHub's shortest 5, which cost runner minutes for little: GitHub kept that one only loosely anyway
+    # (10 to 30 minutes apart on 2026-10-19).
+    - cron: "*/15 * * * *"
   push:
     branches: [dev, "epic/**"]
   workflow_run:

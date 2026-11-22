@@ -1,4 +1,4 @@
-import { devices, type Locator, type Page } from "@playwright/test";
+import { devices, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 import { pasteInvite } from "../support/clipboard";
 import { DEVICE_SET_PASSWORD, finishJoin } from "../support/devices";
@@ -149,5 +149,24 @@ test("the link opened in a tab where Ghostly is open already: the same one scree
   // Home stays under it: the profile's name in the link never becomes a route.
   await expect.poll(() => new URL(page.url()).hash).toBe("#/");
   await page.keyboard.press("Escape");
+  await expect(page.getByTitle("New Chat")).toBeVisible();
+});
+
+test("the link opened in that tab as it asks a new profile's name: the one screen opens in its place and stays", { tag: ["@feature:devices.enroll", "@feature:profiles.name-step"] }, async ({ peer }) => {
+  const askForName = async (context: BrowserContext) => { await context.addInitScript(() => { try { localStorage.setItem("ghostly-test-name-step", "on"); } catch { /* opaque origin */ } }); };
+  const [desktop, phone] = await Promise.all([peer("desktop"), peer("phone", { ...PHONE, beforeOpen: askForName })]);
+  const { link } = await addDevice(desktop.page);
+  const page = phone.page;
+  await expect(page.getByTestId("name-step")).toBeVisible();
+  // As the address bar, or the installed web app handed the link, does: the same page, a new history entry.
+  await page.goto(link.replace(/^https?:\/\/[^/]+/, new URL(page.url()).origin));
+  await expect(page.getByTestId("device-join-confirm")).toHaveAttribute("data-place", "here");
+  await expect(page.getByTestId("name-step")).toHaveCount(0);
+  // It closed as it opened, the code used up, before: it is still there a moment later.
+  await page.waitForTimeout(3_000);
+  await expect(page.getByTestId("device-join")).toContainText("Add this phone to “");
+  // Back closes it alone.
+  await page.goBack();
+  await expect(page.getByTestId("device-join")).toHaveCount(0);
   await expect(page.getByTitle("New Chat")).toBeVisible();
 });

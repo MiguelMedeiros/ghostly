@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { followPlatformDrags, guardFileDrops, PLATFORM_PASTE_MAX, resetPlatformDrags } from "../../lib/pastedFiles";
-import type { ClipboardFile } from "@ghostly/browser/host";
+import type { ClipboardFile, ClipboardFiles } from "@ghostly/browser/host";
 import { renderApp } from "../render";
 
 // covers: app.composer.paste-files
@@ -37,7 +37,7 @@ function held(name: string, text: string): ClipboardFile {
   return { name, size: bytes.length, mime: null, read: vi.fn(async (offset: number, length: number) => bytes.slice(offset, offset + length)), done: vi.fn() };
 }
 
-let read: ReturnType<typeof vi.fn<() => Promise<ClipboardFile[]>>>;
+let read: ReturnType<typeof vi.fn<() => Promise<ClipboardFiles>>>;
 let over: (on: boolean) => void;
 
 beforeEach(() => {
@@ -99,6 +99,89 @@ describe("files dragged in from another app that the webview names by address on
     act(() => release());
     expect(await screen.findByTestId("attachment-sheet")).toBeInTheDocument();
     expect(screen.queryByTestId("paste-reading")).toBeNull();
+  });
+
+  it("where the platform answers a file chooser with a drop's files, a drop over 256 MB opens the sheet with them, never read into the page", async () => {
+    // What the desktop app does on Linux: the drop's files picked on the page's own file input, as + → Document picks.
+    const large = new File(["tail"], "archive 300.bin");
+    Object.defineProperty(large, "size", { value: 300 * 1024 * 1024 });
+    const bigHeld = { ...held("archive 300.bin", ""), size: large.size };
+    read.mockResolvedValue([bigHeld]);
+    const choose = vi.fn(async () => {
+      const input = document.getElementById("ghostly-dropped-files") as HTMLInputElement;
+      expect(input.accept).toBe("application/x-ghostly-dropped-files");
+      Object.defineProperty(input, "files", { value: [large], configurable: true });
+      input.dispatchEvent(new Event("change"));
+      return { count: 1, leftOut: [] };
+    });
+    resetPlatformDrags();
+    over = followPlatformDrags(read, window, choose);
+    const { user } = composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(within(open).getByText("archive 300.bin")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(choose).toHaveBeenCalledTimes(1);
+    expect(read).not.toHaveBeenCalled();
+    await user.click(within(open).getByTestId("attachment-send"));
+    await waitFor(() => expect(onSendFile).toHaveBeenCalledWith(large));
+  });
+
+  it("a drop the platform's chooser finds no file in (a folder) says so", async () => {
+    const choose = vi.fn(async () => ({ count: 0, leftOut: ["Photos"] }));
+    resetPlatformDrags();
+    over = followPlatformDrags(read, window, choose);
+    composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not add those files. Send them with + → Document.");
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+  });
+
+  it("a drop the platform's chooser can't name (a folder whose name is not UTF-8) is read by token at once, as before", async () => {
+    // What `choose_dropped_files` answers then (apps/desktop/src/dropped_files.rs): the drop stays, to be read.
+    const choose = vi.fn(async (): Promise<{ count: number; leftOut: string[] }> => { throw "read-dropped-files"; });
+    resetPlatformDrags();
+    over = followPlatformDrags(read, window, choose);
+    composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(within(open).getByText("relatório final.txt")).toBeInTheDocument();
+    expect(choose).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a drop the platform's chooser picked with a folder beside its files names the folder it left out", async () => {
+    const photo = new File(["jpg"], "p1.jpg");
+    const choose = vi.fn(async () => {
+      const input = document.getElementById("ghostly-dropped-files") as HTMLInputElement;
+      Object.defineProperty(input, "files", { value: [photo], configurable: true });
+      input.dispatchEvent(new Event("change"));
+      return { count: 1, leftOut: ["Photos"] };
+    });
+    resetPlatformDrags();
+    over = followPlatformDrags(read, window, choose);
+    composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(within(open).getByText("p1.jpg")).toBeInTheDocument();
+    expect(await within(open).findByRole("alert")).toHaveTextContent("Not added: Photos. Folders, and files that cannot be read, are left out.");
+  });
+
+  it("a drop the platform read only some files of names the ones it left out: past the most one drop brings, and not files", async () => {
+    read.mockResolvedValueOnce(Object.assign([held("p1.txt", "1")], { pastLimit: ["p33.txt", "p34.txt"], leftOut: ["Photos"] }));
+    composer();
+    act(() => over(true));
+    expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(within(open).getByText("p1.txt")).toBeInTheDocument();
+    const said = await within(open).findByRole("alert");
+    expect(said).toHaveTextContent("Only the first 32 files were added. Left out: p33.txt, p34.txt. Add the rest with + → Document.");
+    expect(said).toHaveTextContent("Not added: Photos. Folders, and files that cannot be read, are left out.");
   });
 
   it("a drop with no file to send (a folder) says so; the next drag is a link again once the drop is over", async () => {

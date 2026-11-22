@@ -13,7 +13,7 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, installList, precacheMode, pushNotice, pushScopeProfile, quietWakeNotice, quietWakeTag, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, carriedOver, classify, installList, precacheMode, pushNotice, pushScopeProfile, quietWakeNotice, quietWakeTag, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText, type WakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
@@ -25,6 +25,8 @@ declare const __SW_BUILD__: string;
 declare const __SW_PRECACHE__: string[];
 /** The files of each language but English, left out of `__SW_PRECACHE__`: the install takes the person's own (`installList`). */
 declare const __SW_LANGUAGES__: Record<string, string[]>;
+/** The build's other hashed files, kept on their first use (`asset`): the install takes them from an older cache only. */
+declare const __SW_LAZY__: string[];
 
 // The few worker APIs used here, typed locally: the web app's tsconfig has the DOM library, not WebWorker's.
 interface ExtendableEvent extends Event { waitUntil(promise: Promise<unknown>): void }
@@ -39,7 +41,14 @@ interface WorkerScope {
   /** Web Locks, where the browser has them in workers: who holds which lock, by window id. */
   navigator?: { locks?: { query(): Promise<{ held?: { name?: string; clientId?: string }[] }> } };
   skipWaiting(): Promise<void>;
-  registration: { scope: string; showNotification(title: string, options: object): Promise<void>; getNotifications(filter?: { tag?: string }): Promise<Shown[]> };
+  registration: {
+    scope: string;
+    /** A newer worker of this registration, installing or installed and waiting (the one activating is neither). */
+    installing?: object | null;
+    waiting?: object | null;
+    showNotification(title: string, options: object): Promise<void>;
+    getNotifications(filter?: { tag?: string }): Promise<Shown[]>;
+  };
   clients: {
     claim(): Promise<void>;
     matchAll(options: { type: "window"; includeUncontrolled?: boolean }): Promise<WindowClient[]>;
@@ -61,13 +70,17 @@ const PUSH_PROFILE = pushScopeProfile(worker.registration.scope);
 worker.addEventListener("install", (event) => {
   if (PUSH_PROFILE !== null) return;
   event.waitUntil((async () => {
-    // The languages the person reads in: the browser's, and those a page of the previous build fetched into its cache.
+    // What the caches of earlier builds hold, and which holds it.
     const older = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE);
-    const held = (await Promise.all(older.map(async (name) => (await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname)))).flat();
-    const list = installList(__SW_PRECACHE__, __SW_LANGUAGES__, navigator.languages?.length ? navigator.languages : [navigator.language], held);
-    // The page and the files beside it past the browser's HTTP cache; the hashed files from it when it has them.
+    const held = new Map<string, string>();
+    for (const name of older) for (const request of await (await caches.open(name)).keys()) held.set(new URL(request.url).pathname, name);
+    // The languages the person reads in: the browser's, and those a page of the previous build fetched into its cache.
+    const list = installList(__SW_PRECACHE__, __SW_LANGUAGES__, navigator.languages?.length ? navigator.languages : [navigator.language], [...held.keys()]);
     const cache = await caches.open(CACHE);
-    await cache.addAll(list.map((path) => new Request(path, { cache: precacheMode(path) })));
+    // The hashed files an earlier build's cache holds, from there (`carriedOver`).
+    const carried = new Set(await carryOver(cache, carriedOver(list, __SW_LAZY__, held), held));
+    // The rest: the page and the files beside it past the browser's HTTP cache; the hashed files from it when it has them.
+    await cache.addAll(list.filter((path) => !carried.has(path)).map((path) => new Request(path, { cache: precacheMode(path) })));
   })());
 });
 
@@ -77,10 +90,32 @@ worker.addEventListener("activate", (event) => {
   if (PUSH_PROFILE !== null) return;
   event.waitUntil((async () => {
     const names = await caches.keys();
+    // A newer worker installing or waiting behind this one (a later deploy found while this one waited, and the last
+    // tab closed): one of these caches is its own, maybe still filling. Deleted, its install would finish into a
+    // cache that is gone, and once it took over no cache would be left: the app would not open offline until the
+    // next deploy. The other builds' caches are left to its activation, which deletes all but its own. Read after
+    // the names: a cache listed is one whose worker started installing before, so is installing, waiting or failed.
+    if (worker.registration.installing || worker.registration.waiting) { await worker.clients.claim(); return; }
     await Promise.all(names.filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE).map((name) => caches.delete(name)));
     await worker.clients.claim();
   })());
 });
+
+/** Puts each of `paths` in `cache` from the older cache `held` names for it: the paths it could, the others to download. */
+async function carryOver(cache: Cache, paths: readonly string[], held: ReadonlyMap<string, string>): Promise<string[]> {
+  const done = await Promise.all(paths.map(async (path) => {
+    try {
+      // Gone meanwhile (another tab's new worker deleted that cache): downloaded as any other.
+      const kept = await caches.match(path, { cacheName: held.get(path) });
+      if (!kept) return null;
+      await cache.put(path, kept);
+      return path;
+    } catch {
+      return null;
+    }
+  }));
+  return done.filter((path): path is string => path !== null);
+}
 
 async function fromCache(key: string, request: Request): Promise<Response> {
   const cached = await caches.match(key, { cacheName: CACHE });
@@ -115,7 +150,12 @@ async function tellBuildGone(): Promise<void> {
 
 // ---------- share target ----------
 
-type Held = { item: SharedItem; done: () => void; kept: boolean };
+/**
+ * A share held. `for`: the profile of the tab opened for it, once that tab asked to forward it (`share-forward`); from
+ * then on only a page of that profile gets it. Null: a tab that did not say its profile. `waits`: no page of it was
+ * there to forward it to (none yet, or this worker restarted and forgot them): the first that says it is there gets it.
+ */
+type Held = { item: SharedItem; done: () => void; kept: boolean; for?: string | null; waits?: boolean };
 
 /**
  * The shares held for the page that asks, oldest first. Any website can post to the share target, so a share never
@@ -125,13 +165,13 @@ type Held = { item: SharedItem; done: () => void; kept: boolean };
 let held: Held[] = [];
 /** Shares dropped past `MAX_HELD_SHARES` since a page last took those held: that page is told how many. */
 let dropped = 0;
-/**
- * Asked to forward the shares held while no page of that profile was there (none yet, or this worker restarted and
- * forgot them): the first page of it that says it is there gets them. `profile` null: a page that did not say its own.
- */
-let forwardFor: { profile: string | null } | null = null;
-/** The tabs that asked to forward the shares held now: told once those are handed over (they say so), or dropped. */
-let forwarding: WindowClient[] = [];
+/** The tabs that asked to forward the shares held now, and their profile: told once those are handed over (they say so), or dropped. */
+let forwarding: { client: WindowClient; profile: string | null }[] = [];
+
+/** Whether a page of `profile` may take `entry`: no tab said whose it is yet, or one of that profile did (or did not say its own). */
+const isFor = (entry: Held, profile: string | null | undefined) => entry.for === undefined || entry.for === null || entry.for === profile;
+/** Whether `entry` is one a tab of `profile` asked to forward. */
+const claimed = (entry: Held, profile: string | null) => entry.for !== undefined && isFor(entry, profile);
 /**
  * The app's pages that take shares (they hold the peer), by window id: their profile, when they were last in front,
  * and the holder of their peer lock as Web Locks names it (Chromium's is not the window id).
@@ -156,23 +196,28 @@ function hold(item: SharedItem, done: () => void, kept = false): void {
   setTimeout(() => {
     if (!held.includes(entry)) return;
     held = held.filter((other) => other !== entry);
-    if (!held.length) { forwardFor = null; dropped = 0; tellForwarding({ type: "share-none" }); }
+    if (!held.length) dropped = 0;
+    tellForwarding({ type: "share-none" });
     done();
   }, SHARE_HOLD_MS);
 }
 
-/** Every share held, handed to `client` in the order they came; the last says how many could not be kept. */
-function handOver(client: WindowClient): void {
-  const taken = held;
+/**
+ * The shares held that `client` may take (`takes`), handed to it in the order they came; the last says how many could
+ * not be kept. False: none was.
+ */
+function handOver(client: WindowClient, takes: (entry: Held) => boolean): boolean {
+  const taken = held.filter(takes);
+  if (!taken.length) return false;
   const lost = dropped;
-  held = [];
+  held = held.filter((entry) => !taken.includes(entry));
   dropped = 0;
-  forwardFor = null;
   taken.forEach(({ item }, at) => client.postMessage({ type: "share", item, ...(lost > 0 && at === taken.length - 1 && { dropped: lost }) } satisfies FromWorker));
   for (const { done } of taken) done();
   // The tab that asked for them took them itself (it is the app now): nothing went elsewhere to tell it about.
-  forwarding = forwarding.filter((asked) => asked.id !== client.id);
+  forwarding = forwarding.filter((asked) => asked.client.id !== client.id);
   tellForwarding({ type: "share-forwarded" });
+  return true;
 }
 
 /**
@@ -230,9 +275,9 @@ async function forward(source: WindowClient, profile: string | null): Promise<vo
   let looks = 3;
   for (let look = 0; look < looks; look++) {
     if (look) await new Promise((resolve) => setTimeout(resolve, SHARE_LOCK_LOOK_MS));
-    if (!held.length) return;
+    if (!held.some((entry) => claimed(entry, profile))) return;
     const to = await forwardTarget(source, profile);
-    if (!held.length) return;
+    if (!held.some((entry) => claimed(entry, profile))) return;
     if (!to && !asked) {
       // The page that answers holds its lock on two looks after this one, as any other.
       asked = true;
@@ -241,17 +286,17 @@ async function forward(source: WindowClient, profile: string | null): Promise<vo
       continue;
     }
     if (!to) break;
-    if (to.id === before) { handOver(to); return; }
+    if (to.id === before) { handOver(to, (entry) => claimed(entry, profile)); return; }
     before = to.id;
   }
-  forwardFor = { profile };
+  for (const entry of held) if (claimed(entry, profile)) entry.waits = true;
 }
 
-/** The tabs that asked for a forward hear what came of it, once. */
+/** The tabs that asked for a forward hear what came of it, once none they asked for is held any more. */
 function tellForwarding(message: FromWorker): void {
-  const asked = forwarding;
-  forwarding = [];
-  for (const client of asked) client.postMessage(message);
+  const told = forwarding.filter((asked) => !held.some((entry) => claimed(entry, asked.profile)));
+  forwarding = forwarding.filter((asked) => !told.includes(asked));
+  for (const { client } of told) client.postMessage(message);
 }
 
 function share(event: FetchEvent): void {
@@ -285,6 +330,9 @@ worker.addEventListener("message", (event) => {
   }
   if (message.type === "share-keep") {
     if (PUSH_PROFILE !== null || !message.item || typeof message.item !== "object") return;
+    // Those it counted as not kept are told to the next page all the same, with any dropped here.
+    const lost = message.dropped;
+    if (typeof lost === "number" && Number.isSafeInteger(lost) && lost > 0) dropped += lost;
     // The worker stays up while it waits again, as a share just posted does.
     event.waitUntil(new Promise<void>((resolve) => hold(message.item, resolve, true)));
     return;
@@ -292,14 +340,16 @@ worker.addEventListener("message", (event) => {
   const source = event.source;
   if (!source) return;
   if (message.type === "share-ready") {
-    if (held.length) handOver(source);
-    else source.postMessage({ type: "share-none" });
+    // Never a share a tab of another profile asked to forward: it would be sent as this page's profile.
+    const profile = typeof message.profile === "string" ? message.profile : undefined;
+    if (!handOver(source, (entry) => isFor(entry, profile))) source.postMessage({ type: "share-none" });
     return;
   }
   if (message.type === "share-here") {
     if (PUSH_PROFILE !== null || typeof message.profile !== "string") return;
-    sharePages.set(source.id, { profile: message.profile, at: ++inFront, ...(typeof message.lock === "string" && { lock: message.lock }) });
-    if (held.length && forwardFor && (forwardFor.profile === null || forwardFor.profile === message.profile)) handOver(source);
+    const { profile } = message;
+    sharePages.set(source.id, { profile, at: ++inFront, ...(typeof message.lock === "string" && { lock: message.lock }) });
+    handOver(source, (entry) => entry.waits === true && isFor(entry, profile));
     return;
   }
   if (message.type === "share-away") {
@@ -309,10 +359,13 @@ worker.addEventListener("message", (event) => {
     return;
   }
   if (message.type === "share-forward") {
-    if (!held.length) { source.postMessage({ type: "share-none" }); return; }
+    const profile = typeof message.profile === "string" ? message.profile : null;
+    // The shares no tab said whose they are yet are this one's, the tab opened for them: its profile's from now on.
+    for (const entry of held) if (entry.for === undefined) entry.for = profile;
+    if (!held.some((entry) => claimed(entry, profile))) { source.postMessage({ type: "share-none" }); return; }
     // It says "Sent" only once they are handed over: closed before, nothing would have asked for them again.
-    if (!forwarding.some((asked) => asked.id === source.id)) forwarding.push(source);
-    event.waitUntil(forward(source, typeof message.profile === "string" ? message.profile : null));
+    if (!forwarding.some((asked) => asked.client.id === source.id)) forwarding.push({ client: source, profile });
+    event.waitUntil(forward(source, profile));
   }
 });
 

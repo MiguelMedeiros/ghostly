@@ -10,6 +10,7 @@ import { agoIn } from "../../lib/relativeTime";
 import { clockTime, formatAt } from "../../lib/time";
 import type { ChatMessage } from "../../lib/types";
 import { linkView } from "../fakeEngine";
+import { plainSpaces } from "../timeSpaces";
 import { renderApp } from "../render";
 import { identitiesView } from "../identities/views";
 
@@ -43,7 +44,7 @@ describe("in Arabic", () => {
     const week = 8 * 86_400_000;
     expect(formatListTime(AT, AT + week, "ar")).toBe(new Date(AT).toLocaleDateString("ar", { month: "short", day: "numeric" }));
     expect(clockTime(AT, "ar")).toBe(arabicClock);
-    expect(clockTime(AT)).toBe(new Date(AT).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+    expect(plainSpaces(clockTime(AT))).toBe(plainSpaces(new Date(AT).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })));
   });
 
   it("a transport line's details say since when the Arabic way", async () => {
@@ -77,7 +78,7 @@ describe("in Arabic", () => {
     const options: Intl.DateTimeFormatOptions = { dateStyle: "short", timeStyle: "medium" };
     expect(formatAt(AT, options, "ar")).toBe(held(new Intl.DateTimeFormat("ar", options).format(AT)));
     expect(formatAt(AT, { timeStyle: "medium" }, "ja")).toBe(new Intl.DateTimeFormat("ja", { timeStyle: "medium" }).format(AT));
-    expect(formatAt(AT, options)).toBe(new Date(AT).toLocaleString([], options));
+    expect(plainSpaces(formatAt(AT, options))).toBe(plainSpaces(new Date(AT).toLocaleString([], options)));
     expect(formatAt(Number.NaN, options, "ar")).toBe("Invalid Date");
   });
 });

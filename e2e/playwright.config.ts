@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { withoutQuarantine } from "./support/quarantine";
 
 // The end-to-end environment's variables (npm run e2e:infra:up writes them; see e2e/infra/env.mjs). Loaded
 // before anything reads the environment; a variable the shell already set wins.
@@ -18,16 +19,16 @@ const { CHROMIUM_SANDBOX } = await import("./support/chromiumSandbox");
  * set (support/mint.ts), so nothing here needs the network except the tests
  * tagged @network (public chain servers, Breez's regtest; see README.md).
  *
- *   npm run e2e                       # everything, against a fresh build of the web app
- *   npm run e2e -- --grep-invert @network
- *   E2E_WEB_URL=https://app.ghostly.tools npm run e2e -- --project web   # a deployed app
- *   npm run e2e:ui                    # watch and debug
+ *   npm run test:e2e                  # everything, against a fresh build of the web app
+ *   npm run test:e2e:offline          # without the @network tests
+ *   E2E_WEB_URL=https://app.ghostly.tools npm run test:e2e -- --project web   # a deployed app
+ *   npm run test:e2e:ui               # watch and debug
  *   npm run e2e:full                  # every gated suite too, against e2e/infra (see e2e/README.md)
  */
 const deployed = process.env.E2E_WEB_URL;
 const port = Number(process.env.E2E_WEB_PORT || 4173);
 
-export default defineConfig({
+export default withoutQuarantine(defineConfig({
   testDir: ".",
   outputDir: "../test-results/e2e",
   // The headless CLI, built once before the workers start: a build in a worker empties its dist/ under the others' bots.
@@ -40,6 +41,9 @@ export default defineConfig({
   // Two peers find each other by polling every few seconds: messages take seconds, not milliseconds.
   timeout: 3 * 60_000,
   expect: { timeout: 60_000 },
+  // Time budgets (@perf, support/perfBudget.ts) fail at random on a shared runner: only the nightly E2E (perf) job runs
+  // them, with E2E_PERF=1. A --grep-invert given on the command line applies on top of this one.
+  grepInvert: process.env.E2E_PERF ? undefined : /@perf\b/,
   // On CI also a blob report: e2e.yml runs the suite in shards and merges their blobs into one HTML report.
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }], ["github"], ["blob", { outputDir: "../blob-report" }]]
@@ -97,4 +101,4 @@ export default defineConfig({
         env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1",
           VITE_SERVICES_HOST: `http://*.localhost:${port}`, VITE_SERVICES_APP_ORIGIN: `http://localhost:${port}` },
       },
-});
+}));

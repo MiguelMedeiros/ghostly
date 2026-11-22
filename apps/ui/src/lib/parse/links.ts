@@ -1,30 +1,8 @@
-import { LINK_TRAILING, linkStop } from "@ghostly/core";
+import { LINK_STOP_CHARS, linkEnd } from "@ghostly/core";
 import type { Detector } from "./types";
 
-const CLOSERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
-
-/**
- * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.", "見て
- * https://x.example/a。", in any of the app's languages) and a closing bracket or quote the link did not open
- * ("(https://x.example/a)") are left as text, and so is a doubled `~~` or `||` closing the strike or spoiler the link
- * sits in.
- */
-export function linkEnd(whole: string): string {
-  const url = linkStop(whole);
-  const count: Record<string, number> = { "(": 0, ")": 0, "[": 0, "]": 0, "{": 0, "}": 0 };
-  for (const c of url) if (c in count) count[c]++;
-  let end = url.length;
-  while (end > 0) {
-    const last = url[end - 1];
-    const opener = CLOSERS[last];
-    if (LINK_TRAILING.test(last) || (opener && count[last] > count[opener])) {
-      if (opener) count[last]--;
-      end--;
-    } else if ((last === "~" || last === "|") && url[end - 2] === last) end -= 2;
-    else break;
-  }
-  return url.slice(0, end);
-}
+/** Where a link ends: the core's rule, which the link preview's sender and receiver use too. */
+export { linkEnd };
 
 /**
  * Characters that draw as nothing, which can make a link read as another address: format characters (direction
@@ -59,7 +37,9 @@ export function shownUrl(url: string): string {
 /** Web addresses, over http(s) only: `javascript:` and `data:` never become links. */
 export const link: Detector<"link", { url: string }> = {
   kind: "link",
-  pattern: /https?:\/\/\S+/gi,
+  // Up to a space or the punctuation a link stops at (`linkStop`): a run of links each ended by "،" or "。", with no
+  // space, is read once, not again from each link to the end of the run.
+  pattern: new RegExp(`https?:\\/\\/[^\\s${LINK_STOP_CHARS}]+`, "gi"),
   lead: /https?:\/\//gi,
   accept(match) {
     const url = linkEnd(match[0]);

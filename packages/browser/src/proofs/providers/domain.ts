@@ -81,7 +81,7 @@ function nip05Signer(id: "nip05-nip07" | "nip05-nip46"): InAppSigner<DomainEvide
     available: extension ? () => !!extensionSigner() : undefined,
     run: (ctx, work) => {
       const domain = normalizeDomain(ctx.values.domain ?? "");
-      return withNostrSigner({ bunker: extension ? undefined : ctx.values.bunker, signal: ctx.signal, onAuth: ctx.onAuthUrl }, signer => {
+      return withNostrSigner({ bunker: extension ? undefined : ctx.values.bunker, signal: ctx.signal, onAuth: ctx.onAuthUrl, timeoutMs: ctx.waitMs }, signer => {
         const session: SignerSession<DomainEvidence> = {
           subject: async () => domain,
           sign: async statement => {

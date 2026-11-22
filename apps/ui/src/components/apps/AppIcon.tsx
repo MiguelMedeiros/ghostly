@@ -29,9 +29,11 @@ function useBytesUrl(bytes: Uint8Array | null | undefined): string | null {
  * An app's icon: from the checked bundle only (its `icon.png`, read on this device with `appFile`, or the preview's),
  * never from a store or a card, so nobody can dress an app in someone else's picture. The generic mark otherwise.
  */
-export function AppIcon({ size = 40, icon, installed }: { size?: number; icon?: Uint8Array | null; installed?: { ref: string; digest: string; icon: boolean } }) {
+export function AppIcon({ size = 40, icon, installed }: { size?: number; icon?: Uint8Array | null; installed?: { ref: string; digest: string; icon: boolean; run?: { status: string } } }) {
   const [read, setRead] = useState<string | null>(null);
-  const ref = installed?.icon ? installed.ref : null;
+  // Not while its files are missing (a restored profile): the read would fail, and its files come back for the same
+  // version (the update check, Get its files, an Open), so the icon is read then, not at the next visit.
+  const ref = installed?.icon && installed.run?.status !== "needs-files" ? installed.ref : null;
   const digest = installed?.digest;
   useEffect(() => {
     if (!ref || !digest) { setRead(null); return; }

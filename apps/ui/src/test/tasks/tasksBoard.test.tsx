@@ -534,6 +534,31 @@ describe("a card a bot sent to several chats", () => {
     expect(screen.getByTestId("where")).toHaveAttribute("data-jump", "in-g2");
   });
 
+  it("in Arabic, lists its chats and tags the way Arabic lists them, not with an English comma", async () => {
+    const state = everywhere();
+    const tagged = { ...blocked, tags: ["core", "web"] };
+    const { user, engine } = renderApp(<Tasks />, { route: "/tasks", language: "ar" });
+    engine.on("statusCardIndex", () => [
+      row("link-1", tagged, { id: "in-chat", editedAt: NOW - 3 * 60_000 }),
+      row("group:g1", tagged, { id: "in-g1", member: "coord-in-g1", editedAt: NOW - 2 * 60_000 }),
+      row("group:g2", tagged, { id: "in-g2", member: "coord-in-g2", editedAt: NOW - 60_000 }),
+    ]).setState(state);
+    await loaded();
+    const card = screen.getByTestId("tasks-board").querySelector<HTMLElement>('[data-card-id="relay"]')!;
+    expect(within(card).getByTestId("board-card-chat")).toHaveAttribute("title", "Phone وSala de Máquinas");
+    const label = within(card).getByTestId("board-card-open").getAttribute("aria-label")!;
+    expect(label).toContain("Phone وSala de Máquinas");
+    expect(label).not.toContain(", ");
+    await user.click(within(card).getByTestId("board-card-details-toggle"));
+    // Each chat and tag in its own direction, the list's words between them in the page's.
+    const chats = within(card).getByTestId("board-card-chats");
+    expect(chats).toHaveTextContent("Phone وSala de Máquinas وCoordinator");
+    expect([...chats.querySelectorAll("bdi")].map((name) => name.textContent)).toEqual(["Phone", "Sala de Máquinas", "Coordinator"]);
+    const tags = within(card).getByTestId("board-card-tags");
+    expect(tags).toHaveTextContent("core وweb");
+    expect([...tags.querySelectorAll("bdi")].map((tag) => tag.textContent)).toEqual(["core", "web"]);
+  });
+
   it("is one bot's: a column for the bot, and a column for each chat it is in", async () => {
     const state = everywhere();
     const { user, engine } = renderApp(<Tasks />, { route: "/tasks" });
@@ -775,5 +800,38 @@ describe("the way to the board, above the chat list", () => {
     act(() => engine.messages("link-1", [{ ...card, card: rows[0].card, edit: { seq: 1, at: NOW, history: [] } }, text("t1"), text("t2")]));
     await waitFor(() => expect(screen.getByTestId("sidebar-tasks")).toHaveAccessibleName("Tasks"));
     expect(reads()).toBe(2);
+  });
+
+  it("reads the cards again for a card that comes in a group the tab holds no list of, from what changed only", async () => {
+    // The extension's peer sends a tab only what changes in a group it does not show, not the group's newest page.
+    const sent = row("group:g1", task({ id: "relay" }));
+    let rows = [sent];
+    fakeEngine.on("statusCardIndex", () => rows);
+    const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
+    await screen.findByTestId("sidebar-tasks");
+    const reads = () => engine.callsTo("statusCardIndex").length;
+    const settled = () => act(() => new Promise((done) => setTimeout(done, 300)));
+    const text = (id: string) => ({ linkId: "group:g1", id, text: "hi", sender: "peer", timestamp: NOW, via: "datalink" }) as StoredMessage;
+    const changes = (messages: StoredMessage[], deleted: string[] = []) => act(() => engine.emit({ kind: "message-changes", linkId: "group:g1", messages, deleted }));
+    expect(reads()).toBe(1);
+
+    // Texts, and the card the index has as it is: nothing to read.
+    changes([text("t1")]);
+    changes([{ linkId: "group:g1", id: sent.id, text: "", sender: "peer", timestamp: sent.timestamp, via: "datalink", card: sent.card } as StoredMessage]);
+    changes([], ["t1"]);
+    await settled();
+    expect(reads()).toBe(1);
+
+    // A new card: read again, and shown.
+    const next = row("group:g1", task({ id: "second" }));
+    rows = [sent, next];
+    changes([{ linkId: "group:g1", id: next.id, text: "", sender: "peer", timestamp: next.timestamp, via: "datalink", card: next.card } as StoredMessage]);
+    await waitFor(() => expect(reads()).toBe(2));
+    await waitFor(() => expect(screen.getByTestId("sidebar-tasks")).toHaveAccessibleName("Tasks, 2 active"));
+
+    // The card deleted: read again.
+    rows = [next];
+    changes([], [sent.id]);
+    await waitFor(() => expect(reads()).toBe(3));
   });
 });
