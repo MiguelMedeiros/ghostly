@@ -1,0 +1,1 @@
+Calls in communities ([602](../../602-group-calls.md), the `call` field of § Metadata) are built since release 1.12, so the open decisions no longer list them; calls in private groups stay open. No rule changes.
