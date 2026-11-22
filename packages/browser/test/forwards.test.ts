@@ -182,6 +182,23 @@ describe("a group file", () => {
   });
 });
 
+describe("a sent file", () => {
+  // Its transfer cancelled or declined, its staged copy goes (`FileDesk`), its record and bubble stay: its bytes never
+  // come back, so it never "has not arrived yet".
+  it("whose staged copy went, its transfer cancelled: not on this device any more", async () => {
+    const id = `link-a-out-${crypto.randomUUID()}`, size = 64 * 1024;
+    const storage = await fileBytes();
+    await storage.append(id, 0, pattern(0, size));
+    await fileStore.put({ id, linkId: "link-a", direction: "out", wireId: "w1", createdAt: 1, metadata: { name: "a.bin", size, mime: "application/octet-stream", timestamp: 1 },
+      bytes: storage.kind, digest: digestOf(size) });
+    await fileStore.patch(id, { wire3: { id: "w1", direction: "out", state: "cancelled", confirmed: 16_384, since: 1, error: "You cancelled it", file: { name: "a.bin", size, mime: "application/octet-stream", timestamp: 1 } } as FileTransferRecord });
+    await storage.remove(id);
+    const target = { linkId: "link-b", wireId: "w2", timestamp: 2, file: { id: `link-b-out-${crypto.randomUUID()}`, name: "a.bin", size, mime: "application/octet-stream" } };
+    await expect(copyForForward(id, target, async () => false)).rejects.toThrow("The file is not on this device any more");
+    expect(await fileStore.get(target.file.id)).toBeUndefined();
+  });
+});
+
 describe("a copy whose source goes while it is copied", () => {
   /** A received file kept in file storage, and a copy of it for chat `link-b` whose first step runs `meanwhile`. */
   async function copying(meanwhile: (id: string) => Promise<void>) {

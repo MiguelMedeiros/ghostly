@@ -6,7 +6,7 @@ import { reportOpenFailure } from "./openFailure";
  * A web link opened outside the app. A browser page opens it in a new tab through the link itself (no opener, no
  * referrer); Desktop's WebView cannot (WKWebView, as Tauri sets it up, drops a new-window request), so Rust hands it
  * to the system (`open_web_link`, http(s) only), which opens the browser, or the Maps app for an Apple Maps link.
- * Every `target="_blank"` in the app comes from here: apps/ui/src/test/ui/externalLinks.test.tsx fails on any other.
+ * Every `target="_blank"` in the app comes from here: the lint rule ghostly/no-blank-target (tools/eslint/) refuses any other.
  */
 export const isDesktopApp = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 

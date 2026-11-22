@@ -34,26 +34,34 @@ export function isRunnerPolicy(policy: string, internet = false): boolean {
     && only("script-src", "'unsafe-inline'", "'wasm-unsafe-eval'");
 }
 
-const checked = new Map<string, Promise<boolean | null>>();
+/**
+ * What asking the runner page found: whether it sends its policy; the status of a server that did not answer for it
+ * (a number); or null when it could not be asked at all (offline, a dropped request).
+ */
+export type RunnerAnswer = boolean | number | null;
+
+const checked = new Map<string, Promise<RunnerAnswer>>();
 
 /** A response that is no answer of the runner page's: the server failing (a proxy's 502 while it restarts), too busy, or timing out. */
 const notAnswered = (status: number) => status >= 500 || status === 408 || status === 429;
 
 /**
- * Whether the runner at `url` comes with its policy as a header (`internet`: the network runner's), or null when the
- * page could not be asked (offline, a dropped request, a server error). An answer is kept for the page's life; null is
- * not, so the next ask goes out again.
+ * Whether the runner at `url` comes with its policy as a header (`internet`: the network runner's), the status when
+ * its server answered with an error of its own (5xx, 408, 429), or null when the page could not be asked (offline, a
+ * dropped request). An answer is kept for the page's life; a status or null is not, so the next ask goes out again.
  */
-export function runnerPolicy(url: string, fetcher: typeof fetch = fetch, internet = false): Promise<boolean | null> {
+export function runnerPolicy(url: string, fetcher: typeof fetch = fetch, internet = false): Promise<RunnerAnswer> {
   const key = `${internet ? "net" : "plain"} ${url}`;
   let answer = checked.get(key);
   if (!answer) {
-    const unasked = () => {
+    const unasked = (status: number | null = null) => {
       if (checked.get(key) === asking) checked.delete(key);
-      return null;
+      return status;
     };
-    const asking: Promise<boolean | null> = fetcher(url, { cache: "no-store", credentials: "omit", redirect: "error" })
-      .then((response) => notAnswered(response.status) ? unasked() : response.ok && isRunnerPolicy(response.headers.get("content-security-policy") ?? "", internet), unasked);
+    // `no-cache`, not `no-store`: the server is asked every time, but an unchanged page answers 304 with its headers
+    // instead of its whole body (9.6 KiB gzip at every start, most of what a warm start downloaded).
+    const asking: Promise<RunnerAnswer> = fetcher(url, { cache: "no-cache", credentials: "omit", redirect: "error" })
+      .then((response) => notAnswered(response.status) ? unasked(response.status) : response.ok && isRunnerPolicy(response.headers.get("content-security-policy") ?? "", internet), () => unasked());
     answer = asking;
     checked.set(key, answer);
   }

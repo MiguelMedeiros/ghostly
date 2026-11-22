@@ -29,7 +29,7 @@ use rtc::rtp_transceiver::rtp_sender::{
 };
 use rtc::shared::marshal::Marshal;
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -53,6 +53,13 @@ const FPS: u32 = 15;
 /// What the page gets to show, at most: the size and rate of the JPEGs.
 const SHOWN_MAX: u32 = 960;
 const SHOWN_FPS: u32 = 15;
+/// The most pixels a peer's picture is decoded at: 8K UHD, more than any screen a browser shares. VP8 allows
+/// 16383×16383, 268 million: each such picture cost a third of a second of a core and the app 2.4 GiB, for a
+/// picture shown at most SHOWN_MAX wide ([`refuse_large`]).
+const DECODED_MOST: u64 = 7680 * 4320;
+/// The most bytes of RTP one of a peer's frames may take before the depayloader lets it go ([`bound_frames`]): an
+/// 8K keyframe is a few MiB. With none, packets that never end a frame grew the app by twice what they carried.
+const FRAME_MOST: usize = 16 * 1024 * 1024;
 /// How long before it is due a picture is shown all the same ([`due`]).
 const SHOWN_EARLY: Duration = Duration::from_millis(8);
 /// The browsers' own STUN server (RTC_CONFIG), for the server reflexive candidate.
@@ -893,7 +900,7 @@ fn receiver(
         format!(
             "appsrc name=rtp is-live=true format=time do-timestamp=true \
              caps=\"application/x-rtp,media=(string)video,clock-rate=(int)90000,encoding-name=(string)VP8,payload=(int){payload_type}\" \
-             ! rtpjitterbuffer latency=100 ! rtpvp8depay request-keyframe=true wait-for-keyframe=true ! vp8dec name=decoder \
+             ! rtpjitterbuffer latency=100 ! rtpvp8depay name=depay request-keyframe=true wait-for-keyframe=true ! vp8dec name=decoder \
              ! {}",
             shown()
         )
@@ -908,6 +915,8 @@ fn receiver(
     let ready = |pipeline: &gst::Pipeline| receiving(shared, pipeline, video, &decoded, &keyframes);
     if video {
         let pipeline = launch(&description)?;
+        bound_frames(&element(&pipeline, "depay")?)?;
+        refuse_large(&element(&pipeline, "decoder")?)?;
         ready(&pipeline)?;
         start(&pipeline, "The picture")?;
         return Ok((element(&pipeline, "rtp")?, pipeline, None));
@@ -927,6 +936,76 @@ fn receiver(
         ready,
     )?;
     Ok((element(&pipeline, "rtp")?, pipeline, device))
+}
+
+/// The size a VP8 keyframe says its pictures are (RFC 6386 § 9.1); none for any other frame.
+fn keyframe_size(frame: &[u8]) -> Option<(u64, u64)> {
+    if frame.len() < 10 || frame[0] & 1 != 0 || frame[3..6] != [0x9d, 0x01, 0x2a] {
+        return None;
+    }
+    let size = |at: usize| u64::from(u16::from_le_bytes([frame[at], frame[at + 1]]) & 0x3fff);
+    Some((size(6), size(8)))
+}
+
+/// Leaves a peer's pictures larger than DECODED_MOST out before `decoder` decodes them: from a keyframe that
+/// large to the next keyframe that is not (the frames between are drawn on it).
+fn refuse_large(decoder: &gst::Element) -> Result<(), String> {
+    let refused = AtomicBool::new(false);
+    let said = AtomicBool::new(false);
+    decoder
+        .static_pad("sink")
+        .ok_or("No decoder input")?
+        .add_probe(gst::PadProbeType::BUFFER, move |_, info| {
+            let size = match &info.data {
+                Some(gst::PadProbeData::Buffer(buffer)) => buffer
+                    .map_readable()
+                    .ok()
+                    .and_then(|frame| keyframe_size(&frame)),
+                _ => None,
+            };
+            if let Some((width, height)) = size {
+                let large = width * height > DECODED_MOST;
+                refused.store(large, Ordering::Relaxed);
+                if large && !said.swap(true, Ordering::Relaxed) {
+                    crate::diagnostics::log(&format!(
+                        "native call: the peer's video is {width}×{height}, too large to decode"
+                    ));
+                }
+            }
+            if refused.load(Ordering::Relaxed) {
+                gst::PadProbeReturn::Drop
+            } else {
+                gst::PadProbeReturn::Ok
+            }
+        });
+    Ok(())
+}
+
+/// Lets no frame of a peer's RTP grow in `depay` past FRAME_MOST bytes: the packet that would is marked a
+/// discontinuity, so the depayloader drops the frame and waits for the next keyframe.
+fn bound_frames(depay: &gst::Element) -> Result<(), String> {
+    let gathered = AtomicUsize::new(0);
+    depay
+        .static_pad("sink")
+        .ok_or("No depayloader input")?
+        .add_probe(gst::PadProbeType::BUFFER, move |_, info| {
+            if let Some(gst::PadProbeData::Buffer(buffer)) = &mut info.data {
+                // The RTP header's marker bit ends a frame.
+                let ends = buffer
+                    .map_readable()
+                    .is_ok_and(|packet| packet.get(1).is_some_and(|byte| byte & 0x80 != 0));
+                let size = buffer.size();
+                if gathered.fetch_add(size, Ordering::Relaxed) + size > FRAME_MOST {
+                    buffer.make_mut().set_flags(gst::BufferFlags::DISCONT);
+                    gathered.store(0, Ordering::Relaxed);
+                }
+                if ends {
+                    gathered.store(0, Ordering::Relaxed);
+                }
+            }
+            gst::PadProbeReturn::Ok
+        });
+    Ok(())
 }
 
 /// What makes the pictures the element named `decoder` gives into JPEGs for the page ([`show`]).
@@ -2500,6 +2579,105 @@ mod tests {
         );
     }
 
+    /// What a peer's VP8 pictures of that size, as RTP, make the call's video receiver decode.
+    fn decoded_of(width: u32, height: u32, pictures: u32) -> u64 {
+        let (shared, _) = telling();
+        let (keyframes, _) = mpsc::unbounded_channel();
+        let (rtp, receiving, _) =
+            receiver(&shared, true, VP8_PT, Arc::default(), keyframes).unwrap();
+        let peer = launch(&format!(
+            "videotestsrc num-buffers={pictures} ! video/x-raw,format=I420,width={width},height={height},framerate=15/1 \
+             ! vp8enc deadline=1 cpu-used=16 keyframe-max-dist=5 ! rtpvp8pay pt={VP8_PT} mtu=1200 \
+             ! appsink name=out sync=false"
+        ))
+        .unwrap();
+        let out: gst_app::AppSink = element(&peer, "out").unwrap();
+        start(&peer, "The peer").unwrap();
+        while let Ok(sample) = out.pull_sample() {
+            rtp.push_buffer(sample.buffer_owned().unwrap()).unwrap();
+        }
+        stop(peer);
+        // Past the jitter buffer's 100 ms, and a picture's decoding.
+        let end = Instant::now() + Duration::from_secs(3);
+        while shared.counts.video_received.load(Ordering::Relaxed) < u64::from(pictures)
+            && Instant::now() < end
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        stop(receiving);
+        shared.counts.video_received.load(Ordering::Relaxed)
+    }
+
+    /// A peer's pictures larger than any screen (VP8 allows 16383×16383: a third of a second of a core and 2.4 GiB
+    /// each) are never decoded; a camera's are.
+    #[test]
+    fn a_peers_picture_larger_than_any_screen_is_never_decoded() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        assert_eq!(decoded_of(7696, 4320, 3), 0);
+        assert!(decoded_of(640, 480, 10) > 0);
+    }
+
+    /// A peer's VP8 RTP packet: a frame's start or the rest of it, the frame's last when `marker`.
+    fn vp8_packet(seq: u16, start: bool, marker: bool) -> gst::Buffer {
+        let mut packet = vec![0x80, (u8::from(marker) << 7) | VP8_PT];
+        packet.extend_from_slice(&seq.to_be_bytes());
+        packet.extend_from_slice(&[0, 0, 0, u8::from(start), 0, 0, 0, 1]);
+        if start {
+            // The payload descriptor's S bit, then a 64×64 keyframe's header.
+            packet.extend_from_slice(&[0x10, 0x10, 0, 0, 0x9d, 0x01, 0x2a, 64, 0, 64, 0]);
+        } else {
+            packet.push(0);
+        }
+        packet.resize(1200, 0);
+        gst::Buffer::from_slice(packet)
+    }
+
+    /// A peer's frame that never ends (no packet with the marker bit) reaches the decoder no larger than
+    /// FRAME_MOST, and the frame after it still does.
+    #[test]
+    fn a_peers_frame_that_never_ends_is_never_gathered_past_the_most() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let (shared, _) = telling();
+        let (keyframes, _) = mpsc::unbounded_channel();
+        let (rtp, receiving, _) =
+            receiver(&shared, true, VP8_PT, Arc::default(), keyframes).unwrap();
+        let (largest, frames) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let (seen, counted) = (largest.clone(), frames.clone());
+        element::<gst::Element>(&receiving, "decoder")
+            .unwrap()
+            .static_pad("sink")
+            .unwrap()
+            .add_probe(gst::PadProbeType::BUFFER, move |_, info| {
+                if let Some(gst::PadProbeData::Buffer(buffer)) = &info.data {
+                    seen.fetch_max(buffer.size(), Ordering::Relaxed);
+                    counted.fetch_add(1, Ordering::Relaxed);
+                }
+                gst::PadProbeReturn::Drop
+            });
+        let rest = (FRAME_MOST + FRAME_MOST / 4) / 1200;
+        rtp.push_buffer(vp8_packet(0, true, false)).unwrap();
+        for seq in 1..=rest as u16 {
+            rtp.push_buffer(vp8_packet(seq, false, seq == rest as u16))
+                .unwrap();
+        }
+        rtp.push_buffer(vp8_packet(rest as u16 + 1, true, true))
+            .unwrap();
+        let end = Instant::now() + Duration::from_secs(10);
+        while frames.load(Ordering::Relaxed) == 0 && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        stop(receiving);
+        let largest = largest.load(Ordering::Relaxed);
+        assert!(largest <= FRAME_MOST, "a frame of {largest} bytes");
+        assert!(frames.load(Ordering::Relaxed) > 0, "no frame after it");
+    }
+
     /// The page out of sight: a peer's pictures are made JPEGs until one has gone to the page, then none, until
     /// it is back in sight. 2 s of a live peer at 30 a second, out of sight for the first half and more.
     #[test]
@@ -2599,7 +2777,10 @@ mod tests {
         let shared = Arc::new(Shared {
             fake: true,
             events: Arc::new(move |bytes| {
-                into.lock().unwrap().push(String::from_utf8(bytes).unwrap());
+                // Pictures (JPEGs) too, as whatever text they read as.
+                into.lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&bytes).into_owned());
             }),
             counts: Counts::default(),
             ice: Mutex::new("new".into()),

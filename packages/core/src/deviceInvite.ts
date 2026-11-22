@@ -30,6 +30,20 @@ export const DEVICE_INVITE_BYTES = 133;
 export const DEVICE_INVITE_OWN_DEVICE = 1;
 /** How long a code is good for (WISP 06: the inviter enforces the 10 minutes). */
 export const DEVICE_INVITE_LIFETIME_S = 600;
+/**
+ * How far past its expiry, by the reading device's own clock, a code is still taken: a day. The expiry is in the
+ * inviter's clock, and the reader's may run ahead of it by minutes (no time sync), by hours (a wrong time zone set as
+ * local time) or more; only the inviter's word counts, and the inviter refuses a code past its ten minutes. A code a
+ * day past its expiry here is old by any likely clock.
+ */
+export const DEVICE_INVITE_READ_SLACK_S = 24 * 3600;
+
+/**
+ * Whether the device reading a code takes it as expired: `expires` is the code's (the inviter's clock), `now` this
+ * device's, both UNIX seconds. The one rule for every reader (the enrollment and the join dialogs), so none refuses a
+ * fresh code from an inviter whose clock is behind this one.
+ */
+export const deviceInviteExpired = (expires: number, now: number): boolean => expires + DEVICE_INVITE_READ_SLACK_S <= now;
 
 /** A device invite, as both sides hold it. Keys and seeds are the forms the link parameters use. */
 export interface DeviceInvite {
@@ -46,7 +60,7 @@ export interface DeviceInvite {
   expires: number;
 }
 
-/** Why a device code was refused. `chat`: it is a chat invite. `expired`: past its time. The others as for a chat invite (WISP 801). */
+/** Why a device code was refused. `chat`: it is a chat invite. `expired`: a day past its time here. The others as for a chat invite (WISP 801). */
 export type DeviceInviteRefusal = "typo" | "update" | "not-ghostly" | "damaged" | "chat" | "expired";
 
 export type DeviceInviteReading = { ok: true; invite: DeviceInvite } | { ok: false; reason: DeviceInviteRefusal; detail?: string };
@@ -71,7 +85,8 @@ const body = (input: string) => unwrapPasted(input).replace(/^.*#/, "");
 
 /**
  * Reads a device code, pasted or scanned (bare, in capitals from a QR code, or after a `#`). `now` is in UNIX
- * seconds: a code past its expiry is refused here already, though only the inviter's word counts.
+ * seconds, this device's clock: only a code a day past its expiry by it is refused here (`deviceInviteExpired`), since
+ * only the inviter's word counts.
  */
 export function readDeviceInvite(input: string, now: number = Math.floor(Date.now() / 1000)): DeviceInviteReading {
   const code = body(input).toLowerCase();
@@ -95,7 +110,7 @@ export function readDeviceInvite(input: string, now: number = Math.floor(Date.no
   // Bit 0 is the only kind of device invite there is. One without it is of a kind this build does not know.
   if (!(flags & DEVICE_INVITE_OWN_DEVICE)) return { ok: false, reason: "update", detail: `Flags ${flags}` };
   const expires = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(129);
-  if (expires <= now) return { ok: false, reason: "expired" };
+  if (deviceInviteExpired(expires, now)) return { ok: false, reason: "expired" };
   const field = (index: number) => payload.slice(index * 32, index * 32 + 32);
   return {
     ok: true,

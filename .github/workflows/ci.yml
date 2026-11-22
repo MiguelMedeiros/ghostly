@@ -56,6 +56,9 @@ jobs:
   #   checks when the site changed, and Tauri when Rust changed. The app's tests, the packages shards, the CLI on ARM64,
   #   the builds, the site's browser checks and the macOS jobs wait for ready_for_review, whose run plans everything.
   #   Many sessions push drafts at once, and the free plan runs about 20 jobs at a time (5 on macOS).
+  # - So does a ready pull request that already has `queue` and whose head is behind its base: the merge train boards
+  #   it on that fast tier, and its batch's full run on the base's tip is the gate. Its gate job is "CI Success (draft)"
+  #   too. At the base's tip (where the train rebases a lone pull request) it runs everything, as without `queue`.
   # - Website: runs when the pull request changes something the site reads (apps/website/, docs/, the files its
   #   scripts copy or quote; the list is tested against those scripts).
   # - The Desktop jobs on macOS: skipped only when every change is in apps/website/ or docs/, which the app never reads.
@@ -89,6 +92,7 @@ jobs:
       affected: ${{ steps.plan.outputs.affected }}
       draft: ${{ steps.plan.outputs.draft }}
       left_draft: ${{ steps.plan.outputs.left_draft }}
+      queued: ${{ steps.plan.outputs.queued }}
       tested: ${{ steps.plan.outputs.tested }}
     steps:
       - name: Checkout the gate
@@ -147,24 +151,33 @@ jobs:
             draft=true
             echo "left_draft=true" >> "$GITHUB_OUTPUT"
           fi
+          # Ready, with `queue` already, and behind its base: the merge train boards it on the fast tier and its batch
+          # runs everything (ci-changes.mjs's queuedBehind). At the base's tip it runs everything: the train lands a lone
+          # pull request on its own run there.
+          queued=false
+          if [[ "$draft" == "false" ]] && node tools/scripts/ci-changes.mjs --queued-behind; then
+            draft=true
+            queued=true
+            echo "queued=true" >> "$GITHUB_OUTPUT"
+          fi
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
           # A pull request that changes no file (main merged back into dev after a release) gives nothing to plan
           # from: every path gate is on (a draft still gets the fast tier).
           if (( CHANGED == 0 )); then
             echo "::notice::This pull request changes no file: every path gate is on"
-            node tools/scripts/ci-changes.mjs --draft="$draft" --all
+            node tools/scripts/ci-changes.mjs --draft="$draft" --queued="$queued" --all
             exit 0
           fi
           gh api --paginate "$FILES_URL" --jq '.[] | "\(.filename)\t\(.previous_filename // "")"' > "$RUNNER_TEMP/files.tsv"
           # The files API lists at most 3000 files: a longer pull request runs everything.
           if (( $(wc -l < "$RUNNER_TEMP/files.tsv") < CHANGED )); then
             echo "::notice::More files changed than the files API lists: every path gate is on"
-            node tools/scripts/ci-changes.mjs --draft="$draft" --all
+            node tools/scripts/ci-changes.mjs --draft="$draft" --queued="$queued" --all
             exit 0
           fi
           files=$(tr '\t' '\n' < "$RUNNER_TEMP/files.tsv" | grep -v '^$')
           echo "$files"
-          node tools/scripts/ci-changes.mjs --draft="$draft" <<< "$files"
+          node tools/scripts/ci-changes.mjs --draft="$draft" --queued="$queued" <<< "$files"
 
   # ============================================
   # Frontend (src, packages, extension) - React + Vite + TypeScript
@@ -181,6 +194,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The test map reads what a pull request adds against the merge commit's first parent.
+          fetch-depth: 2
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -214,10 +230,19 @@ jobs:
       - name: Changelog entries are well formed
         run: node tools/scripts/changes.mjs
 
+      # A flaky test leaves the gate (@quarantine, tools/scripts/quarantine.json) for at most 7 days, with its open
+      # kind:flake issue (docs/TESTING.md, "Quarantine"). A pull request's build gets no secret: the nightly E2E (full)
+      # checks the issues.
+      - name: Quarantined tests are in date
+        run: node tools/scripts/quarantine.mjs
+
       # Runs no test: reads e2e/features.json and what every test says it covers (docs/TESTING.md). The map goes to
-      # the run's summary page: it is not committed.
+      # the run's summary page: it is not committed. On a pull request, what it adds (a test file, a feature) is checked
+      # against its base, the merge commit's first parent (the checkout's second commit).
       - name: Test map (every feature has a test)
-        run: npm run test:map -- --summary
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+        run: npm run test:map -- --summary ${BASE:+--base=$BASE}
 
   frontend-tests:
     name: Frontend tests (app)
@@ -293,15 +318,24 @@ jobs:
           if-no-files-found: ignore
 
   # A draft's unit tests: only the ones its change can reach (tools/scripts/test-affected.mjs, what sessions run before
-  # they push), on one runner instead of the five above. `vitest related` per project; a project's config, setup or the
-  # lock file runs that project whole. Lint and types are frontend-checks' (whole), Rust is tauri's, the e2e is no
-  # pull request's. Leaving draft runs the full suites above instead.
+  # they push), on four runners instead of the five above. `vitest related` per project; a project's config, setup or
+  # the lock file runs that project whole. ui, browser and cli each get a runner (a core change reaches most of each,
+  # minutes apiece, and one after another they passed the 20 minutes), the fourth takes every other project
+  # (affected/select.mjs UNIT_ALONE). The cli alone still took 6-8 minutes where the others took 1-2, so it runs in two
+  # halves cut by time (`vitest --shard`, UNIT_HALVED): the first on the third runner, the second beside the small
+  # projects on the fourth. Lint and types are frontend-checks' (whole), Rust is tauri's, the e2e is no pull
+  # request's. Leaving draft runs the full suites above instead.
   affected-tests:
-    name: Affected unit tests (draft)
+    name: Affected unit tests (draft ${{ matrix.group }}/4)
     needs: changes
     if: needs.changes.outputs.affected == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The 4 below, in the name and in CI Success's check must match this list.
+        group: [1, 2, 3, 4]
     steps:
       # The pull request's merge commit and its first parent, the base it is merged onto: their difference is the change.
       - name: Checkout
@@ -321,15 +355,16 @@ jobs:
       - name: Unit tests the change reaches
         env:
           JOBS: "4"
-        run: node tools/scripts/test-affected.mjs --base HEAD^1 --no-e2e --no-rust --no-lint --no-typecheck
+        run: node tools/scripts/test-affected.mjs --base HEAD^1 --no-e2e --no-rust --no-lint --no-typecheck --unit-group ${{ matrix.group }}/4
 
   # ============================================
   # The headless CLI on Linux ARM64 (Graviton, Ampere, Hetzner ARM, a Raspberry Pi)
   # ============================================
   # The shards above run on x64 only. Here: the CLI packed as npm publishes it, installed into an empty folder the way
   # `npm install -g @ghostlytools/cli` does (its dependencies from npm, so node-datachannel's linux-arm64 build comes
-  # from its own optional package), must start a daemon with WebRTC and calls on. Then the CLI's whole test suite, the
-  # two-peer story included: pairing, messages, files and a voice call over libdatachannel, on arm64.
+  # from its own optional package), must start a daemon with WebRTC and calls on. The CLI's whole test suite on arm64
+  # (the two-peer story, a voice call over libdatachannel) runs nightly in cli-arm64-nightly.yml: on x64 the packages
+  # shards above already run it on every pull request.
   # No Rust: the Iroh WebAssembly the CLI bundles is committed (packages/iroh-web/pkg).
   cli-linux-arm64:
     name: CLI on Linux ARM64
@@ -337,7 +372,7 @@ jobs:
     if: needs.changes.outputs.packages == 'true'
     runs-on: ubuntu-24.04-arm
     # A daemon that never exits would otherwise hold the runner for 6 hours.
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -390,15 +425,6 @@ jobs:
           $ghostly daemon stop
           trap - EXIT
 
-      # The CLI's own suite, as the packages shards run it on x64 (its Vitest builds dist/ again first). Skipped here as
-      # on x64: fedimint (a regtest federation) and payments (a test mint), which need the Docker e2e services, the long
-      # chat bench, and the ffmpeg comparisons in voicePeaks when ffmpeg is missing.
-      - name: jq for the Claude Code agent example
-        run: command -v jq || { sudo apt-get update && sudo apt-get install -y jq; }
-
-      - name: CLI tests
-        run: npm run test -w @ghostlytools/cli
-
   frontend-build:
     name: Frontend builds
     needs: changes
@@ -437,6 +463,15 @@ jobs:
 
       - name: Build web app
         run: npm run build:web
+
+      # What the web app runs on load stays one file (see tools/scripts/check-web-first-load.mjs).
+      - name: Web first load is one file
+        run: npm run check:web-first-load
+
+      # Every file the service worker installs is in the build: one missing and nginx's 404 fails the install, which
+      # vite preview hides (see tools/scripts/check-web-precache.mjs).
+      - name: Web service worker names only built files
+        run: npm run check:web-precache
 
       # The adapter SDK, the way an outside author gets it: packed into a tarball, installed into
       # packages/sdk/examples/adapter (not a workspace member), whose adapters must pass the contract suites.
@@ -880,6 +915,7 @@ jobs:
         env:
           DRAFT: ${{ needs.changes.outputs.draft }}
           LEFT_DRAFT: ${{ needs.changes.outputs.left_draft }}
+          QUEUED: ${{ needs.changes.outputs.queued }}
           TESTED: ${{ needs.changes.outputs.tested }}
           PUSH_TO_DEV: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
           CHANGES: ${{ needs.changes.result }}
@@ -903,6 +939,11 @@ jobs:
           DESKTOP_MEDIA: ${{ needs.desktop-media.result }}
           DESKTOP_MACOS: ${{ needs.desktop-macos.result }}
         run: |
+          # First: with `changes` not green, every output below is empty, and the plan's check would blame the plan.
+          if [[ "$CHANGES" != "success" ]]; then
+            echo "::error::Changed paths ended $CHANGES, so this run has no plan: see that job"
+            exit 1
+          fi
           # Not a draft (this job is "CI Success"): the plan must be the full tier, or nothing passes. Only a push to dev
           # whose tree already passed it may plan less.
           if [[ "$TESTED" == "true" && "$PUSH_TO_DEV" != "true" ]]; then
@@ -915,19 +956,39 @@ jobs:
           fi
           # Skipped only counts when `changes` chose to skip that job.
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$2" == "false" ) ]]; }
+          # One error per job that did not pass, by the name the run page shows: the summary alone hid it among the skips.
+          # A matrix has one result for all its jobs: the error names their range and says so ($4), and each job names
+          # its own failure.
+          failed=0
+          check() {
+            ok "$2" "$3" && return
+            if [[ "$2" == "skipped" ]]; then echo "::error::$1 was skipped, but this change needs it"
+            elif [[ -n "${4:-}" ]]; then echo "::error::$1: $4 ended $2"
+            else echo "::error::$1 ended $2"; fi
+            failed=1
+          }
+          check "Frontend lint and types" "$FRONTEND_CHECKS" "$LINT"
+          check "Frontend tests (app)" "$FRONTEND_TESTS" "$FULL"
+          check "Frontend builds" "$FRONTEND_BUILD" "$FULL"
+          check "Affected unit tests (draft 1/4 to 4/4)" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"
+          check "Frontend tests (packages)" "$PACKAGES_TESTS" "$PACKAGES"
+          check "CLI on Linux ARM64" "$CLI_ARM64" "$PACKAGES"
+          check "Tauri Backend" "$TAURI" "$RUST"
+          check "Website" "$WEBSITE" "$WEBSITE_GATE"
+          check "Website browser checks" "$WEBSITE_E2E" "$WEBSITE_E2E_GATE"
+          check "Desktop media" "$DESKTOP_MEDIA" "$APP"
+          check "Desktop on macOS" "$DESKTOP_MACOS" "$APP"
           summary="draft=$DRAFT tested=$TESTED changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS affected-tests=$AFFECTED cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
-          if [[ "$CHANGES" != "success" ]] || ! ok "$FRONTEND_CHECKS" "$LINT" || \
-             ! ok "$FRONTEND_TESTS" "$FULL" || ! ok "$FRONTEND_BUILD" "$FULL" || ! ok "$AFFECTED" "$AFFECTED_GATE" || \
-             ! ok "$PACKAGES_TESTS" "$PACKAGES" || ! ok "$CLI_ARM64" "$PACKAGES" || ! ok "$TAURI" "$RUST" || \
-             ! ok "$WEBSITE" "$WEBSITE_GATE" || ! ok "$WEBSITE_E2E" "$WEBSITE_E2E_GATE" || \
-             ! ok "$DESKTOP_MEDIA" "$APP" || ! ok "$DESKTOP_MACOS" "$APP"; then
+          if (( failed )); then
             echo "One or more jobs failed: $summary"
             exit 1
           fi
           if [[ "$TESTED" == "true" ]]; then
             echo "::notice::This tree passed CI Success on a pull request already (see Changed paths): Tauri Backend saved the Cargo cache when dev lacked it."
           fi
-          if [[ "$LEFT_DRAFT" == "true" ]]; then
+          if [[ "$QUEUED" == "true" ]]; then
+            echo "::notice::Queued and behind its base: the fast tier passed. The merge train boards it on this run, and its batch's full run is the check that counts (alone, the train rebases it onto the tip, where it gets the full tier)."
+          elif [[ "$LEFT_DRAFT" == "true" ]]; then
             echo "::notice::Left draft after this run started: the fast tier passed, and the full run waits behind this one. The merge train may board it on this run and cancel that full run; the batch's run is the check that counts."
           elif [[ "$DRAFT" == "true" ]]; then
             echo "::notice::Draft: the fast tier passed. Once you mark it ready (gh pr ready), the merge train may board it on this run and cancel the full run; the batch's run is the check that counts."

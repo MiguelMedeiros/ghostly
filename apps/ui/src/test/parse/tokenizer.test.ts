@@ -146,11 +146,14 @@ describe("links", () => {
     ["a family and a flag", "https://x.example/a👨‍👩‍👧 https://x.example/b🇧🇷", "[link:https://x.example/a]👨‍👩‍👧 [link:https://x.example/b]🇧🇷"],
     ["a bracket, then an emoji", "(https://x.example/a)😂", "([link:https://x.example/a])😂"],
     ["a zero-width space", "https://x.example/a\u200b", "[link:https://x.example/a]\u200b"],
-    // Right-to-left text puts direction marks around a link: the link opened "\u2026/a%E2%80%8F", and took the emoji back.
-    ["a right-to-left mark", "https://x.example/a\u200f", "[link:https://x.example/a]\u200f"],
-    ["an emoji, then a right-to-left mark", "https://x.example/a\ud83d\udd25\u200f", "[link:https://x.example/a]\ud83d\udd25\u200f"],
-    ["an isolate around it", "\u2067https://x.example/a\u2069", "\u2067[link:https://x.example/a]\u2069"],
+    // A direction mark after a link (Arabic and Hebrew writers type one so the full stop sits on the right side) went
+    // into it: "…/a%E2%80%8F".
+    ["a right-to-left mark, then a stop", "\u0632\u0648\u0631\u0648\u0627 https://x.example/a\u200f. \u0634\u0643\u0631\u0627", "\u0632\u0648\u0631\u0648\u0627 [link:https://x.example/a]\u200f. \u0634\u0643\u0631\u0627"],
+    ["a left-to-right mark", "https://x.example/a\u200e", "[link:https://x.example/a]\u200e"],
     ["an Arabic letter mark", "https://x.example/a\u061c", "[link:https://x.example/a]\u061c"],
+    ["a closed isolate", "\u2067https://x.example/a\u2069", "\u2067[link:https://x.example/a]\u2069"],
+    ["an emoji, then a right-to-left mark", "https://x.example/a\ud83d\udd25\u200f", "[link:https://x.example/a]\ud83d\udd25\u200f"],
+    // The link opened "…/a%C2%AD" and "…/a1": a soft hyphen draws as nothing, and a keycap's digit is part of its emoji.
     ["a soft hyphen", "https://x.example/a\u00ad", "[link:https://x.example/a]\u00ad"],
     ["a keycap", "https://x.example/a1\ufe0f\u20e3 https://x.example/b#\u20e3", "[link:https://x.example/a]1\ufe0f\u20e3 [link:https://x.example/b]#\u20e3"],
     ["an emoji inside the path (kept)", "https://x.example/🔥/a", "[link:https://x.example/🔥/a]"],

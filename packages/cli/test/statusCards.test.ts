@@ -11,6 +11,7 @@ import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
 import { CARD_UPDATE_GAP_MS, flushCardUpdates, mergeCard } from "../src/statusCards";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.status-cards
 
 /** `task send` and `task update` (WISP 405 · Status Cards) against an engine that keeps what it is sent. */
@@ -35,7 +36,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon", out: { delivery?: StoredMe
   const emit = (event: GhostlyEvent) => { for (const listener of listeners) listener(event); };
   const card = (raw: unknown) => { const checked = checkStatusCard(raw); if ("error" in checked) throw new Error(checked.error); return checked.card; };
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Coordinator" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Coordinator" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
     getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => of(`group:${groupId}`).map((m) => ({ ...m }))),
@@ -124,7 +125,7 @@ describe("the task commands", () => {
     usage("task send", pr("--pr-number", "0"), /^--pr-number takes a whole number from 1 to 1000000000, not 0$/);
     for (const flag of ["additions", "deletions", "files"]) usage("task send", pr(`--${flag}`, "-3"), new RegExp(`^--${flag} takes a whole number from 0 to 1000000000, not -3$`));
     usage("task update", ["g1", "t", "--additions", "2.5"], /^--additions takes a whole number from 0 to 1000000000, not 2.5$/);
-    usage("task send", send("--steps", "99999999999999999999/99999999999999999999"), /^--steps takes done\/total of at most 1000000000 steps, like 2\/5, not "99999999999999999999\/99999999999999999999"$/);
+    usage("task send", send("--steps", "99999999999999999999/99999999999999999999"), /^--steps takes done\/total of at most 1000000000 steps, like 2\/5, not \(a 41-character word\)$/);
     expect(params("task send", pr("--pr-number", "7", "--additions", "0", "--files", "1000000000", "--steps", "1000000000/1000000000")).card).toMatchObject({ pr: { number: 7, additions: 0, files: 1e9 }, done: 1e9, total: 1e9 });
     usage("task update", ["g1", "t", "--pr-state", "weird"], /^--pr-state takes draft, open, merged or closed, not "weird"$/);
     usage("task update", ["g1", "t", "--pr-checks", "green"], /^--pr-checks takes passing, failing or pending, not "green"$/);
