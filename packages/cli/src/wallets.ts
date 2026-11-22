@@ -280,16 +280,6 @@ function lightningRecent(s: EngineState, n: WalletNetwork) {
   }))).sort((a, b) => b.createdAt - a.createdAt);
 }
 
-/**
- * Waits (at most `ms`) until the wallet view shows this outgoing payment as answered. The engine makes the view again
- * within 50 ms of a change, so read at once the answer said the sats set aside before the payment.
- */
-async function viewShows(ctx: ApiContext, n: WalletNetwork, paymentHash: string, ms = 2_000): Promise<void> {
-  const until = Date.now() + ms;
-  const shows = () => (netView(state(ctx), n)?.lightnings ?? []).some((c) => (c.recent ?? []).some((op) => op.direction === "out" && op.paymentHash === paymentHash && op.state !== "sending"));
-  while (!shows() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 20));
-}
-
 function badMintUrl(error: unknown): boolean {
   const code = error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
   return code === "invalidMintUrl" || code === "mintNotHttps";
@@ -524,8 +514,7 @@ const WALLETS: Record<string, Method> = {
     const source = (quote as { source?: string }).source ?? quote.mint;
     if (paid.paid) return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: true };
     // Not settled yet: the payment by its hash, and through the mints the sats set aside (the network's, as `wallet list`
-    // says them), read once the wallet view shows the payment.
-    if (paymentHash) await viewShows(ctx, n, paymentHash);
+    // says them), from the wallets' view the engine made after the payment.
     return {
       network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: false, pending: true, paymentHash,
       ...(source === CASHU_MINT_SOURCE && { setAside: netView(state(ctx), n)?.setAside ?? 0 }), note: notPaidYet(ctx, n, source, quote.amount, quote.feeReserve),

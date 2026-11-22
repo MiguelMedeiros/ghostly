@@ -140,6 +140,9 @@ describe("pay that the mint has not settled", { timeout: 60_000 }, () => {
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + later });
     try { await (node as unknown as { wallet: { pollMelts(): Promise<void> } }).wallet.pollMelts(); } finally { vi.useRealTimers(); monotonic.mockRestore(); }
   };
+  /** The sats of the coins the wallet's store holds set aside, read past the view. */
+  const reservedSats = async () => (await (node as unknown as { wallet: { allProofs(): Promise<{ amount: number; reserved?: boolean }[]> } }).wallet.allProofs())
+    .filter((p) => p.reserved).reduce((sum, p) => sum + p.amount, 0);
 
   it("answers pending with the payment hash and the sats set aside, which wallet list says as setAside", async () => {
     mint.cfg.melt = "pending";
@@ -149,6 +152,8 @@ describe("pay that the mint has not settled", { timeout: 60_000 }, () => {
     expect(before).toMatchObject({ setAside: 34 });
     const pending = await callApi(ctx, "pay", { target: invoice(30, 5) }) as Record<string, unknown>;
     expect(pending).toMatchObject({ paid: false, pending: true, paymentHash: "05".repeat(32), setAside: 66 });
+    // Read from a view made after the payment: the coins the wallet holds set aside now, none of a split's inputs.
+    expect(pending.setAside).toBe(await reservedSats());
     expect(pending.note).toContain("Cashu wallet's `setAside`");
     expect(await listed()).toMatchObject({ setAside: 66, balance: (before.balance as number) - 32 });
     // A paid payment answers as before.
@@ -168,14 +173,18 @@ describe("pay that the mint has not settled", { timeout: 60_000 }, () => {
     // The mint pays the first and says the second never went.
     for (const m of mint.melts.values()) if (m.state === "PENDING") m.state = m.amount === 10 ? "PAID" : m.amount === 20 ? "UNPAID" : m.state;
     await askAgain();
-    // The wallet view is made again within moments of the answer.
-    await vi.waitFor(async () => expect(await recentOf("04".repeat(32))).toMatchObject({ state: "failed" }));
+    // The wallet view is made again within moments of the answer: the failed one's 22 sats back with it.
+    const listedAside = async () => ((await callApi(ctx, "wallet.list", { network: "testnet" }) as { wallets: Record<string, unknown>[] }).wallets).find((w) => w.type === "cashu")?.setAside;
+    await vi.waitFor(async () => {
+      expect(await recentOf("04".repeat(32))).toMatchObject({ state: "failed" });
+      expect(await listedAside()).toBe(32);
+    });
     expect(await recentOf("03".repeat(32))).toMatchObject({ state: "paid", settledAt: expect.any(Number) });
     const history = (await callApi(ctx, "wallet.history", {}) as { history: { kind: string; amount: number }[] }).history;
     // Paid: its movement is in the history now, beside the one paid at once in the first test.
     expect(history.filter((tx) => tx.kind === "lightning-out" && tx.amount === 10)).toHaveLength(2);
-    // Only the one still pending (32 sats) is set aside now; the failed one's 22 came back.
-    expect(((await callApi(ctx, "wallet.list", { network: "testnet" }) as { wallets: Record<string, unknown>[] }).wallets).find((w) => w.type === "cashu")).toMatchObject({ setAside: 32 });
+    // Only the one still pending (32 sats) is set aside now.
+    expect(await listedAside()).toBe(await reservedSats());
   });
 
   it("one sat set aside is said in the singular", async () => {
