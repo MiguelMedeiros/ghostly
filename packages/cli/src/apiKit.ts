@@ -319,13 +319,18 @@ export function findOwnNamedChat(links: readonly LinkView[], ref: string, groups
   return chat.link;
 }
 
+/** The most distinct refs `call auto on --from` and `group auto on --from` (`call.auto`, `group.auto`) take at once. */
+export const AUTO_FROM_CHATS = 256;
+
 /**
  * `findOwnNamedChat` for each chat a grant names (`call auto` / `group auto on --from`), each chat once: a ref given twice
  * is read once, and a chat named by its id and its label too is kept once: 50,000 copies of one ref from a script were
- * each resolved (8 s of the daemon's thread), and `call auto` kept them all.
+ * each resolved (8 s of the daemon's thread), and `call auto` kept them all. More than `AUTO_FROM_CHATS` distinct refs
+ * are refused before any is read: each is a lookup over every chat.
  */
 export function findOwnNamedChats(links: readonly LinkView[], refs: readonly string[], groups: readonly GroupView[] = [], onlyChat?: string): LinkView[] {
   const unique = new Set(refs);
+  if (unique.size > AUTO_FROM_CHATS) throw new CliError("bad_request", `At most ${AUTO_FROM_CHATS} chats in --from; got ${unique.size}.`);
   const chats = new Map<string, LinkView>();
   for (const ref of unique) {
     const link = findOwnNamedChat(links, ref, groups, onlyChat);
