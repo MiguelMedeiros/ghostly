@@ -826,12 +826,18 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(bob.views()[0]).toMatchObject({ status: "removed", epoch: alice.views()[0].epoch });
       });
 
-      it("that was several hundred changes behind gets them a slice at a time, never more than its app holds waiting, and is told", async () => {
+      /**
+       * Far behind: 80 changes, more than an app held waiting before 2026-10-07 (64). The admin's answer is 81 commits,
+       * six slices: all at once they would be a turn of 81 with 81 or more waiting, past both bounds below, and the slices
+       * after the first two each wait for Bob's app. Several hundred checked no more and took seconds of real crypto.
+       */
+      it("that was far behind gets them a slice at a time, never more than its app holds waiting, and is told", async () => {
         const { world, alice, bob, groupId, key, edge } = await trio();
         const aliceKey = key(alice), bobKey = key(bob);
         edge("alice", bob, false); edge("carol", bob, false);
         world.chats.delete("chat-ab");
-        for (let i = 0; i < 300; i++) { await alice.rotate(groupId); await world.settle(); }
+        const behind = 5 * GROUP_LIMITS.catchUpSlice;
+        for (let i = 0; i < behind; i++) { await alice.rotate(groupId); await world.settle(); }
         await alice.remove(groupId, bobKey); await world.settle();
         const removal = alice.views()[0].epoch!;
         // Bob's app: what came on his edges and is not handled yet waits there; past `SESSION_RECEIVE_PENDING` its
@@ -883,7 +889,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect((await world.peers.get("alice")!.store.getGroups())[0].farewells?.[bobKey]).toMatchObject({ answered: 1 });
         // The commit that removed him as the edge opened, then every one from where he was up to it, each once.
         const from = epochs[1] - 1;
-        expect(from).toBeLessThan(removal - 290);
+        expect(from).toBeLessThan(removal - behind);
         expect(epochs).toEqual([removal, ...Array.from({ length: removal - from }, (_, i) => from + 1 + i)]);
         // Asked again once that answer is through: a try each, up to the few an admin answers, then no more.
         const before = epochs.length;

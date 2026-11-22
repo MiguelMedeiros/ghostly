@@ -10,6 +10,13 @@
 .wallet-network:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
 .wallet-network[aria-selected=true]{border-color:var(--net);background:color-mix(in srgb,var(--net) 10%,transparent);color:var(--color-text-primary)}
 .wallet-network-name{white-space:nowrap}
+/* Forced colors (Windows Contrast) give both tabs the same edge and drop the tint: the chosen one is filled with
+   Highlight instead, as the app's other chosen options are (wallet/ui.tsx chosenInForcedColors). */
+@media(forced-colors:active){
+  .wallet-network[aria-selected=true]{forced-color-adjust:none;border-color:Highlight;background:Highlight;color:HighlightText}
+  .wallet-network[aria-selected=true] .network-tag{color:HighlightText}
+  .wallet-network[aria-selected=true] .needs-you-dot{background:HighlightText}
+}
 /* The payment sheet's row, under Pay or request | Accept: the same tabs, one line lower and tighter. */
 .wallet-networks[data-size=compact]{gap:4px;padding:3px;border-radius:12px}
 .wallet-networks[data-size=compact] .wallet-network{min-height:36px;padding:4px 8px;border-radius:9px;font-size:13px;gap:2px 6px}

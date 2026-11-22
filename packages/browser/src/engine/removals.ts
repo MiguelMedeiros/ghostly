@@ -30,6 +30,8 @@ export const removalNumber = (seq: number | undefined) => Math.min((seq ?? 0) + 
 
 /** How often a chat is read whole for the quotes of removed messages (`QuoteSweeps`). */
 export const QUOTE_SWEEP_MS = 10_000;
+/** `QUOTE_SWEEP_MS` as the sweeps read it (tests shorten it). */
+export const quoteSweepTiming = { ms: QUOTE_SWEEP_MS };
 
 /** Removed messages whose quotes go, by their id here: the reference a reply names each by (`replyRef`), if any. */
 export type RemovedQuotes = ReadonlyMap<string, string | undefined>;
@@ -75,7 +77,7 @@ export class QuoteSweeps {
   private next(chat: string): void {
     const state = this.chats.get(chat);
     if (!state?.due.size || state.busy || state.timer) return;
-    const wait = state.at + QUOTE_SWEEP_MS - this.now();
+    const wait = state.at + quoteSweepTiming.ms - this.now();
     if (wait > 0) { state.timer = setTimeout(() => { state.timer = undefined; this.next(chat); }, wait); return; }
     const removed = state.due;
     state.due = new Map();
@@ -84,6 +86,32 @@ export class QuoteSweeps {
       state.busy = undefined;
       if (this.chats.get(chat) === state) this.next(chat);
     });
+  }
+}
+
+/**
+ * The quotes of messages purged here (the CLI's `message delete --purge`), which go before the purge answers, so with no
+ * pace: a purge that comes while the chat is read for others waits for that read to end, then those that came meanwhile
+ * share the next. N purges of one chat at once cost about two reads of it, not N.
+ */
+export class QuotePurges {
+  private readonly chats = new Map<string, { busy: Promise<void>; next?: { due: Map<string, string | undefined>; done: Promise<void> } }>();
+
+  constructor(private readonly sweep: (chat: string, removed: RemovedQuotes) => Promise<void>) {}
+
+  /** Resolves once a read that began after this call took the quotes of `id` out (rejects if that read failed). */
+  purge(chat: string, id: string, ref: string | undefined): Promise<void> {
+    const state = this.chats.get(chat);
+    if (state?.next) { state.next.due.set(id, ref); return state.next.done; }
+    const due = new Map([[id, ref]]);
+    const done = (state?.busy ?? Promise.resolve()).then(() => {
+      const current = this.chats.get(chat)!;
+      if (current.next?.due === due) current.next = undefined;
+      return this.sweep(chat, due);
+    });
+    const busy = done.catch(() => {}).finally(() => { if (this.chats.get(chat)?.busy === busy && !this.chats.get(chat)!.next) this.chats.delete(chat); });
+    if (state) { state.next = { due, done }; state.busy = busy; } else this.chats.set(chat, { busy, next: { due, done } });
+    return done;
   }
 }
 

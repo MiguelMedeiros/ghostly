@@ -62,6 +62,13 @@ export interface FileBytes {
    * are pieces in the profile's own database (`idb`): those are read and written with that database.
    */
   forSpace?(space: string): FileBytes;
+  /**
+   * Another space's stored file `fromId` under `id` here as well, nothing read or written: one file with two names (a
+   * move back to a device whose frozen copy holds it). A write to either name gives that name a file of its own first,
+   * so the other keeps its bytes. Absent where storage has no such names (`opfs`, `idb`); rejects where the disk has
+   * none: copy instead.
+   */
+  link?(fromSpace: string, fromId: string, id: string): Promise<void>;
 }
 
 export type FileBytesKind = "opfs" | "native" | "idb";

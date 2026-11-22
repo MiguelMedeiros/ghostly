@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { hasVisible, stripHidden } from "@ghostly/core";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
-import { engine } from "@ghostly/browser/platform/engine";
+import { engine, linkOfPeer } from "@ghostly/browser/platform/engine";
 import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import { badgeState, isGood } from "./contactBadges";
-import { providerLabel, useEngineValue } from "../../lib/identities";
+import { useEngineValue } from "../../lib/identities";
 import { keyedStorage } from "../../lib/keyedStorage";
 import { getPrefix } from "../../lib/storage";
 
@@ -59,11 +59,6 @@ export function setFaceChoice(peerKey: string, choice: FaceChoice | undefined): 
   window.dispatchEvent(new Event(FACE_EVENT));
 }
 
-/** Forgets a contact's choice with their chat. */
-export function forgetFaceChoice(peerKey: string): void {
-  try { localStorage.removeItem(faceKey(peerKey)); } catch { /* storage unavailable */ }
-}
-
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 
 // Every row of the chat list reads its contact's choice: they share one window listener, which calls a contact's own.
@@ -95,8 +90,6 @@ export interface ContactFace {
   id: string;
   provider: string;
   subject: string;
-  /** "Pubky", "Nostr": whose profile it is. */
-  providerName: string;
   name?: string;
   /** A sanitized data URL, never a remote address. */
   photo?: string;
@@ -109,7 +102,7 @@ const faceOf = (r: ReceivedIdentityView, now: number): ContactFace | undefined =
   const name = cleanFaceName(profile?.name);
   const photo = profile?.avatar?.startsWith("data:image/") ? profile.avatar : undefined;
   if (!name && !photo) return undefined;
-  return { id: r.id, provider: r.provider, subject: r.subject, providerName: providerLabel(r.provider), ...(name ? { name } : {}), ...(photo ? { photo } : {}) };
+  return { id: r.id, provider: r.provider, subject: r.subject, ...(name ? { name } : {}), ...(photo ? { photo } : {}) };
 };
 
 /** Every identity a contact can be shown as, right now. */
@@ -145,8 +138,8 @@ export function shownContactName({ nickname, face, nick, fallback }: { nickname?
   return { name: fallback, from: "key" };
 }
 
-const receivedOf = (links: LinkView[] | undefined, peerKey: string | undefined) =>
-  peerKey ? links?.find(l => l.peerPubKeyZ32 === peerKey)?.identities?.received : undefined;
+// By the state's index of chats by contact key: each row of the chat list reads its contact's on every engine state.
+const receivedOf = (links: LinkView[] | undefined, peerKey: string | undefined) => linkOfPeer(links, peerKey)?.identities?.received;
 
 /**
  * The contact's face as chosen, redrawn when their identities or the choice change: not on every engine state, which

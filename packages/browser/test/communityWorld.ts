@@ -86,6 +86,17 @@ export interface Peer {
   host: GroupsHost;
 }
 
+/** A map that says when what it holds changes (`changed`): the world's peers and their links, which `counterpart` indexes. */
+class Watched<K, V> extends Map<K, V> {
+  changed?: () => void;
+  override set(key: K, value: V): this { this.changed?.(); return super.set(key, value); }
+  override delete(key: K): boolean { this.changed?.(); return super.delete(key); }
+  override clear(): void { this.changed?.(); super.clear(); }
+}
+
+/** Where a link sits in the world's index: its kind, its group and both ends. */
+const linkKey = (kind: Edge["kind"], g: string, me: string, peer: string) => `${kind} ${g} ${me} ${peer}`;
+
 /** Numbers in [0, 1) from a seed (xorshift32): the same ones every run. */
 export function seededRandom(seed: number): () => number {
   let x = Math.imul(seed, 2654435761) >>> 0 || 1;
@@ -150,7 +161,13 @@ function memoryStore(messages: StoredMessage[]): GroupStore {
 }
 
 export class CommunityWorld {
-  readonly peers = new Map<string, Peer>();
+  readonly peers = new Watched<string, Peer>();
+  /**
+   * Every peer's links by kind, group and both ends (`linkKey`), in the order `counterpart` walked them, made again
+   * after a link or a peer came or went. It walked every link of every peer for each frame sent and each `linkReady`,
+   * a third of the load test's time at 128 members (bug hunt, 2026-11-12).
+   */
+  private linkIndex: Map<string, { peer: Peer; linkId: string }[]> | null = null;
   readonly pkarr = new Map<string, GhostRecord[]>();
   now = Date.now();
   pkarrOps = 0;
@@ -205,7 +222,9 @@ export class CommunityWorld {
   private readonly slowed = new Map<string, { per: number; frames: (() => void)[] }>();
   private pending: Promise<unknown>[] = [];
 
-  constructor(private readonly timings: CommunityTimings = { ...COMMUNITY_TIMINGS, hubJitterMs: 0 }, readonly network: NetworkModel | null = null, private readonly random: () => number = Math.random) {}
+  constructor(private readonly timings: CommunityTimings = { ...COMMUNITY_TIMINGS, hubJitterMs: 0 }, readonly network: NetworkModel | null = null, private readonly random: () => number = Math.random) {
+    this.peers.changed = () => { this.linkIndex = null; };
+  }
 
   /** One Pkarr request of `cost`, if the app's budget allows it (always, without a `NetworkModel`). */
   /** Sees every request the network model charges (or refuses), with what it was for. */
@@ -236,7 +255,7 @@ export class CommunityWorld {
    * (a hub of large private groups), or one from before hubs.
    */
   add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>, app: { staysOnline?: boolean; legacy?: boolean; unmetered?: boolean; peerBudget?: number; heldElsewhere?: number; clock?: number } = {}): Peer {
-    const links = new Map<string, Edge>();
+    const links = this.watch(new Map<string, Edge>());
     const messages: StoredMessage[] = [];
     const places = new Map<number, string>();
     const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, known: new Map(), heldUntil: new Map(), host: null as unknown as GroupsHost, ...app };
@@ -368,13 +387,30 @@ export class CommunityWorld {
    * same end (two hubs answering one joiner with the link's entry key) collide on the same rendezvous
    * identity, as they would on Pkarr: then nobody gets through.
    */
+  private indexLinks(): Map<string, { peer: Peer; linkId: string }[]> {
+    const index = new Map<string, { peer: Peer; linkId: string }[]>();
+    for (const peer of this.peers.values()) {
+      // A peer a test put in the world by hand, with links of its own: watched from now on.
+      if (!(peer.links instanceof Watched)) peer.links = this.watch(new Map(peer.links));
+      for (const [linkId, e] of peer.links) {
+        const key = linkKey(e.kind, e.g, e.me, e.peer);
+        index.set(key, [...index.get(key) ?? [], { peer, linkId }]);
+      }
+    }
+    return index;
+  }
+
+  private watch(links: Map<string, Edge>): Watched<string, Edge> {
+    const watched = new Watched<string, Edge>(links);
+    watched.changed = () => { this.linkIndex = null; };
+    return watched;
+  }
+
   private counterpart(edge: Edge): { peer: Peer; linkId: string } | undefined {
     const want = edge.kind === "edge" ? "edge" : edge.kind === "host" ? "guest" : "host";
-    const found: { peer: Peer; linkId: string }[] = [];
-    for (const peer of this.peers.values()) for (const [linkId, e] of peer.links) {
-      if (e.kind === want && e.g === edge.g && e.me === edge.peer && e.peer === edge.me) found.push({ peer, linkId });
-    }
-    const same = [...this.peers.values()].flatMap(peer => [...peer.links.values()].filter(e => e.kind === edge.kind && e.g === edge.g && e.me === edge.me && e.peer === edge.peer));
+    const index = this.linkIndex ??= this.indexLinks();
+    const found = index.get(linkKey(want, edge.g, edge.peer, edge.me)) ?? [];
+    const same = index.get(linkKey(edge.kind, edge.g, edge.me, edge.peer)) ?? [];
     if (this.entryWinner && edge.kind !== "edge") {
       const winner = this.entryWinner;
       if (edge.kind === "guest") return found.find(f => f.peer === winner) ?? (found.length === 1 ? found[0] : undefined);
