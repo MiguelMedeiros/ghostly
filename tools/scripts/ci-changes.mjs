@@ -132,6 +132,9 @@ export const WEBSITE_INPUTS = [
   // pkarr-ttl.test.mjs checks the site's text against it.
   "packages/core/src/didDht.ts",
   "packages/core/src/pkarr.ts",
+  // group-calls.test.mjs checks the site's text against the group header's call button and the Linux Desktop's refusal.
+  "apps/ui/src/pages/GroupChat.tsx",
+  "apps/ui/src/desktop/groupCallSupport.ts",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];
