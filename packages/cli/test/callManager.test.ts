@@ -1780,6 +1780,26 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("the contact hanging up while the offer made again after their answer is on its way is told the call ended: their side does not ring it", async () => {
+    // Found in a bug hunt: the hang-up and the newer offer crossed, the caller ended without a word, and the offer
+    // reached a side with no call any more, which rang it as a new call nobody was placing.
+    const { a, b } = pairOfManagers({ a: stuckStack(1), checkingRedialMs: 1000, delay: 300 });
+    b.calls.setAuto({ on: true });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    b.calls.setAuto({ on: false });
+    await until(() => signalsOf(a, "o").length === 2, 30_000).catch(diagnose(a, b));
+    await b.calls.hangup("chat-ba");
+    await until(() => a.events.find((e) => e.type === "call.ended"));
+    // The newer offer arrives first and rings, then the caller's hang-up ends it, a signal's trip later.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(b.calls.list()).toEqual([]);
+    expect(a.signals.at(-1) && JSON.parse(a.signals.at(-1)!).t).toBe("h");
+    expect(b.events.at(-1)).toMatchObject({ type: "call.ended" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("answers refused past the last start-over end the call as failed, and the contact is told", async () => {
     // The first offer and MAX_REDIALS more, each answer refused.
     const { a, b } = pairOfManagers({ a: refusingStack(MAX_REDIALS + 1) });
