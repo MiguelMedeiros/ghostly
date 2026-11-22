@@ -55,7 +55,7 @@ export function useMentionPicker({ mentions, text, setText, textareaRef, caretRe
 
   const choose = (candidate: MentionCandidate) => {
     if (!query) return;
-    const label = candidate.key === MENTION_EVERYONE ? "everyone" : mentionLabel(candidate.name);
+    const label = candidate.key === MENTION_EVERYONE ? "everyone" : mentionLabel(candidate.label ?? candidate.name);
     const next = insertMention(text, query, label);
     caretRef.current = next.caret;
     // The others moved by the insertion now, and this one placed in the new text, so the change is not moved again.

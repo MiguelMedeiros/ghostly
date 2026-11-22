@@ -37,12 +37,76 @@ export interface ListChanges extends MessageChanges {
 export type MessagesListener = (linkId: string, messages: StoredMessage[], changes?: ListChanges) => void;
 
 /**
+ * The page's lists, by chat: what changes in one (`change`) is held and made on its list once, when the list is next
+ * read, so a burst of K one-row changes (a delivery mark per text) costs one pass over a history of N, not K. Every
+ * read (`get`, iterating) sees each list as it is now.
+ */
+class Histories extends Map<string, StoredMessage[]> {
+  private readonly owed = new Map<string, { rows: Map<string, StoredMessage>; deleted: Set<string> }>();
+
+  /** Holds these changes for this chat's list, which is here: as `applyMessageChanges` has it, a row both given and deleted goes. */
+  change(linkId: string, changes: MessageChanges): void {
+    let owed = this.owed.get(linkId);
+    if (!owed) this.owed.set(linkId, owed = { rows: new Map(), deleted: new Set() });
+    for (const id of changes.deleted) { owed.rows.delete(id); owed.deleted.add(id); }
+    for (const row of changes.messages) {
+      if (changes.deleted.includes(row.id)) continue;
+      owed.rows.set(row.id, row);
+      owed.deleted.delete(row.id);
+    }
+  }
+
+  override get(linkId: string): StoredMessage[] | undefined {
+    const owed = this.owed.get(linkId);
+    if (!owed) return super.get(linkId);
+    this.owed.delete(linkId);
+    const made = applyMessageChanges(super.get(linkId)!, { messages: [...owed.rows.values()], deleted: [...owed.deleted] });
+    super.set(linkId, made);
+    return made;
+  }
+
+  override set(linkId: string, messages: StoredMessage[]): this {
+    this.owed.delete(linkId);
+    return super.set(linkId, messages);
+  }
+
+  override delete(linkId: string): boolean {
+    this.owed.delete(linkId);
+    return super.delete(linkId);
+  }
+
+  override clear(): void {
+    this.owed.clear();
+    super.clear();
+  }
+
+  override forEach(each: (messages: StoredMessage[], linkId: string, map: Map<string, StoredMessage[]>) => void, self?: unknown): void {
+    for (const [linkId, messages] of this.entries()) each.call(self, messages, linkId, this);
+  }
+
+  override entries(): MapIterator<[string, StoredMessage[]]> {
+    for (const linkId of [...this.owed.keys()]) this.get(linkId);
+    return super.entries();
+  }
+
+  override values(): MapIterator<StoredMessage[]> {
+    for (const linkId of [...this.owed.keys()]) this.get(linkId);
+    return super.values();
+  }
+
+  override [Symbol.iterator](): MapIterator<[string, StoredMessage[]]> {
+    return this.entries();
+  }
+}
+
+/**
  * This page's connection to the Ghostly peer, wherever the host keeps it. The
  * peer owns the network; pages only ask it to do things.
  */
 class EngineClient {
   state: EngineState | null = null;
-  readonly messages = new Map<string, StoredMessage[]>();
+  private readonly histories = new Histories();
+  readonly messages: Map<string, StoredMessage[]> = this.histories;
   /** Per chat, the ids the engine deleted in it, as its last whole history said (the `messages` event's `deleted`). */
   readonly deletedIds = new Map<string, readonly string[]>();
   /** The chats whose list here is only their newest page (a `messages` event with `more`): the peer has older rows. */
@@ -408,9 +472,8 @@ class EngineClient {
         break;
       case "message-changes": {
         // Only what changed, in a history the peer sent whole first: listeners still get the whole list, as it is now.
-        // The list here is current at once; its listeners hear once per tick, of every change in it together.
-        const history = this.messages.get(message.linkId);
-        if (!history) {
+        // The list here reads current at once; its listeners hear once per tick, of every change in it together.
+        if (!this.messages.has(message.linkId)) {
           // A group this page has no list of (the peer sends a tab only its changes until it shows it): no list is made
           // of them; its listeners hear what changed, with nothing as its list (`engine.messages` has none).
           if (message.linkId.startsWith("group:")) {
@@ -419,9 +482,10 @@ class EngineClient {
           }
           break;
         }
-        this.messages.set(message.linkId, applyMessageChanges(history, message));
+        // The first change in the tick reads the list its listeners last heard; the list is made once the changes are read.
         let since = this.changed.get(message.linkId);
-        if (!since) this.changed.set(message.linkId, since = { from: history, rows: new Map(), deleted: new Set() });
+        if (!since) this.changed.set(message.linkId, since = { from: this.messages.get(message.linkId)!, rows: new Map(), deleted: new Set() });
+        this.histories.change(message.linkId, message);
         // As `applyMessageChanges` has it: a row both given and deleted goes.
         for (const id of message.deleted) { since.rows.delete(id); since.deleted.add(id); }
         for (const row of message.messages) {
