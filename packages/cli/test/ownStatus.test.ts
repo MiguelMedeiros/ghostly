@@ -57,6 +57,10 @@ describe("status set's line", () => {
     for (const until of ["soon", "2y", "30s", "1.5h", "-1h"]) {
       expect(usage("hi", "--until", until)).toBe(`--until takes 30m, 2h or 1d from now (whole minutes, hours or days), milliseconds or a date: ${CARD_TIME_FORMS}, not ${JSON.stringify(until)}`);
     }
+    // A date with no year is not 2001's (a time past), nor a few digits 1970's: the year is what it lacks.
+    for (const until of ["Dec 25 10:00", "2026"]) {
+      expect(usage("hi", "--until", until)).toBe(`--until takes 30m, 2h or 1d from now (whole minutes, hours or days), milliseconds or a date: ${CARD_TIME_FORMS}, the date with its year, not ${JSON.stringify(until)}`);
+    }
     expect(usage()).toBe("Nothing to set: give a <text>, --emoji or --availability");
     expect(usage("--until", "1h")).toBe("Nothing to set: give a <text>, --emoji or --availability");
   });
