@@ -58,7 +58,9 @@ jobs:
   #   Many sessions push drafts at once, and the free plan runs about 20 jobs at a time (5 on macOS).
   # - So does a ready pull request that already has `queue` and whose head is behind its base: the merge train boards
   #   it on that fast tier, and its batch's full run on the base's tip is the gate. Its gate job is "CI Success (draft)"
-  #   too. At the base's tip (where the train rebases a lone pull request) it runs everything, as without `queue`.
+  #   too. At the base's tip (where the train rebases a lone pull request) it runs everything, as without `queue`. One
+  #   behind its base whose "CI Success (draft)" already passed on its head (it left draft after that) waits up to about
+  #   3 minutes for the feeder's `queue` before it plans: the train would cancel a full run it started without.
   # - Website: runs when the pull request changes something the site reads (apps/website/, docs/, the files its
   #   scripts copy or quote; the list is tested against those scripts).
   # - The Desktop jobs on macOS: skipped only when every change is in apps/website/ or docs/, which the app never reads.
@@ -153,7 +155,8 @@ jobs:
           fi
           # Ready, with `queue` already, and behind its base: the merge train boards it on the fast tier and its batch
           # runs everything (ci-changes.mjs's queuedBehind). At the base's tip it runs everything: the train lands a lone
-          # pull request on its own run there.
+          # pull request on its own run there. Without `queue` yet, but with its fast tier green on this head, it waits a
+          # little for the label first.
           queued=false
           if [[ "$draft" == "false" ]] && node tools/scripts/ci-changes.mjs --queued-behind; then
             draft=true
