@@ -95,7 +95,7 @@ const ARABIC_COUNT_ALONE = new Set([
   "cards.panel.finishedCount", "chat.announce.rowMoved", "chat.file.comingList", "chat.forward.partial", "chat.forward.pick", "chat.forward.selected",
   "chat.hold.quota", "chat.jump.count", "chat.listTime.days", "chat.listTime.hours", "chat.listTime.minutes",
   "composer.bytesLeft", "composer.charactersLeft", "composer.identityShared", "composer.sendCount", "composer.servicesShared", "connection.history.showAll",
-  "connection.history.title", "errors.group.growMore", "group.create.communityHint", "group.link.full", "group.link.note",
+  "connection.history.title", "errors.files.pastLimit", "errors.group.growMore", "group.create.communityHint", "group.link.full", "group.link.note",
   "group.link.noteCommunity", "group.members.missing", "group.members.missingOne", "group.readNote", "group.readNoteCommunity",
   "group.readNoteCommunityOff", "groupCallModeration.removed",
   "messageDetails.value.edits", "profileSwitcher.unread", "pwa.sharePastLimit", "saved.rowLabel", "secretGuard.sat",
