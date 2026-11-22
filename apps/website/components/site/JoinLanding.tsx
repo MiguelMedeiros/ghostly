@@ -205,7 +205,7 @@ function JoinDialog({ check }: { check: InviteCheck }) {
             {preferApp ? app(true) : browser(true)}
             {copied === "yes" && <p role="status" className="join-note">{t.desktopCopied}</p>}
             {copied === "failed" && (
-              <p role="status" className="join-note">
+              <p role="status" className="join-note join-note--failed">
                 {t.desktopCopyFailed} <code className="join-code">{check.code}</code>
               </p>
             )}

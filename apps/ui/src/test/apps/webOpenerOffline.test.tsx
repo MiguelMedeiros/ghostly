@@ -113,7 +113,7 @@ describe("opening an app on the web while offline", () => {
     online = false;
     started[0]!.stop("timeout");
     const said = within(screen.getByTestId("mini-app")).getByRole("status");
-    expect(said).toHaveTextContent(en("apps.view.stoppedOffline", { title: "Chess" }));
+    expect(said).toHaveTextContent(en("apps.view.stoppedOffline", { title: "\u2068Chess\u2069" }));
     expect(said).not.toHaveTextContent("tell its maker");
   });
 });

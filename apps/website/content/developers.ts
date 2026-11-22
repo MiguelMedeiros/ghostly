@@ -233,9 +233,9 @@ export const developers = {
         title: "Build a client or adapter",
         body: "The protocol library, the SDK and the native transports.",
         links: [
-          { label: "packages/core", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/core/src" },
-          { label: "packages/sdk", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/sdk" },
-          { label: "native/transports", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/native/transports" },
+          { label: "packages/core", href: "https://github.com/MiguelMedeiros/ghostly/tree/main/packages/core/src" },
+          { label: "packages/sdk", href: "https://github.com/MiguelMedeiros/ghostly/tree/main/packages/sdk" },
+          { label: "native/transports", href: "https://github.com/MiguelMedeiros/ghostly/tree/main/native/transports" },
         ],
       },
       {
@@ -245,7 +245,7 @@ export const developers = {
           { label: "CLI guide", href: "/cli" },
           { label: "AI agents", href: "/developers/agents" },
           { label: "WISP 1100 · Headless", href: "/wisps/1100-headless" },
-          { label: "packages/cli", href: "https://github.com/MiguelMedeiros/ghostly/tree/dev/packages/cli" },
+          { label: "packages/cli", href: "https://github.com/MiguelMedeiros/ghostly/tree/main/packages/cli" },
         ],
       },
     ],

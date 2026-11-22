@@ -111,6 +111,14 @@ describe("a send at a mint that charges for each coin it takes in", () => {
     await expect(cashu.prepareReviewedCashu(FEE_MINT, 150)).rejects.toThrow(`Not enough sats in your wallet: ${room} sats leave room for the fee`);
   });
 
+  // At a mint that charges nothing, every sat it holds fits: the number said was one short of it.
+  it("counts every sat a mint that charges nothing holds when a reviewed payment asks for more", async () => {
+    seed("proofs", coins(FREE_MINT, [32, 4]));
+    const cashu = wallet([FREE_MINT]);
+    await expect(cashu.prepareReviewedCashu(FREE_MINT, 60)).rejects.toThrow(/^Not enough sats in your wallet: 36 sats leave room for the fee$/);
+    expect((await cashu.prepareReviewedCashu(FREE_MINT, 36)).fee).toBe(0);
+  });
+
   it("says there are not enough sats when a reviewed payment's mint holds none", async () => {
     seed("proofs", coins(FREE_MINT, [64]));
     const cashu = wallet([FEE_MINT, FREE_MINT]);

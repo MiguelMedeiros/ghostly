@@ -235,11 +235,17 @@
     "sendUnavailable": "グループへの請求は 1 人のメンバーが支払います。誰かに支払うには、その人を選んでください",
     "status": {
       "claimedPaid": "{{names}} が支払い済み · {{to}} のウォレット待ち",
+      "claimedPaidByMe": "あなたが支払い済み · {{to}} のウォレット待ち",
+      "claimedPaidToMe": "{{names}} が支払い済み · あなたのウォレット待ち",
+      "claimedPaidWithMe": "あなたと {{names}} が支払い済み · {{to}} のウォレット待ち",
       "closed": "終了",
       "paid": "支払い済み",
       "paidBy": "{{name}} が支払い済み",
+      "paidByMe": "あなたが支払い済み",
       "saysPaid": "{{names}} が支払ったと言っています · {{to}} のウォレット待ち",
+      "saysPaidToMe": "{{names}} が支払ったと言っています · あなたのウォレット待ち",
       "sent": "送信済み · {{name}} を待っています",
+      "sentToMe": "送信済み · あなたのウォレット待ち",
       "takenBack": "取り消し済み",
       "waiting": "支払い待ち"
     },
@@ -247,9 +253,16 @@
     "theGroup": "グループ",
     "title": {
       "asked": "{{to}} が {{from}} に請求",
+      "askedByMe": "あなたが {{from}} に請求",
       "askedGroup": "{{to}} がグループに請求",
+      "askedGroupByMe": "あなたがグループに請求",
+      "askedMe": "{{to}} があなたに請求",
       "paying": "{{from}} が {{to}} に支払い中",
-      "sent": "{{from}} が {{to}} に送金"
+      "payingByMe": "あなたが {{to}} に支払い中",
+      "payingMe": "{{from}} があなたに支払い中",
+      "sent": "{{from}} が {{to}} に送金",
+      "sentByMe": "あなたが {{to}} に送金",
+      "sentToMe": "{{from}} があなたに送金"
     },
     "why": {
       "noPayments": "相手のアプリはグループでの支払いに対応していないか（更新が必要）、すべての方法をオフにしています",
