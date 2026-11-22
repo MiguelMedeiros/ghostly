@@ -35,6 +35,10 @@
       "amountMismatch": "La fattura non corrisponde all'importo richiesto",
       "feeAbove": "La commissione Lightning (fino a {{fee}} {{unit}}) supera il tuo massimo"
     },
+    "expiredNext": {
+      "mine": "chiedi di nuovo con una nuova richiesta",
+      "theirs": "chiedi al tuo contatto una nuova richiesta"
+    },
     "externalNote": {
       "ark": "Pagabile da qualsiasi portafoglio Ark. Il portafoglio del tuo contatto lo segna come pagato quando vede il denaro.",
       "bitcoin": "Pagabile da qualsiasi portafoglio Bitcoin. Il portafoglio del tuo contatto lo segna come pagato quando vede il denaro, dopo una conferma.",
@@ -58,6 +62,7 @@
     "preparing": "Preparazione…",
     "review": "Rivedi il pagamento",
     "state": {
+      "checking": "Verifica del pagamento…",
       "closed": "Chiuso",
       "lightningPending": "Pagamento Lightning in sospeso…",
       "payment": {
@@ -67,6 +72,7 @@
         "settled": "Ricevuto"
       },
       "request": {
+        "expired": "Scaduta",
         "failed": "Non riuscito",
         "pending": "In attesa del pagamento",
         "settled": "Pagato"
@@ -228,12 +234,18 @@
     "listSeparator": ", ",
     "sendUnavailable": "Una richiesta al gruppo la paga un membro; per pagare qualcuno, sceglilo",
     "status": {
-      "claimedPaid": "{{names}} ha pagato · in attesa del portafoglio di {{to}}",
+      "claimedPaid": "{{names}} hanno pagato · in attesa del portafoglio di {{to}}",
+      "claimedPaidByMe": "Hai pagato · in attesa del portafoglio di {{to}}",
+      "claimedPaidToMe": "{{names}} hanno pagato · in attesa del tuo portafoglio",
+      "claimedPaidWithMe": "Tu e {{names}} avete pagato · in attesa del portafoglio di {{to}}",
       "closed": "Chiuso",
       "paid": "Pagato",
       "paidBy": "Pagato da {{name}}",
+      "paidByMe": "Pagato da te",
       "saysPaid": "{{names}} dice di aver pagato · in attesa del portafoglio di {{to}}",
+      "saysPaidToMe": "{{names}} dice di aver pagato · in attesa del tuo portafoglio",
       "sent": "Inviato · in attesa di {{name}}",
+      "sentToMe": "Inviato · in attesa del tuo portafoglio",
       "takenBack": "Ripreso",
       "waiting": "In attesa del pagamento"
     },
@@ -241,9 +253,16 @@
     "theGroup": "il gruppo",
     "title": {
       "asked": "{{to}} ha chiesto a {{from}}",
+      "askedByMe": "Hai chiesto a {{from}}",
       "askedGroup": "{{to}} ha chiesto al gruppo",
+      "askedGroupByMe": "Hai chiesto al gruppo",
+      "askedMe": "{{to}} ti ha chiesto",
       "paying": "{{from}} sta pagando {{to}}",
-      "sent": "{{from}} ha inviato a {{to}}"
+      "payingByMe": "Stai pagando {{to}}",
+      "payingMe": "{{from}} ti sta pagando",
+      "sent": "{{from}} ha inviato a {{to}}",
+      "sentByMe": "Hai inviato a {{to}}",
+      "sentToMe": "{{from}} ti ha inviato"
     },
     "why": {
       "noPayments": "La sua app non accetta pagamenti nei gruppi (serve un aggiornamento), o ha disattivato ogni metodo",
@@ -257,7 +276,7 @@
     "alreadySpent": "Già speso",
     "anyAmount": "Importo libero",
     "checking": "Verifica…",
-    "confirmWhat": "{{amount}} sats (più una commissione fino a {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (più una commissione fino a {{fee}} {{feeUnit}})",
     "copied": "Copiato",
     "ecashRequest": "Richiesta di pagamento ecash",
     "ecashToken": "Token ecash",
@@ -286,9 +305,11 @@
     "otherUnitToken": "Un token in {{unit}}",
     "paid": "Pagata ✓",
     "pay": "Paga",
-    "payWithFee": "Paga {{amount}} + commissione fino a {{fee}}",
+    "payWithFee": "Paga {{amount}} {{unit}} + commissione fino a {{fee}}",
     "paying": "Pagamento…",
     "paysThrough": "Si paga tramite {{domain}}",
+    "pending": "Pagamento in sospeso…",
+    "pendingAtCard": "Pagamento in sospeso presso {{card}}…",
     "pendingAtMint": "Pagamento in sospeso presso il mint…",
     "qrTooLong": "Troppo lungo per un codice QR: copialo invece.",
     "redeem": "Riscatta",

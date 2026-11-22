@@ -46,6 +46,12 @@ export interface OidcProvider {
   reveal: Partial<Record<OidcReveal, { scope?: string; claims?: string[] }>>;
   /** What the provider puts in the token whatever the person picks. Shown before sign-in. */
   alwaysIncluded: string;
+  /**
+   * Claims the provider adds on its own for some accounts that say more than the account, each with the
+   * choice that already shares as much. The signature covers the whole token, so such a claim cannot be
+   * stripped: a token carrying one the person did not choose to share is turned down before it is used.
+   */
+  disclosing?: Record<string, OidcReveal>;
   /** Extra authorization parameters, e.g. an account chooser. */
   extraParams?: Record<string, string>;
   /** Client IDs per platform. Desktop signs in through the web callback page, so it uses the web client. */
@@ -64,7 +70,9 @@ export const OIDC_PROVIDERS: Record<Exclude<OidcProviderId, 'test'>, OidcProvide
     jwksUri: 'https://www.googleapis.com/oauth2/v3/certs',
     algs: ['RS256'], responseType: 'id_token',
     reveal: { email: { scope: 'email' }, profile: { scope: 'profile' } },
-    alwaysIncluded: 'A Google account identifier.',
+    alwaysIncluded: 'A Google account identifier. For a work or school account Google also adds its organisation’s domain, so one is only accepted with your email shared.',
+    // `hd`: a Workspace or Cloud organisation account's domain, in every token Google signs for it.
+    disclosing: { hd: 'email' },
     extraParams: { prompt: 'select_account' },
     clientIds: { web: '', extension: '' },
   },

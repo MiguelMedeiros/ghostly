@@ -244,7 +244,8 @@ export function clearChatNotification(chat:string):void{
 /**
  * Every extension notification that opens `chat` goes. Chrome keeps them in the system's list past the page that showed
  * them (a reload), so the ones only session storage still knows of (`keepNotice`) go too: a deleted profile's
- * "New messages in" would otherwise stay there, by name, for the rest of the browser's session.
+ * "New messages in" would otherwise stay there, by name, for the rest of the browser's session; a deleted chat's or a
+ * left group's, opening a chat that is not there.
  */
 export async function clearExtensionNotices(chat:string):Promise<void>{
   const chrome=extension();

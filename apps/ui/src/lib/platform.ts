@@ -110,7 +110,8 @@ export interface NetworkSettings {
   pushRelay: string;
   /**
    * The push relay answered the last wake-up, but not as a push relay: its HTTP status and its own error text, when it
-   * gave one (`EngineState.pushRelayRefused`). Absent while it forwards them, or where this app posts them itself.
+   * gave one (`EngineState.pushRelayRefused`); `http` 0 when its address answered without CORS, which the page may not
+   * read. Absent while it forwards them, or where this app posts them itself.
    */
   pushRelayRefused?: { http: number; text?: string };
   /**
@@ -190,7 +191,10 @@ export interface WalletTransaction {
   /** What this movement cost, exactly. */
   fee: number;
   note?: string;
-  /** `lightning-in`: the mint quote of the invoice paid (what `receiveLightning` returned as `quote`). */
+  /**
+   * `lightning-in`: the mint quote of the invoice paid (what `receiveLightning` returned as `quote`). `lightning-out`, and
+   * the `fee` of a failed one: the melt quote paid (what `quoteInvoice` returned on the Cashu card).
+   */
   quote?: string;
 }
 
@@ -217,7 +221,7 @@ export interface WalletState {
    * The Lightning card of this network the calls act on: the one a platform is bound to (`forLightning`), else the
    * network's default for receiving. Its source (the Cashu mints by default) and its latest operations.
    */
-  lightning?: LightningView & Partial<Pick<LightningCardView, "card" | "name" | "receive">>;
+  lightning?: LightningView & Partial<Pick<LightningCardView, "card" | "name" | "receive" | "sameWalletAs">>;
   /** Every Lightning card of this network, in the order they were added. */
   lightnings?: LightningCardView[];
   /** The on-chain Bitcoin source of this network, if one is set up. */
@@ -430,6 +434,8 @@ export interface WalletPlatform {
   askToPay(peerPubKeyZ32: string, amount: number, method: "arkade" | "usdt" | "bark" | "bitcoin" | "fedimint" | "spark", memo?: string): Promise<{ askId: string }>;
   /** The contact's request answering an ask, once it arrived. */
   answerTo(askId: string): ChatPayment | null;
+  /** The contact's payment of one of our requests that is still on its way (an on-chain one waits for a confirmation). */
+  paymentOnItsWay(requestId: string): ChatPayment | null;
   /**
    * Pays a contact's request. `via: "lightning"`: its invoice through the Lightning source, as reviewed, within `maxFee`.
    * `confirmedReal`: required for a Mainnet request, as for `payQuote`.
@@ -522,8 +528,11 @@ export interface LinkedFilesHost {
    * keeps nothing, and the app gets no other one until it is answered (`too-fast`).
    */
   pick(ref: string, title: string, options: { folder: boolean; accept: string[] }, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
-  /** Every link the app keeps; where the browser must be asked again to read kept ones, the person is asked once (a sheet that goes on `signal`, as pick's). */
-  list(ref: string, title: string, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
+  /**
+   * Every link the app keeps; where the browser must be asked again to read kept ones, the person is asked once (a sheet
+   * that goes on `signal`, as pick's). `ask` false (the app is not on screen): nobody is asked, and a later list may ask.
+   */
+  list(ref: string, title: string, signal?: AbortSignal, ask?: boolean): Promise<MiniAppLinkedFile[]>;
   /**
    * One link as `list` gives it (the person is not asked), or null for an id the app does not keep: what `files.serve`
    * reads, so serving one file of a library does not list every file. Absent: the broker finds it in `list`.
@@ -609,7 +618,7 @@ export interface ServicesPlatform {
    * Files or a picture on the clipboard read by the platform itself (the desktop app), for a paste whose
    * event carried neither. Null where the paste event is the way. Use `nativePastedFiles` in `pastedFiles.ts`.
    */
-  readClipboardFiles(): Promise<import("@ghostly/browser/host").ClipboardFile[]> | null;
+  readClipboardFiles(): Promise<import("@ghostly/browser/host").ClipboardFiles> | null;
   /** Where calls get their media, when not from the page's own WebRTC (Ghostly Desktop on Linux). Null: the page's. */
   callMedia?(): import("@ghostly/core").CallMedia | null;
   /** Largest file that can be sent, in bytes. */

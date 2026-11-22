@@ -20,6 +20,7 @@ import { canStartOwnSet, resumeOwnSet, startOwnSet, supersedeOwnTombstone, type 
 import { peekTurn } from "./restoreGuard";
 import { newDeviceSecretDue } from "./rotate";
 import { provesHandoffPassword } from "./handoffPake";
+import { filesOn } from "./handoffFiles";
 
 /**
  * What runs the handoff on this device (WISP 06 § The handoff): the giver while the engine runs, the giver and the
@@ -33,6 +34,8 @@ export interface DeviceHandoffHandler {
   call?(method: string, params: unknown): Promise<unknown> | undefined;
   /** What a turn read found: a standby that released learns from it that its release was taken. */
   turnRead?(outcome: TurnOutcome): void;
+  /** A forced takeover is about to write: a pull here ends, and its staging goes (`HandoffTaker.abandon`). */
+  dropStaging?(): Promise<void>;
   stop(): void;
 }
 
@@ -76,7 +79,11 @@ export interface DeviceLinkView {
 /** The device set as a page shows it (Profile, Devices; the standby screen): names and states, never a secret. */
 export interface DeviceSetView {
   state: DeviceState;
-  devices: { key: string; name: string; slot: number; self: boolean; active: boolean; status?: DeviceLinkView["status"] }[];
+  devices: {
+    key: string; name: string; slot: number; self: boolean; active: boolean; status?: DeviceLinkView["status"];
+    /** On the active device: files a move left for later on that device and not fetched yet (Remove says so). */
+    later?: { count: number; bytes: number };
+  }[];
   /**
    * Devices this one granted the set to whose enrollment never came back: they hold `D` and are in no record. Shown
    * as "Not finished"; moving the set to a new `D` (removal, a later part) is what takes `D` from them.
@@ -114,7 +121,8 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
   const devices = record.deviceSet.flatMap((slot, index) => {
     if (!slot) return [];
     const link = links.find((l) => l.key === slot.key && !l.earlier);
-    return [{ key: slot.key, name: slot.name, slot: index, self: index === record.ownSlot, active: index === record.activeSlot, ...(link ? { status: link.status } : {}) }];
+    const later = record.state === "active" ? filesOn(record, slot.key) : null;
+    return [{ key: slot.key, name: slot.name, slot: index, self: index === record.ownSlot, active: index === record.activeSlot, ...(link ? { status: link.status } : {}), ...(later ? { later } : {}) }];
   });
   const listed = new Set(record.deviceSet.flatMap((slot) => (slot ? [slot.key] : [])));
   const grants = (record.unfinishedGrants ?? []).filter((grant) => !listed.has(grant.key));
@@ -306,6 +314,8 @@ export class DeviceLinks implements DeviceLinkEngine {
   /** Turn reads and new secrets one after the other: a read made under the old secret must not undo a secret just taken. */
   private turnQueue: Promise<unknown> = Promise.resolve();
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The turn watch ended on a `removed` record (`watchTurn`). */
+  private turnWatchEnded = false;
   private lastHintRead = 0;
   /** When a link closing by the other side's doing last made this standby read the turn (`linkLost`). */
   private lastLossRead = 0;
@@ -347,14 +357,29 @@ export class DeviceLinks implements DeviceLinkEngine {
   /**
    * A standby's own reads of the turn: now, then every 10 minutes (with jitter) while it runs. A read that changes the
    * device's state (a tombstone: `moving` or `removed`; a record that names another active device) tells the pages.
+   * None for a `removed` device: no read can change that state, so the watch ends there (and a screen that opens on it
+   * starts none); a new enrollment, which makes it `standby` again, starts it again (`reconcile`).
    */
   private watchTurn(after: number): void {
     if (this.stopped) return;
     if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.turnWatchEnded = false;
     this.turnTimer = setTimeout(() => {
       this.turnTimer = null;
-      void this.checkAndShow().catch(() => null).finally(() => this.watchTurn(STANDBY_TURN_EVERY_MS + Math.floor(Math.random() * STANDBY_TURN_JITTER_MS)));
+      void (async () => {
+        if (await this.removed()) return;
+        await this.checkAndShow().catch(() => null);
+        if (await this.removed()) return;
+        this.watchTurn(STANDBY_TURN_EVERY_MS + Math.floor(Math.random() * STANDBY_TURN_JITTER_MS));
+      })();
     }, after);
+  }
+
+  /** The record says `removed`: the turn watch ends here. */
+  private async removed(): Promise<boolean> {
+    if ((await this.record().catch(() => null))?.state !== "removed") return false;
+    this.turnWatchEnded = true;
+    return true;
   }
 
   /** Reads the turn and, when the device's state, the device it believes or a name in the set changed, tells the pages. */
@@ -438,6 +463,8 @@ export class DeviceLinks implements DeviceLinkEngine {
       if (became && this.isLive(kept)) void this.linkLive(kept).catch(() => {});
     }
     if (closing.length || wanted.length) this.changed();
+    // Added again by enrollment (`removed` to `standby`): the turn watch that ended on `removed` starts again.
+    if (this.turnWatchEnded && !this.stopped && ((await this.record().catch(() => null))?.state ?? "removed") !== "removed") this.watchTurn(0);
     // A device the set no longer lists (removed) takes its push target and its token with it. Also once at start: a
     // device removed while this one was closed had no link open here to close.
     if (!this.stopped && (closing.length || !this.pushPruned)) {
@@ -1207,6 +1234,7 @@ export class DeviceLinks implements DeviceLinkEngine {
           amend: (patch) => amendDevice(this.options.profile, patch),
           proves: (verifier, password) => provesHandoffPassword(verifier, password),
           keeper: () => this.turnKeeper(),
+          dropStaging: async () => { await this.handoff?.dropStaging?.(); },
         }, { password: typeof p.password === "string" ? p.password : "", name: typeof p.name === "string" ? p.name : "" });
         // Lost or stolen: once the profile opens here, the money checklist comes first, then removing that device.
         if (outcome.kind === "start" && p.lost === true) {

@@ -44,12 +44,15 @@ script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-sr
 media-src data: blob: https:; font-src data: https:; connect-src https: wss:; frame-src 'none'; \
 worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
-/// The largest request an app may send the broker (WISP 1200: 64 KiB), as JSON.
-const MAX_REQUEST_BYTES: usize = 64 * 1024;
+/// The largest request an app may send the broker (WISP 1200: 66 KiB, a 64 KiB stored value with its key), as JSON.
+const MAX_REQUEST_BYTES: usize = 66 * 1024;
 /// The largest IPC message an app window may post: its largest request with room for Tauri's envelope. Tauri
 /// drops a larger one unread (`message_limit`), as parsing it would hold the main thread, every window's; the
 /// runner refuses such a request first, so an app that calls `window.ghostly` still gets "too-large".
 const MAX_MESSAGE_BYTES: usize = 2 * MAX_REQUEST_BYTES;
+/// The largest IPC message any other window but the Ghostly one may post (a contact's app, a hidden cleaning
+/// page): it may call no command, so this is only room for a call to be refused, not parsed at any length.
+const MAX_OTHER_MESSAGE_BYTES: usize = 4 * 1024;
 /// The most requests an app may send the broker in a second (WISP 1200: 50), every call counted.
 const MAX_REQUESTS_PER_SECOND: usize = 50;
 /// What a window keeps of what it was refused: the last few, each cut short, so an app that keeps asking to
@@ -154,15 +157,22 @@ const RUNNER: &str = r#"<!doctype html>
   } });
   // What a request may carry, as the broker reads it: plain JSON, no deeper than 64. An `undefined` member or item
   // goes, as JSON.stringify writes it (left out, or null in an array), the way the web broker reads it (jsonValueOf).
+  // A string or member name with a lone surrogate (half an emoji, cut by `slice`) does not: Tauri's JSON refuses it, and the web
+  // broker refuses it too, so the app gets `bad-request` on both (WISP 1200).
+  const loneSurrogate = /\p{Cs}/u;
+  const testPattern = RegExp.prototype.test;
+  const wellFormed = (text) => !reflectApply(testPattern, loneSurrogate, [text]);
   const isJson = (value, depth) => {
     if (depth > 64) return false;
-    if (value === null || typeof value === "boolean" || typeof value === "string") return true;
+    if (value === null || typeof value === "boolean") return true;
+    if (typeof value === "string") return wellFormed(value);
     if (typeof value === "number") return Number.isFinite(value);
     const inside = (item) => item === undefined || isJson(item, depth + 1);
     if (Array.isArray(value)) return value.every(inside);
     if (typeof value !== "object") return false;
     const proto = Object.getPrototypeOf(value);
-    return (proto === Object.prototype || proto === null) && Object.values(value).every(inside);
+    const member = (entry) => entry[1] === undefined || (wellFormed(entry[0]) && isJson(entry[1], depth + 1));
+    return (proto === Object.prototype || proto === null) && Object.entries(value).every(member);
   };
   // What a failed call rejects with: one of the broker's codes (MINI_APP_ERROR_CODES, packages/core/src/miniApp.ts),
   // or "failed" for anything else, this runner's own failures included. Read without the prototypes the app may change.
@@ -170,8 +180,13 @@ const RUNNER: &str = r#"<!doctype html>
   const known = Object.create(null);
   for (let i = 0; i < CODES.length; i++) known[CODES[i]] = true;
   const refusal = (code) => new Error(typeof code === "string" && known[code] === true ? code : "failed");
+  // A file's bytes come as base64 (`bytes_response`), up to 64 MiB: the engine's own decoder where it has one (WebKit
+  // decodes 64 MiB in about 40 ms with it, 250 ms a character at a time), taken before any app code can change it.
+  const fromBase64 = typeof Uint8Array.fromBase64 === "function" ? Uint8Array.fromBase64 : null;
+  const decode = atob;
   const bytesOf = (text) => {
-    const raw = atob(text);
+    if (fromBase64) return reflectApply(fromBase64, Uint8Array, [text]).buffer;
+    const raw = decode(text);
     const out = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
     return out.buffer;
@@ -181,8 +196,8 @@ const RUNNER: &str = r#"<!doctype html>
     if (!isJson(args, 0)) return Promise.reject(refusal("bad-request"));
     const id = nextId++;
     const request = { id, type, args };
-    // Over the broker's 64 KiB (MAX_REQUEST_BYTES) here: far over it, Tauri would drop the call unanswered.
-    if (utf8(stringify(request)).length > 65536) return Promise.reject(refusal("too-large"));
+    // Over the broker's 66 KiB (MAX_REQUEST_BYTES) here: far over it, Tauri would drop the call unanswered.
+    if (utf8(stringify(request)).length > 67584) return Promise.reject(refusal("too-large"));
     return broker(request).then((answer) => {
       if (!answer || typeof answer !== "object" || answer.id !== id) throw refusal("failed");
       if (answer.ok !== true) throw refusal(answer.error);
@@ -506,10 +521,16 @@ pub fn is_app_label(label: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric())
 }
 
-/// The largest IPC message the webview `label` may post, for `tauri::ipc::set_post_message_limit`: an app
-/// window's is bounded, the Ghostly window's is not.
+/// The largest IPC message the webview `label` may post, for `tauri::ipc::set_post_message_limit`: the Ghostly
+/// window's is not bounded, an app window's has room for the broker, and every other window's is tiny.
 pub fn message_limit(label: &str) -> Option<usize> {
-    is_app_label(label).then_some(MAX_MESSAGE_BYTES)
+    if label == "main" {
+        None
+    } else if is_app_label(label) {
+        Some(MAX_MESSAGE_BYTES)
+    } else {
+        Some(MAX_OTHER_MESSAGE_BYTES)
+    }
 }
 
 /// Whether `url` is the runner, in either spelling: `ghostly-app://localhost/` on macOS and Linux, and
@@ -632,16 +653,13 @@ fn window_title(title: &str) -> String {
 }
 
 /// The window, with every layer that does not depend on the platform.
-/// An app window's answer to a permission request: never the microphone, the camera, the screen or the location.
-fn capture_answer(kind: tauri::webview::PermissionKind) -> tauri::webview::PermissionResponse {
-    use tauri::webview::{PermissionKind, PermissionResponse};
-    match kind {
-        PermissionKind::Microphone
-        | PermissionKind::Camera
-        | PermissionKind::DisplayCapture
-        | PermissionKind::Geolocation => PermissionResponse::Deny,
-        _ => PermissionResponse::Default,
-    }
+/// An app window's answer to a permission request (a contact's service window's too, `viewer::open`): no, whatever
+/// it asks for. Never the microphone, the camera, the screen or the location, and no notifications, file pickers or
+/// any other kind either: `Default` would let WebView2 ask the user in its own prompt, inside a Ghostly window.
+pub(crate) fn capture_answer(
+    _kind: tauri::webview::PermissionKind,
+) -> tauri::webview::PermissionResponse {
+    tauri::webview::PermissionResponse::Deny
 }
 
 fn window_builder<'a, R: Runtime>(
@@ -731,6 +749,7 @@ fn build_window<R: Runtime>(
     let window = window_builder(app, label, title, guard)?
         .build()
         .map_err(|e| format!("Window: {e}"))?;
+    crate::downloads::trim(&window, crate::downloads::Window::App);
     let store = app
         .path()
         .app_cache_dir()
@@ -1066,7 +1085,7 @@ const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The one command an app window may call (`only_main` lets it through from `app-*` windows only). The
 /// request is `{"id", "type", "args"}`; the result is the broker's answer, `{"id", "ok", "value" | "error"}`, or
-/// for a file `{"id", "ok", "bytes"}`, the bytes in base64, read here (`file_bytes`) or carried by the broker.
+/// for bytes `{"id", "ok", "bytes"}`, in base64, read here (`file_bytes`) or sent raw by the broker (`app_post_bytes`).
 #[tauri::command]
 pub async fn app_broker<R: Runtime>(
     app: AppHandle<R>,
@@ -1115,9 +1134,14 @@ async fn answer_to(request: &Value, receiver: oneshot::Receiver<Value>) -> Optio
 /// window's CSP and rule list block `ipc://`, so Tauri would eval a raw body into it as a JSON list of numbers,
 /// about 3.6 characters a byte, slow to build, parse and hold, and on the GTK main loop the windows share.
 fn bytes_response(id: u64, bytes: &[u8]) -> Result<tauri::ipc::Response, String> {
+    json_response(&bytes_answer(id, bytes))
+}
+
+/// An answer that carries bytes, as the runner reads it: `{"id", "ok": true, "bytes"}`, the bytes in base64.
+fn bytes_answer(id: u64, bytes: &[u8]) -> Value {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD.encode(bytes);
-    json_response(&json!({ "id": id, "ok": true, "bytes": bytes }))
+    json!({ "id": id, "ok": true, "bytes": bytes })
 }
 
 /// An answer for the app window: its JSON text, sent as a JSON string, which the runner parses (`jsonOf`). Not the
@@ -1190,6 +1214,39 @@ pub fn app_post<R: Runtime>(
     message: Value,
 ) -> Result<(), String> {
     post(&app, &label, message)
+}
+
+/// An answer whose value is bytes (`files.read`, `remote.read`, a `file` the broker carried) from the Ghostly window's
+/// broker (the Ghostly window only): the raw body is the bytes, `x-label` and `x-id` say which window's request it
+/// answers. Turned into base64 here, as a `file` read by reference is (`bytes_response`): on the Ghostly window's
+/// thread, a 1 MiB read cost ~2 ms of base64 and a 1.4 MB JSON string for `app_post`.
+#[tauri::command]
+pub async fn app_post_bytes<R: Runtime>(
+    app: AppHandle<R>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("Expected raw bytes".into());
+    };
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(|| format!("Missing {name}"))
+    };
+    let id = header("x-id")?.parse().map_err(|_| "Invalid id")?;
+    post_bytes(&app, header("x-label")?, id, bytes)
+}
+
+/// The answer to `id` in window `label`: `bytes`, as the runner reads them (`bytes_answer`).
+pub fn post_bytes<R: Runtime>(
+    app: &AppHandle<R>,
+    label: &str,
+    id: u64,
+    bytes: &[u8],
+) -> Result<(), String> {
+    post(app, label, bytes_answer(id, bytes))
 }
 
 /// Names an app window anew (the Ghostly window only): "Chess · sharing a file with Ana" while the app serves the
@@ -2083,7 +2140,7 @@ mod tests {
 
     /// No microphone, camera, screen or location for an app: no app permission covers them. Without a handler wry
     /// grants a capture on macOS with no question, so every app window carries one that refuses, and the runner is
-    /// served with a policy that turns the features off.
+    /// served with a policy that turns the features off. The handler refuses every other kind too.
     #[test]
     fn an_app_window_never_captures() {
         let source = include_str!("app_sandbox.rs");
@@ -2091,18 +2148,30 @@ mod tests {
         let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
         assert!(body.contains(".on_permission_request("), "window_builder");
         use tauri::webview::{PermissionKind, PermissionResponse};
+        // Every kind, not only the capture ones: `Default` lets WebView2 ask in the window, as if Ghostly asked.
         for kind in [
             PermissionKind::Microphone,
             PermissionKind::Camera,
-            PermissionKind::DisplayCapture,
             PermissionKind::Geolocation,
+            PermissionKind::Notifications,
+            PermissionKind::ClipboardRead,
+            PermissionKind::DisplayCapture,
+            PermissionKind::Midi,
+            PermissionKind::Sensors,
+            PermissionKind::MediaKeySystemAccess,
+            PermissionKind::LocalFonts,
+            PermissionKind::WindowManagement,
+            PermissionKind::PointerLock,
+            PermissionKind::AutomaticDownloads,
+            PermissionKind::FileSystemAccess,
+            PermissionKind::Autoplay,
+            PermissionKind::Other,
         ] {
-            assert!(matches!(capture_answer(kind), PermissionResponse::Deny));
+            assert!(
+                matches!(capture_answer(kind), PermissionResponse::Deny),
+                "{kind}"
+            );
         }
-        assert!(matches!(
-            capture_answer(PermissionKind::PointerLock),
-            PermissionResponse::Default
-        ));
         let app = app();
         app.state::<AppSandboxState>()
             .windows
@@ -2233,7 +2302,7 @@ mod tests {
             ),
             Ok(Admitted::Relay(MAX_ID, _))
         ));
-        // The whole request, as JSON: 64 KiB passes, a byte more does not.
+        // The whole request, as JSON: 66 KiB passes, a byte more does not.
         let request = |length: usize, id: u64| json!({"id": id, "type": "storage.set", "args": ["k", "x".repeat(length)]});
         let fixed = serde_json::to_vec(&request(0, 2)).unwrap().len();
         assert!(matches!(
@@ -2244,10 +2313,17 @@ mod tests {
             admitted(&state, "app-1", request(MAX_REQUEST_BYTES - fixed + 1, 3)).unwrap_err(),
             "too-large"
         );
+        // A stored value's 64 KiB (WISP 1200) under the longest key, 256 control characters at six bytes each in JSON.
+        let longest = json!({"id": 4, "type": "storage.set", "args": ["\u{1}".repeat(256), "x".repeat(64 * 1024 - 2)]});
+        assert!(matches!(
+            admitted(&state, "app-1", longest),
+            Ok(Admitted::Relay(4, _))
+        ));
     }
 
     /// An app window's IPC message is bounded before Tauri parses it, with room for the broker's largest request
-    /// in Tauri's envelope; the Ghostly window's is not. `run()` sets the bound before any window opens.
+    /// in Tauri's envelope; every other window's but the Ghostly one's is bounded tighter (a contact's app's
+    /// `svc-*` window calls nothing), and the Ghostly window's is not. `run()` sets the bound before any window opens.
     #[test]
     fn an_app_windows_message_is_bounded_before_tauri_parses_it() {
         let request = json!({"id": MAX_ID, "type": "storage.set", "args": ["k", "x".repeat(MAX_REQUEST_BYTES)]});
@@ -2258,8 +2334,16 @@ mod tests {
         let limit = message_limit("app-0123456789abcdef").unwrap();
         assert!(serde_json::to_vec(&message).unwrap().len() <= limit);
         assert!(limit <= 256 * 1024, "parsed in a few milliseconds");
-        for label in ["main", "svc-1", "app-", "App-1", "xapp-1"] {
-            assert_eq!(message_limit(label), None, "{label}");
+        assert_eq!(message_limit("main"), None);
+        // A refused call fits; a body of any length does not reach the parser.
+        let refused = json!({
+            "cmd": "generate_enc_key", "callback": u32::MAX, "error": u32::MAX, "payload": {},
+            "options": {"headers": {}, "customProtocolIpcBlocked": true}, "__TAURI_INVOKE_KEY__": "k".repeat(64),
+        });
+        let refused = serde_json::to_vec(&refused).unwrap().len();
+        for label in ["svc-1", "forget-1", "app-", "xapp-1", "Main", "main-2"] {
+            let other = message_limit(label).expect(label);
+            assert!(refused <= other && other <= 4 * 1024, "{label}");
         }
         assert!(include_str!("lib.rs")
             .contains("tauri::ipc::set_post_message_limit(app_sandbox::message_limit);"));
@@ -2447,6 +2531,43 @@ mod tests {
             first.try_recv(),
             Err(oneshot::error::TryRecvError::Closed)
         ));
+    }
+
+    /// `files.read` and `remote.read`: the broker sends the bytes raw (`app_post_bytes`), and the request waiting gets
+    /// them as the runner reads a file's, base64 made here rather than on the Ghostly window's thread.
+    #[test]
+    fn bytes_reach_the_request_of_their_window_as_the_runner_reads_them() {
+        let app = app();
+        let state = app.state::<AppSandboxState>();
+        {
+            let mut windows = state.windows.lock().unwrap();
+            windows.insert("app-1".into(), window("ana/cinema", true, true));
+            windows.insert("app-2".into(), window("bob/snake", true, true));
+        }
+        started(&state, "app-1");
+        started(&state, "app-2");
+        let request =
+            json!({"id": 6, "type": "files.read", "args": ["f", {"offset": 0, "length": 5}]});
+        let Admitted::Relay(_, mut first) = admitted(&state, "app-1", request.clone()).unwrap()
+        else {
+            panic!("relayed")
+        };
+        let Admitted::Relay(_, mut second) = admitted(&state, "app-2", request).unwrap() else {
+            panic!("relayed")
+        };
+        post_bytes(app.handle(), "app-1", 6, &[0, 1, 2, 250, 255]).unwrap();
+        assert_eq!(
+            first.try_recv().unwrap(),
+            json!({"id": 6, "ok": true, "bytes": "AAEC+v8="})
+        );
+        assert!(second.try_recv().is_err(), "app-2's request still waits");
+        for label in ["main", "svc-1", "app-"] {
+            assert!(post_bytes(app.handle(), label, 6, &[1]).is_err(), "{label}");
+        }
+        assert_eq!(
+            post_bytes(app.handle(), "app-9", 6, &[1]).unwrap_err(),
+            "No app window"
+        );
     }
 
     /// A pick waits for the person as long as they take, within `PICK_TIMEOUT` (as on the web); it ends when the

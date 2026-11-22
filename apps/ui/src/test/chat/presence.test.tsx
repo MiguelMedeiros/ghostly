@@ -213,6 +213,30 @@ describe("the chat's header and the contact panel", () => {
     expect(classes).toContain("max-md:[&_bdi]:sr-only");
   });
 
+  it("on a phone the header's emoji gives way whole: one line high that wraps behind an empty first item, cut away", () => {
+    // jsdom lays nothing out: these are the rules that make an emoji with no room left beside the name go to a second
+    // line, cut by the line's own box, instead of taking the name's room (e2e/web/presence-status.spec.ts measures it).
+    const GIVES_WAY = ["max-md:h-4", "max-md:flex-wrap", "max-md:gap-0", "max-md:overflow-hidden", "max-md:before:h-full", "max-md:before:content-['']"];
+    setLinks(link(ANA, { peerPresence: "active", peerStatus: { emoji: "🌴", text: "On holiday" } }));
+    const phone = renderApp(<PeerPresenceLine peerKey={ANA} testId="chat-presence" emojiOnPhone />);
+    const line = screen.getByTestId("chat-presence");
+    expect(line.className.split(" ")).toEqual(expect.arrayContaining(GIVES_WAY));
+    // The emoji is inside that line, the only thing in its flow: the dot's words and the text are for a screen reader.
+    expect(line.contains(screen.getByTestId("chat-presence-status-emoji"))).toBe(true);
+    expect(screen.getByTestId("chat-presence-presence").className).toContain("sr-only");
+    expect(line.className.split(" ")).toContain("max-md:[&_bdi]:sr-only");
+    // The text keeps its own direction, isolated and cut at its own end where it shows.
+    const text = screen.getByTestId("chat-presence-status-text");
+    expect(text.tagName).toBe("BDI");
+    expect(text).toHaveAttribute("dir", "auto");
+    expect(text).toHaveClass("min-w-0", "truncate");
+    phone.unmount();
+    // The contact panel shows the whole status on any screen: none of it there.
+    renderApp(<PeerPresenceLine peerKey={ANA} testId="chat-identities-presence" />);
+    const panel = screen.getByTestId("chat-identities-presence").className.split(" ");
+    for (const rule of GIVES_WAY) expect(panel, rule).not.toContain(rule);
+  });
+
   it("no dot without `presence`: other places that draw a contact's picture are left as they were", () => {
     setLinks(link(ANA, { peerPresence: "active" }));
     renderApp(<PeerAvatar peerPubKey={ANA} label="Ana" testId="lock-call-avatar" />);

@@ -32,6 +32,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  delete (globalThis as { window?: unknown }).window;
   delete (globalThis as { location?: unknown }).location;
   delete (globalThis as { history?: unknown }).history;
 });
@@ -104,6 +105,7 @@ describe("the page that runs Clear all data while another tab switches", () => {
     world.storage.set(`ghostly_${WORK}_app_settings`, "{}");
     const order: string[] = [];
     Object.assign(globalThis, {
+      window: new EventTarget(),
       location: { reload: () => order.push("reload") },
       history: { replaceState: () => {} },
     });

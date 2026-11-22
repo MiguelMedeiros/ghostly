@@ -37,9 +37,9 @@ export function handoffProfileHost(): HandoffProfileHost | null {
  * does not move. These are the versions `packages/browser/package.json` pins; a test checks the two agree.
  */
 export const WALLET_SDK_PINS: Readonly<Record<string, string>> = {
-  ark: "0.4.76",
-  bark: "0.25.0",
-  breez: "0.26.0",
+  ark: "0.5.4",
+  bark: "0.27.0",
+  breez: "0.28.2",
   fedimint: "eea6a3c98909",
 };
 
@@ -47,6 +47,14 @@ export const WALLET_SDK_PINS: Readonly<Record<string, string>> = {
 export function meteredConnection(): boolean {
   const connection = (typeof navigator === "undefined" ? undefined : (navigator as Navigator & { connection?: { type?: string; saveData?: boolean } }).connection);
   return connection?.saveData === true || connection?.type === "cellular";
+}
+
+/** Calls `listener` when the connection changes (mobile data on or off), where the browser says; returns how to stop. */
+export function onConnectionChange(listener: () => void): () => void {
+  const connection = (typeof navigator === "undefined" ? undefined : (navigator as Navigator & { connection?: EventTarget }).connection);
+  if (typeof connection?.addEventListener !== "function") return () => {};
+  connection.addEventListener("change", listener);
+  return () => connection.removeEventListener("change", listener);
 }
 
 /** Bytes this origin may still store, or -1 where the browser does not say. */

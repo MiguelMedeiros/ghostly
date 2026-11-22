@@ -32,6 +32,13 @@ const GRACE_MS = 60_000;
 const TARGETED = new Set<WalletType>(["arkade", "bark", "spark", "bitcoin", "usdt"]);
 
 /**
+ * Ecash sent that can still be taken back: not taken yet, or refused by the contact while the mint did not answer the
+ * automatic take back (`failed`, its token kept). Its bubble offers both, and `PaymentDesk.forgetLink` keeps both.
+ */
+export const sentUntaken = (p: StoredPayment): boolean =>
+  p.kind === "payment" && p.direction === "out" && (p.state === "pending" || p.state === "failed") && !!p.token;
+
+/**
  * What the wallets of one network still wait for (see `WalletAwaitingView`): what removing one of them would lose, or
  * close. A request of ours counts only for the wallet it can be paid through, and only when there is one: a request a
  * Cashu mint and another Lightning source can both be paid through is not lost when one of them goes.
@@ -106,7 +113,7 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
   // Ecash sent that the contact has not taken yet: only the wallet it came from can take it back. One whose chat was
   // deleted is kept for that (`PaymentDesk.forgetLink`), and one whose line is in no chat says so: nothing else offers it back.
   for (const p of payments) {
-    if (p.kind !== "payment" || p.direction !== "out" || p.state !== "pending" || !p.token) continue;
+    if (!sentUntaken(p)) continue;
     const gone = chatGone?.(p.id) ? { chatGone: true as const } : {};
     if (p.target?.method === "fedimint" || p.federation) {
       if (paymentNetwork(p) === network) out.push({ type: "fedimint", kind: "sent", amount: p.amount, paymentId: p.id, ...gone });

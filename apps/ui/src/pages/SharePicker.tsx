@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Page } from "../components/layout";
-import { ChatTargetRow } from "../components/chat/ChatTargets";
+import { ChatTargetRow, ChatTargetSearch } from "../components/chat/ChatTargets";
 import { useChatTargets } from "../hooks/useChatTargets";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { chatTargetKeys, findChatTargets } from "../lib/chatTargets";
 import { Notice } from "../components/ui/Notice";
+import { listText } from "../lib/listText";
 import { SEARCH_STATUS_SETTLE_MS, SearchStatus } from "../components/ui/SearchStatus";
+import { takeReplaceStep } from "../lib/profiles";
 import { MAX_SHARE_FILES, MAX_WAITING_SHARES, dropIncomingShare, incomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare, type IncomingShare } from "../lib/incomingShare";
 
 /** How long the page waits for a share that has not reached it yet before it says there is none. */
@@ -16,6 +20,8 @@ const WAIT_MS = 5000;
  * text in the draft and the files on the attachment sheet, to look over and send there; nothing is sent from
  * here. Groups take files as chats do (WISP 503).
  * A chat is never picked for the person, not even when there is only one: any website can post a share.
+ * Found by name as in Forward: with a hundred contacts, the one not chatted with lately is typed, not scrolled to. The
+ * search does not take the focus by itself: the picker may open on its own, and a phone's keyboard would hide the list.
  */
 export function SharePicker() {
   const { t } = useI18n();
@@ -26,6 +32,14 @@ export function SharePicker() {
     const timer = setTimeout(() => setWaited(true), WAIT_MS);
     return () => clearTimeout(timer);
   }, []);
+  // A backup's Replace opened this copy here, as a share went along: once the share is in (a share arriving takes the
+  // page back here), the profile page offers the original's removal, and the share is offered after.
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (!share && !waited) return;
+    const replace = takeReplaceStep();
+    if (replace) navigate(replace, { replace: true });
+  }, [share, waited, navigate]);
 
   const hasFiles = !!share?.files.length;
   const leftOut = share?.leftOut ?? [];
@@ -36,7 +50,12 @@ export function SharePicker() {
   const pastLimit = share?.pastLimit ?? [];
   const dropped = share?.dropped ?? 0;
   const targets = useChatTargets();
+  const search = useRef<HTMLInputElement>(null), list = useRef<HTMLUListElement>(null);
+  const [query, setQuery] = useState("");
+  const shown = useMemo(() => findChatTargets(targets, query), [targets, query]);
   const preview = share ? sharePreview(share) : "";
+  // File names as the language lists them ("a.jpg、b.pdf"), each isolated: an Arabic name beside a Latin one keeps its own order.
+  const names = (list: readonly string[]) => listText(list.map((name) => `⁨${name}⁩`), t);
   const filesName = (shown: IncomingShare) => shown.files.length === 1 ? shown.files[0]!.name || t("pwa.shareOneFile") : t("pwa.shareFiles", { count: String(shown.files.length) });
 
   // Each share shown (the first, and the next in place of the one just picked or put aside): said, and not acted on before it is.
@@ -58,6 +77,8 @@ export function SharePicker() {
    */
   const showNext = (next: IncomingShare) => {
     shownAt.current = Date.now();
+    // The next share may be for another chat: the whole list again.
+    setQuery("");
     setSaid(say(next));
     document.querySelector<HTMLElement>('[data-testid="share-picker"] h1')?.focus();
     document.querySelector<HTMLElement>('[data-testid="share-picker"] [data-page-body]')?.scrollTo?.({ top: 0 });
@@ -81,7 +102,8 @@ export function SharePicker() {
 
   return (
     <Page title={t("pwa.shareTitle")} testId="share-picker">
-      <SearchStatus testId="share-next" text={said} />
+      {/* Said too when nothing came: the waiting line changes on its own after a while. */}
+      <SearchStatus testId="share-next" text={share ? said : waited ? t("pwa.shareNone") : ""} />
       {!share ? (
         <p className="text-sm text-text-muted" data-testid="share-none">{waited ? t("pwa.shareNone") : t("pwa.shareWaiting")}</p>
       ) : (
@@ -89,22 +111,22 @@ export function SharePicker() {
           {/* Files too large to bring in were left out: the picker names them, and how to send them. */}
           {leftOut.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-left-out"
-              title={leftOutNames.length ? t("pwa.shareTooLarge", { names: leftOutNames.join(", ") }) : t("pwa.shareTooLargeUnnamed")} next={t("pwa.shareTooLargeNext")} />
+              title={leftOutNames.length ? t("pwa.shareTooLarge", { names: names(leftOutNames) }) : t("pwa.shareTooLargeUnnamed")} next={t("pwa.shareTooLargeNext")} />
           )}
           {/* Files Android could not read (a revoked permission, a broken stream): named too, never dropped silently. */}
           {unread.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-unread"
-              title={t("pwa.shareUnread", { names: unread.join(", ") })} next={t("pwa.shareUnreadNext")} />
+              title={t("pwa.shareUnread", { names: names(unread) })} next={t("pwa.shareUnreadNext")} />
           )}
           {/* Files Android had no room to copy (the device is full): sharing again only helps once there is space. */}
           {noRoom.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-no-room"
-              title={t("pwa.shareNoRoom", { names: noRoom.join(", ") })} next={t("pwa.shareNoRoomNext")} />
+              title={t("pwa.shareNoRoom", { names: names(noRoom) })} next={t("pwa.shareNoRoomNext")} />
           )}
           {/* Files past the most one share brings were left out: named apart, as they were not too large. */}
           {pastLimit.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-past-limit"
-              title={t("pwa.sharePastLimit", { count: String(MAX_SHARE_FILES), names: pastLimit.join(", ") })} next={t("pwa.sharePastLimitNext")} />
+              title={t("pwa.sharePastLimit", { count: String(MAX_SHARE_FILES), names: names(pastLimit) })} next={t("pwa.sharePastLimitNext")} />
           )}
           {/* Shares that came while this one waited, past the most that can wait, were not kept: never dropped without a word. */}
           {dropped > 0 && (
@@ -132,8 +154,15 @@ export function SharePicker() {
               {targets.length === 0 ? (
                 <p className="text-sm text-text-muted">{t("pwa.shareNoChats")}</p>
               ) : (
-                <ul className="rounded-xl bg-surface divide-y divide-border overflow-hidden m-0 p-0 list-none" aria-label={t("pwa.shareTitle")}>
-                  {targets.map((target) => (
+                <>
+                  <ChatTargetSearch inputRef={search} list={list} testId="share-search" value={query} onChange={setQuery} />
+                  <SearchStatus testId="share-found" text={!query.trim() ? "" : shown.length ? t("chat.forward.found", { count: shown.length }) : t("chat.forward.noMatch")} />
+                </>
+              )}
+              {targets.length > 0 && shown.length === 0 && <p className="text-sm text-text-muted" data-testid="share-no-match">{t("chat.forward.noMatch")}</p>}
+              {shown.length > 0 && (
+                <ul ref={list} onKeyDown={chatTargetKeys(search)} className="rounded-xl bg-surface divide-y divide-border overflow-hidden m-0 p-0 list-none" aria-label={t("pwa.shareTitle")}>
+                  {shown.map((target) => (
                     <li key={target.chat}>
                       <ChatTargetRow target={target} testId={target.kind === "group" ? "share-group" : "share-chat"} onClick={() => pick(target.chat, target.path)} />
                     </li>
@@ -144,7 +173,7 @@ export function SharePicker() {
           )}
 
           <button type="button" onClick={cancel} data-testid="share-cancel"
-            className="px-4 py-2 min-h-10 rounded-lg text-sm border border-border text-text-secondary hover:bg-surface-hover cursor-pointer">
+            className="px-4 py-2 min-h-10 max-md:min-h-11 rounded-lg text-sm border border-border text-text-secondary hover:bg-surface-hover cursor-pointer">
             {t("common.cancel")}
           </button>
         </>

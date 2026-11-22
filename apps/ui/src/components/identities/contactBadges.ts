@@ -96,8 +96,9 @@ export function contactBadges(received: ReceivedIdentityView[] | undefined, { go
     if (!state || (good && !isGood(state))) return;
     // A public profile's name, while the proof still vouches for it: "Nostr: npub1…yz (Alice) · verified 2 h ago".
     const profile = isGood(state) && r.publicProfile?.found ? r.publicProfile : undefined;
-    const providerName = providerLabel(r.provider), short = shortSubject(r.provider, r.verified.subject), stateText = stateWords(state, r, now, t, language);
-    const label = `${providerName}: ${short}${profile?.name ? ` (${profile.name})` : ""} · ${stateText}`;
+    const providerName = providerLabel(r.provider, t), short = shortSubject(r.provider, r.verified.subject), stateText = stateWords(state, r, now, t, language);
+    const words = { provider: providerName, subject: short, state: stateText };
+    const label = profile?.name ? t("identities.badge.markNamed", { ...words, name: profile.name }) : t("identities.badge.mark", words);
     const photo = profile?.avatar?.startsWith("data:image/") ? profile.avatar : undefined;
     const about = profile ? { ...(profile.name ? { name: profile.name } : {}), ...(profile.handle ? { handle: profile.handle } : {}), ...(profile.hosts?.length ? { hosts: profile.hosts } : {}) } : {};
     badges.push({ id: r.id, provider: r.provider, subject: r.subject, state, label, providerName, short, stateText, ...about, ...(photo ? { photo } : {}), rank: badgeRank(r.provider, r.subject), i });
@@ -106,6 +107,10 @@ export function contactBadges(received: ReceivedIdentityView[] | undefined, { go
     .sort((a, b) => Number(isGood(b.state)) - Number(isGood(a.state)) || a.rank - b.rank || a.i - b.i)
     .map(({ rank: _rank, i: _i, ...badge }) => badge);
 }
+
+/** The marks' labels as one line, for a screen reader: "GitHub: ana · verified 2 h ago; Domain: …", joined the language's way. */
+export const marksText = (badges: readonly Pick<Badge, "label">[], t: Translate = english): string =>
+  badges.map(b => b.label).reduce((list, next) => (list ? t("identities.badge.markList", { list, next }) : next), "");
 
 /** The first `limit` marks and how many more there are, for the "+N" chip. */
 export function takeBadges<T>(badges: T[], limit: number): { shown: T[]; more: number } {

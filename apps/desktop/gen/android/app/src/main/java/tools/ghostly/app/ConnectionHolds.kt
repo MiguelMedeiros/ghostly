@@ -43,4 +43,11 @@ object ConnectionHolds {
    * crash, an update or a permission taken back: the battery setting would change nothing there.
    */
   fun killedBySystem(wasRunning: Boolean, reason: Int?): Boolean = wasRunning && (reason == null || reason in BY_THE_SYSTEM)
+
+  /**
+   * How the app's last run ended, from Android's exit records of the package, newest first (process name and reason):
+   * the app's own process (`process`), not its WebView's renderers, which Android lists under the app too and which
+   * end a few milliseconds after it, "other kills by system" even after a person's force stop. Null: no record of it.
+   */
+  fun lastExitReason(exits: List<Pair<String, Int>>, process: String): Int? = exits.firstOrNull { it.first == process }?.second
 }

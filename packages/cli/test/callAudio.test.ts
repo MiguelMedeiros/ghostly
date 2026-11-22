@@ -1,7 +1,7 @@
 import { createSocket } from "node:dgram";
 import { describe, expect, it, vi } from "vitest";
 import { CallAudio, type OpusCodec, type RtpTrack } from "../src/calls/audio";
-import { callIceServers, CallMedia, callUsesTurn, gathering, HOST_GATHER_MS, loadCallStack, type CallStack } from "../src/calls/media";
+import { callIceServers, CallMedia, callUsesTurn, gathering, HOST_GATHER_MS, loadCallStack, trackSend, type CallStack } from "../src/calls/media";
 import { bytesToMs, frameBytes, PARTIAL_WAIT_MS, PlaybackQueue, type CallRate } from "../src/calls/pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter, sequenceDelta, TICKS_PER_FRAME, type RtpPacket } from "../src/calls/rtp";
 import { dominantHz, level, tone } from "./support/tone";
@@ -50,6 +50,66 @@ describe("the playback queue (program to call)", () => {
     expect(q.next().frame.subarray(0, 2)).toEqual(Buffer.from([3, 4]));
   });
 
+  it("a program writing in tiny pieces costs each frame well under its 20 ms", () => {
+    // 60 s at 48 kHz in 16-byte writes: 360,000 chunks queued. Each chunk used up must not copy the whole queue.
+    const q = new PlaybackQueue(48000, () => 0);
+    const piece = Buffer.alloc(16, 1);
+    for (let i = 0; i < (48000 * 2 * 60) / 16; i++) q.push(piece);
+    const frames = 50;
+    const start = performance.now();
+    for (let i = 0; i < frames; i++) q.next();
+    expect((performance.now() - start) / frames).toBeLessThan(1);
+    expect(q.queuedMs).toBe(60_000 - frames * 20);
+  });
+
+  it("gives back every byte, in order, from many small odd writes", () => {
+    const q = new PlaybackQueue(16000, () => 0);
+    const audio = tone(440, 16000, 2000);
+    for (let at = 0; at < audio.length; at += 7) q.push(audio.subarray(at, at + 7));
+    const out: Buffer[] = [];
+    out.push(q.next().frame);
+    expect(q.skip(40)).toBe(40);
+    while (q.queuedMs >= 20) out.push(q.next().frame);
+    const frame = frameBytes(16000);
+    expect(Buffer.concat(out)).toEqual(Buffer.concat([audio.subarray(0, frame), audio.subarray(3 * frame)]));
+  });
+
+  it("holds none of the audio it already sent", () => {
+    // 15 min at 48 kHz in 64 KiB writes, about a second ahead: what went out must not stay referenced.
+    let t = 0;
+    const q = new PlaybackQueue(48000, () => t);
+    const inner = q as unknown as { chunks: Buffer[] };
+    const piece = Buffer.alloc(65536, 1);
+    let worst = 0;
+    for (let tick = 0; tick < (15 * 60_000) / 20; tick++) {
+      while (q.queuedMs < 1000) q.push(piece);
+      q.next();
+      t += 20;
+      if (tick % 50 === 0) worst = Math.max(worst, inner.chunks.reduce((n, c) => n + c.length, 0));
+    }
+    expect(worst).toBeLessThanOrEqual(48 * 2 * 1000 + 2 * piece.length);
+  });
+
+  it("drops the used-up chunks of tiny writes as it goes, and reads on after a flush or a new writer", () => {
+    const q = new PlaybackQueue(16000, () => 0);
+    const inner = q as unknown as { chunks: Buffer[] };
+    const perFrame = frameBytes(16000) / 4;
+    let worst = 0;
+    for (let tick = 0; tick < 3000; tick++) {
+      for (let k = 0; k < perFrame; k++) q.push(Buffer.alloc(4, 1));
+      q.next();
+      worst = Math.max(worst, inner.chunks.length);
+    }
+    expect(worst).toBeLessThan(2048 + perFrame);
+    for (const reset of [() => q.flush(), () => q.newWriter()]) {
+      for (let k = 0; k < perFrame * 3; k++) q.push(Buffer.alloc(4, 1));
+      q.next();
+      reset();
+      q.push(Buffer.alloc(frameBytes(16000), 2));
+      expect(q.next().frame[0]).toBe(2);
+    }
+  });
+
   it("flush drops everything queued and says how much", () => {
     const q = new PlaybackQueue(48000);
     q.push(tone(440, 48000, 2000));
@@ -57,6 +117,29 @@ describe("the playback queue (program to call)", () => {
     expect(q.flush()).toBe(1980);
     expect(q.queuedMs).toBe(0);
     expect(q.next().silent).toBe(true);
+  });
+
+  // A program streams in chunks of any size (a TTS body piped through): a flush that dropped half a sample read every
+  // sample after it a byte off, loud noise until the call ended.
+  it("a flush with half a sample queued drops its other half too, and the samples after it read right", () => {
+    const q = new PlaybackQueue(8000, () => 0);
+    const stream = Buffer.alloc(2 * 400);
+    for (let i = 0; i < 400; i++) stream.writeInt16LE(1000 + i, i * 2);
+    q.push(stream.subarray(0, 3));
+    q.flush();
+    q.push(stream.subarray(3));
+    expect(q.next().frame.readInt16LE(0)).toBe(1002);
+  });
+
+  it("a full queue that drops an odd number of bytes drops the next byte too, and the samples after it read right", () => {
+    const q = new PlaybackQueue(8000, Date.now, 100);
+    q.push(Buffer.alloc(1600));
+    expect(q.push(Buffer.alloc(3))).toBe(3);
+    q.flush();
+    const rest = Buffer.alloc(2 * 160 + 1);
+    for (let i = 0; i < 160; i++) rest.writeInt16LE(-500, 1 + i * 2);
+    q.push(rest);
+    expect(q.next().frame.readInt16LE(0)).toBe(-500);
   });
 
   it("drops what goes past its cap", () => {
@@ -247,6 +330,36 @@ describe("a call's candidates", () => {
     expect(callUsesTurn(callIceServers([], { GHOSTLY_STUN: "1" }))).toBe(false);
     expect(callUsesTurn(callIceServers([{ urls: "stun:stun.example.org" }], { GHOSTLY_STUN: "1" }))).toBe(false);
     expect(callUsesTurn(callIceServers([{ urls: "turn:turn.example.org", username: "u", credential: "p" }], { GHOSTLY_STUN: "0" }))).toBe(true);
+  });
+});
+
+describe("a call's track", () => {
+  it("drops the frame of a track that closes between isOpen and the send, and the next tick still sends", async () => {
+    const stack = await loadCallStack();
+    if (typeof stack === "string") throw new Error(stack);
+    // libdatachannel's own words when the connection fails while a frame goes out.
+    let closing = true;
+    const sent: Buffer[] = [];
+    const track = {
+      isOpen: () => true,
+      sendMessageBinary: (packet: Buffer) => {
+        if (closing) throw new Error("libdatachannel error while sending track message: Track is not open");
+        sent.push(packet);
+        return true;
+      },
+    };
+    const audio = new CallAudio({ rate: 48000, payloadType: 111, ssrc: 1, track: { send: trackSend(track), onPacket: () => {} }, encoder: stack.opus(48000), decoder: stack.opus(48000), onFrame: () => {} });
+    expect(() => audio.tick()).not.toThrow();
+    closing = false;
+    audio.tick();
+    expect(sent).toHaveLength(1);
+    audio.stop();
+  });
+
+  it("sends nothing on a track that is not open", () => {
+    const sendMessageBinary = vi.fn(() => true);
+    trackSend({ isOpen: () => false, sendMessageBinary })(Buffer.alloc(12));
+    expect(sendMessageBinary).not.toHaveBeenCalled();
   });
 });
 
@@ -517,6 +630,33 @@ describe("a call's audio through Opus", () => {
       expect(a.queue.queuedMs).toBe(queued - 20);
     } finally {
       a.stop(); b.stop();
+      loop.restore();
+    }
+  });
+
+  it("moves the RTP timestamp on by the time a stall too long to catch up skipped, the sequence still continuous", async () => {
+    const stack = await loadCallStack();
+    if (typeof stack === "string") throw new Error(stack);
+    const loop = handLoop();
+    const packets: RtpPacket[] = [];
+    const audio = new CallAudio({
+      rate: 48000, payloadType: 111, ssrc: 1, track: { send: (p) => packets.push(parseRtp(p)!), onPacket: () => {} },
+      encoder: stack.opus(48000), decoder: stack.opus(48000), onFrame: () => {},
+    });
+    try {
+      const frame = tone(440, 48000, 20);
+      const turns = (count: number, ms: number) => { for (let i = 0; i < count; i++) loop.turn(ms, () => { for (let w = 0; w < ms / 20; w++) audio.queue.push(frame); }); };
+      audio.start();
+      turns(50, 20);
+      const before = packets.length;
+      turns(1, 2980);
+      turns(5, 20);
+      const steps = packets.slice(before - 1).map((p, i, all) => i && [sequenceDelta(p.sequence, all[i - 1].sequence), (p.timestamp - all[i - 1].timestamp) >>> 0]).slice(1);
+      // The timestamp is the sampling time (RFC 3550): the packet after the stall is 2980 ms after the one before it,
+      // and the contact's jitter buffer does not read the gap as seconds of jitter.
+      expect(steps).toEqual([[1, 2980 * 48], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME], [1, TICKS_PER_FRAME]]);
+    } finally {
+      audio.stop();
       loop.restore();
     }
   });

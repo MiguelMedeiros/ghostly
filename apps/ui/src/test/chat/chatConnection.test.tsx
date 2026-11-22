@@ -1,10 +1,17 @@
 import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { ChatConnection } from "../../components/ChatConnection";
-import { connectionSummary } from "../../lib/transportEvents";
+import { SAID_QUIET_MS } from "../../hooks/useSaidSettled";
+import { connectionSummary, liveAttemptText, transportLineDetails, transportLineText, transportOptions, type TransportEntry, transportEventText, transportWaitText, type TransportEvent } from "../../lib/transportEvents";
 import { linkView, type StatePatch } from "../fakeEngine";
 import { renderApp } from "../render";
+import { clockOffAmount } from "../../lib/clockOff";
+import { NetworkSettings } from "../../components/NetworkSettings";
+import { LOCALES as locales, LANGUAGES, LOCALES } from "../i18n/locales";
+import type { LiveAttempt } from "@ghostly/core";
+import type { Language } from "../../lib/settings";
+import { translateWith } from "../../locales/translate";
 
 // covers: chat.paired.discovery-health, chat.paired.status, chat.paired.verify, chat.paired.reconnect, transport.indicator, transport.chat-switch, transport.wait, invite.delivery-mode
 
@@ -814,5 +821,739 @@ describe("ChatConnection: how contacts are found", () => {
   it("is not there when the app says nothing about discovery", () => {
     banner({ pairing: ready() });
     expect(screen.queryByTestId("connection-discovery")).toBeNull();
+  });
+});
+
+// covers: app.clock-off
+describe("the note that this device's clock seems to be off", () => {
+  type Pairing = NonNullable<LinkView["pairing"]>;
+  const RELAYS = ["https://pkarr.pubky.org"];
+  const web = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS };
+  const live = linkView({ availableTransports: ["webrtc/1"], peerTransports: ["webrtc/1"], transportAutomatic: true, pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open" });
+  const waiting = linkView({ availableTransports: ["webrtc/1"], peerTransports: [], transportAutomatic: true });
+  const HINT = "This device's clock seems to be off by about 2 minutes. Chats may be slow to connect.";
+
+  it("is in the chat's connection panel while the engine says so, one short line with the story behind its ⓘ", async () => {
+    const view = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => view.engine.update({ transport: { ...web, clockOffMs: 2 * 60_000 + 3_000 }, links: [live] }));
+    await view.user.click(screen.getByTestId("connection-options"));
+    const panel = screen.getByRole("dialog", { name: "Connection options" });
+    const note = within(panel).getByTestId("connection-clock-off");
+    expect(note).toHaveTextContent(HINT);
+    // No alarm: a line among the others, and its story only when asked for.
+    expect(within(panel).queryByRole("alert")).toBeNull();
+    expect(within(note).queryByTestId("connection-clock-off-text")).toBeNull();
+    const more = within(note).getByRole("button", { name: "More info" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    await view.user.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    const story = within(note).getByTestId("connection-clock-off-text");
+    expect(story).toHaveTextContent("about 2 minutes ahead of what the relays and your contacts' devices say");
+    expect(story).toHaveTextContent("Set the date and time to automatic");
+    expect(story).toHaveTextContent("never one contact alone");
+
+    // Behind says so, and an hour reads as an hour.
+    act(() => view.engine.update({ transport: { ...web, clockOffMs: -3 * 60 * 60_000 }, links: [live] }));
+    expect(within(panel).getByTestId("connection-clock-off")).toHaveTextContent("off by about 3 hours");
+    expect(within(panel).getByTestId("connection-clock-off-text")).toHaveTextContent("about 3 hours behind what the relays");
+
+    // The clock agrees again: the note goes by itself.
+    act(() => view.engine.update({ transport: web, links: [live] }));
+    expect(screen.queryByTestId("connection-clock-off")).toBeNull();
+  });
+
+  it("is there for a chat that is not connected yet too: that is when it matters", async () => {
+    const view = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => view.engine.update({ transport: { ...web, clockOffMs: -2 * 60_000 }, links: [waiting] }));
+    await view.user.click(screen.getByTestId("connection-options"));
+    expect(screen.getByTestId("connection-clock-off")).toHaveTextContent(HINT);
+  });
+
+  it("is in Settings, Network too, with the same words", async () => {
+    const view = renderApp(<NetworkSettings />);
+    act(() => view.engine.update({ transport: web, settings: { relays: RELAYS } }));
+    expect(screen.queryByTestId("network-clock-off")).toBeNull();
+    act(() => view.engine.update({ transport: { ...web, clockOffMs: 2 * 60_000 }, settings: { relays: RELAYS } }));
+    const row = screen.getByTestId("network-clock-off");
+    expect(row).toHaveTextContent("Device clock");
+    expect(row).toHaveTextContent(HINT);
+    await view.user.click(within(row).getByTestId("row-info"));
+    expect(within(row).getByTestId("row-info-text")).toHaveTextContent("about 2 minutes ahead");
+    act(() => view.engine.update({ transport: web, settings: { relays: RELAYS } }));
+    expect(screen.queryByTestId("network-clock-off")).toBeNull();
+  });
+
+  it("says the amount to the minute, never less than one, in hours past ninety minutes, in the app's language", () => {
+    expect(clockOffAmount(61_000, "en")).toBe("1 minute");
+    expect(clockOffAmount(-89 * 60_000, "en")).toBe("89 minutes");
+    expect(clockOffAmount(90 * 60_000, "en")).toBe("2 hours");
+    expect(clockOffAmount(2 * 60_000, "pt")).toBe("2 minutos");
+    expect(clockOffAmount(2 * 60_000, "not a language")).toBe("2 minutes");
+  });
+
+  it("has its words in every language, each with the amount, and no em dash", () => {
+    for (const [language, strings] of Object.entries(locales)) {
+      const clock = (strings as { connection: { clockOff: Record<string, string> } }).connection.clockOff;
+      expect(Object.keys(clock).sort(), language).toEqual(["hint", "infoAhead", "infoBehind", "title"]);
+      for (const key of ["hint", "infoAhead", "infoBehind"]) {
+        expect(clock[key], `${language} ${key}`).toContain("{{amount}}");
+        expect(clock[key], `${language} ${key}`).not.toContain("—");
+      }
+      expect(clock.infoAhead, language).not.toBe(clock.infoBehind);
+      expect(clock.hint.length, `${language}: one short line`).toBeLessThan(140);
+    }
+  });
+});
+
+// covers: transport.chat-switch
+/**
+ * DHT only closes the live link, and a call's hang-up crosses it: chosen during a call, the call talked on over its
+ * own connection and neither side could hang it up (the contact's ended only when its media stalled out). So DHT only
+ * is off while a call is on in that chat, with the reason on screen, and back once the call ends.
+ */
+describe("the connection panel's DHT only during a call", () => {
+  type Pairing = NonNullable<LinkView["pairing"]>;
+  const all = ["webrtc/1", "iroh/1", "hyperdht/1"] as LinkView["availableTransports"];
+  const live = (patch: Partial<LinkView> = {}) => linkView({ availableTransports: all, transportAutomatic: false, preferredTransport: "webrtc/1",
+    pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open", ...patch });
+  const reason = "Hang up the call to use DHT only";
+
+  it("is off with the reason while a call is on in the chat, and chooses nothing", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" callOn />);
+    act(() => engine.update({ links: [live()] }));
+    await user.click(screen.getByTestId("connection-options"));
+    const dht = screen.getByTestId("connection-option-dht");
+    expect(dht).toBeDisabled();
+    expect(dht).toHaveAccessibleDescription(reason);
+    // On screen at every width, not only in a tooltip.
+    expect(within(dht).getByText(reason)).not.toHaveClass("md:hidden");
+    await user.click(dht);
+    expect(engine.callsTo("setChatTransport")).toEqual([]);
+    // The other choices stay.
+    expect(screen.getByTestId("connection-option-iroh")).toBeEnabled();
+    expect(screen.getByTestId("connection-option-auto")).toBeEnabled();
+  });
+
+  it("is on with no call, and comes back when the call ends", async () => {
+    const { user, engine, rerender } = renderApp(<ChatConnection peerKey="peer" callOn />);
+    act(() => engine.update({ links: [live()] }));
+    await user.click(screen.getByTestId("connection-options"));
+    expect(screen.getByTestId("connection-option-dht")).toBeDisabled();
+    rerender(<ChatConnection peerKey="peer" callOn={false} />);
+    const dht = screen.getByTestId("connection-option-dht");
+    expect(dht).toBeEnabled();
+    expect(dht).not.toHaveAccessibleDescription(reason);
+    await user.click(dht);
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "dht" }]);
+  });
+
+  it("is on in a chat beside the one with the call", async () => {
+    const { user, engine } = renderApp(<>
+      <ChatConnection peerKey="peer" callOn />
+      <ChatConnection peerKey="other" testIdPrefix="b-" />
+    </>);
+    act(() => engine.update({ links: [live(), live({ id: "link-2", peerPubKeyZ32: "other" })] }));
+    await user.click(screen.getByTestId("b-connection-options"));
+    const panel = screen.getByTestId("b-connection-menu");
+    expect(within(panel).getByTestId("connection-option-dht")).toBeEnabled();
+    await user.click(within(panel).getByTestId("connection-option-dht"));
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-2", transport: "dht" }]);
+  });
+
+  it("is skipped by the arrow keys, and a call coming in while it has the focus leaves the focus in the group", async () => {
+    const { user, engine, rerender } = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => engine.update({ links: [live()] }));
+    await user.click(screen.getByTestId("connection-options"));
+    const dht = screen.getByTestId("connection-option-dht");
+    dht.focus();
+    rerender(<ChatConnection peerKey="peer" callOn />);
+    expect(dht).toBeDisabled();
+    // The group's Tab stop, the transport chosen, has it: never the page.
+    const webrtc = screen.getByTestId("connection-option-webrtc");
+    expect(webrtc).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(screen.getByTestId("connection-option-hyperdht")).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByTestId("connection-option-auto")).toHaveFocus();
+  });
+});
+
+// covers: transport.chat-switch
+/**
+ * The panel disables its choices and buttons while the engine works on one, and a browser drops the focus of a
+ * disabled control to the page: the next Tab left the panel, and its Escape did not close it. Once the work is done,
+ * the focus is back on what was pressed.
+ */
+describe("the connection panel, while a choice or button works", () => {
+  type Pairing = NonNullable<LinkView["pairing"]>;
+  const all = ["webrtc/1", "iroh/1", "hyperdht/1"] as LinkView["availableTransports"];
+
+  /**
+   * What a real browser does to a focused control that turns disabled: the page gets the focus. happy-dom keeps it on
+   * the control, and its `blur()` does nothing on a disabled one, so the control reads as enabled for that one call.
+   */
+  function dropFocusIfDisabled() {
+    const el = document.activeElement as HTMLButtonElement | null;
+    if (!el || !(el.disabled || el.closest("fieldset[disabled]"))) return;
+    Object.defineProperty(el, "disabled", { value: false, configurable: true });
+    el.blur();
+    delete (el as Partial<HTMLButtonElement>).disabled;
+  }
+
+  /** An engine call held open until `done()`: the panel stays busy meanwhile. */
+  function held(engine: ReturnType<typeof renderApp>["engine"], method: "setChatTransport" | "confirmPair", fail?: string) {
+    let done!: () => void;
+    engine.on(method, () => new Promise<void>((resolve, reject) => { done = () => fail ? reject(new Error(fail)) : resolve(); }));
+    return () => act(async () => { done(); });
+  }
+
+  it("gives the focus back to the transport chosen from the keyboard", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => engine.update({ links: [linkView({ availableTransports: all, transportAutomatic: false, preferredTransport: "webrtc/1", pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open" })] }));
+    const finish = held(engine, "setChatTransport");
+    await user.click(screen.getByTestId("connection-options"));
+    screen.getByTestId("connection-option-webrtc").focus();
+    await user.keyboard("{End}");
+    const dht = screen.getByTestId("connection-option-dht");
+    expect(dht).toHaveFocus();
+    await user.keyboard(" ");
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "dht" }]);
+    expect(dht).toBeDisabled();
+    dropFocusIfDisabled();
+    expect(document.body).toHaveFocus();
+    await finish();
+    expect(dht).not.toBeDisabled();
+    expect(dht).toHaveFocus();
+  });
+
+  it("gives the focus back to The codes match when the engine refuses it", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => engine.update({ links: [linkView({ availableTransports: all, peerParticipationKey: "saved", pairing: { status: "ready", transport: "webrtc/1", code: "4821 0937", peerKey: "peer" } as Pairing })] }));
+    const finish = held(engine, "confirmPair", "No authenticated peer to verify");
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByTestId("pair-verify"));
+    const confirm = screen.getByTestId("pair-verify-confirm");
+    confirm.focus();
+    await user.keyboard("{Enter}");
+    // Off while it works, by aria-disabled: it keeps the focus, so there is nothing for Chromium to drop.
+    expect(confirm).toHaveAttribute("aria-disabled", "true");
+    dropFocusIfDisabled();
+    expect(confirm).toHaveFocus();
+    await finish();
+    expect(screen.getByTestId("pair-verify-error")).toBeInTheDocument();
+    expect(confirm).toHaveFocus();
+  });
+
+  it("leaves the focus where the person moved it meanwhile", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => engine.update({ links: [linkView({ availableTransports: all, transportAutomatic: false, preferredTransport: "webrtc/1", pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open" })] }));
+    const finish = held(engine, "setChatTransport");
+    await user.click(screen.getByTestId("connection-options"));
+    screen.getByTestId("connection-option-dht").focus();
+    await user.keyboard(" ");
+    dropFocusIfDisabled();
+    const details = screen.getByTestId("connection-details-summary");
+    details.focus();
+    await finish();
+    expect(details).toHaveFocus();
+  });
+});
+
+// covers: chat.paired.reconnect
+/**
+ * Reconnect is there only while the chat is not live. When the contact came back with the focus on it (just pressed,
+ * or tabbed to), it went from under the focus, which fell to the page: a screen reader lost its place, and Tab started
+ * again from the top. The panel's state line, which then says the chat is live, takes it instead.
+ */
+describe("the connection panel, when the chat goes live under Reconnect", () => {
+  type Pairing = NonNullable<LinkView["pairing"]>;
+  const all = ["webrtc/1", "iroh/1", "hyperdht/1"] as LinkView["availableTransports"];
+  const away: Partial<LinkView> = { dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" };
+  const live: Partial<LinkView> = { dataLink: "open", peerOnline: true, peerParticipationKey: "saved", pairing: { status: "ready", transport: "webrtc/1", peerKey: "peer" } as Pairing };
+
+  /** The chat with a contact who is away, its connection panel open. */
+  async function openAway(outside = false) {
+    const view = renderApp(<><ChatConnection peerKey="peer" />{outside && <button type="button">Elsewhere</button>}</>);
+    act(() => view.engine.update({ links: [linkView({ availableTransports: all, ...away })] }));
+    await view.user.click(screen.getByTestId("connection-options"));
+    return { ...view, goLive: () => act(() => view.engine.update({ links: [linkView({ availableTransports: all, ...live })] })) };
+  }
+
+  it("moves the focus from Reconnect to the state line, which says the chat is live", async () => {
+    const { goLive } = await openAway();
+    const reconnect = screen.getByRole("button", { name: "Reconnect" });
+    reconnect.focus();
+    goLive();
+    expect(reconnect).not.toBeInTheDocument();
+    const state = screen.getByTestId("connection-state");
+    expect(document.body).not.toHaveFocus();
+    expect(state).toHaveFocus();
+    expect(state).toHaveTextContent("Connected · WebRTC");
+    expect(state).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("keeps the focus on Reconnect while it dials, then gives it to the state line once live", async () => {
+    const { user, engine, goLive } = await openAway();
+    let answer: () => void = () => {};
+    engine.on("connect", () => new Promise<void>((resolve) => { answer = resolve; }));
+    const reconnect = screen.getByRole("button", { name: "Reconnect" });
+    await user.click(reconnect);
+    expect(reconnect).toHaveTextContent("Reconnecting…");
+    expect(reconnect).toHaveFocus();
+    goLive();
+    await act(async () => answer());
+    expect(screen.getByTestId("connection-state")).toHaveFocus();
+  });
+
+  it("leaves the focus alone when it was elsewhere in the panel", async () => {
+    const { goLive } = await openAway();
+    const details = screen.getByTestId("connection-details-summary");
+    details.focus();
+    goLive();
+    expect(details).toHaveFocus();
+  });
+
+  it("leaves the focus alone when it was outside the panel", async () => {
+    const { goLive } = await openAway(true);
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+    elsewhere.focus();
+    goLive();
+    expect(elsewhere).toHaveFocus();
+  });
+
+  it("still closes on Escape from the state line, handing the focus back to the header", async () => {
+    const { user, goLive } = await openAway();
+    const menu = screen.getByTestId("connection-menu") as HTMLDetailsElement;
+    screen.getByRole("button", { name: "Reconnect" }).focus();
+    goLive();
+    expect(screen.getByTestId("connection-state")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(menu.open).toBe(false);
+    expect(screen.getByTestId("connection-options")).toHaveFocus();
+  });
+});
+
+// covers: transport.direct-blocked
+describe("the note that direct connections are blocked on this network", () => {
+  type Pairing = NonNullable<LinkView["pairing"]>;
+  const RELAYS = ["https://pkarr.pubky.org"];
+  const web = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS };
+  const relayed = linkView({ availableTransports: ["webrtc/1", "iroh/1"], peerTransports: ["webrtc/1", "iroh/1"], relayedTransports: ["iroh/1"], transportAutomatic: true,
+    pairing: { status: "ready", transport: "iroh/1" } as Pairing, dataLink: "open", transportRelayed: { relays: ["relay.example"] } });
+  const HINT = "Direct connections are blocked on this network (a VPN or firewall?). Chats still work through relays, but connect more slowly.";
+
+  it("is in the chat's connection panel while the engine says so, one short line with the story behind its ⓘ", async () => {
+    const view = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => view.engine.update({ transport: { ...web, directBlocked: true }, links: [relayed] }));
+    await view.user.click(screen.getByTestId("connection-options"));
+    const panel = screen.getByRole("dialog", { name: "Connection options" });
+    const note = within(panel).getByTestId("connection-direct-blocked");
+    expect(note).toHaveTextContent(HINT);
+    // It never says a VPN was found, and it is no alarm: the chat works.
+    expect(note).not.toHaveTextContent(/VPN detected/i);
+    expect(within(panel).queryByRole("alert")).toBeNull();
+    expect(within(note).queryByTestId("connection-direct-blocked-text")).toBeNull();
+    const more = within(note).getByRole("button", { name: "More info" });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    await view.user.click(more);
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    const story = within(note).getByTestId("connection-direct-blocked-text");
+    expect(story).toHaveTextContent("never what they say");
+    expect(story).toHaveTextContent("This clears when a direct connection works");
+
+    // The network changed, or a direct connection worked: the note goes by itself.
+    act(() => view.engine.update({ transport: web, links: [relayed] }));
+    expect(screen.queryByTestId("connection-direct-blocked")).toBeNull();
+  });
+
+  it("is not there on a network where direct connections work, nor in a chat kept on the DHT by choice", async () => {
+    const view = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => view.engine.update({ transport: web, links: [relayed] }));
+    await view.user.click(screen.getByTestId("connection-options"));
+    expect(screen.queryByTestId("connection-direct-blocked")).toBeNull();
+    act(() => view.engine.update({ transport: { ...web, directBlocked: true }, links: [linkView({ deliveryMode: "dht", textDelivery: "dht" })] }));
+    expect(screen.queryByTestId("connection-direct-blocked")).toBeNull();
+  });
+
+  it("is in Settings, Network too, with the same words", async () => {
+    const view = renderApp(<NetworkSettings />);
+    act(() => view.engine.update({ transport: web, settings: { relays: RELAYS } }));
+    expect(screen.queryByTestId("network-direct-blocked")).toBeNull();
+    act(() => view.engine.update({ transport: { ...web, directBlocked: true }, settings: { relays: RELAYS } }));
+    const row = screen.getByTestId("network-direct-blocked");
+    expect(row).toHaveTextContent("Direct connections blocked");
+    expect(row).toHaveTextContent(HINT);
+    await view.user.click(within(row).getByTestId("row-info"));
+    expect(within(row).getByTestId("row-info-text")).toHaveTextContent("Calls need a TURN server");
+    act(() => view.engine.update({ transport: web, settings: { relays: RELAYS } }));
+    expect(screen.queryByTestId("network-direct-blocked")).toBeNull();
+  });
+});
+
+// covers: transport.wait, transport.indicator
+describe("a chat that is not live", () => {
+  describe("why a chat is not live (WISP 100)", () => {
+    const text = (attempt: LiveAttempt | undefined, dialer?: "you" | "contact") => liveAttemptText(attempt, dialer, "Bea", () => "17:02");
+
+    it("says what the dialling side tried, why each did not connect, and when it tries again", () => {
+      expect(text({ at: 1, side: "dialled", retryAt: Date.now() + 60_000, failed: [
+        { transport: "webrtc/1", error: "The offer was not answered" },
+        { transport: "iroh/1", error: "The contact has no Iroh relay" },
+      ] }, "you")).toEqual({ label: "Last attempt at 17:02", lines: [
+        "WebRTC: The offer was not answered.", "Iroh: The contact has no Iroh relay.", "Trying again at about 17:02.",
+      ] });
+      // Nothing to try yet: why, instead of a list, in the app's words.
+      expect(text({ at: 1, side: "dialled", failed: [], reason: "No transport both apps allow is available yet" }, "you")?.lines)
+        .toEqual(["No way to connect in common."]);
+    });
+
+    it("drops a retry time that has passed: nothing dialled when it came", () => {
+      expect(text({ at: 1, side: "dialled", retryAt: Date.now() - 60_000, failed: [{ transport: "hyperdht/1", error: "Couldn't connect" }] }, "contact")?.lines)
+        .toEqual(["Bea's app connects to this one: this app answers.", "HyperDHT: Couldn't connect."]);
+    });
+
+    it("says on the answering side that the contact dials, and what of it reached this app", () => {
+      expect(text({ at: 1, side: "answered", failed: [{ transport: "webrtc/1", error: "No connection came up" }] }, "contact")).toEqual({
+        label: "Last attempt at 17:02", lines: ["Bea's app connects to this one: this app answers.", "Bea's last attempt reached this app and did not connect:", "WebRTC: No connection came up."],
+      });
+      expect(text(undefined, "contact")).toEqual({ label: "Not live yet", lines: ["Bea's app connects to this one: this app answers.", "No attempt of Bea's has reached this app yet."] });
+    });
+
+    it("says nothing on the dialling side before its first attempt", () => {
+      expect(text(undefined, "you")).toBeUndefined();
+      expect(text(undefined, undefined)).toBeUndefined();
+    });
+  });
+
+  describe("the connection panel of a chat on the DHT", () => {
+    const onDht: Partial<LinkView> = { textDelivery: "dht", dataLink: "idle", peerParticipationKey: "saved", peerNick: "Bea",
+      pairing: { status: "connecting" } as LinkView["pairing"] };
+    function panel(link: Partial<LinkView>) {
+      const view = renderApp(<ChatConnection peerKey="peer" />);
+      act(() => view.engine.update({ links: [linkView({ availableTransports: ["webrtc/1", "iroh/1"], ...onDht, ...link })] }));
+      return view;
+    }
+
+    it("says under Details why it is not live, from this side's last attempt", () => {
+      panel({ liveDialer: "you", liveAttempt: { at: Date.UTC(2026, 8, 25, 19, 58), side: "dialled", retryAt: Date.now() + 60_000,
+        failed: [{ transport: "webrtc/1", error: "The offer was not answered" }, { transport: "iroh/1", error: "The contact has no Iroh relay" }] } });
+      expect(screen.getByTestId("connection-options")).toHaveAttribute("aria-label", "Connection options: On DHT · retrying live");
+      const block = screen.getByTestId("connection-not-live");
+      expect(screen.getByTestId("connection-details")).toContainElement(block);
+      expect(block).toHaveAttribute("data-side", "dialled");
+      expect(block).toHaveTextContent(/^Last attempt at /);
+      expect(block).toHaveTextContent("WebRTC: The offer was not answered.");
+      expect(block).toHaveTextContent("Iroh: The contact has no Iroh relay.");
+      expect(block).toHaveTextContent(/Trying again at about /);
+    });
+
+    it("says on the side that answers that its contact dials, before anything reached it", () => {
+      panel({ liveDialer: "contact" });
+      expect(screen.getByTestId("connection-not-live")).toHaveTextContent("Not live yetBea's app connects to this one: this app answers.No attempt of Bea's has reached this app yet.");
+    });
+
+    it("says nothing of it while live, or in DHT only", () => {
+      const attempt: LiveAttempt = { at: 1, side: "dialled", failed: [{ transport: "iroh/1", error: "x" }] };
+      const live = panel({ textDelivery: "stream", dataLink: "open", pairing: { status: "ready", transport: "iroh/1" } as LinkView["pairing"], liveDialer: "you", liveAttempt: attempt });
+      expect(screen.queryByTestId("connection-not-live")).toBeNull();
+      live.unmount();
+      panel({ deliveryMode: "dht", liveDialer: "contact" });
+      expect(screen.queryByTestId("connection-not-live")).toBeNull();
+    });
+
+    it("says nothing of it while the contact keeps the chat on DHT only: no attempt will come, the choice is said instead", () => {
+      const attempt: LiveAttempt = { at: 1, side: "dialled", retryAt: Date.now() + 60_000, failed: [{ transport: "webrtc/1", error: "The offer was not answered" }] };
+      const peerDht = { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } as const;
+      const answering = panel({ liveDialer: "contact", dhtDelivery: peerDht });
+      expect(screen.getByTestId("connection-options")).toHaveAttribute("aria-label", "Connection options: DHT only · chosen by your contact");
+      expect(screen.queryByTestId("connection-not-live")).toBeNull();
+      expect(screen.getByTestId("connection-option-dht")).toHaveAttribute("aria-description", "Your contact chose it · no live link until you both leave it");
+      answering.unmount();
+      panel({ liveDialer: "you", liveAttempt: attempt, dhtDelivery: peerDht });
+      expect(screen.queryByTestId("connection-not-live")).toBeNull();
+    });
+  });
+});
+
+// covers: transport.indicator, transport.iroh-web
+describe("a chat back on Automatic over Iroh's relay, on its way to WebRTC", () => {
+  type Pairing = NonNullable<LinkView["pairing"]>;
+  /** Two browsers on Automatic: both run WebRTC and Iroh, and a browser's Iroh always goes through its relay. */
+  const web: Partial<LinkView> = {
+    availableTransports: ["iroh/1", "webrtc/1"], peerTransports: ["iroh/1", "webrtc/1"], relayedTransports: ["iroh/1"], transportAutomatic: true,
+  };
+  const onDht = linkView({ ...web, dataLink: "idle", textDelivery: "dht", pairing: { status: "waiting" } as Pairing });
+  const onIroh = linkView({ ...web, dataLink: "open", pairing: { status: "ready", transport: "iroh/1" } as Pairing, transportRelayed: { relays: ["127.0.0.1"] } });
+  const onWebrtc = linkView({ ...web, dataLink: "open", pairing: { status: "ready", transport: "webrtc/1" } as Pairing });
+
+  /** What a screen reader is told: the header's polite live region, each time its words change. */
+  function listen() {
+    const said: string[] = [];
+    const region = () => document.querySelector(".sr-only[aria-live=polite]");
+    let last = region()?.textContent ?? "";
+    const observer = new MutationObserver(() => { const now = region()?.textContent ?? ""; if (now !== last) { last = now; said.push(now); } });
+    observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+    return { said, stop: () => observer.disconnect() };
+  }
+  const flush = () => new Promise<void>(resolve => queueMicrotask(resolve));
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("says only where it lands: not the relayed Iroh it moves off a moment later", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { engine } = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => engine.update({ links: [onDht] }));
+    const ear = listen();
+    // As measured between two browsers at a reload: live over the relay, then on WebRTC about 250 ms later.
+    act(() => engine.update({ links: [onIroh] }));
+    await act(async () => { vi.advanceTimersByTime(250); await flush(); });
+    act(() => engine.update({ links: [onWebrtc] }));
+    await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
+    ear.stop();
+    expect(ear.said).toEqual(["Connected · WebRTC"]);
+  });
+
+  it("still says the relayed Iroh once the move has not come", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { engine } = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => engine.update({ links: [onDht] }));
+    const ear = listen();
+    act(() => engine.update({ links: [onIroh] }));
+    await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
+    ear.stop();
+    expect(ear.said).toEqual(["Connected · Iroh (relayed)"]);
+  });
+
+  // No move due (Iroh chosen, no direct transport both apps run, a network that blocks direct connections): the relay
+  // is where it lands, said once it held, as any change is (hooks/useSaidSettled).
+  it("says it once it held where no move is due: Iroh chosen, no direct transport both apps run, direct connections blocked", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: ["https://pkarr.pubky.org"], directBlocked: true as const };
+    const cases: [LinkView, StatePatch][] = [
+      [linkView({ ...onIroh, transportAutomatic: false, preferredTransport: "iroh/1" }), {}],
+      [linkView({ ...onIroh, availableTransports: ["iroh/1"] }), {}],
+      [onIroh, { transport }],
+    ];
+    for (const [link, state] of cases) {
+      const { engine, unmount } = renderApp(<ChatConnection peerKey="peer" />);
+      act(() => engine.update({ ...state, links: [onDht] }));
+      await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
+      const ear = listen();
+      act(() => engine.update({ ...state, links: [link] }));
+      await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
+      ear.stop();
+      expect(ear.said).toEqual(["Connected · Iroh (relayed)"]);
+      unmount();
+    }
+  });
+});
+
+// covers: transport.relayed, transport.indicator, transport.chat-switch
+describe("a relayed transport", () => {
+  type Pairing = NonNullable<LinkView["pairing"]>;
+  const onHyperdht = { status: "ready", transport: "hyperdht/1" } as Pairing;
+  /** A browser whose HyperDHT goes through a relay, talking to a contact on WebRTC and HyperDHT. */
+  const web: Partial<LinkView> = {
+    availableTransports: ["webrtc/1", "hyperdht/1"], peerTransports: ["webrtc/1", "iroh/1", "hyperdht/1"], relayedTransports: ["hyperdht/1"], transportAutomatic: true,
+  };
+
+  it("is offered, and marked as a relay the apps use when nothing direct connects", () => {
+    expect(transportOptions(web)).toEqual([
+      { transport: "webrtc/1", available: true },
+      { transport: "iroh/1", available: false, reason: "Iroh needs Ghostly Desktop" },
+      { transport: "hyperdht/1", available: true, relayed: true },
+    ]);
+  });
+
+  it("says relayed wherever the live connection is described, which relay, and what it sees", () => {
+    const link = linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRttMs: 180, transportRelayed: { relays: ["relay.example"] } });
+    const summary = connectionSummary(link, Date.now())!;
+    expect(summary.relays).toEqual(["relay.example"]);
+    expect(summary.line).toBe("HyperDHT · relayed · 180 ms · no direct path");
+    expect(summary.why).toContain("Relayed: relay.example sees which devices talk and when, never what they say.");
+    // The same transport between two Desktops is direct, and says nothing of a relay.
+    const direct = connectionSummary(linkView({ ...web, relayedTransports: [], pairing: onHyperdht, dataLink: "open" }), Date.now())!;
+    expect(direct.relays).toBeUndefined();
+    expect(direct.line).not.toContain("relay");
+  });
+
+  it("is named in the chat's timeline, not called a direct path", () => {
+    const entry: TransportEntry = { id: "l", at: 0, kind: "switched", cause: "automatic", from: "webrtc/1", transport: "hyperdht/1", relayed: true };
+    expect(transportLineText(entry, "Ana")).toBe("Moved to HyperDHT, through a relay");
+    expect(transportLineDetails(entry, "Ana", () => "14:02")[0]).toEqual({ label: "Transport", value: "HyperDHT · relayed" });
+    expect(transportLineText({ ...entry, relayed: undefined }, "Ana")).toBe("Moved to HyperDHT, a direct path was found");
+  });
+
+  it("shows in the header's connection control and in its panel", async () => {
+    const view = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => view.engine.update({ links: [linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRttMs: 180, transportRelayed: { relays: ["relay.example"] } })] }));
+    expect(screen.getByTestId("connection-options")).toHaveAttribute("data-relayed", "");
+    expect(screen.getByTestId("connection-options")).toHaveAccessibleName("Connection options: Connected · HyperDHT (relayed)");
+    await view.user.click(screen.getByTestId("connection-options"));
+    const panel = screen.getByRole("dialog", { name: "Connection options" });
+    expect(within(panel).getByTestId("connection-option-hyperdht")).toHaveTextContent("In use · relayed · 180 ms");
+    expect(within(panel).getByTestId("connection-relayed")).toHaveTextContent("Relayed via relay.example");
+    expect(within(panel).getByTestId("connection-summary")).toHaveTextContent("never what they say");
+  });
+
+  it("when not in use, says it goes through a relay", async () => {
+    const view = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => view.engine.update({ links: [linkView({ ...web, pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open" })] }));
+    await view.user.click(screen.getByTestId("connection-options"));
+    expect(screen.getByTestId("connection-option-hyperdht")).toHaveAttribute("title", "HyperDHT: Through a relay · used when nothing direct connects");
+  });
+});
+
+// covers: transport.chat-switch
+/**
+ * The connection choices were a radiogroup that arrow keys did not move in, each radio its own Tab stop. Now they are
+ * one Tab stop (the checked choice), and the arrows move between the choices that can be made.
+ */
+describe("the connection choices, by keyboard", () => {
+  type Pairing = NonNullable<LinkView["pairing"]>;
+  const all = ["webrtc/1", "iroh/1", "hyperdht/1"] as LinkView["availableTransports"];
+
+  async function open(link: Partial<LinkView>, language?: "ar") {
+    const view = renderApp(<ChatConnection peerKey="peer" />, language ? { language } : undefined);
+    act(() => view.engine.update({ links: [linkView({ pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open", ...link })] }));
+    view.engine.on("setChatTransport", () => undefined);
+    await view.user.click(screen.getByTestId("connection-options"));
+    const group = screen.getByTestId("transport-options");
+    const radio = (id: string) => within(group).getByTestId(`connection-option-${id}`);
+    const focused = () => document.activeElement?.getAttribute("data-testid")?.replace("connection-option-", "");
+    return { ...view, group, radio, focused };
+  }
+
+  it("are one Tab stop, the checked choice, and the arrows move past what is off, around the ends", async () => {
+    // Iroh chosen; HyperDHT off (the contact's app lacks it).
+    const { user, radio, focused, engine } = await open({ availableTransports: all, peerTransports: ["webrtc/1", "iroh/1"], preferredTransport: "iroh/1", transportAutomatic: false });
+    expect(["auto", "webrtc", "iroh", "hyperdht", "dht"].map(id => radio(id).tabIndex)).toEqual([-1, -1, 0, -1, -1]);
+
+    radio("iroh").focus();
+    await user.keyboard("{ArrowDown}");
+    expect(focused()).toBe("dht"); // HyperDHT is off: skipped
+    await user.keyboard("{ArrowDown}");
+    expect(focused()).toBe("auto"); // around the end
+    await user.keyboard("{ArrowUp}");
+    expect(focused()).toBe("dht");
+    await user.keyboard("{ArrowRight}");
+    expect(focused()).toBe("auto");
+    await user.keyboard("{ArrowLeft}");
+    expect(focused()).toBe("dht");
+    await user.keyboard("{Home}");
+    expect(focused()).toBe("auto");
+    await user.keyboard("{End}");
+    expect(focused()).toBe("dht");
+    // Moving chooses nothing: the live session moves only when a choice is made.
+    expect(engine.callsTo("setChatTransport")).toEqual([]);
+    await user.keyboard("{ArrowUp}{ArrowUp}");
+    expect(focused()).toBe("webrtc");
+    await user.keyboard(" ");
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "webrtc/1" }]);
+  });
+
+  it("with nothing checked that can be chosen, the first choice that can is the Tab stop", async () => {
+    // HyperDHT chosen, but off here: the first enabled choice takes the Tab stop.
+    const { radio } = await open({ availableTransports: ["webrtc/1", "iroh/1"], preferredTransport: "hyperdht/1", transportAutomatic: false });
+    expect(["auto", "webrtc", "iroh", "hyperdht", "dht"].map(id => radio(id).tabIndex)).toEqual([0, -1, -1, -1, -1]);
+  });
+
+  it("in Arabic, Left goes on and Right goes back, as the page reads", async () => {
+    const { user, group, radio, focused } = await open({ availableTransports: all, transportAutomatic: true }, "ar");
+    group.style.direction = "rtl";
+    radio("auto").focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(focused()).toBe("webrtc");
+    await user.keyboard("{ArrowRight}");
+    expect(focused()).toBe("auto");
+  });
+
+  it("leaving DHT only by Automatic, with Iroh out of reach, keeps the focus in the group when the Automatic row goes", async () => {
+    // On the web on DHT only, the choices are what this app can run (WebRTC and Iroh); off DHT only, what it runs
+    // now: WebRTC alone, as Iroh cannot start. Automatic then is the only choice and its row goes from under the focus.
+    const dhtOnly = { availableTransports: ["webrtc/1"], runnableTransports: ["webrtc/1", "iroh/1"], transportAutomatic: true } as Partial<LinkView>;
+    const { user, radio, engine } = await open({ ...dhtOnly, deliveryMode: "dht" });
+    await user.click(radio("auto"));
+    expect(engine.callsTo("setChatTransport")).toEqual([{ linkId: "link-1", transport: "auto" }]);
+    act(() => engine.update({ links: [linkView({ pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open", ...dhtOnly, deliveryMode: "stream" })] }));
+    expect(screen.queryByTestId("connection-option-auto")).toBeNull();
+    // The group's Tab stop, WebRTC (now checked), has it: never the page.
+    expect(radio("webrtc")).toHaveFocus();
+    expect(radio("webrtc")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("show the keyboard focus with the accent ring, not only a background a shade off the dialog's", async () => {
+    const { radio } = await open({ availableTransports: all, transportAutomatic: true });
+    for (const id of ["auto", "webrtc", "iroh", "hyperdht", "dht"])
+      expect(radio(id).className.split(/\s+/)).toEqual(expect.arrayContaining(["focus-visible:ring-2", "focus-visible:ring-accent"]));
+  });
+});
+
+// covers: transport.wait, transport.indicator
+/** A contact who shared no name: the Details text says "your contact" in whole sentences, never the fallback name. */
+describe("the connection Details of a contact with no name", () => {
+  type Pairing = NonNullable<LinkView["pairing"]>;
+  type Wait = NonNullable<LinkView["transportWait"]>;
+
+  const onDht: Partial<LinkView> = { textDelivery: "dht", dataLink: "idle", peerParticipationKey: "saved",
+    pairing: { status: "connecting" } as Pairing };
+  function panel(link: Partial<LinkView>, language?: Language) {
+    const view = renderApp(<ChatConnection peerKey="peer" />, { language });
+    act(() => view.engine.update({ links: [linkView({ availableTransports: ["webrtc/1", "iroh/1"], ...onDht, ...link })] }));
+    return view;
+  }
+  const lines = (testId: string) => [...screen.getByTestId(testId).querySelectorAll("p")].map(p => p.textContent);
+
+  it.each<[Language, string[]]>([
+    ["en", ["Not live yet", "Your contact's app connects to this one: this app answers.", "No attempt from your contact has reached this app yet."]],
+    ["pt", ["Ainda sem conexão direta", "O app do seu contato conecta a este: este app responde.", "Nenhuma tentativa do seu contato chegou a este app ainda."]],
+    ["zh", ["尚未直连", "你的联系人的应用会连接到本应用：本应用负责应答。", "你的联系人的连接尝试尚未到达本应用。"]],
+  ])("says in %s why it is not live in whole sentences", (language, expected) => {
+    panel({ liveDialer: "contact" }, language);
+    expect(lines("connection-not-live")).toEqual(expected);
+  });
+
+  it("says what of the contact's attempt reached this app, and what the chat waits for", () => {
+    panel({ liveDialer: "contact", liveAttempt: { at: 1, side: "answered", failed: [{ transport: "webrtc/1", error: "No connection came up" }] },
+      transportWait: { transport: "iroh/1", by: "contact", reason: "starting", failures: 0 } as Wait }, "pt");
+    expect(lines("connection-not-live").slice(1, 3)).toEqual(["O app do seu contato conecta a este: este app responde.",
+      "A última tentativa do seu contato chegou a este app e não conectou:"]);
+    expect(within(screen.getByTestId("connection-waiting")).getByTestId("connection-waiting-why"))
+      .toHaveTextContent("Seu contato escolheu Iroh. O Iroh do seu contato está iniciando.");
+  });
+
+  // Every line the Details box can say with the contact in it, in every language. The fallback ("Your contact", "Il
+  // tuo contatto") only ever opens a sentence where a name would; in Chinese and Japanese no space sits beside it (the
+  // space a Latin name gets; the " · " between a line's parts aside); and nothing of "{{contact}}" or an "undefined" is left.
+  const events: TransportEvent[] = [
+    { at: 1, kind: "down", from: "webrtc/1", text: "hold" },
+    { at: 1, kind: "switched", from: "webrtc/1", transport: "iroh/1", cause: "contact" },
+    { at: 1, kind: "chose", cause: "contact", target: "iroh/1" },
+    { at: 1, kind: "chose", cause: "contact" },
+    { at: 1, kind: "dht-only", cause: "contact" },
+  ];
+  const waits: Wait[] = (["unknown", "starting", "waiting", "contact-lacks"] as const).map(reason => ({ transport: "iroh/1", by: "contact", reason, failures: 0 }));
+  it.each(LANGUAGES)("never drops the fallback name into a sentence in %s", (language) => {
+    const t = translateWith(LOCALES[language], language), fallback = t("pairing.contact");
+    panel({ liveDialer: "contact", liveAttempt: { at: 1, side: "answered", failed: [] }, transportWait: waits[1], transportHistory: events }, language);
+    const said = [
+      ...lines("connection-not-live"), ...lines("connection-waiting"),
+      ...screen.getAllByTestId("connection-history-event").map(e => e.querySelector("span")!.textContent!),
+      ...liveAttemptText(undefined, "contact", undefined, () => "17:02", t)!.lines,
+      ...waits.map(w => transportWaitText(w, undefined, () => "17:02", t).why),
+      ...events.map(e => transportEventText(e, undefined, t)),
+    ];
+    expect(said.length).toBeGreaterThan(15);
+    const cjk = language === "zh" || language === "ja";
+    for (const line of said) {
+      expect([language, line]).not.toEqual([language, expect.stringMatching(/\{\{|\}\}|undefined/)]);
+      if (cjk) expect([language, line]).not.toEqual([language, expect.stringMatching(new RegExp(`${fallback} |(?<!·) ${fallback}`))]);
+      else if (language !== "ar") expect([language, line, "mid-sentence", line!.indexOf(fallback) > 0]).toEqual([language, line, "mid-sentence", false]);
+    }
+  });
+
+  it("keeps the contact's name when there is one", () => {
+    panel({ liveDialer: "contact", peerNick: "Bea" });
+    expect(lines("connection-not-live").slice(1)).toEqual(["Bea's app connects to this one: this app answers.", "No attempt of Bea's has reached this app yet."]);
   });
 });
