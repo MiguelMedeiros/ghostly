@@ -120,6 +120,7 @@ export class CommunityPay {
     if (!frame) return;
     if (frame.t === "pay-req") await this.host.onPaymentRequest(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoints: frame.e, network: frame.n });
     else if (frame.t === "pay-res" && frame.ok) await this.host.onPaymentResult(linkId, { id: frame.id, ok: true });
+    else if (frame.t === "pay-res" && frame.c) await this.host.onPaymentResult(linkId, { id: frame.id, ok: false, error: frame.err, closed: true });
   }
 
   private learn(groupId: string, member: string, raw: unknown): void {
@@ -218,7 +219,8 @@ class GroupLink implements PaymentLink {
   async sendPaymentAsk(): Promise<void> { throw new Error("Choose one member to pay"); }
   async sendPayment(): Promise<void> { throw new Error("Choose one member to pay"); }
   sendPaymentResult(r: PaymentResult): void {
-    // Only "paid" is said to everyone: a refusal concerns one payer, who hears it on its own.
+    // Only "paid" and "closed for good" are said to everyone: a refusal concerns one payer, who hears it on its own.
     if (r.ok) void this.host.sendApp(this.groupId, { t: "pay-res", id: r.id, ok: true }).catch(() => {});
+    else if (r.closed) void this.host.sendApp(this.groupId, { t: "pay-res", id: r.id, ok: false, err: r.error, c: true }).catch(() => {});
   }
 }

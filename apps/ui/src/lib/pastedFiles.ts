@@ -5,7 +5,7 @@
  * text and HTML.
  */
 import { IMAGE_LIMITS, imageSize, previewable } from "@ghostly/core";
-import type { ClipboardFile, ClipboardFiles } from "@ghostly/browser/host";
+import type { ClipboardFile } from "@ghostly/browser/host";
 import { servicesPlatform } from "./platform";
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
@@ -22,15 +22,6 @@ const TYPES: Record<string, string> = {
 
 /** The most a paste read by the platform brings into the page, all its files together: more goes through + → Document. */
 export const PLATFORM_PASTE_MAX = 256 * 1024 * 1024;
-/** The most files a paste or a drop read by the platform brings (the desktop app's `MAX_PASTED_FILES`). */
-export const PLATFORM_PASTE_FILES = 32;
-/** How many names of files left out a line says; the rest is "…". */
-const NAMES_SAID = 10;
-
-/** File names for a line: the first few, then "…". */
-export function someNames(names: string[]): string {
-  return [...names.slice(0, NAMES_SAID), ...(names.length > NAMES_SAID ? ["…"] : [])].join(", ");
-}
 const READ_STEP = 16 * 1024 * 1024;
 const TOO_LARGE_TO_PASTE = "That is too large to paste. Send it with + → Document.";
 
@@ -92,15 +83,29 @@ function dragNamesAddress(data: DataTransfer | null): boolean {
  * Linux: WebKitGTK gives the page neither the files nor their addresses). The platform holds the files of its drop;
  * the page reads them by token, never by path.
  */
-let platformDrag: { over: boolean; read: () => Promise<ClipboardFiles> } | null = null;
+let platformDrag: { over: boolean; read: () => Promise<ClipboardFile[]>; choose?: () => Promise<number>; target: Window } | null = null;
+
+/**
+ * The file input the platform picks a drop's files on (`choose`), and what it accepts at first: no file type, a mark
+ * that gets no files. The platform sets a type of each call's own on it as it clicks, and picks only for that one.
+ */
+const DROP_INPUT_ID = "ghostly-dropped-files";
+const DROP_INPUT_ACCEPT = "application/x-ghostly-dropped-files";
+/** What `choose` fails with when the drop's files are to be read (`read`) instead. */
+const READ_INSTEAD = "read-dropped-files";
+/** How long the page waits for the platform to pick a drop's files it said it would. */
+const CHOOSE_WAIT_MS = 10_000;
 
 /**
  * The platform takes drops of files: `read` hands over the files of the drop that just happened. Returns what the
  * platform calls while such a drag is over the window (true) and once it left (false). The page forgets it once a
  * drop's handlers ran: the platform says nothing of a drop, which it could say before the page hears of it.
+ * `choose`, where the platform has it, picks the drop's files on the page's own file input instead (the desktop app on
+ * Linux): Files read from the disk as they are sent, as + → Document picks them, of any size. It resolves to how many
+ * it picks, 0 for none; it fails with `READ_INSTEAD` when the files are to be read by `read` after all.
  */
-export function followPlatformDrags(read: () => Promise<ClipboardFiles>, target: Window = window): (over: boolean) => void {
-  const drag = { over: false, read };
+export function followPlatformDrags(read: () => Promise<ClipboardFile[]>, target: Window = window, choose?: () => Promise<number>): (over: boolean) => void {
+  const drag = { over: false, read, choose, target };
   platformDrag = drag;
   target.addEventListener("drop", () => { setTimeout(() => { drag.over = false; }); });
   return (over) => { drag.over = over; };
@@ -118,23 +123,43 @@ const DROP_WORDS: Record<string, string> = {
   "That paste is gone. Paste it again.": "That drop is gone. Drop it again.",
 };
 
-/** A paste's or a drop's files the platform read into the page, and the names of those it left out (`ClipboardFiles`). */
-export interface PlatformFiles { files: File[]; pastLimit: string[]; leftOut: string[] }
-
-async function readAllPlatformFiles(clips: ClipboardFiles): Promise<PlatformFiles> {
-  const { pastLimit = [], leftOut = [] } = clips;
-  return { files: await readPlatformFiles(clips, new Date(), true), pastLimit, leftOut };
+/**
+ * The files of a drop the platform holds (`followPlatformDrags`): picked on the page's file input where the platform
+ * can, else read into the page as a paste's are; null when the drop handed the page its files itself, or is no drop
+ * of files.
+ */
+export function platformDroppedFiles(data: DataTransfer | null): Promise<File[]> | null {
+  if (!platformDrag?.over || dragHasFiles(data) || !dragNamesAddress(data)) return null;
+  const { read } = platformDrag;
+  const readDropped = () => read().then((clips) => readPlatformFiles(clips, new Date(), true)).catch((error: unknown) => {
+    const words = DROP_WORDS[errorText(error)];
+    throw words ? new Error(words) : error;
+  });
+  if (!platformDrag.choose) return readDropped();
+  // The platform can't pick these files on the input (a path WebKit can't take): it kept the drop to be read instead.
+  return chooseDropped(platformDrag.choose, platformDrag.target.document).catch((error: unknown) => {
+    if (errorText(error) === READ_INSTEAD) return readDropped();
+    throw error;
+  });
 }
 
-/**
- * The files of a drop the platform holds (`followPlatformDrags`), read into the page as a paste's are; null when the
- * drop handed the page its files itself, or is no drop of files.
- */
-export function platformDroppedFiles(data: DataTransfer | null): Promise<PlatformFiles> | null {
-  if (!platformDrag?.over || dragHasFiles(data) || !dragNamesAddress(data)) return null;
-  return platformDrag.read().then(readAllPlatformFiles).catch((error: unknown) => {
-    const words = DROP_WORDS[error instanceof Error ? error.message : String(error)];
-    throw words ? new Error(words) : error;
+const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+/** The drop's files as the platform picks them on the page's file input; none when it picks none, or not in time. */
+function chooseDropped(choose: () => Promise<number>, doc: Document): Promise<File[]> {
+  let input = doc.getElementById(DROP_INPUT_ID) as HTMLInputElement | null;
+  if (!input) {
+    input = Object.assign(doc.createElement("input"), { type: "file", multiple: true, accept: DROP_INPUT_ACCEPT, id: DROP_INPUT_ID, hidden: true });
+    doc.body.append(input);
+  }
+  const picker = input;
+  return new Promise<File[]>((resolve, reject) => {
+    // Picked before `choose` answers, or after: the platform clicks the input as it answers.
+    const end = (then: () => void) => { picker.removeEventListener("change", picked); clearTimeout(late); then(); };
+    const picked = () => end(() => { const files = [...(picker.files ?? [])]; picker.value = ""; resolve(files); });
+    picker.addEventListener("change", picked);
+    const late = setTimeout(() => end(() => resolve([])), CHOOSE_WAIT_MS);
+    choose().then((count) => { if (!count) end(() => resolve([])); }, (error: unknown) => end(() => reject(error)));
   });
 }
 
@@ -242,9 +267,9 @@ export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new D
 }
 
 /** The clipboard's files as the platform reads them (the desktop app), or null where the paste event is the only way. */
-export function platformPastedFiles(): Promise<PlatformFiles> | null {
+export function platformPastedFiles(): Promise<File[]> | null {
   const read = servicesPlatform?.readClipboardFiles();
-  return read ? read.then(readAllPlatformFiles) : null;
+  return read ? read.then((clips) => readPlatformFiles(clips, new Date(), true)) : null;
 }
 
 /**

@@ -170,7 +170,7 @@ test("audio call, and a call that is declined", { tag: ["@feature:calls.audio", 
   await expect(alice.page.getByTitle("End call")).toHaveCount(0);
 });
 
-test("an audio call grows a camera and a screen, without calling again", { tag: ["@feature:calls.upgrade", "@feature:calls.screen-share"] }, async ({ peer }) => {
+test("an audio call grows a camera and a screen, without calling again", { tag: ["@journey", "@feature:calls.upgrade", "@feature:calls.screen-share"] }, async ({ peer }) => {
   const [alice, bob] = await linked(peer);
   await alice.page.getByTitle("Audio call").click();
   await expect(bob.page.getByText("Incoming audio call...")).toBeVisible();

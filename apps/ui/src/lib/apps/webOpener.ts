@@ -10,11 +10,12 @@
  * stopped there, and its place says why until the person closes it (WISP 1200 § Takedowns).
  */
 import { runnerFor, startApp, type AppStopReason, type AppView, type RunningApp } from "./broker";
-import { appSlot, chatApp, setChatApp, updateChatApp } from "./running";
+import { appSlot, chatApp, isNewestChoice, noteChoice, pressTurn, setChatApp, updateChatApp } from "./running";
 import { runnerPolicy } from "./runnerCheck";
-import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, type AppOpener, type AppTakedown } from "./open";
+import { CHAT_CLOSED, LOCKED, lockedSince, registerRunningApp, takenDownSince, type AppOpener, type AppTakedown } from "./open";
 import type { AppsPlatform, LinkedFilesHost } from "../platform";
 import { openLayer } from "../layerHistory";
+import { ownDirection } from "../ownDirection";
 
 export interface WebOpenerOptions {
   apps: () => AppsPlatform | null | undefined;
@@ -50,22 +51,35 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
   const alone = new Map<string, HTMLElement>();
   const open: AppOpener = (ref, linkId, options) => start(ref, linkId, options);
   /** `replace`: Open again on a stopped layer, which goes only once the app can start, so a failure is said there. */
-  const start = async (ref: string, linkId: string | null | undefined, options: Parameters<AppOpener>[2], replace?: () => void): Promise<void | "shown"> => {
+  const start = async (ref: string, linkId: string | null | undefined, options: Parameters<AppOpener>[2], replace?: () => void): Promise<void | "shown" | "superseded"> => {
     const engine = apps();
     if (!engine) throw new Error("Apps cannot run in this app");
     const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
+    // Each open is a press in its chat, in the order pressed; it becomes the person's newest choice there, as "Back to
+    // <app>" is, only once nothing can refuse it (`noteChoice` below): a refused one chose nothing.
+    const turn = linkId ? pressTurn(linkId) : 0;
+    // The same app still running in that chat (hidden by Back) is only shown again: no entry read, no runner asked, so
+    // it comes back offline too.
+    const already = linkId && options?.again === undefined && appSlot(linkId) ? chatApp(linkId) : undefined;
+    if (linkId && already?.ref === ref && !already.stopped) { noteChoice(linkId, turn); updateChatApp(linkId, { shown: true }); return "shown"; }
     // The profile locking while it opens (its files downloading, the runner checked) stops nothing yet: it never starts.
     const locked = lockedSince();
+    // Taken down or uninstalled while it opens: not running yet, so the read that found it stops nothing of it.
+    const gone = takenDownSince();
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
     const entry = await host.entry(ref, options?.runAnyway === true);
     if (locked()) throw new Error(LOCKED);
     // The runner from what the person granted; its server must send that runner's policy. The runner pages are never
-    // cached (sw/policy.ts): offline, or when it could not be asked, it would not load, and the person is told so.
+    // cached (sw/policy.ts): offline, or when it could not be asked, it would not load, and the person is told so. Its
+    // server answering with an error of its own (a 502 while it restarts, a 429) while online is the host's trouble,
+    // said as the host's (`apps.errors.hostProblem`), not as the person being offline.
     const internet = entry.permissions.includes("internet");
     const policy = navigator.onLine === false ? null : await runnerPolicy(runnerFor(host, entry), fetch, internet);
-    if (policy === null) throw new Error("offline: the runner page could not be reached");
+    if (typeof policy === "number" && navigator.onLine !== false) throw new Error(`status: The host answered ${policy}`);
+    if (policy === null || typeof policy === "number") throw new Error("offline: the runner page could not be reached");
     if (!policy) throw new Error("runner: This server does not send the policy apps run under");
     if (locked()) throw new Error(LOCKED);
+    gone(ref, entry.digest, options?.runAnyway === true);
     replace?.();
 
     const launch = { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null };
@@ -80,9 +94,17 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     const slot = linkId ? appSlot(linkId) : undefined;
     if (linkId && !slot) throw new Error(CHAT_CLOSED);
     if (linkId && slot) {
+      // Another open pressed in this chat after this one, and past its own checks while this one was on its way (its
+      // files downloading, the runner checked), or "Back to <app>" on the one running there, is what the person wants
+      // now: this one starts nothing, never stopping the app they chose, and tells the contact nothing, not even an
+      // "opened" card it still owes there (`sendOpenedCard`): it is not what runs. A newer one refused meanwhile
+      // (revoked, offline, locked) chose nothing: this one still opens.
+      if (!isNewestChoice(linkId, turn)) return "superseded";
       const there = chatApp(linkId);
       // Open again on a stopped app that the person closed meanwhile (Close, Back): it stays closed.
       if (options?.again !== undefined && there?.running !== options.again) throw new Error("closed while it opened again");
+      // Nothing refuses it now: it is the person's newest choice here, and an older open still on its way starts nothing.
+      noteChoice(linkId, turn);
       if (there?.ref === ref && !there.stopped) { updateChatApp(linkId, { shown: true }); return "shown"; }
       if (there && !there.stopped) there.running.stop();
       let running: RunningApp | null = null;
@@ -108,7 +130,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
         },
         onServing: (on) => { if (chatApp(linkId)?.running === running) updateChatApp(linkId, { serving: on }); },
       });
-      setChatApp(linkId, { ref, title: entry.title, shown: true, wide: false, view: entry.view ?? "chat", running, runAnyway });
+      // The same app opened again where it stopped (Open again) keeps the place the person gave it: over the chat's
+      // whole width stays there.
+      setChatApp(linkId, { ref, title: entry.title, shown: true, wide: there?.ref === ref && there.wide, view: entry.view ?? "chat", running, runAnyway });
       return;
     }
 
@@ -141,8 +165,13 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
     close.textContent = closeLabel();
     const box = document.createElement("div");
     box.className = "relative flex-1 [&>iframe]:absolute [&>iframe]:inset-0 [&>iframe]:h-full [&>iframe]:w-full [&>iframe]:border-0";
+    // Why it stopped, said politely in a line that is there, empty, from the start, as a live region must be before
+    // what it says: the focus stays on Close, or goes there from the app's frame, and a line that came with its words
+    // was not read out.
+    const said = document.createElement("div");
+    said.setAttribute("role", "status");
     bar.append(title, close);
-    overlay.append(bar, box);
+    overlay.append(bar, box, said);
     // The app's shell (App.tsx), not the whole page: the lock screen, drawn above the app, must still take a password.
     const under = [...document.querySelectorAll<HTMLElement>(".two-pane, .app-shell")].filter((node) => !node.inert);
     document.body.appendChild(overlay);
@@ -176,17 +205,19 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
         if (!stopped) { dismiss(); return; }
         // Taken down, or stopped on its own: its place says why, under the same bar, until Close.
         const why = document.createElement("p");
-        why.setAttribute("role", "status");
         why.setAttribute("data-testid", "mini-app-stopped");
         why.className = "m-0 p-6 text-center text-sm text-text-secondary";
         why.textContent = stoppedLabel(entry.title, stopped);
-        box.replaceWith(why);
+        box.remove();
+        said.append(why);
         // Stopped by the watchdog: it may run fine once started again, and the person decides.
         if (stopped.why === "unresponsive" && openAgainLabel) {
           const again = document.createElement("button");
           again.type = "button";
           again.setAttribute("data-testid", "mini-app-open-again");
-          again.className = "mx-auto min-h-11 rounded border border-accent px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+          // Dimmed with the wait cursor while it opens again (aria-disabled), as in a chat's panel: busy for a screen
+          // reader only, it looked as though the press did nothing.
+          again.className = "mx-auto min-h-11 rounded border border-accent px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover cursor-pointer aria-disabled:cursor-wait aria-disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
           again.textContent = openAgainLabel();
           const failed = document.createElement("p");
           failed.setAttribute("role", "alert");
@@ -205,10 +236,15 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, o
               if (!overlay.isConnected) return;
               again.removeAttribute("aria-busy");
               again.removeAttribute("aria-disabled");
-              if (errorText) failed.textContent = errorText(error);
+              if (!errorText) return;
+              // An English error shown as it came keeps its own direction in Arabic, as the chat panel's line does.
+              const text = errorText(error);
+              const dir = ownDirection(text);
+              if (dir) failed.dir = dir; else failed.removeAttribute("dir");
+              failed.textContent = text;
             });
           });
-          why.after(again, failed);
+          said.after(again, failed);
         }
         // The focus was in the app's frame, gone with it: Close has it, so Escape still closes.
         if (overlay.isConnected && !overlay.contains(document.activeElement)) close.focus({ preventScroll: true });

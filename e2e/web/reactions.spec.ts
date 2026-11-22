@@ -40,7 +40,7 @@ async function react(page: Page, target: Locator, emoji: string, fromPanel?: str
   await expect(bar).toHaveCount(0);
 }
 
-test("1:1 reactions: add, change, the same one from the contact, take back; who reacted; the chat list", { tag: ["@feature:chat.reactions", "@feature:chat.reactions.wire"] }, async ({ peer }, testInfo) => {
+test("1:1 reactions: add, change, the same one from the contact, take back; who reacted; the chat list", { tag: ["@journey", "@feature:chat.reactions", "@feature:chat.reactions.wire"] }, async ({ peer }, testInfo) => {
   test.setTimeout(5 * 60_000);
   const [alice, bob] = await Promise.all([peer("react-alice"), peer("react-bob")]);
   await Promise.all([setName(alice, "Alice"), setName(bob, "Bob")]);

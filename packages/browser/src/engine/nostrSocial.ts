@@ -33,8 +33,6 @@ const HEX64 = /^[a-f0-9]{64}$/;
 const MAX_DRAFTS = 8;
 const PROFILE_SOURCE = "Nostr profile (kind 0, signed by this key, self-described)";
 
-export const DEFAULT_NOSTR_SETTINGS: NostrSocialSettings = { relays: [...DEFAULT_NOSTR_RELAYS], autoLoadProfiles: false, publish: false };
-
 /** The settings with defaults filled in and the relay list validated; a broken stored list falls back to the defaults. */
 export function effectiveNostrSettings(s: NostrSocialSettings | undefined): NostrSocialSettings {
   let relays: string[];

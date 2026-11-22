@@ -3,10 +3,12 @@ name: Android native
 # The native Android app: apps/desktop built with Tauri 2 mobile (apps/desktop/gen/android, docs/ANDROID.md, "Native
 # app"). Debug APKs only, signed with the Android debug key: to try the app and never to publish. The release APK is
 # android.yml's.
-# - apk: arm64-v8a (phones, and an arm64 emulator on a Mac) and x86_64 (the emulator here), one artifact each.
+# - apk: arm64-v8a (phones, and an arm64 emulator on a Mac) and x86_64 (the emulator here), one artifact each, and the
+#   Kotlin unit tests (app/src/test) on the JVM.
 # - emulator: the x86_64 APK on an Android emulator (KVM): it launches, the UI renders, the engine starts, and the
 #   probe measures what the native app depends on (tools/scripts/android-smoke.mjs). Results are an artifact.
-# On pull requests that touch the Desktop crate or this lane, and by hand.
+# On pull requests that touch the Rust workspace (its crates, Cargo.toml, Cargo.lock, rust-toolchain.toml) or this
+# lane, and by hand (tools/scripts/test/androidNativeWorkflow.test.ts).
 on:
   pull_request:
     # ready_for_review: a draft skips this (see the draft job below); leaving draft builds it.
@@ -14,7 +16,9 @@ on:
     paths:
       - "apps/desktop/**"
       - "native/transports/**"
+      - "Cargo.toml"
       - "Cargo.lock"
+      - "rust-toolchain.toml"
       - "tools/scripts/android-smoke.mjs"
       - ".github/workflows/android-native.yml"
   workflow_dispatch:
@@ -37,9 +41,12 @@ jobs:
   # (ready_for_review) and on every push after. The draft state is read from the API, not the event: a push and
   # `gh pr ready` a second apart start two runs, the later cancels the other, and the survivor may be the push's,
   # whose event still says draft (#742). If the read fails, the build runs.
+  # A merge train batch (batch/<base>-<stamp>, from this repository) builds nothing: each pull request in it ran this
+  # on its own pull request, and the train lands each of them as its own merge, never the batch. A fork's pull request
+  # builds whatever its branch is called.
   draft:
     name: Draft pull request?
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !(startsWith(github.head_ref, 'batch/') && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     permissions:
       pull-requests: read
@@ -59,7 +66,7 @@ jobs:
   apk:
     name: Debug APKs (arm64-v8a, x86_64)
     needs: draft
-    if: ${{ !cancelled() && needs.draft.outputs.draft != 'true' }}
+    if: ${{ !cancelled() && needs.draft.outputs.draft != 'true' && !(startsWith(github.head_ref, 'batch/') && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -112,6 +119,13 @@ jobs:
       # (tauri.android.conf.json's beforeBuildCommand).
       - name: Build
         run: npm run tauri -- android build --debug --apk --split-per-abi --target aarch64 --target x86_64
+
+      # The Kotlin unit tests (app/src/test) on the JVM. They need the Gradle files the build above generates
+      # (tauri.settings.gradle, tauri.build.gradle.kts), so they run here, after it, and no APK is uploaded when one
+      # fails or no longer compiles.
+      - name: JVM unit tests
+        working-directory: apps/desktop/gen/android
+        run: ./gradlew :app:testUniversalDebugUnitTest
 
       - name: Name the APKs
         run: |

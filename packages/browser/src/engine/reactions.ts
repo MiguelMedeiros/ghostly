@@ -1,6 +1,6 @@
-import { REACTION_LIMITS, ReactionWindow, nextReactionNumber, reactionEmoji, reactionIsNewer, replySnippet, type WireReaction } from "@ghostly/core";
+import { REACTION_LIMITS, ReactionWindow, nextReactionNumber, reactionEmoji, reactionIsNewer, replySnippet, withoutAppLink, type WireReaction } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
-import type { ReactionNote, StoredMessage, WaitingReaction } from "../shared/types";
+import type { ReactionNote, ReactionNoteKind, StoredMessage, WaitingReaction } from "../shared/types";
 
 /*
  * Reactions to messages (WISP 400 § Reactions), as the engine keeps them: on the message's row, one per person, the
@@ -17,6 +17,12 @@ export interface ReactionsHost {
    * of mine and a payment go by their time here, and by their own id on the wire.
    */
   rows?(chat: string, id: string): Promise<string[]>;
+  /**
+   * The rows of a 1:1 chat that go by another id than their own, by that id, read once in a run (as `PinsHost.unkeyed`);
+   * undefined when the host keeps none for that chat. With them, a reaction of mine naming an id no row goes by reads
+   * no history.
+   */
+  unkeyed?(chat: string): Promise<ReadonlyMap<string, string>> | undefined;
   /** Changes one row in place (`db.patchMessage`); undefined when the row is gone. */
   patch(chat: string, id: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<StoredMessage | undefined>;
   /** Row `id` of the chat changed: the pages hear it. `note`: its latest reaction, when this one is it. */
@@ -31,6 +37,8 @@ export interface ReactionsHost {
   keep?(chat: string, waiting: WaitingReaction[]): Promise<void>;
   /** Whether `by` is still someone this group takes reactions from, asked again for one that waited (absent: yes). */
   believed?(chat: string, by: string): boolean;
+  /** My member key in a private group's chat (none in a community or a 1:1 chat): a new one each time I am invited back. */
+  memberKey?(chat: string): string | undefined;
   now?(): number;
 }
 
@@ -60,13 +68,33 @@ export function latestReaction(messages: readonly StoredMessage[]): ReactionNote
 }
 
 function note(message: StoredMessage, by: string, emoji: string, at: number): ReactionNote {
-  return { at, by, emoji, snippet: replySnippet(message.text), mine: message.sender === "me", message: message.id };
+  const kind = noteKind(message);
+  return { at, by, emoji, snippet: noteSnippet(message), mine: message.sender === "me", message: message.id, ...(kind && { kind }) };
+}
+
+/** A note's line of its message: its text's, an app card's without its bundle's link. */
+const noteSnippet = (message: StoredMessage) => replySnippet(withoutAppLink(message.text, message.card));
+
+/**
+ * What a note's message is where its text is only an English fallback (`ReactionNote.kind`), for the chat list. A
+ * group's only: the list holds a 1:1 chat's rows and reads it there, and a 1:1 chat's note is kept on its saved session.
+ */
+function noteKind(message: StoredMessage): ReactionNoteKind | undefined {
+  if (!isGroup(message.linkId)) return undefined;
+  const { card, file } = message;
+  if (card?.kind === "app") return { app: { ref: card.ref, title: card.title, ...(card.version && { version: card.version }) } };
+  if (file?.voice) return { voice: file.voice.duration };
+  if (file?.video) return { video: file.video.duration };
+  return undefined;
 }
 
 /** The note again after its message changed (an edit): its line is the message's text now. Undefined when nothing changed. */
 export function noteAfterChange(current: ReactionNote, message: StoredMessage): ReactionNote | undefined {
-  const snippet = replySnippet(message.text);
-  return snippet === current.snippet ? undefined : { ...current, snippet };
+  const snippet = noteSnippet(message), kind = noteKind(message);
+  if (snippet === current.snippet && JSON.stringify(kind) === JSON.stringify(current.kind)) return undefined;
+  const next: ReactionNote = { ...current, snippet };
+  if (kind) next.kind = kind; else delete next.kind;
+  return next;
 }
 
 /** The note as its message's row has it now, when that reaction still stands there (not replaced, not taken back). */
@@ -82,12 +110,18 @@ export function noteIfStanding(current: ReactionNote, message: StoredMessage): R
  * the new one, and every member would show it twice.
  */
 export function groupReactionsToResend(messages: readonly StoredMessage[], limit: number): WireReaction[] {
-  let joinedAt = 0;
-  for (const m of messages) if (m.event === "joined" && !m.member) joinedAt = Math.max(joinedAt, m.timestamp);
+  const joinedAt = lastJoined(messages);
   return messages.flatMap(m => {
     const r = m.reactions?.me, id = replyRef(m, true);
     return r && id && r.at >= joinedAt ? [{ id, e: r.e, n: r.n }] : [];
   }).sort((a, b) => b.n - a.n).slice(0, limit);
+}
+
+/** When I last joined a group (its "You joined" line): my reactions from before went out under a member key I may hold no more. */
+export function lastJoined(messages: readonly StoredMessage[]): number {
+  let at = 0;
+  for (const m of messages) if (m.event === "joined" && !m.member) at = Math.max(at, m.timestamp);
+  return at;
 }
 
 /** This side's highest number in a chat's history: the next one goes past it. */
@@ -113,6 +147,8 @@ export class Reactions {
    * out. It only has to grow, so a row deleted since leaves it too high and nothing is wrong.
    */
   private readonly last = new Map<string, number>();
+  /** Per private group's chat: my member key and when I joined under it (`joinedAt`). */
+  private readonly joined = new Map<string, { key: string; at: number }>();
   /** Per 1:1 chat: when it was last read whole for a received reaction, and the read of those that waited meanwhile. */
   private readonly lookups = new Map<string, { at: number; timer?: ReturnType<typeof setTimeout> }>();
 
@@ -141,13 +177,33 @@ export class Reactions {
       if (!target || !id) return { error: `That message is not in this ${group ? "group" : "chat"}, or takes no reaction` };
       const current = target.reactions?.me;
       if (!e && !current?.e) return { error: "No reaction of yours to take back" };
-      let last = this.last.get(chat) ?? lastMine(await this.host.messages(chat));
+      let history: StoredMessage[] | undefined;
+      const read = async () => history ??= await this.host.messages(chat);
+      if (group && current?.e && current.at < await this.joinedAt(chat, read)) return { error: "Your reaction to this message is from before you were removed and invited back, and stays as it is" };
+      let last = this.last.get(chat) ?? lastMine(await read());
       for (const p of pending) last = Math.max(last, p.n);
       const reaction: WireReaction = { id, e, n: nextReactionNumber(last, this.now()) };
       this.last.set(chat, reaction.n);
       const message = await this.write(chat, target, "me", reaction) ?? target;
       return { reaction, message };
     });
+  }
+
+  /**
+   * When I joined a private group under the member key I hold now: removed and invited back, I hold a new one, and the
+   * members keep a reaction of mine from before under the old one. Said again under the new key, a change or a take
+   * back left it standing for them, beside the new one. Read from the history once per key.
+   */
+  private async joinedAt(chat: string, read: () => Promise<StoredMessage[]>): Promise<number> {
+    const key = this.host.memberKey?.(chat);
+    if (!key) return 0;
+    const known = this.joined.get(chat);
+    if (known?.key === key) return known.at;
+    const messages = await read(), at = lastJoined(messages);
+    this.joined.set(chat, { key, at });
+    // Read whole already: my highest number in it is not read again.
+    if (!this.last.has(chat)) this.last.set(chat, lastMine(messages));
+    return at;
   }
 
   /**
@@ -267,11 +323,12 @@ export class Reactions {
 
   /**
    * The row a received reaction names. Most often the row of that id (a group's), or of `peer_` or `me_` and that id (a
-   * chat's), else a row the host knows that id names (a file of mine, a payment): those are read alone. Any other (one
-   * not here yet) is looked for in the whole chat; in a group there is no other, since a row that takes a reaction goes
-   * by its own id there. A `received` one is looked for so at most once a `REACTION_LOOKUP_MS` per chat, since the
-   * contact can name ids that never were: one that comes meanwhile waits, and the next read finds what waited
-   * (`lookUpWaiting`).
+   * chat's), else a row the host knows that id names (a file of mine, a payment): those are read alone. Mine (the CLI's
+   * typo, a message gone) then looks only among the rows the host knows by another id (`unkeyed`), when it keeps them:
+   * each one read the whole chat, 0.7 s at 100,000 messages. Any other (one not here yet) is looked for in the whole
+   * chat; in a group there is no other, since a row that takes a reaction goes by its own id there. A `received` one is
+   * looked for so at most once a `REACTION_LOOKUP_MS` per chat, since the contact can name ids that never were: one
+   * that comes meanwhile waits, and the next read finds what waited (`lookUpWaiting`).
    */
   private async find(chat: string, id: string, received = false): Promise<StoredMessage | undefined> {
     const group = isGroup(chat);
@@ -284,6 +341,11 @@ export class Reactions {
       for (const rowId of await this.host.rows?.(chat, id) ?? []) {
         const row = await this.host.message(chat, rowId);
         if (row && replyRef(row, false) === id) return row;
+      }
+      const unkeyed = received ? undefined : this.host.unkeyed?.(chat);
+      if (unkeyed) {
+        const rowId = (await unkeyed).get(id), row = rowId === undefined ? undefined : await this.host.message(chat, rowId);
+        return row && replyRef(row, false) === id ? row : undefined;
       }
       if (received && !this.lookupDue(chat)) return undefined;
     }
@@ -344,6 +406,7 @@ export class Reactions {
     this.dropHeld(chat);
     this.waiting.delete(chat);
     this.last.delete(chat);
+    this.joined.delete(chat);
     clearTimeout(this.lookups.get(chat)?.timer);
     this.lookups.delete(chat);
   }

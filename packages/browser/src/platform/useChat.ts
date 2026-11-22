@@ -93,6 +93,8 @@ export const useChat: typeof Desktop.useChat = (params) => {
     return shown.current;
   });
   const [sessionMessages, setMessages] = useState<ChatMessage[]>([]);
+  /** The chat whose stored messages `sessionMessages` holds: until then it holds none of them, or another chat's. */
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
   /**
    * A paired chat's texts sent from this page that the engine's history has not brought back yet: shown at once as
    * sending, even while the engine is still reading every chat's history at start. The engine stores each under the
@@ -132,7 +134,9 @@ export const useChat: typeof Desktop.useChat = (params) => {
     // Read as the chat list and the sync read it: a chat that changed is parsed once for all of them. One that did not
     // is the same list (the page's cache, never changed in place), so a change in another chat draws nothing here: a new
     // copy on every `session-updated` drew the open chat and reran its whole-history work for each message elsewhere.
-    if (sessionId) setMessages(loadShownSession(sessionId)?.messages ?? NO_MESSAGES);
+    if (!sessionId) return;
+    setMessages(loadShownSession(sessionId)?.messages ?? NO_MESSAGES);
+    setLoadedFor(sessionId);
   }, [sessionId]);
 
   useEffect(() => setPending([]), [sessionId]);
@@ -323,6 +327,11 @@ export const useChat: typeof Desktop.useChat = (params) => {
     if (linkIdRef.current) await engine.call("setCallSignal", { linkId: linkIdRef.current, signal }).catch(() => {});
   }, []);
 
+  /** This page kept the contact's offer of `ts` as missed, with no ring: the engine does not count it as a call waiting. */
+  const callOfferHeld = useCallback((ts: number) => {
+    if (linkIdRef.current) void engine.call("callOfferHeld", { linkId: linkIdRef.current, ts }).catch(() => {});
+  }, []);
+
   const setChatFastPoll = useCallback((fast: boolean) => {
     if (linkIdRef.current) void engine.call("setFastPoll", { linkId: linkIdRef.current, fast }).catch(() => {});
   }, []);
@@ -408,6 +417,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
 
   return {
     messages,
+    loaded: !!sessionId && loadedFor === sessionId,
     status,
     lastSync: linkNow?.lastSyncAt || null,
     isSending,
@@ -421,6 +431,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
     incomingCallSignal,
     callHandledElsewhere,
     setCallSignal,
+    callOfferHeld,
     setChatFastPoll,
     addSystemMessage,
     addMissedCallMessage,

@@ -45,7 +45,9 @@ describe("Public DID", () => {
     const at = Date.UTC(2026, 8, 25, 12, 0);
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, upToDate: true }) }));
     expect(screen.getByTestId("did-published")).toHaveTextContent("Published");
-    expect(screen.getByTestId("did-status")).toHaveTextContent(`Published ${formatAt(at, { dateStyle: "medium", timeStyle: "short" }, "en")}`);
+    // The text is read with its spaces made plain: compare it with the time's spaces made plain too (where the engine
+    // writes a plain space before "AM", formatAt keeps them together with a no-break one).
+    expect(screen.getByTestId("did-status")).toHaveTextContent(`Published ${formatAt(at, { dateStyle: "medium", timeStyle: "short" }, "en").replace(/\s+/g, " ")}`);
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, upToDate: false }) }));
     expect(screen.getByTestId("did-status")).toHaveTextContent("Publishing the change…");
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, error: "Publish failed on every relay" }) }));

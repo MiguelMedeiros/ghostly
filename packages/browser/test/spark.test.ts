@@ -323,4 +323,30 @@ describe("the Spark wallet", () => {
     expect(await settingsKeys()).toEqual([]);
     await down.stop();
   });
+
+  it("an SDK error that repeats the phrase or the API key never shows them, made or opened", async () => {
+    let echo = true;
+    const echoing = async () => ({ connect: async (params: { mnemonic: string; apiKey?: string }) => {
+      if (echo) throw new Error(`refused ${params.mnemonic} with ${params.apiKey}`);
+      return net.sdk.connect(params as never);
+    } });
+    const mainnet = new SparkWallet("mainnet", vi.fn(), echoing);
+    await mainnet.start();
+    const made = await mainnet.create({ network: "bitcoin", mnemonic: TEST_PHRASE, apiKey: "the-breez-key" }).catch((e: unknown) => e as Error);
+    expect(made.message).toContain("refused");
+    expect(made.message).not.toContain(TEST_PHRASE);
+    expect(made.message).not.toContain("the-breez-key");
+    await mainnet.stop();
+
+    const testnet = new SparkWallet("testnet", vi.fn(), echoing);
+    await testnet.start();
+    echo = false; await testnet.create({ network: "regtest", mnemonic: TEST_PHRASE }); await testnet.stop();
+    echo = true;
+    const again = new SparkWallet("testnet", vi.fn(), echoing);
+    await again.start();
+    await again.ensureReady();
+    expect(again.view.error).toContain("refused");
+    expect(again.view.error).not.toContain(TEST_PHRASE);
+    await again.stop();
+  });
 });

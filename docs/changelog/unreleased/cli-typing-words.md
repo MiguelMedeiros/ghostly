@@ -1,0 +1,4 @@
+---
+section: Fixed / CLI
+---
+- `ghostly typing` and `ghostly group typing` check `--kind` and `--status` before the profile opens, as `status set` checks its text: a status too long, one with a link or markup, one with nothing that shows, or a kind or status given with `--stop` is now a usage error (exit 2) that names the option and gives the count (`--status is up to 40 characters, not 41 characters`). Before, these were `bad_request` (exit 1) in the socket's words, while `--for` and `--kind foo` were already usage errors. A blank `--status` (spaces, tabs, line breaks) now counts as no status, as `--status ""` did; it was refused as "plain text, with no link or markup". A one-shot `--for` whose chat (or group) was not live in time now answers `typing: false`, with no `until` and a `note` that it reached nobody and that `ghostly daemon --detach` keeps the profile online; it answered `typing: true` with an `until` to come.
