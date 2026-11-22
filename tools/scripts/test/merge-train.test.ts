@@ -3247,9 +3247,9 @@ describe("a pull request with a review running (Review: in progress)", () => {
     expect(REVIEW_HOLD).toBe(90 * 60_000);
     expect(reviewHold([note("Review: in progress (head d06086e)")], sha, now)).toEqual({ since: start, until });
     expect(reviewHold([note(`**Review: in progress (head ${sha})**\nreviewer: hermes-one`)], sha, now)).toEqual({ since: start, until });
-    // A verdict after it ends it, on any head; an older verdict does not.
+    // A verdict after it ends it: approved on any head, changes needed on another head; an older verdict does not.
     expect(reviewHold([note("Review: in progress (head d06086e)"), note("Review: approved (head d06086e)", start + 60_000)], sha, now)).toBeNull();
-    expect(reviewHold([note("Review: in progress (head d06086e)"), note("Review: changes needed (head d06086e)", start + 60_000)], sha, now)).toBeNull();
+    expect(reviewHold([note("Review: in progress (head d06086e)"), note("Review: changes needed (head bc29edd)", start + 60_000)], sha, now)).toBeNull();
     expect(reviewHold([note("Review: changes needed (head 1111111)", start - 60_000), note("Review: in progress (head d06086e)")], sha, now)).toEqual({ since: start, until });
     // Another head (a push since), a head too short to tell, no head, or the bound passed: nothing held.
     expect(reviewHold([note("Review: in progress (head bc29edd)")], sha, now)).toBeNull();
@@ -3265,6 +3265,53 @@ describe("a pull request with a review running (Review: in progress)", () => {
     expect(reviewHold([note("Merge train: see\nReview: in progress (head d06086e)")], sha, now)).toBeNull();
   });
 
+  it("holds one with changes needed on its head with no time limit, until a later approved or a new head", () => {
+    const sha = "d06086e5a1b2c3d4e5f60718293a4b5c6d7e8f90";
+    const asked = [note("Review: in progress (head d06086e)"), note("**Review: changes needed (head d06086e)**", start + 60_000)];
+    expect(reviewHold(asked, sha, start + 2 * 60_000)).toEqual({ since: start + 60_000, until: null });
+    expect(reviewHold(asked, sha, start + REVIEW_HOLD + 60_000)).toEqual({ since: start + 60_000, until: null });
+    expect(reviewHold(asked, sha, start + 30 * 24 * 60 * 60_000)).toEqual({ since: start + 60_000, until: null });
+    expect(reviewHold([note("Review: changes needed (head d06086e)")], sha, start + REVIEW_HOLD * 10)).toEqual({ since: start, until: null });
+    // A later approved releases it; a new head (the fix pushed) does too, and so does changes needed on an older head.
+    expect(reviewHold([...asked, note("Review: approved (head d06086e)", start + 5 * 60_000)], sha, start + 6 * 60_000)).toBeNull();
+    expect(reviewHold(asked, "bc29edd5a1b2c3d4e5f60718293a4b5c6d7e8f90", start + 2 * 60_000)).toBeNull();
+    expect(reviewHold([note("Review: changes needed (head bc29edd)")], sha, start + 60_000)).toBeNull();
+    expect(reviewHold([note("Review: changes needed")], sha, start + 60_000)).toBeNull();
+    // A re-review on the head after it does not end it, even once its bound passed; only its approval does. An approval
+    // of another head does not either.
+    const again = [...asked, note("Review: in progress (head d06086e)", start + 5 * 60_000)];
+    expect(reviewHold(again, sha, start + 6 * 60_000)).toEqual({ since: start + 60_000, until: null });
+    expect(reviewHold(again, sha, start + 5 * 60_000 + 2 * REVIEW_HOLD)).toEqual({ since: start + 60_000, until: null });
+    expect(reviewHold([...again, note("Review: approved (head d06086e)", start + 20 * 60_000)], sha, start + 21 * 60_000)).toBeNull();
+    expect(reviewHold([...asked, note("Review: approved (head bc29edd)", start + 5 * 60_000)], sha, start + 6 * 60_000)).toEqual({ since: start + 60_000, until: null });
+    // Changes needed again after an approval holds it again.
+    expect(reviewHold([...asked, note("Review: approved (head d06086e)", start + 5 * 60_000), note("Review: changes needed (head d06086e)", start + 9 * 60_000)], sha, start + 10 * 60_000)).toEqual({ since: start + 9 * 60_000, until: null });
+    // Only a reviewer's verdict holds it.
+    expect(reviewHold([note("Review: changes needed (head d06086e)", start, "NONE")], sha, start + 60_000)).toBeNull();
+  });
+
+  it("says a held one boards on the train's next pass after the verdict, not once it is posted", () => {
+    expect(waiting({ review: { since: start, until: start + REVIEW_HOLD } })).toBe(
+      "a review is running on its head since 19:45 UTC (until 21:15 UTC at the latest): it boards on the train's next pass after the review's verdict is posted (up to about 30 minutes later), or after that time",
+    );
+    expect(waiting({ review: { since: start, until: null } })).toBe(
+      "a reviewer asked for changes on its head at 19:45 UTC: it waits for a later `Review: approved` on this head or a new head, and boards on the train's next pass after that (up to about 30 minutes later)",
+    );
+  });
+
+  it("never lands one with changes needed on its head, past REVIEW_HOLD; it lands after a later approved", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    review(repo, 11);
+    review(repo, 11, "Review: changes needed (head h11)", start + 20 * 60_000);
+    await repo.run({ now: start + REVIEW_HOLD + 60 * 60_000 });
+    expect(repo.merges).toEqual([]);
+    expect(said(repo, 11)).toMatch(/Waiting: a reviewer asked for changes on its head at 20:05 UTC/);
+    review(repo, 11, "Review: approved (head h11)", start + 3 * REVIEW_HOLD);
+    await repo.run({ now: start + 3 * REVIEW_HOLD + 60_000 });
+    expect(repo.landed).toEqual(["#11"]);
+  });
+
   it("never merges a lone one green at the tip while its review runs; it lands once the verdict is posted", async () => {
     const repo = fakeRepo();
     repo.add(11);
@@ -3272,7 +3319,7 @@ describe("a pull request with a review running (Review: in progress)", () => {
     const r = await repo.run({ now: start + 10 * 60_000 });
     expect(repo.merges).toEqual([]);
     expect(r.inFlight).toBeNull();
-    expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: a review is running on its head since 19:45 UTC \(until 21:15 UTC at the latest\): it boards once the review's verdict is posted, or at that time\. It keeps its place\.$/);
+    expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: a review is running on its head since 19:45 UTC \(until 21:15 UTC at the latest\): it boards on the train's next pass after the review's verdict is posted \(up to about 30 minutes later\), or after that time\. It keeps its place\.$/);
     review(repo, 11, "Review: approved (head h11)", start + 30 * 60_000);
     await repo.run({ now: start + 31 * 60_000 });
     expect(repo.landed).toEqual(["#11"]);
@@ -3299,6 +3346,31 @@ describe("a pull request with a review running (Review: in progress)", () => {
     review(fix, 11);
     await fix.run({ now: start + 10 * 60_000 });
     expect(fix.landed).toEqual(["#11"]);
+  });
+
+  it("holds a queue:priority one with changes needed on its head all the same: priority skips only a review running", async () => {
+    const sha = "d06086e5a1b2c3d4e5f60718293a4b5c6d7e8f90";
+    expect(reviewHold([note("Review: in progress (head d06086e)")], sha, start + 60_000, true)).toBeNull();
+    expect(reviewHold([note("Review: changes needed (head d06086e)")], sha, start + 60_000, true)).toEqual({ since: start, until: null });
+    const repo = fakeRepo();
+    repo.add(11, { priority: true });
+    review(repo, 11, "Review: changes needed (head h11)");
+    await repo.run({ now: start + REVIEW_HOLD + 60_000 });
+    expect(repo.merges).toEqual([]);
+    expect(said(repo, 11)).toMatch(/Waiting: a reviewer asked for changes on its head at 19:45 UTC/);
+    review(repo, 11, "Review: approved (head h11)", start + 2 * REVIEW_HOLD);
+    await repo.run({ now: start + 2 * REVIEW_HOLD + 60_000 });
+    expect(repo.landed).toEqual(["#11"]);
+  });
+
+  it("never lands one with changes needed on its head whose re-review never posts a verdict", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    review(repo, 11, "Review: changes needed (head h11)");
+    review(repo, 11, "Review: in progress (head h11)", start + 10 * 60_000);
+    await repo.run({ now: start + 10 * 60_000 + 2 * REVIEW_HOLD });
+    expect(repo.merges).toEqual([]);
+    expect(said(repo, 11)).toMatch(/Waiting: a reviewer asked for changes on its head at 19:45 UTC/);
   });
 
   it("never merges a lone one the train rebased and flies alone while its review runs: it waits in line and the others go", async () => {
@@ -3344,6 +3416,32 @@ describe("a pull request with a review running (Review: in progress)", () => {
     await repo.run({ now: start });
     expect(repo.merges).toEqual(["squash #11", "squash #12"]);
     expect(said(repo, b)).toMatch(/#13 changed or left the line \(#13 has a review running\)/);
+    expect(repo.pulls.get(13)!.merged).toBeUndefined();
+  });
+
+  it("stops a green batch's landing on dev at one a reviewer asked changes on since it boarded", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const b = (await repo.run({ now: start - 60 * 60_000 })).inFlight as number;
+    repo.settle();
+    review(repo, 12, "Review: changes needed (head h12)");
+    await repo.run({ now: start + REVIEW_HOLD + 5 * 60_000 });
+    expect(repo.merges).toEqual(["squash #11"]);
+    expect(said(repo, b)).toMatch(/#12 changed or left the line \(a reviewer asked for changes on #12\)/);
+    expect(said(repo, 12)).toMatch(/Waiting: a reviewer asked for changes on its head/);
+  });
+
+  it("stops the landing at a queue:priority one a reviewer asked changes on since it boarded, not at one whose review runs", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const b = (await repo.run({ now: start - 60 * 60_000 })).inFlight as number;
+    repo.settle();
+    for (const n of [12, 13]) repo.pulls.get(n)!.labels.push(LABEL.priority);
+    review(repo, 12);
+    review(repo, 13, "Review: changes needed (head h13)");
+    await repo.run({ now: start + 5 * 60_000 });
+    expect(repo.merges).toEqual(["squash #11", "squash #12"]);
+    expect(said(repo, b)).toMatch(/#13 changed or left the line \(a reviewer asked for changes on #13\)/);
     expect(repo.pulls.get(13)!.merged).toBeUndefined();
   });
 });
