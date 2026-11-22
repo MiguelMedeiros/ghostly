@@ -139,4 +139,34 @@ describe("a new program on the call's audio", () => {
       a.destroy();
     }
   });
+
+  it("the socket: a program that ends its side after a clip still hears the call", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gw-"));
+    dirs.push(dir);
+    const path = audioSocketPath(dir, "abc");
+    let got = 0;
+    const socket = await AudioSocket.open(path, 16000, { onAudio: (chunk) => { got += chunk.length; } });
+    // The program sends its token and a clip of 5 frames, then half-closes (`ncat -U` at stdin EOF, `shutdown(SHUT_WR)`).
+    const a = connect({ path, allowHalfOpen: true });
+    let heard = 0;
+    let eof = false;
+    a.on("data", (chunk: Buffer) => { heard += chunk.length; });
+    a.on("end", () => { eof = true; });
+    await new Promise<void>((resolve) => a.once("connect", resolve));
+    a.end(Buffer.concat([Buffer.from(`${socket.token}\n`), ...Array.from({ length: 5 }, () => frameOf(100))]));
+    try {
+      await until(() => got === 5 * frameBytes(16000));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(socket.connected).toBe(true);
+      // What the contact says afterwards still reaches it, and it reads EOF only when the call ends.
+      for (let i = 0; i < 5; i++) socket.write(frameOf(7));
+      await until(() => heard === 5 * frameBytes(16000));
+      expect(eof).toBe(false);
+      await socket.close();
+      await until(() => eof);
+    } finally {
+      a.destroy();
+      await socket.close();
+    }
+  });
 });

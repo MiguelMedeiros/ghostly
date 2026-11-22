@@ -255,6 +255,16 @@ describe("a chat as the contact drives it", () => {
     expect(node.getState().links[0].pairing).toEqual({ status: "connecting" });
   });
 
+  it("texts the contact had no room for go once the link says there is room, not at their backoff check", async () => {
+    // Written while the contact was away, their checks were minutes apart: back, the ones past the contact's burst
+    // waited that long again, though the contact took more 10 s later.
+    const chat = row();
+    const { linkOf, node } = await started(chat);
+    const flush = vi.spyOn(node["outboxFor"](chat.id), "flush");
+    linkOf(chat.id).options.events.onTextRoom();
+    expect(flush).toHaveBeenCalledOnce();
+  });
+
   it("a removed chat's link closing as it stops makes none of its outbox or files again", async () => {
     // A bot that paired with new contacts and removed their chats kept both for every chat it ever removed.
     const chat = row();

@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "../affected/files.mjs";
-import { bundleReaches, checkPaths, featureGrep, globToRegExp, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_ALONE, UNIT_HALVED, UNIT_PROJECTS, unitGroupOf, unitPartsOf, workspaceExports } from "../affected/select.mjs";
+import { bundleReaches, checkPaths, featureGrep, globToRegExp, integrationReached, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_ALONE, UNIT_HALVED, UNIT_PROJECTS, unitGroupOf, unitPartsOf, workspaceExports } from "../affected/select.mjs";
 import { shardByTime, TimedShards } from "../../vitest.shards.ts";
 
 // A small repository: a few features, a paths map, specs tagged with them, and core modules behind a barrel.
@@ -240,6 +241,22 @@ describe("tests that import across workspaces", () => {
     expect(testsReaching(["apps/ui/src/components/ChatConnection.tsx"], codeFiles, ["e2e/matrix/*"])).toEqual([]);
   });
 
+  it("names the integration test files a project's plan reaches, which test:affected runs only with --integration", () => {
+    const list = ["packages/cli/test/twoPeers.test.ts", "packages/cli/test/daemon.test.ts", "packages/browser/test/dhtNode.test.ts"];
+    const files = {
+      "packages/cli/test/twoPeers.test.ts": `import { runCli } from "./support/cli";`,
+      "packages/cli/test/daemon.test.ts": `import { serve } from "../src/host";`,
+      "packages/cli/test/support/cli.ts": "export const runCli = () => {};",
+    };
+    const cli = { tests: ["packages/cli/test/**"] };
+    // Related: the listed files among its files, or importing one of them.
+    expect(integrationReached({ ...cli, mode: "related", files: ["packages/cli/test/support/cli.ts"] }, list, files)).toEqual(["packages/cli/test/twoPeers.test.ts"]);
+    expect(integrationReached({ ...cli, mode: "related", files: ["packages/cli/test/daemon.test.ts"] }, list, files)).toEqual(["packages/cli/test/daemon.test.ts"]);
+    // Whole: all of the project's; another project's never; a skipped project none.
+    expect(integrationReached({ ...cli, mode: "whole" }, list, files)).toEqual(["packages/cli/test/twoPeers.test.ts", "packages/cli/test/daemon.test.ts"]);
+    expect(integrationReached({ ...cli, mode: "skip" }, list, files)).toEqual([]);
+  });
+
   it("finds the real chatConnection test from the real component", () => {
     const root = join(import.meta.dirname, "..", "..", "..");
     const real = Object.fromEntries(["packages/browser/test/chatConnection.test.ts", "apps/ui/src/components/ChatConnection.tsx"].map((f) => [f, readFileSync(join(root, f), "utf8")]));
@@ -469,9 +486,9 @@ describe("fallbacks", () => {
     const scripts = byName(p.unit).scripts;
     expect(scripts.mode).toBe("related");
     expect(scripts.files).toEqual(["tools/scripts/test/releaseInstallScripts.test.ts", "tools/scripts/test/webAppsTestFlag.test.ts"]);
-    // A workspace's package.json is not the root's.
+    // A workspace's package.json is not the root's: only the test that reads that one runs.
     const site = byName(plan({ changed: [{ path: "apps/website/package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles }).unit).scripts;
-    expect(site.mode).toBe("skip");
+    expect(site.files).toEqual(["tools/scripts/test/websiteSteps.test.ts"]);
   });
 
   it("core's index.ts runs every project that imports core whole, and every spec", () => {
@@ -874,7 +891,30 @@ describe("--unit-group: the draft tier's unit projects over a few runners", () =
     expect(count).toBeGreaterThan(UNIT_ALONE.length);
     expect(job).toContain(`name: Affected unit tests (draft \${{ matrix.group }}/${count})`);
     expect(job).toMatch(new RegExp(`run: node tools/scripts/test-affected\\.mjs .*--unit-group \\$\\{\\{ matrix\\.group \\}\\}/${count}( |$)`, "m"));
+    // CI Success gets one result for every group: it names the range, and each group names its own failures.
+    expect(ci).toContain(`check "Affected unit tests (draft 1/${count} to ${count}/${count})" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"`);
   });
+
+  it("names, in CI, its group's job and each unit project that failed, the job the run page shows", () => {
+    const bin = mkdtempSync(join(tmpdir(), "affected-npx-"));
+    try {
+      // Every vitest run fails at once.
+      writeFileSync(join(bin, "npx"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      const run = (env: Record<string, string>) =>
+        spawnSync(process.execPath, [script, "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--unit-group", "1/4", "--files", "packages/core/src/http.ts"], {
+          encoding: "utf8",
+          timeout: 60_000,
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, ...env },
+        });
+      const ci = run({ GITHUB_ACTIONS: "true" });
+      expect(ci.status).toBe(1);
+      expect(ci.stdout.split("\n").filter((l) => l.startsWith("::error::"))).toEqual(["::error::Affected unit tests (draft 1/4): unit ui failed"]);
+      // Not in a terminal.
+      expect(run({ GITHUB_ACTIONS: "" }).stdout).not.toContain("::error::");
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
 
 describe("the cli's halves (tools/vitest.shards.ts): vitest --shard cut by time", () => {
