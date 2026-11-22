@@ -172,9 +172,14 @@ function tokenUnits(text: string, decimals: number): number {
 }
 
 export function paymentJson(p: PaymentView) {
+  // First the way `chat pay-request` pays it: Cashu ecash before the invoice, but a Fedimint request's invoice before its
+  // federation (its ecash goes through a review); a request lists every way.
+  const ecash = p.federation || p.federations ? ["fedimint"] : p.mint || p.mints ? ["cashu"] : [];
+  const lightning = p.invoice ? ["lightning"] : [];
+  const methods = p.target ? [p.target.method] : p.kind === "request" && ecash[0] === "fedimint" ? [...lightning, ...ecash] : [...ecash, ...lightning];
   return {
     id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, ...tokenDecimals(p), memo: p.memo ?? null,
-    state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: p.target?.method ?? (p.federation || p.federations ? "fedimint" : p.invoice ? "lightning" : p.mint || p.mints ? "cashu" : null),
+    state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: methods[0] ?? null, ...(p.kind === "request" ? { methods } : {}),
     createdAt: p.createdAt, ...(p.group ? { group: p.group } : {}), ...(p.closed ? { closed: true } : {}), ...(p.txid ? { txid: p.txid } : {}),
   };
 }
