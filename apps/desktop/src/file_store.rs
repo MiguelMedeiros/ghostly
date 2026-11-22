@@ -85,7 +85,8 @@ impl FileStore {
     /// profile's folder. The page removes its copy once the save command answers (`saveStaged` in
     /// packages/browser/src/platform/services.ts), but a save dialog that never answers (on Linux GTK's can open
     /// out of sight, and waits with no timeout) keeps the command waiting, and closing the app or reloading the page
-    /// then leaves the copy behind. Nothing is being saved yet here. Best effort.
+    /// then leaves the copy behind. Nothing is being saved yet here. The hidden copies `own` makes (`.<id>.own`) that
+    /// a kill left before their rename go too: nothing is written yet either. Best effort.
     pub fn remove_staged_saves(&self) {
         let Ok(spaces) = fs::read_dir(&self.base) else {
             return;
@@ -97,6 +98,13 @@ impl FileStore {
             };
             if check_space(name).is_ok() && space.path().is_dir() {
                 let _ = self.remove_where(name, STAGED_SAVE_PREFIX);
+                for entry in fs::read_dir(space.path()).into_iter().flatten().flatten() {
+                    let file = entry.file_name();
+                    let file = file.to_string_lossy();
+                    if file.starts_with('.') && file.ends_with(".own") && entry.path().is_file() {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                }
             }
         }
     }
@@ -122,6 +130,7 @@ impl FileStore {
         }
         let path = self.path(space, id)?;
         private_folder(path.parent().unwrap()).map_err(io_text)?;
+        own(&path, None).map_err(io_text)?;
         let mut options = OpenOptions::new();
         options.create(true).truncate(false).write(true);
         // A received file is the chat's plain bytes: the user's alone, whatever the umask.
@@ -156,12 +165,18 @@ impl FileStore {
 
     pub fn truncate(&self, space: &str, id: &str, size: u64) -> Result<(), String> {
         let path = self.path(space, id)?;
-        let file = match OpenOptions::new().write(true).open(&path) {
+        let mut file = match OpenOptions::new().write(true).open(&path) {
             Ok(file) => file,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && size == 0 => return Ok(()),
             Err(e) => return Err(e.to_string()),
         };
         if size < file.metadata().map_err(io_text)?.len() {
+            if own(&path, Some(size)).map_err(io_text)? {
+                file = OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .map_err(io_text)?;
+            }
             file.set_len(size).map_err(io_text)?;
         }
         file.sync_all().map_err(io_text)
@@ -182,6 +197,41 @@ impl FileStore {
     pub fn digest(&self, space: &str, id: &str) -> Result<String, String> {
         let mut file = File::open(self.path(space, id)?).map_err(io_text)?;
         Ok(URL_SAFE_NO_PAD.encode(digest_of(&mut file)?))
+    }
+
+    /// `from_space`'s file `from_id` under `id` in `space` as well, a second name of the same file (a hard link): nothing
+    /// is read or written. A move back to a device whose frozen copy holds a file gives the staged profile its own name
+    /// for it; the frozen copy keeps its own, for a revert. `append` and `truncate` give a name a file of its own
+    /// (`own`) before they write, so the other name keeps its bytes. Unix only (Linux, macOS, Android): Windows has no
+    /// stable way to count a file's names, so the page copies there.
+    pub fn link(
+        &self,
+        from_space: &str,
+        from_id: &str,
+        space: &str,
+        id: &str,
+    ) -> Result<(), String> {
+        let from = self.path(from_space, from_id)?;
+        let to = self.path(space, id)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            // Already that file (a retry, or a name a case-insensitive disk folds to the same one): removing `to` first
+            // would remove the only name it has.
+            if let (Ok(a), Ok(b)) = (fs::metadata(&from), fs::metadata(&to)) {
+                if a.dev() == b.dev() && a.ino() == b.ino() {
+                    return Ok(());
+                }
+            }
+            private_folder(to.parent().unwrap()).map_err(io_text)?;
+            self.remove(space, id)?;
+            fs::hard_link(&from, &to).map_err(io_text)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (from, to);
+            Err("Not supported on this platform".into())
+        }
     }
 
     pub fn remove(&self, space: &str, id: &str) -> Result<(), String> {
@@ -227,14 +277,13 @@ impl FileStore {
             let Ok(meta) = entry.metadata() else {
                 continue;
             };
-            if !meta.is_file() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            // A hidden name is never a file of the page's (`check_id`): an `own` copy a kill left behind.
+            if !meta.is_file() || name.starts_with('.') {
                 continue;
             }
-            if entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(STAGED_SAVE_PREFIX)
-            {
+            if name.starts_with(STAGED_SAVE_PREFIX) {
                 usage.staged += meta.len();
             } else {
                 usage.files += meta.len();
@@ -259,22 +308,55 @@ impl FileStore {
     #[cfg_attr(target_os = "android", allow(dead_code))]
     pub fn copy_to(&self, space: &str, id: &str, target: &Path) -> Result<(), String> {
         let mut from = File::open(self.path(space, id)?).map_err(io_text)?;
-        write_whole(target, |to| std::io::copy(&mut from, to).map(|_| ()))?;
+        write_whole(target, &self.saving(), |to| {
+            std::io::copy(&mut from, to).map(|_| ())
+        })?;
         mark_downloaded(target);
         Ok(())
     }
+
+    /// Where each save a copy notes its partial copy's path while it writes it (`write_whole`): a name no profile
+    /// space takes.
+    fn saving(&self) -> PathBuf {
+        self.base.join(SAVING)
+    }
+
+    /// Partial copies of a save cut short, in the folders the person chose (Downloads, a USB stick), removed: at
+    /// start, after a crash or a power loss, and as the app ends (`RunEvent::Exit`: the window closed on Linux or
+    /// Windows, Quit, a logout), when a copy still running would never come back to remove its own. Only a path whose
+    /// name is a partial copy's (`.<name>.<16 hex>.part`) is removed. Best effort.
+    pub fn remove_unfinished_saves(&self) {
+        let Ok(notes) = fs::read_dir(self.saving()) else {
+            return;
+        };
+        for note in notes.flatten() {
+            if let Ok(partial) = fs::read_to_string(note.path()) {
+                let partial = PathBuf::from(partial);
+                if partial.file_name().is_some_and(is_partial_name) && partial.is_file() {
+                    let _ = fs::remove_file(&partial);
+                }
+            }
+            let _ = fs::remove_file(note.path());
+        }
+    }
 }
+
+/// The folder of the notes of saves being written ([`FileStore::saving`]).
+const SAVING: &str = ".saving";
 
 /// Writes `target` whole or not at all. The bytes go to a hidden name in the same folder (so the
 /// rename stays on one disk) and take the chosen name only once all of them are on the disk. A copy
 /// that fails partway (a full disk, a removed drive) leaves no half file under the name the person
-/// chose, and does not truncate a file that was there before.
+/// chose, and does not truncate a file that was there before. One the app's end cuts short never comes
+/// back here: the partial's path is noted in `notes` first, for [`FileStore::remove_unfinished_saves`].
 #[cfg_attr(target_os = "android", allow(dead_code))]
 fn write_whole(
     target: &Path,
+    notes: &Path,
     write: impl FnOnce(&mut File) -> std::io::Result<()>,
 ) -> Result<(), String> {
     let partial = partial_path(target)?;
+    let note = note_partial(notes, &partial);
     let result = (|| {
         let mut to = OpenOptions::new()
             .write(true)
@@ -288,7 +370,51 @@ fn write_whole(
     if result.is_err() {
         let _ = fs::remove_file(&partial);
     }
+    if let Some(note) = note {
+        let _ = fs::remove_file(note);
+    }
     result.map_err(io_text)
+}
+
+/// Notes `partial`'s path in a file of its own in `notes`, on the disk before the copy starts (a power loss keeps
+/// it). None when it could not be noted (a path that is not UTF-8): the save goes on all the same.
+#[cfg_attr(target_os = "android", allow(dead_code))]
+fn note_partial(notes: &Path, partial: &Path) -> Option<PathBuf> {
+    let text = partial.to_str()?;
+    private_folder(notes).ok()?;
+    let note = notes.join(format!("{:016x}", rand::random::<u64>()));
+    let written = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&note)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()
+    })();
+    match written {
+        Ok(()) => Some(note),
+        Err(_) => {
+            let _ = fs::remove_file(&note);
+            None
+        }
+    }
+}
+
+/// `.<name>.<16 hex>.part`, a name [`partial_path`] makes.
+fn is_partial_name(name: &std::ffi::OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    let Some(rest) = name.strip_suffix(".part") else {
+        return false;
+    };
+    let Some((start, random)) = rest.rsplit_once('.') else {
+        return false;
+    };
+    start.len() > 1
+        && start.starts_with('.')
+        && random.len() == 16
+        && random.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// `.<name>.<random>.part` beside `target`, its name cut to fit [`NAME_BYTES`]: a name the disk takes (up to 255
@@ -360,6 +486,46 @@ fn private_folder(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
     builder.create(path)
+}
+
+/// A file with another name too (`FileStore::link`) gets one of its own before it is written: its bytes (the first
+/// `keep` of them, when given) are copied to a hidden name beside it, which then takes its name. The other name keeps
+/// the file it had. Resolves to whether it was copied. A file with one name, or none, is left as it is.
+fn own(path: &Path, keep: Option<u64>) -> std::io::Result<bool> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match fs::metadata(path) {
+            Ok(meta) if meta.nlink() > 1 => {}
+            Ok(_) => return Ok(false),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        }
+        // A file id is never a hidden name (`check_id`), so no file of the page's is under this one.
+        let copy = path.with_file_name(format!(
+            ".{}.own",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        let result = (|| {
+            let mut options = OpenOptions::new();
+            options.create(true).truncate(true).write(true);
+            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+            let mut to = options.open(&copy)?;
+            let from = File::open(path)?;
+            std::io::copy(&mut from.take(keep.unwrap_or(u64::MAX)), &mut to)?;
+            to.sync_all()?;
+            fs::rename(&copy, path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&copy);
+        }
+        result.map(|()| true)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, keep);
+        Ok(false)
+    }
 }
 
 fn check_id(id: &str) -> Result<&str, String> {
@@ -580,6 +746,23 @@ pub async fn file_bytes_digest<R: tauri::Runtime>(
     tauri::async_runtime::spawn_blocking(move || FileStore::new(base).digest(&space, &id))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// `fromSpace`'s file `fromId` under `id` in `space` as well, nothing copied ([`FileStore::link`]).
+#[tauri::command]
+pub async fn file_bytes_link<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    from_space: String,
+    from_id: String,
+    space: String,
+    id: String,
+) -> Result<(), String> {
+    let base = store(&app)?.base.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        FileStore::new(base).link(&from_space, &from_id, &space, &id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -807,6 +990,13 @@ mod tests {
             }
         );
         assert!(files.usage("../p").is_err(), "a space is never a path");
+        // A hidden copy a kill left behind in `own` is not one of the profile's files, and goes at start.
+        fs::write(dir.join("p").join(".chat-in-a.own"), [6; 4000]).unwrap();
+        assert_eq!(files.usage("p").unwrap().files, 1024);
+        assert_eq!(files.usage("p").unwrap().count, 2);
+        files.remove_staged_saves();
+        assert!(!dir.join("p").join(".chat-in-a.own").exists());
+        assert_eq!(files.size("p", "chat-in-a").unwrap(), Some(1000));
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -824,6 +1014,98 @@ mod tests {
         files.truncate("p", "missing", 0).unwrap();
         assert!(files.truncate("p", "missing", 1).is_err());
         fs::remove_dir_all(dir).ok();
+    }
+
+    /// A move back to a device whose frozen copy holds a file over 16 MiB: the staged profile gets a second name of it,
+    /// nothing copied, and a write to either name leaves the other's bytes as they were.
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_file_is_one_file_until_either_name_is_written() {
+        // covers: devices.handoff
+        use std::os::unix::fs::MetadataExt;
+        let (files, dir) = store();
+        files
+            .append("ghostly", "chat-in-v", 0, b"video bytes")
+            .unwrap();
+        files
+            .link("ghostly", "chat-in-v", "ghostly_staged", "chat-in-v")
+            .unwrap();
+        let ino = |space: &str| {
+            fs::metadata(dir.join(space).join("chat-in-v"))
+                .unwrap()
+                .ino()
+        };
+        assert_eq!(ino("ghostly"), ino("ghostly_staged"), "one file, two names");
+        assert_eq!(
+            files.read("ghostly_staged", "chat-in-v", 0, 100).unwrap(),
+            b"video bytes"
+        );
+        // The frozen copy goes once the move is over: the staged name keeps the file.
+        files.remove_where("ghostly", "").unwrap();
+        assert_eq!(
+            files.read("ghostly_staged", "chat-in-v", 0, 100).unwrap(),
+            b"video bytes"
+        );
+
+        // Linked again, then cut back and written under one name: the other keeps its bytes.
+        files
+            .link("ghostly_staged", "chat-in-v", "ghostly", "chat-in-v")
+            .unwrap();
+        files.truncate("ghostly_staged", "chat-in-v", 5).unwrap();
+        files
+            .append("ghostly_staged", "chat-in-v", 5, b"!")
+            .unwrap();
+        assert_eq!(
+            files.read("ghostly_staged", "chat-in-v", 0, 100).unwrap(),
+            b"video!"
+        );
+        assert_eq!(
+            files.read("ghostly", "chat-in-v", 0, 100).unwrap(),
+            b"video bytes"
+        );
+        assert_ne!(ino("ghostly"), ino("ghostly_staged"));
+        files
+            .link("ghostly", "chat-in-v", "ghostly_staged", "chat-in-w")
+            .unwrap();
+        files
+            .append("ghostly_staged", "chat-in-w", 11, b" more")
+            .unwrap();
+        assert_eq!(
+            files.read("ghostly", "chat-in-v", 0, 100).unwrap(),
+            b"video bytes"
+        );
+        assert_eq!(
+            files.read("ghostly_staged", "chat-in-w", 0, 100).unwrap(),
+            b"video bytes more"
+        );
+        // A link onto the same file (a retry, or a name the disk folds to the same one) leaves it where it is.
+        files
+            .link("ghostly", "chat-in-v", "ghostly", "chat-in-v")
+            .unwrap();
+        assert_eq!(
+            files.read("ghostly", "chat-in-v", 0, 100).unwrap(),
+            b"video bytes"
+        );
+        files
+            .link("ghostly", "chat-in-v", "ghostly_staged", "chat-in-w")
+            .unwrap();
+        files
+            .link("ghostly", "chat-in-v", "ghostly_staged", "chat-in-w")
+            .unwrap();
+        assert_eq!(
+            files.read("ghostly_staged", "chat-in-w", 0, 100).unwrap(),
+            b"video bytes"
+        );
+        // No hidden copy is left beside them, and a name is never a path.
+        assert_eq!(fs::read_dir(dir.join("ghostly_staged")).unwrap().count(), 2);
+        assert!(files
+            .link("ghostly", "../x", "ghostly_staged", "y")
+            .is_err());
+        assert!(files.link("ghostly", "chat-in-v", "..", "y").is_err());
+        assert!(files
+            .link("ghostly", "missing", "ghostly_staged", "y")
+            .is_err());
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]
@@ -1024,26 +1306,86 @@ mod tests {
         fs::remove_dir_all(dir).ok();
     }
 
+    /// The issue: a save cut short by the app ending (the window closed on Linux or Windows, a logout, a crash) never
+    /// came back to remove its hidden partial copy, and nothing else knew the folder: it stayed in the person's
+    /// Downloads for good, as big as what was copied so far.
+    #[test]
+    fn a_save_cut_short_by_the_app_ending_leaves_nothing_in_the_chosen_folder() {
+        let (files, dir) = store();
+        files.append("p", "f", 0, b"kept").unwrap();
+        let out = dir.join("Downloads");
+        fs::create_dir_all(&out).unwrap();
+        // A crash (or power loss) mid-copy: write_whole never returns, the partial stays.
+        let crashed = std::panic::catch_unwind(|| {
+            write_whole(&out.join("video.mp4"), &files.saving(), |to| {
+                to.write_all(b"half of it")?;
+                panic!("the app ends");
+            })
+        });
+        assert!(crashed.is_err());
+        assert_eq!(names(&out).len(), 1, "{:?}", names(&out));
+        // The next start removes it.
+        files.remove_unfinished_saves();
+        assert!(names(&out).is_empty(), "{:?}", names(&out));
+
+        // The app ending while a copy runs (`RunEvent::Exit`, the copy on another thread): its partial goes with it,
+        // and the copy, should it get that far, does not take the chosen name.
+        let ended = write_whole(&out.join("song.mp3"), &files.saving(), |to| {
+            to.write_all(b"half of it")?;
+            files.remove_unfinished_saves();
+            to.write_all(b" and the rest")
+        });
+        assert!(ended.is_err());
+        assert!(names(&out).is_empty(), "{:?}", names(&out));
+
+        // A save that finished leaves no note behind, and a note naming anything but a partial copy removes nothing.
+        files.copy_to("p", "f", &out.join("kept.txt")).unwrap();
+        assert!(names(&files.saving()).is_empty());
+        fs::write(out.join(".kept.txt.zzzzzzzzzzzzzzzz.part"), b"x").unwrap();
+        for (note, named) in [
+            ("1", out.join("kept.txt")),
+            ("2", out.join(".kept.txt.zzzzzzzzzzzzzzzz.part")),
+            ("3", out.clone()),
+        ] {
+            fs::write(
+                files.saving().join(note),
+                named.to_string_lossy().as_bytes(),
+            )
+            .unwrap();
+        }
+        files.remove_unfinished_saves();
+        assert_eq!(
+            names(&out),
+            vec![".kept.txt.zzzzzzzzzzzzzzzz.part", "kept.txt"]
+        );
+        assert!(names(&files.saving()).is_empty());
+        // The notes' folder is no profile's.
+        assert_eq!(files.usage(".saving"), Err("Invalid profile space".into()));
+        fs::remove_dir_all(dir).ok();
+    }
+
     #[test]
     fn a_copy_that_fails_partway_leaves_no_file_and_keeps_the_one_that_was_there() {
-        let (_, dir) = store();
-        fs::create_dir_all(&dir).unwrap();
-        let target = dir.join("report.pdf");
-        let failed = write_whole(&target, |to| {
+        let (files, dir) = store();
+        let out = dir.join("out");
+        fs::create_dir_all(&out).unwrap();
+        let target = out.join("report.pdf");
+        let failed = write_whole(&target, &files.saving(), |to| {
             to.write_all(b"half of it")?;
             Err(std::io::Error::other("disk full"))
         });
         assert_eq!(failed, Err("disk full".to_string()));
-        assert!(names(&dir).is_empty(), "{:?}", names(&dir));
+        assert!(names(&out).is_empty(), "{:?}", names(&out));
+        assert!(names(&files.saving()).is_empty());
         // A file already under that name is not cut short by a failed copy over it.
         fs::write(&target, b"the old report").unwrap();
-        let failed = write_whole(&target, |to| {
+        let failed = write_whole(&target, &files.saving(), |to| {
             to.write_all(b"half")?;
             Err(std::io::Error::other("drive removed"))
         });
         assert!(failed.is_err());
         assert_eq!(fs::read(&target).unwrap(), b"the old report");
-        assert_eq!(names(&dir), vec!["report.pdf"]);
+        assert_eq!(names(&out), vec!["report.pdf"]);
         fs::remove_dir_all(dir).ok();
     }
 

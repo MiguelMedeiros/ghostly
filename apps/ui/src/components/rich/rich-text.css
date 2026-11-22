@@ -86,6 +86,13 @@
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
+/* Forced colors (Windows Contrast themes) replace the cover's background with the page's and its transparent text with
+   the theme's text colour, so the hidden words showed in plain view. The cover keeps its own colours there, drawn in the
+   theme's text colour (a muted one on hover); its words stay transparent, inherited by everything inside. */
+@media (forced-colors: active) {
+  .rich-spoiler { forced-color-adjust: none; background: CanvasText; }
+  .rich-spoiler:hover { background: GrayText; }
+}
 
 /* A long blob: one line with its actions, or all of it wrapped anywhere. */
 .rich-blob {

@@ -76,3 +76,42 @@ describe("why a contact's proof failed this app's check, in the app's language",
     expect(status).not.toHaveTextContent(/has no account/);
   });
 });
+
+/*
+ * This app's own refusal of a contact's proof (core identityProofs.ts onPresent) is worded for the contact it goes back
+ * to: "Your contact keeps too many identities from you already". Under the contact's card in my chat that said the
+ * contact keeps too many of mine, the wrong way round: it is this app that keeps too many of theirs.
+ */
+describe("a contact's proof this app did not take, said from this side", () => {
+  const TOO_MANY = "Your contact keeps too many identities from you already";
+  const NEWER = "Your contact keeps a newer proof of this identity from you";
+
+  it.each([
+    [TOO_MANY, "You already keep too many identities from this contact", "Você já guarda identidades demais deste contato"],
+    [NEWER, "You already keep a newer proof of this identity from this contact", "Você já guarda uma prova mais nova desta identidade deste contato"],
+  ])("%s: under the contact's card in the chat", (raw, en, pt) => {
+    const view = renderApp(<IdentityShareLine entry={entry(raw)} link={undefined} contact="Alice" onOpen={vi.fn()} />);
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent(en);
+    expect(screen.getByTestId("identity-share-reason")).not.toHaveTextContent(/Your contact/);
+    view.unmount();
+    expect(shareReason(raw, "pt")).toBe(pt);
+  });
+
+  it("mine, refused by the contact's app because it keeps a newer proof of it: said as that, in the app's language", () => {
+    const mine = { ...entry(NEWER), id: "mine:proof-1:0", proof: "proof-1", side: "mine" } as IdentityTimelineEntry;
+    const view = renderApp(<IdentityShareLine entry={mine} link={undefined} contact="Alice" onOpen={vi.fn()} />, { language: "pt" });
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("Seu contato já guarda uma prova mais nova desta identidade sua");
+    view.unmount();
+  });
+
+  it("on the back of the contact's card, when a check again turned it unconfirmed", async () => {
+    const { user, engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={vi.fn()} />);
+    document.documentElement.dataset.reduceMotion = "true";
+    const received = receivedView({ id: "r1", provider: "ssh-github", subject: "octocat-old", status: "unconfirmed", error: TOO_MANY, verified: { subject: "octocat-old", source: "GitHub: octocat-old (via published SSH key)" } });
+    act(() => engine.update({ links: [paired({ identities: identitiesView({ received: [received] }) })] }));
+    await user.click(within(screen.getByTestId("chat-identities-received")).getAllByTestId("chat-identity-received")[0]!);
+    const status = within(screen.getByTestId("chat-identity-back")).getByTestId("chat-identity-received-status");
+    expect(status).toHaveTextContent("You already keep too many identities from this contact");
+    expect(status).not.toHaveTextContent(/Your contact/);
+  });
+});

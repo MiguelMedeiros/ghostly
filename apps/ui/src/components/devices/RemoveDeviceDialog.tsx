@@ -2,23 +2,37 @@ import { useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
 import { useSettings } from "../../contexts/SettingsContext";
-import { lostWalletLines, removeErrorKey } from "../../lib/devices";
+import { lostWalletLines, removeErrorKey, walletsAtHomeOn } from "../../lib/devices";
 import { DeviceDialog, dangerButton, primaryButton, quietButton } from "./DeviceDialog";
+import { HomeWallets } from "./HomeWallets";
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
+import { sizeText } from "../../lib/handoff";
 
 /**
  * Remove (WISP 06 § User experience, Remove): "Remove <device>?", what it means, and "Lost or stolen", which shows the
- * money checklist first.
+ * money checklist first. A device that still holds files a move left for later (`later`) says so first, with "Get them
+ * now": removed, that device's copy is the only one they had.
  */
-export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { device: string; deviceKey: string; onClose(): void; onRemoved?(): void }) {
+export function RemoveDeviceDialog({ device, deviceKey, later, onClose, onRemoved }: { device: string; deviceKey: string; later?: { bytes: number }; onClose(): void; onRemoved?(): void }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const [checklist, setChecklist] = useState(false);
+  // The wallets at home on that device (WISP 06 § Wallets that stay home): once it is removed, they open here instead.
+  const wallet = useSyncExternalStore(subscribe, walletOf);
+  const homes = walletsAtHomeOn(wallet, deviceKey);
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<Problem | null>(null);
+  const fetchNow = () => {
+    if (fetching || busy) return;
+    setFetching(true); setFetchError(null);
+    void engine.call("deviceFetchLeftFiles", { key: deviceKey }).catch((cause: unknown) => { setFetching(false); setFetchError(problemText(cause, t)); });
+  };
   const remove = async () => {
+    if (busy) return;
     setBusy(true); setError(null);
     try {
       await engine.call("deviceRemove", { key: deviceKey });
@@ -29,18 +43,38 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
       setError(key ? said(key, t) : problemText(cause, t));
     } finally { setBusy(false); }
   };
-  if (checklist) return <LostChecklist device={device} onClose={onClose} onRemove={() => { setChecklist(false); void remove(); }} />;
+  // While the removal runs × and Escape do nothing, as Rename's: closed, its refusal would be said nowhere and the
+  // device would stay in the set with nothing said.
+  const close = () => { if (!busy) onClose(); };
+  // Before the removal the checklist goes Back to Remove: a Done there ended the flow with the device still in the set.
+  if (checklist) return <LostChecklist device={device} onClose={onClose} onBack={() => setChecklist(false)} onRemove={() => { setChecklist(false); void remove(); }} />;
   return (
-    <DeviceDialog title={fillNames(t("devices.remove.title"), { device })} onClose={onClose} testId="device-remove">
+    <DeviceDialog title={fillNames(t("devices.remove.title"), { device })} onClose={close} testId="device-remove">
       <p className="text-text-secondary">{t("devices.remove.text")}</p>
       <p className="text-text-muted text-xs">{t("devices.remove.copy")}</p>
-      {busy && <p role="status" data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}
+      <HomeWallets wallets={homes} device={device} testId="device-remove-homes" />
+      {later && (
+        <div data-testid="device-remove-later" className="space-y-2">
+          <Notice tone="warning" className="" title={fillNames(t("devices.remove.later", { size: sizeText(later.bytes, t) }), { device })} next={t("devices.remove.laterNext")} />
+          {fetching
+            ? <p role="status" data-testid="device-remove-fetching" className="text-xs text-text-secondary">{t("devices.remove.fetching")}</p>
+            : <button type="button" data-testid="device-remove-fetch" aria-disabled={busy || undefined} onClick={fetchNow} className={`${quietButton} ${BUSY}`}>{t("devices.remove.fetch")}</button>}
+          {fetchError && <Notice problem={fetchError} testId="device-remove-fetch-error" className="" />}
+        </div>
+      )}
+      {/* Said from a line there from the start, as Take over's: one that comes with its text is often not read. */}
+      <div role="status">{busy && <p data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}</div>
       {error && <Notice problem={error} testId="device-remove-error" className="" />}
-      <button type="button" data-testid="device-remove-go" disabled={busy} onClick={() => void remove()} className={dangerButton}>{t("devices.remove.go")}</button>
-      <button type="button" data-testid="device-remove-lost" disabled={busy} onClick={() => setChecklist(true)} className={quietButton}>{t("devices.remove.lost")}</button>
+      {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page, and a
+          refusal left it there. A press while busy does nothing. */}
+      <button type="button" data-testid="device-remove-go" aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={() => void remove()} className={`${dangerButton} ${BUSY}`}>{t("devices.remove.go")}</button>
+      <button type="button" data-testid="device-remove-lost" aria-disabled={busy || undefined} onClick={() => { if (!busy) setChecklist(true); }} className={`${quietButton} ${BUSY}`}>{t("devices.remove.lost")}</button>
     </DeviceDialog>
   );
 }
+
+/** A button busy by `aria-disabled` looks as a disabled one does. */
+const BUSY = "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const walletOf = () => engine.state?.wallet;
@@ -48,9 +82,10 @@ const holdOf = () => !!engine.state?.settings.holdStorage;
 
 /**
  * "Lost or stolen?": the written checklist of phase 1. First the storage keys, when storage is set up (the copy holds
- * them); then one line per wallet the lost device could spend from; then the chats. "Remove <device>" at the end.
+ * them); then one line per wallet the lost device could spend from; then the chats. "Remove <device>" at the end, and
+ * Back to the Remove dialog when it comes before the removal (onBack), else Done.
  */
-export function LostChecklist({ device, onClose, onRemove }: { device?: string; onClose(): void; onRemove?(): void }) {
+export function LostChecklist({ device, onClose, onRemove, onBack }: { device?: string; onClose(): void; onRemove?(): void; onBack?(): void }) {
   const { t } = useI18n();
   const { settings } = useSettings();
   const wallet = useSyncExternalStore(subscribe, walletOf);
@@ -70,7 +105,9 @@ export function LostChecklist({ device, onClose, onRemove }: { device?: string; 
         ].filter((line): line is { testId: string; title: string; hint?: string } => !!line).map((line, index) => <Line key={`${line.testId}:${line.title}`} n={index + 1} {...line} />)}
       </ol>
       {onRemove && device && <button type="button" data-testid="device-lost-remove" onClick={onRemove} className={primaryButton}><span>{fillNames(t("devices.lost.remove"), { device })}</span></button>}
-      <button type="button" data-testid="device-lost-done" onClick={onClose} className={quietButton}>{t("devices.lost.done")}</button>
+      {onBack
+        ? <button type="button" data-testid="device-lost-back" onClick={onBack} className={quietButton}>{t("common.back")}</button>
+        : <button type="button" data-testid="device-lost-done" onClick={onClose} className={quietButton}>{t("devices.lost.done")}</button>}
     </DeviceDialog>
   );
 }

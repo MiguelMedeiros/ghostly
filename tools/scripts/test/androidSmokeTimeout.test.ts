@@ -52,4 +52,26 @@ describe("android-smoke.mjs step time limits", () => {
     expect(row?.check).toBe("step timed out: adb install -r /fake/ghostly.apk");
     expect(row?.detail).toMatch(/^no answer in 300 s; /);
   });
+
+  it("connects to the WebView's page on a new device connection when the first never answers", () => {
+    const { run, results } = smoke("page");
+    expect(run.error, "the run ended by itself").toBeUndefined();
+    expect(results.filter((r) => r.check.startsWith("step timed out: "))).toEqual([]);
+    expect(results.find((r) => r.check === "WebView found over adb")?.detail).toMatch(/ ms, http:\/\/tauri\.localhost\/$/);
+    const row = results.find((r) => r.check === "WebView page connects");
+    expect(row?.ok).toBe(true);
+    expect(row?.detail).toBe("second try on a new device connection (the first: no answer in 120 s from pid 4242's WebView, Playwright had not closed the device; devtools sockets webview_devtools_remote_4242; app pid 4242)");
+  });
+
+  it("says the first try worked when it did", () => {
+    const { results } = smoke("page-ok");
+    expect(results.find((r) => r.check === "WebView page connects")?.detail).toBe("first try");
+  });
+
+  it("fails at the second try when that one never answers either", () => {
+    const { run, results } = smoke("page-twice");
+    expect(run.error, "the run ended by itself").toBeUndefined();
+    expect(run.status).toBe(1);
+    expect(results.find((r) => r.check.startsWith("step timed out: "))?.check).toBe("step timed out: WebView page connects, second try");
+  });
 });

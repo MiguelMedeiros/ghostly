@@ -13,9 +13,10 @@ import type { Language } from "./settings";
 import { formatAt } from "./time";
 import type { ChatSession } from "./types";
 import { english } from "./english";
+import { problemLine } from "./problemText";
 import { localProvider } from "./providerWords";
 import { useEngineState as usePlainEngineState, useEngineValue as usePlainEngineValue } from "./engineState";
-import type { Translate } from "../contexts/I18nContext";
+import type { Translate, TranslationKey } from "../contexts/I18nContext";
 
 const subscribeProviders = (listener: () => void) => {
   void loadIdentityProviders().catch(() => {});
@@ -78,7 +79,7 @@ export function addableProviders(): IdentityProofProvider[] {
 }
 
 export const providerOf = (id: string) => identityProvider(id);
-/** A provider's name, in `t`'s language for a built-in one (as Add shows it); English by default, as in tests. */
+/** A provider's name in `t`'s language, as the Add picker shows it ("Domínio"): a plugin's in its own words. */
 export const providerLabel = (id: string, t: Translate = english) => {
   const p = identityProvider(id);
   return p ? localProvider(p, t).label : id;
@@ -120,6 +121,20 @@ export function sharedStatus(status: SharedIdentity["status"], t: Translate = en
     case "withdrawn": return t("identities.shared.notShared");
   }
   return status;
+}
+
+/**
+ * The refusals the engine words for the contact who presented the proof (identityProofs.ts onPresent): its timeline
+ * keeps the same words for this side, where "your contact keeps … from you" reads the wrong way round.
+ */
+const RECEIVED_REFUSALS: Record<string, TranslationKey> = {
+  "Your contact keeps too many identities from you already": "identities.share.tooManyTheirs",
+  "Your contact keeps a newer proof of this identity from you": "identities.share.newerTheirs",
+};
+/** Why a contact's identity was not taken here, in one line, as this app says it (never "your contact keeps …"). */
+export function receivedRefusal(error: string, t: Translate = english): string {
+  const key = RECEIVED_REFUSALS[error];
+  return key ? t(key) : problemLine(error, t, "proof");
 }
 
 /** The engine's status, with expiry applied at render time: an expired proof is never shown as verified. */

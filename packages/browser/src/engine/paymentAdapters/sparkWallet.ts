@@ -3,7 +3,8 @@ import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { SPARK_NETWORKS, SPARK_PROVIDER, type PaymentTarget, type SparkNetwork, type WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
-import type { WalletMode } from "../../shared/mints";
+import { redact } from "./providers/types";
+import { SPARK_MAINNET_NEEDS_KEY, sparkMode, sparkNetworkFor } from "./walletModes";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
 import { viewNews } from "./viewNews";
@@ -31,9 +32,7 @@ export interface SparkWalletView {
 interface StoredSpark { network: SparkNetwork; seed: EncryptedSeed; deviceKey: string; apiKey?: EncryptedSeed; createdAt: number }
 export interface SparkCreate { network: SparkNetwork; mnemonic?: string; apiKey?: string }
 
-export const SPARK_MAINNET_NEEDS_KEY = "Spark on Mainnet needs a Breez API key (free, from Breez). Mainnet moves real bitcoin.";
-export const sparkMode = (network: SparkNetwork): WalletMode => network === "bitcoin" ? "mainnet" : "testnet";
-export const sparkNetworkFor = (network: WalletNetwork): SparkNetwork => network === "mainnet" ? "bitcoin" : "regtest";
+export { SPARK_MAINNET_NEEDS_KEY, sparkMode, sparkNetworkFor };
 /** How often the page's balance and history are read while the wallet is open. */
 export const sparkTiming = { pollMs: 10_000, retryMs: 30_000 };
 
@@ -102,7 +101,7 @@ export class SparkWallet {
     let adapter: SparkAdapter | undefined;
     try {
       // Opened before it is saved: a key Breez refuses, or no Spark at all, leaves nothing behind.
-      adapter = await this.gate.within(SparkAdapter.connect({ network: params.network, mnemonic, apiKey }, this.sdk), (a) => a.close());
+      adapter = await this.connect(params.network, mnemonic, apiKey);
       const deviceKey = newDeviceKey();
       const saved: StoredSpark = { network: params.network, seed: await sealSeed(mnemonic, deviceKey), deviceKey, apiKey: apiKey ? await sealSeed(apiKey, deviceKey) : undefined, createdAt: Date.now() };
       await this.save(saved, replaced || undefined);
@@ -117,8 +116,13 @@ export class SparkWallet {
   private async open() {
     if (!this.saved || this.adapter) return;
     const { mnemonic, apiKey } = await this.secrets();
-    this.adapter = await this.gate.within(SparkAdapter.connect({ network: this.saved.network, mnemonic, apiKey }, this.sdk), (a) => a.close());
+    this.adapter = await this.connect(this.saved.network, mnemonic, apiKey);
     this.view = { ...this.view, locked: false }; await this.refresh();
+  }
+  /** The SDK's error comes back with the phrase and the key blanked out, as a Breez Lightning card's does: it is shown and stored. */
+  private connect(network: SparkNetwork, mnemonic: string, apiKey?: string) {
+    return this.gate.within(SparkAdapter.connect({ network, mnemonic, apiKey }, this.sdk), (a) => a.close())
+      .catch((error: unknown) => { throw error instanceof ModeChanged ? error : new Error(redact(error, { mnemonic, apiKey: apiKey ?? "" })); });
   }
   private async secrets() {
     const saved = this.saved!;

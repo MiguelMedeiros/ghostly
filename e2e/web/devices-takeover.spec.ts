@@ -61,6 +61,11 @@ test("the standby takes over with the password, the contact keeps chatting with 
   await dialog.getByTestId("takeover-password").fill(DEVICE_SET_PASSWORD);
   const tookAt = Date.now();
   await dialog.getByTestId("takeover-go").click();
+  // Escape, again and again, during the check: the dialog stays, as its answer is said there (a browser lets a modal
+  // dialog refuse one close request, not the next).
+  await expect(dialog.getByTestId("takeover-checking")).toBeVisible();
+  for (let press = 0; press < 3; press++) await desktop.page.keyboard.press("Escape");
+  await expect(dialog.getByTestId("takeover-checking")).toBeVisible();
   // The password was just typed: the reload into the profile does not ask for it again.
   await expect(desktop.page.getByTitle("New Chat")).toBeVisible({ timeout: 240_000 });
   await expect(desktop.page.getByText("Ghostly is locked")).toHaveCount(0);

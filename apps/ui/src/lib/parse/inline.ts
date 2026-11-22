@@ -25,18 +25,21 @@ const PUNCT = /[\p{P}\p{S}]/u;
 const SPACE = /\s/u;
 const WORD = /[\p{L}\p{N}]/u;
 
-const compiled = new WeakMap<Detector, RegExp>();
-function patternOf(detector: Detector): RegExp {
-  let re = compiled.get(detector);
+const compiled = new WeakMap<RegExp, RegExp>();
+function globalOf(pattern: RegExp): RegExp {
+  let re = compiled.get(pattern);
   if (!re) {
-    const { source, flags } = detector.pattern;
+    const { source, flags } = pattern;
     re = new RegExp(source, flags.includes("g") ? flags : flags + "g");
-    compiled.set(detector, re);
+    compiled.set(pattern, re);
   }
   return re;
 }
+const patternOf = (detector: Detector) => globalOf(detector.pattern);
 
 type Found = { start: number; end: number; data: unknown };
+/** Where a detector's next match may start (its `lead`), not yet read: none starts before `start`. */
+type Lead = { start: number; lead: true };
 
 /** The detector's next accepted match in `text` at or after `from`. */
 function findNext(detector: Detector, text: string, from: number, ctx: ParseContext): Found | null {
@@ -60,9 +63,18 @@ function findNext(detector: Detector, text: string, from: number, ctx: ParseCont
 type Item = { t: "text"; s: string } | { t: "seg"; seg: Segment } | Mark;
 interface Mark { t: "mark"; run: string; canOpen: boolean; canClose: boolean; pair?: "open" | "close" }
 
+/** The detector's next match at or after `from`, or only where it may start when it has a `lead`. */
+function nextFrom(detector: Detector, text: string, from: number, ctx: ParseContext): Found | Lead | null {
+  if (!detector.lead) return findNext(detector, text, from, ctx);
+  const re = globalOf(detector.lead);
+  re.lastIndex = from;
+  const hit = re.exec(text);
+  return hit ? { start: hit.index, lead: true } : null;
+}
+
 /** Pass 2: the detectors' atoms in a stretch of text outside code, and the text between them. */
 function detect(text: string, detectors: readonly Detector[], ctx: ParseContext, out: (string | Segment)[]) {
-  const next = detectors.map((d) => findNext(d, text, 0, ctx));
+  const next = detectors.map((d) => nextFrom(d, text, 0, ctx));
   let cursor = 0;
   for (;;) {
     let best = -1;
@@ -71,13 +83,16 @@ function detect(text: string, detectors: readonly Detector[], ctx: ParseContext,
       if (found && (best < 0 || found.start < next[best]!.start)) best = i;
     }
     if (best < 0) break;
-    const found = next[best]!;
+    const first = next[best]!;
+    // A lead is read only once it comes first: its match starts there or later, and is looked at again.
+    if ("lead" in first) { next[best] = findNext(detectors[best], text, first.start, ctx); continue; }
+    const found = first;
     if (found.start > cursor) out.push(text.slice(cursor, found.start));
     const detector = detectors[best];
     out.push({ type: "atom", kind: detector.kind, text: text.slice(found.start, found.end), data: found.data });
     cursor = found.end;
     // Whatever started inside the atom is gone; look again from its end.
-    for (let i = 0; i < next.length; i++) if (next[i] && next[i]!.start < cursor) next[i] = findNext(detectors[i], text, cursor, ctx);
+    for (let i = 0; i < next.length; i++) if (next[i] && next[i]!.start < cursor) next[i] = nextFrom(detectors[i], text, cursor, ctx);
   }
   if (cursor < text.length) out.push(text.slice(cursor));
 }

@@ -5,7 +5,8 @@ name: CodeQL
 # apart) and ran its 12-minute Rust analysis on every pull request.
 # - A pull request into dev, main or a release branch analyses only the languages its files can change (see `plan`):
 #   Rust when a Rust source, Cargo.toml, Cargo.lock or the toolchain file changes, Actions when a workflow or an action
-#   does, JavaScript/TypeScript unless every change is one that analysis never reads.
+#   does, JavaScript/TypeScript unless every change is one that analysis never reads. A draft and a merge train batch
+#   analyse nothing; leaving draft (ready_for_review) analyses it.
 # - Pushes to dev are not scanned: everything on dev landed through a pull request into dev, which was scanned, and the
 #   daily run below scans dev (the default branch) whole, every language, so dev's alerts are at most a day old.
 # - Pushes to main (what ships) are scanned whole, every language.
@@ -17,6 +18,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main, dev, "release/**"]
   schedule:
     - cron: "47 2 * * *"
@@ -35,6 +37,9 @@ jobs:
     name: Languages to analyse
     if: vars.CODEQL_WORKFLOW == 'on'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       languages: ${{ steps.plan.outputs.languages }}
     steps:
@@ -54,15 +59,36 @@ jobs:
       # language, so a change to it is tried on all three. Names are read NUL-separated and unquoted: by default git
       # C-quotes a name with a non-ASCII byte, a `"` or a `\` ("a\303\247.rs"), which no pattern below would match.
       # `shell: bash` runs with pipefail, so a git that fails is not read as a short list.
+      # A merge train batch (batch/<base>-<stamp>, from this repository) analyses nothing: each pull request in it was
+      # analysed on its own pull request, the train lands each of them as its own merge, never the batch, and reads no
+      # CodeQL result. A fork's pull request is analysed whatever its branch is called.
+      # A draft analyses nothing either: leaving draft (ready_for_review) analyses it, and so does every push after. As
+      # in ci.yml, the draft state is read from the API, not the event (#742); if the read fails, it is analysed.
       - name: Which languages this change needs
         id: plan
         shell: bash
         env:
           EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
         run: |
           all='["actions","javascript-typescript","rust"]'
           if [[ "$EVENT" != "pull_request" ]]; then
             echo "languages=$all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$HEAD_REF" == batch/* && -n "$REPO" && "$HEAD_REPO" == "$REPO" ]]; then
+            echo "::notice::A merge train batch: each pull request in it was analysed on its own pull request, and the batch is never merged: nothing analysed"
+            echo "languages=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          draft=$(gh api "$PR_URL" --jq .draft) || draft=unknown
+          if [[ "$draft" == "true" ]]; then
+            echo "::notice::A draft: nothing analysed until it is marked ready"
+            echo "languages=[]" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if ! files=$(git -c core.quotePath=false diff -z --name-only --no-renames HEAD^1 HEAD | tr '\0' '\n') || [[ -z "$files" ]]; then
