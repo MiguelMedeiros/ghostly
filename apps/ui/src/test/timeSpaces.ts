@@ -1,7 +1,8 @@
 /**
  * `text` with its no-break spaces (U+00A0, U+202F) as plain ones, for tests that compare a time and not its spaces: the
- * space before English's "PM" is a plain one the app holds with U+00A0 on ICU 78, while Node 22's V8 (ICU 74-77) writes
- * a plain one from `format`/`toLocaleTimeString` though `formatToParts` says U+202F, so neither text is the same everywhere.
+ * space before English's "PM" is a plain one the app holds with U+00A0 where the runtime's `formatToParts` reports a plain
+ * space (Node 26), while older V8 (Node 20-24) reports U+202F in its parts but writes a plain one from
+ * `format`/`toLocaleTimeString`, so neither text is the same everywhere.
  */
 export const plainSpaces = (text: string) => text.replace(/[\u00a0\u202f]/g, " ");
 

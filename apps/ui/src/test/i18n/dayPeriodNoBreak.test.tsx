@@ -31,7 +31,7 @@ describe("an Arabic time keeps its day period on its line", () => {
     }
   });
 
-  // ICU 78 writes English's "PM" after a plain space, which the app holds; Node 22's V8 (ICU 74-77) says U+202F in its parts and is left as it writes.
+  // Node 26's V8 puts a plain space before English's "PM" in its parts, which the app holds; older V8 (Node 20-24, CI's) says U+202F there and the text is left as it writes.
   it("other languages read as before, a plain space before a day period held where the runtime writes one", () => {
     const options: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
     const format = new Intl.DateTimeFormat("en", options);
