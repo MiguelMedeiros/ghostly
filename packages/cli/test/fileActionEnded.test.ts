@@ -187,6 +187,32 @@ describe("file actions on an ended 1:1 transfer", () => {
   });
 
   /**
+   * On a nearly full disk, where this refusal is met: sizes under a megabyte read "(0.1 MB) does not fit: 0 MB free",
+   * or the same 0.1 MB on both sides, where the engine's line (released) said "48.0 KB free". What is needed rounds up
+   * and the room down, so a file a few bytes short of the room never reads as if it fit ("(61 KB) … 61 KB free").
+   */
+  it("accept refused for no room on a nearly full disk names sizes under a megabyte in KB, not 0 MB, never as if it fit", async () => {
+    const id = "chat-one-in-small";
+    await fileStore.put({ id, linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "notes.txt", size: 61_440, mime: "text/plain", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 61_440 } } as never);
+    const { ctx, node } = world({ [id]: { state: "transferring", stage: "asking", transferred: 0, size: 61_440, direction: "in", room: 49_152 } as FileTransferView });
+    const refused = async (size: number, coming: number, room: number) => {
+      node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file"), { room, size, coming }));
+      return ((await callApi(ctx, "file.action", { file: id, action: "accept" }).catch((e: unknown) => e)) as Error).message;
+    };
+    const tail = `. Free some space, then ghostly file accept ${id} again (or file decline)`;
+    expect(await refused(61_440, 0, 49_152)).toBe(`notes.txt (62 KB) does not fit: 49 KB free${tail}`);
+    expect(await refused(40_960, 20_480, 49_152)).toBe(`notes.txt (41 KB) does not fit: 49 KB free, and 21 KB of files still coming need it first${tail}`);
+    expect(await refused(512, 0, 0)).toBe(`notes.txt (512 B) does not fit: 0 B free${tail}`);
+    // A few bytes short: rounded to nearest these read "(61 KB) … 61 KB free", "41 + 20 KB … 61 KB free", "(1 MB) … 1 MB free".
+    expect(await refused(61_000, 0, 60_999)).toBe(`notes.txt (61 KB) does not fit: 60 KB free${tail}`);
+    expect(await refused(40_600, 20_400, 60_600)).toBe(`notes.txt (41 KB) does not fit: 60 KB free, and 21 KB of files still coming need it first${tail}`);
+    expect(await refused(1_000_400, 0, 999_600)).toBe(`notes.txt (1.1 MB) does not fit: 999 KB free${tail}`);
+    // The unit is chosen after rounding up: not "1000 KB".
+    expect(await refused(999_001, 0, 0)).toBe(`notes.txt (1 MB) does not fit: 0 B free${tail}`);
+    expect(await refused(24_460_000, 0, 24_450_000)).toBe(`notes.txt (24.5 MB) does not fit: 24.4 MB free${tail}`);
+  });
+
+  /**
    * The files still coming that hold the room are named, with their chat and the command that cancels each: the line
    * said only how many MB of them there were, and nothing said which files, nor in which chat, to cancel to make room.
    */
