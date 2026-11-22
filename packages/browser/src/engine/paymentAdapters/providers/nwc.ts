@@ -1,4 +1,4 @@
-import { decodeBolt11 } from "@ghostly/core";
+import { decodeBolt11, sanitizeDisplayText } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import * as nip04 from "nostr-tools/nip04";
 import * as nip44 from "nostr-tools/nip44";
@@ -306,7 +306,8 @@ export class NwcLightning implements LightningProvider {
       if (!network) throw new Error("The wallet is on a network Ghostly does not know");
       this.network = network;
     }
-    if (typeof info.alias === "string" && info.alias.trim()) this.alias = info.alias.trim().slice(0, 40);
+    const alias = typeof info.alias === "string" ? sanitizeDisplayText(info.alias.replace(/\s+/g, " "), 40) : undefined;
+    if (alias) this.alias = alias;
     if (Array.isArray(info.methods) && info.methods.every((m) => typeof m === "string")) {
       this.capabilities = this.capabilitiesOf(new Set(info.methods as string[]));
     }

@@ -61,6 +61,22 @@ const BROWSER_PACKAGES = new Map([
 ]);
 
 /**
+ * nostr-tools pins exact, older versions of the noble and scure libraries; the app and its other libraries share
+ * newer ones of the same major. nostr-tools gets those, or every browser build carries a second secp256k1, SHA-2 and
+ * base encoders in its first load. Only nostr-tools: other libraries' copies are of an older major (ethers' noble 1.x).
+ */
+const PINNED_CRYPTO = /^@(noble\/(ciphers|curves|hashes)|scure\/(base|bip32|bip39))(\/|$)/;
+const NOSTR_TOOLS = "/node_modules/nostr-tools/";
+
+/**
+ * The Bitcoin descriptor libraries are CommonJS and `require()` noble's secp256k1; a `require()` keeps every export
+ * of the module it loads, so they get a module with only the two they use (src/platform/nobleSecp256k1.ts).
+ */
+const NOBLE_SECP256K1 = /^@noble\/curves\/secp256k1(\.js)?$/;
+const DESCRIPTORS = "/node_modules/@bitcoinerlab/";
+const FROM_ROOT = viteId(resolve(repositoryRoot, "package.json"));
+
+/**
  * `@synonymdev/pubky`'s browser entry carries its wasm (2.5 MB) as base64 and compiles it at once: its chunk was 1.1 MB
  * gzip, 0.34 MB more than the wasm file it ships beside it. A build swaps the inline copy for that file, fetched and
  * compiled as it arrives, the way the wallets load theirs (bdkSdk.ts), when `pubkyWasmReady()` is first called: the
@@ -106,6 +122,8 @@ export function ghostlyPlatformModules(): Plugin {
       const sdkModule = SDK_MODULES.get(source) ?? BROWSER_PACKAGES.get(source);
       if (sdkModule) return sdkModule;
       if (!importer || viteId(importer).startsWith(platform(""))) return null;
+      if (NOBLE_SECP256K1.test(source) && viteId(importer).includes(DESCRIPTORS)) return platform("nobleSecp256k1.ts");
+      if (PINNED_CRYPTO.test(source) && viteId(importer).includes(NOSTR_TOOLS)) return this.resolve(source, FROM_ROOT, { ...options, skipSelf: true });
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (!resolved) return null;
       const id = viteId(resolved.id);

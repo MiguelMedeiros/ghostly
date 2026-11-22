@@ -55,7 +55,7 @@ export function useMentionPicker({ mentions, text, setText, textareaRef, caretRe
 
   const choose = (candidate: MentionCandidate) => {
     if (!query) return;
-    const label = candidate.key === MENTION_EVERYONE ? "everyone" : mentionLabel(candidate.name);
+    const label = candidate.key === MENTION_EVERYONE ? "everyone" : mentionLabel(candidate.label ?? candidate.name);
     const next = insertMention(text, query, label);
     caretRef.current = next.caret;
     // The others moved by the insertion now, and this one placed in the new text, so the change is not moved again.
@@ -105,7 +105,7 @@ export function useMentionPicker({ mentions, text, setText, textareaRef, caretRe
         <div key={c.key} id={optionId(i)} role="option" aria-selected={i === current} data-testid="mention-option" data-key={c.key}
           // The field keeps the focus: a press chooses without taking it.
           onMouseDown={e => e.preventDefault()} onClick={() => choose(c)} onMouseMove={() => setActive(i)}
-          className={`flex cursor-pointer items-baseline gap-2 px-3 py-2 text-sm max-md:min-h-11 max-md:py-3 ${i === current ? "bg-surface-hover" : ""}`}>
+          className={`flex cursor-pointer items-baseline gap-2 px-3 py-2 text-sm max-md:min-h-11 max-md:py-3 ${i === current ? "bg-surface-hover forced-colors:outline-2 forced-colors:-outline-offset-2 forced-colors:outline-[color:Highlight]" : ""}`}>
           {/* Each in its own direction: a Latin name cut keeps its start in Arabic, and the key's end reads "…jzg98o"
               there too, not with the "…" after it. */}
           <span dir="auto" className="truncate font-medium text-text-primary">{c.key === MENTION_EVERYONE ? "@everyone" : c.name}</span>

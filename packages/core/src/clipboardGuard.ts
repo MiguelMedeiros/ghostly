@@ -6,7 +6,10 @@
  * - `execCommand("copy")` and `execCommand("cut")` work only while one of the person's own inputs in that window is
  *   being dispatched (a trusted `pointerdown`, `pointerup`, `mousedown`, `mouseup`, `click`, `auxclick`, `dblclick`,
  *   `contextmenu`, `touchstart`, `touchend`, `keydown`, `keypress` or `keyup`; no script can fire one), or a trusted
- *   `submit` or `change` that began while such an input's window was open. That window opens as the input is
+ *   `submit` or `change` that began while such an input's window was open, and only within a second of that input
+ *   (from its own `timeStamp`, or from its dispatch where that is later or on another clock): Chromium lets a copy
+ *   write for seconds after a tap, and a page that spins in its own listener keeps the input being dispatched all
+ *   that time, while the person may copy something of their own in Ghostly. That window opens as the input is
  *   dispatched and closes at the first callback the guard queued at any input that runs (a message on a channel of
  *   its own, a `user-blocking` task where `scheduler.postTask` exists, an animation frame), so it holds the input's
  *   own dispatch and its default action: the submit of a click on a submit button or of Enter in a field, the change
@@ -25,7 +28,9 @@
  *   this script first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
  *   a `javascript:` URL is refused (its own Trusted Types default policy; one passes every other string on as it is,
  *   or, once the page made its own `default` policy, to that one's rules: the page's `createPolicy("default")` gets the
- *   guard's policy back with them, and the copy of itself it puts in a `srcdoc` frame skips them).
+ *   guard's policy back with them, and the copy of itself it puts in a `srcdoc` frame skips them);
+ * - starts a worker made from a `blob:` URL of the page's own from a script that makes a pass-through Trusted Types
+ *   `default` policy in it first, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`, whichever of the two runs first).
  * A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
  * bridge's guard reaches the app's frame then): there this script only watches the new document. Each document it
  * watches is marked (`ghostlyClipboardGuard`, fixed in place): the bridge reads that to know the guard ran in the page
@@ -112,6 +117,11 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
       const dispatching = (event, trusted) => {
         try { return apply(trusted, event, []) === true && apply(phase, event, []) !== 0; } catch (e) { return false; }
       };
+      const stamp = describe(w.Event.prototype, "timeStamp");
+      const clock = w.performance;
+      const tick = clock && clock.now;
+      const time = () => { try { return apply(tick, clock, []); } catch (e) { return NaN; } };
+      const recent = (at) => time() - at <= 1000;
       const shutters = [];
       try {
         const channel = new w.MessageChannel();
@@ -132,14 +142,21 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
       } catch (e) {}
       let tap = null;
       let trusted = null;
+      let tapped = NaN;
       let open = 0;
       let follows = null;
       const settle = () => { open = 0; follows = null; };
       const seen = (event) => {
         const found = trust(event);
         if (found === null) return;
+        let at = time();
+        try {
+          const given = apply(stamp.get, event, []);
+          if (given >= 0 && given < at) at = given;
+        } catch (e) {}
         tap = event;
         trusted = found;
+        tapped = at;
         if (shutters.length === 0) return;
         open = 1;
         for (let i = 0; i < shutters.length; i++) { try { shutters[i](); } catch (e) {} }
@@ -149,13 +166,13 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
       const followed = (event) => {
         if (open === 0) return;
         const found = trust(event);
-        if (found !== null) follows = { event: event, trusted: found, next: follows };
+        if (found !== null) follows = { event: event, trusted: found, at: tapped, next: follows };
       };
       apply(listen, w, ["submit", followed, true]);
       apply(listen, w, ["change", followed, true]);
       const tapping = () => {
-        if (tap !== null && dispatching(tap, trusted)) return true;
-        for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted)) return true;
+        if (tap !== null && dispatching(tap, trusted) && recent(tapped)) return true;
+        for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted) && recent(f.at)) return true;
         return false;
       };
       const guarded = function execCommand(command) {
@@ -191,6 +208,66 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
             rules = given;
             return policy;
           };
+        } catch (e) {}
+      }
+      if (types && w.URL && w.Blob && !describe(w, "ghostlyWorkerGuard")) {
+        try {
+          define(w, "ghostlyWorkerGuard", { value: true });
+          const construct = w.Reflect.construct;
+          const json = w.JSON.stringify;
+          const later = w.setTimeout;
+          const Blob = w.Blob;
+          const sized = describe(Blob.prototype, "size").get;
+          const make = w.URL.createObjectURL;
+          const revoke = w.URL.revokeObjectURL;
+          const policy = "if (self.trustedTypes && !self.trustedTypes.defaultPolicy) { try { self.trustedTypes.createPolicy('default', { createHTML: (s) => s, createScript: (s) => s, createScriptURL: (s) => s }); } catch (e) {} }";
+          const script = (code) => apply(make, null, [new Blob([code], { type: "text/javascript" })]);
+          const known = { __proto__: null };
+          let first = null;
+          w.URL.createObjectURL = function createObjectURL(object) {
+            const made = apply(make, this, arguments);
+            try { apply(sized, object, []); known[made] = { blob: object, inner: null, classic: null, module: null }; } catch (e) {}
+            return made;
+          };
+          w.URL.revokeObjectURL = function revokeObjectURL(url) {
+            try {
+              const key = text(url);
+              const entry = known[key];
+              if (entry) {
+                delete known[key];
+                const ours = [entry.inner, entry.classic, entry.module];
+                apply(later, w, [() => { for (let i = 0; i < 3; i++) { if (ours[i] !== null) apply(revoke, null, [ours[i]]); } }, 60000]);
+              }
+            } catch (e) {}
+            return apply(revoke, this, arguments);
+          };
+          const start = (url, options) => {
+            const entry = known[text(url)];
+            if (!entry) return url;
+            const kind = options && typeof options === "object" && options.type === "module" ? "module" : "classic";
+            if (entry[kind] === null) {
+              if (entry.inner === null) entry.inner = apply(make, null, [entry.blob]);
+              if (kind === "module" && first === null) first = script(policy);
+              entry[kind] = script(kind === "module" ? "import " + json(first) + "; import " + json(entry.inner) + ";" : policy + " importScripts(" + json(entry.inner) + ");");
+            }
+            return entry[kind];
+          };
+          const makers = ["Worker", "SharedWorker"];
+          for (let i = 0; i < makers.length; i++) {
+            const Real = w[makers[i]];
+            if (typeof Real !== "function") continue;
+            const started = function (url) {
+              if (new.target === undefined) return apply(Real, this, arguments);
+              const args = [];
+              for (let j = 0; j < arguments.length; j++) args[j] = arguments[j];
+              if (args.length > 0) { try { args[0] = start(url, args[1]); } catch (e) {} }
+              return construct(Real, args, new.target);
+            };
+            define(started, "name", { value: makers[i] });
+            started.prototype = Real.prototype;
+            define(Real.prototype, "constructor", { value: started, writable: true, enumerable: false, configurable: true });
+            w[makers[i]] = started;
+          }
         } catch (e) {}
       }
       const reopen = proto.open;
@@ -259,4 +336,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-VQmaFzhHMo1TP1ODnuXq72M52+6qthD/ZZHQsQiYAdY='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-D8U3zSg1xP77RbZuV/DekRuM6nx80gIN5mh2TQAtZ40='";

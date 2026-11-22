@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
+import { BlockList, isIP, isIPv6 } from 'node:net'
+
+// The per-minute counts read a monotonic clock: a host clock set back (an NTP step, a resumed VM) would otherwise keep
+// every request before the step in its minute, refusing an address or subscription near its limit for the whole step.
+const monotonicNow = () => performance.now()
 
 /**
  * A push relay for Ghostly's wake-up push (WISP 401 § Wake-up push). A browser page may not post to a push
@@ -44,6 +49,23 @@ const b64url = text => Buffer.from(text.replace(/-/g, '+').replace(/_/g, '/'), '
  */
 const asSent = url => { url.hash = ''; if (!url.search) url.search = ''; return url }
 
+/** Microsoft's push service, whose endpoints carry their subscription in a query: `/w/?token=…`. */
+const WNS = /(^|\.)notify\.windows\.com$/
+
+/**
+ * What the push service routes the endpoint on, or nothing for one the relay does not forward. A push service decodes
+ * the path before routing and reads no query, so a `%` in the path or a query would spell one subscription many ways,
+ * each a count of its own: refused (a real path is letters, digits, `-_:/.`). WNS reads one `token` from the query:
+ * that one alone, counted by its value.
+ */
+const routedOn = url => {
+  if (url.pathname.includes('%')) return
+  if (!url.search) return url.href
+  const params = [...url.searchParams]
+  if (!WNS.test(url.hostname) || params.length !== 1 || params[0][0] !== 'token' || !params[0][1]) return
+  return `${url.origin}${url.pathname}?token=${encodeURIComponent(params[0][1])}`
+}
+
 /** The request to forward, or a reason it is refused. */
 export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAULT_LIMITS.bodyBytes } = {}) {
   let request
@@ -52,6 +74,8 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   let url
   try { url = asSent(new URL(endpoint)) } catch { return { error: 'No endpoint' } }
   if (url.protocol !== 'https:' || url.username || url.password || url.port || !hosts.some(host => host.test(url.hostname))) return { error: 'Not a push service' }
+  const routed = routedOn(url)
+  if (!routed) return { error: 'Not a push endpoint' }
   if (typeof body !== 'string' || !/^[A-Za-z0-9_-]*$/.test(body)) return { error: 'No body' }
   const bytes = b64url(body)
   if (bytes.length > bodyBytes) return { error: 'Too large' }
@@ -71,7 +95,7 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
   if (!authorization || !VAPID.test(authorization)) return { error: 'No VAPID authorization' }
   // The subscription it wakes: a push service refuses a key the subscription was not made with, so another key wakes
   // nothing. Hashed, so the relay's table holds no endpoint and an entry weighs the same however long the URL.
-  const subscription = createHash('sha256').update(`${url.href} ${authorization.split('k=').pop()}`).digest('base64')
+  const subscription = createHash('sha256').update(`${routed} ${authorization.split('k=').pop()}`).digest('base64')
   return { endpoint: url.href, headers: forwarded, body: bytes, subscription }
 }
 
@@ -105,11 +129,39 @@ const refusedByFetch = error => error instanceof TypeError && (!('cause' in erro
  * client's to write). With none configured, the header is ignored.
  */
 export function clientAddress (req, proxies = 0) {
-  const socket = req.socket.remoteAddress ?? ''
-  if (!proxies) return socket
+  return forwardedAddress(req, proxies) ?? req.socket.remoteAddress ?? ''
+}
+
+/**
+ * Whether an address is loopback, private or link-local: where a reverse proxy on the same host or network connects
+ * from. Clients refused at their address's rate from one of these, with no proxy setting, are likely one proxy's.
+ */
+const NEARBY = new BlockList()
+for (const [network, prefix, type] of [['127.0.0.0', 8, 'ipv4'], ['10.0.0.0', 8, 'ipv4'], ['172.16.0.0', 12, 'ipv4'], ['192.168.0.0', 16, 'ipv4'], ['169.254.0.0', 16, 'ipv4'], ['100.64.0.0', 10, 'ipv4'], ['::1', 128, 'ipv6'], ['fc00::', 7, 'ipv6'], ['fe80::', 10, 'ipv6']]) NEARBY.addSubnet(network, prefix, type)
+export const nearbyAddress = address => isIP(address ?? '') > 0 && NEARBY.check(address, isIPv6(address) ? 'ipv6' : 'ipv4')
+
+/** The client's address from `X-Forwarded-For` behind `proxies` proxies (see clientAddress), or null without that entry. */
+export function forwardedAddress (req, proxies = 0) {
+  if (!proxies) return null
+  const hops = forwardedHops(req)
+  return hops.length >= proxies ? hops[hops.length - proxies] : null
+}
+
+/** The entries of a request's `X-Forwarded-For`, in order (none without the header). */
+export function forwardedHops (req) {
   const header = req.headers['x-forwarded-for']
-  const hops = (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
-  return hops.length >= proxies ? hops[hops.length - proxies] : socket
+  return (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
+}
+
+/**
+ * The line for a request with `entries` X-Forwarded-For entries, fewer than GHOSTLY_RELAY_PROXIES (`proxies`) or than
+ * any request before: the setting names more proxies than write the header. Until then a client writing the header
+ * itself could choose the address it counted as; from then on the relay reads only as deep as `entries`.
+ */
+export function fewerHops (entries, proxies) {
+  const before = 'until now a client writing the header itself could choose the address it counts as'
+  if (!entries) return `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set: ${before}; from now on the header is ignored and each counts as the proxy, so have the proxy write it or leave the setting out`
+  return `requests carry ${entries} X-Forwarded-For ${entries === 1 ? 'entry' : 'entries'} though GHOSTLY_RELAY_PROXIES is ${proxies}: ${before}; from now on each counts by entry ${entries} from the end, so set it to the number of proxies that write the header`
 }
 
 /**
@@ -172,6 +224,7 @@ export function refusalLog (log) {
  * and says whether it was under its limit; a newcomer to a full table drops the idle (a scan at most once a second),
  * else the entry seen longest ago that is under its limit (the oldest of all only when every one is at it). Dropped at
  * its limit, a key would start its minute over: newcomers enough would buy it another `perMinute`.
+ * `now` is a monotonic time (monotonicNow), so a clock step neither extends nor shortens a minute.
  */
 function minuteCounts (perMinute, tracked) {
   const recent = new Map()
@@ -221,10 +274,15 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   const flush = () => { refusals.flush(); forwards.flush(); failures.flush() }
   // Forwards waiting on the push service: counted once it answers, so the ones a stop cuts are said apart.
   let forwarding = 0
-  const pruning = setInterval(() => { prune(Date.now()); flush() }, 60_000)
+  const pruning = setInterval(() => { prune(monotonicNow()); flush() }, 60_000)
   pruning.unref?.()
   // Once per start: a proxy in front the relay was not told about makes every client count as that proxy.
   let hinted = false
+  let nearbyHinted = false
+  // The fewest `X-Forwarded-For` entries a request has come with, from `proxies` down: each proxy in front adds one and
+  // a client can only add more, so no more proxies than that write the header. Read deeper, the counted entry would be
+  // one the client wrote (a new address per request if it likes), so the relay reads no deeper than that from then on.
+  let trusted = proxies
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const allowed = new Set(origins.map(origin => originOf(origin) ?? origin))
 
@@ -235,8 +293,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     // A refused page still gets its preflight and a readable 403 (it posts JSON, so the browser asks first): without
     // them its fetch fails as a CORS error and says nothing. The relay refuses the POST itself, forwarding nothing.
     const cors = origin === undefined ? {} : { 'Access-Control-Allow-Origin': allowed.size ? origin : '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }
-    const answer = (status, value) => { res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
-    const refuse = (why, status, value, detail) => { refusals.refuse(why, detail); answer(status, value) }
+    const answer = (status, value, headers = {}) => { res.writeHead(status, { ...cors, ...headers, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
+    const refuse = (why, status, value, detail, headers) => { refusals.refuse(why, detail); answer(status, value, headers) }
     // A monitor's check: up, and nothing else. Anyone may read it (behind a proxy every caller is on loopback), so it
     // has no counts: those move with each push, and on a relay one person runs they would tell when that person wakes
     // someone. The operator has them in the log. A monitor's HEAD and its query string are read as the GET (Node
@@ -248,16 +306,29 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     }
     // The preflight is answered, not refused: the POST after it is the one refusal of that page's attempt.
     if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return }
-    if (req.method !== 'POST') return refuse('method', 405, { error: 'No' })
+    // Someone opening the relay's address in a browser (an operator checking it runs) reads what it is and what it
+    // takes, as on the HyperDHT relay; `Allow` as a 405 must carry it.
+    if (req.method !== 'POST') return refuse('method', 405, { error: 'Ghostly push relay: POST a push to it' }, undefined, { Allow: 'POST, OPTIONS' })
     // A refusal of kind `origin`, its first line in a minute naming the origin so a misspelt GHOSTLY_RELAY_ORIGINS shows.
     if (refused) return refuse('origin', 403, { error: 'Origin not allowed' }, originShown(origin))
 
-    const ip = rateKey(clientAddress(req, proxies))
     if (!proxies && !hinted && req.headers['x-forwarded-for'] !== undefined) {
       hinted = true
       log('requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set: every client counts as the proxy')
+    } else if (proxies) {
+      const entries = forwardedHops(req).length
+      if (entries < trusted) { trusted = entries; log(fewerHops(entries, proxies)) }
     }
-    if (!addresses.take(ip, Date.now())) return refuse('rate', 429, { error: 'Too many' })
+    const ip = rateKey(forwardedAddress(req, trusted) ?? req.socket.remoteAddress ?? '')
+    if (!addresses.take(ip, monotonicNow())) {
+      // A proxy that writes no header and was not named: everyone behind it shares this one address's rate. Said once.
+      if (!proxies && !nearbyHinted && req.headers['x-forwarded-for'] === undefined && nearbyAddress(req.socket.remoteAddress)) {
+        nearbyHinted = true
+        log(`requests refused at the rate of ${perMinute} a minute from one address come from a loopback or private address: if they come through a proxy, have it write X-Forwarded-For and set GHOSTLY_RELAY_PROXIES, or every client shares that rate`)
+      }
+      // The first line of a minute names the limit: the code holds it, no setting moves it.
+      return refuse('rate', 429, { error: 'Too many' }, `(${perMinute} ${perMinute === 1 ? 'request' : 'requests'} a minute from one address)`)
+    }
 
     if (Number(req.headers['content-length']) > requestBytes) return refuse('size', 413, { error: 'Too large' })
     const chunks = []
@@ -273,11 +344,14 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       // `<name> twice` names a header the client chose: the log says only which kind it was.
       if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
       // Counted only for a request it would forward: a refused one wakes nobody.
-      const taken = Date.now()
-      if (!subscriptions.take(request.subscription, taken)) return refuse('subscription rate', 429, { error: 'Too many' })
+      const taken = monotonicNow()
+      if (!subscriptions.take(request.subscription, taken)) return refuse('subscription rate', 429, { error: 'Too many' }, `(${perEndpoint} ${perEndpoint === 1 ? 'forward' : 'forwards'} a minute to one subscription)`)
       forwarding++
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })
+        // Only the status is read. The body is dropped now: the timeout above ends at the headers, and a body the push
+        // service stalls would otherwise hold its connection (and a file descriptor) for as long as the far end keeps it.
+        response.body?.cancel().catch(() => {})
         // The push service refused the request itself (a token it does not accept, a subscription gone, a malformed
         // push): it woke nobody, so the subscription's count is given back and only the sender's address has spent one.
         if (refusedPush(response.status)) subscriptions.giveBack(request.subscription, taken)

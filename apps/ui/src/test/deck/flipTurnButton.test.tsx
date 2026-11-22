@@ -1,5 +1,6 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { ForwardArrow } from "../../components/ComposerSheet";
 import { FlipTurnButton } from "../../components/deck/Flip";
 import type { Language } from "../../lib/settings";
 import { translatorFor } from "../../locales";
@@ -34,4 +35,19 @@ describe("A turned card's back button", () => {
       }
     });
   }
+
+  // A right-to-left language puts it at the card's right: a chevron still pointing left pointed on, into the card.
+  it("its chevron is mirrored in a right-to-left language, so it points back", () => {
+    renderApp(<FlipTurnButton testId="turn" label="Back to the cards" onClick={() => {}} />, { language: "ar" });
+    expect(screen.getByTestId("turn").querySelector("svg")).toHaveClass("rtl:-scale-x-100");
+  });
+});
+
+describe("A sheet action's arrow", () => {
+  // It follows the action's words: in a right-to-left language it sits at their left, and pointing right it pointed
+  // back at them instead of on.
+  it("is mirrored in a right-to-left language, so it points on", () => {
+    renderApp(<button type="button" data-testid="go">Go<ForwardArrow /></button>, { language: "ar" });
+    expect(screen.getByTestId("go").querySelector("svg")).toHaveClass("rtl:-scale-x-100");
+  });
 });

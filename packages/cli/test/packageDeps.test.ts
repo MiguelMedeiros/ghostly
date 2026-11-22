@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { expect, it } from "vitest";
 // covers: headless.package
 
@@ -45,6 +47,25 @@ it("ships every chunk and WebAssembly file the bundle loads", () => {
   expect([...loaded].filter((path) => !existsSync(join(root, path))).sort()).toEqual([]);
   const packed = new Set(npmPack(root).map((f) => f.path));
   expect([...loaded].filter((path) => !packed.has(path)).sort()).toEqual([]);
+});
+
+/**
+ * The WebAssembly of a package npm installs with the CLI (Bark, BDK, Fedimint) is read from that package: a copy in
+ * dist/ was the same 21 MB a second time in every install (1.13.1 shipped 58 MB). Only the bundled SDKs' stay beside.
+ */
+it("reads an installed package's WebAssembly from that package, not from a copy in dist/", async () => {
+  const root = join(import.meta.dirname, "..");
+  const assets = join(root, "dist", "assets");
+  const files = readdirSync(assets);
+  expect(files.filter((f) => f.endsWith(".wasm")).sort()).toEqual(["breez_sdk_spark_wasm_bg.wasm", "ghostly_iroh_web_bg.wasm"]);
+  const installed = createRequire(join(root, "package.json"));
+  for (const spec of ["@bitcoindevkit/bdk-wallet-web/bitcoindevkit_bg.wasm", "@fedimint/fedimint-client-wasm-bundler/fedimint_client_wasm_bg.wasm", "@secondts/bark/web/bark_ffi_wasm_bg.wasm"]) {
+    const name = spec.slice(spec.lastIndexOf("/") + 1, -".wasm".length);
+    const chunk = files.find((f) => f.startsWith(`${name}-`) && f.endsWith(".js"));
+    expect(chunk, spec).toBeDefined();
+    const { default: url } = await import(pathToFileURL(join(assets, chunk!)).href) as { default: string };
+    expect(fileURLToPath(url)).toBe(installed.resolve(spec));
+  }
 });
 
 /** What `npm pack` sends: npm 10 and 11 answer `[{files}]`, npm 12 `{"<name>": {files}}`. */

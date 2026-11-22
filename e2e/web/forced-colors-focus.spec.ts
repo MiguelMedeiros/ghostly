@@ -75,3 +75,31 @@ test("every Tab stop on the first-run home and in Settings shows the focus, in f
   expect(settings.length).toBeGreaterThan(10);
   expect.soft(unmarked(settings), `Settings, forced colors (${settings.length} stops)`).toEqual([]);
 });
+
+test("the option the arrow keys are on in a list of choices shows, in forced colors", { tag: ["@feature:app.keyboard", "@feature:app.theme"] }, async ({ peer }) => {
+  const { page } = await peer("alice");
+  await page.goto("/#/settings");
+  await page.addStyleTag({ content: "*, *::before, *::after { transition: none !important; animation: none !important; }" });
+  await page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  const language = page.getByTestId("settings-language");
+  await language.focus();
+  await page.keyboard.press("ArrowDown");
+  const list = page.getByTestId("settings-language-list");
+  await expect(list).toBeVisible();
+  await page.keyboard.press("ArrowDown");
+  // Which option the keys are on, and whether each option draws a mark of its own: an outline, or a fill unlike the list's.
+  const options = await list.getByRole("option").evaluateAll((all) => all.map((el) => {
+    const own = getComputedStyle(el);
+    const list = getComputedStyle(el.parentElement!);
+    return {
+      name: el.textContent?.trim().slice(0, 20),
+      active: el.hasAttribute("data-active"),
+      marked: (own.outlineStyle !== "none" && parseFloat(own.outlineWidth) >= 1) || own.backgroundColor !== list.backgroundColor && own.backgroundColor !== "rgba(0, 0, 0, 0)",
+    };
+  }));
+  const active = options.filter((o) => o.active);
+  expect(active, "one option under the keys").toHaveLength(1);
+  expect(active[0].marked, `${active[0].name}: marked under the keys`).toBe(true);
+  expect(options.filter((o) => !o.active && o.marked), "no other option marked").toEqual([]);
+  await page.keyboard.press("Escape");
+});

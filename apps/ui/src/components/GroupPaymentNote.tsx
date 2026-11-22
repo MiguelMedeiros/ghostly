@@ -1,12 +1,7 @@
 import type { GroupPayNote, GroupView } from "@ghostly/browser/shared/types";
-import { useI18n, type Translate } from "../contexts/I18nContext";
+import { useI18n } from "../contexts/I18nContext";
 import { groupPayStatus, groupPayTitle, railName } from "../lib/groupPayments";
-import { satsIn } from "./NetworkTag";
-import { formatAmount, formatTokenAmount } from "../lib/amount";
-
-const amountOf = (note: GroupPayNote, t: Translate) => note.decimals
-  ? `${formatTokenAmount(note.amount, note.decimals, t.language)} ${note.unit === "testusdt" ? t("payments.group.testUsdt") : "USDT"}`
-  : `${formatAmount(Number(note.amount), t.language)} ${satsIn(t, note.test ? "testnet" : "mainnet", Number(note.amount))}`;
+import { groupPayAmount as amountOf } from "./paymentWords";
 
 /**
  * A payment between two members, as everyone in the group sees it: who pays whom, how much, over what, and how it

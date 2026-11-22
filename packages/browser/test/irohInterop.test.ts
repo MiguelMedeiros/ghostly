@@ -1,15 +1,13 @@
 import "fake-indexeddb/auto";
-import { resolve } from "node:path";
 import { expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, createLink, type PairingState } from "@ghostly/core";
 import { db } from "../src/engine/db";
 import { Outbox } from "../src/engine/outbox";
-import { nativePeer } from "./helpers/nativePeer";
+import { IROH_PEER, nativePeer } from "./helpers/nativePeer";
 // covers-gated: transport.iroh, chat.paired.reconnect, chat.paired.offline-send, core.peer-keys
 
 it.skipIf(process.env.TEST_NATIVE !== "1")("real Iroh peers preserve pins, history and retry IDs through reconnect", async () => {
-  const binary = resolve("../../target/debug/examples/iroh-peer");
-  const peers = await Promise.all([nativePeer(binary, 31), nativePeer(binary, 32)]);
+  const peers = await Promise.all([nativePeer(IROH_PEER, 31), nativePeer(IROH_PEER, 32)]);
   const invitation = createLink();
   const params = [invitation.mine, invitation.invite];
   const identities = [createIdentity(), createIdentity()];
@@ -45,7 +43,8 @@ it.skipIf(process.env.TEST_NATIVE !== "1")("real Iroh peers preserve pins, histo
     await db.addMessage({ linkId: "iroh-real-0", id: `me_${wireId}`, wireId, text: "real QUIC durable message", timestamp: 1, sender: "me", via: "datalink", delivery: "sending" });
     peers[0].dropReceipts = true;
     await boxes[0].transmit(`me_${wireId}`);
-    await vi.waitFor(async () => expect((await db.getMessages("iroh-real-0"))[0].delivery).toBe("failed"));
+    // No receipt within the window: queued to go again with the same ID, not failed.
+    await vi.waitFor(async () => expect((await db.getMessages("iroh-real-0"))[0].delivery).toBe("queued"));
     expect(await db.getMessages("iroh-real-1")).toHaveLength(1);
     links[0].disconnect();
     await vi.waitFor(() => expect(links[1].isDataLinkOpen).toBe(false));

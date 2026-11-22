@@ -96,3 +96,25 @@ describe("the chat or group on screen, as the engine knows it", () => {
     await vi.waitFor(() => expect(onScreen()).toBeNull());
   });
 });
+
+describe("the chat on screen and the person's presence, after the peer started again", () => {
+  /*
+   * An extension tab whose peer's document Chrome replaced: the tab connects again by itself, and the new peer knew
+   * neither (App and usePresence say them only when they change), so the open chat's mailbox was read at the
+   * background pace and contacts saw no presence until the person moved.
+   */
+  it("are told the new peer once it is connected, without the person doing anything", async () => {
+    fakeEngine.on("setPresence", () => undefined);
+    open("/chat/chat-1");
+    await vi.waitFor(() => expect(onScreen()).toBe("link-1"));
+    await vi.waitFor(() => expect(fakeEngine.callsTo("setPresence")).toHaveLength(1));
+    const presence = fakeEngine.callsTo("setPresence")[0];
+    // The first peer hears each once.
+    expect(fakeEngine.callsTo("setActiveLink")).toEqual([{ linkId: "link-1" }]);
+
+    fakeEngine.drop();
+    await vi.waitFor(() => expect(fakeEngine.callsTo("setActiveLink")).toHaveLength(2), { timeout: 3000 });
+    expect(fakeEngine.callsTo("setActiveLink")).toEqual([{ linkId: "link-1" }, { linkId: "link-1" }]);
+    expect(fakeEngine.callsTo("setPresence")).toEqual([presence, presence]);
+  });
+});
