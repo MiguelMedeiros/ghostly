@@ -14,6 +14,7 @@ import { useOnline } from "../hooks/useOnline";
 import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { useNoLinksHint } from "../hooks/useNoLinksHint";
+import { useSaidSettled } from "../hooks/useSaidSettled";
 import { focusLost, working } from "../lib/focus";
 
 /** Some members reachable, not all: the connected icon with a warning dot. */
@@ -65,6 +66,9 @@ export function GroupConnection({ group }: { group: GroupView }) {
     : reachable === 0 ? (reconnecting ? reconnectingLabel : connecting ? t("group.connection.connecting") : t("group.connection.nobody"))
     : reconnecting ? t("group.connection.reachableReconnecting", { reachable, total: others.length, state: reconnectingLabel })
     : t("group.connection.reachable", { reachable, total: others.length });
+  // What the live region says: where the group's connection settles (hooks/useSaidSettled). A member whose edge flaps
+  // read "1 of 2 reachable", "2 of 2 reachable" at every drop and every return; offline or a failure is said at once.
+  const spoken = useSaidSettled(label, kind === "offline" || kind === "failure");
   // The icon breathes while the app reconnects by itself (and only then: a group at rest stays still).
   const pulsing = online && !peerLost && !noLinks &&reconnecting > 0 && !(community && reachable > 0);
   const dot = kind === "partial" ? "bg-amber-500" : dots[kind];
@@ -100,7 +104,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
         aria-label={t("group.connection.labelWith", { state: label })} aria-describedby={`${id}-tip`} aria-expanded={menuOpen} aria-controls={`${id}-popover`}
         onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
         onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
-        className={`relative flex cursor-pointer items-center justify-center rounded-full p-2 transition-colors max-md:h-11 max-md:w-11 max-md:p-0 hover:bg-surface-hover ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
+        className={`relative flex cursor-pointer items-center justify-center rounded-full p-2 transition-colors max-md:h-[44px] max-md:w-[44px] max-md:p-0 hover:bg-surface-hover ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
         <span className={`flex ${pulsing ? "motion-safe:animate-pulse" : ""}`} data-testid="group-connection-icon">
           <ConnectionIcon kind={iconKind} transport={carried?.transport} size={18} weight={2} />
         </span>
@@ -150,7 +154,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
     <span role="tooltip" id={`${id}-tip`} data-testid="group-connection-tooltip" className={`pointer-events-none absolute end-0 top-full z-50 mt-1.5 w-max max-w-[min(16rem,55vw)] rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] leading-4 text-text-primary shadow-lg motion-safe:transition-opacity ${tip && !menuOpen ? "opacity-100" : "invisible opacity-0"}`}>
       {label}{carried && <span data-testid="group-connection-tooltip-detail" className="mt-0.5 block text-text-secondary">{carried.line}</span>}
     </span>
-    <span className="sr-only" aria-live="polite">{label}</span>
+    <span className="sr-only" aria-live="polite">{spoken}</span>
   </div>;
 }
 

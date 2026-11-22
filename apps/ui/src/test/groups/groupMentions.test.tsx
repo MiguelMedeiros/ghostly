@@ -8,7 +8,7 @@ import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { groupChat, mentionsNotify, mutedFor, setChatMute, setMentionsNotify } from "../../lib/chatMute";
 import { markGroupRead } from "../../lib/groups";
-import { loadSettings, saveSettings } from "../../lib/settings";
+import { loadSettings, saveSettings, type Language } from "../../lib/settings";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -32,13 +32,13 @@ afterEach(() => {
   sound.notice.mockClear();
 });
 
-function openGroup(group: GroupView, history: StoredMessage[] = []) {
+function openGroup(group: GroupView, history: StoredMessage[] = [], language?: Language) {
   fakeEngine.on("groupMessages", () => history).on("updateSettings", () => undefined).on("sendGroupMessage", () => ({ error: null }));
   fakeEngine.update({ groups: [group] });
   return renderApp(<Routes>
     <Route path="/" element={<p>Chat list</p>} />
     <Route path="/group/:groupId" element={<GroupChat />} />
-  </Routes>, { route: "/group/group-1" });
+  </Routes>, { route: "/group/group-1", language });
 }
 const composer = () => screen.getByRole("textbox");
 const options = () => within(screen.getByTestId("mention-picker")).getAllByRole("option");
@@ -136,6 +136,15 @@ describe("the composer's @", () => {
     expect(engine.callsTo("sendGroupMessage")).toEqual([{ groupId: "group-1", text: "@Bob hi", mentions: [{ k: BOB2, o: 0, l: 4 }] }]);
   });
 
+  // "@Membro bobyyy..." went out in Portuguese, and a reader in English saw "Membro" too.
+  it("names a member with no name yet by their key, in no language", async () => {
+    const { user, engine } = openGroup(active({ members: [members[0], members[1], member({ key: BOB })] }), [], "pt");
+    await user.type(composer(), "@bob");
+    expect(options()[0]).toHaveTextContent("Membro bobyyy...yyyyyy");
+    await user.keyboard("{Enter}oi{Enter}");
+    expect(engine.callsTo("sendGroupMessage")).toEqual([{ groupId: "group-1", text: "@bobyyy...yyyyyy oi", mentions: [{ k: BOB, o: 0, l: 16 }] }]);
+  });
+
   // The second Bob picked was bound to the first: never named, no sound, no notification (agents#1046).
   it("names each of two members of one name where they were picked, whatever is typed around them", async () => {
     const { user, engine } = openGroup(active({ members: [...members, member({ key: BOB2, nick: "Bob" })] }));
@@ -196,6 +205,11 @@ describe("mentions in the bubbles", () => {
     // The rest is text as ever: the link is still a link.
     expect(screen.getByRole("link", { name: "https://x.example" })).toBeInTheDocument();
     expect(screen.getByTestId("message-text")).toHaveTextContent("@Alicia @Zoe and @Gone, see https://x.example");
+  });
+
+  it("shows a member with no name yet, mentioned by their key, in the reader's own wording", async () => {
+    openGroup(active({ members: [members[0], members[1], member({ key: BOB })] }), [stored({ member: ALICE, text: "@bobyyy...yyyyyy oi", mentions: [{ k: BOB, o: 0, l: 16 }] })]);
+    expect(await screen.findByTestId("mention")).toHaveTextContent("@Member bobyyy...yyyyyy");
   });
 
   it("everyone is mine when someone else says it, not when I do", async () => {

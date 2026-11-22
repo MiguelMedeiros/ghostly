@@ -8,6 +8,7 @@ import type { EngineState, LinkView, FileTransferView } from "@ghostly/browser/s
 import { callApi, type ApiContext } from "../src/api";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files
 
 /** `file save` of a file sent from here: its bytes were staged whole at send, so it saves before the contact takes it. */
@@ -24,6 +25,7 @@ beforeAll(async () => {
 function world() {
   const transfers: Record<string, FileTransferView> = {};
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [{ id: "team" }], settings: {}, transport: {}, transfers }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { isLetterKey } from "../lib/appCommands";
-import { searchable, searchMessages } from "../lib/chatSearch";
+import { searchable, searchMessages, shownText, type Searchable } from "../lib/chatSearch";
 import { jumpToMessage } from "../lib/replies";
 import type { Translate } from "../locales/translate";
 import type { ChatMessage } from "../lib/types";
@@ -43,14 +43,14 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [term, setTerm] = useState("");
-  const [current, setCurrent] = useState<string | null>(null);
+  const [pick, setPick] = useState<{ term: string; id: string | null }>({ term: "", id: null });
   const inputRef = useRef<HTMLInputElement>(null);
   /** What had the focus as the search opened, to have it back: not a menu's row (it goes with the menu), not the bar. */
   const before = useRef<HTMLElement | null>(null);
   // Behind the lock screen the chat stays mounted: Ctrl/Cmd+F typed there is the lock screen's, not the chat's.
   const locked = useIsLocked();
 
-  const close = useCallback(() => { setOpen(false); setQuery(""); setTerm(""); setCurrent(null); }, []);
+  const close = useCallback(() => { setOpen(false); setQuery(""); setTerm(""); setPick({ term: "", id: null }); }, []);
   const show = useCallback(() => {
     const at = document.activeElement;
     const bar = inputRef.current?.closest("[data-testid=chat-search]");
@@ -104,17 +104,21 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   // Folded once while the search is open, not on each key; a closed search costs nothing. `t`: a voice message, a video
   // or a picture is found by its kind in the profile's language too. `translated`: a received text shown translated is
   // found by the words shown (folded again when a translation comes or Show original is pressed).
+  // A change of the chat folds only the texts it brings (`searchable`'s `before`).
   const translated = useShownTranslations(chat, open);
-  const items = useMemo(() => (open ? searchable(messages, t, translated) : []), [open, messages, t, translated]);
+  const folded = useRef<Searchable[]>([]);
+  const items = useMemo(() => (folded.current = open ? searchable(messages, t, translated, folded.current) : []), [open, messages, t, translated]);
   const results = useMemo(() => searchMessages(items, term), [items, term]);
   const found = useMemo(() => new Set(results), [results]);
   const latest = useRef(results);
   latest.current = results;
+  // The match being read is the newest one from the render the new words come in, not after it.
+  const current = pick.term === term ? pick.id : (results[0] ?? null);
 
   // New words: the newest match. A message coming in meanwhile moves nothing.
   useEffect(() => {
     const first = latest.current[0] ?? null;
-    setCurrent(first);
+    setPick({ term, id: first });
     if (!first) return;
     // Its own task: drawing every row (a long chat still drawing its older ones) cannot happen inside an effect.
     const timer = setTimeout(() => jump(first), 0);
@@ -122,9 +126,27 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   }, [term]);
 
   const index = current ? results.indexOf(current) : -1;
+  /**
+   * The match being read, as the chat has it now: what a screen reader is told with the count. A text as its bubble shows
+   * it, the words it was found by (a group's mentions by the names they show, a translation shown in its place). None
+   * once it is gone.
+   */
+  const match = useMemo(() => {
+    if (index < 0) return undefined;
+    let message: ChatMessage | undefined;
+    for (let at = messages.length - 1; at >= 0 && !message; at--) if (messages[at].id === current) message = messages[at];
+    if (!message || message.file || message.card) return message;
+    const translation = translated?.(message);
+    return { ...message, text: translation !== undefined ? shownText(translation) : shownText(message.text, message.mentions) };
+  }, [messages, current, index, translated]);
   /** The matches as they were while the one being read was among them: where it stood, once it is gone. */
   const held = useRef(results);
   if (index >= 0) held.current = results;
+  /**
+   * The place the count shows: the one being read, or where it stood once it is gone (deleted, edited away), so the count
+   * stays where Older and Newer go on from. Before, it read "1 of N" there. Past the end (the oldest went): the last.
+   */
+  const place = index >= 0 || !current ? index : Math.min(placeOf(current, held.current, results), results.length - 1);
   const step = useCallback((by: 1 | -1) => {
     // Enter before the pause is over: these words now, on their newest match.
     if (query.trim() && query !== term) { setTerm(query); return; }
@@ -136,7 +158,7 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
     const gone = at < 0 && current ? placeOf(current, held.current, list) : -1;
     const next = gone >= 0 ? list[(by === 1 ? gone : gone - 1 + list.length) % list.length]
       : list[at < 0 ? 0 : (at + by + list.length) % list.length];
-    setCurrent(next);
+    setPick({ term, id: next });
     jump(next);
   }, [current, query, term]);
   const older = useCallback(() => step(1), [step]);
@@ -145,7 +167,7 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   /** The words to mark in a message: the search's, when that message is one of its matches. */
   const highlight = useCallback((id: string) => (found.has(id) ? term : undefined), [found, term]);
 
-  return { open, show, close, dismiss, query, setQuery, term, results, index, current, older, newer, highlight, inputRef };
+  return { open, show, close, dismiss, query, setQuery, term, results, index, place, current, match, older, newer, highlight, inputRef };
 }
 
 export type ChatSearch = ReturnType<typeof useChatSearch>;

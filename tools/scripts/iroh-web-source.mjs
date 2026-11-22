@@ -12,3 +12,8 @@ export function irohWebSourceHash(root) {
   for (const file of files) hash.update(`${file}\n`).update(readFileSync(join(crate, file), 'utf8').replace(/\r\n/g, '\n'))
   return hash.digest('hex')
 }
+
+// A text file of pkg as wasm-bindgen wrote it, line endings normalised like the sources'.
+export function irohWebFileHash(path) {
+  return createHash('sha256').update(readFileSync(path, 'utf8').replace(/\r\n/g, '\n')).digest('hex')
+}

@@ -56,7 +56,7 @@ test("an SSH key proves a GitHub account, shared with one contact only, and a re
     await add.getByTestId("add-identity-finish").click();
     if (error) await expect(add.getByTestId("add-identity-error")).toHaveText(error);
   };
-  await paste(mine.sign(statement, "git"), /for "git", not "ghostly"/);
+  await paste(mine.sign(statement, "git"), /made for "git", not for Ghostly.*Run the command again with -n ghostly\./);
   await paste(mine.sign(statement.replace("octo-cat", "someone-else")), /not over this statement/);
   const stranger = testSshKey();
   keys.push(stranger);

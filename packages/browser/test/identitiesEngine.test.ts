@@ -75,7 +75,7 @@ function pair() {
 
 async function clearStorage() {
   await transact([STORES.settings], stores => {
-    for (const key of ["identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound"]) stores[STORES.settings].delete(key);
+    for (const key of ["identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups"]) stores[STORES.settings].delete(key);
   });
 }
 const stored = async <T,>(key: string) => wrap<T | undefined>((await store(STORES.settings, "readonly")).get(key));
@@ -695,6 +695,49 @@ describe("removing a proof and its revocation", () => {
     engines.b.stop();
   });
 
+  it("a proof removed just before the contact's app stops is looked up again after its next start, not 12 h later", async () => {
+    const { engines, resolved, make, id } = await shared();
+    // A lookup a moment ago: the next 12 h one is not due for hours.
+    expect(await engines.b.checkRevocations()).toBe(true);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await engines.a.remove({ id });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn"));
+    // B's app stops before its first lookup, and starts again.
+    engines.b.stop();
+    resolved.length = 0;
+    const b = make("b");
+    await b.load(); b.start();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(b.linkView("chat", true)!.received[0].status).toBe("revoked");
+    expect(resolved, "found on the first try").toHaveLength(1);
+    b.stop();
+    // Found: the next start looks nothing up again.
+    resolved.length = 0;
+    const c = make("b");
+    await c.load(); c.start();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(resolved).toEqual([]);
+    c.stop();
+  });
+
+  it("a withdrawn proof whose lookups all ran is not looked up again at the next start", async () => {
+    const { engines, resolved, make, id } = await shared();
+    expect(await engines.b.checkRevocations()).toBe(true);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await engines.a.withdraw({ linkId: "chat", id });
+    await vi.waitFor(() => expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn"));
+    resolved.length = 0;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(resolved).toHaveLength(3);
+    engines.b.stop();
+    resolved.length = 0;
+    const b = make("b");
+    await b.load(); b.start();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(resolved).toEqual([]);
+    b.stop();
+  });
+
   it("a contact's request that is never presented leaves the chat's timeline once its challenge ends, with no request after it", async () => {
     const { engines, ledgers } = pair();
     await clearStorage();
@@ -958,6 +1001,26 @@ describe("per chat", () => {
       await engines.b.recheck({ linkId: "chat", id: ledgers.b.received[0].id });
       expect(fetched).toEqual([]);
       expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: expect.stringMatching(/Hide my IP/) });
+    } finally { vi.restoreAllMocks(); }
+  });
+
+  it("a contact's proof is read through the host's fetch when it gives one (the CLI's, on public addresses only), never the global one", async () => {
+    const reads: IdentityProofProvider = { ...fakeKey,
+      verify: async (statement, evidence, ctx) => { await ctx.fetch("https://contact.example/proof.json"); return fakeKey.verify(statement, evidence as never, ctx); } } as IdentityProofProvider;
+    const global = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("{}", { status: 200 }));
+    const fetcher = vi.fn<typeof fetch>(async () => new Response("{}", { status: 200 }));
+    try {
+      const p = pair();
+      await clearStorage();
+      p.state.providers = { a: [reads], b: [reads] };
+      p.engines.b = new IdentityProofs({ ...p.host("b"), fetcher }, () => p.state.providers.b);
+      await p.engines.a.load(); await p.engines.b.load();
+      const own = await prove(p.engines.a);
+      global.mockClear();
+      await p.engines.a.share({ linkId: "chat", id: own.id });
+      await vi.waitFor(() => expect(p.ledgers.b.received.find(r => r.id === own.id)?.status).toBe("verified"));
+      expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual(["https://contact.example/proof.json"]);
+      expect(global).not.toHaveBeenCalled();
     } finally { vi.restoreAllMocks(); }
   });
 

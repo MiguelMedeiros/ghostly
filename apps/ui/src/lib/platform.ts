@@ -110,7 +110,8 @@ export interface NetworkSettings {
   pushRelay: string;
   /**
    * The push relay answered the last wake-up, but not as a push relay: its HTTP status and its own error text, when it
-   * gave one (`EngineState.pushRelayRefused`). Absent while it forwards them, or where this app posts them itself.
+   * gave one (`EngineState.pushRelayRefused`); `http` 0 when its address answered without CORS, which the page may not
+   * read. Absent while it forwards them, or where this app posts them itself.
    */
   pushRelayRefused?: { http: number; text?: string };
   /**
@@ -190,7 +191,10 @@ export interface WalletTransaction {
   /** What this movement cost, exactly. */
   fee: number;
   note?: string;
-  /** `lightning-in`: the mint quote of the invoice paid (what `receiveLightning` returned as `quote`). */
+  /**
+   * `lightning-in`: the mint quote of the invoice paid (what `receiveLightning` returned as `quote`). `lightning-out`, and
+   * the `fee` of a failed one: the melt quote paid (what `quoteInvoice` returned on the Cashu card).
+   */
   quote?: string;
 }
 
@@ -614,7 +618,7 @@ export interface ServicesPlatform {
    * Files or a picture on the clipboard read by the platform itself (the desktop app), for a paste whose
    * event carried neither. Null where the paste event is the way. Use `nativePastedFiles` in `pastedFiles.ts`.
    */
-  readClipboardFiles(): Promise<import("@ghostly/browser/host").ClipboardFile[]> | null;
+  readClipboardFiles(): Promise<import("@ghostly/browser/host").ClipboardFiles> | null;
   /** Where calls get their media, when not from the page's own WebRTC (Ghostly Desktop on Linux). Null: the page's. */
   callMedia?(): import("@ghostly/core").CallMedia | null;
   /** Largest file that can be sent, in bytes. */

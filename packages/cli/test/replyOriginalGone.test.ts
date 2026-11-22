@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { pageOf } from "./support/messagePage";
-import { chatViewOf } from "./support/chatView";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.replies
 
 /**
@@ -17,7 +17,7 @@ const reply = (to: string, snippet: string) => ({ replyTo: { id: "wire-" + to, s
 
 function fake(rows: StoredMessage[]) {
   const node = {
-    chatView: chatViewOf, getState: () => ({ links: [link], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     messagePage: vi.fn(async ({ linkId, limit, before }: { linkId: string; limit: number; before?: string | number }) => pageOf(rows.filter((m) => m.linkId === linkId), { limit, before })),
@@ -102,7 +102,7 @@ describe("a reply whose original was edited", () => {
     const crew = await callApi(ctx, "group.history", { group: "Crew" }) as Page;
     expect(quote(crew, "mine:1:1")).toMatchObject({ snippet: "on friday (edited)", found: true });
 
-    Object.assign(node, { savedMessages: vi.fn(async () => [{ savedAt: 20, message: rows[4]! }, { savedAt: 21, message: rows[9]! }]) });
+    Object.assign(node, { savedMessages: vi.fn(async () => [{ savedAt: 20, message: rows[4]! }, { savedAt: 21, message: rows[9]! }]), startDeferredChat: vi.fn(async () => {}) });
     const { saved } = await callApi(ctx, "saved.list", {}) as { saved: { message: { replyTo?: Record<string, unknown> } }[] };
     expect(saved.map((s) => s.message.replyTo?.snippet)).toEqual(["hello bob (edited)", "on friday (edited)"]);
   });
