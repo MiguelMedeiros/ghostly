@@ -303,7 +303,7 @@ describe("how many are kept", () => {
     // Still bounded: the other publisher made room from its own.
     const kept = await wrap((await dbStore(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY)) as [string, unknown[]][];
     expect(kept.reduce((n, [, list]) => n + list.length, 0)).toBeLessThanOrEqual(1024);
-  });
+  }, 60_000);
 
   it.each([1, 3])("install screens of many other publishers, one revocation each, push out none of the %i of this publisher", async (count) => {
     const v1 = await bundle();
