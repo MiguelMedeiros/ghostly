@@ -7688,6 +7688,8 @@ export class GhostlyNode implements EngineImplementation {
 
   removeService({ serviceId }: { serviceId: string }): void {
     this.services = this.services.filter((s) => s.id !== serviceId);
+    // An app added again under the same name gets the same id: it starts with no requests of its own.
+    this.requestCounts.delete(serviceId);
     void db.deleteService(serviceId);
     this.servicesChanged();
   }
@@ -9503,6 +9505,8 @@ export class GhostlyNode implements EngineImplementation {
         },
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
+        // The contact takes texts again: those paced out wait for no backoff check (minutes after the contact was away).
+        onTextRoom: () => void this.outboxes.get(linkId)?.flush().catch(() => {}),
         onDhtDelivery: view => {
           // Every read of the mailbox says so, whatever it found: the outbox looks again only when the view changed (a
           // receipt cleared `pendingUntil`, the contact's mode, an error gone). Looked at on each read, waiting texts read

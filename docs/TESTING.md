@@ -18,7 +18,10 @@ npm run test:affected         # before pushing: only the tests your change can b
 - an allow-list entry that is not a feature, or has no reason;
 - a malformed inventory entry: duplicate id, a WISP not in [`docs/wisps/numbering.json`](wisps/numbering.json), an unknown client or infrastructure.
 
-A test file that declares nothing is a warning, not a failure (yet).
+On a pull request, CI also checks what it adds against its base (`npm run test:map -- --base=origin/dev` does the same before you push, from the branch's merge base):
+
+- a test file it adds that declares nothing: no `@feature` tag, `covers:` or `guards:` line (see below). A test file already on the base that declares nothing is only a warning.
+- a `kind: feature` it adds to `e2e/features.json` that exists in the web app, the extension or Desktop, with no ungated e2e test in one of those clients (unit tests and `@gated` specs do not count), unless the allow list gives the reason. For such a feature, the allow list's reason is why it has no ungated e2e test, and the line comes off once it has one.
 
 ## Declaring what a test covers
 
@@ -42,6 +45,12 @@ test("LND pays a chat request", { tag: ["@feature:wallet.lightning.lnd.pay", "@g
 ```
 
 `covers-gated:` is for tests that skip themselves unless an environment variable is set (`*.regtest.test.ts`, `TEST_NATIVE`, …).
+
+A test that guards a bug rather than a feature (a regression test for a race, a tooling script's test) names the issue or pull request instead, in any test file, a spec too:
+
+```ts
+// guards: #1234, #1240
+```
 
 Tag what the test would catch if it broke, not everything it happens to touch.
 
