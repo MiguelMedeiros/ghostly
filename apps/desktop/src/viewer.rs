@@ -66,8 +66,10 @@ const SERVICE_CSP_RELAY_ONLY: &str = "default-src 'self' data: blob: 'unsafe-inl
 /// WebView did not run it in, and starts a worker made from a `blob:` URL of the page's from a script that makes a
 /// pass-through Trusted Types `default` policy in it first. It takes out each `<script type="speculationrules">`
 /// as it is put in the page: Chromium (WebView2) would prefetch or prerender the pages it lists on a server the
-/// contact names, outside the policy, and `'unsafe-inline'` lets it in. The same text as `VIEWER_GUARD_SCRIPT` in
-/// `packages/core/src/viewerGuard.ts`, which says what a script in the page cannot do.
+/// contact names, outside the policy, and `'unsafe-inline'` lets it in. Its Trusted Types default policy refuses
+/// `javascript:` URLs; an app that makes its own `default` policy gets the guard's back, with the app's rules in it.
+/// The same text as `VIEWER_GUARD_SCRIPT` in `packages/core/src/viewerGuard.ts`, which says what a script in the
+/// page cannot do.
 const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
   "use strict";
   try {
@@ -76,13 +78,33 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     for (const name of Object.getOwnPropertyNames(w)) {
       if (/^(webkit)?RTC/.test(name)) { try { delete w[name]; } catch (e) {} }
     }
-    if (w.trustedTypes && !w.trustedTypes.defaultPolicy) {
+    const types = w.trustedTypes;
+    let passing = false;
+    if (types && !types.defaultPolicy) {
       try {
-        w.trustedTypes.createPolicy("default", {
-          createHTML: (input) => input,
-          createScript: (input, type, sink) => (sink === "Location href" ? null : input),
-          createScriptURL: (input) => input,
-        });
+        let rules = null;
+        const rule = (kind) => (input, type, sink) => {
+          if (kind === "createScript" && sink === "Location href") return null;
+          if (passing || rules === null) return input;
+          return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+        };
+        const members = ["createHTML", "createScript", "createScriptURL"];
+        const create = types.createPolicy;
+        const policy = apply(create, types, ["default", { createHTML: rule(members[0]), createScript: rule(members[1]), createScriptURL: rule(members[2]) }]);
+        const named = String;
+        const Mistyped = w.TypeError;
+        Object.getPrototypeOf(types).createPolicy = function createPolicy(name, options) {
+          if (this !== types || rules !== null || named(name) !== "default") return apply(create, this, arguments);
+          const given = { createHTML: null, createScript: null, createScriptURL: null };
+          for (let i = 0; i < members.length; i++) {
+            const found = options ? options[members[i]] : undefined;
+            if (found === undefined || found === null) continue;
+            if (typeof found !== "function") throw new Mistyped("The policy's " + members[i] + " is not a function");
+            given[members[i]] = found;
+          }
+          rules = given;
+          return policy;
+        };
       } catch (e) {}
     }
     const open = w.open;
@@ -158,7 +180,9 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     const first = (frame) => {
       const doc = apply(getAttribute, frame, ["srcdoc"]);
       if (doc === null || apply(slice, doc, [0, own.length]) === own) return;
+      passing = true;
       try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
+      passing = false;
     };
     const trim = String.prototype.trim;
     const drop = w.Element.prototype.remove;
