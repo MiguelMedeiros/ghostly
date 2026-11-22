@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+// guards: #8399
+
 /**
  * Who saves the npm cache. The repository's Actions cache holds 10 GB, and GitHub evicts by last use. A pull request
  * restores dev's entries but never another pull request's, so `actions/setup-node` with `cache: "npm"`, which saves on
