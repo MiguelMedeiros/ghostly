@@ -272,7 +272,8 @@ export function txtValue(rdata: Uint8Array): string {
 // Addresses: a proof may only make a contact's app fetch from the public Internet
 
 /** False for loopback, private, link-local, shared (CGNAT), multicast, reserved
- * and unspecified addresses, including IPv4 embedded in IPv6. */
+ * and unspecified addresses, including IPv4 embedded in IPv6, and for 6to4, Teredo and documentation IPv6, as
+ * Desktop's link_preview::is_public and apps/ui/src/lib/localHost.ts refuse them. */
 export function isPublicAddress(address: Uint8Array): boolean {
   if (address.length === 4) {
     const [a, b, c] = address;
@@ -292,5 +293,8 @@ export function isPublicAddress(address: Uint8Array): boolean {
   if (address[0] === 0xfe && (address[1] & 0xc0) === 0xc0) return false; // fec0::/10 site-local
   if (address[0] === 0xff) return false; // multicast
   if (address[0] === 0x01 && address.subarray(1, 8).every(x => x === 0)) return false; // 100::/64 discard
+  if (address[0] === 0x20 && address[1] === 0x02) return false; // 2002::/16 6to4: carries an IPv4 address a gateway may reach
+  if (address[0] === 0x20 && address[1] === 0x01 && address[2] === 0x00 && address[3] === 0x00) return false; // 2001::/32 Teredo, the same
+  if (address[0] === 0x20 && address[1] === 0x01 && address[2] === 0x0d && address[3] === 0xb8) return false; // 2001:db8::/32 documentation
   return (address[0] & 0xe0) === 0x20; // only 2000::/3 is global unicast
 }

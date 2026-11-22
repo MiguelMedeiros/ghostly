@@ -63,22 +63,23 @@ export function signGroupCallRequest(sfu: string, fields: { g: string; k: string
 }
 
 /**
- * Where a pass may send its LiveKit client: `wss://`, or `ws://` to this machine (a node for tests or development), as a
- * relay's address. LiveKit puts the token in the address, so a `ws://` one elsewhere would hand the pass to the path.
+ * Where a pass may send its LiveKit client: `wss://`, as a relay's address. LiveKit puts the token in the address, so a
+ * `ws://` one would hand the pass to the path. `ws://` to this machine only with `loopback` (the e2e suite's LiveKit):
+ * the group's node names the address, and a plain request to a local port is not its to make.
  */
-function passUrlHolds(url: string): boolean {
+function passUrlHolds(url: string, loopback: boolean): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "wss:" || (parsed.protocol === "ws:" && ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname));
+    return parsed.protocol === "wss:" || (loopback && parsed.protocol === "ws:" && ["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname));
   } catch { return false; }
 }
 
 /** The reply's pass, or null when it is not one for this room and key. */
-export function parseGroupCallPass(raw: unknown, room: string, identity: string): GroupCallPass | null {
+export function parseGroupCallPass(raw: unknown, room: string, identity: string, loopback = false): GroupCallPass | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   if (typeof r.url !== "string" || typeof r.token !== "string" || !r.token || r.room !== room || r.identity !== identity) return null;
-  if (!passUrlHolds(r.url)) return null;
+  if (!passUrlHolds(r.url, loopback)) return null;
   if (typeof r.expiresIn !== "number" || !Number.isFinite(r.expiresIn) || r.expiresIn <= 0) return null;
   const iceServers = Array.isArray(r.iceServers) ? r.iceServers.flatMap(iceServer) : undefined;
   return { url: r.url, token: r.token, room, identity, expiresIn: Math.min(r.expiresIn, MAX_EXPIRES_IN), ...(iceServers?.length ? { iceServers } : {}) };
@@ -101,6 +102,8 @@ export interface GroupCallAsk {
   /** The name members know me by; the node prefers its own. */
   name?: string;
   fetch?: typeof fetch;
+  /** A pass's `ws://` address on this machine is taken (tests only, `passUrlHolds`). */
+  loopback?: boolean;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -135,7 +138,7 @@ export async function fetchGroupCallToken(ask: GroupCallAsk): Promise<GroupCallP
     if (response.status === 429) throw engineError("groupCallBusy", { host });
     let raw: unknown = null;
     if (response.ok) try { const text = await readCapped(response, MAX_REPLY_BYTES); raw = text === null ? null : JSON.parse(text); } catch { raw = null; }
-    const pass = parseGroupCallPass(raw, room, ask.k);
+    const pass = parseGroupCallPass(raw, room, ask.k, ask.loopback === true);
     if (!pass) throw engineError("groupCallFailed", { host });
     return pass;
   }

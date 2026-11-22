@@ -315,7 +315,9 @@ jobs:
   # they push), on four runners instead of the five above. `vitest related` per project; a project's config, setup or
   # the lock file runs that project whole. ui, browser and cli each get a runner (a core change reaches most of each,
   # minutes apiece, and one after another they passed the 20 minutes), the fourth takes every other project
-  # (affected/select.mjs UNIT_ALONE). Lint and types are frontend-checks' (whole), Rust is tauri's, the e2e is no pull
+  # (affected/select.mjs UNIT_ALONE). The cli alone still took 6-8 minutes where the others took 1-2, so it runs in two
+  # halves cut by time (`vitest --shard`, UNIT_HALVED): the first on the third runner, the second beside the small
+  # projects on the fourth. Lint and types are frontend-checks' (whole), Rust is tauri's, the e2e is no pull
   # request's. Leaving draft runs the full suites above instead.
   affected-tests:
     name: Affected unit tests (draft ${{ matrix.group }}/4)
@@ -326,7 +328,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The 4 below and in the name must match this list.
+        # The 4 below, in the name and in CI Success's check must match this list.
         group: [1, 2, 3, 4]
     steps:
       # The pull request's merge commit and its first parent, the base it is merged onto: their difference is the change.
@@ -467,6 +469,11 @@ jobs:
       # What the web app runs on load stays one file (see tools/scripts/check-web-first-load.mjs).
       - name: Web first load is one file
         run: npm run check:web-first-load
+
+      # Every file the service worker installs is in the build: one missing and nginx's 404 fails the install, which
+      # vite preview hides (see tools/scripts/check-web-precache.mjs).
+      - name: Web service worker names only built files
+        run: npm run check:web-precache
 
       # The adapter SDK, the way an outside author gets it: packed into a tarball, installed into
       # packages/sdk/examples/adapter (not a workspace member), whose adapters must pass the contract suites.
@@ -952,16 +959,20 @@ jobs:
           # Skipped only counts when `changes` chose to skip that job.
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$2" == "false" ) ]]; }
           # One error per job that did not pass, by the name the run page shows: the summary alone hid it among the skips.
+          # A matrix has one result for all its jobs: the error names their range and says so ($4), and each job names
+          # its own failure.
           failed=0
           check() {
             ok "$2" "$3" && return
-            if [[ "$2" == "skipped" ]]; then echo "::error::$1 was skipped, but this change needs it"; else echo "::error::$1 ended $2"; fi
+            if [[ "$2" == "skipped" ]]; then echo "::error::$1 was skipped, but this change needs it"
+            elif [[ -n "${4:-}" ]]; then echo "::error::$1: $4 ended $2"
+            else echo "::error::$1 ended $2"; fi
             failed=1
           }
           check "Frontend lint and types" "$FRONTEND_CHECKS" "$LINT"
           check "Frontend tests (app)" "$FRONTEND_TESTS" "$FULL"
           check "Frontend builds" "$FRONTEND_BUILD" "$FULL"
-          check "Affected unit tests (draft)" "$AFFECTED" "$AFFECTED_GATE"
+          check "Affected unit tests (draft 1/4 to 4/4)" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"
           check "Frontend tests (packages)" "$PACKAGES_TESTS" "$PACKAGES"
           check "CLI on Linux ARM64" "$CLI_ARM64" "$PACKAGES"
           check "Tauri Backend" "$TAURI" "$RUST"
