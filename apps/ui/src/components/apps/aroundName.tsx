@@ -23,3 +23,12 @@ export function aroundName(text: string, name: string, testId = "mini-app-with-n
 export function withName(text: string, name: string) {
   return text.split(NAME).flatMap((part, i) => [i > 0 && <bdi key={`name-${i}`}>{name}</bdi>, part]);
 }
+
+/** The stand-ins of a line with two names (`withNames`): `NAME` for the first, this for the second. */
+export const SECOND_NAME = "\u0002";
+
+/** `withName` for a line with two names ("Ana wants to send report.pdf"): each goes back in as its own <bdi>. */
+export function withNames(text: string, [first, second]: readonly [string, string]) {
+  return text.split(NAME).flatMap((part, i) => [i > 0 && <bdi key={`name-${i}`}>{first}</bdi>,
+    ...part.split(SECOND_NAME).flatMap((piece, j) => [j > 0 && <bdi key={`second-${i}-${j}`}>{second}</bdi>, piece])]);
+}

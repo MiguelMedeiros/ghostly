@@ -92,4 +92,13 @@ describe("a file's, a song's and a video's buttons in forced colors", () => {
     renderApp(<SpeedPill rate={1.5} locale="en" onGone={() => {}} />);
     keepsAnEdge(screen.getByTestId("voice-speed"));
   });
+
+  it("the speed keeps its fill and its text colour in normal colours", () => {
+    // The edge's classes went in with no space after them: `bg-black/25text-text-primary/85` was one unknown class,
+    // and the pill drew as a bare "1×" in the bubble's colour.
+    renderApp(<SpeedPill rate={1} locale="en" onGone={() => {}} />);
+    const classes = screen.getByTestId("voice-speed").className.split(/\s+/);
+    expect(classes).toContain("bg-black/25");
+    expect(classes).toContain("text-text-primary/85");
+  });
 });

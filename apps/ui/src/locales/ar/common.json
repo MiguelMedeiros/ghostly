@@ -17,6 +17,7 @@
   "deleteChatLocal": "سيتم حذف المحادثة وسجلها من هذا الجهاز فقط، وليس نسخة جهة الاتصال.",
   "deleteChatTitle": "حذف المحادثة؟",
   "goHome": "الانتقال إلى الرئيسية",
+  "labelValue": "{{label}}: {{value}}",
   "loading": "جاري التحميل...",
   "moreInfo": "مزيد من المعلومات",
   "needsYou": {
@@ -27,6 +28,7 @@
   "notCopied": "لم يُنسخ",
   "quotedName": "«{{name}}»",
   "save": "حفظ",
+  "sentences": "{{first}}. {{second}}",
   "size": {
     "b": "{{n}} بايت",
     "gb": "{{n}} غ.ب",

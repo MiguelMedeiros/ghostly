@@ -16,7 +16,7 @@ const locked = (page: Page) => page.getByText("Ghostly is locked");
 const rows = (page: Page) => page.locator("div.group").filter({ has: page.getByTitle("Delete chat") });
 const unreadBadge = (page: Page) => rows(page).locator("span").filter({ hasText: /^(\d+|99\+)$/ });
 
-test("the account bar switches profiles in one tap, each one reopening where it was left", { tag: ["@feature:profiles.switcher", "@feature:profiles.switch", "@feature:profiles.create"] }, async ({ peer }) => {
+test("the account bar switches profiles in one tap, each one reopening where it was left", { tag: ["@journey", "@feature:profiles.switcher", "@feature:profiles.switch", "@feature:profiles.create"] }, async ({ peer }) => {
   const alice = await peer("switcher-alice");
   const bob = await peer("switcher-bob");
   const { page } = alice;
@@ -70,7 +70,7 @@ test("the account bar switches profiles in one tap, each one reopening where it 
   }).observe(document, { childList: true, subtree: true }));
   await item(page, "Personal").click();
   await profileIs(page, "Personal");
-  expect(await page.evaluate(() => sessionStorage.getItem("e2e-splash")), "the restart showed Personal coming up").toBe("POpening Personal…");
+  expect(await page.evaluate(() => sessionStorage.getItem("e2e-splash")), "the restart showed Personal coming up").toBe("POpening \u2068Personal\u2069…");
   await expect(page.getByTestId("profile-switch-splash")).toHaveCount(0, { timeout: 15_000 });
   await expect(page.getByTestId("profile-name")).toHaveValue("Personal");
   await expect(page).toHaveURL(/#\/profile$/);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEVICES_EVENT,
   EMPTY_DEVICES,
@@ -14,11 +14,13 @@ import {
   type DeviceKind,
   type DeviceList,
 } from "../lib/mediaDevices";
+import type { GroupCall } from "./useGroupCall";
 
-/** What the call hook (`useWebRTC`) gives this one. */
+/** What the call hook (`useWebRTC`, or a group call's `useGroupCall`) gives this one. */
 interface CallMediaControls {
   callState: string;
-  localStream: MediaStream | null;
+  /** What the call captures now: only its tracks are read. */
+  localStream: { getAudioTracks(): MediaStreamTrack[]; getVideoTracks(): MediaStreamTrack[] } | null;
   isVideoOff: boolean;
   isScreenSharing: boolean;
   canSwitchDevices: boolean;
@@ -110,6 +112,9 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
   const choosing = useRef(false);
   /** A switch is under way: the device checks wait for it instead of starting another. */
   const busy = useRef(false);
+  /** The devices changed while a switch was under way: they are checked again once it ends, with what it left on. */
+  const missed = useRef(false);
+  const [recheck, setRecheck] = useState(0);
   /** What was told this call (`<kind>:<id>` a device offered back, `<kind>:missing` a loss), so each is told once. */
   const offered = useRef(new Set<string>());
 
@@ -121,12 +126,20 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       // The call goes on with what it had.
     } finally {
       busy.current = false;
+      if (missed.current) {
+        missed.current = false;
+        setRecheck((n) => n + 1);
+      }
     }
   }, []);
 
   /** After the devices changed: falls back from a device that went away, offers one that came back. */
   const check = useCallback(async (next: DeviceList) => {
-    if (busy.current || !next.named) return;
+    if (busy.current) {
+      missed.current = true;
+      return;
+    }
+    if (!next.named) return;
     const { webrtc: call, micNow: mic, cameraNow: camera, audioTrack: audio, videoTrack: video, speaker: sink, cameraOn: showing } = state.current;
     const gone = (kind: DeviceKind, id: string | undefined, track?: MediaStreamTrack) =>
       track?.readyState === "ended" || (!followsSystem(id) && !next[kind].some((d) => d.id === id));
@@ -195,7 +208,7 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
     }
   }, [run, setNotice]);
 
-  // The devices, while a call is on: now, and at every plug and unplug.
+  // The devices, while a call is on: now, at every plug and unplug, and after a switch that one came during.
   useEffect(() => {
     if (!active) return;
     let live = true;
@@ -212,7 +225,7 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       live = false;
       stop();
     };
-  }, [active, check]);
+  }, [active, check, recheck]);
 
   // An unplugged microphone or camera may end its track before the device list says anything.
   useEffect(() => {
@@ -326,4 +339,24 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
     switchBack,
     hold,
   };
+}
+
+/**
+ * A group call's devices, as a 1:1 call's (`useGroupCall` while `on`): its speaker, the Devices menu, a choice made in
+ * Settings during the call, and the default taking over from an unplugged device. The microphone and camera switch in
+ * the call's own LiveKit tracks; a shared screen is a track of its own there, so the camera is read beside it.
+ */
+export function useGroupCallDevices(call: GroupCall, on: boolean): CallDevices | null {
+  const mic = call.micTrack;
+  const camera = call.local.tracks.camera ?? null;
+  const localStream = useMemo(() => ({ getAudioTracks: () => (mic ? [mic] : []), getVideoTracks: () => (camera ? [camera] : []) }), [mic, camera]);
+  return useCallDevices({
+    callState: on ? call.status : "idle",
+    localStream,
+    isVideoOff: !call.local.camera,
+    isScreenSharing: false,
+    canSwitchDevices: true,
+    switchMicrophone: call.switchMicrophone,
+    switchCamera: call.switchCamera,
+  });
 }

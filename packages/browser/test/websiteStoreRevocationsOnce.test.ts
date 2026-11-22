@@ -8,10 +8,16 @@ import { readStore } from "../../../apps/website/lib/storeRead";
  * ghostly.tools' /apps pages check each publisher's `ghostly-revoke.json` the first time a request reaches them, on the
  * server's one thread: up to 4096 signature checks a file. The same file served beside every URL and source of a
  * listing (or of every listing of one publisher) was checked again for each URL, holding the server for tens of
- * seconds; the app keeps a file's answer by the SHA-256 of its bytes, and so does the site now.
+ * seconds; the app keeps a file's answer by the SHA-256 of its bytes, and so does the site now. The same entries in
+ * another order in each folder (other bytes, nothing newly signed) held it as long: each signed revocation is checked once.
  */
 
-const reads = vi.hoisted(() => ({ count: 0 }));
+const reads = vi.hoisted(() => ({ count: 0, verified: 0 }));
+vi.mock("@noble/curves/ed25519.js", async (original) => {
+  const real = await original<typeof import("@noble/curves/ed25519.js")>();
+  const verify: typeof real.ed25519.verify = (...args) => { reads.verified++; return real.ed25519.verify(...args); };
+  return { ...real, ed25519: { ...real.ed25519, verify } };
+});
 vi.mock("../../../apps/website/lib/store-core/appStatements", async (original) => {
   const real = await original<typeof import("../../../apps/website/lib/store-core/appStatements")>();
   return { ...real, readAppRevocations: (...args: Parameters<typeof real.readAppRevocations>) => { reads.count++; return real.readAppRevocations(...args); } };
@@ -23,8 +29,11 @@ const RAW = "https://raw.githubusercontent.com/ana";
 const at = (dir: string) => `${RAW}/${dir}/HEAD/app.ghostlyapp`;
 const revokeAt = (dir: string) => `${RAW}/${dir}/HEAD/ghostly-revoke.json`;
 
-/** Two apps of one publisher, each with four listing URLs and two sources, every folder serving the same revocation file. */
-async function world(revokes: "other" | "chess") {
+/**
+ * Two apps of one publisher, each with four listing URLs and two sources, every folder serving the same revocation file,
+ * or (`rotated`) the same signed entries in another order in each folder: other bytes, nothing newly signed.
+ */
+async function world(revokes: "other" | "chess", order: "same" | "rotated" = "same") {
   const publisher = signerOf("publisher");
   const store = signerOf("store");
   const key = toZ32(publisher.publicKey);
@@ -46,7 +55,8 @@ async function world(revokes: "other" | "chess") {
   for (let n = 0; n < 16; n++) entries.push(await signAppRevocation({ ghostlyRevoke: 1, app: appRef(key, n === 0 ? revokes : `other${n}`), upTo: 1 }, publisher));
   const file = utf8Encode(canonicalJson(entries as never));
   const folders = ["chess", "notes"].flatMap((name) => [...dirs(name), `${name}-src-1`, `${name}-src-2`]);
-  const revocations = Object.fromEntries(folders.map((dir) => [revokeAt(dir), file.slice()]));
+  const rotated = (i: number) => utf8Encode(canonicalJson([...entries.slice(i), ...entries.slice(0, i)] as never));
+  const revocations = Object.fromEntries(folders.map((dir, i) => [revokeAt(dir), order === "same" ? file.slice() : rotated(i)]));
   return { bytes: { index: indexBytes, sig: sigBytes, bundles, revocations }, key: toZ32(store.publicKey), files: folders.length, chess: appRef(key, "chess") };
 }
 
@@ -68,5 +78,18 @@ describe("website store, each revocation file checked once", () => {
     expect(view).toMatchObject({ ok: true, skipped: [{ ref: chess, reason: "revoked" }] });
     expect(view.ok && view.apps.map((a) => a.name)).toEqual(["notes"]);
     expect(reads.count).toBe(1);
+  });
+
+  it("checks each signed revocation once, whichever file and order holds it", async () => {
+    const same = await world("other");
+    reads.verified = 0;
+    readStore(same.bytes, NOW, same.key);
+    const once = reads.verified;
+    const { bytes, key } = await world("other", "rotated");
+    reads.verified = 0;
+    const view = readStore(bytes, NOW, key);
+    expect(view).toMatchObject({ ok: true, skipped: [] });
+    expect(reads.count).toBe(1 + 12);
+    expect(reads.verified).toBe(once);
   });
 });
