@@ -89,12 +89,13 @@ export function desktopOnlyFiles(bundle: Iterable<{ type: string; fileName: stri
 
 /**
  * What only an online flow loads, by module id: a Pubky approval (it waits on a relay for a remote signer) and the
- * homeserver reads, a device handoff's PAKE (both devices online), the USDT and Ark wallets' adapters and SDK (nothing
- * without their RPC or Ark server; their wasm is not precached either), and a group call's LiveKit client with its
- * E2EE worker (a call joins with a pass the node hands out, WISP 602). 3 MiB of the build: cached the first time one is used, not at install.
+ * homeserver reads, a Keet proof (signed for, or checked from, a contact on a live channel), a device handoff's PAKE
+ * (both devices online), the USDT and Ark wallets' adapters and SDK (nothing without their RPC or Ark server; their
+ * wasm is not precached either), and a group call's LiveKit client with its E2EE worker (a call joins with a pass the
+ * node hands out, WISP 602). 3 MiB of the build: cached the first time one is used, not at install.
  */
 const ONLINE_ONLY_MODULES = [
-  "/node_modules/@synonymdev/pubky/", "/node_modules/@serenity-kit/opaque/", "/node_modules/@arkade-os/sdk/",
+  "/node_modules/@synonymdev/pubky/", "/node_modules/keet-identity-key/", "/node_modules/@serenity-kit/opaque/", "/node_modules/@arkade-os/sdk/",
   "/paymentAdapters/usdt.ts", "/paymentAdapters/arkade.ts", "/hooks/groupCallLivekit.ts",
 ];
 
