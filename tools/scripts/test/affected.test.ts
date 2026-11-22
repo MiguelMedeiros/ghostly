@@ -486,9 +486,9 @@ describe("fallbacks", () => {
     const scripts = byName(p.unit).scripts;
     expect(scripts.mode).toBe("related");
     expect(scripts.files).toEqual(["tools/scripts/test/releaseInstallScripts.test.ts", "tools/scripts/test/webAppsTestFlag.test.ts"]);
-    // A workspace's package.json is not the root's.
+    // A workspace's package.json is not the root's: only the test that reads that one runs.
     const site = byName(plan({ changed: [{ path: "apps/website/package.json", exists: true, scriptsOnly: true }], inventory, e2eFiles }).unit).scripts;
-    expect(site.mode).toBe("skip");
+    expect(site.files).toEqual(["tools/scripts/test/websiteSteps.test.ts"]);
   });
 
   it("core's index.ts runs every project that imports core whole, and every spec", () => {

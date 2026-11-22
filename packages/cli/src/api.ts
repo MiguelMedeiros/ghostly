@@ -895,6 +895,11 @@ const METHODS: Record<string, Method> = {
       if (!target.group && wait === "sent") throw new CliError("bad_request", "--wait sent is for a group: a chat's removal waits with --wait confirmed");
       const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
       const ref = str(params, "message", true);
+      // A group not joined yet holds no message: said as `group send` says it, not "No message … of yours".
+      // Still not_found (exit 3): only the words change here.
+      const held = target.group ? groupById(ctx, target.id) : undefined;
+      const yet = held && notInYet(held, str(params, "chat", true));
+      if (yet) throw new CliError("not_found", yet);
       // Another's message the ref names (by its id or wire id), seen in the same reads that look for mine.
       let theirs: StoredMessage | undefined;
       const message = await messageOf(ctx, target.linkId, ref, (m) => {
@@ -1142,6 +1147,9 @@ const METHODS: Record<string, Method> = {
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const linkId = `group:${group.id}`;
+    // Not in yet: no message is here to find, and it answered "No message …", as if the id were mistyped.
+    const yet = notInYet(group, str(params, "group", true));
+    if (yet) throw new CliError("not_found", yet);
     const before = (await node(ctx).getMessage(linkId, messageId))?.edit?.seq ?? 0;
     const result = await node(ctx).editMessage({ linkId, messageId, text, ...(mentions.length ? { mentions } : {}) });
     if (result.error) throw await editRefused(ctx, linkId, messageId, { group: true, ref: str(params, "group", true) }, result.error, result);
