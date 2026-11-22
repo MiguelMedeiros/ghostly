@@ -393,7 +393,7 @@ describe("a chat's header with a mouse and a larger browser font", () => {
       return this.classList.contains("chat-column") ? columnWidth : 0;
     });
   });
-  afterEach(() => { vi.restoreAllMocks(); document.documentElement.style.fontSize = ""; columnWidth = 348; });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.documentElement.style.fontSize = ""; columnWidth = 348; });
 
   it.each([[768, 348], [880, 460]])("is the phone's at a 24 px font in a %i px window's %i px column", async (width, column) => {
     document.documentElement.style.fontSize = "24px";
@@ -420,5 +420,24 @@ describe("a chat's header with a mouse and a larger browser font", () => {
     openChat();
     await screen.findByTestId("chat-options");
     for (const id of MOVED) expect(screen.getByTestId(id), id).toBeInTheDocument();
+  });
+
+  // The list beside the column is in px: the browser's font made larger with the window left as it is keeps the column
+  // 348 px wide, and only a box sized in rem sees the change.
+  it("is the phone's once the browser's font grows to 24 px, the window and its column as they were", async () => {
+    const resizedElse: (() => void)[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) { if (!target.classList.contains("chat-column")) resizedElse.push(() => this.callback([], this as never)); }
+      unobserve() {}
+      disconnect() {}
+    });
+    viewport(768, 800);
+    openChat();
+    await screen.findByTestId("chat-options");
+    for (const id of MOVED) expect(screen.getByTestId(id), id).toBeInTheDocument();
+    document.documentElement.style.fontSize = "24px";
+    act(() => resizedElse.forEach(resize => resize()));
+    for (const id of MOVED) expect(screen.queryByTestId(id), id).not.toBeInTheDocument();
   });
 });

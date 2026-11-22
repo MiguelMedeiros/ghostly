@@ -290,10 +290,18 @@ test("with a larger browser font, a mid-size window's chat header keeps the cont
       await expect(page.getByTestId("call-video"), `call-video at ${width}px`).toHaveCount(0);
       const room = await name.evaluate((el) => ({ shown: el.clientWidth, whole: el.scrollWidth }));
       expect(room.whole, `at ${width}px: ${JSON.stringify(room)}`).toBeLessThanOrEqual(room.shown);
+      await page.screenshot({ path: test.info().outputPath(`large-font-${width}.png`) });
     }
-    await page.screenshot({ path: test.info().outputPath("large-font-880.png") });
     await page.setViewportSize({ width: 1280, height: 800 });
     await expect(page.getByTestId("call-video")).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("large-font-1280.png") });
+
+    // The font changed with the window left as it is: the column beside the px-wide list keeps its width.
+    await cdp.send("Page.setFontSizes", { fontSizes: { standard: 16 } });
+    await page.setViewportSize({ width: 800, height: 800 });
+    await expect(page.getByTestId("call-video"), "every button at 16 px").toBeVisible();
+    await cdp.send("Page.setFontSizes", { fontSizes: { standard: 24 } });
+    await expect(page.getByTestId("call-video"), "the phone's header once the font is 24 px").toHaveCount(0);
   } finally {
     await bot.stop();
   }

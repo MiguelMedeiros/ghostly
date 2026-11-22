@@ -33,6 +33,15 @@ function useMedia(media: string): boolean {
 /** The px of one rem: the browser's font size, 16 unless the person chose a larger one. */
 const remPx = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
 
+/** A hidden box 1 rem wide: its size follows the browser's font, changed with the window (and so the column) as it was. */
+function remProbe(): HTMLElement {
+  const probe = document.createElement("div");
+  probe.setAttribute("aria-hidden", "true");
+  probe.style.cssText = "position:fixed;top:0;left:0;width:1rem;height:0;visibility:hidden;pointer-events:none";
+  document.body.append(probe);
+  return probe;
+}
+
 /**
  * The phone's header, by the window or by the header's `column`. By the window alone, a phone on its side (844x390 with
  * an iPhone's safe areas) left the chat a 330 px column beside the list with every button in its header, and the name
@@ -55,7 +64,13 @@ export function usePhoneHeader(column?: HTMLElement | null): boolean {
     if (typeof ResizeObserver !== "function") return;
     const observer = new ResizeObserver(measure);
     observer.observe(column);
-    return () => observer.disconnect();
+    // With a mouse the cut is in rem, and the list beside the column in px: a larger font leaves the column as wide.
+    const rem = touch ? null : remProbe();
+    if (rem) observer.observe(rem);
+    return () => {
+      observer.disconnect();
+      rem?.remove();
+    };
   }, [column]);
   return phone || narrowColumn;
 }
