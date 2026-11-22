@@ -15,6 +15,8 @@ class Viewport extends EventTarget {
 }
 let viewport: Viewport;
 let inner = 874;
+/** A phone's touch screen, unless a test says the device has none (a laptop, a desktop). */
+let touchPoints = 5;
 
 function resize(height: number, innerHeight = inner, width = viewport.width) {
   viewport.height = height;
@@ -31,12 +33,15 @@ beforeEach(() => {
   shell.className = "app-shell";
   viewport = new Viewport();
   inner = 874;
+  touchPoints = 5;
   Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
   Object.defineProperty(window, "innerHeight", { configurable: true, get: () => inner });
+  Object.defineProperty(navigator, "maxTouchPoints", { configurable: true, get: () => touchPoints });
 });
 afterEach(() => {
   Reflect.deleteProperty(window, "visualViewport");
   Reflect.deleteProperty(window, "innerHeight");
+  Reflect.deleteProperty(navigator, "maxTouchPoints");
   delete document.documentElement.dataset.keyboard;
   shell.remove();
 });
@@ -111,15 +116,149 @@ describe("the app's height and the keyboard", () => {
 
   it("in an installed web app or on Android, where the page shrinks with the keyboard", () => {
     renderHook(() => useViewportHeight());
-    resize(471, 471);
-    expect(appHeight()).toBe("471px");
-    expect(keyboard()).toBe("true");
-    // iOS puts `innerHeight` back a moment later, with no event: the answer stays the same.
-    inner = 874;
-    act(() => { viewport.dispatchEvent(new Event("scroll")); });
-    expect(keyboard()).toBe("true");
-    resize(874, 874);
-    expect(keyboard()).toBe("false");
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      resize(471, 471);
+      expect(appHeight()).toBe("471px");
+      expect(keyboard()).toBe("true");
+      // iOS puts `innerHeight` back a moment later, with no event: the answer stays the same.
+      inner = 874;
+      act(() => { viewport.dispatchEvent(new Event("scroll")); });
+      expect(keyboard()).toBe("true");
+      resize(874, 874);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("turned with the keyboard up where the page shrinks with it, the keyboard stays up both ways", () => {
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      resize(471, 471);
+      expect(keyboard()).toBe("true");
+      // On its side, the keyboard still up: no height seen there says how tall the screen is without it.
+      resize(180, 180, 874);
+      expect(appHeight()).toBe("180px");
+      expect(keyboard()).toBe("true");
+      // Upright again: the whole height seen upright still counts.
+      resize(471, 471, 402);
+      expect(keyboard()).toBe("true");
+      // On its side again, and the keyboard goes down there.
+      resize(180, 180, 874);
+      expect(keyboard()).toBe("true");
+      resize(402, 402, 874);
+      expect(keyboard()).toBe("false");
+      // The keyboard up again on its side is measured against the height now seen there.
+      resize(180, 180, 874);
+      expect(keyboard()).toBe("true");
+      // Turned to a width never seen, and the field loses the focus there: the keyboard goes with it.
+      resize(300, 300, 600);
+      expect(keyboard()).toBe("true");
+      act(() => field.blur());
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("turned with the keyboard up on Android, which gives the whole height first: the keyboard goes down there", () => {
+    // As the API 35 emulator reports it: upright 412×842, on its side 866×364, the keyboard laid out after the turn.
+    viewport.width = 412;
+    viewport.height = 842;
+    inner = 842;
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      resize(530, 530);
+      expect(keyboard()).toBe("true");
+      resize(364, 364, 866);
+      resize(127, 127, 866);
+      expect(keyboard()).toBe("true");
+      // Back takes the keyboard down, the field keeps the focus.
+      resize(364, 364, 866);
+      expect(keyboard()).toBe("false");
+      resize(842, 842, 412);
+      expect(keyboard()).toBe("false");
+      // On its side once more, a height seen there now.
+      resize(530, 530);
+      resize(364, 364, 866);
+      resize(127, 127, 866);
+      expect(keyboard()).toBe("true");
+      resize(364, 364, 866);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("a window made shorter with nothing focused is not a keyboard (split screen, a quarter of the screen)", () => {
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      resize(674, 674);
+      expect(appHeight()).toBe("674px");
+      expect(keyboard()).toBe("false");
+      // A field in the shorter window has the focus, and no keyboard comes up (a laptop).
+      act(() => field.focus());
+      expect(keyboard()).toBe("false");
+      act(() => field.blur());
+      resize(437, 437);
+      expect(keyboard()).toBe("false");
+      resize(874, 874);
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("with no touch screen, a window made shorter while a field has the focus is not a keyboard (a narrow desktop window, 200 % zoom)", () => {
+    touchPoints = 0;
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("input"));
+    try {
+      act(() => field.focus());
+      // Another window stacked under it, devtools docked, full screen left.
+      resize(574, 574);
+      expect(appHeight()).toBe("574px");
+      expect(keyboard()).toBe("false");
+      // The field loses the focus, nothing resizes: the tab bar was left hidden until the next resize.
+      act(() => field.blur());
+      expect(keyboard()).toBe("false");
+      act(() => field.focus());
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("on a touch laptop, a window made shorter while a field has the focus is not a keyboard once the field loses it", () => {
+    // A 2-in-1 or a Chromebook with its keyboard: a touch screen, the touchpad the primary pointer.
+    touchPoints = 10;
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+      ({ matches: query === "(pointer: fine)", media: query, addEventListener: () => {}, removeEventListener: () => {} }) as unknown as MediaQueryList);
+    viewport.width = 700;
+    viewport.height = 900;
+    inner = 900;
+    renderHook(() => useViewportHeight());
+    const field = document.body.appendChild(document.createElement("input"));
+    try {
+      act(() => field.focus());
+      resize(600, 600);
+      expect(appHeight()).toBe("600px");
+      expect(keyboard()).toBe("false");
+      // The field loses the focus, nothing resizes: the tab bar was left hidden until the next resize.
+      act(() => field.blur());
+      expect(appHeight()).toBe("600px");
+      expect(keyboard()).toBe("false");
+    } finally {
+      field.remove();
+      vi.restoreAllMocks();
+    }
   });
 
   it("a browser toolbar that slides away is not a keyboard", () => {
@@ -218,11 +357,17 @@ describe("the app's height and the keyboard", () => {
 
   it("starts over when the phone turns", () => {
     renderHook(() => useViewportHeight());
-    // Landscape: a much shorter screen, with no keyboard.
-    resize(402, 402, 874);
-    expect(keyboard()).toBe("false");
-    resize(180, 180, 874);
-    expect(keyboard()).toBe("true");
+    const field = document.body.appendChild(document.createElement("textarea"));
+    try {
+      act(() => field.focus());
+      // Landscape: a much shorter screen, with no keyboard.
+      resize(402, 402, 874);
+      expect(keyboard()).toBe("false");
+      resize(180, 180, 874);
+      expect(keyboard()).toBe("true");
+    } finally {
+      field.remove();
+    }
   });
 });
 

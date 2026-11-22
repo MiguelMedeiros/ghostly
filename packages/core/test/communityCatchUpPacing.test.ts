@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
+vi.mock("../src/identity", async importOriginal => (await import("./support/verifyOnce")).verifyOnce(await importOriginal()));
 import {
   COMMUNITY_LIMITS, CommunitySession,
   type CommunityFrame, type CommunityIncomingMessage, type CommunitySessionHooks, type CommunityState,

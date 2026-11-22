@@ -44,7 +44,7 @@ describe("restoring a backup of a profile still on this device", () => {
   it("warns before anything is restored, and Replace restores the copy and opens the original's removal there", async () => {
     const { user } = await pickBackup([work]);
     const warning = await screen.findByTestId("restore-same-device");
-    expect(warning).toHaveTextContent("This backup is “Work”, which is on this device");
+    expect(warning).toHaveTextContent("This backup is “\u2068Work\u2069”, which is on this device");
     expect(warning).toHaveTextContent("Both would act as the same person to your contacts.");
     expect(restoreOpenedBackup, "nothing restored before the person chooses").not.toHaveBeenCalled();
     expect(screen.getByTestId("restore-copy")).toHaveTextContent("Restore as a copy anyway");

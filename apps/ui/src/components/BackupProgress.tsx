@@ -49,8 +49,8 @@ export function BackupProgress({ job, onCancel }: { job: BackupJob; onCancel: ()
       <h2 id="backup-progress-title" className="m-0 text-base font-semibold text-text-primary">{title}</h2>
       <p data-testid="backup-progress-stage" aria-live="polite" className="text-sm text-text-secondary">{stage}</p>
       <div role="progressbar" aria-label={title} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined} data-testid="backup-progress-bar"
-        className="h-2 w-full overflow-hidden rounded-full bg-surface-alt">
-        <div className={`h-full rounded-full bg-accent ${percent === null ? "w-1/3 animate-pulse" : "transition-[width] duration-150"}`} style={percent === null ? undefined : { width: `${percent}%` }} />
+        className="progress-track h-2 w-full overflow-hidden rounded-full bg-surface-alt">
+        <div className={`progress-fill h-full rounded-full bg-accent ${percent === null ? "w-1/3 animate-pulse" : "transition-[width] duration-150"}`} style={percent === null ? undefined : { width: `${percent}%` }} />
       </div>
       <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-xs text-text-muted min-h-4">
         <span data-testid="backup-progress-files">{job.filesTotal > 0 ? t("profile.backups.progress.files", { done: fileNow, total: job.filesTotal }) : ""}</span>

@@ -87,6 +87,18 @@ describe("the certificate check of a signed x401 request", () => {
     expect(await reason([near.der, exact.der], "notverifier.example")).toMatch(/outside its CA's name constraints/);
   });
 
+  it("reads a name with a trailing dot as the same name against a CA's name constraints", async () => {
+    const excluding = testCertificate({ subject: "Excluding CA", ca: true, issuer: root, names: { excluded: ["bank.example"] } });
+    const dotted = testCertificate({ subject: "x.bank.example.", dns: ["x.bank.example."], issuer: excluding });
+    expect(await reason([dotted.der, excluding.der], "x.bank.example.")).toMatch(/names x\.bank\.example\.?, outside its CA's name constraints \(Excluding CA\)/);
+    const dottedBase = testCertificate({ subject: "Dotted CA", ca: true, issuer: root, names: { excluded: ["bank.example."] } });
+    const plain = testCertificate({ subject: "x.bank.example", dns: ["x.bank.example"], issuer: dottedBase });
+    expect(await reason([plain.der, dottedBase.der], "x.bank.example")).toMatch(/outside its CA's name constraints \(Dotted CA\)/);
+    const permitting = testCertificate({ subject: "Permitting CA", ca: true, issuer: root, names: { permitted: ["verifier.example"] } });
+    const fqdn = testCertificate({ subject: "api.verifier.example.", dns: ["api.verifier.example."], issuer: permitting });
+    expect(await reason([fqdn.der, permitting.der], "api.verifier.example.")).toBe("ok");
+  });
+
   it("refuses a leaf whose key usages do not allow signing a request", async () => {
     const leafWith = (o: { keyUsage?: number[]; eku?: (readonly number[])[] }) =>
       testCertificate({ subject: "verifier.example", dns: ["verifier.example"], issuer: intermediate, ...o }).der;

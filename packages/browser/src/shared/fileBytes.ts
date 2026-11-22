@@ -20,8 +20,12 @@ export interface FileBytes {
   append(id: string, offset: number, bytes: Uint8Array): Promise<void>;
   /** What was appended so far survives a crash. */
   flush(id: string): Promise<void>;
-  /** Writing is over for now: flushed, and the file let go so it can be read elsewhere. */
-  close(id: string): Promise<void>;
+  /**
+   * Writing is over for now: flushed, and the file let go so it can be read elsewhere. `flush: false` lets it go
+   * without forcing its bytes to disk: they get there all the same, unless the device itself goes down first. A
+   * backend with nothing to skip flushes anyway.
+   */
+  close(id: string, flush?: boolean): Promise<void>;
   /** Bytes stored, or null when there is no such file. */
   size(id: string): Promise<number | null>;
   /** Cuts the file to `size` bytes (a transfer going back to its last durable point). */
@@ -62,6 +66,13 @@ export interface FileBytes {
    * are pieces in the profile's own database (`idb`): those are read and written with that database.
    */
   forSpace?(space: string): FileBytes;
+  /**
+   * Another space's stored file `fromId` under `id` here as well, nothing read or written: one file with two names (a
+   * move back to a device whose frozen copy holds it). A write to either name gives that name a file of its own first,
+   * so the other keeps its bytes. Absent where storage has no such names (`opfs`, `idb`); rejects where the disk has
+   * none: copy instead.
+   */
+  link?(fromSpace: string, fromId: string, id: string): Promise<void>;
 }
 
 export type FileBytesKind = "opfs" | "native" | "idb";
