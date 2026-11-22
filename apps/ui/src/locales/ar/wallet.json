@@ -251,6 +251,8 @@
     "removeMintQuestion": "إزالة {{name}}؟",
     "setAside": "{{amount}} {{unit}} محجوزة",
     "setAsideInfo": "محجوزة لدفعة لم تؤكدها دار السك بعد. تخرج مع الدفعة أو تعود إلى رصيدك عندما تجيب دار السك.",
+    "setAside_one": "{{amount}} {{unit}} محجوز",
+    "setAside_other": "{{amount}} {{unit}} محجوزة",
     "settings": "الإعدادات",
     "testBalance": "{{amount}} sats تجريبية (بلا قيمة)",
     "testBalance_one": "{{amount}} sat تجريبي (بلا قيمة)",
