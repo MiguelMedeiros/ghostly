@@ -407,3 +407,107 @@ describe("the clipboard guard's Trusted Types default policy", () => {
     expect(page.navigate("javascript:alert(1)")).toBeNull();
   });
 });
+
+/**
+ * The apps' origins under a services host share its site: a cookie one sets for the whole host would be read by every
+ * other contact's app open at once. The guard keeps each one the page's script sets to the page's own host.
+ */
+describe("the clipboard guard's cookies", () => {
+  /** A window whose `document.cookie` and `cookieStore` record every write, the guard run in it. */
+  function guarded() {
+    const writes: string[] = [];
+    const changes: [string, unknown][] = [];
+    class Doc { execCommand() { return true; } }
+    Object.defineProperty(Doc.prototype, "cookie", {
+      configurable: true,
+      enumerable: true,
+      get() { return writes.join("; "); },
+      set(value: string) { writes.push(value); },
+    });
+    class Store {
+      set(...args: unknown[]) { changes.push(["set", args.length > 1 ? args : { ...(args[0] as object) }]); return Promise.resolve(); }
+      delete(options: unknown) { changes.push(["delete", typeof options === "object" ? { ...(options as object) } : options]); return Promise.resolve(); }
+    }
+    const w = {
+      Reflect, Object, String, TypeError,
+      Document: Doc,
+      CookieStore: Store,
+      cookieStore: new Store(),
+      Event: class { get eventPhase() { return 0; } },
+      EventTarget: { prototype: { addEventListener() {} } },
+      Element: { prototype: {} },
+      DocumentFragment: { prototype: {} },
+      NodeList: { prototype: { get length() { return 0; } } },
+      MutationObserver: class { observe() {} },
+      get length() { return 0; },
+      document: null as unknown,
+    };
+    Object.defineProperty(Doc.prototype, "defaultView", { get() { return w; } });
+    w.document = new Doc();
+    new Function("window", CLIPBOARD_GUARD_SCRIPT)(w);
+    return { doc: w.document as { cookie: string }, store: w.cookieStore, writes, changes, Doc, Store };
+  }
+
+  it("leaves a Domain attribute out of a document.cookie write, whatever its case or spacing, and keeps the rest", () => {
+    const { doc, writes } = guarded();
+    doc.cookie = "a=1; Domain=svc.example; Path=/";
+    doc.cookie = "b=2;domain=.svc.example;Secure;SameSite=None;Partitioned";
+    doc.cookie = "c=3; \tDOMAIN = svc.example ";
+    doc.cookie = "domain=4; Path=/x";
+    doc.cookie = { toString: () => "e=5; Domain=svc.example" } as unknown as string;
+    doc.cookie = "f=6;; Domain";
+    expect(writes).toEqual(["a=1; Path=/", "b=2;Secure;SameSite=None;Partitioned", "c=3", "domain=4; Path=/x", "e=5", "f=6;"]);
+  });
+
+  it("does not split the cookie with a method the page can change after it ran", () => {
+    const { doc, writes } = guarded();
+    const real = String.prototype.split;
+    const symbol = Object.getOwnPropertyDescriptor(String.prototype, Symbol.split);
+    String.prototype.split = () => ["x"];
+    Object.defineProperty(String.prototype, Symbol.split, { value: () => ["x"], configurable: true, writable: true });
+    try {
+      doc.cookie = "a=1; Domain=svc.example";
+    } finally {
+      String.prototype.split = real;
+      if (symbol) Object.defineProperty(String.prototype, Symbol.split, symbol);
+      else delete (String.prototype as unknown as Record<symbol, unknown>)[Symbol.split];
+    }
+    expect(writes).toEqual(["a=1"]);
+  });
+
+  it("leaves a domain out of cookieStore.set and cookieStore.delete, and passes the rest on", async () => {
+    const { store, changes } = guarded();
+    await store.set({ name: "a", value: "1", domain: "svc.example", path: "/", sameSite: "none", partitioned: true } as never);
+    await store.set("b", "2");
+    await store.delete({ name: "a", domain: "svc.example", path: "/" } as never);
+    await store.delete("b");
+    // A function is a dictionary too, to the browser.
+    const callable = Object.defineProperties(() => {}, { name: { value: "c" }, value: { value: "3" }, domain: { value: "svc.example" } });
+    await store.set(callable as never);
+    expect(changes).toEqual([
+      ["set", { name: "a", value: "1", path: "/", sameSite: "none", partitioned: true }],
+      ["set", ["b", "2"]],
+      ["delete", { name: "a", path: "/" }],
+      ["delete", "b"],
+      ["set", { name: "c", value: "3" }],
+    ]);
+  });
+
+  it("reads each member of the options once, so a getter cannot hand the domain on after the guard looked", async () => {
+    const { store, changes } = guarded();
+    let reads = 0;
+    const options = { name: "a", get value() { reads++; return "1"; }, domain: "svc.example" };
+    await store.set(options as never);
+    expect(reads).toBe(1);
+    expect(changes).toEqual([["set", { name: "a", value: "1" }]]);
+  });
+
+  it("is fixed in place: the page cannot put the browser's setter or methods back", () => {
+    const { Doc, Store } = guarded();
+    const cookie = Object.getOwnPropertyDescriptor(Doc.prototype, "cookie")!;
+    expect(cookie.configurable).toBe(false);
+    for (const name of ["set", "delete"]) {
+      expect(Object.getOwnPropertyDescriptor(Store.prototype, name)).toMatchObject({ writable: false, configurable: false });
+    }
+  });
+});

@@ -1,5 +1,25 @@
 import { CLEAR_COOKIES } from "./protocol";
 
+/**
+ * The browser's own `document.cookie` setter, kept as this module loads, before the bridge runs the clipboard guard
+ * here: that one leaves out a `Domain` attribute (packages/core/src/clipboardGuard.ts), and the bridge expires the
+ * cookies a contact's app left for the whole services host by that attribute.
+ */
+const putCookie = cookieSetter();
+
+function cookieSetter(): ((this: Document, cookie: string) => void) | undefined {
+  for (let holder: object | null = Document.prototype; holder; holder = Object.getPrototypeOf(holder)) {
+    const found = Object.getOwnPropertyDescriptor(holder, "cookie");
+    if (found) return found.set;
+  }
+  return undefined;
+}
+
+/** Writes `cookie` with that setter, or with one this document holds of its own (a test's jar; none in a browser). */
+function setCookie(cookie: string): void {
+  (Object.getOwnPropertyDescriptor(document, "cookie")?.set ?? putCookie)?.call(document, cookie);
+}
+
 /** The names of the cookies this page's script sees. */
 function cookieNames(): string[] {
   return document.cookie.split(";").map((pair) => pair.split("=")[0]?.trim() ?? "").filter(Boolean);
@@ -12,9 +32,9 @@ function cookieNames(): string[] {
  */
 function expire(name: string, domain?: string): void {
   const base = `${name}=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/${domain ? `; Domain=${domain}` : ""}`;
-  document.cookie = base;
-  document.cookie = `${base}; Secure; SameSite=None`;
-  document.cookie = `${base}; Secure; SameSite=None; Partitioned`;
+  setCookie(base);
+  setCookie(`${base}; Secure; SameSite=None`);
+  setCookie(`${base}; Secure; SameSite=None; Partitioned`);
 }
 
 /** Expires each cookie this page sees on `domain` (none: this origin's own). */
@@ -43,9 +63,9 @@ function sharedCookiesTaken(suffix: string): boolean {
   const name = "ghostly-svc-probe";
   const base = `${name}=1; Path=/; Domain=${suffix}`;
   try {
-    document.cookie = base;
-    document.cookie = `${base}; Secure; SameSite=None`;
-    document.cookie = `${base}; Secure; SameSite=None; Partitioned`;
+    setCookie(base);
+    setCookie(`${base}; Secure; SameSite=None`);
+    setCookie(`${base}; Secure; SameSite=None; Partitioned`);
   } catch { return false; }
   const taken = cookieNames().includes(name);
   if (taken) expire(name, suffix);
