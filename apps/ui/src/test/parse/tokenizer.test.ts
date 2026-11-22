@@ -152,6 +152,10 @@ describe("links", () => {
     ["a left-to-right mark", "https://x.example/a\u200e", "[link:https://x.example/a]\u200e"],
     ["an Arabic letter mark", "https://x.example/a\u061c", "[link:https://x.example/a]\u061c"],
     ["a closed isolate", "\u2067https://x.example/a\u2069", "\u2067[link:https://x.example/a]\u2069"],
+    ["an emoji, then a right-to-left mark", "https://x.example/a\ud83d\udd25\u200f", "[link:https://x.example/a]\ud83d\udd25\u200f"],
+    // The link opened "…/a%C2%AD" and "…/a1": a soft hyphen draws as nothing, and a keycap's digit is part of its emoji.
+    ["a soft hyphen", "https://x.example/a\u00ad", "[link:https://x.example/a]\u00ad"],
+    ["a keycap", "https://x.example/a1\ufe0f\u20e3 https://x.example/b#\u20e3", "[link:https://x.example/a]1\ufe0f\u20e3 [link:https://x.example/b]#\u20e3"],
     ["an emoji inside the path (kept)", "https://x.example/🔥/a", "[link:https://x.example/🔥/a]"],
   ])("ends a link before an emoji or invisible character typed after it: %s", (_name, text, shown) => expect(inline(text)).toBe(shown));
 

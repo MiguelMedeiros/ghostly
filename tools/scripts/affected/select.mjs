@@ -109,6 +109,7 @@ export const UNIT_PROJECTS = [
       "docs/RELEASING.md": ["chromeWebStore", "npmPublish", "webLatest"],
       "{CHANGELOG.md,apps/desktop/Cargo.toml,apps/website/lib/release.ts,apps/extension/public/manifest.json,packages/browser/src/shared/features.ts}": ["bumpVersion"],
       "packages/cli/package.json": ["npmPublish", "cliShrinkwrap"],
+      "apps/website/package.json": ["websiteSteps"],
       ".gitignore": ["cliShrinkwrap"],
       "apps/desktop/src/{translate,translate_models}.rs": ["translationRuntimes"],
       "e2e/playwright.config.ts": ["e2eWorkflow"],
@@ -404,6 +405,25 @@ export function testsReaching(changed, files, tests, packages) {
     }
   }
   return [...out].sort();
+}
+
+/**
+ * The integration test files (tools/scripts/integration-tests.json, repository paths) a unit project's plan reaches:
+ * all of the project's when it runs whole, those among its related files or importing one of them otherwise. As
+ * `vitest related` would pick them; `test:affected` leaves them out unless --integration is given.
+ *
+ * @param {{ mode: string, tests: string[], files?: string[] }} unit  a unit project of `plan`
+ * @param {string[]} list  the integration files
+ * @param {Record<string, string>} [files]  path → text of the files to follow
+ * @param {Record<string, [string, string][]>} [packages]  the workspaces' exports (workspaceExports)
+ * @returns {string[]}
+ */
+export function integrationReached(unit, list, files, packages) {
+  const mine = list.filter((f) => unit.tests.some((g) => globToRegExp(g).test(f)));
+  if (unit.mode === "skip" || !mine.length) return [];
+  if (unit.mode === "whole" || !files) return mine;
+  const hit = new Set([...unit.files.filter((f) => mine.includes(f)), ...testsReaching(unit.files, files, mine, packages)]);
+  return mine.filter((f) => hit.has(f));
 }
 
 // ---------- tests that read a file from disk ----------

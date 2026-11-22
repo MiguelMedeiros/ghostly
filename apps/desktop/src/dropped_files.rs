@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
-use crate::clipboard::{pasted_files, regular_files, shelve_files, PasteShelf, PastedItem};
+use crate::clipboard::{pasted_files, regular_files, shelve_files, PasteShelf, ShelvedFiles};
 
 /// The event the page hears while another app's drag of files is over the window (true), and when it left (false).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -153,11 +153,12 @@ pub fn local_files<S: AsRef<str>>(uris: &[S]) -> Vec<PathBuf> {
 }
 
 /// The files of the drop the page just took, on the shelf (regular files only, as a paste's): read by token
-/// (`read_pasted_bytes`), let go with `incoming_share_done`. Empty when no drop of files came from another app.
+/// (`read_pasted_bytes`), let go with `incoming_share_done`; those left out by name. Empty when no drop of files came
+/// from another app.
 #[tauri::command]
 pub async fn read_dropped_files<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
-) -> Result<Vec<PastedItem>, String> {
+) -> Result<ShelvedFiles, String> {
     if window.label() != "main" {
         return Err("Not allowed from this window".into());
     }
@@ -177,12 +178,12 @@ pub async fn read_dropped_files<R: tauri::Runtime>(
 /// The files of the drop the page just took, picked on its own file input (regular files only, all of them): the page
 /// gets Files WebKit reads from the disk as they are sent, as + → Document's, of any size, where a read by token
 /// (`read_dropped_files`) brings every byte into the page first. How many are picked: 0, and nothing is clicked, when
-/// the drop brought no file to send. `READ_INSTEAD` when one of its files has a path the chooser can't take: the drop
-/// stays, whole, for `read_dropped_files`.
+/// the drop brought no file to send; and the names of what it left out (a folder), for the page to say. `READ_INSTEAD`
+/// when one of its files has a path the chooser can't take: the drop stays, whole, for `read_dropped_files`.
 #[tauri::command]
 pub async fn choose_dropped_files<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
-) -> Result<usize, String> {
+) -> Result<ChosenFiles, String> {
     if window.label() != "main" {
         return Err("Not allowed from this window".into());
     }
@@ -190,14 +191,15 @@ pub async fn choose_dropped_files<R: tauri::Runtime>(
         .try_state::<DroppedFiles>()
         .ok_or("Dropping files is unavailable")?;
     let Some((paths, at)) = dropped.take_latest() else {
-        return Ok(0);
+        return Ok(ChosenFiles::default());
     };
-    let (files, paths) =
+    let (regular, paths) =
         tauri::async_runtime::spawn_blocking(move || (regular_files(paths.clone()), paths))
             .await
             .map_err(|e| e.to_string())?;
+    let (files, left_out) = (regular.files, regular.left_out);
     if files.is_empty() {
-        return Ok(0);
+        return Ok(ChosenFiles { count: 0, left_out });
     }
     if files.iter().any(|(path, ..)| path.to_str().is_none()) {
         dropped.put(paths, at);
@@ -216,7 +218,15 @@ pub async fn choose_dropped_files<R: tauri::Runtime>(
         dropped.chosen.lock().unwrap().take();
         return Err(e.to_string());
     }
-    Ok(count)
+    Ok(ChosenFiles { count, left_out })
+}
+
+/// What `choose_dropped_files` picks: how many, and the names of what the drop brought that is no file to send.
+#[derive(serde::Serialize, Debug, Default, PartialEq)]
+pub struct ChosenFiles {
+    pub count: usize,
+    #[serde(rename = "leftOut")]
+    pub left_out: Vec<String>,
 }
 
 /// Watches the main window's drags (Linux only: elsewhere the WebView hands the page the dropped files itself).
@@ -425,7 +435,7 @@ mod tests {
             .expect("app")
     }
 
-    fn read(window: &tauri::WebviewWindow<MockRuntime>) -> Result<Vec<PastedItem>, String> {
+    fn read(window: &tauri::WebviewWindow<MockRuntime>) -> Result<ShelvedFiles, String> {
         tauri::async_runtime::block_on(read_dropped_files(window.clone()))
     }
 
@@ -445,7 +455,7 @@ mod tests {
         let main = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .unwrap();
-        assert_eq!(read(&main), Ok(Vec::new()), "no drop yet");
+        assert_eq!(read(&main), Ok(ShelvedFiles::default()), "no drop yet");
 
         let dropped = app.state::<DroppedFiles>();
         dropped.put(
@@ -458,7 +468,13 @@ mod tests {
             .unwrap();
         assert_eq!(read(&other), Err("Not allowed from this window".into()));
 
-        let items = read(&main).unwrap();
+        let dropped_now = read(&main).unwrap();
+        // The folder is named, for the page to say it was left out.
+        assert_eq!(
+            (dropped_now.left_out, dropped_now.past_limit),
+            (vec!["a folder".to_string()], Vec::new())
+        );
+        let items = dropped_now.items;
         assert_eq!(items.len(), 1);
         assert_eq!(
             (
@@ -479,14 +495,14 @@ mod tests {
             tauri::ipc::InvokeResponseBody::Raw(raw) => assert_eq!(raw, b"boo"),
             other => panic!("not raw bytes: {other:?}"),
         }
-        assert_eq!(read(&main), Ok(Vec::new()), "taken once");
+        assert_eq!(read(&main), Ok(ShelvedFiles::default()), "taken once");
 
         // A drop the page never asked for in time is gone.
         dropped.put(
             vec![dir.join("ghost story.txt")],
             Instant::now().checked_sub(FRESH * 2).unwrap(),
         );
-        assert_eq!(read(&main), Ok(Vec::new()));
+        assert_eq!(read(&main), Ok(ShelvedFiles::default()));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -506,7 +522,13 @@ mod tests {
             tauri::async_runtime::block_on(choose_dropped_files(window.clone()))
         };
         let dropped = app.state::<DroppedFiles>();
-        assert_eq!(choose(&main), Ok(0), "no drop yet");
+        let picked = |count: usize, left_out: &[&str]| {
+            Ok(ChosenFiles {
+                count,
+                left_out: left_out.iter().map(|name| name.to_string()).collect(),
+            })
+        };
+        assert_eq!(choose(&main), picked(0, &[]), "no drop yet");
         assert!(take_asked(&dropped).is_empty());
 
         dropped.put(
@@ -518,8 +540,13 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(choose(&other), Err("Not allowed from this window".into()));
-        assert_eq!(choose(&main), Ok(1));
-        assert_eq!(read(&main), Ok(Vec::new()), "the drop is taken");
+        // The folder is named, for the page to say it was left out.
+        assert_eq!(choose(&main), picked(1, &["a folder"]));
+        assert_eq!(
+            read(&main),
+            Ok(ShelvedFiles::default()),
+            "the drop is taken"
+        );
         let accept = asked(&dropped);
         assert_eq!(take_asked(&dropped), vec![dir.join("archive 300.bin")]);
         assert!(dropped.take_chosen(&[&accept]).is_empty(), "picked once");
@@ -534,7 +561,7 @@ mod tests {
 
         // A folder alone: nothing to pick, and nothing clicked.
         dropped.put(vec![dir.join("a folder")], Instant::now());
-        assert_eq!(choose(&main), Ok(0));
+        assert_eq!(choose(&main), picked(0, &["a folder"]));
         assert!(take_asked(&dropped).is_empty());
 
         // Only the drop input's chooser is the window's to answer; any other is the system's dialog.
@@ -592,12 +619,12 @@ mod tests {
         let dropped = app.state::<DroppedFiles>();
 
         dropped.put(vec![dir.join("first.txt")], Instant::now());
-        assert_eq!(choose(), Ok(1));
+        assert_eq!(choose().map(|picked| picked.count), Ok(1));
         let stale = asked(&dropped);
         assert_eq!(take_asked(&dropped), vec![dir.join("first.txt")]);
 
         dropped.put(vec![dir.join("second.txt")], Instant::now());
-        assert_eq!(choose(), Ok(1));
+        assert_eq!(choose().map(|picked| picked.count), Ok(1));
         let accept = asked(&dropped);
         assert_ne!(accept, stale, "a new type each call");
         let random = accept.strip_prefix(&format!("{DROP_CHOOSER}.")).unwrap();
@@ -642,7 +669,10 @@ mod tests {
         dropped.put(many.clone(), Instant::now());
         assert_eq!(
             tauri::async_runtime::block_on(choose_dropped_files(main.clone())),
-            Ok(many.len())
+            Ok(ChosenFiles {
+                count: many.len(),
+                left_out: Vec::new()
+            })
         );
         assert_eq!(take_asked(&dropped), many);
         std::fs::remove_dir_all(dir).unwrap();
@@ -672,7 +702,7 @@ mod tests {
             Err(READ_INSTEAD.into())
         );
         assert!(take_asked(&dropped).is_empty(), "nothing to pick");
-        let items = read(&main).unwrap();
+        let items = read(&main).unwrap().items;
         assert_eq!(
             items.iter().map(|i| i.name.as_deref()).collect::<Vec<_>>(),
             vec![Some("plain.txt"), Some("report.txt")],
@@ -682,6 +712,36 @@ mod tests {
         assert!(include_str!("../../ui/src/lib/pastedFiles.ts")
             .contains(&format!("READ_INSTEAD = \"{READ_INSTEAD}\"")));
         std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+    }
+
+    /// A file whose own name is not UTF-8 (Latin-1, from an old archive) was left out of the drop without a word: it
+    /// comes in by token, under a name that can be shown.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_dropped_file_whose_name_is_not_utf8_comes_in() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = std::env::temp_dir().join(format!("ghostly-latin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let plain = dir.join("p1.txt");
+        let latin = dir.join(std::ffi::OsStr::from_bytes(b"caf\xe9.txt"));
+        std::fs::write(&plain, b"1").unwrap();
+        std::fs::write(&latin, b"x").unwrap();
+        let app = app();
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        app.state::<DroppedFiles>()
+            .put(vec![plain, latin], Instant::now());
+        assert_eq!(
+            tauri::async_runtime::block_on(choose_dropped_files(main.clone())),
+            Err(READ_INSTEAD.into())
+        );
+        let items = read(&main).unwrap().items;
+        assert_eq!(
+            items.iter().map(|i| i.name.as_deref()).collect::<Vec<_>>(),
+            vec![Some("p1.txt"), Some("caf\u{FFFD}.txt")]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// `run` is what the person's app is built from: the watch goes on its Ghostly window.
