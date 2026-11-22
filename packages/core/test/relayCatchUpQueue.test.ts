@@ -95,7 +95,7 @@ describe("relay transport: packets queued for a relay", () => {
     // The person removes the small relay in Settings.
     relay.setRelays([A]);
     await vi.advanceTimersByTimeAsync(180_000);
-    // Before: the queued packet still went to the relay removed.
+    // Without the listed-relay check in `refusal`: the queued packet still went to the relay removed.
     expect(r.last(SMALL, k.pubKeyZ32)).toBeUndefined();
   });
 
@@ -118,7 +118,7 @@ describe("relay transport: packets queued for a relay", () => {
     while (sent === 0) await vi.advanceTimersByTimeAsync(500);
     relay.setRelays([A]);
     await vi.advanceTimersByTimeAsync(600_000);
-    // Before: the 429 queued it again, and the relay removed got it once more.
+    // Without the listed-relay check in `refusal`: the 429 queued it again, and the relay removed got it 5 times more.
     expect(sent).toBe(1);
   });
 
