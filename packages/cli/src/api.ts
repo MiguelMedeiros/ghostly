@@ -10,7 +10,7 @@ import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PA
 import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inCall, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type CallScope, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -697,8 +697,16 @@ const METHODS: Record<string, Method> = {
   },
   /** The saved messages under `saved`, the last saved first, each as it is now and named by its chat or group. */
   async "saved.list"(ctx) {
+    let saved = await node(ctx).savedMessages();
+    // A one-shot leaves the saved chats unstarted (`readsNoHistory`): each 1:1 chat that holds a saved row is restored
+    // first (a no-op in a daemon), whose outbox and waiting reactions rewrite rows this lists. Mine still "sent" when
+    // the last process stopped listed so, not queued as `chat history` says it. Nothing saved: no chat is read.
+    const chats = new Set(saved.flatMap((s) => (s.message.linkId.startsWith("group:") ? [] : [s.message.linkId])));
+    if (chats.size) {
+      for (const linkId of chats) await node(ctx).startDeferredChat(linkId);
+      saved = await node(ctx).savedMessages();
+    }
     const { links, groups } = state(ctx);
-    const saved = await node(ctx).savedMessages();
     // A saved reply quotes its original as history gives it: per chat or group, one read per quoted original.
     const originals = new Map<string, Originals>();
     for (const linkId of new Set(saved.map((s) => s.message.linkId))) originals.set(linkId, await originalsNow(ctx, linkId, saved.flatMap((s) => (s.message.linkId === linkId ? [s.message] : []))));
@@ -827,6 +835,11 @@ const METHODS: Record<string, Method> = {
       if (!target.group && wait === "sent") throw new CliError("bad_request", "--wait sent is for a group: a chat's removal waits with --wait confirmed");
       const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
       const ref = str(params, "message", true);
+      // A group not joined yet holds no message: said as `group send` says it, not "No message … of yours".
+      // Still not_found (exit 3): only the words change here.
+      const held = target.group ? groupById(ctx, target.id) : undefined;
+      const yet = held && notInYet(held, str(params, "chat", true));
+      if (yet) throw new CliError("not_found", yet);
       // Another's message the ref names (by its id or wire id), seen in the same reads that look for mine.
       let theirs: StoredMessage | undefined;
       const message = await messageOf(ctx, target.linkId, ref, (m) => {
@@ -1070,6 +1083,9 @@ const METHODS: Record<string, Method> = {
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const linkId = `group:${group.id}`;
+    // Not in yet: no message is here to find, and it answered "No message …", as if the id were mistyped.
+    const yet = notInYet(group, str(params, "group", true));
+    if (yet) throw new CliError("not_found", yet);
     const before = (await node(ctx).getMessage(linkId, messageId))?.edit?.seq ?? 0;
     const result = await node(ctx).editMessage({ linkId, messageId, text, ...(mentions.length ? { mentions } : {}) });
     if (result.error) throw await editRefused(ctx, linkId, messageId, { group: true, ref: str(params, "group", true) }, result.error, result);
@@ -1722,5 +1738,6 @@ export async function callApi(ctx: ApiContext, method: string, params: unknown =
   const run = Object.hasOwn(METHODS, method) ? METHODS[method] : undefined;
   if (!run) throw new CliError("not_found", `No method ${method}`);
   if (params === null || typeof params !== "object" || Array.isArray(params)) throw new CliError("bad_request", "params must be an object");
-  return run(ctx, await withStoredIds(ctx, params as Params), call);
+  const named = await withStoredIds(ctx, params as Params);
+  return inCall(call, () => run(ctx, named, call));
 }

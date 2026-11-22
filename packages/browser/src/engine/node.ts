@@ -1186,6 +1186,7 @@ export class GhostlyNode implements EngineImplementation {
     wireIds: (linkId) => this.links.get(linkId)?.files.wireIds,
     deleted: (linkId, messageId) => !!this.links.get(linkId)?.stored.deletedIds?.includes(messageId),
     messageExists: (linkId, messageId) => db.hasMessage(linkId, messageId),
+    namesMine: (linkId, wireId) => this.namesMine(linkId, wireId),
     storeMessage: (message) => this.storeMessage(message),
     patchMessage: async (linkId, messageId, change) => { if (await db.patchMessage(linkId, messageId, change)) await this.messagesChanged(linkId, [messageId]); },
     place: (linkId) => {
@@ -1202,6 +1203,8 @@ export class GhostlyNode implements EngineImplementation {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
       void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state, !seen);
     },
+    // One room for both: an offer is decided beside the group files still coming, and a group file beside a chat's.
+    groupsComing: (): number => this.groups.files?.stillComing() ?? 0,
   });
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
   /** When the snapshot `stateTimer` waits for is due (`emitState`). */
@@ -1981,6 +1984,8 @@ export class GhostlyNode implements EngineImplementation {
       sendFiles: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
       sendData: (linkId, id, offset, data) => this.links.get(linkId)?.link?.sendFileData(id, offset, data) ?? false,
       writable: linkId => this.links.get(linkId)?.link?.filesWritable(),
+      chatsComing: (room: number): number => this.fileDesk.chatsComing(room),
+      comingChanged: () => this.fileDesk.comingChanged(),
     },
   });
 
@@ -7680,6 +7685,8 @@ export class GhostlyNode implements EngineImplementation {
 
   removeService({ serviceId }: { serviceId: string }): void {
     this.services = this.services.filter((s) => s.id !== serviceId);
+    // An app added again under the same name gets the same id: it starts with no requests of its own.
+    this.requestCounts.delete(serviceId);
     void db.deleteService(serviceId);
     this.servicesChanged();
   }
@@ -7918,7 +7925,7 @@ export class GhostlyNode implements EngineImplementation {
     if (wasOnline && !this.networkOn) await this.hold.stop();
     // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
     const gate = knownDeviceGate();
-    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay", "hyperdhtRelay"] as const).some((key) => key in settings)) {
+    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay", "hyperdhtRelay", "relayOnly"] as const).some((key) => key in settings)) {
       await this.syncDeviceNetwork().catch(() => {});
     }
     this.emitState();
@@ -9348,6 +9355,14 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * Reads the history of a chat this run left unstarted (`restoreDeferred`) and leaves it unstarted: what a read the
+   * one-shot makes beside its call (a pin's notice reads its chat) needs, with nothing put on the relays for it.
+   */
+  async readDeferredChat(linkId: string): Promise<void> {
+    if (this.deferredChats.has(linkId)) await this.restoreDeferred(linkId);
+  }
+
+  /**
    * Starts the edges of a group this run left unstarted (`NodeOptions.deferChats`): the one a one-shot names. Each
    * group's edges put their records and read their members' on the relays: started, six groups shared with one member
    * asked the relays about three times what the named group alone does, and a `group react` behind them waited out its
@@ -9495,6 +9510,8 @@ export class GhostlyNode implements EngineImplementation {
         },
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
+        // The contact takes texts again: those paced out wait for no backoff check (minutes after the contact was away).
+        onTextRoom: () => void this.outboxes.get(linkId)?.flush().catch(() => {}),
         onDhtDelivery: view => {
           // Every read of the mailbox says so, whatever it found: the outbox looks again only when the view changed (a
           // receipt cleared `pendingUntil`, the contact's mode, an error gone). Looked at on each read, waiting texts read
@@ -10837,7 +10854,8 @@ export class GhostlyNode implements EngineImplementation {
     // Whether it may be the chat's joined line, decided before anything is awaited: rows are taken in the order they come.
     const first = live ? this.firstContactRow(live, message) : false;
     // A paired contact knows my wire ids, and what names one (a pin, a quote, a reaction) looks for their row first: a
-    // text of theirs under one is never stored, as a removal naming one does nothing (`namesMine`). Files: as they come.
+    // text of theirs under one is never stored, as a removal naming one does nothing (`namesMine`). Files: by their offer
+    // (`FileDesk.weigh`), the hold (`receiveFile`) and the DHT floor (`fileAnnounced`).
     const mine = live?.stored.profile && !live.stored.group && message.sender === "peer" && !message.file && message.id.startsWith("peer_")
       ? this.namesMine(chat, message.id.slice("peer_".length)).catch(() => false) : false;
     // A reply's original, looked for in this chat only: one named from elsewhere is simply not found here.

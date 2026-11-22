@@ -70,7 +70,7 @@ export class OpfsFileBytes implements FileBytes {
     return this.call({ op: "append", id: checkFileId(id), offset, bytes: copy }, [copy.buffer]);
   }
   flush(id: string): Promise<void> { return this.call({ op: "flush", id: checkFileId(id) }); }
-  close(id: string): Promise<void> { return this.call({ op: "close", id: checkFileId(id) }); }
+  close(id: string, flush = true): Promise<void> { return this.call({ op: "close", id: checkFileId(id), ...(flush ? {} : { flush }) }); }
   size(id: string): Promise<number | null> { return this.call({ op: "size", id: checkFileId(id) }); }
   truncate(id: string, size: number): Promise<void> { return this.call({ op: "truncate", id: checkFileId(id), size }); }
   read(id: string, offset: number, length: number): Promise<Uint8Array> {

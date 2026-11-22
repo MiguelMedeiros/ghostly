@@ -558,7 +558,8 @@ export class CallManager {
     // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
     const { links, groups } = this.host.engine.getState();
     const from = (next.from ?? []).map((ref) => findOwnNamedChat(links, ref, groups).id);
-    this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, next.on ? this.auto.rate : DEFAULT_RATE) };
+    // Each `on` sets the whole of it: the chats and the rate, 48000 when none is given, as the usage line says.
+    this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, DEFAULT_RATE) };
     this.saveAuto();
     return this.getAuto();
   }

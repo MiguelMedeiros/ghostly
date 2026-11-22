@@ -90,6 +90,7 @@ import {
   loadShownSession,
   peerDisplayName,
   updateSessionLabel,
+  chatLabelOf,
 } from "../lib/storage";
 import { chatPath, inviteShareText } from "../lib/url";
 import { copySecret } from "../lib/shareLink";
@@ -658,9 +659,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   const saveLabel = () => {
     if (!sessionId) return;
-    const trimmed = labelDraft.trim();
-    updateSessionLabel(sessionId, trimmed);
-    setChatLabel(trimmed);
+    const label = chatLabelOf(labelDraft) ?? "";
+    updateSessionLabel(sessionId, label);
+    setChatLabel(label);
     setIsEditingLabel(false);
     window.dispatchEvent(new Event("session-updated"));
   };
@@ -1185,7 +1186,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
         <CallNoPathNotice iceServers={engine.state?.settings.iceServers} returnFocus={optionsRef} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
       )}
-      <ChatSearchBar search={search} />
+      <ChatSearchBar search={search} nameOf={m => nameOf(m.sender === "me" ? "me" : "peer") ?? shownName} appCards={appCards} />
       {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} appCards={appCards} />
 

@@ -1,5 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
+import { replyRef } from "@ghostly/browser/shared/replies";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
 import { shellWord } from "./shellWord";
@@ -44,6 +46,17 @@ export interface CallScope {
 }
 
 export type Method = (ctx: ApiContext, params: Params, call?: CallScope) => Promise<unknown>;
+
+/**
+ * The scope of the call running now (`callApi`), however deep: a wait still open when its client's connection closes
+ * ends at once (`waits.ts`, `waitForState`), where it kept its listener or its reads to its own timeout, up to a day,
+ * with nobody to answer. Not a context per connection: the CLI keeps state per daemon keyed by its one `ApiContext`
+ * (card pacing, the invite's mark, holds), which one per connection split.
+ */
+const calls = new AsyncLocalStorage<CallScope>();
+export const inCall = <T>(call: CallScope | undefined, run: () => T): T => (call ? calls.run(call, run) : run());
+/** The connection of the call running now went away (`CallScope.gone`): its wait only stops. */
+export const callGone = (): AbortSignal | undefined => calls.getStore()?.gone;
 
 export const node = (ctx: ApiContext): GhostlyNode => ctx.runtime.server.node;
 export const state = (ctx: ApiContext): EngineState => node(ctx).getState();
@@ -384,20 +397,39 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
   return { link: chat.link };
 }
 
+/** The calls on one message (`message`) of the chat they name. */
+const ON_A_MESSAGE: ReadonlySet<string> = new Set(["chat.react", "chat.pin", "chat.edit", "chat.delete", "chat.retry"]);
+
+/**
+ * Whether the chat may have the message `ref` names: by its row's id, or by an id both sides know it by (its wire id,
+ * the one a reaction or a pin names), as each call of `ON_A_MESSAGE` looks for it. The chat is read whole only when the
+ * row's id finds nothing.
+ */
+async function mayHaveMessage(ctx: ApiContext, linkId: string, ref: string): Promise<boolean> {
+  if (await node(ctx).getMessage(linkId, ref)) return true;
+  return (await node(ctx).getMessages(linkId)).some((m) => m.wireId === ref || replyRef(m, false) === ref);
+}
+
 /**
  * Starts the chats and groups a call names (its `chat`, a forward's `to`, its `group`) in a runtime that left the saved
  * chats and the groups' edges unstarted (`RuntimeOptions.deferChats`). A ref that names nothing starts nothing: the
- * call says so itself.
+ * call says so itself. Nor does a call on a message the chat does not have (`ON_A_MESSAGE`): its history is read, and
+ * the call refused `not_found` with nothing sent. Started, the chat put its records on the relays and the one-shot's
+ * close waited for its leave packet there: a mistyped message id took 4 to 10 s to say "No message". `read`: a call
+ * that only reads (main.ts `READS`; a pin's notice reads its chat beside it) reads the chat's history, starts nothing.
  */
-export async function startNamedChats(ctx: ApiContext, params: Params): Promise<void> {
+export async function startNamedChats(ctx: ApiContext, method: string, params: Params, read = false): Promise<void> {
   const { links, groups } = state(ctx);
+  const message = ON_A_MESSAGE.has(method) && typeof params.message === "string" ? params.message : undefined;
   for (const ref of [params.chat, ...(Array.isArray(params.to) ? params.to : [])]) {
     if (typeof ref !== "string") continue;
     let found: ReturnType<typeof findChatOrGroup>;
     try { found = findChatOrGroup(links, groups, ref); } catch { continue; }
-    if ("link" in found) await node(ctx).startDeferredChat(found.link.id);
-    else node(ctx).startDeferredGroup(found.group.id);
+    if (!("link" in found)) { if (!read) node(ctx).startDeferredGroup(found.group.id); continue; }
+    if (read || (message !== undefined && !await mayHaveMessage(ctx, found.link.id, message))) await node(ctx).readDeferredChat(found.link.id);
+    else await node(ctx).startDeferredChat(found.link.id);
   }
+  if (read) return;
   if (typeof params.group === "string") {
     try { node(ctx).startDeferredGroup(findGroup(groups, params.group).id); } catch { /* the call says so itself */ }
   }
@@ -598,9 +630,14 @@ export async function messageOf(ctx: ApiContext, linkId: string, ref: string, ke
 export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string, stopping?: AbortSignal): Promise<T> {
   const now = check(state(ctx));
   if (now !== undefined) return Promise.resolve(now);
+  const closed = callGone();
   return new Promise<T>((resolve, reject) => {
-    const end = (error: unknown) => { clearTimeout(timer); off(); stopping?.removeEventListener("abort", stopped); if (error) reject(error); };
+    const end = (error: unknown) => {
+      clearTimeout(timer); off(); stopping?.removeEventListener("abort", stopped); closed?.removeEventListener("abort", gone);
+      if (error) reject(error);
+    };
     const stopped = () => end(new CliError("timeout", `The daemon stopped before the wait ended, waiting for ${what}`, { reason: "daemon-stopped" }));
+    const gone = () => end(connectionClosed());
     const timer = setTimeout(() => end(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)), ms);
     const off = ctx.hub.onState((next) => {
       let value: T | undefined;
@@ -609,8 +646,15 @@ export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => 
       end(null);
       resolve(value);
     });
-    if (stopping?.aborted) stopped();
-    else stopping?.addEventListener("abort", stopped, { once: true });
+    if (closed?.aborted) gone();
+    else if (stopping?.aborted) stopped();
+    else {
+      stopping?.addEventListener("abort", stopped, { once: true });
+      closed?.addEventListener("abort", gone, { once: true });
+    }
   });
 }
+
+/** How a wait ends whose client's connection closed (`callGone`): nobody reads it, the wait only stops. */
+export const connectionClosed = () => new CliError("interrupted", "The connection closed before the wait ended");
 

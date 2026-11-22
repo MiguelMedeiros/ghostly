@@ -66,8 +66,10 @@ const SERVICE_CSP_RELAY_ONLY: &str = "default-src 'self' data: blob: 'unsafe-inl
 /// WebView did not run it in, and starts a worker made from a `blob:` URL of the page's from a script that makes a
 /// pass-through Trusted Types `default` policy in it first. It takes out each `<script type="speculationrules">`
 /// as it is put in the page: Chromium (WebView2) would prefetch or prerender the pages it lists on a server the
-/// contact names, outside the policy, and `'unsafe-inline'` lets it in. The same text as `VIEWER_GUARD_SCRIPT` in
-/// `packages/core/src/viewerGuard.ts`, which says what a script in the page cannot do.
+/// contact names, outside the policy, and `'unsafe-inline'` lets it in. Its Trusted Types default policy refuses
+/// `javascript:` URLs; an app that makes its own `default` policy gets the guard's back, with the app's rules in it.
+/// The same text as `VIEWER_GUARD_SCRIPT` in `packages/core/src/viewerGuard.ts`, which says what a script in the
+/// page cannot do.
 const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
   "use strict";
   try {
@@ -76,13 +78,33 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     for (const name of Object.getOwnPropertyNames(w)) {
       if (/^(webkit)?RTC/.test(name)) { try { delete w[name]; } catch (e) {} }
     }
-    if (w.trustedTypes && !w.trustedTypes.defaultPolicy) {
+    const types = w.trustedTypes;
+    let passing = false;
+    if (types && !types.defaultPolicy) {
       try {
-        w.trustedTypes.createPolicy("default", {
-          createHTML: (input) => input,
-          createScript: (input, type, sink) => (sink === "Location href" ? null : input),
-          createScriptURL: (input) => input,
-        });
+        let rules = null;
+        const rule = (kind) => (input, type, sink) => {
+          if (kind === "createScript" && sink === "Location href") return null;
+          if (passing || rules === null) return input;
+          return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+        };
+        const members = ["createHTML", "createScript", "createScriptURL"];
+        const create = types.createPolicy;
+        const policy = apply(create, types, ["default", { createHTML: rule(members[0]), createScript: rule(members[1]), createScriptURL: rule(members[2]) }]);
+        const named = String;
+        const Mistyped = w.TypeError;
+        Object.getPrototypeOf(types).createPolicy = function createPolicy(name, options) {
+          if (this !== types || rules !== null || named(name) !== "default") return apply(create, this, arguments);
+          const given = { createHTML: null, createScript: null, createScriptURL: null };
+          for (let i = 0; i < members.length; i++) {
+            const found = options ? options[members[i]] : undefined;
+            if (found === undefined || found === null) continue;
+            if (typeof found !== "function") throw new Mistyped("The policy's " + members[i] + " is not a function");
+            given[members[i]] = found;
+          }
+          rules = given;
+          return policy;
+        };
       } catch (e) {}
     }
     const open = w.open;
@@ -158,7 +180,9 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     const first = (frame) => {
       const doc = apply(getAttribute, frame, ["srcdoc"]);
       if (doc === null || apply(slice, doc, [0, own.length]) === own) return;
+      passing = true;
       try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
+      passing = false;
     };
     const trim = String.prototype.trim;
     const drop = w.Element.prototype.remove;
@@ -410,8 +434,8 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           let rules = null;
           const rule = (kind) => (input, type, sink) => {
             if (kind === "createScript" && sink === "Location href") return null;
-            if (passing || rules === null) return input;
-            return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+            if (passing || rules === null || !rules[kind]) return input;
+            return apply(rules[kind], undefined, [input, type, sink]);
           };
           const members = ["createHTML", "createScript", "createScriptURL"];
           const create = types.createPolicy;
@@ -553,6 +577,112 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
       }
     }
     if (!watched) watch(home, proto.querySelectorAll);
+  } catch (e) {}
+})(window)"#;
+
+/// Nor does any keep it off the async Clipboard API: WebKit lets `navigator.clipboard.writeText` and `write` write the
+/// system clipboard from a timer seconds after a tap in the page, and `readText` and `read` read it, whatever the
+/// `clipboard-write=()` and `clipboard-read=()` the window is sent (`PERMISSIONS_POLICY`). This runs in every frame of
+/// the window after the guards, whatever the setting, and in each frame of the page's it reaches: a write only while
+/// the person's own input in that frame is being dispatched (`CLIPBOARD_GUARD`'s test for a copy), never a read. The
+/// web needs none: there the browser keeps the app's frames off the API.
+const ASYNC_CLIPBOARD_GUARD: &str = r#"(function noAsyncClipboard(w) {
+  "use strict";
+  try {
+    const apply = w.Reflect.apply;
+    const describe = w.Object.getOwnPropertyDescriptor;
+    const define = w.Object.defineProperty;
+    const board = w.Clipboard && w.Clipboard.prototype;
+    if (!board || describe(board, "ghostlyAsyncClipboard")) return;
+    define(board, "ghostlyAsyncClipboard", { value: true });
+    const listen = w.EventTarget.prototype.addEventListener;
+    const phase = describe(w.Event.prototype, "eventPhase").get;
+    const stamp = describe(w.Event.prototype, "timeStamp").get;
+    const clock = w.performance;
+    const tick = clock && clock.now;
+    const time = () => { try { return apply(tick, clock, []); } catch (e) { return NaN; } };
+    let tap = null;
+    let trusted = null;
+    let tapped = NaN;
+    const seen = (event) => {
+      try {
+        const found = describe(event, "isTrusted");
+        if (!found || !found.get || apply(found.get, event, []) !== true) return;
+        let at = time();
+        try {
+          const given = apply(stamp, event, []);
+          if (given >= 0 && given < at) at = given;
+        } catch (e) {}
+        tap = event;
+        trusted = found.get;
+        tapped = at;
+      } catch (e) {}
+    };
+    const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
+    for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
+    const tapping = () => {
+      try { return tap !== null && apply(trusted, tap, []) === true && apply(phase, tap, []) !== 0 && time() - tapped <= 1000; } catch (e) { return false; }
+    };
+    const Refused = w.DOMException;
+    const Promised = w.Promise;
+    const reject = Promised.reject;
+    const refuse = () => apply(reject, Promised, [new Refused("The app may not use the clipboard here", "NotAllowedError")]);
+    const calls = [["write", true], ["writeText", true], ["read", false], ["readText", false]];
+    for (let i = 0; i < calls.length; i++) {
+      const name = calls[i][0];
+      const writes = calls[i][1];
+      const found = describe(board, name);
+      if (!found || typeof found.value !== "function") continue;
+      const real = found.value;
+      const guarded = function () {
+        if (!writes || !tapping()) return refuse();
+        return apply(real, this, arguments);
+      };
+      define(guarded, "name", { value: name });
+      define(board, name, { value: guarded, writable: false, enumerable: found.enumerable, configurable: false });
+    }
+    const shut = (inner) => {
+      try { if (inner && inner !== w) noAsyncClipboard(inner); } catch (e) {}
+    };
+    const count = describe(w, "length").get;
+    const view = describe(w.Document.prototype, "defaultView").get;
+    const sweep = () => {
+      try { for (let i = apply(count, w, []); i-- > 0;) shut(w[i]); } catch (e) {}
+    };
+    const kinds = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
+    const reads = ["contentWindow", "contentDocument", "getSVGDocument"];
+    for (let k = 0; k < kinds.length; k++) {
+      const owner = w[kinds[k]] && w[kinds[k]].prototype;
+      for (let r = 0; r < reads.length; r++) {
+        const name = reads[r];
+        const found = owner && describe(owner, name);
+        const key = found && found.get ? "get" : "value";
+        if (!found || typeof found[key] !== "function") continue;
+        const read = found[key];
+        found[key] = function () {
+          const got = apply(read, this, arguments);
+          try { shut(name === "contentWindow" ? got : apply(view, got, [])); } catch (e) {}
+          return got;
+        };
+        try { define(owner, name, found); } catch (e) {}
+      }
+    }
+    const Observer = w.MutationObserver;
+    const observe = Observer.prototype.observe;
+    const watch = (root) => {
+      apply(observe, new Observer(sweep), [root, { subtree: true, childList: true }]);
+      apply(listen, root, ["load", sweep, true]);
+    };
+    const attachShadow = w.Element.prototype.attachShadow;
+    if (attachShadow) {
+      w.Element.prototype.attachShadow = function () {
+        const root = apply(attachShadow, this, arguments);
+        try { watch(root); } catch (e) {}
+        return root;
+      };
+    }
+    watch(w.document);
+    sweep();
   } catch (e) {}
 })(window)"#;
 
@@ -916,12 +1046,12 @@ pub fn open<R: tauri::Runtime>(
 }
 
 /// The scripts the app's every frame runs before its own code, in this order: the clipboard guard always, then the
-/// WebRTC guard with Hide my IP from contacts on (the web runner's order).
+/// WebRTC guard with Hide my IP from contacts on (the web runner's order), then the Desktop's async clipboard guard.
 fn frame_guards(relay_only: bool) -> Vec<&'static str> {
     if relay_only {
-        vec![CLIPBOARD_GUARD, SERVICE_GUARD]
+        vec![CLIPBOARD_GUARD, SERVICE_GUARD, ASYNC_CLIPBOARD_GUARD]
     } else {
-        vec![CLIPBOARD_GUARD]
+        vec![CLIPBOARD_GUARD, ASYNC_CLIPBOARD_GUARD]
     }
 }
 
@@ -2140,8 +2270,32 @@ mod routing_tests {
     /// after it with Hide my IP on: the order the web runner puts them in a page.
     #[test]
     fn every_frame_runs_the_clipboard_guard_first() {
-        assert_eq!(frame_guards(false), vec![CLIPBOARD_GUARD]);
-        assert_eq!(frame_guards(true), vec![CLIPBOARD_GUARD, SERVICE_GUARD]);
+        assert_eq!(
+            frame_guards(false),
+            vec![CLIPBOARD_GUARD, ASYNC_CLIPBOARD_GUARD]
+        );
+        assert_eq!(
+            frame_guards(true),
+            vec![CLIPBOARD_GUARD, SERVICE_GUARD, ASYNC_CLIPBOARD_GUARD]
+        );
+    }
+
+    /// Every frame of the window, whatever the setting, also runs the Desktop's own guard of the async Clipboard API
+    /// after the others: its two writes go through only in the person's tap, its two reads never.
+    #[test]
+    fn every_frame_keeps_the_async_clipboard_to_a_tap() {
+        for relay_only in [false, true] {
+            assert_eq!(
+                frame_guards(relay_only).last(),
+                Some(&ASYNC_CLIPBOARD_GUARD)
+            );
+        }
+        assert!(ASYNC_CLIPBOARD_GUARD.starts_with("(function noAsyncClipboard(w) {"));
+        assert!(ASYNC_CLIPBOARD_GUARD.contains(
+            r#"const calls = [["write", true], ["writeText", true], ["read", false], ["readText", false]];"#
+        ));
+        assert!(ASYNC_CLIPBOARD_GUARD.contains("if (!writes || !tapping()) return refuse();"));
+        assert!(ASYNC_CLIPBOARD_GUARD.contains("configurable: false"));
     }
 
     /// The clipboard guard is the web runner's, word for word.

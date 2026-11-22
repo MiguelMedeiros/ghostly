@@ -201,6 +201,40 @@ describe("the services worker", () => {
     });
   });
 
+  describe("an origin of its own, apart from another contact's app open at once", () => {
+    // The apps' origins share one site (the services host): with no `Origin-Agent-Cluster: ?1` a browser keys their
+    // agent cluster by site, where `document.domain` joins two of them and they may share a process.
+    it("every answer the worker makes asks for an agent cluster of this origin's own, whatever the contact sends", async () => {
+      const answers: [string, () => Promise<Response>][] = [
+        ["refused", () => fetchThrough({ mode: "navigate", destination: "document", referrer: "" })!],
+        ["go on", () => fetchThrough({ mode: "navigate", destination: "iframe", referrer: "" })!],
+        ["contact's", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            const port = transfer[0] as MessagePort;
+            port.postMessage({ type: "head", status: 200, headers: [["content-type", "text/html"], ["Origin-Agent-Cluster", "?0"]] });
+            port.postMessage({ type: "end" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+        ["error page", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            (transfer[0] as MessagePort).postMessage({ type: "error", status: 503, text: "Unreachable", lang: "en" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+        ["empty error", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            (transfer[0] as MessagePort).postMessage({ type: "error", status: 304, text: "Not modified" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+      ];
+      for (const [label, answer] of answers) {
+        expect((await answer()).headers.get("origin-agent-cluster"), label).toBe("?1");
+      }
+    });
+  });
+
   describe("a request the app's page could not get an answer to", () => {
     it("is said in the profile's language and direction, as a page with nothing to run: never the worker's plain English", async () => {
       bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {

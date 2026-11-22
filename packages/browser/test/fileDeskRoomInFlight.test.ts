@@ -122,6 +122,39 @@ it.each([
 });
 
 /**
+ * The group files this device fetches were not counted: an offer that fit only without them was taken without asking,
+ * and the disk filled part way through one or the other. They count beside the 1:1 files still to come.
+ */
+it("asks about an offer that fits only without the group files still on their way, and takes one that fits beside them", async () => {
+  vi.stubGlobal("navigator", { storage: { estimate: async () => ({ quota: 40 * MiB, usage: 0 }) } });
+  resetFileBytes(["idb"]);
+  const sent: { link: string; frame: Record<string, unknown> }[] = [];
+  const desk = new FileDesk({
+    send: (link, frame) => { sent.push({ link, frame }); return true; },
+    receivedBytes: () => 0,
+    wireIds: () => new Set(),
+    deleted: () => false,
+    messageExists: async () => false,
+    storeMessage: async () => {},
+    transfers: new Map(),
+    changed: () => {},
+    // Four 8 MiB group files asked for, none of their bytes here yet.
+    groupsComing: () => 32 * MiB,
+  });
+  desk.session("chat-a", true);
+  const offer = (id: string, size: number) => desk.handle("chat-a", { t: "pf-offer", id, name: `${id}.mp4`, mime: "video/mp4", size, ts: 1_700_000_000_000 });
+  await offer("wBesideGroup01", 20 * MiB);
+  const answered = (t: string) => sent.filter(({ frame }) => frame.t === t && (t !== "pf-wait" || frame.why === "consent")).map(({ frame }) => frame.id);
+  await vi.waitFor(() => expect(answered("pf-wait")).toEqual(["wBesideGroup01"]));
+  await offer("wBesideGroup02", 5 * MiB);
+  await vi.waitFor(() => expect(answered("pf-accept")).toEqual(["wBesideGroup02"]));
+  expect(answered("pf-refuse")).toEqual([]);
+  // What the group files are fetched beside: the chats' files alone, not the group files' own again.
+  expect(desk.chatsComing(40 * MiB)).toBe(5 * MiB);
+  desk.drop("chat-a");
+});
+
+/**
  * What is still to come was read by copying every record of every chat, the finished ones the chats keep for good
  * included: each offer cost more with every file the profile ever had (about 10 ms at 200 chats of 500 files). It is
  * read from the transfers not ended alone, and answers the same.

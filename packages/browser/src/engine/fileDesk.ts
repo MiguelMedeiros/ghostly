@@ -39,6 +39,8 @@ export interface FileDeskDeps {
   deleted(linkId: string, messageId: string): boolean;
   /** A message the chat holds already (a new file must not take the id of the contact's text, say). */
   messageExists?(linkId: string, messageId: string): Promise<boolean>;
+  /** A wire id that names a message of mine in the chat (`GhostlyNode.namesMine`): a contact's file never takes it. */
+  namesMine?(linkId: string, wireId: string): Promise<boolean>;
   storeMessage(message: StoredMessage): Promise<void>;
   /** Changes a stored message in place (`db.patchMessage`); nothing happens to one that is not there. */
   patchMessage?(linkId: string, messageId: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<void>;
@@ -60,6 +62,11 @@ export interface FileDeskDeps {
   /** A transfer ended, either way: its local file id and how (for the message's details). */
   /** `seen`: this desk saw the transfer under way before it ended (not a finished one shown again on a restart). */
   settled?(linkId: string, fileId: string, record: FileTransferRecord, seen: boolean): void;
+  /**
+   * Bytes still to come of the group files this device fetches (`GroupFileDesk.stillComing`): an offer is taken
+   * without asking only where it fits beside them too. Absent: none.
+   */
+  groupsComing?(): number;
 }
 
 interface Chat {
@@ -505,6 +512,7 @@ export class FileDesk {
     // Offered again, the file is this chat's already (its id is in use by it); new, its id must be new.
     if (!again && !said && used.has(file.id)) return { refuse: "invalid" };
     if (!again && !said && await this.deps.messageExists?.(linkId, `peer_${file.id}`)) return { refuse: "invalid" };
+    if (!again && !said && await this.deps.namesMine?.(linkId, file.id)) return { refuse: "invalid" };
     const room = await (await fileBytes()).room().catch(() => null);
     if (room !== null && file.size > room) return { refuse: "no-room", room };
     // Beside what the files already taken still need: one that fits only without them is asked about.
@@ -520,9 +528,10 @@ export class FileDesk {
    * counts only the ones before it, so of several that fit only one at a time the first is taken and the rest asked.
    * Of those, only what each will take without asking, once per file: one above 25 MiB, or past `room` beside the
    * ones before it, is asked about or refused, and held back a smaller offer that fits.
+   * The group files this device fetches count first (`groups`, `FileDeskDeps.groupsComing`): they were asked for already.
    */
-  private stillComing(own: object, room: number): number {
-    let due = 0;
+  private stillComing(own: object, room: number, groups = this.deps.groupsComing?.() ?? 0): number {
+    let due = groups;
     for (const chat of this.chats.values()) due += chat.files.stillToCome();
     const seen = new Set<string>();
     for (const held of this.deciding) {
@@ -537,6 +546,23 @@ export class FileDesk {
       }
     }
     return due;
+  }
+
+  /**
+   * Bytes still to come of the files the chats took here, and of the offers being taken (`stillComing`, every one, with
+   * `room` left): what a group file is fetched beside (`GroupFileDesk`). The group files' own are not in it.
+   */
+  chatsComing(room: number): number {
+    return this.stillComing({}, room, 0);
+  }
+
+  /**
+   * The group files still coming changed (`FileDeskDeps.groupsComing`): one started or ended. The offers waiting show the
+   * room left beside them again (`rooms`). Before, they were read again only for a 1:1 file, and an offer kept showing
+   * the room a group file had taken since (or had given back).
+   */
+  comingChanged(): void {
+    void this.rooms();
   }
 
   /** A taken offer's record is kept, under way: it counts itself from now (`stillComing`), even if forgotten later. */
@@ -840,7 +866,8 @@ export class FileDesk {
   /**
    * The room the offers waiting for the person are decided against, shown with them: the free space (`known` when an
    * Accept read it) less what the files taken here still need (`stillComing`), as Accept counts it. Read again when one
-   * is shown, when one is taken, when another received file ends, and when an Accept found less; once for all of them.
+   * is shown, when one is taken, when another received file ends, when a group file starts or ends (`comingChanged`),
+   * and when an Accept found less; once for all of them.
    * Before, the free space alone: an offer that fit it read as fitting, and Accept refused it for the file still coming.
    */
   private async rooms(known?: number | null): Promise<void> {
