@@ -58,7 +58,7 @@ test("the contact opens a shared app from Services, and it is gone once removed"
     await expect(b.page.getByTestId("open-service")).toHaveCount(0);
     // And the page B still had open is refused, not served: named as A named it, though B's chat lists it no more.
     await viewer.reload();
-    await expect(viewer.getByText("Atlas is no longer shared with you.")).toBeVisible();
+    await expect(viewer.getByText("⁨Atlas⁩ is no longer shared with you.")).toBeVisible();
   } finally {
     atlas.server.close();
   }
