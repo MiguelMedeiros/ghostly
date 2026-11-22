@@ -388,6 +388,24 @@ describe("chats", () => {
     expect(await list.allows(event(mallory.id))).toBe(false);
   });
 
+  it("listen --group takes a group only by its id: its name (its admin's) and a prefix of its id (its creator's) are refused", async () => {
+    // Team is still only an invitation; Mallory, admin of a group this profile is in, renamed hers "Team".
+    const team = { ...group, id: "Tm4q9ZkLx2PdR7sVw0Yb3A", name: "Team", status: undefined, invitation: { linkId: "chatOwner" } } as unknown as GroupView;
+    const theirs = { ...group, id: "Qz8uE1hJc5NnFo6Gk2Mt7B", name: "Team", status: "active" } as unknown as GroupView;
+    const ctx = { runtime: { server: { node: { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [], groups: [team, theirs] }) } } } } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    const refused = (id: string, name: string) => ({ code: "bad_request", message: expect.stringContaining(`use its id: ghostly listen --group ${id}`), details: { group: id, name } });
+    for (const ref of ["Team", "team", "group:Team"]) await expect(allowlist([], [ref], call, async () => null)).rejects.toMatchObject(refused(theirs.id, "Team"));
+    for (const ref of ["Qz8u", "group:Qz8u"]) await expect(allowlist([], [ref], call, async () => null)).rejects.toMatchObject(refused(theirs.id, "Team"));
+    // Its id, as is or after group:, still names it (an invitation too).
+    const event = (id: string) => ({ seq: 1, id: "g", type: "group.message", at: 1, group: id } as GhostlyEvent);
+    for (const ref of [team.id, `group:${team.id}`]) {
+      const list = await allowlist([], [ref], call, async () => null);
+      expect(await list.allows(event(team.id))).toBe(true);
+      expect(await list.allows(event(theirs.id))).toBe(false);
+    }
+  });
+
   it("listen --from takes a label given here in every form send and call auto on --from take it (a tab, a trailing space, decomposed accents)", async () => {
     // Stored as `chat rename` stores them: a tab as a space, in NFC. The contact chose no name; Mallory calls herself "owner".
     const ops = link("chatOpsxxxxxxxxx", { label: "ops bot" }), cafe = link("chatCafexxxxxxxx", { label: "Café" }), mallory = link("chatMalloryxxxxx", { peerNick: "owner" });
@@ -1077,10 +1095,10 @@ describe("chat wait", () => {
   });
 
   it("a timeout names the state in words that read: text is carried, not been", async () => {
-    // It read "waiting for chat chat-one to be text".
+    // It read "waiting for chat chat-one to be text": the chat by its id too, where the person named it Alice.
     const { ctx } = moving(remembered({ textDelivery: "unavailable" }));
-    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat chat-one to carry text" });
-    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat chat-one to be live" });
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "text", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Alice to carry text" });
+    await expect(callApi(ctx, "chat.wait", { chat: "Alice", until: "live", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for chat Alice to be live" });
   });
 
   it("a chat removed while it is waited for answers not_found at once, not a timeout at the end", async () => {
@@ -1397,6 +1415,42 @@ describe("the engine passthrough", () => {
     expect(engine.sendGroupMessage).toHaveBeenCalledTimes(2);
     expect(engine.editMessage).toHaveBeenCalledOnce();
     expect(engine.forwardMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads a link preview's title, description and site as the contact's card shows them, sent, edited or forwarded", async () => {
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const text = "see https://example.com/page";
+    const shown = { u: "https://example.com/page", t: "Example page", d: seed };
+    const { ctx, node } = fake([msg("m_card", 5, { text, preview: shown }), msg("m_plain", 6, { text, preview: { ...shown, d: "A page" } })]);
+    Object.assign(node, { editMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })), forwardMessages: vi.fn(async () => ({ results: [{ messageIds: ["me:1:0"], sent: [], error: null }] })),
+      sendFile: vi.fn(async () => ({ error: null })) });
+    const engine = node as unknown as Record<"sendMessage" | "editMessage" | "forwardMessages" | "sendFile", ReturnType<typeof vi.fn>>;
+    const preview = (fields: Record<string, unknown>) => ({ u: "https://example.com/page", ...fields });
+    const calls: [keyof typeof engine, Record<string, unknown>][] = [
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ t: "Example page", d: seed }) }],
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ t: seed }) }],
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ t: "x", s: "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ" }) }],
+      // As the engine carries it: a control character between two words is a space on the card.
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ d: seed.replaceAll(" ", "\u0001") }) }],
+      ["editMessage", { linkId: "chat-one", messageId: "me_1", text, preview: preview({ d: seed }) }],
+      ["forwardMessages", { linkId: "chat-one", messageIds: ["m_card"], to: ["chat-two"] }],
+      // A file's type, which the contact's app shows too.
+      ["sendFile", { linkId: "chat-one", file: { name: "a.bin", mime: "application/cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ", size: 1 }, timestamp: 1 }],
+    ];
+    for (const [method, params] of calls) {
+      await expect(callApi(ctx, "engine.call", { method, params }), method).rejects.toMatchObject({ code: "confirm" });
+    }
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_card"], to: ["Bob"] })).rejects.toMatchObject({ code: "confirm", details: { messageId: "m_card" } });
+    for (const call of ["sendMessage", "editMessage", "forwardMessages", "sendFile"] as const) expect(engine[call]).not.toHaveBeenCalled();
+    // A plain preview goes as it did; with force, the secret goes too.
+    await callApi(ctx, "engine.call", { method: "sendMessage", params: { linkId: "chat-one", text, preview: preview({ t: "Example page", d: "A page" }) } });
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_plain"], to: ["Bob"] });
+    for (const [method, params] of calls) await callApi(ctx, "engine.call", { method, params, force: true });
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_card"], to: ["Bob"], force: true });
+    expect(engine.sendMessage).toHaveBeenCalledTimes(5);
+    expect(engine.editMessage).toHaveBeenCalledOnce();
+    expect(engine.forwardMessages).toHaveBeenCalledTimes(3);
+    expect(engine.sendFile).toHaveBeenCalledOnce();
   });
 });
 

@@ -30,6 +30,10 @@ import { TURN_MAX } from "./turnRecord";
  *   (`id`) when it goes on in a new session.
  * - `handoff-pake` frame 3 carries `c`, the proof of the context (see `handoffContext`), and `wrong` when the taker
  *   found the password wrong (so the giver counts it at once rather than at its timeout).
+ * - A file left for later (`handoff-file-request`) is answered as a part is sent: `handoff-data` pieces of the part
+ *   `file/<sha256>`, confirmed with `handoff-ack`, at most `HANDOFF_WINDOW` unconfirmed. The pieces are sealed with
+ *   `handoffFileKey` of the session, as the handoff that left the file has ended and its stream key with it. The request
+ *   says from which byte (`o`), so a dropped link goes on where it was.
  *
  * A session's stream key: `HKDF-SHA256(ikm = X25519(e_A, e_B) || K, salt = the session's transcript hash (32 bytes),
  * info = "ghostly-handoff-stream/1", 32)`. `K` is the password proof's key on a pull's first session and empty on a
@@ -428,11 +432,24 @@ export function readHandoffDone(frame: DeviceFrame): number | null {
   return frame.t === HANDOFF_DONE && isCount(frame.seq) ? frame.seq : null;
 }
 
-export const handoffFileRequestFrame = (sha256B64: string): DeviceFrame => ({ t: HANDOFF_FILE_REQUEST, sha256: sha256B64 });
+/** `handoff-file-request` (the active device): a file left for later, from byte `offset` (what it already wrote). */
+export const handoffFileRequestFrame = (sha256B64: string, offset = 0): DeviceFrame => ({ t: HANDOFF_FILE_REQUEST, sha256: sha256B64, ...(offset ? { o: offset } : {}) });
 export const handoffFileMissingFrame = (sha256B64: string): DeviceFrame => ({ t: HANDOFF_FILE_MISSING, sha256: sha256B64 });
-export function readHandoffFileFrame(frame: DeviceFrame): { missing: boolean; sha256: string } | null {
+export function readHandoffFileFrame(frame: DeviceFrame): { missing: boolean; sha256: string; offset: number } | null {
   if ((frame.t !== HANDOFF_FILE_REQUEST && frame.t !== HANDOFF_FILE_MISSING) || !isText(frame.sha256, DIGEST)) return null;
-  return { missing: frame.t === HANDOFF_FILE_MISSING, sha256: frame.sha256 };
+  if (frame.o !== undefined && (frame.t !== HANDOFF_FILE_REQUEST || !isCount(frame.o, MAX_PART))) return null;
+  return { missing: frame.t === HANDOFF_FILE_MISSING, sha256: frame.sha256, offset: (frame.o as number | undefined) ?? 0 };
+}
+
+/**
+ * The key the pieces of a file left for later are sealed with (see the top of this file): `HKDF-SHA256(ikm = D, salt =
+ * the session's transcript hash (32 bytes), info = "ghostly-handoff-file/1", 32)`. Both devices hold the device-set
+ * secret `D`; no password and no exchange of its own, as the person already moved the profile.
+ */
+export function handoffFileKey(d: Uint8Array, transcriptHash: string): Uint8Array {
+  if (d.length !== 32) throw new Error("A device-set secret is 32 bytes");
+  if (!HEX.test(transcriptHash)) throw new Error("A transcript hash is 64 lower-case hex digits");
+  return hkdf(sha256, d, hexToBytes(transcriptHash), utf8Encode("ghostly-handoff-file/1"), 32);
 }
 
 // -- versions -------------------------------------------------------------------------------------------------------

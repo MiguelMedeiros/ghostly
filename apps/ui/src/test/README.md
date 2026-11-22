@@ -2,7 +2,7 @@
 
 Tests for the shared UI (`apps/ui/src/`) and the hooks in `packages/react`, with Vitest, Testing Library and
 happy-dom. `npm run test:ui` runs them alone; `npm run test:app` (part of `npm test`) runs them too, and so
-does CI's "Frontend tests (app)" job. Config: `apps/ui/vitest.ui.config.ts`. `npm run test:affected` runs only the ones
+do CI's "Frontend tests (app)" shards, a third of the files each. Config: `apps/ui/vitest.ui.config.ts`. `npm run test:affected` runs only the ones
 your change can break ([docs/TESTING.md](../../../../docs/TESTING.md#testing-only-what-changed)).
 
 They render the UI as the **web app** builds it: `ghostlyPlatformModules()` swaps `apps/ui/src/lib/platform.ts` and

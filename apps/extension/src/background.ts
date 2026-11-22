@@ -32,7 +32,7 @@ function ensureEngine(): Promise<void> {
 async function startEngine(): Promise<void> {
   if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
   const status = await waitForEngine();
-  if (status.profile === status.active && !status.stopped) return;
+  if (status.profile === status.active && !status.stopped) return await sweepAfterPeer(status);
   // A page made another profile the one in use. The running peer stops and its document closes before
   // the next one opens: never two peers, and never one peer over two profiles' data.
   // Or the peer stopped for good and nobody asked for the next one: the page that ran "Clear all data" went away
@@ -61,10 +61,28 @@ async function replaceEngine(next?: string): Promise<void> {
     const status = (await answerOf()) ?? notStarted();
     // Again: a tab still on the peer before posted one while that peer stopped. The next profile's pages wait on this start.
     await clearNotices(next);
-    if (status.profile === status.active) return;
+    if (status.profile === status.active) return await chrome.storage.session.set({ [PEER_PROFILE]: status.profile });
     next = status.activeId;
   }
   throw new Error("Switching profiles…");
+}
+
+/**
+ * The profile the last peer ran, in session storage, which outlives the worker. A document that went away (its renderer
+ * crashed, it was ended from Chrome's task manager) replaces nothing when the next one opens, and that one may open as
+ * another profile: a switch made meanwhile, or one it read as it loaded. Its start closes the viewers and the notices,
+ * as a switch does (`replaceEngine`).
+ */
+const PEER_PROFILE = "peer-profile";
+
+async function sweepAfterPeer(status: EngineStatus): Promise<void> {
+  const before: unknown = (await chrome.storage.session.get(PEER_PROFILE))[PEER_PROFILE];
+  if (typeof before === "string" && before !== status.profile) {
+    viewersClosed++;
+    await closeViewers();
+    await clearNotices(status.activeId);
+  }
+  await chrome.storage.session.set({ [PEER_PROFILE]: status.profile });
 }
 
 /** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
@@ -219,7 +237,7 @@ async function openNotification(id: string): Promise<void> {
   const key = `notice:${id}`;
   const chat = await inNoticeOrder(async () => {
     const kept: unknown = (await chrome.storage.session.get(key))[key];
-    await chrome.storage.session.remove(key);
+    await chrome.storage.session.remove([key, `ring:${id}`]);
     return kept;
   });
   const owned = await chrome.runtime.sendMessage({ target: "app", type: "notification-open", id } satisfies RuntimeMessage).catch(() => false);
@@ -250,7 +268,7 @@ async function clearNoticesNow(next?: string): Promise<void> {
   const gone = (chat: string) => !chat.startsWith("profile:") || (typeof next === "string" && chat === `profile:${next}`);
   const keys = Object.keys(kept).filter((key) => key.startsWith("notice:") && gone(String(kept[key])));
   if (!keys.length) return;
-  await chrome.storage.session.remove(keys).catch(() => {});
+  await chrome.storage.session.remove([...keys, ...keys.map((key) => `ring:${key.slice("notice:".length)}`)]).catch(() => {});
   await Promise.all(keys.map((key) => chrome.notifications?.clear(key.slice("notice:".length)).catch(() => false)));
 }
 
@@ -273,17 +291,33 @@ function inNoticeOrder<T>(task: () => Promise<T>): Promise<T> {
  * one's (`notice:<id>`), so a click opens it. A chat's next one takes the place of the one before, as a burst's do in a tab,
  * also when the burst's messages are asked for at once.
  */
-function showNotice(body: string, chat?: string): Promise<void> {
-  return inNoticeOrder(() => showNoticeNow(body, chat));
+function showNotice(body: string, chat?: string, own?: string): Promise<void> {
+  return inNoticeOrder(() => showNoticeNow(body, chat, own));
 }
 
-async function showNoticeNow(body: string, chat?: string): Promise<void> {
+/**
+ * `own`: the id the peer gave it (a ringing call's), which it takes back (`unnotify`). It is marked (`ring:<id>`) so a
+ * message of its chat gets a notification of its own, as in a tab, and does not take the call's place.
+ */
+async function showNoticeNow(body: string, chat?: string, own?: string): Promise<void> {
   if (!chrome.notifications) return;
-  const kept = chat ? await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>) : {};
-  const id = Object.keys(kept).find((key) => key.startsWith("notice:") && kept[key] === chat)?.slice("notice:".length) ?? crypto.randomUUID();
-  if (chat) await chrome.storage.session.set({ [`notice:${id}`]: chat });
+  const kept = chat && !own ? await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>) : {};
+  const chats = (key: string) => key.startsWith("notice:") && kept[key] === chat && !(`ring:${key.slice("notice:".length)}` in kept);
+  const id = own ?? Object.keys(kept).find(chats)?.slice("notice:".length) ?? crypto.randomUUID();
+  if (chat) await chrome.storage.session.set({ [`notice:${id}`]: chat, ...(own && { [`ring:${id}`]: true }) });
   await chrome.notifications.create(id, { type: "basic", iconUrl: chrome.runtime.getURL("icons/128.png"), title: "Ghostly", message: body, silent: true });
 }
+
+/** The peer's notification `id` (a ring's, `showNotice`'s `own`) is over: it leaves the system's list, and its chat with it. */
+function takeBackNotice(id: string): Promise<void> {
+  return inNoticeOrder(async () => {
+    await chrome.storage.session.remove([`notice:${id}`, `ring:${id}`]).catch(() => {});
+    await chrome.notifications?.clear(id).catch(() => false);
+  });
+}
+
+/** A notification id the peer gave (`notify`'s `id`): a random UUID, nothing else. */
+const NOTICE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** `chrome.notifications` exists only once the optional permission is granted, maybe while the worker runs. */
 function listenToNotifications(): void {
@@ -338,7 +372,13 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   }
   if (message.type === "notify") {
     if (typeof message.body !== "string" || !message.body || (message.chat !== undefined && typeof message.chat !== "string")) return false;
-    void showNotice(message.body.slice(0, 200), message.chat).catch(() => {}).then(() => sendResponse(true));
+    if (message.id !== undefined && (typeof message.id !== "string" || !NOTICE_ID.test(message.id))) return false;
+    void showNotice(message.body.slice(0, 200), message.chat, message.id).catch(() => {}).then(() => sendResponse(true));
+    return true;
+  }
+  if (message.type === "unnotify") {
+    if (typeof message.id !== "string" || !NOTICE_ID.test(message.id)) return false;
+    void takeBackNotice(message.id).catch(() => {}).then(() => sendResponse(true));
     return true;
   }
   if (message.type === "open-payment-link") {
@@ -737,6 +777,12 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     bodyB64,
     ...(binding.page.app ? { app: binding.page.app } : {}),
   };
+
+  // A start in progress may find the next peer another profile's (`sweepAfterPeer`): this tab's request waits on it.
+  if (starting) {
+    await starting.catch(() => {});
+    if (!(await bindingOf(tabId))) return;
+  }
 
   let reply: HttpRequestReply;
   try {

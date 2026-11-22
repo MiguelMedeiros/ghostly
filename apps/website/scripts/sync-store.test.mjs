@@ -1,10 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
-import { LIMITS, STORE_URL, besideUrl, fromStore } from "./sync-store.mjs";
+import { FIXTURE_DIR, LIMITS, STORE_URL, besideUrl, fromStore, manifestDigest } from "./sync-store.mjs";
 
 const BUNDLE = "https://raw.githubusercontent.com/ghostly-fixtures/big/HEAD/app.ghostlyapp";
 /** A body six times the bundle bound, as a host that sends no content-length could. */
@@ -199,4 +202,50 @@ test("reads that finish out of order keep the list's order, its byte budget and 
     `${revoke(urls[1])}: HTTP 503`,
     `${revoke(urls[4])}: HTTP 502`,
   ]);
+});
+
+/** Bundle-shaped bytes, `size` long: the magic, the manifest's length and bytes, then filler the build does not read. */
+function bundleOf(manifest, size) {
+  const json = new TextEncoder().encode(JSON.stringify(manifest));
+  const bytes = new Uint8Array(size);
+  bytes.set(new TextEncoder().encode("GHOSTLYAPP1"));
+  new DataView(bytes.buffer).setUint32(11, json.length);
+  bytes.set(json, 15);
+  return { bytes, digest: createHash("sha256").update(json).digest("base64url") };
+}
+
+test("a raw `HEAD` that moved on to another version takes none of the budget a later listing's raw URL needs", async () => {
+  const MiB = 1024 * 1024;
+  const JSD = "https://cdn.jsdelivr.net/gh/ghostly-fixtures";
+  const served = {};
+  // Four listings whose pinned copies hold the listed version, and whose raw `HEAD` holds a later one, as large as a
+  // bundle may be.
+  const early = ["a", "b", "c", "d"].map((name) => {
+    const listed = bundleOf({ name, sequence: 1 }, 64 * 1024);
+    const urls = [`${JSD}/${name}@0123abc/a.ghostlyapp`, `${RAW}/${name}/HEAD/a.ghostlyapp`];
+    served[urls[0]] = listed.bytes;
+    served[urls[1]] = bundleOf({ name, sequence: 2 }, LIMITS.bundleBytes).bytes;
+    return { digest: listed.digest, urls };
+  });
+  // A later listing whose jsDelivr copy fails while the site is built: its raw URL holds the listed version.
+  const later = bundleOf({ name: "later", sequence: 1 }, 2 * MiB);
+  const laterUrls = [`${JSD}/later@0123abc/a.ghostlyapp`, `${RAW}/later/HEAD/a.ghostlyapp`];
+  served[laterUrls[0]] = 503;
+  served[laterUrls[1]] = later.bytes;
+  const { fetcher } = network([...early, { digest: later.digest, urls: laterUrls }], served);
+  const snap = await fromStore(fetcher);
+  assert.ok(laterUrls[1] in snap.bundles, snap.problems.join("\n"));
+  assert.deepEqual(Object.keys(snap.bundles), [...early.map(({ urls }) => urls[0]), laterUrls[1]]);
+  assert.deepEqual(snap.problems, [
+    `${laterUrls[0]}: HTTP 503`,
+    ...early.map(({ urls }) => `${urls[1]}: not the version its listing names`),
+  ]);
+});
+
+test("the build reads a bundle's digest as core names it", () => {
+  const meta = JSON.parse(readFileSync(resolve(FIXTURE_DIR, "fixture.json"), "utf8"));
+  const { apps } = JSON.parse(readFileSync(resolve(FIXTURE_DIR, "ghostly-store.json"), "utf8"));
+  const matches = apps.flatMap((app) => app.urls.map((url) => [url, manifestDigest(readFileSync(resolve(FIXTURE_DIR, meta.bundles[url]))) === app.digest]));
+  // `older` serves another version than its listing names (its README); every other fixture bundle is the listed one.
+  assert.deepEqual(matches, matches.map(([url]) => [url, !url.includes("/older/")]));
 });

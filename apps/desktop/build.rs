@@ -42,6 +42,7 @@ const COMMANDS: &[&str] = &[
     "generate_enc_key",
     "get_profile",
     "get_public_key",
+    "group_call_fetch",
     "hide_from_switcher",
     "hold_fetch",
     "incoming_share_done",

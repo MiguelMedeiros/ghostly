@@ -46,6 +46,7 @@ export const LOCKFILES = [
 /** Lockfiles the scan leaves out, each with why: nothing of them reaches a person who runs Ghostly. */
 export const NOT_SHIPPED = {
   "e2e/infra/atproto/package-lock.json": "The end-to-end suite's AT Protocol network: it runs on the test machine only. Dependabot keeps it current.",
+  "e2e/infra/sfu-token/package-lock.json": "The end-to-end suite's group-call token mock: it runs on the test machine only. Dependabot keeps it current.",
 };
 
 export function npmPackages(lockfile) {

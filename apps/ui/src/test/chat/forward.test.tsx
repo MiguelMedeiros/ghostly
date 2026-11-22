@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { MessageBubble } from "../../components/MessageBubble";
@@ -544,6 +545,26 @@ describe("choosing several", () => {
     expect(fakeEngine.callsTo("forwardMessages")).toEqual([{ linkId: "link-bo", messageIds: ["a", "b"], to: ["link-ana", "group:g1"] }]);
     // Sent: the choice is over.
     expect(screen.queryByTestId("select-bar")).toBeNull();
+  });
+
+  it("Forward to… open from a ⋮ closes when the contact deletes its message for everyone, the focus on the next message's ⋮", async () => {
+    let take = (_id: string) => {};
+    function Live() {
+      const [shown, setShown] = useState(messages);
+      take = (id) => setShown((all) => all.filter((m) => m.id !== id));
+      return <div data-message-list><Timeline messages={shown} /></div>;
+    }
+    const { user } = renderApp(<Live />);
+    const options = (text: string) => within(screen.getByText(text).closest<HTMLElement>("[data-message-row]")!).getByTestId("message-options");
+    options("first").focus();
+    await user.keyboard("{Enter}");
+    screen.getByTestId("message-forward").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("forward-dialog")).toContainElement(document.activeElement as HTMLElement);
+    act(() => take("a"));
+    expect(screen.queryByTestId("forward-dialog")).toBeNull();
+    expect(screen.queryByText("first")).toBeNull();
+    expect(document.activeElement).toBe(screen.getAllByTestId("message-options")[0]);
   });
 
   it("Escape, ✕ or taking the last one off ends it", async () => {

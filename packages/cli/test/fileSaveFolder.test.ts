@@ -9,7 +9,9 @@ import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, positionals } from "../src/commands";
 import { asCliError } from "../src/errors";
+import { jsonOut } from "../src/jsonOut";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { pasted } from "./support/pasted";
 // covers: headless.files
 
 /**
@@ -190,6 +192,25 @@ describe("file save to a folder", () => {
     });
   });
 
+  it("the name it offers to keep both of a long name fits a folder's entry, and saves", async () => {
+    // 84 CJK characters + .pdf: 256 bytes, saved as 83 (253). Before, " (2)" made the offer 257 bytes: its stat failed
+    // ENAMETOOLONG, read as free, and the offered --path failed "too long for this file system".
+    const name = `${"文".repeat(84)}.pdf`;
+    await fileStore.put({
+      id: "chat-one-in-long", linkId: "chat-one", blob: new Blob(["long"]), createdAt: 1, direction: "in",
+      metadata: { name, size: 4, mime: "application/pdf", timestamp: 1 },
+      transfer: { state: "done", transferred: 4, size: 4 },
+    } as never);
+    const folder = join(dir, "long-name");
+    mkdirSync(folder);
+    const saved = `${"文".repeat(83)}.pdf`, offered = `${"文".repeat(82)} (2).pdf`;
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-long", dir: folder })).toMatchObject({ path: join(folder, saved) });
+    const refused = await callApi(ctx, "file.save", { file: "chat-one-in-long", dir: folder }).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: "confirm", details: { path: join(folder, offered) } });
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-long", path: (refused as { details: { path: string } }).details.path })).toMatchObject({ path: join(folder, offered) });
+    expect(readdirSync(folder).sort()).toEqual([offered, saved].sort());
+  });
+
   it("the paths its hints suggest paste into a shell as one word: quoted, raw in details; one with a ' only there", async () => {
     // Before, "--path /x/report (2).txt" was a syntax error at "(" in bash and zsh, and a name with spaces two words.
     const quoted = (path: string) => `'${path}'`;
@@ -213,6 +234,40 @@ describe("file save to a folder", () => {
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: folder })).rejects.toMatchObject({
       code: "bad_request", message: `${folder} is a folder: name a file, or use --dir <the one in details.dir> (dir over the socket)`, details: { dir: folder },
     });
+  });
+
+  it("a hint's path, copied from the answer as the terminal shows it, pastes as that one path or is not offered", async () => {
+    // The sender names the file. Its keep-both path was quoted as '…'\''…', which the JSON answer prints as '…'\\''…':
+    // pasted, the quote ended at the `'` and the rest of the name ran as commands.
+    const folder = join(dir, "pasted");
+    mkdirSync(folder);
+    const name = "x'; touch PWNED; 'y.txt";
+    await fileStore.put({
+      id: "chat-one-in-q", linkId: "chat-one", blob: new Blob(["q"]), createdAt: 1, direction: "in",
+      metadata: { name, size: 1, mime: "text/plain", timestamp: 1 }, transfer: { state: "done", transferred: 1, size: 1 },
+    } as never);
+    writeFileSync(join(folder, name), "first");
+    const odd = join(dir, "it's \"a\" \\folder"), dollar = join(dir, "a (b) $HOME `id` folder");
+    mkdirSync(odd);
+    mkdirSync(dollar);
+    const cases = [
+      [{ file: "chat-one-in-q", dir: folder }, "--path"],
+      [{ file: "chat-one-in-r", path: odd }, "--dir"],
+      [{ file: "chat-one-in-r", path: dollar }, "--dir"],
+    ] as const;
+    const pastes: { hint: string; meant: string }[] = [];
+    for (const [params, flag] of cases) {
+      const failure = asCliError(await callApi(ctx, "file.save", params).then(() => { throw new Error("saved"); }, (error: unknown) => error));
+      // What the terminal shows is the JSON line, its escapes as printed: the word after the flag, up to "(… over the socket)".
+      const hint = new RegExp(`${flag} (.*) \\(\\w+ over the socket\\)`).exec(jsonOut({ error: failure.toJSON() }))![1]!;
+      const meant = Object.values(failure.details!);
+      expect(meant).toHaveLength(1);
+      if (hint.startsWith("<")) continue; // no word to paste: the path is in details
+      pastes.push({ hint, meant: meant[0] as string });
+    }
+    for (const { hint, meant } of pastes) expect(pasted(hint), hint).toEqual([meant]);
+    expect(pastes.map(({ meant }) => meant)).toEqual([dollar]);
+    expect(readdirSync(folder)).toEqual([name]);
   });
 
   it("a voice message whose sender claims a time no date can hold is named from its row's time, never NaN", async () => {

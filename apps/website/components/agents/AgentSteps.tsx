@@ -113,7 +113,8 @@ export function AgentSteps({ t }: { t: AgentStepsCopy }) {
               data-fill={running && i === shown + 1 ? "" : undefined}
               style={{ "--fill": `${wait}ms` } as CSSProperties}
             >
-              <button type="button" className="psx-dot" aria-current={i === shown ? "step" : undefined} aria-label={`${of(i)}: ${s.title}`} onClick={() => pick(i)}>
+              {/* Named with the word it shows, so voice control's "click Install" finds it (WCAG 2.5.3). */}
+              <button type="button" className="psx-dot" aria-current={i === shown ? "step" : undefined} aria-label={`${of(i)}: ${s.label}`} onClick={() => pick(i)}>
                 <span className="psx-dot-mark" aria-hidden="true" />
                 <span className="psx-dot-label" aria-hidden="true">
                   {s.label}

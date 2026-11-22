@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/types";
-import { findChat, findOwnNamedChat } from "../apiKit";
+import { dhtOnly, findChat, findOwnNamedChats } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue, sharedFolder } from "./audioSocket";
 import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
@@ -56,6 +56,8 @@ export interface CallHost {
   callPaceMs?: number;
   /** QUICK_REDIAL_MS (0: no call is held back; tests that ring and hang up over and over to see each call). */
   quickRedialMs?: number;
+  /** CHECKING_REDIAL_MS (tests shorten it). */
+  checkingRedialMs?: number;
 }
 
 /**
@@ -81,6 +83,14 @@ export const STALL_MS = 5_000;
 export const STALL_END_MS = 15_000;
 /** A connection that fails this soon after its answer went in lost the race `redial` describes, and starts over. */
 export const RACE_FAIL_MS = 2_000;
+/**
+ * An outgoing call whose answer went in and that has not connected this long after offers again (`redial`). The
+ * contact's app, whose connection failed before it ever connected, waits RESTART_GRACE_MS (8 s) for that newer offer
+ * and then hangs up, while libjuice here can still say "checking": the app's checks are all this side has when its
+ * host address is an mDNS name (WebKit's), and none from a macOS runner's WKWebView arrived in 23 s (CI run
+ * 44619228595). A call on a LAN connects in under 100 ms, one through a TURN server in a few seconds.
+ */
+export const CHECKING_REDIAL_MS = 10_000;
 /**
  * A ringing call's answer is made ahead (`prepare`), and made again this often while it rings: libjuice gives up on a
  * connection that has nothing to check (the offer's candidates wait for the answer) after about 40 s.
@@ -293,7 +303,8 @@ export class CallManager {
     this.held.delete(chat);
     this.bursts.delete(chat);
     const link = this.link(chat);
-    const call = this.add(chat, "in", this.auto.rate);
+    // At the default rate: auto-answer's rate is its own answers' (below), not that of a call answered by hand.
+    const call = this.add(chat, "in", DEFAULT_RATE);
     call.offer = offer;
     call.video = signalHasVideo(offer);
     // Unanswered, an offer goes stale: the contact's app has given up or will, and answering it would be refused.
@@ -301,7 +312,7 @@ export class CallManager {
     this.host.emit("call.incoming", `call.incoming:${call.id}`, { call: call.id, chat, name: link ? nameOf(link) : null, video: call.video, auto: this.autoFor(chat) });
     this.prepare(call);
     if (this.host.answers !== false && this.autoFor(chat)) {
-      void this.answer(call.id, {}).catch((error) => process.stderr.write(`ghostly: auto-answer failed: ${error instanceof Error ? error.message : String(error)}\n`));
+      void this.answer(call.id, { rate: this.auto.rate }).catch((error) => process.stderr.write(`ghostly: auto-answer failed: ${error instanceof Error ? error.message : String(error)}\n`));
     }
   }
 
@@ -317,7 +328,17 @@ export class CallManager {
       if (attempt === call.attempt) this.refused(call, `the answer was refused (${error instanceof Error ? error.message : String(error)})`);
       return;
     }
-    if (attempt === call.attempt) this.arm(call, CONNECT_MS, "failed", true);
+    if (attempt !== call.attempt) return;
+    if (call.redials >= this.maxRedials) { this.arm(call, CONNECT_MS, "failed", true); return; }
+    // Still not connected a while after the answer (CHECKING_REDIAL_MS): offering again, as the contact's app waits for.
+    const wait = this.host.checkingRedialMs ?? CHECKING_REDIAL_MS;
+    this.disarm(call);
+    call.timer = setTimeout(() => {
+      call.timer = null;
+      if (call.ended || attempt !== call.attempt || call.state === "connected") return;
+      this.refused(call, `not connected ${Math.round(wait / 100) / 10} s after the answer went in (ice ${call.media?.ice.state ?? "none"})`);
+    }, wait);
+    call.timer.unref?.();
   }
 
   /**
@@ -469,7 +490,8 @@ export class CallManager {
       throw new CliError("busy", "The contact is calling: their call rings here");
     }
     this.paced(link.id);
-    const rate = rateOf(options.rate, this.auto.rate);
+    // The default rate, as documented: auto-answer's rate is for the calls it answers, not the ones placed here.
+    const rate = rateOf(options.rate, DEFAULT_RATE);
     const stack = await this.stack();
     // The contact's call may have come in while the stack loaded.
     if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
@@ -555,8 +577,9 @@ export class CallManager {
   setAuto(next: { on: boolean; from?: string[]; rate?: unknown }): AutoAnswer {
     // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
     const { links, groups } = this.host.engine.getState();
-    const from = (next.from ?? []).map((ref) => findOwnNamedChat(links, ref, groups).id);
-    this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, next.on ? this.auto.rate : DEFAULT_RATE) };
+    const from = findOwnNamedChats(links, next.from ?? [], groups).map((link) => link.id);
+    // Each `on` sets the whole of it: the chats and the rate, 48000 when none is given, as the usage line says.
+    this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, DEFAULT_RATE) };
     this.saveAuto();
     return this.getAuto();
   }
@@ -836,12 +859,27 @@ export class CallManager {
     return undefined;
   }
 
-  /** A call by its id, or by its chat; with no ref, the only call (or the only one `prefer` picks). */
+  /**
+   * A call by its id, or by its chat; with no ref, the only call (or the only one `prefer` picks). A ref shaped as a
+   * call's id (`CALL_ID`) that names no call on now and no chat says so as a call: it ended (hung up twice, or a
+   * command racing the call's end) or never was one. It said `No chat "<id>"`, sending a script to the chat list. A
+   * chat whose id or label has that shape is still found as a chat first. An ended call is not kept (`end`), so
+   * whether it ended or never was is not known here.
+   */
   private find(ref: string | undefined, prefer?: (call: Call) => boolean): Call {
     if (ref) {
       const byId = this.calls.get(ref);
       if (byId) return byId;
-      const call = this.byChat(this.chatOf(ref).id);
+      let chat: LinkView;
+      try {
+        chat = this.chatOf(ref);
+      } catch (error) {
+        if (CALL_ID.test(ref) && error instanceof CliError && error.code === "not_found" && !error.details) {
+          throw new CliError("not_found", `No call ${ref}: it ended or never existed (ghostly call list)`);
+        }
+        throw error;
+      }
+      const call = this.byChat(chat.id);
       if (!call) throw new CliError("not_found", `No call in chat ${ref}`);
       return call;
     }
@@ -859,24 +897,31 @@ export class CallManager {
   /**
    * A chat by id, contact key, prefix or name (the API's rules, `findChat`); a group's says it is one. By its id (as
    * events name it, and a call's own chat), only that chat's view is built: a call placed and hung up built every chat's
-   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats.
+   * five times, one rung and answered six, ~0.2 s of the daemon's thread at 2,000 chats. `onlyChat`: as `findChat`.
    */
-  private chatOf(ref: string): LinkView {
+  private chatOf(ref: string, onlyChat?: string): LinkView {
     const byId = this.link(ref);
     if (byId) return byId;
     const { links, groups } = this.host.engine.getState();
-    return findChat(links, ref, groups);
+    return findChat(links, ref, groups, onlyChat);
   }
 
   /** The chat, if a call can go in it now; else why not (the engine's reason). */
   private callable(ref: string): LinkView {
-    const link = this.chatOf(ref);
+    // A name more than one group has says a call is a chat's: no command calls a group (`group call` names its node).
+    const link = this.chatOf(ref, "a call goes to a contact, in their chat");
     // A one-shot's chat is not live yet, and never would be in time: it said "Calls need a live connection" before
     // the daemon it needs (`stack`).
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
     // Not live (the contact's app closed or asleep): the engine's words alone left the person with nothing to do next.
     if (link.callsUnavailable === CALLS_NEED_LIVE) {
+      // On DHT only (either side's choice) no session ever opens: say whose choice it is, as `chat connect` does, not a
+      // wait that never ends. Still `unavailable`, this command's code.
+      try { dhtOnly(link); } catch (error) {
+        if (!(error instanceof CliError)) throw error;
+        throw new CliError("unavailable", `${CALLS_NEED_LIVE}. ${error.message}`, { chat: link.id, ...error.details });
+      }
       const shown = /^[\w.:-]+$/.test(link.label ?? "") ? link.label! : link.id;
       throw new CliError("unavailable", `${CALLS_NEED_LIVE}, and your contact's app is not connected now: ghostly chat wait ${shown} --until live waits for it, then call again`, { chat: link.id });
     }
@@ -889,6 +934,9 @@ export class CallManager {
     return this.auto.on && (this.auto.from.length === 0 || this.auto.from.includes(chat));
   }
 }
+
+/** A call's id as `add` makes it: 6 random bytes in lowercase hex. */
+const CALL_ID = /^[0-9a-f]{12}$/;
 
 const CALLS_NEED_DAEMON = "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`";
 /** The engine's `callsUnavailable` for a chat with no live session (ghostlink's, or node.ts's with no link running). */

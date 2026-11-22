@@ -1,5 +1,5 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { NewGroupDialog } from "../../components/NewGroupDialog";
@@ -63,6 +63,40 @@ describe("the secret guard on names and the status", () => {
     await user.click(screen.getByTestId("new-group-create"));
     await waitFor(() => expect(engine.callsTo("createGroup")).toEqual([{ name: "Book club", profile: "community" }]));
     expect(guard()).not.toBeInTheDocument();
+  });
+
+  // Escape on the question is a cancel event on its own <dialog>: React hands it to the dialog it sits in too.
+  const escapeGuard = () => act(() => { guard()!.dispatchEvent(new Event("cancel", { cancelable: true })); });
+
+  it("Escape on a new group's question closes the question alone: the dialog and its name stay", async () => {
+    const onClose = vi.fn();
+    const { user, engine } = renderApp(<NewGroupDialog onClose={onClose} onCreated={() => {}} />);
+    await user.click(screen.getByTestId("new-group-name"));
+    await user.paste(NSEC);
+    await user.click(screen.getByTestId("new-group-create"));
+    expect(await screen.findByTestId("secret-guard")).toBeInTheDocument();
+    escapeGuard();
+    expect(guard()).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId("new-group-name")).toHaveValue(NSEC);
+    expect(engine.callsTo("createGroup")).toEqual([]);
+  });
+
+  it("Escape on a rename's question closes the question alone: the members dialog stays", async () => {
+    fakeEngine.update({ groups: [admin({ name: "Friends" })] });
+    const onClose = vi.fn();
+    const { user } = renderApp(<GroupMembersDialog group={admin({ name: "Friends" })} onClose={onClose} />);
+    await user.click(screen.getByTestId("group-rename"));
+    const input = screen.getByTestId("group-rename-input");
+    await user.clear(input);
+    await user.click(input);
+    await user.paste(NSEC);
+    await user.click(screen.getByTestId("group-rename-save"));
+    expect(await screen.findByTestId("secret-guard")).toBeInTheDocument();
+    escapeGuard();
+    expect(guard()).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId("group-rename-input")).toHaveValue(NSEC);
   });
 
   it("a status of a Bitcoin private key asks first, and is set only on Send anyway", async () => {

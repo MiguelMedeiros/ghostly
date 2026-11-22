@@ -12,6 +12,7 @@ import { bundleDidSeed, openProfileBackup, restoreOpenedBackup, sameIdentityProf
 import { markUncheckedRestore, restoreForTakeover } from "../../lib/restoreGuard";
 import { switchProfile } from "../../lib/profiles";
 import { fakeEngine, groupView } from "../fakeEngine";
+import { plainSpaces } from "../timeSpaces";
 import { renderApp } from "../render";
 // covers: devices.takeover, devices.restore-guard
 
@@ -165,13 +166,14 @@ describe("a replaced device (WISP 06 § User experience: \"Use here\", \"It wasn
 
   it("each kept copy says when it was kept, and its Discard says which copy it removes", async () => {
     const a = Date.UTC(2026, 9, 2, 9, 30), b = Date.UTC(2026, 10, 1, 18, 5);
-    const when = (at: number) => new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(at);
+    // Its spaces aside (timeSpaces.ts): the space before "AM"/"PM" is held by the app on one runtime and not another.
+    const when = (at: number) => plainSpaces(new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(at));
     renderApp(<ForkRows forks={["ghostly_a", "ghostly_b"]} keptAt={{ ghostly_a: a, ghostly_b: b }} />);
     const rows = await screen.findAllByTestId("settings-fork");
-    expect(rows.map((row) => row.textContent)).toEqual([expect.stringContaining(`Kept ${when(a)}`), expect.stringContaining(`Kept ${when(b)}`)]);
+    expect(rows.map((row) => plainSpaces(row.textContent!))).toEqual([expect.stringContaining(`Kept ${when(a)}`), expect.stringContaining(`Kept ${when(b)}`)]);
     expect(new Set(rows.map((row) => row.textContent)).size).toBe(2);
-    expect(screen.getAllByTestId("settings-fork-discard").map((button) => button.getAttribute("aria-label"))).toEqual([`Discard: Kept ${when(a)}`, `Discard: Kept ${when(b)}`]);
-    expect(screen.getByRole("button", { name: `Discard: Kept ${when(b)}` })).toBe(screen.getAllByTestId("settings-fork-discard")[1]);
+    expect(screen.getAllByTestId("settings-fork-discard").map((button) => plainSpaces(button.getAttribute("aria-label")!))).toEqual([`Discard: Kept ${when(a)}`, `Discard: Kept ${when(b)}`]);
+    expect(screen.getByRole("button", { name: (name) => plainSpaces(name) === `Discard: Kept ${when(b)}` })).toBe(screen.getAllByTestId("settings-fork-discard")[1]);
   });
 
   it("copies an older build kept without a time are numbered, and no two rows read the same", async () => {
