@@ -24,6 +24,12 @@ export class CliError extends Error {
 }
 
 /**
+ * What `ghostly device` and `ghostly help device` say (WISP 06): the engine runs a CLI profile on one device only
+ * (`singleDevice`), and the app's devices cannot take it. Before, `ghostly device` suggested `service`.
+ */
+export const SINGLE_DEVICE = "A CLI profile is on this one device only: it cannot be added to another device, moved to one or taken over from one, and the app's Add a device cannot add it. To run it on another machine, back it up here (ghostly profile backup --out <file>), restore it there (ghostly profile restore <file> <name>) and stop using it here";
+
+/**
  * A value as a refusal quotes it (`--limit takes a number, not "x"`): a word with a line break or longer than 40
  * characters is described, not printed, as an unknown option is (docs/CLI.md "Secrets stay hidden"). A Cashu token, a
  * wallet connection link, an nsec, a seed or a hex key typed in the wrong place is that long, and bots keep the output.

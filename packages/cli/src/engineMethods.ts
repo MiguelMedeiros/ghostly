@@ -232,6 +232,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   deviceForkDiscard: "{ database }",
   deviceRestoreStartOwn: "",
   deviceRemove: "{ key }",
+  deviceFetchLeftFiles: "{ key }",
   deviceRename: "{ key, name }",
   deviceNewSecret: "",
   deviceSecretOfferDismiss: "",

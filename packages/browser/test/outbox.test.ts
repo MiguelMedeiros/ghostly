@@ -865,7 +865,7 @@ describe("texts the contact's windows have no room for yet", () => {
     for (const text of ["a", "b", "c", "d"]) await write(text);
     expect(arrived).toEqual(["a", "b"]);
     expect(rows[2]).toMatchObject({ delivery: "waiting", deliveryError: PACED });
-    expect(rows[3].delivery).toBe("waiting");
+    expect(rows[3]).toMatchObject({ delivery: "waiting", deliveryError: NotSent.BEHIND });
     // Many checks with no room: none of them is a send that counts, so none of them ends failed.
     await vi.advanceTimersByTimeAsync(30 * 60_000);
     expect(rows.every(r => r.delivery !== "failed")).toBe(true);
@@ -876,6 +876,53 @@ describe("texts the contact's windows have no room for yet", () => {
     room = 10;
     await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs.at(-1)!);
     expect(arrived).toEqual(["a", "b", "c", "d", "e"]);
+    expect(rows.every(r => r.delivery === "delivered")).toBe(true);
+    await box.stop();
+  });
+
+  // Texts written while the contact was away had climbed the backoff (minutes between checks); back, past the window's
+  // burst, the next one waited that long again although the contact took more 10 s later: 450 texts took about 9
+  // minutes. The link says when there is room (`onTextRoom`), and the engine's look then sends them.
+  it("go at the look made when the contact can take more, not at their backoff step", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    const PACED = "Your contact takes a limited number of texts at a time.";
+    const rows: StoredMessage[] = [];
+    const store = {
+      read: async () => rows.map(row => ({ ...row })),
+      get: async (id: string) => { const row = rows.find(r => r.id === id); return row && { ...row }; },
+      update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        const row = rows.find(r => r.id === id);
+        if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+      },
+    };
+    // Away, then back with room for one text; the contact takes more 10 s on.
+    let live = false, room = 0;
+    const arrived: string[] = [];
+    const send = vi.fn(async (m: StoredMessage) => {
+      if (!live) return "No authenticated text delivery method is available.";
+      if (!room) return new NotSent(PACED, PACED);
+      room--;
+      arrived.push(m.text);
+      setTimeout(() => void box.received(m.wireId!), 1);
+      return null;
+    });
+    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => live && room > 0, via: () => "datalink" } });
+    for (const text of ["a", "b"]) {
+      const wireId = text.padEnd(22, "x");
+      rows.push({ linkId: "paced", id: `me_${wireId}`, wireId, text, sender: "me", timestamp: Date.now(), via: "datalink", delivery: "waiting" });
+      await box.wait(`me_${wireId}`, "Waiting for your contact.");
+    }
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    live = true; room = 1;
+    await box.flush({ reopened: true });
+    await vi.advanceTimersByTimeAsync(5);
+    expect(arrived).toEqual(["a"]);
+    expect(rows[1].delivery).toBe("waiting");
+    await vi.advanceTimersByTimeAsync(10_000);
+    room = 10;
+    await box.flush();
+    await vi.advanceTimersByTimeAsync(5);
+    expect(arrived).toEqual(["a", "b"]);
     expect(rows.every(r => r.delivery === "delivered")).toBe(true);
     await box.stop();
   });

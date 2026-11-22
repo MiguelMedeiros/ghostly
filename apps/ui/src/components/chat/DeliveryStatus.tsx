@@ -46,7 +46,10 @@ const TIP_MS = 2500;
  */
 export function DeliveryStatus({ delivery, acked = false, onPicture = false, onRetry, live, group, error }: {
   delivery?: ChatMessage["delivery"];
-  /** Why it was not sent (the message's `deliveryError`): said on the mark when the person must wait for something. */
+  /**
+   * Why it was not sent (the message's `deliveryError`): said on the mark when the person must wait for something, and
+   * what a waiting text waits for when it is not the contact being online (`useDeliveryWords`).
+   */
   error?: string;
   /** A waiting file in a DHT-only chat: it waits for a live connection, and who chose DHT only. */
   live?: DhtOnlyBy;
@@ -80,7 +83,8 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
   // The contact's storage has no room (WISP 404): sending again now is refused again, so the mark says why and when.
   const full = delivery === "failed" && !!error && holdFull(error) ? problemLine(error, t) : undefined;
   // Not sent, with nothing to send again (a file that never left this device): no "Tap to send again".
-  const line = full ?? (state === "failed" && !onRetry ? words.label(state) : words.hint(state, live, group));
+  const line = full ?? (state === "failed" && !onRetry ? words.label(state) : words.hint(state, live, group, error));
+  const label = words.label(state, live, error);
   const lineId = useId();
 
   const handlers = {
@@ -130,7 +134,7 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
       ) : (
         // Focusable, and its line its description at all times: a keyboard or a screen reader learns why it waits
         // (a DHT-only chat, what to change) as a hover does.
-        <span role="img" {...common} aria-label={words.label(state, live)} aria-describedby={line === words.label(state, live) ? undefined : lineId}
+        <span role="img" {...common} aria-label={label} aria-describedby={line === label ? undefined : lineId}
           tabIndex={0} onFocus={() => show(false)} onBlur={() => setTip(false)}
           className={`${common.className} rounded-full focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-current`}
           onClick={(e) => { e.stopPropagation(); if (press.current?.fired) { press.current = null; return; } press.current = null; show(true); }}>
