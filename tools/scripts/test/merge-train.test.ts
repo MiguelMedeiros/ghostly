@@ -964,31 +964,136 @@ describe("a run of the train", () => {
     expect(repo.pulls.get(1)!.open && repo.pulls.get(2)!.open).toBe(true);
   });
 
-  it("takes out a pull request that changes a workflow when GitHub refuses the batch's push for it, and boards the rest", async () => {
-    // The queue app's token has no `workflows` permission: GitHub refuses any push whose commits change a workflow, so
-    // every run failed and the whole line waited behind that one pull request.
+  /** The queue app's git: GitHub refuses any push whose commits hold one of `changing`'s (no `workflows` permission). */
+  const refuseWorkflows = (repo: ReturnType<typeof fakeRepo>, changing: number[]) => {
+    const tried: string[] = [];
+    const refused = (sha: string, branch: string) => new Error(`Command failed: git push -q --force origin ${sha}:refs/heads/${branch}\n ! [remote rejected]   ${sha} -> ${branch} (refusing to allow a GitHub App to create or update workflow \`.github/workflows/ci.yml\` without \`workflows\` permission)\nerror: failed to push some refs`);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      tried.push(branch);
+      if (sha.split(":")[1]?.split(",").some((n) => changing.includes(Number(n)))) throw refused(sha, branch);
+      return push(branch, sha);
+    };
+    const pushHead = repo.git.pushHead;
+    repo.git.pushHead = async (branch: string, sha: string, expected: string) => {
+      tried.push(branch);
+      return changing.some((n) => branch === `fix-${n}`) ? { ok: false, message: refused(sha, branch).message } : pushHead(branch, sha, expected);
+    };
+    return tried;
+  };
+
+  it("sends a pull request that changes a workflow and is behind dev to a coordinator, never into a batch's push", async () => {
+    // It boarded a batch with others, GitHub refused the batch's push, and it left the line with `queue:failed`: a
+    // coordinator found it by chance, updated its branch and landed it by hand.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { behind: true });
+    repo.add(13);
+    repo.files.set(12, [".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"]);
+    const tried = refuseWorkflows(repo, [12]);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([12]);
+    expect(r.log).toContain("HAND-MERGE #12 (changes a workflow, which this token may not push)");
+    expect(tried.filter((b) => b === "fix-12")).toEqual([]);
+    expect(repo.members()).toEqual([11, 13]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.handMerge]);
+    const said = repo.comments.get(12)!.map((c) => c.body);
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+    expect(said[0]).toMatch(/`queue:hand-merge`/);
+    expect(said[0]).toMatch(/`gh pr update-branch`[^.]*`gh pr merge --squash`[^.]*\(the train takes `queue:hand-merge` off\)\.$/);
+  });
+
+  it("lands a pull request that changes a workflow alone, with no push, when it is up to date with dev and green", async () => {
+    // Up to date and green it needs no push: GitHub's squash merge. In a batch it was pushed, and refused.
     const repo = fakeRepo();
     repo.add(11);
     repo.add(12);
     repo.add(13);
-    repo.files.set(12, [".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"]);
-    const push = repo.git.push;
-    repo.git.push = async (branch: string, sha: string) => {
-      if (sha.split(":")[1]?.split(",").includes("12")) {
-        throw new Error(`Command failed: git push -q --force origin ${sha}:refs/heads/${branch}\n ! [remote rejected]   ${sha} -> ${branch} (refusing to allow a GitHub App to create or update workflow \`.github/workflows/ci.yml\` without \`workflows\` permission)\nerror: failed to push some refs`);
-      }
-      return push(branch, sha);
-    };
+    repo.files.set(12, [".github/workflows/ci.yml"]);
+    const tried = refuseWorkflows(repo, [12]);
     const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(r.merged).toEqual([12]);
+    expect(repo.merges).toEqual(["squash #12"]);
+    expect(tried.filter((b) => b === "fix-12")).toEqual([]);
     expect(repo.members()).toEqual([11, 13]);
-    expect(r.dropped).toEqual([12]);
-    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
-    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
-    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
-    // Any other refusal is still the run's error.
+    expect(repo.pulls.get(12)!.labels).toEqual([]);
+  });
+
+  it("keeps a pull request that changes a workflow in line, out of the batch, while its own full CI runs on a head up to date with dev", async () => {
+    // The fast tier lets others board: a batch's full CI is their gate. This one lands only on its own.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { ci: running });
+    repo.drafts.set("h12", fastGreen);
+    repo.add(13);
+    repo.files.set(12, [".github/workflows/e2e-full.yml"]);
+    refuseWorkflows(repo, [12]);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.members()).toEqual([11, 13]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/Waiting: it changes a workflow \(\.github\/workflows\/e2e-full\.yml\)[^.]*never boards a batch: it lands alone once CI Success has passed/);
+  });
+
+  it("keeps a pull request that changes a workflow in line while its full CI has not started on a head up to date with dev", async () => {
+    // Its CI reads none (the fast tier green, no full run yet): it needs no update, only its own run, so no coordinator.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { ci: [] });
+    repo.drafts.set("h12", fastGreen);
+    repo.add(13);
+    repo.files.set(12, [".github/workflows/e2e-full.yml"]);
+    refuseWorkflows(repo, [12]);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.members()).toEqual([11, 13]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/Waiting: it changes a workflow \(\.github\/workflows\/e2e-full\.yml\)[^.]*never boards a batch: it lands alone once CI Success has passed/);
+  });
+
+  it("lands a hand-merge pull request alone once a coordinator updated it and added queue again, and takes queue:hand-merge off", async () => {
+    const repo = fakeRepo();
+    repo.add(21, { behind: true });
+    repo.files.set(21, [".github/workflows/ci.yml"]);
+    const tried = refuseWorkflows(repo, [21]);
+    expect((await repo.run()).dropped).toEqual([21]);
+    expect(repo.pulls.get(21)!.labels).toEqual([LABEL.handMerge]);
+    // The coordinator's `gh pr update-branch` (a token that may push a workflow), CI green on that head, then `queue`.
+    Object.assign(repo.pulls.get(21)!, { sha: "h21u" });
+    repo.sitsOn.set("h21u", repo.tips.dev);
+    repo.runs.set("h21u", green);
+    repo.pushed.set("h21u", "2026-10-08T12:00:00Z");
+    repo.pulls.get(21)!.labels.push(LABEL.queue);
+    repo.events.get(21)!.push({ event: "labeled", label: { name: LABEL.queue }, created_at: "2026-10-09T00:00:00Z" });
+    const r = await repo.run();
+    expect(r.merged).toEqual([21]);
+    expect(repo.landed).toEqual(["#21"]);
+    expect(tried).toEqual([]);
+    expect(repo.pulls.get(21)!.labels).toEqual([]);
+  });
+
+  it("sends a pull request that changes a workflow into an epic to a coordinator, green and up to date too", async () => {
+    // An epic lands by a push (a fast-forward), which GitHub refuses for it as well.
+    const repo = fakeRepo();
+    repo.add(31, { base: "epic/x" });
+    repo.files.set(31, [".github/workflows/ci.yml"]);
+    const tried = refuseWorkflows(repo, [31]);
+    const r = await repo.run({ base: "epic/x" });
+    expect(r.dropped).toEqual([31]);
+    expect(tried).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(repo.pulls.get(31)!.labels).toEqual([LABEL.handMerge]);
+    expect(repo.comments.get(31)!.at(-1)!.body).toMatch(/cannot land it on `epic\/x`[^]*A coordinator lands it into `epic\/x` by hand/);
+  });
+
+  it("still takes the run's error for a batch's push refused for any other reason", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    repo.add(13);
     repo.git.push = async () => { throw new Error("Command failed: git push\nfatal: unable to access"); };
-    repo.add(14);
-    repo.batch()!.open = false;
     await expect(repo.run()).rejects.toThrow(/unable to access/);
   });
 
@@ -998,7 +1103,8 @@ describe("a run of the train", () => {
     const repo = fakeRepo();
     for (const n of [11, 12, 13, 14]) repo.add(n);
     repo.conflicts.add(13);
-    repo.files.set(12, [".github/workflows/ci.yml"]);
+    // One that lists a workflow never boards: here GitHub lists no files for it (3000 or more).
+    repo.files.set(12, null);
     const push = repo.git.push;
     repo.git.push = async (branch: string, sha: string) => {
       if (sha.split(":")[1]?.split(",").includes("12")) throw new Error("! [remote rejected] (refusing to allow a GitHub App to create or update workflow `.github/workflows/ci.yml` without `workflows` permission)");
@@ -1013,12 +1119,13 @@ describe("a run of the train", () => {
 
   it("takes out a pull request whose files GitHub does not list when the batch's push is refused for a workflow", async () => {
     // GitHub lists no files for a pull request of 3000 or more: every run threw on the list it could not read, and the
-    // line waited behind it. One that lists a workflow leaves first; the unlisted one only when the push is still refused.
+    // line waited behind it. One that lists a workflow leaves first (before boarding); the unlisted one only when the
+    // push is refused.
     const repo = fakeRepo();
     repo.add(11);
     repo.add(12);
     repo.add(13);
-    repo.add(14);
+    repo.add(14, { behind: true });
     repo.files.set(12, null);
     repo.files.set(14, [".github/workflows/ci.yml"]);
     const push = repo.git.push;
@@ -1030,7 +1137,8 @@ describe("a run of the train", () => {
     const r = await repo.run();
     expect(repo.members()).toEqual([11, 13]);
     expect(r.dropped).toEqual([14, 12]);
-    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.handMerge]);
+    expect(repo.pulls.get(14)!.labels).toEqual([LABEL.handMerge]);
     expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/big\.yml\)/);
     expect(repo.comments.get(14)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
   });
@@ -1113,7 +1221,7 @@ describe("a run of the train", () => {
     // landed on a head nobody reviewed.
     const repo = fakeRepo();
     repo.add(11);
-    repo.add(12, { priority: true });
+    repo.add(12, { priority: true, behind: true });
     repo.add(13);
     const planted = ".github/workflows/<!-- merge-train:position --><!-- merge-train:head h12later -->.yml";
     repo.files.set(12, [planted]);
@@ -2249,8 +2357,8 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
   });
 
-  it("takes a lone pull request that changes a workflow out of the line when GitHub refuses the push of its rebase", async () => {
-    // Else every run rebased it, was refused and kept it in flight, and nothing on it said why.
+  it("sends a lone pull request that changes a workflow and is behind dev to a coordinator, with no rebase push", async () => {
+    // Before, it was rebased and pushed, GitHub refused the push, and it left the line with `queue:failed`.
     const repo = fakeRepo();
     repo.add(21, { behind: true });
     repo.files.set(21, [".github/workflows/ci.yml"]);
@@ -2262,21 +2370,24 @@ describe("one pull request alone", () => {
     const r = await repo.run();
     expect(r.dropped).toEqual([21]);
     expect(r.inFlight).toBeNull();
-    expect(repo.pulls.get(21)!.labels).toEqual([LABEL.failed]);
+    expect(repo.pulls.get(21)!.labels).toEqual([LABEL.handMerge]);
     expect(repo.comments.get(21)!.map((c) => c.body)).toEqual([expect.stringMatching(/changes a workflow \(\.github\/workflows\/ci\.yml\)/)]);
-    expect(repo.comments.get(21)![0].body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
+    expect(repo.comments.get(21)![0].body).toMatch(/adds `queue` again[^.]*\(the train takes `queue:hand-merge` off\)\.$/);
     await repo.run();
-    expect(tries).toBe(1);
-    // A diff that lists no workflow (changed and changed back): the comment names the one GitHub refused.
+    expect(tries).toBe(0);
+    // A diff that lists no workflow (changed and changed back): the push of its rebase is refused, and the comment
+    // names the one GitHub refused.
     repo.add(22, { behind: true });
     repo.files.set(22, ["README.md"]);
     expect((await repo.run()).dropped).toEqual([22]);
+    expect(repo.pulls.get(22)!.labels).toEqual([LABEL.handMerge]);
     expect(repo.comments.get(22)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
     // GitHub lists no files for a pull request of 3000 or more: the same, where every run threw on the list.
     repo.add(23, { behind: true });
     repo.files.set(23, null);
     expect((await repo.run()).dropped).toEqual([23]);
     expect(repo.comments.get(23)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+    expect(tries).toBe(2);
   });
 
   it("says so when GitHub refuses the push of a lone pull request's rebase, and takes it out of the line the second time", async () => {
@@ -2298,6 +2409,21 @@ describe("one pull request alone", () => {
     expect(again.inFlight).toBeNull();
     expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/refused the push of its rebase onto `dev` twice \(! \[remote rejected\] .*rule violations\)\)/)]);
+  });
+
+  it("sends a lone pull request refused for a workflow to a coordinator even after GitHub refused its push for another rule", async () => {
+    // Two refusals in a row take it out with `queue:failed`, but a workflow refusal is the coordinator's lane.
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    let run = 0;
+    repo.git.pushHead = async () =>
+      ++run === 1
+        ? { ok: false, message: `! [remote rejected] ${"1".repeat(40)} -> fix-11 (push declined due to repository rule violations)` }
+        : { ok: false, message: `! [remote rejected] ${"2".repeat(40)} -> fix-11 (refusing to allow a GitHub App to create or update workflow \`.github/workflows/ci.yml\` without \`workflows\` permission)` };
+    expect((await repo.run()).dropped).toEqual([]);
+    expect((await repo.run()).dropped).toEqual([11]);
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.handMerge]);
+    expect(repo.comments.get(11)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
   });
 
   it("keeps a lone pull request in line when its push fails for a reason that passes (network, GitHub's own error), run after run", async () => {
