@@ -407,6 +407,23 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     expect(forwardedMany(t.a.got[1]!.forwarded)).toBe(true);
   });
 
+  // One Forward to two chats: the copy without the video's metadata is hashed once, and each chat's copy checks out.
+  it("forwards a video to two chats hashing its stripped copy once, and each contact's copy checks out", async () => {
+    const t = await setup();
+    const recorded = withMovie(H264_MP4, [xyzUdta()]);
+    const video = Buffer.concat([recorded, new Uint8Array(2.5 * 1024 * 1024 - recorded.length)]);
+    t.a.offerBytes("vid-0000001", "clip.mp4", "video/mp4", video);
+    const received = await t.row(t.a, m => m.id === "peer_vid-0000001");
+    await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    const digests = vi.spyOn(await fileBytes(), "digest");
+    cleanup.push(async () => { digests.mockRestore(); });
+    const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id, t.a.id] });
+    expect(results.map(r => r.error)).toEqual([null, null]);
+    expect(digests).toHaveBeenCalledTimes(1);
+    for (const contact of [t.b, t.a])
+      await vi.waitFor(() => expect([...contact.records.values()].filter(r => r.direction === "in" && r.state === "done")).toHaveLength(1), { timeout: 20_000 });
+  });
+
   /** A file Alice sent, received here whole and kept in file storage (not in a Blob), so it is copied a step at a time. */
   async function receivedLarge(t: Awaited<ReturnType<typeof setup>>, wireId: string, size = 2.5 * 1024 * 1024 + 11) {
     t.a.offer(wireId, size);
