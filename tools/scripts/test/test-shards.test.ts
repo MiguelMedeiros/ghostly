@@ -1,5 +1,8 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ALONE, WORKERS, packages, split, staleWarning } from "../test-shards.mjs";
+import { ALONE, WORKERS, appSuites, packages, reportTimes, slowWarnings, split, staleWarning, unlistedAlone } from "../test-shards.mjs";
 
 const unit = (id: string, files: string[], alone = false) => ({ id, dir: id, files, alone });
 
@@ -63,8 +66,86 @@ describe("the packages shards", () => {
     expect(staleWarning([unit("a", files), unit("b", ["new1", "new2", "new3"])], seconds)).toMatch(/^::warning::3 of the 23 test files have no time/);
   });
 
+  it("name the files with no recorded time in that warning, the first ten", () => {
+    const files = Array.from({ length: 20 }, (_, i) => `f${i}`);
+    const seconds = Object.fromEntries(files.map((f) => [f, 1]));
+    expect(staleWarning([unit("a", files), unit("b", ["new3", "new1", "new2"])], seconds)).toContain("(new1, new2, new3)");
+    const many = Array.from({ length: 12 }, (_, i) => `new${String(i).padStart(2, "0")}`);
+    expect(staleWarning([unit("a", files), unit("b", many)], seconds)).toContain("(new00, new01, new02, new03, new04, new05, new06, new07, new08, new09 and 2 more)");
+  });
+
+  it("name, after a shard's run, a file the split weighed far too light", () => {
+    // 2026-11-13: communityAdminHubFull.test.ts took 193 s with no record, counted as a typical file (under a second),
+    // and alone made one shard 11.5 minutes and another 4.2; only 22 of 1,031 files had no time, so nothing warned.
+    const dir = mkdtempSync(join(tmpdir(), "test-shards-"));
+    const root = resolve(import.meta.dirname, "../../..");
+    const result = (file: string, took: number, status = "passed") => ({ name: join(root, file), status, startTime: 1000, endTime: 1000 + took * 1000 });
+    const hub = "packages/browser/test/communityAdminHubFull.test.ts";
+    const leaver = "packages/browser/test/communityAdminToLeaver.test.ts";
+    const leave = "packages/browser/test/communityAdminLeave.test.ts";
+    const notHub = "packages/browser/test/communityAdminNotHub.test.ts";
+    const report = join(dir, "browser.json");
+    // The record: leaver 8 s, leave 20 s; hub and notHub have none.
+    const seconds = { [leaver]: 8, [leave]: 20 };
+    writeFileSync(report, JSON.stringify({ testResults: [result(hub, 193), result(leaver, 40), result(leave, 45), result(notHub, 29)] }));
+    const warnings = slowWarnings([report], seconds);
+    // hub: no record and over 30 s. leaver: over twice 8 s and 30 s more. leave: twice its 20 s but only 25 s more.
+    // notHub: no record, under 30 s.
+    expect(warnings).toEqual([
+      expect.stringMatching(/^::warning file=packages\/browser\/test\/communityAdminHubFull\.test\.ts::.* took 193 s, but .* has no time for it/),
+      expect.stringMatching(/^::warning file=packages\/browser\/test\/communityAdminToLeaver\.test\.ts::.* took 40 s, but .* has 8 s for it/),
+    ]);
+    // A failed file's time is no record either (--record skips it), and a report of fast files warns of nothing.
+    writeFileSync(report, JSON.stringify({ testResults: [result(hub, 193, "failed"), result(leaver, 9)] }));
+    expect(slowWarnings([report], seconds)).toEqual([]);
+  });
+
   it("need a shard for each file that runs alone", () => {
     expect(() => split([unit("long", ["long"], true), unit("other", ["other"], true)], {}, 1)).toThrow(/at least 2 shards/);
     expect(split([unit("long", ["long"], true), unit("a", ["a1"])], {}, 1)[0].units.map((u) => u.id)).toEqual(["long", "a"]);
+  });
+
+  it("leave out a file that runs alone while tools/scripts/quarantine.json holds it, and still refuse one that is gone", () => {
+    const [long] = ALONE;
+    // Quarantined, Vitest lists it nowhere: the nightly runs it, and the shards plan without it.
+    expect(unlistedAlone([unit("cli", ["packages/cli/test/a.test.ts"])], [long])).toEqual([]);
+    // Renamed or removed, with no quarantine: a name to fix in ALONE.
+    expect(unlistedAlone([unit("cli", ["packages/cli/test/a.test.ts"])], [])).toEqual([long]);
+    expect(unlistedAlone([unit(long, [long], true)], [])).toEqual([]);
+  });
+
+  it("record a file's median time over the reports of several runs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "test-shards-"));
+    const file = "tools/scripts/test/test-shards.test.ts";
+    const other = "tools/scripts/test/merge-train.test.ts";
+    const report = (name: string, results: [string, number][]) => {
+      writeFileSync(join(dir, name), JSON.stringify({ testResults: results.map(([f, took]) => ({ name: join("/home/runner/work/ghostly/ghostly", f), status: "passed", startTime: 1000, endTime: 1000 + took * 1000 })) }));
+      return join(dir, name);
+    };
+    // One slow runner (40 s) does not set the record; with two runs it is their mean.
+    const runs = [report("a.json", [[file, 10], [other, 4]]), report("b.json", [[file, 40], [other, 6]]), report("c.json", [[file, 12]])];
+    expect(reportTimes(runs)).toEqual({ [file]: 12, [other]: 5 });
+  });
+});
+
+describe("the app shards", () => {
+  it("test what npm run test:app tests, each Vitest by its config", () => {
+    expect(appSuites()).toEqual([
+      { name: "test:ui", dir: ".", config: "apps/ui/vitest.ui.config.ts" },
+      { name: "test:matrix", dir: ".", config: "e2e/matrix/vitest.config.ts" },
+      { name: "test:scripts", dir: ".", config: "tools/scripts/vitest.config.ts" },
+    ]);
+  });
+
+  it("cut the UI's tests by their files across the shards, and name its reports and warnings for the app", () => {
+    const seconds = { u1: 120, u2: 100, u3: 90, u4: 80, s1: 60, m1: 1 };
+    const ui = { ...unit("test:ui", ["u1", "u2", "u3", "u4"]), whole: true };
+    const shards = split([ui, { ...unit("test:matrix", ["m1"]), whole: true }, { ...unit("test:scripts", ["s1"]), whole: true }], seconds, 3);
+    // The UI's 390 s are over the 150 s each shard gets: whole, one runner would take 390 and the others 60 and 1.
+    expect(shards.map((s) => s.load)).toEqual([121, 160, 170]);
+    expect(shards.flatMap((s) => s.units.flatMap((u) => u.files)).sort()).toEqual(Object.keys(seconds).sort());
+    expect(shards.every((s) => s.units.some((u) => u.id === "test:ui" && !u.whole))).toBe(true);
+    const many = Array.from({ length: 5 }, (_, i) => `new${i}`);
+    expect(staleWarning([unit("test:ui", many)], {}, "app")).toContain("so the app shards are uneven: download the app-test-reports-* artifacts");
   });
 });

@@ -1,8 +1,9 @@
 import type { Page } from "@playwright/test";
-import { chat, expect, test } from "../support/fixtures";
+import { chat, expect, test, type Peer } from "../support/fixtures";
 import { history, seed } from "../support/chatPerf";
 import { instrumentTyping, typeAndMeasure, type Typing } from "../support/typingPerf";
 import { pair } from "../support/paired";
+import { budget } from "../support/perfBudget";
 
 /**
  * Typing in a long chat costs what it costs in a short one: a keystroke draws the composer, never the chat's messages,
@@ -13,7 +14,7 @@ import { pair } from "../support/paired";
  *
  * prints the numbers; PERF_PAIRED=1 adds a paired chat whose contact's typing indicator comes and goes meanwhile, as a
  * bot's "thinking..." does (a real pairing: slower). Absolute times depend on the machine and its load: the test holds
- * generous bounds only.
+ * generous bounds only, and its bound on a keystroke's time is @perf (the nightly E2E (perf) job).
  */
 const TEXT = "Olha isso: the composer should stay quick while a long chat sits above it, even when the machine is busy with builds and a bot keeps thinking. ";
 const typed = (n: number) => TEXT.repeat(Math.ceil(n / TEXT.length)).slice(0, n);
@@ -31,30 +32,16 @@ const log = (label: string, numbers: Record<string, Typing>) => {
   if (process.env.PERF_LOG) console.log(`composer-typing-perf ${label}: ${JSON.stringify(numbers, null, 1)}`);
 };
 
-test("typing in a long chat draws no message rows and costs what it does in a short one", { tag: ["@feature:app.composer.typing-cost"] }, async ({ peer }) => {
-  test.setTimeout(5 * 60_000);
-  const bob = await peer("typing-bob");
+/** Bob with a chat of 600 messages and one of 20, his keystrokes counted. */
+async function seeded(bob: Peer) {
   await bob.context.addInitScript(instrumentTyping);
   await seed(bob.page, [{ label: "Long chat", count: 600 }, { label: "Short chat", count: 20 }]);
   await bob.page.reload();
   await expect(bob.page.getByTestId("chat-row-name").filter({ hasText: "Long chat" })).toBeVisible();
+}
 
-  // No `:has()` rule anchored on `.group`: every message row is one, and WebKit then pays for each keystroke (and any
-  // other change of the page) in proportion to the chat's length. Rules inside @layer and @media are read too.
-  const groupHas = await bob.page.evaluate(() => {
-    const found: string[] = [];
-    const walk = (rules: CSSRuleList) => {
-      for (const rule of rules) {
-        const selector = (rule as CSSStyleRule).selectorText;
-        if (selector && /\.group\b[^,]*:has\(/.test(selector)) found.push(selector);
-        if ((rule as CSSGroupingRule).cssRules) walk((rule as CSSGroupingRule).cssRules);
-      }
-    };
-    for (const sheet of document.styleSheets) { try { walk(sheet.cssRules); } catch { /* another origin's */ } }
-    return found;
-  });
-  expect(groupHas).toEqual([]);
-
+/** Typing in each chat, at full speed and with the processor 4x slower. */
+async function typeInBoth(bob: Peer) {
   const open = async (label: string) => {
     await bob.page.getByTestId("chat-row-name").filter({ hasText: label }).click();
     await expect(chat(bob).locator("[data-message-row]").last()).toBeInViewport();
@@ -72,6 +59,31 @@ test("typing in a long chat draws no message rows and costs what it does in a sh
   }
   await throttle(bob.page, 1);
   log("seeded", results);
+  return results;
+}
+
+test("typing in a long chat draws no message rows and grows the field a line at a time", { tag: ["@feature:app.composer.typing-cost"] }, async ({ peer }) => {
+  test.setTimeout(5 * 60_000);
+  const bob = await peer("typing-bob");
+  await seeded(bob);
+
+  // No `:has()` rule anchored on `.group`: every message row is one, and WebKit then pays for each keystroke (and any
+  // other change of the page) in proportion to the chat's length. Rules inside @layer and @media are read too.
+  const groupHas = await bob.page.evaluate(() => {
+    const found: string[] = [];
+    const walk = (rules: CSSRuleList) => {
+      for (const rule of rules) {
+        const selector = (rule as CSSStyleRule).selectorText;
+        if (selector && /\.group\b[^,]*:has\(/.test(selector)) found.push(selector);
+        if ((rule as CSSGroupingRule).cssRules) walk((rule as CSSGroupingRule).cssRules);
+      }
+    };
+    for (const sheet of document.styleSheets) { try { walk(sheet.cssRules); } catch { /* another origin's */ } }
+    return found;
+  });
+  expect(groupHas).toEqual([]);
+
+  const results = await typeInBoth(bob);
 
   for (const label of ["Short chat", "Long chat"]) for (const rate of [1, 4]) {
     // Message rows are not drawn again for keystrokes (a row the engine changed meanwhile may be; every row of the
@@ -81,9 +93,16 @@ test("typing in a long chat draws no message rows and costs what it does in a sh
     // keystroke (about 800 here).
     expect(results[`${label} ${rate}x`].heightWrites, `${label} ${rate}x height writes`).toBeLessThanOrEqual(8);
   }
+});
+
+test("a keystroke in a long chat costs what it does in a short one", { tag: ["@feature:app.composer.typing-cost", "@perf"] }, async ({ peer }) => {
+  test.setTimeout(5 * 60_000);
+  const bob = await peer("typing-bob");
+  await seeded(bob);
+  const results = await typeInBoth(bob);
   // Generous on purpose (a loaded runner): 30 times the messages may not make a keystroke cost 3 times more.
   const long = results["Long chat 4x"], short = results["Short chat 4x"];
-  expect(long.median).toBeLessThan(Math.max(50, short.median * 3));
+  budget("keystroke in a chat of 600 at 4x slower, median", long.median, Math.max(50, short.median * 3));
 });
 
 test("a keystroke in a long chat does not paint its message list again", { tag: ["@feature:app.composer.typing-cost"] }, async ({ peer, browserName }) => {
@@ -121,7 +140,7 @@ test("a keystroke in a long chat does not paint its message list again", { tag: 
 });
 
 /** A paired chat whose contact's typing indicator comes and goes every second, with 600 messages seeded above it. */
-test("a contact's typing indicator coming and going does not draw a long chat again", { tag: ["@feature:app.composer.typing-cost"] }, async ({ peer }) => {
+test("a contact's typing indicator coming and going does not draw a long chat again", { tag: ["@feature:app.composer.typing-cost", "@perf"] }, async ({ peer }) => {
   test.skip(!process.env.PERF_PAIRED, "a measurement: PERF_PAIRED=1 runs it");
   test.setTimeout(6 * 60_000);
   const [alice, bob] = await Promise.all([peer("thinking-alice"), peer("typing-bob")]);
@@ -166,6 +185,6 @@ test("a contact's typing indicator coming and going does not draw a long chat ag
   // The indicator redraws the header, never the 600 rows.
   expect(results["1x rows"].rows).toBeLessThan(5);
   expect(results["4x rows"].rows).toBeLessThan(5);
-  expect(results["4x"].median).toBeLessThan(50);
+  budget("keystroke in a paired chat of 600 at 4x slower, its contact typing, median", results["4x"].median, 50);
 });
 

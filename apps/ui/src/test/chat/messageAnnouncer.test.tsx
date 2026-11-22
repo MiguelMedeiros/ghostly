@@ -174,6 +174,37 @@ describe("a new message, read out to a screen reader", () => {
     expect(region()).toHaveTextContent(/^Alice: after a delete$/);
   });
 
+  it("a message deleted within the window is not read out, and one edited within it is read as it stands", () => {
+    const { update } = setup(HISTORY);
+    const secret = peer("my bank pin is 1234");
+    update([...HISTORY, secret]);
+    update(HISTORY);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toBeEmptyDOMElement();
+    wait(ANNOUNCE_CLEAR_MS);
+    // Two came, one went: the one left is read out alone.
+    const kept = peer("kept"), gone = peer("gone");
+    update([...HISTORY, kept, gone]);
+    update([...HISTORY, kept]);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: kept$/);
+    wait(ANNOUNCE_CLEAR_MS);
+    const typo = peer("see you at 9");
+    update([...HISTORY, kept, typo]);
+    update([...HISTORY, kept, { ...typo, text: "see you at 10" }]);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: see you at 10$/);
+  });
+
+  it("in a group, a member's message deleted within the window is not read out", () => {
+    const { update } = setup(HISTORY);
+    const hi = peer("hi", { member: "a" }), secret = peer("my bank pin is 1234", { member: "b" });
+    update([...HISTORY, hi, secret]);
+    update([...HISTORY, hi]);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: hi$/);
+  });
+
   it("a list with none of the rows known is not read out as news", () => {
     const { update } = setup(HISTORY);
     update([peer("x"), peer("y")]);

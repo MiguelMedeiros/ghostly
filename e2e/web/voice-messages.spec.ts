@@ -375,9 +375,14 @@ test("voice messages: on a phone the recorder's hint stays on the screen in a lo
   expect(edges.right).toBeLessThanOrEqual(edges.width);
 });
 
-test("voice messages: on a phone the recorder's Discard question reads whole in every language", { tag: ["@feature:files.voice.record", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
-  // Beside Keep and Discard, the question had what was left of the bar on one line: "¿Descartar …" in Spanish at 375 px.
-  const [alice, bob] = await Promise.all([peer("voice-ask-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("voice-ask-bob")]);
+// Beside Keep and Discard, the question had what was left of the bar on one line: "¿Descartar …" in Spanish at 375 px.
+// On its side the window is wide but the chat beside the list is not (about 330 px): the question was cut to "¿De…".
+const ASKING_PHONES = [
+  { name: "on a phone", viewport: { width: 375, height: 667 } },
+  { name: "on a phone on its side", viewport: { width: 844, height: 390 } },
+];
+for (const phone of ASKING_PHONES) test(`voice messages: ${phone.name} the recorder's Discard question reads whole in every language`, { tag: ["@feature:files.voice.record", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer(`voice-ask-alice-${phone.viewport.width}`, { mobile: true, viewport: phone.viewport }), peer(`voice-ask-bob-${phone.viewport.width}`)]);
   await pair(alice, bob);
   const page = alice.page;
   for (const language of ["es", "fr", "ja", "ar"]) {
@@ -400,7 +405,7 @@ test("voice messages: on a phone the recorder's Discard question reads whole in 
       const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
       return { cut: text.scrollWidth > text.clientWidth || text.scrollHeight > text.clientHeight, left: box.left, right: box.right, width: document.documentElement.clientWidth, onTop: !!top && text.contains(top) };
     });
-    expect(question, language).toEqual({ cut: false, left: expect.any(Number), right: expect.any(Number), width: 375, onTop: true });
+    expect(question, language).toEqual({ cut: false, left: expect.any(Number), right: expect.any(Number), width: phone.viewport.width, onTop: true });
     expect(question.left, language).toBeGreaterThanOrEqual(0);
     expect(question.right, language).toBeLessThanOrEqual(question.width);
     await ask.getByTestId("voice-confirm-discard").click();

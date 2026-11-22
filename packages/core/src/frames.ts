@@ -51,6 +51,12 @@ export const LIMITS = {
    * worker), is not cut: it holds up to the response's own bound.
    */
   unreadStallMs: 2_000,
+  /**
+   * Response-body bytes a client holds for all its responses before their readers took them. Past it, a response over
+   * `maxUnreadResponseBytes` is reset at once, its reader's pace aside: one slow reader keeps its whole response (as
+   * much as `maxResponseBodyBytes`), but many cannot add up (a contact's app reading each answer a chunk at a time).
+   */
+  maxClientUnreadResponseBytes: 64 * 1024 * 1024,
   maxChatMessageBytes: 16 * 1024,
   maxFileBytes: 100 * 1024 * 1024,
   /** Files a peer may be sending us at once. */
@@ -252,7 +258,11 @@ export function encodeControl(frame: ControlFrame): string {
   return json;
 }
 
-function isHeaderList(value: unknown): value is HeaderList {
+/**
+ * A `req` or `res` header list the link takes: at most `maxHeaderCount` headers, names of 256 characters and values of
+ * `maxHeaderValueBytes` at most. A frame past it is dropped by the receiver, so a sender checks first.
+ */
+export function isHeaderList(value: unknown): value is HeaderList {
   if (!Array.isArray(value) || value.length > LIMITS.maxHeaderCount) return false;
   return value.every(
     (h) =>

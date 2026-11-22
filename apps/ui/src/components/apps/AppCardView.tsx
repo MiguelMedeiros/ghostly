@@ -6,11 +6,12 @@ import { servicesPlatform } from "../../lib/platform";
 import { Button } from "../wallet/ui";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
-import { NAME, aroundName } from "./aroundName";
+import { NAME, aroundName, withName } from "./aroundName";
 import { appStopped, refreshInstalledApps, useInstalledApp } from "../../lib/apps/installed";
 import { appsBlock, appsUnavailable } from "../../lib/apps/availability";
 import { openApp } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
+import { ownDirection } from "../../lib/ownDirection";
 
 /*
  * An app card in a 1:1 chat (WISP 405 § An app, WISP 1200 § Apps sent in a chat): "Ana opened Chess", drawn from its
@@ -20,7 +21,7 @@ import { appErrorText } from "../../lib/apps/errors";
  * into the app their contact opened), and installing opens it in
  * this chat. Once the app is installed here, the card says Open and names the installed app (its checked title, version
  * and icon), whatever the card calls it. While the contact is not live it says the app needs
- * you both online. A version found revoked or removed says "Stopped" with no Open, as the Apps page and the composer's
+ * you both online, unless the app is stopped with nothing that could run it. A version found revoked or removed says "Stopped" with no Open, as the Apps page and the composer's
  * Apps do (`appStopped`); one a store of the person's removed offers "Run anyway" (WISP 1200 § Takedowns), which a
  * revoked one never gets.
  */
@@ -69,13 +70,18 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   // A long name is cut alone, never "opened it here" after it: a 20-letter nickname on a 320 px phone lost the words.
   const who = mine ? (card.opened ? t("apps.card.youOpened") : t("apps.card.youShared"))
     : aroundName(t(card.opened ? "apps.card.opened" : "apps.card.shared", { name: NAME }), contact, "app-card-name");
-  const waiting = appsUnavailable(block, title, contact, t);
+  // A stopped app with no Run anyway runs nowhere: being online would not open it, so no line says it waits for that.
+  const runAnyway = app?.run.status === "removed";
+  const waiting = stopped && !runAnyway ? null : appsUnavailable(block, title, contact, t);
   const open = (runAnyway = false) => {
     if (opening) return;
     setError(null); setOpening(runAnyway ? "anyway" : "open");
+    const lacked = app?.run.status === "needs-files";
     // Refused (removed or revoked since the list was read): the list is read again first, so the card says Stopped,
     // and offers Run anyway only for a store's removal, as the Apps page then does.
-    void openApp(card.ref, linkId, { runAnyway }).catch(async (e: unknown) => { await refreshInstalledApps(); setError(appErrorText(e, t)); })
+    void openApp(card.ref, linkId, { runAnyway })
+      // Opening is what fetched its files (a restored profile): every screen's list says so, and the icon shows.
+      .then(() => { if (lacked) void refreshInstalledApps(); }, async (e: unknown) => { await refreshInstalledApps(); setError(appErrorText(e, t)); })
       .finally(() => setOpening(null));
   };
   return (
@@ -98,12 +104,12 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
         </div>
       </div>
       {waiting && <p className="chat-text-card-line text-text-secondary" data-testid="app-card-waiting">{waiting}</p>}
-      {error && <p role="alert" className="chat-text-card-line text-danger-ink" data-testid="app-card-error">{error}</p>}
+      {error && <p role="alert" dir={ownDirection(error)} className="chat-text-card-line text-danger-ink" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
         {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
-            : <span className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
-        {app?.run.status === "removed" &&<Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
+            : <span className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : withName(t("apps.card.ask", { name: NAME }), contact)}</span>}
+        {runAnyway && <Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>
       {installing && card.url && (

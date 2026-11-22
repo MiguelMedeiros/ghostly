@@ -1,6 +1,6 @@
 import { reactionEmoji, sanitizeDisplayText, sanitizeStatusText, STATUS_AVAILABILITIES, STATUS_TEXT_MAX, type PersonStatus, type StatusAvailability } from "@ghostly/core";
 import { STATUS_CARD_LIMITS } from "@ghostly/core/statusCards";
-import { CliError, type ErrorCode } from "./errors";
+import { CliError, type ErrorCode, shownValue } from "./errors";
 
 /**
  * This profile's status (WISP 401 § Presence and status): a text, one emoji, an availability and when it ends, said to
@@ -21,12 +21,12 @@ export function checkOwnStatus(input: StatusInput, name: (field: keyof StatusInp
   const fail = (field: keyof StatusInput, rule: string) => new CliError(code, `${name(field)} ${rule}`);
   const status: PersonStatus = {};
   if (input.availability !== undefined) {
-    if (!(STATUS_AVAILABILITIES as readonly string[]).includes(input.availability)) throw fail("availability", `takes ${STATUS_AVAILABILITIES.join(", ")}, not ${JSON.stringify(input.availability)}`);
+    if (!(STATUS_AVAILABILITIES as readonly string[]).includes(input.availability)) throw fail("availability", `takes ${STATUS_AVAILABILITIES.join(", ")}, not ${shownValue(input.availability)}`);
     status.availability = input.availability as StatusAvailability;
   }
   if (input.emoji !== undefined) {
     const emoji = reactionEmoji(input.emoji);
-    if (!emoji) throw fail("emoji", `takes one emoji, not ${JSON.stringify(input.emoji)}`);
+    if (!emoji) throw fail("emoji", `takes one emoji, not ${shownValue(input.emoji)}`);
     status.emoji = emoji;
   }
   // One line, as contacts see it: a line break or a run of spaces is one space; invisible characters are not counted.

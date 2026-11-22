@@ -2,7 +2,7 @@ import { sep } from "node:path";
 import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
 import { VOICE_LIMITS } from "@ghostly/core/voice";
 import type { Parsed } from "../args";
-import { CliError } from "../errors";
+import { CliError, shownValue } from "../errors";
 import { type Command, here, localStat, LONG_WAIT_SECONDS, reply, timeout } from "./shared";
 
 /**
@@ -19,7 +19,7 @@ function voiceOf(options: Parsed["options"]): { voice?: number | true; peaks?: s
   if (voice === undefined) throw new CliError("usage", "--peaks is a voice note's waveform: not without --voice");
   const bars = peaks.split(",");
   if (bars.length > VOICE_LIMITS.maxBars || !bars.every((bar) => /^\d{1,3}$/.test(bar.trim()) && Number(bar) <= 255)) {
-    throw new CliError("usage", `--peaks takes up to ${VOICE_LIMITS.maxBars} numbers from 0 to 255, comma-separated, not ${JSON.stringify(peaks)}`);
+    throw new CliError("usage", `--peaks takes up to ${VOICE_LIMITS.maxBars} numbers from 0 to 255, comma-separated, not ${shownValue(peaks)}`);
   }
   return { voice: voice as number | true, peaks: bars };
 }
@@ -32,13 +32,13 @@ function sendable(path: string): string {
 
 /** Files: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
-  "file accept": { method: "file.action", usage: "file accept [<chat>] <file>", summary: "Take a file the contact offers, or download a group's file that did not come by itself (<chat> may be the group)", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "accept" }) },
+  "file accept": { method: "file.action", usage: "file accept [<chat>] <file>", summary: "Take a file the contact offers, or download a group's file that did not come by itself (<chat> may be the group); refused when it does not fit in the room left on this device, and it keeps waiting", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "accept" }) },
   "file cancel": { method: "file.action", usage: "file cancel [<chat>] <file>", summary: "Cancel a transfer", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "cancel" }) },
   "file decline": { method: "file.action", usage: "file decline [<chat>] <file>", summary: "Refuse a file the contact offers", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "decline" }) },
   "file list": { method: "file.list", usage: "file list <chat|group>", summary: "A chat's or a group's files and their transfers", args: ["chat"], params: (_, { chat }) => ({ chat }) },
   "file pause": { method: "file.action", usage: "file pause [<chat>] <file>", summary: "Pause a transfer", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "pause" }) },
   "file request": { method: "file.action", usage: "file request [<chat>] <file>", summary: "Ask again for a file that stopped arriving: it goes on from what is here (a group's file: asked of whoever holds it)", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "request" }) },
-  "file resend": { method: "file.action", usage: "file resend [<chat>] <file>", summary: "Send again a file that stopped moving or failed: it goes on from what the contact holds", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "resend" }) },
+  "file resend": { method: "file.action", usage: "file resend [<chat>] <file>", summary: "Send again a file that stopped moving or failed: it goes on from what the contact holds (not one cancelled or declined: file send it again)", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "resend" }) },
   "file resume": { method: "file.action", usage: "file resume [<chat>] <file>", summary: "Resume a transfer", args: ["chat?", "file"], params: (_, a) => ({ chat: a.chat, file: a.file, action: "resume" }) },
   "file save": {
     method: "file.save", usage: "file save [<chat>] <file> [--dir d | --path p] [--force] [--wait [--timeout s]]", summary: "Write a received file to disk (never over a file without --force; --wait: once it is all here)",
@@ -65,19 +65,21 @@ export const commands: Record<string, Command> = {
     method: "file.send", usage: "file send <chat|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]] [--reply <message>] [--force] [--wait none|sent] [--timeout s]", summary: `Send a file (or, with --voice, a voice note), as a reply with --reply; to a group, every member's app fetches it (up to ${GROUP_FILE_LIMITS.maxBytes / 1024 / 1024} MiB)`,
     args: ["chat", "path"],
     options: {
-      name: { type: "string", description: "The name the contact (or the group) sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply,
+      name: { type: "string", description: "The name the contact (or the group) sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, takes: "a length in milliseconds", description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply,
       wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until the contact has the whole file, in a 1:1 chat (default: none with a daemon, sent without; a group: none)" },
       timeout: { type: "number", description: "Seconds --wait sent waits (default 300)" },
       force: { type: "boolean", description: "Send even if --name looks like a seed, a key or ecash" },
     },
     // The flags first: a usage error (exit 2) is said before the file is looked at.
     params: ({ options }, a) => {
+      // Empty (an unset variable in a script), it sent the file as no reply: an id the chat lacks is exit 3.
+      if (options.reply === "") throw new CliError("usage", "--reply needs a message id");
       const voice = voiceOf(options), seconds = timeout(options, LONG_WAIT_SECONDS);
       return { chat: a.chat, path: sendable(here(a.path)!), name: options.name, mime: options.mime, ...voice, reply: options.reply, force: options.force === true, wait: options.wait, timeout: seconds };
     },
   },
   "file wait": {
-    method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error)",
+    method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error); exit 4 on timeout, 5 at once when a received file waits for file accept",
     args: ["chat?", "file"], options: { timeout: { type: "number", description: "Seconds (default 300)" } },
     params: ({ options }, a) => ({ chat: a.chat, file: a.file, timeout: timeout(options, LONG_WAIT_SECONDS) }),
   },

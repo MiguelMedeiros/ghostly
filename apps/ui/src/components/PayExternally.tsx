@@ -6,6 +6,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { rawError } from "../lib/errorText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 /**
  * Paying, or being paid, with a wallet that is not Ghostly: the invoice or address as a QR code, as text
@@ -82,12 +83,12 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
           </a>}
           {actions}
           {onPaid && (
-            <button type="button" className={`${button} bg-black/20 hover:bg-black/30`} data-testid={`${testId}-paid`} disabled={busy} title={t("payments.external.paidTitle")} onClick={() => {
+            <FocusSafeButton type="button" className={`${button} bg-black/20 hover:bg-black/30`} data-testid={`${testId}-paid`} disabled={busy} title={t("payments.external.paidTitle")} onClick={() => {
               setBusy(true); setError(null);
               onPaid().then(() => setChecked(true), (cause: unknown) => setError(problemText(cause, t))).finally(() => setBusy(false));
             }}>
               {busy ? t("payments.external.asking") : checked ? t("payments.external.checking") : t("payments.external.paid")}
-            </button>
+            </FocusSafeButton>
           )}
         </div>
         {checked && <p className="text-[11px] m-0 opacity-70" data-testid={`${testId}-checking`}>{t("payments.external.checkingNote")}</p>}
