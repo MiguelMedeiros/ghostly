@@ -194,6 +194,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The test map reads what a pull request adds against the merge commit's first parent.
+          fetch-depth: 2
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -234,9 +237,12 @@ jobs:
         run: node tools/scripts/quarantine.mjs
 
       # Runs no test: reads e2e/features.json and what every test says it covers (docs/TESTING.md). The map goes to
-      # the run's summary page: it is not committed.
+      # the run's summary page: it is not committed. On a pull request, what it adds (a test file, a feature) is checked
+      # against its base, the merge commit's first parent (the checkout's second commit).
       - name: Test map (every feature has a test)
-        run: npm run test:map -- --summary
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+        run: npm run test:map -- --summary ${BASE:+--base=$BASE}
 
   frontend-tests:
     name: Frontend tests (app)
