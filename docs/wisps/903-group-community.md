@@ -449,7 +449,7 @@ On public relays each trip through Pkarr (a packet published, then seen by the o
 
 ## Open decisions
 
-Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; calls (files and voice messages are [503](503-group-files.md)); native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members; an ephemeral frame hubs relay without storing it (signed by its author, seen once, rate limited per member by each hub, never in a catch-up), for typing (§ Typing); wake-up push for a mention, shared with chosen members only over pair payloads (§ Wake-up push).
+Approval of each entry, expiry and use count; several admins; member key updates; a checkpoint so a very long chain need not be replayed from its genesis; calls in private groups (calls in communities are [602](602-group-calls.md), files and voice messages are [503](503-group-files.md)); native transports on edges; a gossip profile ([901](901-gossipsub.md)) beyond a few hundred members; an ephemeral frame hubs relay without storing it (signed by its author, seen once, rate limited per member by each hub, never in a catch-up), for typing (§ Typing); wake-up push for a mention, shared with chosen members only over pair payloads (§ Wake-up push).
 
 On a leave of one admission (revision 2026-10-10); the text above takes the first choice of each:
 
