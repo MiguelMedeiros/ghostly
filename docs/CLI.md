@@ -83,6 +83,7 @@ tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tool
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
 | `status set [text…] [--emoji <emoji>] [--availability available\|busy\|away\|dnd] [--until 2h]`, `status show`, `status clear` | The status paired contacts see: up to 60 characters, one emoji, an availability (`dnd`: Do not disturb), until a time. A daemon says it at once; without one it goes on each chat's next live session |
 | `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings and the chats' holds (`chat disconnect --hold`) travel with it |
+| `ghostly device` | None: a CLI profile is on this one device only. It cannot be added to another device, moved or taken over, and the app's Add a device cannot add it; to run it on another machine, back it up here, restore it there and stop using it here. `ghostly device …` says so as a usage error (exit 2) |
 
 Only one process opens a profile at a time.
 
