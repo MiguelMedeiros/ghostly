@@ -4,7 +4,9 @@ import { MESSAGE_LIST } from "../MessageBubble";
 
 /**
  * The timeline's ↓ button, over its bottom end corner: "↓ 3 new" when the contact wrote while I was scrolled up, a plain ↓
- * when I am far from the bottom with nothing new. On a phone it is a round button, the count a badge on it.
+ * when I am far from the bottom with nothing new. On a phone it is a round button, the count a badge on it: a thumb's
+ * 44 px in px, not rem, so a larger text size leaves it that size (at 2.75rem it was an 88 px circle at 32 px text,
+ * over the newest messages' text and time).
  */
 export function JumpToLatest({ count, far, onJump }: { count: number; far: boolean; onJump: () => void }) {
   const { t } = useI18n();
@@ -39,7 +41,7 @@ export function JumpToLatest({ count, far, onJump }: { count: number; far: boole
         // To nothing: the person's own move if it is still in the page. One taken out is seen after the render.
         else setTimeout(() => { if (button.isConnected && document.activeElement !== button) keyed.current = null; });
       }}
-      className={`absolute bottom-3 end-4 z-10 flex h-10 items-center justify-center gap-1.5 rounded-full border border-border bg-surface-alt text-text-primary shadow-lg transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent animate-fade-in max-md:w-11 max-md:h-11 ${count ? "md:ps-3 md:pe-3.5" : "w-10"}`}>
+      className={`absolute bottom-3 end-4 z-10 flex h-10 items-center justify-center gap-1.5 rounded-full border border-border bg-surface-alt text-text-primary shadow-lg transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent animate-fade-in max-md:w-[44px] max-md:h-[44px] ${count ? "md:ps-3 md:pe-3.5" : "w-10"}`}>
       <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 5v14" /><path d="m19 12-7 7-7-7" />
       </svg>

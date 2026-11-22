@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { APPS_CAPABILITY, DhtDelivery, GhostLink, STATUS_CARD_CAPABILITY, appCardId, createIdentity, createLink, createRelayPayload, identityFromSeedB64, parseRelayPayload, readStatusCard, statusCardText,
   type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
-import { GhostlyNode } from "../src/engine/node";
+import { CARD_RESTORE_EVERY_MS, GhostlyNode, cardRestoreTiming } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { CARD_RESTORE_GAP_MS } from "../src/engine/edits";
 import type { StoredMessage } from "../src/shared/types";
@@ -277,6 +277,9 @@ describe("a session that opens with no card due", () => {
 
 describe("a contact that says edit/1 again and again", () => {
   it("costs one look through the history, not one per time: the flips coalesce, and a card due since still goes after the gap", async () => {
+    // The gap is 30 s, most of this file's run: a shorter one still holds the flips and the 2 s wait below.
+    cardRestoreTiming.everyMs = 6_000;
+    cleanup.push(async () => { cardRestoreTiming.everyMs = CARD_RESTORE_EVERY_MS; });
     const t = await setup({ rows: [floored("A", appCard)] });
     await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1), { timeout: 15_000 });
     const channel = (t.contact as unknown as { channel: { send(frame: string): void } }).channel;

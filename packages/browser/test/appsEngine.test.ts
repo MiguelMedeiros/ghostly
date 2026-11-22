@@ -159,6 +159,21 @@ describe("apps in the engine (apps/1)", () => {
     expect(contactGot.at(-1)).toEqual({ app, o: "close" });
   });
 
+  it("on: a waiting update installed is told to the pages, so another tab's screen drops its Update", async () => {
+    const net = new FakeNet();
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const { call, ref, server } = await setup({ apps: true, appFetch: net.fetch, ref: `${keyOf(PUBLISHER)}/chess` });
+    await call("appPreview", { url: BUNDLE_URL });
+    await call("appInstall", { digest: v1.digest, grant: ["chat"] });
+    net.put(BUNDLE_URL, (await bundle({ sequence: 2, permissions: ["chat", "name"], sources: [BUNDLE_URL] })).bytes);
+    expect((await call("appCheckUpdates", {}))[0]!.outcome).toBe("ask");
+    const told: string[] = [];
+    server.attach({ post: message => { if (message.kind !== "response") told.push(message.kind); } });
+    expect(await call("appUpdateAccept", { ref, sequence: 2, added: ["name"] })).toMatchObject({ sequence: 2 });
+    expect(told).toContain("apps-checked");
+  });
+
   it("on: an app opened while the chat is offline says open once the session is live", async () => {
     const offline: unknown[] = [];
     const { contactGot, app } = await setup({ apps: true, beforeLive: async (call, linkId, ref) => {

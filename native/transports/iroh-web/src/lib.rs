@@ -7,12 +7,16 @@
 //! and src-tauri/src/paired_transport.rs): same ALPN, same stream preface, same
 //! u32 length-prefixed text frames, same TLS exporter binding.
 use iroh::{
-    endpoint::{presets, Connection, RecvStream, SendStream},
+    endpoint::{presets, Connection, RecvStream, SendStream, WeakConnectionHandle},
     Endpoint, EndpointAddr, RelayMap, RelayMode, RelayUrl, SecretKey,
 };
-use n0_future::time::{timeout, Duration};
+use n0_future::{
+    task::{AbortHandle, JoinSet},
+    time::{timeout, Duration},
+    FutureExt,
+};
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::future_to_promise;
 
@@ -20,6 +24,10 @@ pub const ALPN: &[u8] = b"ghostly/paired-chat/1";
 pub const MAX_FRAME: usize = 60 * 1024;
 const PREFACE: &[u8] = b"ghostly/paired-chat/1";
 const EXPORTER_LABEL: &[u8] = b"EXPORTER-Ghostly-paired-chat-v1";
+/// How many incoming connections are admitted at once (a handshake, then a stream with its preface), as the Desktop.
+const ADMITTING: usize = 4;
+/// How many incoming connections that sent the preface may be open at once, as the Desktop.
+const INCOMING_OPEN: usize = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Address {
@@ -105,10 +113,126 @@ async fn read_frame(recv: &mut RecvStream) -> Result<Vec<u8>, String> {
     Ok(frame)
 }
 
+/// A connection whose stream is open: the preface sent (outgoing) or read (incoming).
+struct Streams {
+    connection: Connection,
+    binding: Binding,
+    send: SendStream,
+    recv: RecvStream,
+}
+
+async fn streams(
+    endpoint: &Endpoint,
+    connection: Connection,
+    incoming: bool,
+) -> Result<Streams, String> {
+    let binding = binding(endpoint, &connection)?;
+    let streams = timeout(Duration::from_secs(10), async {
+        if incoming {
+            let (send, mut recv) = connection.accept_bi().await.map_err(|e| e.to_string())?;
+            if read_frame(&mut recv).await? != PREFACE {
+                return Err("Invalid stream preface".to_string());
+            }
+            Ok((send, recv))
+        } else {
+            let (mut send, recv) = connection.open_bi().await.map_err(|e| e.to_string())?;
+            write_frame(&mut send, PREFACE).await?;
+            Ok((send, recv))
+        }
+    })
+    .await;
+    match streams {
+        Ok(Ok((send, recv))) => Ok(Streams {
+            connection,
+            binding,
+            send,
+            recv,
+        }),
+        Ok(Err(e)) => {
+            connection.close(1u32.into(), b"stream");
+            Err(e)
+        }
+        Err(_) => {
+            connection.close(1u32.into(), b"stream");
+            Err("Native stream timed out".into())
+        }
+    }
+}
+
+/// The incoming connections of one endpoint: those being admitted, and those handed over (held weakly, so a channel
+/// dropped without a close is not counted).
+#[derive(Default)]
+struct Admission {
+    admitting: JoinSet<Option<Streams>>,
+    order: VecDeque<AbortHandle>,
+    open: Vec<WeakConnectionHandle>,
+}
+
+enum Next {
+    Incoming(Option<iroh::endpoint::Incoming>),
+    Admitted(Option<Streams>),
+}
+
+/// The next incoming connection that sent the preface, or None once the endpoint is closed. Each is admitted beside
+/// the others, so one that stalls never holds the next: at most `ADMITTING` are unfinished at once (a new one past
+/// that drops the oldest), and at most `INCOMING_OPEN` handed over are open (one past that is closed). This side's
+/// own dials are not counted: one always goes out.
+async fn next_incoming(endpoint: &Endpoint, admission: &mut Admission) -> Option<Streams> {
+    loop {
+        let accepting = async { Next::Incoming(endpoint.accept().await) };
+        let next = if admission.admitting.is_empty() {
+            accepting.await
+        } else {
+            let admitting = &mut admission.admitting;
+            accepting
+                .or(async {
+                    Next::Admitted(admitting.join_next().await.and_then(Result::ok).flatten())
+                })
+                .await
+        };
+        match next {
+            Next::Incoming(None) => return None,
+            Next::Incoming(Some(incoming)) => {
+                admission.order.retain(|admitting| !admitting.is_finished());
+                if admission.order.len() >= ADMITTING {
+                    if let Some(oldest) = admission.order.pop_front() {
+                        oldest.abort();
+                    }
+                }
+                let endpoint = endpoint.clone();
+                admission
+                    .order
+                    .push_back(admission.admitting.spawn(async move {
+                        let connection = timeout(Duration::from_secs(10), incoming)
+                            .await
+                            .ok()?
+                            .ok()?;
+                        streams(&endpoint, connection, true).await.ok()
+                    }));
+            }
+            Next::Admitted(Some(streams)) => {
+                admission.open.retain(|open| {
+                    open.upgrade()
+                        .is_some_and(|connection| connection.close_reason().is_none())
+                });
+                if admission.open.len() >= INCOMING_OPEN {
+                    streams.connection.close(1u32.into(), b"connection limit");
+                    continue;
+                }
+                admission.open.push(streams.connection.weak_handle());
+                return Some(streams);
+            }
+            Next::Admitted(None) => {}
+        }
+    }
+}
+
 /// One Iroh endpoint for one paired chat, homed on a relay.
 #[wasm_bindgen]
 pub struct IrohNode {
     endpoint: Endpoint,
+    /// Taken by the `accept` in progress; None while one is, or once the endpoint closed.
+    admission: Rc<RefCell<Option<Admission>>>,
 }
 
 #[wasm_bindgen]
@@ -141,7 +265,11 @@ impl IrohNode {
                 endpoint.close().await;
                 return Err(err("Iroh relay unreachable"));
             }
-            Ok(IrohNode { endpoint }.into())
+            Ok(IrohNode {
+                endpoint,
+                admission: Rc::new(RefCell::new(Some(Admission::default()))),
+            }
+            .into())
         })
     }
 
@@ -180,33 +308,35 @@ impl IrohNode {
             .await
             .map_err(|_| err("Iroh connection timed out"))?
             .map_err(err)?;
-            IrohConn::attach(&endpoint, connection, false)
+            streams(&endpoint, connection, false)
                 .await
-                .map(Into::into)
+                .map(|streams| IrohConn::from(streams).into())
+                .map_err(err)
         })
     }
 
-    /// Resolves with the next incoming connection, or `undefined` once closed.
+    /// Resolves with the next incoming connection, or `undefined` once closed. Callers serialise accepts; a
+    /// concurrent call fails.
     pub fn accept(&self) -> js_sys::Promise {
         let endpoint = self.endpoint.clone();
+        let slot = self.admission.clone();
         future_to_promise(async move {
-            loop {
-                let Some(incoming) = endpoint.accept().await else {
-                    return Ok(JsValue::UNDEFINED);
-                };
-                // A failed or slow handshake is dropped; the next one is awaited.
-                let Ok(Ok(connection)) = timeout(Duration::from_secs(10), incoming).await else {
-                    continue;
-                };
-                if let Ok(conn) = IrohConn::attach(&endpoint, connection, true).await {
-                    return Ok(conn.into());
-                }
-            }
+            let mut admission = slot
+                .borrow_mut()
+                .take()
+                .ok_or_else(|| err("Accept busy or closed"))?;
+            let Some(streams) = next_incoming(&endpoint, &mut admission).await else {
+                return Ok(JsValue::UNDEFINED);
+            };
+            *slot.borrow_mut() = Some(admission);
+            Ok(IrohConn::from(streams).into())
         })
     }
 
     pub fn close(&self) -> js_sys::Promise {
         let endpoint = self.endpoint.clone();
+        // Every admission still unfinished goes with it.
+        self.admission.borrow_mut().take();
         future_to_promise(async move {
             endpoint.close().await;
             Ok(JsValue::UNDEFINED)
@@ -223,44 +353,14 @@ pub struct IrohConn {
     recv: Rc<RefCell<Option<RecvStream>>>,
 }
 
-impl IrohConn {
-    async fn attach(
-        endpoint: &Endpoint,
-        connection: Connection,
-        incoming: bool,
-    ) -> Result<IrohConn, JsValue> {
-        let binding = binding(endpoint, &connection).map_err(err)?;
-        let streams = timeout(Duration::from_secs(10), async {
-            if incoming {
-                let (send, mut recv) = connection.accept_bi().await.map_err(|e| e.to_string())?;
-                if read_frame(&mut recv).await? != PREFACE {
-                    return Err("Invalid stream preface".to_string());
-                }
-                Ok((send, recv))
-            } else {
-                let (mut send, recv) = connection.open_bi().await.map_err(|e| e.to_string())?;
-                write_frame(&mut send, PREFACE).await?;
-                Ok((send, recv))
-            }
-        })
-        .await;
-        let (send, recv) = match streams {
-            Ok(Ok(streams)) => streams,
-            Ok(Err(e)) => {
-                connection.close(1u32.into(), b"stream");
-                return Err(err(e));
-            }
-            Err(_) => {
-                connection.close(1u32.into(), b"stream");
-                return Err(err("Native stream timed out"));
-            }
-        };
-        Ok(IrohConn {
-            connection,
-            binding,
-            send: Rc::new(RefCell::new(Some(send))),
-            recv: Rc::new(RefCell::new(Some(recv))),
-        })
+impl From<Streams> for IrohConn {
+    fn from(streams: Streams) -> Self {
+        IrohConn {
+            connection: streams.connection,
+            binding: streams.binding,
+            send: Rc::new(RefCell::new(Some(streams.send))),
+            recv: Rc::new(RefCell::new(Some(streams.recv))),
+        }
     }
 }
 
@@ -323,5 +423,98 @@ impl IrohConn {
         self.send.borrow_mut().take();
         self.recv.borrow_mut().take();
         self.connection.close(0u32.into(), b"closed");
+    }
+}
+
+/// Admission, run natively on loopback (the wasm build is the same code with a relay in between).
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod admission {
+    use super::*;
+
+    async fn bind(seed: u8) -> Endpoint {
+        Endpoint::builder(presets::Minimal)
+            .clear_ip_transports()
+            .bind_addr("127.0.0.1:0")
+            .unwrap()
+            .secret_key(SecretKey::from_bytes(&[seed; 32]))
+            .alpns(vec![ALPN.to_vec()])
+            .bind()
+            .await
+            .unwrap()
+    }
+
+    /// A dial that completes the handshake and nothing else: no stream, no preface.
+    async fn stall(from: &Endpoint, to: &Endpoint) -> Connection {
+        from.connect(to.addr(), ALPN).await.unwrap()
+    }
+
+    async fn dial(from: &Endpoint, to: &Endpoint) -> Streams {
+        let connection = from.connect(to.addr(), ALPN).await.unwrap();
+        streams(from, connection, false).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_dial_that_never_sends_the_preface_does_not_hold_the_next() {
+        let (listener, stranger, contact) = (bind(1).await, bind(2).await, bind(3).await);
+        let mut admission = Admission::default();
+        let accepting = async {
+            let mut held = Vec::new();
+            for _ in 0..3 {
+                held.push(stall(&stranger, &listener).await);
+            }
+            let _dialled = dial(&contact, &listener).await;
+            std::future::pending::<()>().await;
+        };
+        let admitted = timeout(
+            Duration::from_secs(5),
+            next_incoming(&listener, &mut admission).or(async {
+                accepting.await;
+                None
+            }),
+        )
+        .await
+        .expect("the contact's dial waited behind the stranger's")
+        .unwrap();
+        assert_eq!(admitted.connection.remote_id(), contact.id());
+    }
+
+    #[tokio::test]
+    async fn at_most_two_incoming_connections_are_open_at_once() {
+        let (listener, stranger) = (bind(4).await, bind(5).await);
+        let mut admission = Admission::default();
+        let (a, first) = tokio::join!(
+            next_incoming(&listener, &mut admission),
+            dial(&stranger, &listener)
+        );
+        let (b, _second) = tokio::join!(
+            next_incoming(&listener, &mut admission),
+            dial(&stranger, &listener)
+        );
+        let (a, _b) = (a.unwrap(), b.unwrap());
+
+        let refused = timeout(
+            Duration::from_secs(5),
+            next_incoming(&listener, &mut admission).or(async {
+                let third = dial(&stranger, &listener).await;
+                third.connection.closed().await;
+                None
+            }),
+        )
+        .await
+        .expect("the third connection was neither refused nor admitted");
+        assert!(refused.is_none(), "a third connection was admitted");
+
+        // One closed, the next one is admitted.
+        a.connection.close(0u32.into(), b"closed");
+        first.connection.closed().await;
+        let (admitted, _fourth) = timeout(Duration::from_secs(5), async {
+            tokio::join!(
+                next_incoming(&listener, &mut admission),
+                dial(&stranger, &listener)
+            )
+        })
+        .await
+        .expect("a connection was refused with only one open");
+        assert_eq!(admitted.unwrap().connection.remote_id(), stranger.id());
     }
 }

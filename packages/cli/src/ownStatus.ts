@@ -1,6 +1,6 @@
 import { reactionEmoji, sanitizeDisplayText, sanitizeStatusText, STATUS_AVAILABILITIES, STATUS_TEXT_MAX, type PersonStatus, type StatusAvailability } from "@ghostly/core";
 import { STATUS_CARD_LIMITS } from "@ghostly/core/statusCards";
-import { CliError, type ErrorCode } from "./errors";
+import { CliError, type ErrorCode, shownValue } from "./errors";
 
 /**
  * This profile's status (WISP 401 § Presence and status): a text, one emoji, an availability and when it ends, said to
@@ -21,12 +21,12 @@ export function checkOwnStatus(input: StatusInput, name: (field: keyof StatusInp
   const fail = (field: keyof StatusInput, rule: string) => new CliError(code, `${name(field)} ${rule}`);
   const status: PersonStatus = {};
   if (input.availability !== undefined) {
-    if (!(STATUS_AVAILABILITIES as readonly string[]).includes(input.availability)) throw fail("availability", `takes ${STATUS_AVAILABILITIES.join(", ")}, not ${JSON.stringify(input.availability)}`);
+    if (!(STATUS_AVAILABILITIES as readonly string[]).includes(input.availability)) throw fail("availability", `takes ${STATUS_AVAILABILITIES.join(", ")}, not ${shownValue(input.availability)}`);
     status.availability = input.availability as StatusAvailability;
   }
   if (input.emoji !== undefined) {
     const emoji = reactionEmoji(input.emoji);
-    if (!emoji) throw fail("emoji", `takes one emoji, not ${JSON.stringify(input.emoji)}`);
+    if (!emoji) throw fail("emoji", `takes one emoji, not ${shownValue(input.emoji)}`);
     status.emoji = emoji;
   }
   // Far past its bound as given (64 UTF-16 units a character, as a name: apiKit's `RAW_PER_CHARACTER`), refused before
@@ -39,7 +39,8 @@ export function checkOwnStatus(input: StatusInput, name: (field: keyof StatusInp
     const length = [...shown].length;
     if (length > STATUS_TEXT_MAX) throw fail("text", `is up to ${STATUS_TEXT_MAX} characters, not ${length} characters`);
     if (!shown) throw fail("text", "needs a character that shows");
-    const text = sanitizeStatusText(oneLine);
+    // The text as counted: the raw one could lose characters that fit to the engine's cut of invisible padding.
+    const text = sanitizeStatusText(shown);
     if (!text) throw fail("text", "is plain text: no link or markup");
     status.text = text;
   }

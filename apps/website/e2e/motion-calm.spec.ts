@@ -105,16 +105,20 @@ async function look(page: Page, name: string) {
   // Nothing keeps moving: no SMIL, no boo, no running animation longer than a frame.
   await page.evaluate(() => scrollTo({ top: 0, behavior: "instant" }));
   await page.waitForTimeout(800);
-  const moving = await page.evaluate(() => {
-    const smil = document.querySelectorAll("animate, animateTransform, animateMotion").length;
-    const running = document.getAnimations().filter((a) => {
-      if (a.playState !== "running") return false;
-      const t = a.effect?.getTiming();
-      const d = typeof t?.duration === "number" ? t.duration : 0;
-      return d > 16 && (t?.iterations === Infinity || d > 16);
+  const moving = () =>
+    page.evaluate(() => {
+      const smil = document.querySelectorAll("animate, animateTransform, animateMotion").length;
+      const running = document.getAnimations().filter((a) => {
+        if (a.playState !== "running") return false;
+        const t = a.effect?.getTiming();
+        const d = typeof t?.duration === "number" ? t.duration : 0;
+        return d > 16 && (t?.iterations === Infinity || d > 16);
+      });
+      return { smil, running: running.map((a) => `${(a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id}`) };
     });
-    return { smil, running: running.map((a) => `${(a as CSSAnimation).animationName ?? (a as CSSTransition).transitionProperty ?? a.id}`) };
-  });
-  expect(moving.smil, "SMIL animations in the DOM under reduced motion").toBe(0);
-  expect(moving.running, "animations still running under reduced motion").toEqual([]);
+  expect((await moving()).smil, "SMIL animations in the DOM under reduced motion").toBe(0);
+  // Back at the top the nav drops its backdrop and the rail fades out: colour and opacity cross-fades of --dur-base,
+  // which reduced motion keeps. A loaded runner starts them late, past any fixed wait, so what ends on its own is
+  // waited out and only what keeps moving fails.
+  await expect.poll(async () => (await moving()).running, { message: "animations still running under reduced motion", timeout: 5_000 }).toEqual([]);
 }

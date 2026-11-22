@@ -69,6 +69,17 @@ describe("the Content-Security-Policy of every shell", () => {
     if (connect !== "anything") expect(connect).toContain("'self'");
   });
 
+  // covers: groups.protocol.call-key
+  it.each(Object.keys(policies) as (keyof typeof policies)[])("%s starts the app's bundled workers (a group call's media encryption, the QR reader) from its own origin, and no blob: worker", (shell) => {
+    // A worker is checked against worker-src, else child-src, else script-src, else default-src: no policy names the
+    // first two, so the bundled file runs under script-src 'self' and a worker built from a blob: URL does not.
+    const d = directives(policies[shell]());
+    const workers = d.get("worker-src") ?? d.get("child-src") ?? d.get("script-src") ?? d.get("default-src");
+    expect(d.has("worker-src"), "worker-src").toBe(false);
+    expect(workers).toContain("'self'");
+    expect(workers).not.toContain("blob:");
+  });
+
   it("keeps every sound a file of its own: Vite inlines an asset under 4 KiB as a data: URL, which connect-src 'self' refuses", () => {
     const folder = join(import.meta.dirname, "../../assets/sounds");
     for (const name of readdirSync(folder).filter(f => f.endsWith(".mp3"))) expect(statSync(join(folder, name)).size, name).toBeGreaterThan(4096);
@@ -156,6 +167,7 @@ describe("the mini-app runner (WISP 1200, \"The runner's CSP\")", () => {
     const net = locations.find((l) => l.match === "= /app-frame-net.html");
     for (const location of locations.filter((l) => l !== runner && l !== net)) {
       if (/^\s*return\s/.test(location.body.trim())) continue; // a redirect, no page
+      if (location.match.startsWith("@")) continue; // a named one, no page: it sends the path on to one of these
       expect(location.body, location.match).toContain("include /etc/nginx/ghostly-headers.conf;");
     }
   });
@@ -168,7 +180,8 @@ describe("the web app's opener policy", () => {
   const nginx = read("apps/web/nginx.conf");
   const locations = [...nginx.matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)].map(([, match, body]) => ({ match: match!.trim(), body: body! }));
   const sent = (text: string) => [...text.matchAll(/^\s*add_header Cross-Origin-Opener-Policy "([^"]+)" always;$/gm)].map((m) => m[1]);
-  const pages = locations.filter((l) => !/^\s*return\s/.test(l.body.trim())); // a redirect, no page
+  // A redirect, no page; a named one (nginx's answer to headers over its limit) sends the path on to one of the others.
+  const pages = locations.filter((l) => !/^\s*return\s/.test(l.body.trim()) && !l.match.startsWith("@"));
 
   it("every location that answers with a file sends it, once, but the sign-in's return page", () => {
     expect(OPENER_POLICY).toBe("same-origin-allow-popups");
