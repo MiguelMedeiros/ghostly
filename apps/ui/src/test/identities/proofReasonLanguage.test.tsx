@@ -97,6 +97,13 @@ describe("a contact's proof this app did not take, said from this side", () => {
     expect(shareReason(raw, "pt")).toBe(pt);
   });
 
+  it("mine, refused by the contact's app because it keeps a newer proof of it: said as that, in the app's language", () => {
+    const mine = { ...entry(NEWER), id: "mine:proof-1:0", proof: "proof-1", side: "mine" } as IdentityTimelineEntry;
+    const view = renderApp(<IdentityShareLine entry={mine} link={undefined} contact="Alice" onOpen={vi.fn()} />, { language: "pt" });
+    expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("Seu contato já guarda uma prova mais nova desta identidade sua");
+    view.unmount();
+  });
+
   it("on the back of the contact's card, when a check again turned it unconfirmed", async () => {
     const { user, engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={vi.fn()} />);
     document.documentElement.dataset.reduceMotion = "true";

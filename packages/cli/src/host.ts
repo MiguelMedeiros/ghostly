@@ -17,7 +17,7 @@ import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { GroupAutoJoin } from "./groupAuto";
 import { resumeHolds } from "./holds";
-import { ownFolder, ownProfile, privateFolder } from "./privateFolder";
+import { dropRuntimeFolder, ownFolder, ownProfile, privateFolder } from "./privateFolder";
 import { acquireLock, startingPath, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 import { flushCardUpdates } from "./statusCards";
@@ -219,7 +219,9 @@ export async function serve(host: Host): Promise<Served> {
       // it has stopped. The other way round, a client that found the secret gone in between (a read whose hello's
       // answer came just before) asked again on the socket still listening, and the close ended that connection as well:
       // "The daemon went away before it answered chat.list, twice".
-      server.close(() => resolve());
+      // The socket's file goes as the server closes; the folder made for it outside the profile goes once it has, when
+      // empty: before the profile's lock is let go, so no next daemon of the profile has a socket in it yet.
+      server.close(() => { dropRuntimeFolder(path); resolve(); });
       removeDaemonSecret(ctx.runtime.paths.dir);
       // The waits still open answer with what they know (`waits.ts`) before their connections end: a `send --wait`
       // ended by a restart has its `messageId`, and its message goes on, where it failed as "The daemon went away".
@@ -296,6 +298,9 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
   // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
   let limit = MAX_UNREAD;
   const unsubscribe = () => { for (const off of unsubscribes.splice(0)) off(); };
+  // The client that asked the calls still open went away (Ctrl-C on the command): `CallScope.gone`.
+  const gone = new AbortController();
+  socket.on("close", () => gone.abort());
   // Ended, not destroyed: the client still reads whole lines up to the last one written, then the end.
   const write = (value: unknown, replayed = false) => {
     if (socket.destroyed || socket.writableEnded) return;
@@ -350,7 +355,7 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
       for (const event of queued) if (event.seq > last) write({ event });
       return;
     }
-    const answered = callApi(ctx, request.method, request.params ?? {}).then(
+    const answered = callApi(ctx, request.method, request.params ?? {}, { gone: gone.signal }).then(
       (result) => write({ id, result: result ?? null }),
       (error) => write({ id, error: asCliError(error).toJSON() }),
     );

@@ -18,6 +18,17 @@ class SaveSlotTest {
   }
 
   @Test
+  fun theOpenSaveIsThereForTheSavedState() {
+    val slot = SaveSlot<String>()
+    assertNull(slot.open)
+    slot.take("photo.jpg")
+    slot.take("report.pdf")
+    assertEquals("photo.jpg", slot.open)
+    slot.answered()
+    assertNull(slot.open)
+  }
+
+  @Test
   fun aSaveAfterThePickerAnsweredStarts() {
     val slot = SaveSlot<String>()
     slot.take("photo.jpg")

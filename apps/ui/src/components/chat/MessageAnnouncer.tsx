@@ -3,14 +3,14 @@ import type { StatusCard } from "@ghostly/core";
 import type { GroupPayNote } from "@ghostly/browser/shared/types";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { useOnline } from "../../hooks/useOnline";
-import { filePreview, previewText } from "../../lib/chatList";
 import { fileMoment, fileMomentLine, fileOfferLine, type FileMoment } from "../../lib/fileAnnounce";
 import { isGroupFile } from "../../lib/fileStatus";
 import { servicesPlatform, type ChatPayment } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
-import { paymentLine, paymentStateLine, storedPaymentLine } from "../paymentWords";
-import { appCardLine, appCardsShown, cardLine, showsCard } from "../../lib/statusCards";
+import { paymentLine, paymentStateLine } from "../paymentWords";
+import { appCardsShown } from "../../lib/statusCards";
 import { useAppsAvailable } from "../../lib/apps/flag";
+import { short, spoken } from "./spokenMessage";
 
 /** What the announcer reads of a message: a 1:1 chat's and a group's both have it. */
 export interface Announceable {
@@ -36,31 +36,6 @@ export interface Announceable {
 export const ANNOUNCE_WINDOW_MS = 1_500;
 /** How long an announcement stays before the region empties, so the same words next time are a change again. */
 export const ANNOUNCE_CLEAR_MS = 1_000;
-/** A message is read out up to this many characters. */
-const PREVIEW_CHARS = 80;
-
-/**
- * What a message says, read out: a status card's line, a payment's (paymentLine, as the chat list), a voice message's
- * or a video's (filePreview, as the chat list), else its text. An app card's line only where the chat's bubbles draw it
- * as a card (`appCards`: `appCardsShown`), its text elsewhere, as the bubble shows it. A group's payment note as its
- * timeline shows it (`noteLine`), not the engine's English line.
- */
-function spoken(message: Announceable, t: Translate, appCards: boolean, noteLine?: (note: GroupPayNote) => string | null): string {
-  if (showsCard(message.card)) return cardLine(message.card);
-  const note = message.groupPay && noteLine?.(message.groupPay);
-  if (note) return note;
-  const wallet = message.paymentId ? servicesPlatform?.wallet : undefined;
-  const payment = wallet?.getPayment(message.paymentId!);
-  if (payment) return paymentLine(t, payment, wallet!.getState());
-  // A payment the wallet does not know (yet): its stored English line, said as the bubble says it.
-  if (message.paymentId) return storedPaymentLine(t, message.text, message.sender === "me");
-  return appCardLine(message.card, appCards, t) ?? filePreview(message.file, t) ?? previewText(message.text, t);
-}
-
-const short = (text: string) => {
-  const line = text.replace(/\s+/g, " ").trim();
-  return line.length > PREVIEW_CHARS ? `${line.slice(0, PREVIEW_CHARS - 1).trimEnd()}…` : line;
-};
 
 /**
  * A chat's 1:1 file, as last heard: its message, where it stood, and since when it is in the chat (`-Infinity`: it
@@ -151,6 +126,9 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
   /** `at`: where `last` was, so rows that came or went above it are noticed. */
   const seen = useRef<{ chat: string; ids: Set<string>; last?: string; at: number } | null>(null);
   const pending = useRef<Announceable[]>([]);
+  /** The chat's messages as last drawn: what is pending is read from them, as it stands when the window ends. */
+  const latest = useRef(messages);
+  latest.current = messages;
   const timers = useRef<{ flush?: ReturnType<typeof setTimeout>; clear?: ReturnType<typeof setTimeout>; turns?: ReturnType<typeof setTimeout> }>({});
   const appCards = appCardsShown(linkId, useAppsAvailable());
   const words = useRef({ t, nameOf, noteLine, active, online, appCards });
@@ -359,8 +337,12 @@ export function MessageAnnouncer({ chat, linkId, messages, nameOf, noteLine, act
     if (timers.current.flush) return;
     timers.current.flush = setTimeout(() => {
       timers.current.flush = undefined;
-      const batch = pending.current;
+      // Only what is still in the chat, as it is now: one deleted within the window is not read out, one edited is read
+      // as it stands. Looked for from the end, where they came in.
+      const wanted = new Set(pending.current.map(m => m.id));
       pending.current = [];
+      const list = latest.current, batch: Announceable[] = [];
+      for (let at = list.length - 1; at >= 0 && batch.length < wanted.size; at--) if (wanted.has(list[at].id)) batch.unshift(list[at]);
       const { t, nameOf, noteLine, active, appCards } = words.current;
       if (!batch.length || !active) return;
       const names = new Set(batch.map(m => nameOf(m)));

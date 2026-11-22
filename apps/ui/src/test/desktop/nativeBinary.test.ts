@@ -99,4 +99,21 @@ describe("the Desktop's native channels and binary messages", () => {
     tauri.channels[0].onmessage!({ type: "frame", id: 7, text: "hello" });
     expect(heard).toEqual([new Uint8Array([0x04, 0, 255, 10]), "hello"]);
   });
+
+  it("tells Rust the frames it took, every few or soon after the last, so Rust reads no further than the page takes", async () => {
+    for (const [create, command] of [[createIrohEndpoint, "paired_native_took"], [createHyperEndpoint, "paired_hyperdht_took"]] as const) {
+      // What an earlier connection took is told first, out of this count.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      tauri.channels.length = 0;
+      tauri.invoke.mockClear();
+      const { heard } = await incoming(create);
+      const told = () => tauri.invoke.mock.calls.filter(([name]) => name === command).map(([, args]) => args);
+      const event = tauri.channels[0].onmessage!;
+      for (let i = 0; i < 5; i++) event({ type: "frame", id: 7, text: `m${i}` });
+      expect(heard).toHaveLength(5);
+      expect(told()).toEqual([{ endpointId: 1, connectionId: 7, frames: 4 }]);
+      // The one after the last four is told once no more come.
+      await vi.waitFor(() => expect(told()).toEqual([{ endpointId: 1, connectionId: 7, frames: 4 }, { endpointId: 1, connectionId: 7, frames: 1 }]));
+    }
+  });
 });

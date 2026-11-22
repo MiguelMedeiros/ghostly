@@ -46,6 +46,7 @@ export const LOCKFILES = [
 /** Lockfiles the scan leaves out, each with why: nothing of them reaches a person who runs Ghostly. */
 export const NOT_SHIPPED = {
   "e2e/infra/atproto/package-lock.json": "The end-to-end suite's AT Protocol network: it runs on the test machine only. Dependabot keeps it current.",
+  "e2e/infra/sfu-token/package-lock.json": "The end-to-end suite's group-call token mock: it runs on the test machine only. Dependabot keeps it current.",
 };
 
 export function npmPackages(lockfile) {
@@ -117,9 +118,12 @@ export async function findingsFor(packages, ask = osv) {
     });
   }
 
+  // An advisory hits each version and lockfile that carries the package (semver: 7 hits), its detail is the same for all.
+  const details = new Map();
   const findings = [];
   for (const hit of hits) {
-    const detail = await ask(`https://api.osv.dev/v1/vulns/${hit.id}`);
+    if (!details.has(hit.id)) details.set(hit.id, await ask(`https://api.osv.dev/v1/vulns/${hit.id}`));
+    const detail = details.get(hit.id);
     if (detail.withdrawn) continue;
     const fixed = (detail.affected ?? [])
       .flatMap((a) => a.ranges ?? [])

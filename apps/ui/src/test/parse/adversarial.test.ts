@@ -1,12 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { previewText } from "../../lib/chatList";
 import { findMoney } from "../../lib/money";
 import { DETECTORS, parseMessage, plainText, shownUrl, tokenizeInline, type Segment } from "../../lib/parse";
 import { MAX_SPAN_DEPTH } from "../../lib/parse/inline";
+import { link } from "../../lib/parse/links";
 import { JSON_LIMITS, prettyJson } from "../../lib/parse/json";
 import { findLocation, locationIn } from "../../lib/parse/location";
 import { mentionViews } from "../../lib/parse/mentions";
 import { findBip21 } from "../../lib/parse/money-bitcoin";
+import { findBolt12Offer } from "../../lib/parse/money-bolt12";
 import { trimUriEnd } from "../../lib/parse/money-text";
 
 // covers: chat.rich.code, chat.rich.time, chat.paired.links, chats.list.rows, chat.location.card, groups.mentions, payments.money.onchain-card
@@ -113,11 +115,41 @@ describe("many payment words next to web links", () => {
     }
   });
 
+  it("in one word, each a bitcoin: link that stops at a quote, are read in linear time", () => {
+    for (const unit of ["bitcoin:?'", "bitcoin:?&'"]) {
+      expect(quickly(() => findMoney(fill(unit)))).toBeNull();
+      // Sixteen times the message limit: a scan that reads the word again at each link takes seconds here.
+      expect(quickly(() => findBolt12Offer(unit.repeat(Math.floor((16 * SIZE) / unit.length))))).toBeNull();
+    }
+  });
+
   it("inside a web link stay part of the link, before and after one", () => {
     const address = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
     expect(findBip21(`https://x.example/?u=bitcoin:${address} and http://y`)).toEqual([]);
     expect(findBip21(`http://y and bitcoin:${address}`)[0].address).toBe(address);
     expect(findBip21(`http://y bitcoin:${address} https://x.example/`)[0].address).toBe(address);
+  });
+});
+
+describe("links each ended by Chinese or Arabic punctuation, with no space", () => {
+  it("are each read once, not again to the end of the run from every link", () => {
+    for (const unit of ["http://a،", "http://a。"]) {
+      const count = Math.floor(SIZE / unit.length);
+      const accept = vi.spyOn(link, "accept");
+      const [block] = parseMessage(unit.repeat(count));
+      const read = accept.mock.calls.reduce((sum, [match]) => sum + match[0].length, 0);
+      accept.mockRestore();
+      const atoms = block.type === "paragraph" ? block.segments.filter((segment) => segment.type === "atom") : [];
+      expect(atoms.map((atom) => atom.type === "atom" && atom.data)).toEqual(Array(count).fill({ url: "http://a" }));
+      // The run is about 16 K characters; read from each link to its end it was 1,820 links times half of that.
+      expect(read).toBeLessThan(SIZE);
+    }
+  });
+
+  it("leave a link after a bare scheme a link of its own", () => {
+    const [block] = parseMessage("https://。https://a.example/x");
+    const urls = block.type === "paragraph" ? block.segments.flatMap((segment) => (segment.type === "atom" ? [segment.data] : [])) : [];
+    expect(urls).toEqual([{ url: "https://a.example/x" }]);
   });
 });
 

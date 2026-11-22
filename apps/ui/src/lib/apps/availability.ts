@@ -1,5 +1,6 @@
 import type { PeerLinkState } from "../platform";
 import type { Translate } from "../../contexts/I18nContext";
+import { isolate } from "../ownStatus";
 
 /**
  * Why an app cannot talk to the same app on the contact's side right now (WISP 1200 § In a chat: `apps/1` goes on the
@@ -17,12 +18,15 @@ export function appsBlock(peer: PeerLinkState | null | undefined): AppsBlock | n
   return "contact-cannot";
 }
 
-/** "Chess needs you both online", or why the contact's app cannot play, or null when it can (`appsBlock` of the contact). */
+/**
+ * "Chess needs you both online", or why the contact's app cannot play, or null when it can (`appsBlock` of the contact).
+ * The title and the name are isolated: in Arabic, "Chess!" read "!Chess" inside the sentence.
+ */
 export function appsUnavailable(block: AppsBlock | null, title: string, name: string, t: Translate): string | null {
   switch (block) {
-    case "not-live": return t("apps.card.needsOnline", { title });
+    case "not-live": return t("apps.card.needsOnline", { title: isolate(title) });
     case "contact-older":
-    case "contact-cannot": return t("apps.card.contactCannot", { name });
+    case "contact-cannot": return t("apps.card.contactCannot", { name: isolate(name) });
     default: return null;
   }
 }
@@ -35,7 +39,7 @@ export function appsComposerHint(peer: PeerLinkState | null | undefined, name: s
   switch (appsBlock(peer)) {
     case "not-live": return t("apps.composer.needsOnline");
     case "contact-older":
-    case "contact-cannot": return t("apps.card.contactCannot", { name });
+    case "contact-cannot": return t("apps.card.contactCannot", { name: isolate(name) });
     default: return null;
   }
 }

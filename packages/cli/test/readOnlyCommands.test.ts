@@ -21,7 +21,7 @@ const READS = [
  */
 const LOCAL_WRITES = [
   "app serve", "app unserve", "chat remove", "chat rename", "identity cancel", "saved add", "saved remove", "service add", "status clear", "status set",
-  "x401 credential add", "x401 credential remove", "x401 key new",
+  "x401 credential add", "x401 credential remove", "x401 key new", "lightning default", "lightning rename",
 ];
 /**
  * Said on a live session only: a one-shot starts the chat or group as it says it, so it reaches nobody (it waited for
@@ -32,21 +32,21 @@ const LIVE_ONLY = ["group typing", "typing"];
  * Done only by a daemon: a one-shot refuses them whatever the network says ("start `ghostly daemon --detach`"), so it
  * opens offline. Online it waited for the relays first: 10 s to say so with a relay that does not answer.
  */
-const DAEMON_ONLY = ["app close", "app open", "app send", "call start", "service open"];
+const DAEMON_ONLY = ["app close", "app open", "app send", "call answer", "call flush", "call start", "service close", "service open"];
 const ONLINE = [
   "profile picture",
   "button press", "button update", "chat connect", "chat disconnect", "chat transport", "chat verify", "chat wait",
   "forward", "invite create", "invite join", "message delete", "message retry", "pin", "react", "routine send", "routine update", "task send",
   "task update", "usage send",
-  "group accept", "group admin", "group create", "group decline", "group forget", "group hub", "group invite", "group join", "group leave",
+  "group accept", "group admin", "group call", "group create", "group decline", "group forget", "group hub", "group invite", "group join", "group leave",
   "group link", "group picture", "group react", "group remove", "group rename", "group rotate",
   "file accept", "file cancel", "file decline", "file pause", "file request", "file resend", "file resume", "file save", "file send", "file wait",
-  "chat pay", "chat pay-request", "chat request", "lightning default", "lightning rename", "pay", "payment check", "payment reclaim",
+  "chat pay", "chat pay-request", "chat request", "pay", "payment check", "payment reclaim",
   "wallet add-mint", "wallet address", "wallet create", "wallet faucet", "wallet receive", "wallet redeem", "wallet remove",
   "identity complete", "identity recheck", "identity remove", "identity share", "identity withdraw",
-  "service close", "service enable", "service remove", "service share",
+  "service enable", "service remove", "service share",
   // A one-shot online may see a call ring, and decline it.
-  "call answer", "call flush", "call hangup",
+  "call hangup",
 ];
 
 describe("which one-shots open the profile offline", () => {

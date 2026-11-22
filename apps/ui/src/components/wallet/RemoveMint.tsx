@@ -2,6 +2,7 @@ import { useState } from "react";
 import { walletRemoval } from "@ghostly/browser/shared/walletRemoval";
 import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useI18n } from "../../contexts/I18nContext";
+import { NAME, withName } from "../apps/aroundName";
 import { walletLabel } from "./names";
 import { RemoveWalletDialog } from "./RemoveWallet";
 import { removalWords } from "./removalWords";
@@ -32,7 +33,8 @@ export function RemoveMintConfirm({ mint, wallet, state, onClose }: { mint: Mint
   return (
     <Block>
       <div className="space-y-2 text-sm" data-testid="mint-remove-confirm" role="group" aria-label={question}>
-        <p className="font-semibold text-text-primary">{question}</p>
+        {/* The mint's name keeps its own direction in a line in the page's. */}
+        <p className="font-semibold text-text-primary">{withName(t("wallet.cashu.removeMintQuestion", { name: NAME }), mint.name)}</p>
         {awaiting.length > 0 ? <>
           <p className="text-xs text-text-secondary">{t("wallet.cashu.removeMintAwaiting")}</p>
           <ul className="bg-surface rounded-xl divide-y divide-border" data-testid="mint-remove-awaiting">
