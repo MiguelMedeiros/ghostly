@@ -12,7 +12,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { testSwitch } from "@ghostly/browser/shared/features";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { closeServiceView, parseServicesHost } from "./svc/protocol";
-import { SERVICE_LOCKED, hostErrorText, serviceAppWords, serviceFraming, serviceWindowsClosedSince, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+import { SERVICE_LOCKED, hostErrorText, serviceAppWords, serviceFrameTitle, serviceFraming, serviceWindowsClosedSince, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { activeProfileId, listProfiles } from "../../ui/src/lib/profiles";
 import { OPENED_KEY } from "../../ui/src/lib/openedServices";
@@ -229,6 +229,7 @@ export const webHost = createInPageHost({
         ...serviceAppWords(title, t),
         openLink: (site) => t("services.window.openLink", { site }),
         ...serviceFraming(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
+        frameTitle: serviceFrameTitle(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
         hostError: (headers) => hostErrorText(headers, title, t),
       },
     });
