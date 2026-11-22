@@ -112,9 +112,27 @@ function shorten(name: string): string {
   return chars.slice(0, MAX_NAME_LENGTH - extension.length).join("").trimEnd() + extension.join("");
 }
 
+/** UTF-16 units of a file name read before it is cleaned: far past `MAX_NAME_LENGTH`, whatever it hides. */
+const MAX_RAW_NAME_UNITS = MAX_NAME_LENGTH * 64;
+/** Of those, the units kept from its end, so that its extension is still the one it shows. */
+const RAW_NAME_TAIL_UNITS = 256;
+
+/**
+ * `name` cut to `MAX_RAW_NAME_UNITS` before anything reads it whole: its start and its end, the middle gone (never half
+ * of a surrogate pair). A 10 MiB name was cleaned whole, seconds of the CLI's daemon, to keep 200 characters of it.
+ * "Invoice.pdf" + blanks + ".exe" keeps its ".exe".
+ */
+export function boundFileName(name: string): string {
+  if (name.length <= MAX_RAW_NAME_UNITS) return name;
+  let head = MAX_RAW_NAME_UNITS - RAW_NAME_TAIL_UNITS, tail = name.length - RAW_NAME_TAIL_UNITS;
+  if (/[\uD800-\uDBFF]/.test(name[head - 1])) head--;
+  if (/[\uDC00-\uDFFF]/.test(name[tail])) tail++;
+  return name.slice(0, head) + name.slice(tail);
+}
+
 /** A file name is display text and a download suggestion, never a path. */
 export function sanitizeFileName(name: string): string {
-  const visible = name.replace(INVISIBLE, "").replace(BLANK, "").replace(/[/\\:]/g, "")
+  const visible = boundFileName(name).replace(INVISIBLE, "").replace(BLANK, "").replace(/[/\\:]/g, "")
     .replace(IGNORABLE_RUN, dropIgnorable).replace(SPACE_RUN, " ");
   // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too.
   const clean = shorten(visible.replace(/^[\s.]+/, "").trim());

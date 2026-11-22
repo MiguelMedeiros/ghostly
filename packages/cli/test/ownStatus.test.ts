@@ -42,6 +42,8 @@ describe("status set's line", () => {
     // Emoji count as one character each, invisible ones not at all.
     expect(line(`${"x".repeat(58)}👻👻`).text).toBe(`${"x".repeat(58)}👻👻`);
     expect(line(`${"x".repeat(60)}\u200b`).text).toBe("x".repeat(60));
+    expect(line(`${" ".repeat(3839)}x`).text).toBe("x");
+    expect(usage(`${" ".repeat(3840)}x`)).toBe("<text> is up to 60 characters, not 3841 characters as given");
     // A text that fits is kept whole however much invisible padding it has: it was cut to 240 raw units first (48 kept).
     const padded = Array.from({ length: 50 }, (_, i) => `${String.fromCharCode(97 + (i % 26))}\u200b\u200b\u200b\u200b`).join("");
     expect(line(padded).text).toBe(padded.replaceAll("\u200b", ""));
@@ -94,6 +96,11 @@ describe("the socket's status.set|clear|get", () => {
   it("refuses a bad parameter as bad_request named by it, and a secret unless force", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "status.set", { text: "x".repeat(61) })).rejects.toMatchObject({ code: "bad_request", message: "text is up to 60 characters, not 61 characters" });
+    // 10 MiB was cleaned whole before it was counted, a second the daemon answered no one else: far past 60 characters
+    // as given (64 units a character), it is refused unread, counted as given; up to that, what cleaning drops still goes.
+    const huge = "hello there ".repeat(Math.ceil(10 * 1024 * 1024 / 12));
+    await expect(callApi(ctx, "status.set", { text: huge })).rejects.toMatchObject({ code: "bad_request", message: `text is up to 60 characters, not ${huge.length} characters as given` });
+    await expect(callApi(ctx, "status.set", { text: `${" ".repeat(3841)}x` })).rejects.toMatchObject({ code: "bad_request", message: "text is up to 60 characters, not 3842 characters as given" });
     await expect(callApi(ctx, "status.set", { text: "hi", emoji: "a" })).rejects.toMatchObject({ code: "bad_request", message: 'emoji takes one emoji, not "a"' });
     await expect(callApi(ctx, "status.set", { text: "hi", until: Date.now() - 1 })).rejects.toMatchObject({ code: "bad_request", message: "until is a time to come: a status that ended is none" });
     await expect(callApi(ctx, "status.set", { text: "hi", until: "tomorrow" })).rejects.toMatchObject({ code: "bad_request" });

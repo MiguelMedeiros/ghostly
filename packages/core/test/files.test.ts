@@ -3,6 +3,7 @@ import {
   CHUNK_KIND,
   FileTransfers,
   LIMITS,
+  boundFileName,
   concatBytes,
   decodeChunk,
   decodeControl,
@@ -170,6 +171,18 @@ describe("file transfer", () => {
     expect(sanitizeFileName(`${"a".repeat(195)}.${"b".repeat(40)}`)).toBe(`${"a".repeat(195)}.${"b".repeat(4)}`);
     // Names that fit are left as they are.
     expect(sanitizeFileName(`${"r".repeat(196)}.pdf`)).toBe(`${"r".repeat(196)}.pdf`);
+  });
+
+  // A 10 MiB name was cleaned whole to keep 200 characters of it: 2 s of the CLI's daemon, answering no one else. Read
+  // only as far as its start and its end, it shows as before, and the extension at its end is still the one it shows.
+  it("reads a name far past its bound only at its start and its end", () => {
+    const started = performance.now();
+    expect(sanitizeFileName(`${"hello there ".repeat(900_000)}x.txt`)).toBe(`${"hello there ".repeat(16)}hell.txt`);
+    expect(sanitizeFileName(`Invoice.pdf${"⠀".repeat(10 * 1024 * 1024)}.exe`)).toBe("Invoice.pdf.exe");
+    expect(performance.now() - started).toBeLessThan(250);
+    // Never half of an emoji where the middle goes.
+    expect(boundFileName(`x${"😀".repeat(10_000)}y`)).toBe(`x${"😀".repeat(6271)}${"😀".repeat(127)}y`);
+    expect(boundFileName("a".repeat(12_800))).toBe("a".repeat(12_800));
   });
 
   it("renames a Windows device name, in any case and with any extension", () => {
