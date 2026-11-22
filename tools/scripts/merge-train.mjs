@@ -79,6 +79,12 @@
 //   branch's merges (and commits the base already has), so a conflict resolved, or a change made or taken back, in a
 //   merge of the base is lost or comes back, while the batch's squash merge takes the head as it is. If that conflicts
 //   too: `queue:conflict`.
+// - A pull request that changes a workflow (`.github/workflows/`) never boards a batch, and the train never rebases it:
+//   the queue app may not push a branch that does (its token has no `workflows` permission). Up to date with `dev` and
+//   green on its own full CI, it lands alone with GitHub's squash merge, which pushes nothing. Behind (or into an
+//   epic, which lands by a push), it leaves the line with `queue:hand-merge` and a comment for a coordinator, whose
+//   token may update its branch: `queue` again once that head is green (the train takes the label off), or a squash
+//   merge by hand. Up to date with its own full CI still running, it waits in line for that run.
 // - Signatures: GitHub writes and signs the commit of a squash merge, so what the train lands on `dev`, alone or in a
 //   batch, shows as Verified, with one message format ("<title> (#n)", then one "* <subject>" line per commit). The
 //   train reads each new commit back and warns when it is not verified. GitHub never signs a rebase merge, and a
@@ -111,7 +117,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "queue:conflict", failed: "queue:failed" };
+export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "queue:conflict", failed: "queue:failed", handMerge: "queue:hand-merge" };
+/** Whether a file is one of the repository's workflows, which the queue app may not push (no `workflows` permission). */
+const isWorkflow = (f) => f.startsWith(".github/workflows/");
 /**
  * A person's "not yet" (a feature waiting for the next minor, a change waiting on a decision): a pull request with it
  * never boards or lands, even with `queue` or `queue:priority`. It waits in line and keeps its place, and boards once
@@ -316,6 +324,7 @@ export const PLANNED_JOBS = {
   "Frontend lint and types": "lint",
   "Frontend tests (app)": "full",
   "Frontend tests (packages ": "packages",
+  "Integration tests": "packages",
   "CLI on Linux ARM64": "packages",
   "Frontend builds": "full",
   "Tauri Backend": "rust",
@@ -439,6 +448,8 @@ export function waiting(pr) {
   if (pr.unread === "comments") return `it has more comments than the train reads (${PAGES_READ * 100}), so it cannot find its own record of the reviewed head; it moves on once a maintainer deletes some of them`;
   if (pr.unread) return `it has more events than the train reads (${PAGES_READ * 100}), so it cannot tell when it was queued or whether its base changed; close it and open a new pull request from the same branch, which joins the line ${AT_BACK}`;
   if (pr.ci === "failure") return `CI Success is red on its last commit. A re-run of a failed job keeps its place; after a pushed fix it leaves the line and joins it ${AT_BACK}`;
+  // `tick` reads the files of one that could board: one that changes a workflow lands only alone, on its own full CI.
+  if (pr.workflows?.length && pr.ci !== "success") return `it changes a workflow (${pr.workflows.map(escapeMark).join(", ")}), which the queue app may not push, so it never boards a batch: it lands alone once CI Success has passed on its last commit`;
   // The fast tier is enough to board: the batch's full CI is the gate.
   if (pr.ci === "success" || pr.fast === "success") return null;
   // A green full run that does not count says how to get one that does: that run, not the fast tier, is what a ready
@@ -453,8 +464,11 @@ export function waiting(pr) {
   return "CI Success has not passed on its last commit yet";
 }
 
-/** The next batch: the first pull requests of the line that can board, up to `max`. Nobody behind overtakes them. */
-export const pickBatch = (line, max = MAX_BATCH) => line.filter((p) => !waiting(p)).slice(0, max);
+/**
+ * The next batch: the first pull requests of the line that can board, up to `max`. Nobody behind overtakes them. One
+ * that changes a workflow (`workflows`, as `tick` reads it) never boards: it lands alone or by hand.
+ */
+export const pickBatch = (line, max = MAX_BATCH) => line.filter((p) => !waiting(p) && !p.workflows?.length).slice(0, max);
 
 /**
  * Whether the next batch (`next`, from `pickBatch`) waits for more company: null when it may leave, else how many can
@@ -682,8 +696,14 @@ const failedText = (failed) => {
 // them added `queue` again at once, boarded together and left together again, run after run.
 const unlistedText = (workflow, others, after) =>
   `Merge train: GitHub lists no files for this pull request (it changes 3000 files or more, or none), and it refused the batch's push for a workflow (${workflow ? `\`${escapeMark(workflow)}\`: ` : ""}the queue app's token has no \`workflows\` permission). GitHub lists none for ${others.map((o) => `#${o.number}`).join(", ")} either, so the train cannot tell which of them changes it, and all of them left the line: the rest of the line goes on without them. They come back one at a time, in number order, so that only one of them boards at once: ${after ? `once #${after.number} has landed, left the line again or is not coming back, add \`queue\` again` : "add `queue` again now, before the others"}, and it only leaves again if it is the one that changes it (the train takes \`queue:failed\` off).`;
+// The coordinator's lane (`queue:hand-merge`): its token may push a workflow. On dev a squash merge pushes nothing, so
+// the train lands one that is up to date and green; an epic lands by a push, so there it is all by hand.
 const workflowText = (base, workflows) =>
-  `Merge train: this pull request changes a workflow (${workflows.map(escapeMark).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission: then add \`queue\` again (the train takes \`queue:failed\` off).`;
+  `Merge train: this pull request changes a workflow (${workflows.map(escapeMark).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it never boards a batch and the train cannot ${base === "dev" ? "bring it up to date with" : "land it on"} \`${base}\`. It left the line for a coordinator (\`${LABEL.handMerge}\`): the rest of the line goes on without it. ${
+    base === "dev"
+      ? `A coordinator updates its branch (\`gh pr update-branch\`) and, once CI Success is green on that head, merges it (\`gh pr merge --squash\`) or adds \`queue\` again: up to date and green, it lands alone with no push`
+      : `A coordinator lands it into \`${base}\` by hand, or adds \`queue\` again once the app is given that permission`
+  } (the train takes \`${LABEL.handMerge}\` off).`;
 const pushRefusedText = (base, message) =>
   `Merge train: GitHub refused the push of its rebase onto \`${base}\` twice (${escapeMark(message)}), so it left the line: the rest of the line goes on without it. A rule on its branch or the queue app's permissions keep the app from pushing it: once that is fixed, add \`queue\` again (the train takes \`queue:failed\` off); or land it by hand into \`${base}\`.`;
 
@@ -856,8 +876,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // read as still dropped next to its place in line. The train's own, so it takes it off (a drop adds it back).
   for (const p of queued) {
     if (!inLine(p.labels)) continue;
-    for (const l of [LABEL.conflict, LABEL.failed]) if (p.labels.includes(l)) await w.removeLabel(p.number, l);
-    p.labels = p.labels.filter((l) => l !== LABEL.conflict && l !== LABEL.failed);
+    const dropLabels = [LABEL.conflict, LABEL.failed, LABEL.handMerge];
+    for (const l of dropLabels) if (p.labels.includes(l)) await w.removeLabel(p.number, l);
+    p.labels = p.labels.filter((l) => !dropLabels.includes(l));
   }
   const byNumber = new Map(queued.map((p) => [p.number, p]));
   const line = () => order(queued.filter((p) => !gone.has(p.number)));
@@ -1012,19 +1033,20 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       for (const p of aboard) {
         const files = await gh.pullFiles(p.number);
         if (!files) unlisted.push(p);
-        const workflows = (files ?? []).filter((f) => f.startsWith(".github/workflows/"));
-        if (workflows.length) changing.push([p, workflowText(base, workflows)]);
+        const workflows = (files ?? []).filter(isWorkflow);
+        if (workflows.length) changing.push([p, LABEL.handMerge, workflowText(base, workflows)]);
       }
       if (!changing.length) {
         const named = `${e?.message ?? e}`.match(/workflow `([^`]+)`/)?.[1];
         const turns = [...unlisted].sort((a, b) => a.number - b.number);
-        for (const p of unlisted) changing.push([p, unlisted.length > 1 ? unlistedText(named, unlisted.filter((o) => o !== p), turns[turns.indexOf(p) - 1]) : workflowText(base, [named ?? "a workflow"])]);
+        for (const p of unlisted)
+          changing.push(unlisted.length > 1 ? [p, LABEL.failed, unlistedText(named, unlisted.filter((o) => o !== p), turns[turns.indexOf(p) - 1])] : [p, LABEL.handMerge, workflowText(base, [named ?? "a workflow"])]);
       }
       if (!changing.length) throw e;
-      for (const [p, text] of changing) {
+      for (const [p, label, text] of changing) {
         say(`DROP #${p.number} (changes a workflow, which this token may not push)`);
         done.dropped.push(p.number);
-        await leave(p, LABEL.failed, text);
+        await leave(p, label, text);
       }
       // From the ones aboard: those the build dropped have left the line already, and building them again drops them twice.
       return board(aboard.filter((p) => !changing.some(([c]) => c === p)), next, { ...extra, waits });
@@ -1447,11 +1469,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         // waited for good under a comment naming a commit GitHub never took. A diff that lists no workflow (commits
         // that change one and change it back, which the rebase replays) or none at all (3000 files or more) names the one
         // GitHub refused.
-        const workflows = ((await gh.pullFiles(p.number)) ?? []).filter((f) => f.startsWith(".github/workflows/"));
+        const workflows = ((await gh.pullFiles(p.number)) ?? []).filter(isWorkflow);
         if (!workflows.length) workflows.push(pushed.message.match(/workflow `([^`]+)`/)?.[1] ?? "a workflow");
         say(`DROP #${p.number} (changes a workflow, which this token may not push)`);
         done.dropped.push(p.number);
-        await leave(p, LABEL.failed, workflowText(base, workflows));
+        await leave(p, LABEL.handMerge, workflowText(base, workflows));
         return null;
       }
       if (!pushed.ok && PUSH_REFUSED.test(pushed.message)) {
@@ -1568,6 +1590,30 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       if (!p.priority || p.fork || parked.has(p.number) || canGoAlone(p)) continue;
       cannot.add(p.number);
       say(`::warning::#${p.number} has \`${LABEL.priority}\`, but the train may not push to its branch (${p.branch}), so it cannot go ahead of the held #${inFlight.number} alone.`);
+    }
+  }
+  // Before anything boards: one that changes a workflow never boards a batch, nor is it rebased (both are pushes the
+  // queue app may not make). Up to date with dev and green, it lands alone with no push; up to date and not green yet
+  // (its own full CI running, not started, or cancelled: red never gets here, `waiting` stops it), it waits in line for
+  // that run; else it goes to a coordinator. Files are read only for the ones that could board, and only while nothing
+  // is in flight.
+  if (!inFlight) {
+    const ready = line().filter((p) => !waiting(p));
+    await inTurns(ready, READS_AT_ONCE, async (p) => {
+      p.workflows = ((await gh.pullFiles(p.number)) ?? []).filter(isWorkflow);
+    });
+    for (const p of ready.filter((p) => p.workflows.length)) {
+      const upToDate = base === "dev" && (await gh.behindBy(await gh.branchSha(base), p.sha)) === 0;
+      if (upToDate && p.ci === "success") {
+        const r = await landAlone(p);
+        if (r.ok) continue;
+        say(`::warning::Could not merge #${p.number} alone: ${r.message}`);
+        // A base or head that moved under the merge: the next run reads it again.
+        if (r.status === 409 || /Base branch was modified/.test(r.message ?? "")) continue;
+      } else if (upToDate) continue;
+      say(`HAND-MERGE #${p.number} (changes a workflow, which this token may not push)`);
+      done.dropped.push(p.number);
+      await leave(p, LABEL.handMerge, workflowText(base, p.workflows));
     }
   }
   /** The next batch waiting for company (`holdBatch`), or null. */

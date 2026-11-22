@@ -49,6 +49,14 @@ export function meteredConnection(): boolean {
   return connection?.saveData === true || connection?.type === "cellular";
 }
 
+/** Calls `listener` when the connection changes (mobile data on or off), where the browser says; returns how to stop. */
+export function onConnectionChange(listener: () => void): () => void {
+  const connection = (typeof navigator === "undefined" ? undefined : (navigator as Navigator & { connection?: EventTarget }).connection);
+  if (typeof connection?.addEventListener !== "function") return () => {};
+  connection.addEventListener("change", listener);
+  return () => connection.removeEventListener("change", listener);
+}
+
 /** Bytes this origin may still store, or -1 where the browser does not say. */
 async function room(): Promise<number> {
   try {
