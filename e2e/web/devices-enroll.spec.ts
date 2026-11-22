@@ -11,7 +11,7 @@ import { pasteInvite } from "../support/clipboard";
 const devicesDatabase = (page: import("@playwright/test").Page) =>
   page.evaluate(async () => (await indexedDB.databases()).some((db) => db.name === "ghostly-devices"));
 
-test("a profile adds a second device: the same digits on both, a standby with a live link to the active one, and a single profile elsewhere unchanged", { tag: ["@feature:devices.enroll"] }, async ({ peer }) => {
+test("a profile adds a second device: the same digits on both, a standby with a live link to the active one, and a single profile elsewhere unchanged", { tag: ["@journey", "@feature:devices.enroll"] }, async ({ peer }) => {
   const [desktop, phone, other] = await Promise.all([peer("desktop"), peer("phone"), peer("other")]);
 
   // The active device: Profile, Devices, Add a device. No lock yet: it asks for one of 8 characters first.

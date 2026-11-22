@@ -12,8 +12,11 @@ import { AvatarViewer } from "./AvatarViewer";
 import { Highlight } from "./chat/ChatSearch";
 import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
 import { useT } from "../contexts/I18nContext";
+import { NAME, SECOND_NAME, withNames } from "./apps/aroundName";
 import type { ChatFile } from "../lib/types";
 import { problemLine, saveProblemLine } from "../lib/problemText";
+import { roomHeld } from "../lib/filesComing";
+import { FilesStillComing } from "./chat/FilesStillComing";
 
 /** A press this long is the message's long press (`LONG_PRESS_MS` in MessageBubble.tsx), not a tap. */
 const HELD_MS = 500;
@@ -36,6 +39,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   /** The preview as it loaded, or that it could not be shown, for this URL. */
   const [loaded, setLoaded] = useState<{ url: string; ok: boolean } | null>(null);
   const [actionError, setActionError] = useState("");
+  // Accept refused for the files still coming: which ones, from which chat, show under the offer.
+  const [heldRoom, setHeldRoom] = useState(false);
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
@@ -133,7 +138,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
 
   const act = (action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(problemLine(error, t)));
+    setHeldRoom(false);
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => { setActionError(problemLine(error, t)); setHeldRoom(roomHeld(error)); });
   };
   /** The same path as Download in the message's menu: the system's save dialog where there is one, else a download. */
   const save = () => {
@@ -233,8 +239,9 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </span>
         )}
         <div className="min-w-0 flex-1">
-          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. */}
-          <p dir="auto" className="chat-text-media-name leading-tight truncate m-0" title={file.name}>
+          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. Whole,
+              wrapping anywhere: cut with … at its end, a long name hid its extension on a phone (no tooltip there). */}
+          <p dir="auto" data-testid="file-name" className="chat-text-media-name leading-tight [overflow-wrap:anywhere] m-0" title={file.name}>
             <Highlight text={file.name} term={highlight} />
           </p>
           {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). At 75 %, as words
@@ -271,9 +278,10 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       )}
       {offered && !group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
-          {/* A name with nothing to break at (one long word) wraps anywhere, or it runs out of the bubble. */}
+          {/* A name with nothing to break at (one long word) wraps anywhere, or it runs out of the bubble. The contact's
+              and the file's names keep their own direction in a line in the page's. */}
           <p className="chat-text-media-line m-0 mb-1 [overflow-wrap:anywhere]">
-            {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size, t) })}
+            {withNames(t("chat.file.wantsToSend", { name: NAME, file: SECOND_NAME, size: formatFileSize(file.size, t) }), [peerName, file.name])}
           </p>
           {typeof transfer.room === "number" && (
             <p className={`chat-text-media-meta m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="file-room">
@@ -281,10 +289,13 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
             </p>
           )}
           <div className="flex gap-2">
+            {/* Not turned off when the room shown is less than its size: that room may be old, and Accept reads it again
+                (the engine refuses one that does not fit, and says so under the bubble). */}
             <button type="button" className={`${answerButton} bg-accent text-on-accent disabled:opacity-50`}
-              data-testid="file-accept" disabled={typeof transfer.room === "number" && transfer.room < file.size} onClick={() => act("accept")}>{t("chat.file.accept")}</button>
+              data-testid="file-accept" onClick={() => act("accept")}>{t("chat.file.accept")}</button>
             <button type="button" className={`${answerButton} bg-black/20 text-inherit`} data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
           </div>
+          {(heldRoom || (typeof transfer.room === "number" && transfer.room < file.size)) && <FilesStillComing except={file.id} open={heldRoom} />}
         </div>
       )}
       {(controls && !offered && !group && (canPause || pausedHere || canCancel)) && (

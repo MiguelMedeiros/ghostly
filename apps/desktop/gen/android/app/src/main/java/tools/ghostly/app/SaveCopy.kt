@@ -25,4 +25,18 @@ object SaveCopy {
       return false
     }
   }
+
+  /**
+   * The picker's answer when the page that asked is gone (Android ended the process while the picker was open):
+   * [from] is the save the activity's saved state kept, copied as [copy] does; with none kept the document goes.
+   */
+  fun restored(from: File?, open: () -> OutputStream?, drop: () -> Unit): Boolean {
+    if (from != null) return copy(from, open, drop)
+    try {
+      drop()
+    } catch (ignored: Exception) {
+      // As in copy: the save still failed.
+    }
+    return false
+  }
 }

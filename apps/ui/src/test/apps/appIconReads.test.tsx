@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { MessageBubble } from "../../components/MessageBubble";
+import { AppIcon } from "../../components/apps/AppIcon";
 import { forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetAppIcons } from "../../lib/apps/icons";
 import { forgetInstalledApps, refreshInstalledApps } from "../../lib/apps/installed";
@@ -148,5 +149,26 @@ describe("an installed app's icon", () => {
     fireEvent.click(screen.getAllByTestId("app-card-open")[0]!);
     await settle();
     expect(pictures()).toEqual(Array.from({ length: 20 }, () => "blob:icon-0"));
+  });
+
+  // Each icon was held until the tab closed, its app uninstalled or not: ten apps' pictures (up to 256 KiB each) stayed.
+  it("of an app uninstalled goes, and is read again when it is installed again", async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => ({ ...app(DIGEST), ref: `${KEY}/app${i}`, name: `app${i}` }) as InstalledAppView);
+    let list = ten;
+    fakeEngine.on("appList", () => list);
+    await refreshInstalledApps();
+    renderApp(<>{ten.map((a) => <AppIcon key={a.ref} installed={a} />)}</>);
+    await settle();
+    expect(made).toHaveLength(10);
+    list = [];
+    await act(() => refreshInstalledApps());
+    await settle();
+    expect(vi.mocked(URL.revokeObjectURL).mock.calls.map(([url]) => url).sort()).toEqual([...made].sort());
+    list = [ten[0]!];
+    await act(() => refreshInstalledApps());
+    renderApp(<AppIcon installed={ten[0]} />);
+    await settle();
+    expect(fakeEngine.callsTo("appFile")).toHaveLength(11);
+    expect(made).toHaveLength(11);
   });
 });

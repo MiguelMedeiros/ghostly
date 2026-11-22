@@ -89,6 +89,15 @@ export async function textFromStdin(read: StdinRead, command: string, asked: boo
 }
 
 /**
+ * `identity complete <draft> --stdin` (or `--evidence-file -`): what the tool printed, from stdin. A terminal (a read
+ * that would wait on the keyboard without a word) is a usage error, as identity add --stdin's is.
+ */
+export async function evidenceFromStdin(read: StdinRead, draft: string, tty = false): Promise<string> {
+  if (tty) throw new CliError("usage", `Missing what the tool printed: stdin is a terminal; pipe it in (… | ghostly identity complete ${draft}) or give --evidence-file f`);
+  return read();
+}
+
+/**
  * `identity complete <draft>` with neither --evidence-file nor --stdin, stdin not a terminal: asked with nothing first,
  * since a published record takes none; a draft that answers it takes a tool's output (`details.needs`) is asked again
  * with what was piped, read as a send reads its text.

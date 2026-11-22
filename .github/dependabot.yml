@@ -100,6 +100,24 @@ updates:
       e2e-atproto-security:
         applies-to: security-updates
         patterns: ["*"]
+  # The e2e suite's group-call token mock (never shipped): livekit-client for its smoke page, as above.
+  # livekit-client itself moves with the app's (sfuToken.test.ts holds them equal): only what it pulls in is bumped
+  # here. Listing the update types keeps its security updates coming.
+  - package-ecosystem: npm
+    directory: /e2e/infra/sfu-token
+    schedule: { interval: weekly, day: monday }
+    target-branch: dev
+    allow:
+      - dependency-type: all
+    ignore:
+      - dependency-name: livekit-client
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+    groups:
+      e2e-sfu-token:
+        patterns: ["*"]
+      e2e-sfu-token-security:
+        applies-to: security-updates
+        patterns: ["*"]
   - package-ecosystem: cargo
     directory: /
     schedule: { interval: weekly, day: monday }
@@ -133,7 +151,7 @@ updates:
   # for the HyperDHT relay, a line that had already reached its end). A move to the next long-term
   # release is made by hand.
   - package-ecosystem: docker
-    directories: [/apps/web, /apps/website, /e2e/infra/atproto, /infra/services/hyperdht-relay]
+    directories: [/apps/web, /apps/website, /e2e/infra/atproto, /e2e/infra/sfu-token, /infra/services/hyperdht-relay]
     schedule: { interval: weekly, day: monday }
     target-branch: dev
     ignore:

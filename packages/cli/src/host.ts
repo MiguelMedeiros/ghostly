@@ -17,7 +17,7 @@ import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { GroupAutoJoin } from "./groupAuto";
 import { resumeHolds } from "./holds";
-import { ownFolder, ownProfile, privateFolder } from "./privateFolder";
+import { dropRuntimeFolder, ownFolder, ownProfile, privateFolder } from "./privateFolder";
 import { acquireLock, startingPath, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 import { flushCardUpdates } from "./statusCards";
@@ -219,7 +219,9 @@ export async function serve(host: Host): Promise<Served> {
       // it has stopped. The other way round, a client that found the secret gone in between (a read whose hello's
       // answer came just before) asked again on the socket still listening, and the close ended that connection as well:
       // "The daemon went away before it answered chat.list, twice".
-      server.close(() => resolve());
+      // The socket's file goes as the server closes; the folder made for it outside the profile goes once it has, when
+      // empty: before the profile's lock is let go, so no next daemon of the profile has a socket in it yet.
+      server.close(() => { dropRuntimeFolder(path); resolve(); });
       removeDaemonSecret(ctx.runtime.paths.dir);
       // The waits still open answer with what they know (`waits.ts`) before their connections end: a `send --wait`
       // ended by a restart has its `messageId`, and its message goes on, where it failed as "The daemon went away".
@@ -298,11 +300,13 @@ export const MAX_OPEN_CALLS = 1_024;
 
 /** `answering`: the calls of every connection still open, which a stopping daemon answers before it ends them. */
 function connection(daemon: ApiContext, socket: Socket, secret: Buffer, answering: Set<Promise<void>>): void {
-  // The calls of this connection see it close (`ApiContext.closed`), and their waits end with it. Made from the
-  // daemon's context, not copied: what the daemon sets on it after `serve` (`stop`, `listen`) is read through.
-  const closed = new AbortController();
+  // The client that asked the calls still open went away (Ctrl-C on the command): `CallScope.gone`, and the waits of
+  // this connection end with it (`ApiContext.closed`). Made from the daemon's context, not copied: what the daemon
+  // sets on it after `serve` (`stop`, `listen`) is read through.
+  const gone = new AbortController();
+  socket.on("close", () => gone.abort());
   const ctx: ApiContext = Object.create(daemon) as ApiContext;
-  ctx.closed = closed.signal;
+  ctx.closed = gone.signal;
   let open = 0;
   const unsubscribes: (() => void)[] = [];
   // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
@@ -315,7 +319,7 @@ function connection(daemon: ApiContext, socket: Socket, secret: Buffer, answerin
     socket.write(JSON.stringify(value) + "\n");
   };
   socket.on("drain", () => { limit = MAX_UNREAD; });
-  socket.on("close", () => { unsubscribe(); closed.abort(); });
+  socket.on("close", unsubscribe);
   socket.on("error", () => {});
   // Before anything is read: a client writes nothing until this proves the daemon (`provesGreeting`).
   write(greeting(secret));
@@ -364,7 +368,7 @@ function connection(daemon: ApiContext, socket: Socket, secret: Buffer, answerin
     }
     if (open >= MAX_OPEN_CALLS) { write({ id, error: new CliError("busy", `This connection has ${MAX_OPEN_CALLS} calls open: wait for one to answer, or open another connection`, { open }).toJSON() }); return; }
     open++;
-    const answered = callApi(ctx, request.method, request.params ?? {}).then(
+    const answered = callApi(ctx, request.method, request.params ?? {}, { gone: gone.signal }).then(
       (result) => write({ id, result: result ?? null }),
       (error) => write({ id, error: asCliError(error).toJSON() }),
     ).finally(() => { open--; });

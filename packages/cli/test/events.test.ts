@@ -41,6 +41,42 @@ describe("the event stream", () => {
     expect(JSON.stringify(events)).not.toContain("ghostly1secret");
   });
 
+  it("reads no chat whose view is the same object as in the last state", async () => {
+    const { h, events } = await hub("same-view.jsonl");
+    let reads = 0;
+    const kept = link("c1");
+    Object.defineProperty(kept, "label", { get: () => { reads++; return "kept"; }, enumerable: true });
+    h.baseline(state([kept, link("c2")]), new Map());
+    const before = reads;
+    h.sink.post({ kind: "state", state: state([kept, link("c2", { label: "bot" })]) });
+    expect(reads).toBe(before);
+    expect(events.map((e) => e.id)).toEqual(["chat.renamed:c2:1000"]);
+  });
+
+  it("remembers the chats a live session carried in this run, after they go down (chat connect's resuming)", async () => {
+    const { h } = await hub("was-live.jsonl");
+    const live = { textDelivery: "stream", dataLink: "open", pairing: { status: "ready", transport: "hyperdht/1" } } as Partial<LinkView>;
+    h.baseline(state([link("c1", live), link("c2")]), new Map());
+    h.sink.post({ kind: "state", state: state([link("c1"), link("c2"), link("c3", live)]) });
+    h.sink.post({ kind: "state", state: state([link("c1"), link("c2"), link("c3")]) });
+    expect(["c1", "c2", "c3"].map((id) => h.wasLive(id))).toEqual([true, false, true]);
+  });
+
+  it("reads no payment while the payments are the same object as in the last state", async () => {
+    const { h, events } = await hub("same-payments.jsonl");
+    let reads = 0;
+    const payment = { id: "p1", linkId: "c1", kind: "payment", direction: "in", amount: 21, unit: "sat", state: "settled", createdAt: 5 };
+    Object.defineProperty(payment, "state", { get: () => { reads++; return "settled"; }, enumerable: true });
+    const payments = { p1: payment };
+    h.baseline({ ...state([link("c1")]), payments } as unknown as EngineState, new Map());
+    const before = reads;
+    h.sink.post({ kind: "state", state: { ...state([link("c1", { label: "bot" })]), payments } as unknown as EngineState });
+    expect(reads).toBe(before);
+    expect(events.map((e) => e.id)).toEqual(["chat.renamed:c1:1000"]);
+    h.sink.post({ kind: "state", state: { ...state([link("c1", { label: "bot" })]), payments: { ...payments, p2: { ...payment, id: "p2", state: "pending" } } } as unknown as EngineState });
+    expect(events.map((e) => e.id)).toEqual(["chat.renamed:c1:1000", "payment.created:p2"]);
+  });
+
   it("reports messages, delivery changes, deletions, and chat changes once each", async () => {
     const { h, events } = await hub("a.jsonl");
     h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "old")]]]));
@@ -235,6 +271,27 @@ describe("the event stream", () => {
       { type: "group.typing.stopped", group: "g1", member: "bo", kind: undefined, status: undefined },
     ]);
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+  });
+
+  it("says who joined and left a full community, without looking each member up in the other list (O(members²) a state)", async () => {
+    const { h, events } = await hub("group-members.jsonl");
+    const keys = Array.from({ length: 256 }, (_, i) => `member${String(i).padStart(3, "0")}`.padEnd(52, "x"));
+    const group = (members: string[]) => ({ id: "g1", status: "active", members: [...members].reverse().map((key) => ({ key })) });
+    const later = [...keys.slice(0, 100), ...keys.slice(102), "a-newcomer".padEnd(52, "x"), "zz-newcomer".padEnd(52, "x")];
+    h.baseline(state([], [group(keys)]), new Map());
+    // A full member list's lookups, counted: the `includes` diff made 512 of them each state.
+    const includes = vi.spyOn(Array.prototype, "includes");
+    try {
+      for (let i = 0; i < 20; i++) h.sink.post({ kind: "state", state: state([], [group(keys)]) });
+      h.sink.post({ kind: "state", state: state([], [group(later)]) });
+      h.sink.post({ kind: "state", state: state([], [group(later)]) });
+      expect(includes.mock.contexts.filter((list) => (list as unknown[]).length >= 256)).toHaveLength(0);
+    } finally {
+      includes.mockRestore();
+    }
+    expect(events.map(({ type, joined, left }) => ({ type, joined, left }))).toEqual([
+      { type: "group.members", joined: ["a-newcomer".padEnd(52, "x"), "zz-newcomer".padEnd(52, "x")], left: [keys[100], keys[101]] },
+    ]);
   });
 
   it("typing is live only: a contact who keeps changing it pushes no other chat's events out of the journal", async () => {

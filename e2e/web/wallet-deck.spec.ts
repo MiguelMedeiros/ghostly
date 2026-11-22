@@ -437,3 +437,30 @@ test("on a narrow phone New wallet's money badges stay inside their cards, in ev
   }
   expect(past).toEqual([]);
 });
+
+test("on a phone on its side New wallet's kind actions stay inside their cards, in every language", { tag: ["@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  // In French Fedimint's "Rejoindre avec une invitation…" ran to 403px in a 263px card ending at 402px, its end cut.
+  const { page } = await peer("alice", { mobile: true, viewport: { width: 812, height: 375 } });
+  const past: string[] = [];
+  for (const language of ["en", "pt", "es", "fr", "it", "ar", "ja", "zh"]) {
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    for (const [width, height] of [[812, 375], [375, 812]]) {
+      await page.setViewportSize({ width, height });
+      await page.goto("/#/wallet");
+      await page.reload();
+      await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+      await page.getByTestId("wallet-add").click();
+      await expect(page.locator(".new-wallet-kind").first()).toBeVisible();
+      past.push(...await page.locator(".new-wallet-kind").evaluateAll((cards, at) => cards.map((card) => {
+        const box = card.getBoundingClientRect(), pill = card.querySelector(".new-wallet-action")!.getBoundingClientRect();
+        // The card's 12px padding, whichever side the pill sits on.
+        const over = Math.ceil(Math.max(pill.right - box.right, box.left - pill.left));
+        return over > -12 || card.scrollWidth > card.clientWidth ? `${at} ${card.getAttribute("data-testid")}: ${over}` : "";
+      }).filter(Boolean), `${language} ${width}x${height}`));
+    }
+  }
+  expect(past).toEqual([]);
+});

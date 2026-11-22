@@ -483,7 +483,7 @@ export function Negotiation({ t, relayedLabel }: { t: Copy; relayedLabel: string
         <p>{t.first}</p>
         <div className="ng-truth-meta">
           <span>
-            <a href={`${REPO_URL}/blob/dev/packages/core/src/pairedTransports.ts`}>{t.rule} ↗</a> · {t.simplified}
+            <a href={`${REPO_URL}/blob/main/packages/core/src/pairedTransports.ts`}>{t.rule} ↗</a> · {t.simplified}
           </span>
           <span className="ng-status">{t.status}</span>
         </div>

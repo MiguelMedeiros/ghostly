@@ -374,7 +374,10 @@ export class HoldEngine {
     return stale.length > 0;
   }
 
-  /** A message deleted here: its held item goes too, so the contact never picks it up. */
+  /**
+   * A message deleted here: its held item goes too, so the contact never picks it up. Asks for a state once it is out
+   * of the outbox: a state built before (the delete's own) still counts it in the chat's items waiting.
+   */
   forget(linkId: string, messageId: string): Promise<void> {
     return this.serialize(linkId, async () => {
       const hold = this.state(linkId);
@@ -383,6 +386,7 @@ export class HoldEngine {
       await this.save(linkId, { ...hold, outbox: hold.outbox.filter((e) => e !== entry) });
       await this.host.storage()?.store.remove(entry.name).catch(() => {});
       if (entry.state === "held") await this.publishPointer(linkId, true).catch(() => {});
+      this.host.changed();
     });
   }
   /**

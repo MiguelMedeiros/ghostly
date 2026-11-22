@@ -2,20 +2,22 @@ import { execFile } from "node:child_process";
 import { openAsBlob } from "node:fs";
 import { access, constants, copyFile, link, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
-import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, NO_AUDIO_METADATA, NO_VIDEO_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutAudioMetadata, withoutPictureMetadata, withoutVideoMetadata, type VoiceMeta } from "@ghostly/core";
-import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
+import { GROUP_FILE_LIMITS, HOLD_LIMITS, LIMITS, NO_PICTURE_METADATA, NO_AUDIO_METADATA, NO_VIDEO_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutAudioMetadata, withoutPictureMetadata, withoutVideoMetadata, type VoiceMeta } from "@ghostly/core";
+import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytes } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { EngineState, FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { childEnv } from "./childEnv";
-import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
-import { groupSendRefused } from "./api";
+import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { dhtOnlyOf, groupSendRefused } from "./api";
 import { CliError } from "./errors";
+import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
 import { measureVoice } from "./voicePeaks";
+import { fileWaitsNote } from "./waitNotice";
 import { goesOn } from "./waits";
 
 /**
@@ -31,11 +33,14 @@ const TYPES: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
   ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json", ".csv": "text/csv",
   ".zip": "application/zip", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+  ".aac": "audio/aac", ".flac": "audio/flac", ".oga": "audio/ogg", ".weba": "audio/webm",
   ".webm": "audio/webm", ".mp4": "video/mp4", ".mov": "video/quicktime",
 };
 
-export function mimeOf(path: string, given?: string): string {
-  return sanitizeMime(given ?? TYPES[extname(path).toLowerCase()] ?? "application/octet-stream");
+/** A voice note in an .mp4 is its sound in an MP4 box, as an .m4a: sent as audio/mp4, not as a video. */
+export function mimeOf(path: string, given?: string, voice = false): string {
+  const known = TYPES[extname(path).toLowerCase()];
+  return sanitizeMime(given ?? (voice && known === "video/mp4" ? "audio/mp4" : known) ?? "application/octet-stream");
 }
 
 /**
@@ -80,10 +85,10 @@ const megabytes = (size: number) => `${Math.round(size / 100_000) / 10} MB`;
  * Where an unfinished transfer stands, in words, for a person reading a timeout: the stage's id ("asking", "waiting")
  * stays in `details.stage` for a bot. A group's file says why it waits (`note`), as the app does.
  */
-function stageWords(transfer: FileTransferView): string {
+function stageWords(transfer: FileTransferView, dhtOnly?: string): string {
   switch (transfer.stage) {
     case "preparing": return "getting it ready to send";
-    case "waiting": return transfer.note ?? "waiting for a connection to the contact";
+    case "waiting": return transfer.note ?? dhtOnly ?? "waiting for a connection to the contact";
     case "asking": return transfer.direction === "in" ? "waiting for you to take it (file accept)" : "waiting for the contact to take it";
     case "queued": return "waiting its turn";
     case "paused": return transfer.pausedBy === "peer" ? "paused by the contact" : "paused here (file resume)";
@@ -99,6 +104,18 @@ function stageWords(transfer: FileTransferView): string {
 function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferView & { waitingFor?: "me" | "contact" }) | undefined {
   if (transfer?.state !== "transferring" || transfer.stage !== "asking") return transfer;
   return { ...transfer, waitingFor: transfer.direction === "in" ? "me" : "contact" };
+}
+
+/**
+ * Why a file in a 1:1 chat waits however long a command waits for it (waitNotice.ts `fileWaitsNote`), or undefined: the
+ * chat is on the DHT only, and a file goes on a live session only. Read as the chat is now. `ref`: how the commands it
+ * names call the chat. A chat nobody joined says that instead (`keptForJoin`). One that holds a file of `size` for the
+ * contact (WISP 404, on the DHT only too) sends it without a live session, as node.ts `sendFile` decides: nothing said.
+ */
+function fileWaitsLive(ctx: ApiContext, linkId: string, ref: string, size: number): string | undefined {
+  const link = state(ctx).links.find((l) => l.id === linkId);
+  if (link?.textDelivery === "hold" && size <= HOLD_LIMITS.maxBundleBytes - 4096) return undefined;
+  return link && !nobodyJoined(link) ? fileWaitsNote(dhtOnlyOf(link, ctx), ref) : undefined;
 }
 
 /** The chat or the group a file command names (`findChatOrGroup`). */
@@ -134,7 +151,7 @@ async function voiceOf(params: Params, path: string, mime: string, size: number)
   if (params.voice === undefined) return {};
   const name = basename(path);
   if (!size) throw new CliError("bad_request", `${name} is empty: a voice note is audio`);
-  if (!PLAYABLE_AUDIO.test(baseMime(mime))) throw new CliError("bad_request", `${name} is ${mime}, not audio (webm, ogg, mp4, mpeg, aac, m4a or wav)`);
+  if (!PLAYABLE_AUDIO.test(baseMime(mime))) throw new CliError("bad_request", `${name} is ${mime}, not audio (webm, ogg, opus, mp4, m4a, mpeg, aac, wav or flac)`);
   // Without a length or a waveform, both are measured from the sound, as the apps measure their recordings.
   const given = params.voice === true ? undefined : num(params, "voice", 0, { min: 1 });
   let duration = given;
@@ -195,13 +212,33 @@ async function whileUnchanged<T>(path: string, read: () => Promise<T>): Promise<
 }
 
 /**
+ * The file copied into the profile (`stage`) for a send whose client is still there to hear of it (`CallScope.gone`).
+ * Ctrl-C on `file send` through a daemon, while a large file was copied in (seconds per GiB), said "stopped before the
+ * command answered"; the daemon went on, and the file went to the contact a moment later. Sent again, it went twice.
+ * The copy stops at its next step, and what was copied is removed: nothing is in the chat, nothing goes.
+ */
+async function stageWhileAsked(bytes: FileBytes, id: string, path: string, source: Blob, gone: AbortSignal | undefined): Promise<string> {
+  const stillAsked = () => {
+    if (gone?.aborted) throw new CliError("interrupted", "The file was not sent: the command that sent it went away before it was copied in");
+  };
+  const digest = await whileUnchanged(path, () => bytes.stage(id, source, stillAsked));
+  // Gone after the last step: the whole copy is there, and goes too.
+  if (gone?.aborted) await bytes.remove(id).catch(() => {});
+  stillAsked();
+  return digest;
+}
+
+/**
  * A file announced in a group (WISP 503): its bytes staged under a group file id with their digest, as a chat's are, then
  * the announcement. This device is its first holder and serves the members who ask.
  */
-async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, name: string, picked: number) {
-  if (picked > GROUP_FILE_LIMITS.maxBytes) throw new CliError("refused", `Too large for a group (at most ${GROUP_FILE_LIMITS.maxBytes} bytes)`);
+async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, name: string, picked: number, gone: AbortSignal | undefined) {
+  // Said as `help file send` says the cap, with the file and its size: a 1:1 chat has no cap, which is the way out.
+  if (picked > GROUP_FILE_LIMITS.maxBytes) {
+    throw new CliError("refused", `Too large for a group: ${name} is ${megabytes(picked)}, a group takes up to ${GROUP_FILE_LIMITS.maxBytes / 1_048_576} MiB (send it in a 1:1 chat)`, { reason: "too_large", size: picked, max: GROUP_FILE_LIMITS.maxBytes });
+  }
   if (!picked) throw new CliError("refused", "An empty file cannot go to a group");
-  const mime = mimeOf(path, str(params, "mime"));
+  const mime = mimeOf(path, str(params, "mime"), params.voice !== undefined);
   const replyTo = str(params, "reply");
   if (replyTo) {
     if (!await findMessage(ctx, `group:${group.id}`, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw noMessage(replyTo, { group: true, ref: str(params, "chat", true) }, { tail: ", or it cannot be replied to" });
@@ -218,7 +255,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   const file: MessageFile = { id: fileId, name, size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
   const timestamp = Date.now();
   const bytes = await fileBytes();
-  const digest = await whileUnchanged(path, () => bytes.stage(fileId, source));
+  const digest = await stageWhileAsked(bytes, fileId, path, source, gone);
   await fileStore.put({
     id: fileId, linkId: `group:${group.id}`, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out",
     metadata: { name: file.name, size, mime, timestamp, ...(voice ? { voice } : {}), ...(image ? { image } : {}) },
@@ -240,14 +277,15 @@ const NAME_BYTES = 255;
 /**
  * `name` as an entry of a folder: an app's name may have 200 characters, which in UTF-8 can be 800 bytes. The end of
  * its stem goes until it fits, its extension stays (as `sanitizeFileName` shortens it), so "文…文.txt" is saved as a text.
+ * A `mark` (" (2)") goes between them and is kept too.
  */
-export function fitName(name: string): string {
+export function fitName(name: string, mark = ""): string {
   const fits = (candidate: string) => Buffer.byteLength(candidate) <= NAME_BYTES;
-  if (fits(name)) return name;
+  if (!mark && fits(name)) return name;
   const extension = /\.[^.\s]{1,15}$/u.exec(name)?.[0] ?? "";
   const stem = [...name.slice(0, name.length - extension.length)];
-  while (stem.length && !fits(stem.join("").trimEnd() + extension)) stem.pop();
-  return (stem.join("").trimEnd() || "file") + extension;
+  while (stem.length && !fits(stem.join("").trimEnd() + mark + extension)) stem.pop();
+  return (stem.join("").trimEnd() || "file") + mark + extension;
 }
 
 /**
@@ -292,13 +330,38 @@ async function markDownloaded(path: string): Promise<void> {
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 /**
+ * Who ended a transfer, and how, from the engine's words for it (core's `chatFiles.ts`): its view says only `failed`,
+ * and a script could not tell "the contact said no" from "I already did it" without reading the English.
+ */
+const ENDS: Record<string, { reason: "cancelled" | "declined"; by: "me" | "contact" }> = {
+  "You cancelled it": { reason: "cancelled", by: "me" },
+  "You declined it": { reason: "declined", by: "me" },
+  "Cancelled by your contact": { reason: "cancelled", by: "contact" },
+  "Declined by your contact": { reason: "declined", by: "contact" },
+  "Cancelled by the sender": { reason: "cancelled", by: "contact" },
+};
+const endOf = (transfer: Pick<FileTransferView, "error">) => ENDS[transfer.error ?? ""] ?? { reason: "failed" as const, by: null };
+
+/**
+ * A transfer that ended, refused with its words and the way out: the sender still has the bytes and sends them again
+ * (`file resend` goes on from what the contact holds, while it may); the receiver asks the contact for them.
+ */
+function endedFile(fileId: string, where: { chat: string } | { group: string } | undefined, transfer: Pick<FileTransferView, "error" | "retry">, outgoing: boolean): CliError {
+  const way = where && "chat" in where
+    ? outgoing ? transfer.retry ? " (file resend sends it again)" : ` (send it again: ghostly file send ${where.chat} <path>)` : " (ask the contact to send it again)"
+    : "";
+  return new CliError("refused", `It ended: ${transfer.error ?? "failed"}${way}`, { file: fileId, ...where, ...endOf(transfer) });
+}
+
+/**
  * `file wait`: until a transfer ends: done answers, failed is an `engine` error with the transfer's words (and whether
  * `file resend` can go on). A file whose transfer this run has not seen answers from the file store. `stopping`: the
- * daemon's stop ends it as well (`waitForState`), for `file send --wait`, which answers with what it knows then.
+ * daemon's stop ends it as well (`waitForState`), for `file send --wait`, which answers with what it knows then. A
+ * transfer that waits in a chat on the DHT only says why, naming the chat as `ref` does (`fileWaitsLive`).
  */
-async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSignal) {
+async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSignal, ref = str(params, "chat")) {
   const fileId = str(params, "file", true);
-  const { where } = fileChat(ctx, params, fileId);
+  const { linkId, where } = fileChat(ctx, params, fileId);
   const stored = await fileStore.get(fileId);
   if (!stored && !state(ctx).transfers[fileId]) throw noFile(fileId);
   const ms = num(params, "timeout", 300, { min: 1, max: 86_400 }) * 1000;
@@ -310,12 +373,51 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
     return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
   }, ms, `file ${fileId} to arrive`, stopping).catch((error: unknown) => {
     const now = state(ctx).transfers[fileId];
-    if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null, ...(error.details?.reason ? { reason: error.details.reason } : {}) });
+    const note = now?.stage === "waiting" && "chat" in where ? fileWaitsLive(ctx, linkId, ref ?? linkId, now.size) : undefined;
+    if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now, note)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null, ...(error.details?.reason ? { reason: error.details.reason } : {}) });
     throw error;
   });
-  if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
+  if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry, ...endOf(transfer) });
   if (transfer.state !== "done") throw waitsForYou((stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name, fileId, where, transfer.size);
   return { ...where, file: fileId, state: "done", size: transfer.size };
+}
+
+/** At most this many of the files still coming are named in a refusal; the rest are counted. */
+const HOLDERS_NAMED = 3;
+
+/**
+ * The files still coming that hold this device's room, as the engine counts them (`ChatFiles.stillToCome`): received in
+ * a 1:1 chat, taken (not one still asked about), not ended, largest first; each with its name and its chat's. A group's
+ * file is not counted there.
+ */
+async function roomHolders(s: EngineState, except: string): Promise<{ id: string; name?: string; chat: string; left: number }[]> {
+  const holders: { id: string; linkId: string; left: number }[] = [];
+  for (const [id, view] of Object.entries(s.transfers ?? {})) {
+    if (id === except || view.direction !== "in" || view.state !== "transferring" || view.stage === "asking") continue;
+    const link = s.links.find((l) => id.startsWith(`${l.id}-in-`));
+    const left = Math.max(0, view.size - view.transferred);
+    if (link && left > 0) holders.push({ id, linkId: link.id, left });
+  }
+  holders.sort((a, b) => b.left - a.left || a.id.localeCompare(b.id));
+  return Promise.all(holders.map(async ({ id, linkId, left }) => {
+    const link = s.links.find((l) => l.id === linkId);
+    return { id, left, name: (await fileStore.get(id).catch(() => undefined))?.metadata?.name, chat: link?.label || link?.peerNick || linkId };
+  }));
+}
+
+/**
+ * `file accept` of a file that does not fit the room left beside the files still coming (`FileDesk.accept`), in this
+ * CLI's MB: the engine's line gave the room in binary MB beside a size in decimal ones, and neither the files still
+ * coming that take the rest nor the way out. The files still coming are named with their chat and how to cancel each:
+ * "wait for them, or cancel one" said neither which nor where. Only this side reads it; nothing goes to the contact.
+ */
+function noRoomWords(fileId: string, name: string | undefined, size: number, room: number, coming: number, holders: Awaited<ReturnType<typeof roomHolders>> = []): string {
+  const named = holders.slice(0, HOLDERS_NAMED).map((h) => `${h.name ?? "a file"} from ${h.chat} (${megabytes(h.left)} to come: ghostly file cancel ${shellWord(h.id, "<file>")})`);
+  const more = holders.length > HOLDERS_NAMED ? ` and ${holders.length - HOLDERS_NAMED} more` : "";
+  const which = named.length ? `: ${named.join(", ")}${more}` : "";
+  const rest = coming > 0 ? `, and ${megabytes(coming)} of files still coming need it first${which}` : "";
+  const out = coming > 0 && named.length ? "Free some space or cancel one of them" : "Free some space";
+  return `${name ?? "The file"} (${megabytes(size)}) does not fit: ${megabytes(room)} free${rest}. ${out}, then ghostly file accept ${fileId} again (or file decline)`;
 }
 
 /** A received file that waits for this person's `file accept` (`file wait`, `file save`): said naming the command. */
@@ -324,7 +426,7 @@ function waitsForYou(name: string | undefined, fileId: string, where: { chat: st
 }
 
 export const FILE_METHODS: Record<string, Method> = {
-  async "file.send"(ctx, params) {
+  async "file.send"(ctx, params, call) {
     const path = resolve(str(params, "path", true));
     // The contact (or every member) reads its name as a message's text (docs/CLI.md § Safety): the name that goes out,
     // the file's own without --name, read once cleaned (a key split by a `:` or a line break the cleaning drops is whole).
@@ -342,14 +444,14 @@ export const FILE_METHODS: Record<string, Method> = {
     // nobody joined yet: none.
     const wait = oneOf(params, "wait", "group" in target ? ["none"] as const : ["none", "sent"] as const, !("group" in target) && oneShotWaits(ctx, target.link.id) ? "sent" : "none");
     const seconds = num(params, "timeout", 300, { min: 1, max: 86_400 });
-    if ("group" in target) return sendToGroup(ctx, params, target.group, path, name, info.size);
+    if ("group" in target) return sendToGroup(ctx, params, target.group, path, name, info.size, call?.gone);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
     // Only a session open now says what the contact's app takes: with none (the contact away), the file waits and goes
     // as files/3 on the next one (the engine's `sendWaitingFile`), as the app's composer sends it.
     if (link.dataLink === "open" && !link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
     if (typeof link.peerFileRoom === "number" && info.size > link.peerFileRoom) throw new CliError("refused", `Not enough space on the contact's device (${link.peerFileRoom} bytes free)`);
-    const mime = mimeOf(path, str(params, "mime"));
+    const mime = mimeOf(path, str(params, "mime"), params.voice !== undefined);
     // A reply names a message of this chat, as `send --reply` does: checked before anything is stored.
     const replyTo = str(params, "reply");
     if (replyTo) {
@@ -363,7 +465,7 @@ export const FILE_METHODS: Record<string, Method> = {
     const file: MessageFile = { id: `${link.id}-out-${wireId}`, name, size: source.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
     const timestamp = sentAt();
     const bytes = await fileBytes();
-    const digest = await whileUnchanged(path, () => bytes.stage(file.id, source));
+    const digest = await stageWhileAsked(bytes, file.id, path, source, call?.gone);
     await fileStore.put({
       id: file.id, linkId: link.id, bytes: bytes.kind, digest, createdAt: timestamp, direction: "out", wireId,
       metadata: { name: file.name, size: file.size, mime: file.mime, timestamp, ...(voice ? { voice } : {}), ...(image ? { image } : {}) },
@@ -382,10 +484,15 @@ export const FILE_METHODS: Record<string, Method> = {
     // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.
     const messageId = `me_${timestamp}`;
     // A wait that ends short (its time, or the daemon's stop: a restart) leaves the file in the chat, going on as a text
-    // does (waits.ts): said so, with its ids. A stop ended the connection under it before, with no id to look for.
-    if (wait === "sent") await waitForFile(ctx, { chat: link.id, file: file.id, timeout: seconds }, ctx.stopping).catch((error: unknown) => {
+    // does (waits.ts): said so, with its ids. A stop ended the connection under it before, with no id to look for. In a
+    // chat on the DHT only it does not go by itself: said why, and what ends it (`fileWaitsLive`).
+    const ref = str(params, "chat", true);
+    if (wait === "sent") await waitForFile(ctx, { chat: link.id, file: file.id, timeout: seconds }, ctx.stopping, ref).catch((error: unknown) => {
       if (!(error instanceof CliError) || error.code !== "timeout") throw error;
-      throw new CliError("timeout", `${error.message}. It is kept here and ${goesOn(ctx, link.id)}`, { ...error.details, chat: link.id, messageId, file: file.id });
+      const note = fileWaitsLive(ctx, link.id, ref, file.size);
+      // Said already where the transfer stands (`file wait`'s timeout), it is not said twice.
+      const why = !note ? ` and ${goesOn(ctx, link.id)}` : error.message.includes(note) ? "" : `. ${note}`;
+      throw new CliError("timeout", `${error.message}. It is kept here${why}`, { ...error.details, chat: link.id, messageId, file: file.id });
     });
     return {
       chat: link.id, messageId, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}),
@@ -433,12 +540,16 @@ export const FILE_METHODS: Record<string, Method> = {
       try { await node(ctx).fileAction({ linkId, fileId, action }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
       return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
     }
+    // No longer here (its sender deleted it for everyone, its message was deleted here) or never was: no transfer and
+    // no record. Said as `file save` and `file wait` say it; `request` read the missing transfer as "all here" before,
+    // and the other actions answered the engine's "No such file transfer".
+    if (!state(ctx).transfers[fileId] && !(await fileStore.get(fileId).catch(() => undefined))) throw noFile(fileId);
     if (action === "resend" || action === "request") {
       const outgoing = fileId.startsWith(`${linkId}-out-`);
       if (outgoing !== (action === "resend")) throw new CliError("bad_request", outgoing ? "A file sent from here is sent again: file resend" : "A received file is asked for again: file request");
       const transfer = state(ctx).transfers[fileId];
       if (!transfer || transfer.state === "done") throw new CliError("refused", outgoing ? "Nothing to send again: it arrived whole" : "Nothing to ask for: the file is all here");
-      if (transfer.state === "failed" && (!outgoing || !transfer.retry)) throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
+      if (transfer.state === "failed" && (!outgoing || !transfer.retry)) throw endedFile(fileId, where, transfer, outgoing);
     } else {
       const outgoing = fileId.startsWith(`${linkId}-out-`);
       if (outgoing && (action === "accept" || action === "decline")) throw new CliError("bad_request", "A file sent from here is not accepted or declined: file cancel stops it");
@@ -447,7 +558,11 @@ export const FILE_METHODS: Record<string, Method> = {
       const transfer = state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer;
       // Being checked (sent: the contact checks it; received: its digest here): the engine takes no pause and it ends done.
       if (action === "pause" && transfer?.stage === "verifying") throw new CliError("refused", "Too late to pause: it is being checked");
-      if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}${outgoing && transfer.retry ? " (file resend sends it again)" : ""}`);
+      if (transfer?.state === "failed") {
+        // A second cancel (or decline) of what this side ended answers as the first did, not as an error.
+        if ((action === "cancel" || action === "decline") && endOf(transfer).by === "me") return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? transfer };
+        throw endedFile(fileId, where, transfer, outgoing);
+      }
       // Sent whole (the engine's `sentWhole`): the engine takes no cancel or pause and it ends done, so it is refused, not echoed.
       const whole = outgoing && transfer?.state === "transferring" && (transfer.stage === "verifying"
         || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"));
@@ -463,7 +578,18 @@ export const FILE_METHODS: Record<string, Method> = {
     if ((action === "pause" || action === "resume" || action === "request") && view?.stage === "asking" && view.direction === "in") {
       throw new CliError("refused", "Not taken yet: it waits for you to take it (file accept, or file decline)");
     }
-    await node(ctx).fileAction({ linkId, fileId, action });
+    // Larger than the room this device has left now (`FileDesk.accept`): not started, it keeps waiting for the answer.
+    try {
+      await node(ctx).fileAction({ linkId, fileId, action });
+    } catch (error) {
+      const { room, size, coming } = (error ?? {}) as { room?: unknown; size?: unknown; coming?: unknown };
+      if (action === "accept" && error instanceof Error && typeof room === "number" && error.message.startsWith("No room on this device")) {
+        const comes = typeof coming === "number" ? coming : 0;
+        const holders = comes > 0 ? await roomHolders(state(ctx), fileId) : [];
+        throw new CliError("refused", noRoomWords(fileId, (await fileStore.get(fileId).catch(() => undefined))?.metadata?.name, typeof size === "number" ? size : view?.size ?? 0, room, comes, holders), { reason: "no_room", room });
+      }
+      throw error;
+    }
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
 
@@ -488,7 +614,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // A group's file waiting for a Download has no transfer in the engine's state: its record says it waits.
     const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? waitingGroupFile(stored) ?? stored.transfer;
     // One that ended will not come: its partial bytes were dropped, so "not all here yet" would have a script wait for good.
-    if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
+    if (transfer?.state === "failed") throw endedFile(fileId, stored.linkId.startsWith("group:") ? { group: stored.linkId.slice(6) } : { chat: stored.linkId }, transfer, false);
     // Nor will one that waits for `file accept`: said naming it, as --wait does. It answered "not all here yet (0 of N
     // bytes)" before, and a script retried it for good.
     if (transfer?.state === "transferring" && transfer.stage === "asking" && transfer.direction === "in") {
@@ -500,34 +626,52 @@ export const FILE_METHODS: Record<string, Method> = {
     const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, await voiceTime(ctx, stored)) : stored.metadata.name));
     const force = bool(params, "force");
     // A --path that ends in a separator names a folder: resolve() dropped the slash, and "--path downloads/" with no
-    // downloads folder left a file named downloads. A folder that is there is answered below, as without the slash.
+    // downloads folder left a file named downloads. A folder that is there is answered below, as without the slash. One
+    // that is not hints no --dir: before, it hinted --dir <that folder>, and that failed "No such file or folder".
     const path = str(params, "path");
-    if (path && (path.endsWith("/") || path.endsWith(sep)) && !(await stat(named).catch(() => undefined))?.isDirectory()) {
-      throw new CliError("bad_request", `${path} names a folder: name a file, or use --dir ${named} (dir over the socket)`);
+    if (path && (path.endsWith("/") || path.endsWith(sep))) {
+      const there = await stat(named).catch(() => undefined);
+      if (!there) throw new CliError("not_found", `No such folder: ${named} (make it first, or name a file in a folder that is there)`);
+      if (!there.isDirectory()) throw new CliError("not_found", `${named} is a file, not a folder: name a file in a folder that is there`);
     }
     // A voice message's name is Ghostly's, down to the second its sender claims: two of one second took one name, and
     // the --force the confirm hinted at replaced the first recording with the other. In --dir it steps to a free
     // "<name> (2)", as a browser's Download does; a --path the user named is never renamed.
     const free = !force && !str(params, "path") && !!stored.metadata.voice;
     const ext = extname(named), stem = named.slice(0, named.length - ext.length);
+    // "<name> (n)", its stem shortened when the mark takes it past a name's bytes. Before, a long name (`fitName`) went
+    // past them: its stat failed ENAMETOOLONG, read as free, and the save there failed "too long for this file system".
+    const numbered = (n: number) => {
+      const plain = `${stem} (${n})${ext}`;
+      return Buffer.byteLength(basename(plain)) <= NAME_BYTES ? plain : join(dirname(named), fitName(basename(named), ` (${n})`));
+    };
+    // The next "<name> (n)" a voice message steps to.
+    let next = 2;
     // What is at `target` that the save may not go over, as the error that says so; nothing when it may.
     const taken = async (target: string, code?: string): Promise<CliError | undefined> => {
       const there = await stat(target).catch(() => undefined);
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
-      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${target} (dir over the socket)`);
+      // A voice message in --dir steps past it as past a file: before, it stopped there and named that folder for --dir.
+      if (there?.isDirectory() && free && next <= 1000) return new CliError("confirm", `${target} is a folder`);
+      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use --dir ${shellWord(target, "<the one in details.dir>")} (dir over the socket)`, { dir: target });
       if (!((there && !force) || code === "EEXIST")) return;
       const replace = `${target} exists: pass --force (force: true over the socket) to replace it`;
       if (path) return new CliError("confirm", replace);
+      // A voice message steps on to the next name: no hint is shown. Before, each step looked for one from "(2)" anyway,
+      // ~k²/2 stats at k copies of its name (12-16 s at 999).
+      if (free && next <= 1000) return new CliError("confirm", replace);
       // In --dir the name is its sender's: two files of one name are two files. Before, --force was the one way out
       // named, and it replaced the other. The next free "<name> (2)" is offered, never taken unasked.
       let n = 2;
-      while (n <= 1000 && (await stat(`${stem} (${n})${ext}`).catch(() => undefined))) n += 1;
-      return new CliError("confirm", `${replace}, or --path ${stem} (${n})${ext} (path over the socket) to keep both`);
+      while (n <= 1000 && (await stat(numbered(n)).catch(() => undefined))) n += 1;
+      const other = numbered(n);
+      return new CliError("confirm", `${replace}, or --path ${shellWord(other, "<the one in details.path>")} (path over the socket) to keep both`, { path: other });
     };
     let target = named;
-    for (let n = 2, refused = await taken(target); refused; n += 1, refused = await taken(target)) {
-      if (!free || refused.code !== "confirm" || n > 1000) throw refused;
-      target = `${stem} (${n})${ext}`;
+    for (let refused = await taken(target); refused; refused = await taken(target)) {
+      if (!free || refused.code !== "confirm" || next > 1000) throw refused;
+      target = numbered(next);
+      next += 1;
     }
     // The bytes go beside it first and take its name only once whole: a save that fails (the bytes not on this device, a
     // full disk) leaves no file, and with --force the one it was to replace as it was. Before, --force emptied that file
@@ -576,10 +720,11 @@ export const FILE_METHODS: Record<string, Method> = {
       await out.close();
       out = null;
       // --force over what is there. Else never over a file that appeared meanwhile: a voice message steps on to a free name.
-      for (let n = 2; !complete; n += 1) try { await place(partial, target, force); complete = true; } catch (error) {
+      // It steps on from where the names above left it, never back to "(2)".
+      while (!complete) try { await place(partial, target, force); complete = true; } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         const refused = code === "EEXIST" || code === "EISDIR" || code === "ENOTEMPTY" ? await taken(target, code) : undefined;
-        if (free && refused?.code === "confirm" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
+        if (free && refused?.code === "confirm" && next <= 1000) { target = numbered(next); next += 1; continue; }
         throw refused ?? error;
       }
       // A contact chose its bytes and its name (`.command`, `.lnk`): marked as downloaded. Every save is, as Desktop's:
