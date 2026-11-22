@@ -82,6 +82,38 @@ const au = () => {
   return Buffer.concat([latin(".snd"), u32be(24 + annotation.length), u32be(AU_SOUND.length), u32be(2), u32be(8000), u32be(1), annotation, AU_SOUND]);
 };
 
+// Monkey's Audio, Musepack SV7 and SV8, OptimFROG: APEv2 and ID3v1 tags after their frames, as a TTA's.
+const APE_FRAMES = Buffer.alloc(300, 0x2d);
+const apeTagged = (magic: string) => Buffer.concat([latin(magic), Buffer.alloc(28, 2), APE_FRAMES, apev2(), id3v1()]);
+
+// DSF: an ID3v2 tag at the end, where its header's metadata pointer says.
+const u64le = (n: number) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); return b; };
+const DSD_SOUND = Buffer.alloc(4096, 0x69);
+const dsf = (pointer?: number) => {
+  const fmt = Buffer.concat([latin("fmt "), u64le(52), Buffer.alloc(40, 3)]), data = Buffer.concat([latin("data"), u64le(12 + DSD_SOUND.length), DSD_SOUND]);
+  const id3At = 28 + fmt.length + data.length, size = id3At + id3v2().length;
+  return Buffer.concat([latin("DSD "), u64le(28), u64le(size), u64le(pointer ?? id3At), fmt, data, id3v2()]);
+};
+
+// DSDIFF: a comment, the artist and title in DIIN, an ID3 chunk, around its properties and sound.
+const u64be = (n: number) => { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(n)); return b; };
+const dff = (id: string, body: Buffer) => Buffer.concat([latin(id), u64be(body.length), body, Buffer.alloc(body.length & 1)]);
+const dsdiff = () => {
+  const text = (s: string) => Buffer.concat([u32be(s.length), latin(s)]);
+  const prop = dff("PROP", Buffer.concat([latin("SND "), dff("FS  ", u32be(2822400)), dff("CHNL", Buffer.concat([u16be(2), latin("SLFTSRGT")])), dff("CMPR", Buffer.concat([latin("DSD "), Buffer.from([14]), latin("not compressed"), Buffer.alloc(1)]))]));
+  const comt = dff("COMT", Buffer.concat([u16be(1), Buffer.alloc(12), u32be(PLACE.length), latin(PLACE)]));
+  const diin = dff("DIIN", Buffer.concat([dff("DIAR", text(`Recorded at ${PLACE}`)), dff("DITI", text(PLACE))]));
+  return dff("FRM8", Buffer.concat([latin("DSD "), dff("FVER", u32be(0x01050000)), prop, comt, dff("DSD ", DSD_SOUND), diin, dff("ID3 ", id3v2())]));
+};
+
+// MIDI: copyright, a track's name, a lyric and a marker in meta events, around notes (one in running status) and a SysEx.
+const NOTES = Buffer.from([0x00, 0x90, 0x3c, 0x40, 0x60, 0x3c, 0x00, 0x00, 0xf0, 0x03, 0x7e, 0x09, 0xf7]);
+const meta = (type: number, s: string) => Buffer.concat([Buffer.from([0x00, 0xff, type, s.length]), latin(s)]);
+const midi = () => {
+  const track = Buffer.concat([meta(0x02, `(c) ${PLACE}`), meta(0x03, `Recorded at ${PLACE}`), NOTES, meta(0x05, PLACE), meta(0x06, PLACE), Buffer.from([0x00, 0xff, 0x2f, 0x00])]);
+  return Buffer.concat([iff("MThd", Buffer.from([0, 0, 0, 1, 0, 96])), iff("MTrk", track)]);
+};
+
 // The containers refused: an ASF (WMA, WMV) with a Content Description, an FLV with onMetaData, transport streams,
 // JPEG XL and JPEG 2000 in their boxes.
 const ASF_GUID = Buffer.from("3026b2758e66cf11a6d900aa0062ce6c", "hex");
@@ -162,6 +194,64 @@ describe("the other containers a file is sent in", () => {
     expect(out.length).toBe(file.length);
     expect(Buffer.from(out.subarray(0, 24)).equals(file.subarray(0, 24))).toBe(true);
     expect(contains(out, AU_SOUND)).toBe(true);
+  });
+
+  it("a Monkey's Audio, a Musepack and an OptimFROG go without their APEv2 and ID3v1 tags, their frames untouched", async () => {
+    for (const magic of ["MAC ", "MP+\x17", "MPCK", "OFR "]) {
+      const file = apeTagged(magic);
+      expect(hasPlace(file)).toBe(true);
+      const out = await sent(file, "");
+      expect(hasPlace(out), magic).toBe(false);
+      expect(out.length).toBe(file.length);
+      expect(Buffer.from(out.subarray(0, 32 + APE_FRAMES.length)).equals(file.subarray(0, 32 + APE_FRAMES.length))).toBe(true);
+    }
+  });
+
+  it("a DSF goes without the ID3v2 tag its header points at, however it is typed; its header and sound untouched", async () => {
+    const file = dsf();
+    expect(hasPlace(file)).toBe(true);
+    for (const mime of ["audio/x-dsf", "application/octet-stream", ""]) {
+      const out = await sent(file, mime);
+      expect(hasPlace(out), mime).toBe(false);
+      expect(out.length).toBe(file.length);
+      expect(Buffer.from(out.subarray(0, file.length - id3v2().length + 3)).equals(file.subarray(0, file.length - id3v2().length + 3))).toBe(true);
+    }
+    // A tag its header does not point at (a pointer of 0) is zeros too; a pointer past the file or at no ID3v2 tag is refused.
+    const unpointed = dsf(0), out = await sent(unpointed, "audio/x-dsf");
+    expect(hasPlace(out)).toBe(false);
+    expect(out.length).toBe(unpointed.length);
+    expect(contains(out, DSD_SOUND)).toBe(true);
+    for (const pointer of [dsf().length, 28]) await expect(sent(dsf(pointer), "audio/x-dsf")).rejects.toThrow(NO_AUDIO_METADATA);
+  });
+
+  it("a DSDIFF goes without its COMT, DIIN and ID3 chunks, its properties and sound untouched", async () => {
+    const file = dsdiff();
+    expect(hasPlace(file)).toBe(true);
+    const out = await sent(file, "audio/x-dff");
+    expect(hasPlace(out)).toBe(false);
+    expect(out.length).toBe(file.length);
+    expect(contains(out, dff("DSD ", DSD_SOUND))).toBe(true);
+    for (const kept of ["FVER", "PROP", "FS  ", "CHNL", "CMPR"]) expect(contains(out, latin(kept)), kept).toBe(true);
+    for (const gone of ["COMT", "DIIN", "DIAR", "DITI", "ID3 "]) expect(contains(out, latin(gone)), gone).toBe(false);
+    // A chunk that runs past the file is refused.
+    await expect(sent(file.subarray(0, file.length - 20), "audio/x-dff")).rejects.toThrow(NO_AUDIO_METADATA);
+  });
+
+  it("a MIDI file goes without the text of its meta events, its notes and SysEx untouched", async () => {
+    const file = midi();
+    expect(hasPlace(file)).toBe(true);
+    for (const mime of ["audio/midi", "audio/x-midi", ""]) {
+      const out = await sent(file, mime);
+      expect(hasPlace(out), mime).toBe(false);
+      expect(out.length).toBe(file.length);
+      expect(contains(out, NOTES)).toBe(true);
+      expect(contains(out, Buffer.from([0x00, 0xff, 0x2f, 0x00]))).toBe(true);
+    }
+    // A track cut in an event, or past the file, is refused.
+    const cut = Buffer.from(file);
+    cut.writeUInt32BE(cut.readUInt32BE(18) + 100, 18);
+    await expect(sent(cut, "audio/midi")).rejects.toThrow(NO_AUDIO_METADATA);
+    await expect(sent(file.subarray(0, 30), "audio/midi")).rejects.toThrow(NO_AUDIO_METADATA);
   });
 
   it("an ASF (WMA, WMV), an FLV and a transport stream are refused, never sent with their title or place", async () => {

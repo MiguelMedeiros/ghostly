@@ -13,7 +13,8 @@ const dialDelay = Number(process.env.FAKE_ENDPOINT_DIAL_MS ?? 0)
 const connectDelay = Number(process.env.FAKE_ENDPOINT_CONNECT_MS ?? 0)
 
 function pair(bindingContext) {
-  const ends = [0, 1].map(() => ({ reader: null, pending: [], closeHandler: null, closed: false, buffered: 0, waiting: [] }))
+  // `held`: what reached an end while it was paused, given to its reader once it resumes.
+  const ends = [0, 1].map(() => ({ reader: null, pending: [], closeHandler: null, closed: false, buffered: 0, waiting: [], paused: false, held: [] }))
   const binding = { transport: 'hyperdht/1', context: bindingContext, identities: [] }
   const channel = (self, other) => ({
     get bufferedAmount() { return self.buffered },
@@ -26,10 +27,15 @@ function pair(bindingContext) {
       self.buffered += text.length
       const deliver = () => {
         self.buffered -= text.length
-        if (!other.closed) { if (other.reader) other.reader(text); else other.pending.push(text) }
+        if (!other.closed) { if (other.paused) other.held.push(text); else if (other.reader) other.reader(text); else other.pending.push(text) }
         if (!self.buffered) for (const { resolve } of self.waiting.splice(0)) resolve()
       }
       if (delay) setTimeout(deliver, delay); else queueMicrotask(deliver)
+    },
+    pause() { self.paused = true },
+    resume() {
+      self.paused = false
+      while (!self.paused && self.held.length && self.reader) self.reader(self.held.shift())
     },
     drained() {
       if (!self.buffered) return Promise.resolve()

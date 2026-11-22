@@ -129,7 +129,7 @@ describe("the picture viewer on a touch screen", () => {
 describe("the picture viewer with a mouse and keys", () => {
   it("zooms on a double click and on + / -, and 0 puts it back whole", async () => {
     const { user } = renderApp(<AvatarOpener src={PHOTO} name="Alice"><span>A</span></AvatarOpener>);
-    await user.click(screen.getByRole("button", { name: "View photo of Alice" }));
+    await user.click(screen.getByRole("button", { name: "View photo of \u2068Alice\u2069" }));
     const { image } = layOut();
     fireEvent.pointerDown(image, { pointerId: 1, pointerType: "mouse", button: 0, clientX: 200, clientY: 400 });
     fireEvent.pointerUp(image, { pointerId: 1, pointerType: "mouse", button: 0, clientX: 200, clientY: 400 });
@@ -148,12 +148,12 @@ describe("the picture viewer with a mouse and keys", () => {
 
   it("opens whole again after it was zoomed and closed", async () => {
     const { user } = renderApp(<AvatarOpener src={PHOTO} name="Alice"><span>A</span></AvatarOpener>);
-    await user.click(screen.getByRole("button", { name: "View photo of Alice" }));
+    await user.click(screen.getByRole("button", { name: "View photo of \u2068Alice\u2069" }));
     layOut();
     await user.keyboard("+");
     expect(scale()).toBe(1.5);
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "View photo of Alice" }));
+    await user.click(screen.getByRole("button", { name: "View photo of \u2068Alice\u2069" }));
     expect(scale()).toBe(1);
   });
 });

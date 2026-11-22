@@ -122,14 +122,6 @@ export const INVITE_REFUSAL_MESSAGE = {
   device: "join.device",
 } as const satisfies Record<InviteRefusal, string>;
 
-export function buildInviteCode(
-  seedB: string,
-  pubKeyA: string,
-  encKey: string,
-): string {
-  return `${seedB}/${pubKeyA}/${encKey}`;
-}
-
 /** A link for the other person: opening it joins the chat, and the app takes the keys out of the address at once. */
 export function buildInviteUrl(
   origin: string,

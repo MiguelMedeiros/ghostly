@@ -11,6 +11,7 @@ import { touchOnly } from "../lib/touchOnly";
 import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
 import { problemText, type Problem } from "../lib/problemText";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 import { Notice } from "./ui/Notice";
 import { ReloadButton } from "./ui/ReloadButton";
 import { QR_IMAGE_MAX as IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrFrameReader, qrReaderFailures, readQrImage, scanQrFrames } from "../lib/qrReader";
@@ -271,13 +272,14 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       </button>
       {/* Side by side while each word fits its half; stacked once a larger text size (or a long word) would cut one. */}
       <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3">
-        <button ref={scanButton} disabled={busy} onClick={() => void scan()} className={`${button} border border-border text-text-secondary`}>
+        <FocusSafeButton ref={scanButton} disabled={busy} onClick={() => void scan()} className={`${button} border border-border text-text-secondary`}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><path d="M14 14h3v3h-3z"/></svg>
           {t("join.scan")}
-        </button>
+        </FocusSafeButton>
+        {/* Busy, not disabled: picked from the keys, the field keeps the focus while the picture is read and after a refusal. */}
         <label className={`${button} border border-border text-text-secondary focus-within:ring-2 focus-within:ring-accent ${busy ? "opacity-40" : ""}`}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-          {t("join.image")}<input disabled={busy} aria-label={t("join.image")} type="file" accept="image/*" className="sr-only" onChange={event => { void readImage(event.target.files?.[0]); event.target.value = ""; }} />
+          {t("join.image")}<input aria-disabled={busy || undefined} aria-label={t("join.image")} type="file" accept="image/*" className="sr-only" onClick={event => { if (busyRef.current) event.preventDefault(); }} onChange={event => { void readImage(event.target.files?.[0]); event.target.value = ""; }} />
         </label>
       </div>
       <p className="mt-2 text-center text-xs text-text-secondary">{t("join.pasteScreenshot")}</p>
@@ -291,7 +293,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     </div>}
     {manual && <form className="mt-3" onSubmit={event => { event.preventDefault(); if (!busyRef.current) accept(input.trim()); }}>
       <textarea ref={manualInput} aria-label={onDevice ? t("devices.join.code") : t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-invalid={error && input.trim() ? true : undefined} aria-describedby={error ? errorId : undefined} value={input} onChange={event => { setInput(event.target.value); setError(null); }} placeholder={onDevice ? t("devices.join.codePlaceholder") : t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
-      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><button disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{onDevice ? t("devices.join.anotherButton") : t("join.submit")}</button></div>
+      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><FocusSafeButton disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{onDevice ? t("devices.join.anotherButton") : t("join.submit")}</FocusSafeButton></div>
     </form>}
   </dialog>;
 }

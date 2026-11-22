@@ -198,11 +198,14 @@ export class ProviderSources<P extends Connectable> {
 
   async start() { await this.load(this.mode); this.view = this.idle(); }
 
-  /** One saved secret of the source (a handoff asks whether an LND card pins its certificate, and a Breez phrase), or undefined. */
+  /**
+   * One saved secret of the source (a handoff asks whether an LND card pins its certificate, and a Breez phrase), or
+   * undefined. A connected source reads the secrets it connected with, as `holds` does; one that is not unseals them.
+   */
   async secret(name: string): Promise<string | undefined> {
     const stored = this.stored;
     if (!stored?.secrets) return undefined;
-    const secrets = JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, unknown>;
+    const secrets = (this.provider ? this.secrets : JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? ""))) as Record<string, unknown>;
     const value = secrets[name];
     return typeof value === "string" && value ? value : undefined;
   }

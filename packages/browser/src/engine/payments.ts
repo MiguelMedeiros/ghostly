@@ -1860,8 +1860,11 @@ export class PaymentDesk {
     if (before) { link.sendPaymentResult({ id: payment.id, ok: false, error: before.state === "failed" ? before.error ?? "These notes were already redeemed" : "These notes were already received" }); return; }
     // Before anything is written down or the federation asked (reading the notes asks no one): not redeemed, the contact takes them back.
     if (!this.roomForPayment(linkId)) { link.sendPaymentResult({ id: payment.id, ok: false, error: PAYMENTS_BUSY }); return; }
+    // A request to the group names no federation, so notes never pay it: naming it, they are a plain payment.
+    const requestId = this.paysRequest(payment.requestId, linkId);
+    const paysGroup = !!requestId && !!this.payments.get(requestId)?.group;
     // The federation's network, read as the chat line reads it (unknown is test sats): every reader of the record says the same.
-    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: this.paysRequest(payment.requestId, linkId), federation: found.federation, token: notes, notesDigest: digest, network: fedimintNetwork(network) });
+    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: paysGroup ? undefined : requestId, federation: found.federation, token: notes, notesDigest: digest, network: fedimintNetwork(network) });
     await this.finishRedeem(this.payments.get(payment.id)!);
   }
 

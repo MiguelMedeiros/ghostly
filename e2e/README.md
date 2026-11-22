@@ -84,8 +84,10 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47098 | Cashu mint on a real LND node (`cashubtc/mintd`, with a peer: `support/mint-lnd-regtest`) | `GHOSTLY_MINT_LND_URL` (gate `GHOSTLY_MINT_LND_REGTEST`) |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
+| 47120 (+47121 TCP, 47122 UDP media) | LiveKit SFU (`livekit/livekit-server:v1.13.11 --dev`, key `devkey`): group calls (WISP 602) | `GHOSTLY_LIVEKIT_URL` |
+| 47123 | Group-call token mock (`e2e/infra/sfu-token`, WISP 602's checks, roster set by a test with `PUT /test/roster/<g>`), answering for `https://sfu.ghostly.test`; specs start with `test.skip(!process.env.GHOSTLY_SFU_URL, …)` | `GHOSTLY_SFU_URL`, `GHOSTLY_SFU_ORIGIN` |
 
-The last two are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
+47100 and 47110-47119 are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
 another runner reading that file (the scenario matrix, 47300-47399) keeps its own defaults. The domain-proof
 servers (`support/domain.ts`, DoH and well-known, in the test process) have no port here: each listens on a free one
 the system gives it.
@@ -527,6 +529,7 @@ contracts in 37 s, Playwright (2 workers, one retry) in 39 minutes, inside the w
 ## Writing one
 
 For Desktop, use `test` and `app` from `support/desktop.ts`: `app.text(selector)` returns null until something matches, so wait with `expect.poll`. For the browser clients, use `test` and `peer` from `support/fixtures.ts` (or `extensionPeer` / `webPeer` from `support/extension.ts`), `link(a, b)` to put two people in a chat and `connect(a, b)` to wait for the peer-to-peer link. Look for text in the conversation with `chat(peer)`, since the chat list previews the last message too. Prefer what a person sees (titles, labels, text); add a `data-testid` to the app when there is nothing else to hold on to.
+A helper that loads the app again (a `reload` after setting something it reads as it starts) waits with `openApp(page, name, () => page.reload())`, as `openPeer` does for the first load: on a machine whose network changes under Chromium (another e2e's docker containers coming and going), a load it aborted with `net::ERR_NETWORK_CHANGED` before the app drew is done again, at most twice, with a `↻ … reloaded` line in the log (`support/bootReload.ts`). Any other failure still fails at once.
 
 Say what it covers: `{ tag: ["@feature:<id>"] }` with ids from [`features.json`](features.json), plus `"@gated"` when it needs infrastructure that is not always there. `npm run test:map` checks the tags on every pull request; see [docs/TESTING.md](../docs/TESTING.md).
 

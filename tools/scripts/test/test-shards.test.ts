@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ALONE, WORKERS, packages, slowWarnings, split, staleWarning } from "../test-shards.mjs";
+import { ALONE, WORKERS, packages, slowWarnings, split, staleWarning, unlistedAlone } from "../test-shards.mjs";
 
 const unit = (id: string, files: string[], alone = false) => ({ id, dir: id, files, alone });
 
@@ -103,5 +103,14 @@ describe("the packages shards", () => {
   it("need a shard for each file that runs alone", () => {
     expect(() => split([unit("long", ["long"], true), unit("other", ["other"], true)], {}, 1)).toThrow(/at least 2 shards/);
     expect(split([unit("long", ["long"], true), unit("a", ["a1"])], {}, 1)[0].units.map((u) => u.id)).toEqual(["long", "a"]);
+  });
+
+  it("leave out a file that runs alone while tools/scripts/quarantine.json holds it, and still refuse one that is gone", () => {
+    const [long] = ALONE;
+    // Quarantined, Vitest lists it nowhere: the nightly runs it, and the shards plan without it.
+    expect(unlistedAlone([unit("cli", ["packages/cli/test/a.test.ts"])], [long])).toEqual([]);
+    // Renamed or removed, with no quarantine: a name to fix in ALONE.
+    expect(unlistedAlone([unit("cli", ["packages/cli/test/a.test.ts"])], [])).toEqual([long]);
+    expect(unlistedAlone([unit(long, [long], true)], [])).toEqual([]);
   });
 });

@@ -13,6 +13,7 @@ import { setAppOpener } from "../../lib/apps/open";
 import type { AppOpener } from "../../lib/apps/open";
 import { appWithContact, chatApp, chatAppOver, requestOpenInChat, takeOpenRequest, updateChatApp, useChatAppCovers } from "../../lib/apps/running";
 import { saveSession } from "../../lib/storage";
+import { translatorFor } from "../../locales";
 import type { ChatSession } from "../../lib/types";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { Route, Routes, useLocation } from "react-router-dom";
@@ -255,7 +256,7 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
 
     // Opened again from the chat (its card, or + → Apps): the same app, not a new one.
     await user.click(within(app).getByTestId("mini-app-back"));
-    let again: "shown" | void = undefined;
+    let again: "shown" | "superseded" | void = undefined;
     await act(async () => { again = await open(REF, "link-1"); });
     expect(app).toBeVisible();
     expect(started).toHaveLength(1);
@@ -348,6 +349,62 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     } finally {
       width.mockRestore();
       vi.unstubAllGlobals();
+    }
+  });
+
+  it("widened past a phone's width with still no room beside the chat, keeps Back over it with the focus on it", async () => {
+    // A phone-width window made wider (a window resized, a tablet turned): no longer a phone, but the chat's page is
+    // 604 px, too narrow beside the app. Back was dropped for one render before the page was measured, the focus went
+    // into the panel then, and stayed there when Back came back.
+    let phone = true;
+    const changes: (() => void)[] = [];
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === MOBILE_QUERY
+      ? ({ ...matchMedia(query), get matches() { return phone; }, addEventListener: (_: string, listener: () => void) => { changes.push(listener); }, removeEventListener: () => {} } as unknown as MediaQueryList)
+      : matchMedia(query));
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 604 : 0; });
+    try {
+      panel();
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(app).toHaveAttribute("data-place", "phone");
+      const back = within(app).getByTestId("mini-app-back");
+      expect(back).toHaveFocus();
+      // Back never left the header on the way: the same button is still there, with the focus.
+      const dropped: Node[] = [];
+      const watch = new MutationObserver((records) => { for (const record of records) dropped.push(...record.removedNodes); });
+      watch.observe(app, { childList: true, subtree: true });
+      act(() => { phone = false; for (const change of changes) change(); });
+      for (const record of watch.takeRecords()) dropped.push(...record.removedNodes);
+      watch.disconnect();
+      expect(app).toHaveAttribute("data-place", "wide");
+      expect(dropped).not.toContain(back);
+      expect(within(app).getByTestId("mini-app-back")).toBe(back);
+      expect(back).toHaveFocus();
+    } finally {
+      width.mockRestore();
+    }
+  });
+
+  it("widened past a phone's width with room beside the chat, sits beside it with the focus in the panel", async () => {
+    let phone = true;
+    const changes: (() => void)[] = [];
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === MOBILE_QUERY
+      ? ({ ...matchMedia(query), get matches() { return phone; }, addEventListener: (_: string, listener: () => void) => { changes.push(listener); }, removeEventListener: () => {} } as unknown as MediaQueryList)
+      : matchMedia(query));
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) { return this.classList.contains("chat-pane") ? 1006 : 0; });
+    try {
+      panel();
+      await act(() => open(REF, "link-1"));
+      const app = screen.getByTestId("mini-app");
+      expect(within(app).getByTestId("mini-app-back")).toHaveFocus();
+      act(() => { phone = false; for (const change of changes) change(); });
+      expect(app).toHaveAttribute("data-place", "beside");
+      expect(within(app).queryByTestId("mini-app-back")).not.toBeInTheDocument();
+      expect(app).toHaveFocus();
+    } finally {
+      width.mockRestore();
     }
   });
 
@@ -539,11 +596,24 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     windowIs(false);
     panel();
     const t = ((key: string, vars: Record<string, string>) => key === "apps.view.with" ? `${vars.title} with ${vars.name}` : key === "apps.view.withSharing" ? `${vars.title} · sharing a file with ${vars.name}` : key) as never;
-    expect(appWithContact("Chess", "link-1", t)).toBe("Chess with Ana");
-    expect(appWithContact("Chess", "link-1", t, true)).toBe("Chess · sharing a file with Ana");
+    expect(appWithContact("Chess", "link-1", t)).toBe("⁨Chess⁩ with ⁨Ana⁩");
+    expect(appWithContact("Chess", "link-1", t, true)).toBe("⁨Chess⁩ · sharing a file with ⁨Ana⁩");
     expect(appWithContact("Chess", null, t, true)).toBe("Chess");
     expect(appWithContact("Chess", null, t)).toBe("Chess");
     expect(appWithContact("Chess", "link-other", t)).toBe("Chess");
+  });
+
+  it("in every language, a Desktop app window's title keeps an RTL contact's name and a title ending in punctuation each in its own direction", () => {
+    windowIs(false);
+    renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "سارة", named: true }} peerKey="peer" />);
+    for (const language of ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"] as const) {
+      const t = translatorFor(language);
+      for (const serving of [false, true]) {
+        const title = appWithContact("Hunt!", "link-1", t, serving);
+        expect(title, language).toBe(t(serving ? "apps.view.withSharing" : "apps.view.with", { title: "⁨Hunt!⁩", name: "⁨سارة⁩" }));
+        expect(title.split("⁨"), language).toHaveLength(3);
+      }
+    }
   });
 });
 

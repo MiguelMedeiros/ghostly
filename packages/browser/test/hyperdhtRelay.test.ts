@@ -69,8 +69,13 @@ it("accepts only wss:// relays, and ws:// to this machine", () => {
   expect(relayUrlProblem("not a url")).toMatch(/relay address/);
   // Only the server's address: the endpoint tells it to every contact as its relay.
   for (const bad of ["wss://alice:hunter2@relay.example", "wss://alice@relay.example", "wss://relay.example/?token=s3cr3t", "wss://relay.example/?",
-    "wss://relay.example/#s3cr3t", "ws://alice:hunter2@127.0.0.1:49443/", `wss://relay.example/${"a".repeat(256)}`])
+    "wss://relay.example/#s3cr3t", "ws://alice:hunter2@127.0.0.1:49443/"])
     expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+  // A relay address all the same, one too long: said as what to do, not as a typo to look for in it.
+  for (const long of [`wss://relay.example/${"a".repeat(256)}`, `wss://${"a".repeat(121)}`, `ws://127.0.0.1:49443/${"a".repeat(101)}`])
+    expect(relayUrlProblem(long)).toBe(`Use a shorter relay address: ${long}`);
+  // A login is refused for what it is, however long the address.
+  expect(relayUrlProblem(`wss://alice@relay.example/${"a".repeat(256)}`)).toBe(`Not a relay address: wss://alice@relay.example/${"a".repeat(256)}`);
 });
 
 it("never names a relay with a login or a token in its descriptor, saved before that was refused", async () => {
@@ -80,7 +85,8 @@ it("never names a relay with a login or a token in its descriptor, saved before 
 
 it("names its relay as a contact reads it: a scheme pasted in capitals goes as wss://, an address a contact drops is refused", async () => {
   // A contact keeps a descriptor only with a relay `relayUrl` reads, and drops the whole descriptor otherwise.
-  for (const bad of ["wss://relay.example/my relay", `wss://${"a".repeat(121)}`, "ws://LOCALHOST:49443"]) expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+  for (const bad of ["wss://relay.example/my relay", "ws://LOCALHOST:49443"]) expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+  expect(relayUrlProblem(`wss://${"a".repeat(121)}`)).toBe(`Use a shorter relay address: wss://${"a".repeat(121)}`);
   expect(relayUrlProblem("WSS://relay.example")).toBeNull();
   const endpoint = await web(relay.url.replace("ws://", "WS://"));
   expect(endpoint.descriptor).toMatchObject({ relay: relay.url });
@@ -456,7 +462,7 @@ it("frees the slot of a client that neither listens nor dials, one that stops an
   await vi.waitFor(() => expect(own.stats().accepted).toBe(3));
   await Promise.all([deafClosed, silentClosed, halfClosed]);
   expect(answer).toMatch(/^HTTP\/1\.1 408/);
-  expect(reasons).toEqual(expect.arrayContaining(["dropped no pong", "dropped idle"]));
+  expect(reasons).toEqual(expect.arrayContaining(["dropped no pong: no answer to the last ping by the next, 300 ms later (GHOSTLY_RELAY_PING_MS)", "dropped idle: no listen and no dial for 1500 ms (GHOSTLY_RELAY_IDLE_MS)"]));
   expect(own.stats().clients).toBe(1);
   // The browser listens, answers pings, and stays.
   await new Promise(resolve => setTimeout(resolve, 2000));
@@ -635,7 +641,7 @@ it("holds at most `streams` HyperDHT streams for a client while it stays: a dial
   expect(own.stats().dropped).toBe(0);
   dial(4);
   await dialer.closed;
-  expect(reasons).toContain("dropped stream limit");
+  expect(reasons).toContain("dropped stream limit: 3 streams open at once (GHOSTLY_RELAY_STREAMS)");
   expect(own.stats().dropped).toBe(1);
   await vi.waitFor(() => expect(open(accepted)).toBe(0), { timeout: 15_000 });
   // The listener was never dropped and still holds its three.
@@ -718,7 +724,7 @@ it("holds at most `queuedBytes` that a client has not read: one that reads gets 
     const stalled = await client();
     stalled.link.up.pause();
     go[stalled.at]();
-    await vi.waitFor(() => expect(reasons).toContain("dropped queue"), { timeout: 10_000 });
+    await vi.waitFor(() => expect(reasons).toContain("dropped queue: 4 MiB waiting for the client and its far peers (GHOSTLY_RELAY_QUEUED_BYTES)"), { timeout: 10_000 });
     expect(own.stats().dropped).toBe(1);
     expect(written[stalled.at]).toBeLessThan(total / 2);
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -797,8 +803,10 @@ it("holds at most `queuedTotalBytes` unread over all clients: past it the one ho
     for (const one of stalled) { one.link.up.pause(); go[one.at](); }
     // The reader gets a whole fast transfer meanwhile.
     go[reader.at]();
-    await vi.waitFor(() => expect(reasons.filter(reason => reason === "dropped queue total")).toHaveLength(3), { timeout: 60_000 });
-    expect(reasons).not.toContain("dropped queue");
+    // The first line of a kind names its limit: counted by kind.
+    const kind = (reason: string) => reason.split(":")[0];
+    await vi.waitFor(() => expect(reasons.filter(reason => kind(reason) === "dropped queue total")).toHaveLength(3), { timeout: 60_000 });
+    expect(reasons.filter(reason => kind(reason) === "dropped queue")).toEqual([]);
     for (const one of stalled) expect(written[one.at]).toBeLessThan(perClient / 2);
     await vi.waitFor(() => expect(reader.got.bytes).toBe(total), { timeout: 60_000 });
     expect(own.stats().dropped).toBe(3);
@@ -974,7 +982,7 @@ it("keeps a client's other chats reachable, both ways, while one chat's contact 
     const into = await dials(contact, chat2);
     expect({ out, into }).toEqual({ out: Array(6).fill("ok"), into: Array(6).fill("ok") });
     // The flood is refused past chat 1's share, and the operator sees it; nobody is dropped.
-    expect(reasons).toContain("refused handshake listen share");
+    expect(reasons).toContain("refused handshake listen share: 16 incoming handshakes waiting on one key, a quarter of GHOSTLY_RELAY_HANDSHAKES");
     expect(own.stats().dropped).toBe(0);
   } finally {
     flooding = false;

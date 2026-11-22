@@ -47,6 +47,56 @@ describe("a backup that fails", () => {
     await expect(backup(paths, { exportSnapshot })).rejects.toThrow();
     expect(readdirSync(paths.db)).toEqual([]);
   });
+
+  // A folder it may not write: the backup fails to open its half-written file there, after the store's export. A name
+  // too long for that file (`<path>.partial-<pid>-<hex>`, as it was) also failed to remove it, and kept the store.
+  const locked = (paths: ReturnType<typeof profile>) => {
+    mkdirSync(join(paths.dir, "ro"), { mode: 0o500 });
+    return join(paths.dir, "ro", "out.ghostly-backup");
+  };
+
+  it("into a folder it may not write leaves no store behind, and fails with the open's error on --out's name", async () => {
+    const paths = profile("backup-locked-folder");
+    const store = { exportSnapshot: async (path: string) => writeFileSync(path, "STORE", { mode: 0o600 }) };
+    const out = locked(paths);
+    await expect(BACKUP_METHODS["profile.backup"]({ runtime: { paths, store } } as unknown as ApiContext, { path: out, noPassphrase: true }))
+      .rejects.toMatchObject({ code: "EACCES", syscall: "open", path: out });
+    expect(readdirSync(paths.db)).toEqual([]);
+    expect(readdirSync(join(paths.dir, "ro"))).toEqual([]);
+  });
+
+  it("into a folder it may not write, the process leaving meanwhile, still removes the store", async () => {
+    const paths = profile("backup-locked-folder-exit");
+    let exported!: () => void, release!: () => void;
+    const ready = new Promise<void>((done) => { exported = done; }), gate = new Promise<void>((done) => { release = done; });
+    const exportSnapshot = async (path: string) => { writeFileSync(path, "STORE", { mode: 0o600 }); exported(); await gate; };
+    const running = BACKUP_METHODS["profile.backup"]({ runtime: { paths, store: { exportSnapshot } } } as unknown as ApiContext, { path: locked(paths), noPassphrase: true });
+    running.catch(() => {});
+    await ready;
+    // What the process's exit runs, the backup still under way.
+    const removeLeft = process.listeners("exit").find((listener) => listener.name === "removeLeft") as () => void;
+    expect(removeLeft).toBeTypeOf("function");
+    expect(() => removeLeft()).not.toThrow();
+    expect(readdirSync(paths.db)).toEqual([]);
+    release();
+    await expect(running).rejects.toThrow();
+  });
+});
+
+describe("a backup's start", () => {
+  it("removes a half-written backup beside --out that a process gone since left, and not a live one's", async () => {
+    const paths = profile("backup-partial-dead");
+    const out = join(paths.dir, "out.ghostly-backup");
+    // As older CLIs named it, and as this one does (any backup's into the folder); a live process's (this one's parent) stays.
+    writeFileSync(`${out}.partial-999999999`, "STORE", { mode: 0o600 });
+    writeFileSync(`${out}.partial-999999999-0a1b2c3d4e5f`, "STORE", { mode: 0o600 });
+    writeFileSync(join(paths.dir, ".ghostly-backup-999999999-0a1b2c3d4e5f.partial"), "STORE", { mode: 0o600 });
+    writeFileSync(`${out}.partial-${process.ppid}-0a1b2c3d4e5f`, "LIVE", { mode: 0o600 });
+    writeFileSync(join(paths.dir, `.ghostly-backup-${process.ppid}-0a1b2c3d4e5f.partial`), "LIVE", { mode: 0o600 });
+    writeFileSync(join(paths.dir, "other.partial-999999999-0a1b2c3d4e5f"), "OTHER", { mode: 0o600 });
+    await backup(paths, { exportSnapshot: async (path) => writeFileSync(path, "STORE", { mode: 0o600 }) });
+    expect(readdirSync(paths.dir).sort()).toEqual([`.ghostly-backup-${process.ppid}-0a1b2c3d4e5f.partial`, "db", "files", "other.partial-999999999-0a1b2c3d4e5f", `out.ghostly-backup`, `out.ghostly-backup.partial-${process.ppid}-0a1b2c3d4e5f`]);
+  });
 });
 
 describe("a profile's start", { timeout: 120_000 }, () => {
@@ -70,9 +120,15 @@ describe("a profile's start", { timeout: 120_000 }, () => {
   });
 });
 
-describe("a one-shot backup stopped with Ctrl-C", { timeout: 120_000 }, () => {
-  it("leaves neither the store in db/ nor the half-written backup beside --out", async () => {
-    const dir = home("backup-interrupt");
+describe("a one-shot backup stopped", { timeout: 120_000 }, () => {
+  // Ctrl-C exits 130 with the `interrupted` error; a service manager's stop, `timeout` and a dropped SSH session
+  // (SIGTERM, SIGHUP) still end it by that signal, as before, its files removed first.
+  it.each([
+    ["SIGINT", 130, null],
+    ["SIGTERM", null, "SIGTERM"],
+    ["SIGHUP", null, "SIGHUP"],
+  ] as const)("by %s leaves neither the store in db/ nor the half-written backup beside --out", async (signal, code, ended) => {
+    const dir = home(`backup-interrupt-${signal}`);
     const paths = profilePaths(dir, "default");
     ok(await ghostly(["--home", dir, "status"]));
     mkdirSync(paths.files, { recursive: true });
@@ -89,13 +145,14 @@ describe("a one-shot backup stopped with Ctrl-C", { timeout: 120_000 }, () => {
     mkdirSync(outDir);
     const run = new Running(["--home", dir, "profile", "backup", "--out", join(outDir, "b.ghostly-backup"), "--no-passphrase"], { NODE_OPTIONS: `--require "${slow}"` });
     const until = Date.now() + 60_000;
-    while (!readdirSync(outDir).some((name) => name.includes(".partial-"))) {
+    while (!readdirSync(outDir).some((name) => name.endsWith(".partial"))) {
       if (run.child.exitCode !== null || Date.now() > until) throw new Error(`no backup under way\n${run.stderr}\n${JSON.stringify(run.lines)}`);
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     expect(readdirSync(paths.db).some((name) => name.startsWith("backup-store-"))).toBe(true);
-    run.child.kill("SIGINT");
-    expect(await run.exited(20_000)).toBe(130);
+    run.child.kill(signal);
+    expect(await run.exited(20_000)).toBe(code);
+    expect(run.child.signalCode).toBe(ended);
     expect(readdirSync(paths.db).filter((name) => name.startsWith("backup-store-"))).toEqual([]);
     expect(readdirSync(outDir)).toEqual([]);
   });

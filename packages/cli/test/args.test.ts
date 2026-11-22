@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { liftGlobals, nearest, parseArgs } from "../src/args";
 import { idSlot, numberSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
+import { sats } from "../src/commands/shared";
 import { GhostlyHttpError, TYPING_KINDS, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
@@ -32,6 +33,62 @@ describe("the argument parser", () => {
     for (const argv of [["--lable", "work"], ["--lable"]]) {
       expect(() => parseArgs(argv, credential.options!, idSlot(credential)), argv.join(" ")).toThrow(/Unknown option --lable \(did you mean --label\?\)/);
     }
+  });
+
+  it("does not print a pasted private key, or a long word, as the unknown option's name", () => {
+    const body = Array.from({ length: 6 }, (_, i) => `b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW${i}`);
+    const openssh = ["-----BEGIN OPENSSH PRIVATE KEY-----", ...body, "-----END OPENSSH PRIVATE KEY-----"].join("\n");
+    const pgp = ["-----BEGIN PGP PRIVATE KEY BLOCK-----", "", ...body, "=Zx3a", "-----END PGP PRIVATE KEY BLOCK-----"].join("\n");
+    const long = `--${"x".repeat(410)}`;
+    const add = { signer: { type: "string" as const, description: "" } };
+    const send = TEXT_COMMANDS.send;
+    for (const [argv, spec, slot, command, shown] of [
+      [["ssh", openssh, "--signer", "ssh-keygen"], add, undefined, "identity add", /^Unknown option \(a private key\) for ghostly identity add/],
+      [["pgp", pgp], add, undefined, "identity add", /^Unknown option \(a private key\) for ghostly identity add/],
+      [["ssh", long], add, undefined, "identity add", /^Unknown option \(a 412-character word\) for ghostly identity add/],
+      [["alice", openssh], send.options, idSlot(send), "send", /^Unknown option \(a private key\) for ghostly send/],
+    ] as const) {
+      let message = "";
+      try { parseArgs(argv, spec, slot, { command, text: command === "send" }); } catch (error) { message = (error as Error).message; }
+      expect(message).toMatch(shown);
+      expect(message).toMatch(/never paste a private key|character word/);
+      for (const line of [...body, "x".repeat(40)]) expect(message).not.toContain(line);
+    }
+  });
+
+  it("does not print a long or secret-looking word a value refusal quotes", () => {
+    const cashu = `cashuB${"o2FteBtodHRwczovL21pbnQuZXhhbXBsZS5jb20".repeat(2)}`;
+    const nwc = "nostr+walletconnect://abc?relay=wss://r&secret=0123456789abcdef";
+    const seed = "abandon ability able about above absent absorb abstract absurd abuse access accident";
+    const refusals: [() => unknown, RegExp][] = [
+      [() => sats(cashu), /^<sats> takes a whole number from 1 up, not \(a Cashu token\)$/],
+      [() => sats(seed), /^<sats> takes a whole number from 1 up, not \(a 84-character word\)$/],
+      [() => sats("abc"), /^<sats> takes a whole number from 1 up, not "abc"$/],
+      [() => positionals(COMMANDS["wallet create"], [nwc]), /^<type> takes .*, not \(a wallet connection link\)$/],
+      [() => positionals(COMMANDS["chat transport"], ["foo", cashu]), /^<transport> takes .*, not \(a Cashu token\)$/],
+      [() => parseArgs(["--limit", cashu], { limit: { type: "number", description: "" } }), /^--limit takes a number, not \(a Cashu token\)$/],
+      [() => parseArgs(["--net", "nsec1abc"], { net: { type: "string", description: "", choices: ["a", "b"] } }), /^--net takes a or b, not \(a private key\)$/],
+      [() => parseArgs(["--net", "line\nbreak"], { net: { type: "string", description: "", choices: ["a", "b"] } }), /^--net takes a or b, not \(a 10-character word\)$/],
+    ];
+    for (const [refuse, shown] of refusals) {
+      let message = "";
+      try { refuse(); } catch (error) { message = (error as Error).message; }
+      expect(message).toMatch(shown);
+      for (const secret of [cashu, nwc, seed, "nsec1abc", "line\nbreak"]) expect(message).not.toContain(secret);
+    }
+  });
+
+  it("quotes no typed value whole in a refusal: every one goes through shownValue", async () => {
+    const { readdir, readFile } = await import("node:fs/promises");
+    const root = resolve(__dirname, "../src");
+    const files = (await readdir(root, { recursive: true })).filter((file) => file.endsWith(".ts"));
+    const echoes: string[] = [];
+    for (const file of files) {
+      for (const [i, line] of (await readFile(resolve(root, file), "utf8")).split("\n").entries()) {
+        if (/not \$\{[^}]*JSON\.stringify/.test(line)) echoes.push(`${file}:${i + 1}`);
+      }
+    }
+    expect(echoes).toEqual([]);
   });
 
   it("takes a draft that starts with a dash (identity complete, the #357 failure)", () => {
@@ -189,7 +246,7 @@ describe("the argument parser", () => {
   it("refuses a long word that starts with a dash as fast as a short one", () => {
     const send = TEXT_COMMANDS.send, long = `-${"a".repeat(100_000)}`;
     const started = performance.now();
-    expect(() => parseArgs(["bob", long], send.options, idSlot(send), { command: "send", text: true })).toThrow(/^Unknown option -a+ for ghostly send/);
+    expect(() => parseArgs(["bob", long], send.options, idSlot(send), { command: "send", text: true })).toThrow(/^Unknown option \(a 100001-character word\) for ghostly send/);
     expect(nearest(long.slice(1), Object.keys(COMMANDS))).toBeUndefined();
     expect(performance.now() - started).toBeLessThan(100);
     expect(nearest(`wait${"x".repeat(2)}`, ["wait", "wai"])).toBe("wait");
@@ -467,6 +524,19 @@ describe("the argument parser", () => {
       expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
       // A kind no typing takes: before, the API answered after the profile opened ("kind must be one of …", exit 1).
       usage(name, [target, "--kind", "foo"], "--kind takes typing, recording or thinking, not \"foo\"");
+      // The status and a stop's kind or status, as `status set` checks its text: before, the API answered after the
+      // profile opened (`bad_request`, exit 1) in its socket words, with no count.
+      usage(name, [target, "--status", "x".repeat(41)], "--status is up to 40 characters, not 41 characters");
+      usage(name, [target, "--status", "see https://x.example"], "--status is plain text: no link or markup");
+      usage(name, [target, "--status", "\u202E\u200B"], "--status needs a character that shows");
+      usage(name, [target, "--stop", "--kind", "thinking"], "--kind goes with a start, not with --stop");
+      usage(name, [target, "--stop", "--status", "done"], "--status goes with a start, not with --stop");
+      // Blank is no status, as "" is: it was refused as "no link or markup".
+      for (const status of ["   ", "\t \n", ""]) {
+        expect(params(name, [target, "--status", status]), JSON.stringify(status)).toMatchObject({ status: undefined, stop: false });
+        expect(params(name, [target, "--stop", "--status", status])).toMatchObject({ status: undefined, stop: true });
+      }
+      expect(params(name, [target, "--status", "Reading the thread"])).toMatchObject({ status: "Reading the thread" });
       usage(name, [target, "--kind", ""], "--kind takes typing, recording or thinking, not \"\"");
       expect(COMMANDS[name].options!.kind.choices).toEqual(TYPING_KINDS);
       expect(params(name, [target, "--kind", "recording"])).toMatchObject({ kind: "recording" });
@@ -516,7 +586,7 @@ describe("the argument parser", () => {
     usage("file send", ["alice", "a.wav", "--voice", "2000", "--peaks", "a,b"], `${peaks} "a,b"`);
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", "1,,2"], `${peaks} "1,,2"`);
     usage("file send", ["alice", "a.wav", "--voice", "--peaks", ""], `${peaks} ""`);
-    usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} "${new Array(129).fill(1).join(",")}"`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} (a 257-character word)`);
     usage("file send", ["alice", "a.wav", "--peaks", "1,2"], "--peaks is a voice note's waveform: not without --voice");
     // A file that is there: `file send` looks at it before the profile opens.
     const sound = import.meta.filename;

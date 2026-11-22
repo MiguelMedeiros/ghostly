@@ -170,6 +170,31 @@ describe("Settings, Network: Iroh relays", () => {
     expect(field).toHaveAccessibleDescription("Não é um endereço de relay: relay.example.org");
     expect(field).toHaveFocus();
   });
+
+  // A relay address past what a contact reads (`relayUrl`) is one: "not a relay address" sent the person looking for a
+  // typo in it. Said as what to do, in the app's language, for the Iroh list and the HyperDHT relay alike.
+  it("asks for a shorter address when a relay is too long for contacts, not that it is no relay address", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+    engine.on("updateSettings", ({ settings }) => {
+      const problem = (settings as { irohRelays?: string[] }).irohRelays?.map(irohRelayProblem).find(Boolean);
+      if (problem) throw new Error(problem);
+    });
+    const long = `https://${"a".repeat(60)}.example.com/${"p".repeat(60)}`;
+    const field = screen.getByTestId("network-iroh-relays");
+    await user.clear(field);
+    await user.type(field, long);
+    await user.click(screen.getByTestId("network-save"));
+    expect(field).toHaveAccessibleDescription(`Use um endereço de relay mais curto: ${long}`);
+    expect(field).toHaveFocus();
+    await user.clear(field);
+    await user.type(field, DEFAULTS.join("\n"));
+    const hyperdht = screen.getByTestId("network-hyperdht-relay");
+    const longWss = `wss://${"a".repeat(60)}.example.com/${"p".repeat(60)}`;
+    await user.type(hyperdht, longWss);
+    await user.click(screen.getByTestId("network-save"));
+    expect(hyperdht).toHaveAccessibleDescription(`Use um endereço de relay mais curto: ${longWss}`);
+  });
 });
 
 describe("Settings, Network: push relay", () => {
@@ -194,8 +219,10 @@ describe("Settings, Network: push relay", () => {
     expect(screen.getByTestId("network-push-relay")).toHaveValue(RELAY);
     expect(screen.queryByTestId("network-push-relay-refused")).toBeNull();
     act(() => engine.update({ pushRelayRefused: refused }));
+    // A 403 is the relay not letting this app in: the next step names this app's origin, for whoever runs the relay.
     expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
-      "The last wake-up through this relay failed: it did not answer as a push relay (HTTP 403). Contacts whose app is closed are not woken through it.The relay said: “Origin not allowed”");
+      `The last wake-up through this relay failed: the relay does not let this app in (HTTP 403). Ask whoever runs it to add ${window.location.origin} to its allowed origins (GHOSTLY_RELAY_ORIGINS). Until then, contacts whose app is closed are not woken through it.The relay said: “Origin not allowed”`);
+    expect(screen.getByTestId("network-push-relay-refused").querySelector("p bdi")?.textContent).toBe(window.location.origin);
     // The relay's words are its own: kept apart from the sentence's direction.
     expect(screen.getByTestId("network-push-relay-said").querySelector("bdi")?.textContent).toBe("Origin not allowed");
     // A web page at that address says nothing of its own.
@@ -218,11 +245,38 @@ describe("Settings, Network: push relay", () => {
       "The last wake-up through this relay was turned away: it was at its limit (HTTP 429). It wakes contacts again once it has room.The relay said: “Too many”");
   });
 
+  it("a working relay that cannot reach the push service (502 with its own words) is said to be the relay's side, not a wrong address", () => {
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http: 502, text: "The push service did not answer" } });
+    renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "The last wake-up through this relay failed: the relay answered, but could not reach the push service (HTTP 502). The problem is on the relay's side, not in this setting: ask whoever runs it. Until then, contacts whose app is closed are not woken through it.The relay said: “The push service did not answer”");
+  });
+
+  it("a 502-504 with no words of the relay's own (a proxy's page) and other statuses keep the line that it did not answer as a push relay", () => {
+    for (const [http, text] of [[503, undefined], [504, undefined], [404, "Not found"], [500, "Oops"]] as const) {
+      fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http, ...(text && { text }) } });
+      const { unmount } = renderApp(<NetworkSettings />);
+      expect(screen.getByTestId("network-push-relay-refused"), String(http)).toHaveTextContent(`it did not answer as a push relay (HTTP ${http})`);
+      unmount();
+    }
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http: 503, text: "The push service did not answer" } });
+    renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay-refused")).toHaveTextContent("could not reach the push service (HTTP 503)");
+  });
+
+  it("an address that answers without CORS (another kind of server, a proxy's error page) is said not to be a push relay this app can read", () => {
+    fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: { url: RELAY, at: 1, http: 0 } });
+    renderApp(<NetworkSettings />);
+    expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
+      "The last wake-up through this relay failed: something answers at this address, but not as a push relay this app can read (no CORS). It may be another kind of server, such as a HyperDHT relay, or a proxy's error page while the relay is down. Contacts whose app is closed are not woken through it.");
+    expect(screen.queryByTestId("network-push-relay-said")).toBeNull();
+  });
+
   it("pt: says it in the app's language, the relay's words as it gave them", () => {
     fakeEngine.update({ transport, settings: { relays: RELAYS, pushRelay: RELAY }, pushRelayRefused: refused });
     renderApp(<NetworkSettings />, { language: "pt" });
     expect(screen.getByTestId("network-push-relay-refused").textContent).toBe(
-      "O último despertar por este relay falhou: ele não respondeu como um relay de push (HTTP 403). Contatos com o app fechado não são acordados por ele.O relay disse: “Origin not allowed”");
+      `O último despertar por este relay falhou: o relay não deixa este app entrar (HTTP 403). Peça a quem o mantém para adicionar ${window.location.origin} às origens permitidas (GHOSTLY_RELAY_ORIGINS). Até lá, contatos com o app fechado não são acordados por ele.O relay disse: “Origin not allowed”`);
   });
 });
 

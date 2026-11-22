@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { request as httpRequest } from "node:http";
 import { createServer as createNetServer, Server as NetServer, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { GhostlyHttpError, LIMITS, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { keepServing } from "../src/host";
 import type { ApiContext } from "../src/api";
 import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, OPENED_SERVICE_CSP_RELAY_ONLY, openServiceServer, ownCookies, SERVICE_METHODS, SERVICE_NEEDS_DAEMON, SERVICE_OPEN_OFF_RELAY_ONLY, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
@@ -293,6 +293,17 @@ describe("an opened service's host and link", () => {
     expect(page.headers["x-served-by"]).toBe("atlas");
     for (const name of ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"]) expect(page.headers[name], name).toBeUndefined();
     expect(page.headers["content-security-policy"]).toBe(`default-src 'self'; img-src *, script-src 'self', ${OPENED_SERVICE_CSP}`);
+  });
+
+  it("the page's browser features are Ghostly's viewer policy, not the contact's: its own Permissions-Policy or Feature-Policy cannot allow the camera, a device or the location", async () => {
+    const { service, cookie } = await opened(async (request) => answer(200, request.path === "/own"
+      ? [["content-type", "text/html"], ["Permissions-Policy", "camera=*, microphone=*, geolocation=*, usb=*"], ["feature-policy", "camera *"]]
+      : [["content-type", "text/html"]], ["<p>hi</p>"]));
+    for (const path of ["/", "/own"]) {
+      const page = await get(service, path, { cookie });
+      expect(page.headers["permissions-policy"], path).toBe(VIEWER_PERMISSIONS_POLICY);
+      expect(page.headers["feature-policy"], path).toBeUndefined();
+    }
   });
 
   it("the policy keeps pictures, frames and every other load off plain http too, and leaves inline scripts and styles working", () => {

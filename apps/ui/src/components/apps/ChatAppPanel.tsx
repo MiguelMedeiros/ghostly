@@ -6,7 +6,8 @@ import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
 import { takedownText, useAppOpener } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
-import { chatApp, registerAppSlot, setChatApp, setChatAppNarrow, updateChatApp, useChatApp, useChatAppNarrow, type AppContact } from "../../lib/apps/running";
+import { ownDirection } from "../../lib/ownDirection";
+import { chatApp, noteChoice, registerAppSlot, setChatApp, setChatAppNarrow, updateChatApp, useChatApp, useChatAppNarrow, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
 import { AppGlyph } from "./AppIcon";
@@ -76,8 +77,13 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
 
   // No room beside the chat (a tablet held upright, a narrow window): the app covers it, as a full-screen app does.
   const narrow = useChatAppNarrow(linkId);
+  // Whether the page was last measured on a phone, where it is not measured: a window just widened past a phone's width
+  // has its page measured only after that render, and the app stays over the chat until then. Drawn beside it for that
+  // one render, Back went and came back, and the focus was left in the panel instead of on Back.
+  const [measuredOnPhone, setMeasuredOnPhone] = useState(phone);
   useEffect(() => {
     const pane = root.current?.parentElement;
+    setMeasuredOnPhone(phone);
     if (phone || !pane) { setChatAppNarrow(linkId, false); return; }
     // 0: not laid out (a chat kept loaded off screen): as it was, measured again as it shows. Cleared there, each time the
     // person left the chat and came back the whole chat was drawn twice, and laid out once beside the app for nothing.
@@ -95,8 +101,9 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   const shown = !!app?.shown;
   const full = app?.view === "full";
   // Back to the chat: on a phone, and for a full-screen app or one with no room beside the chat at every width.
-  const withBack = phone || full || narrow;
-  const wide = !phone && (full || narrow || !!app?.wide);
+  const over = narrow || measuredOnPhone;
+  const withBack = phone || full || over;
+  const wide = !phone && (full || over || !!app?.wide);
   const title = app?.title ?? "";
   const modal = shown && phone;
 
@@ -258,7 +265,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
           {t("apps.view.openAgain")}
         </button>
       )}
-      {shown && app?.stopped && againHere?.error && <p role="alert" data-testid="mini-app-open-again-error" className="m-0 px-6 py-2 text-center text-sm text-danger-ink">
+      {shown && app?.stopped && againHere?.error && <p role="alert" dir={ownDirection(againHere.error)} data-testid="mini-app-open-again-error" className="m-0 px-6 py-2 text-center text-sm text-danger-ink">
         {againHere.error}
       </p>}
       <div ref={box} data-testid="mini-app-frame" className="chat-app-frame" />
@@ -275,14 +282,19 @@ function TabTrap({ root }: { root: RefObject<HTMLElement | null> }) {
 /**
  * On a phone, an app the person went Back from: still running, one tap away, under the chat's header. While it serves
  * a file to the contact, it says so here too (WISP 1200 § A read lane to the contact): the panel's header is hidden.
- * One that stopped meanwhile (a takedown, the watchdog) says "Stopped" here, and why once it is shown.
+ * One that stopped meanwhile (a takedown, the watchdog) says "Stopped" here, and why once it is shown; a screen reader
+ * is told why as it stops, the focus left in the chat.
  */
 export function ChatAppResume({ linkId }: { linkId: string }) {
   const { t } = useI18n();
   const app = useChatApp(linkId);
   if (!app || app.shown) return null;
+  // The person's newest choice in this chat: another app's Open still on its way here (its files downloading) starts
+  // nothing once it finishes, instead of stopping this one and taking its place.
+  const resume = () => { noteChoice(linkId); updateChatApp(linkId, { shown: true }); };
   return (
-    <button type="button" data-testid="mini-app-resume" data-serving={app.serving || undefined} onClick={() => updateChatApp(linkId, { shown: true })}
+    <>
+    <button type="button" data-testid="mini-app-resume" data-serving={app.serving || undefined} onClick={resume}
       className="flex w-full items-center gap-2 px-4 py-2 bg-panel-header border-b border-border text-[13px] font-medium text-accent hover:bg-surface-hover cursor-pointer shrink-0 text-start">
       <AppGlyph size={16} />
       <span className="min-w-0 flex-1">
@@ -300,5 +312,10 @@ export function ChatAppResume({ linkId }: { linkId: string }) {
       </span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="m9 18 6-6-6-6" /></svg>
     </button>
+    {/* Why it stopped, said politely while the person stays in the chat: the panel's own line is hidden with it, and the
+        way back's "Stopped" was only drawn. A line that is there, empty, since the way back showed, as a live region must
+        be before what it says; the focus stays where the person is. */}
+    <span role="status" data-testid="mini-app-resume-said" className="sr-only">{app.stopped ? takedownText(app.title, app.stopped, t) : null}</span>
+    </>
   );
 }

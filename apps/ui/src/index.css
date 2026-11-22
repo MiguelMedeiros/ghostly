@@ -384,6 +384,19 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
+/* Locked (components/LockScreen.tsx): a print of the page (Ctrl+P, Save as PDF) is the lock screen only. On screen the
+   app kept under it is out of sight; on paper the whole document is laid out, its text with it. Hidden, not removed:
+   `!important` over an element that makes itself `visible`. */
+@media print {
+  html[data-locked] body,
+  html[data-locked] body :not([data-lock-screen], [data-lock-screen] *) {
+    visibility: hidden !important;
+  }
+  html[data-locked] [data-lock-screen] {
+    visibility: visible !important;
+  }
+}
+
 /* An app opened from the iPhone home screen (iOS 26): with nothing in the page's flow (the body is fixed on
    phones), WebKit sizes the viewport as the screen less the status bar, and draws nothing in a band as tall as
    the status bar at the bottom, under the tab bar and the composer. A document as tall as the screen gets it all.
@@ -533,6 +546,15 @@ html[data-standalone="true"] {
 .call-resize {
   top: calc(1rem + env(safe-area-inset-top));
   left: calc(1rem + env(safe-area-inset-left));
+}
+
+/* The group call's tiles (its grid, or the shared screen and the faces beside it): 1rem from the sides past the notch
+   or Dynamic Island of a phone on its side, where the window is the wide layout and 16 px put a tile's muted mark under
+   it. They end 1rem above the controls, which a phone lifts over its home bar (see below). */
+.call-tiles {
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+  padding-bottom: 8rem;
 }
 
 .call-mini .call-resize {
@@ -689,6 +711,27 @@ html[data-standalone="true"] {
   font-size: 11px;
 }
 
+/* A group call's mic or camera that did not come on (GroupCallView), in the small window: its title on three lines at
+   most, just above the controls as the share notice, after the corner button (30 px at 8 px), and the next step only
+   said. Centred over the whole width with that step, a phone's 190 × 136 window began it above its top, the title cut
+   off ("…desligado"), the corner button over it. */
+.call-mini .call-group-error {
+  bottom: 54px;
+  left: 46px;
+  right: 8px;
+  width: auto;
+  max-width: none;
+  translate: none;
+}
+
+.call-mini .call-group-error > :first-child {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
 /* The whole window lets a notice's words run onto a second line; the small one has room for one, cut short. */
 .call-mini .call-notice-words {
   overflow: hidden;
@@ -810,6 +853,12 @@ html[data-standalone="true"] {
 
   .call-mini .call-share-error {
     bottom: 100px;
+  }
+
+  /* After the 44 px corner button at 4 px. */
+  .call-mini .call-group-error {
+    bottom: 76px;
+    left: 56px;
   }
 }
 
@@ -989,6 +1038,12 @@ html[data-standalone="true"] {
     bottom: calc(2.5rem + env(safe-area-inset-bottom));
   }
 
+  /* The group call's tiles end 1rem above those controls (72 px, hang up's height). A fixed 8rem left a home bar's
+     34 px under them: the muted mark and "You" sat on the microphone button. */
+  .call-tiles {
+    padding-bottom: calc(2.5rem + 72px + 1rem + env(safe-area-inset-bottom));
+  }
+
   /* An incoming call takes the whole screen, answer buttons within thumb reach. */
   .incoming-call {
     display: flex;
@@ -1064,9 +1119,12 @@ html[data-standalone="true"] {
 
 /* A phone on its side with the keyboard up leaves 150-175px: a pinned message's bar and a reply or edit bar between the
    chat's header and the field took it all, and the field went under the keyboard. The pinned bar goes behind the
-   keyboard, as the tab bar does, and the reply or edit bar says who and what on one line. */
+   keyboard, as the tab bar does, and the reply or edit bar says who and what on one line. So does the offline or
+   reconnecting line under the header (`chat-banner`): with a reply the list was 0px tall and the field 6px under the
+   keyboard at 667×375. */
 @media (pointer: coarse) and (max-height: 500px) {
-  html[data-keyboard="true"] .pinned-bar { display: none; }
+  html[data-keyboard="true"] .pinned-bar,
+  html[data-keyboard="true"] .chat-banner { display: none; }
   html[data-keyboard="true"] .composer-quote { margin-bottom: 4px; }
   html[data-keyboard="true"] .composer-quote .quote-body { flex-direction: row; align-items: baseline; gap: 6px; padding-block: 2px; }
   html[data-keyboard="true"] .composer-quote .quote-body > :first-child:not(:last-child) { flex-shrink: 0; max-width: 50%; }
@@ -1459,7 +1517,7 @@ html .toast-place.toast-place-page[data-at="top"] {
  * Motion that rests (lib/windowAway.ts). The loops below say something is under way; while the window is away
  * (hidden, or not the focused one: behind others, on another workspace) nobody is looking, so they hold still and go
  * on when it is back. Only loops are listed: a finite animation (a bubble coming in) must finish, or it would leave
- * its element half shown. A new loop goes here too (test/idleMotion.test.ts checks the stylesheets).
+ * its element half shown. A new loop goes here too (test/app/idleMotion.test.tsx checks the stylesheets).
  */
 :root[data-away] :is(.animate-spin, .animate-pulse, .typing-dots > span, .profile-switch-badge,
   .voice-bar-dot, .voice-slide-arrow, .new-wallet-spinner, .pi-packet),
@@ -1707,9 +1765,12 @@ button[data-held] { opacity: 0.4; }
 }
 /* A chat's search with the keyboard up on a short screen (a phone on its side): the chat's header, the search bar and
    the composer took all the keyboard leaves, and "1 of 8" showed no message. While the search has the focus, the
-   composer goes behind the keyboard and the bar keeps only its buttons' height. */
+   composer goes behind the keyboard and the bar keeps only its buttons' height. The other way round, a reply or an edit
+   written while the search is open: the search bar goes behind the keyboard, as the pinned bar does, or the list was
+   0px tall and the field 30px under the keyboard. */
 @media (pointer: coarse) and (max-height: 500px) {
   html[data-keyboard="true"]:has(.chat-search-bar:focus-within) [data-composer] { display: none; }
+  html[data-keyboard="true"]:has([data-composer]:focus-within) .chat-search-bar { display: none; }
   html[data-keyboard="true"] .chat-search-bar:focus-within { padding-block: 0; }
 }
 

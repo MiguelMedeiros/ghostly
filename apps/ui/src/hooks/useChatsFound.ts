@@ -6,7 +6,7 @@ const NONE: ReadonlySet<string> = new Set();
 
 /**
  * How long a search stays as answered after what it asked about changed: a chat catching up changes many times a second,
- * and the engine reads a changed chat's whole history again for each answer.
+ * and each answer is one more trip to the engine, which reads the rows that changed.
  */
 const ASK_AGAIN_MS = 250;
 

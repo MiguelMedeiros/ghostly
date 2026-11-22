@@ -58,3 +58,27 @@ describe("site access to a local host taken back in Chrome", () => {
     expect(shared()).toEqual(["atlas", "notes"]);
   });
 });
+
+describe("site access to a local host taken back, for a profile not running", () => {
+  const WORK = "work000000";
+  const listed = (ns: string) => world.within("page", async () => (await import("../src/localAllowList.ts")).allowedOrigins(ns));
+  const allowed = (ns: string, origin: string) => world.within("page", async () => (await import("../src/localAllowList.ts")).localOriginAllowed(ns, origin));
+
+  it("takes that host's addresses off every profile's list: a grant for another profile does not bring them back", async () => {
+    await world.within("page", async () => {
+      const list = await import("../src/localAllowList.ts");
+      await list.allowLocalOrigin("", "http://127.0.0.1:3400");
+      await list.allowLocalOrigin(WORK, "http://127.0.0.1:5000");
+      await list.allowLocalOrigin(WORK, "http://localhost:3400");
+    });
+    world.revokeHostAccess("http://127.0.0.1/*");
+    await settle();
+    expect(await listed(WORK), "an address at another host stays").toEqual(["http://localhost:3400"]);
+    expect(await listed("")).toEqual([]);
+    // The running profile's person shares an app at that host again: Chrome grants the host for every profile.
+    const host = await world.load("page", async () => (await import("../src/host.ts")).extensionHost);
+    expect(await host.requestLocalAccess!("http://127.0.0.1/*", "http://127.0.0.1:3400")).toBe(true);
+    expect(await allowed("", "http://127.0.0.1:3400")).toBe(true);
+    expect(await allowed(WORK, "http://127.0.0.1:5000"), "Work's person never allowed it again").toBe(false);
+  });
+});

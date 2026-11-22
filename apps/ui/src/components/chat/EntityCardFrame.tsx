@@ -12,7 +12,7 @@ export const cardQuiet =
 /**
  * One card under a message's text: a mark, what it is, one line of who or what, and whatever the card shows and
  * does below. Drawn inside the bubble, so it reads on either bubble colour (see e2e/web/bubble-contrast.spec.ts); the
- * small label and subtitle at 80%, the least that keeps 4.5:1 on every theme's sent bubble (entityCardContrast.test.tsx).
+ * small label and subtitle at 80%, the least that keeps 4.5:1 on every theme's sent bubble (entityCards.test.tsx).
  */
 export function EntityCardFrame({ testId, mark, label, title, subtitle, children, data }: {
   testId: string; mark: ReactNode; label: string; title: ReactNode; subtitle?: ReactNode; children?: ReactNode;

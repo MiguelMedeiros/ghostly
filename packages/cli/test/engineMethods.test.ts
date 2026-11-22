@@ -22,6 +22,20 @@ it("prints a new invoice without its mint quote id, which could mint the ecash i
   expect(hideSecretFields("walletQuoteInvoice", melt)).toEqual(melt);
 });
 
+it("prints a group call's pass without its token or TURN passwords, which let anyone into the call as this member, unless --show-secret", () => {
+  const pass = {
+    url: "wss://sfu.example", token: "eyJ.pass", room: "r", identity: "k", expiresIn: 600,
+    iceServers: [{ urls: "turn:turn.example:3478", username: "u", credential: "turn-password" }, { urls: "stun:stun.example" }],
+  };
+  expect(hideSecretFields("groupCallToken", pass)).toEqual({
+    ...pass, token: "<hidden>",
+    iceServers: [{ urls: "turn:turn.example:3478", username: "u", credential: "<hidden>" }, { urls: "stun:stun.example" }],
+  });
+  expect(hideSecretFields("groupCallToken", pass, true)).toEqual(pass);
+  const { iceServers: _, ...bare } = pass;
+  expect(hideSecretFields("groupCallToken", bare)).toEqual({ ...bare, token: "<hidden>" });
+});
+
 it("says what each call takes as rpc.ts types it", () => {
   expect(ENGINE_PARAMS).toEqual(engineShapes(source));
   expect(ENGINE_PARAMS.renameLink).toBe("{ linkId, label }");

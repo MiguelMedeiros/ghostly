@@ -1,15 +1,22 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within, render } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createChatInvite, encodeCommunityLink, encodeGroupEntryLink, inviteLink, randomBytes, toBase64Url, toZ32 } from "@ghostly/core";
+import { afterEach, beforeEach, describe, expect, it, vi, afterAll, type MockInstance } from "vitest";
+import { createChatInvite, encodeCommunityLink, encodeGroupEntryLink, inviteLink, randomBytes, toBase64Url, toZ32, DidError } from "@ghostly/core";
 import { neventEncode, npubEncode } from "nostr-tools/nip19";
 import { MessageBubble } from "../../components/MessageBubble";
 import { ensureSession, listSessions, updateSessionLabel } from "../../lib/storage";
-import { groupView, linkView } from "../fakeEngine";
+import { groupView, linkView, fakeEngine, type StatePatch } from "../fakeEngine";
 import { lookup } from "../i18n/locales";
-import { receivedView } from "../identities/views";
+import { receivedView, identitiesView } from "../identities/views";
 import { renderApp } from "../render";
 import type { Language } from "../../lib/settings";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { EntityCardFrame } from "../../components/chat/EntityCardFrame";
+import { loadIdentityProviders } from "@ghostly/browser/proofs/load";
+import { providerOf } from "../../lib/identities";
+import { Profiler } from "react";
 
 // covers: chat.cards.invite, chat.cards.group, chat.cards.nostr, chat.cards.identity, invite.own, invite.rejoin
 
@@ -334,8 +341,12 @@ describe("Nostr cards", () => {
   it("draws what the person wrote in its own direction: their name, about and note", async () => {
     const pubkey = hex(), id = hex();
     const profile = bubble(`nostr:${npubEncode(pubkey)}`, { language: "ar" });
-    profile.engine.on("nostrLookup", () => ({ fetchedAt: 0, relays: ["wss://relay.one.example"], found: true, profile: { name: "Alice (dev)", about: "مرحبا بكم!", hasPicture: false, eventAt: 0, eventId: "e" } }));
+    profile.engine.on("nostrLookup", () => ({ fetchedAt: 0, relays: ["wss://relay.one.example"], found: true, profile: { name: "Alice (dev)", handle: "alice", nip05: "_@example.com", about: "مرحبا بكم!", hasPicture: false, eventAt: 0, eventId: "e" } }));
     await profile.user.click(screen.getByTestId("entity-nostr-load"));
+    // In Arabic "@alice · npub…" was drawn with its "@" past the npub, "_@example.com" with its "_@" past NIP-05
+    // (measured in Chromium): each is a run of its own.
+    expect((await screen.findByText("@alice")).tagName).toBe("BDI");
+    expect(screen.getByText("_@example.com")).toHaveAttribute("dir", "ltr");
     // In the app's direction, "Alice (dev)" in Arabic was drawn "(Alice (dev", an Arabic about in English with its "!" at the far end.
     const title = (await screen.findByTestId("entity-nostr-title")).closest("p")!;
     expect(title).toHaveAttribute("dir", "auto");
@@ -504,5 +515,158 @@ describe("identity cards", () => {
     const { engine } = bubble("did:web:mine.example.com", { mine: true });
     act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: true } }));
     expect(within(screen.getByTestId("entity-identity")).getByTestId("entity-identity-resolve")).toBeInTheDocument();
+  });
+});
+
+// covers: app.accessibility
+describe("EntityCardFrame: the label and the subtitle", () => {
+  /**
+   * A card's small label and its "From …"/"You sent" line are 11-12 px text in a tint of the text colour, on the card's
+   * own tint over the bubble. They read at 4.5:1 or more on both bubbles of every theme, dark and light (at 65% they
+   * were 3.54:1 on classic dark's sent bubble). The tints are read from the frame's classes, the colours from index.css.
+   */
+  const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8");
+
+  const rgb = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  const luminance = (c: number[]) => {
+    const [r, g, b] = c.map(v => v / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a: number[], b: number[]) => { const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  const over = (top: number[], alpha: number, base: number[]) => top.map((v, i) => v * alpha + base[i] * (1 - alpha));
+
+  function themes(): [string, { text: string; received: string; sent: string }][] {
+    const found = new Map<string, { text: string; received: string; sent: string }>();
+    for (const [, mode, color, body] of CSS.matchAll(/\[data-theme="(dark|light)"\]\[data-color-theme="(\w+)"\]\s*\{([^}]*)\}/g)) {
+      const token = (name: string) => body.match(new RegExp(`--theme-${name}:\\s*(#[0-9a-f]{6});`))?.[1];
+      const [text, received, sent] = [token("text-primary"), token("received-bg"), token("sent-bg")];
+      if (text && received && sent && !found.has(`${color} ${mode}`)) found.set(`${color} ${mode}`, { text, received, sent });
+    }
+    return [...found];
+  }
+
+  const alpha = (el: Element, kind: "text" | "bg") => {
+    const match = el.getAttribute("class")!.match(new RegExp(`(?:^|\\s)${kind}-text-primary(?:/(\\d+))?(?:\\s|$)`));
+    expect(match, `${kind}-text-primary on ${el.getAttribute("class")}`).not.toBeNull();
+    return match![1] ? Number(match![1]) / 100 : 1;
+  };
+
+  const { container } = render(<EntityCardFrame testId="card" mark={null} label="Chat invite" title="Private chat" subtitle="You sent" />);
+  const card = container.querySelector("[data-entity-card]")!;
+  const [label, , subtitle] = [...card.querySelectorAll("p")];
+
+  it("the scan finds all four colour themes, dark and light", () => {
+    expect(themes().map(([name]) => name).sort()).toEqual(
+      ["classic dark", "classic light", "cyan dark", "cyan light", "monochrome dark", "monochrome light", "purple dark", "purple light"]);
+  });
+
+  it.each(themes())("read at 4.5:1 or more on %s's received and sent bubbles", (_, { text, received, sent }) => {
+    for (const bubble of [received, sent]) {
+      const back = over(rgb(text), alpha(card, "bg"), rgb(bubble));
+      for (const line of [label, subtitle])
+        expect(contrast(over(rgb(text), alpha(line, "text"), back), back), `${line.textContent} on ${bubble}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
+
+// covers: chat.cards.identity, app.i18n
+describe("a DID card whose lookup found no usable document says why in the app's language", () => {
+  /*
+   * A DID card in a message says what it resolved in the app's language, but a lookup that found no usable document
+   * said why in English in every language: "No DID document at https://…/did.json" for a did:web whose server has none,
+   * "… is not JSON", and "This DID lists no Ed25519, secp256k1 or P-256 key …" for a document with no key that can sign.
+   * The Add dialog's preview said them the same way.
+   */
+
+  const DID = "did:web:example.org";
+  const URL_ = "https://example.org/.well-known/did.json";
+
+  // Nothing leaves this machine: the lookup fails as the resolver throws it, before any fetch.
+  let fetch: MockInstance<typeof globalThis.fetch>;
+  beforeEach(() => { fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("offline in tests")); });
+  afterEach(() => fetch.mockRestore());
+  // A plain function, set once: the card's translated provider keeps the preview it was first made with, and the
+  // config restores spies after each test.
+  let failure: Error = new Error("unset");
+  let real: unknown;
+  const failWith = (e: Error) => {
+    failure = e;
+    const subject = providerOf("did")!.subject as { preview?: unknown };
+    if (real === undefined) { real = subject.preview; subject.preview = async () => { throw failure; }; }
+  };
+  afterAll(() => { if (real !== undefined) (providerOf("did")!.subject as { preview?: unknown }).preview = real; });
+
+  it.each([
+    ["no did.json", `No DID document at ${URL_}`],
+    ["a did.json that is not JSON", `${URL_} is not JSON`],
+    ["a document with no key that can sign", "This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign"],
+  ])("%s, in Arabic", async (_case, english) => {
+    await loadIdentityProviders();
+    failWith(new DidError(english));
+    const { user } = renderApp(<MessageBubble message={{ id: "m1", text: DID, sender: "me", timestamp: 1_700_000_000_000 }} peerNick="Alice" peerPubKey="peer" />, { language: "ar" });
+    const card = screen.getByTestId("entity-identity");
+    await user.click(within(card).getByTestId("entity-identity-resolve"));
+    const error = await within(card).findByTestId("entity-identity-error");
+    expect(error.textContent).not.toMatch(/No DID document|is not JSON|lists no|cannot sign/);
+    // The address stays, as a value.
+    if (english.includes(URL_)) expect(error).toHaveTextContent(URL_);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+// covers: chat.cards.identity, chat.cards.nostr, chat.cards.group
+describe("entity cards on an engine state", () => {
+  /**
+   * The cards under a message (a DID, an npub, a group link) read the engine's state. The engine sends it anew on every
+   * change, up to 20 times a second while a file moves: a card draws again only when what it shows changes.
+   */
+
+  const DID_KEY = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+  const NPUB = npubEncode("a".repeat(64));
+  const g = toBase64Url(randomBytes(16)), host = toZ32(randomBytes(32));
+  const RELAYS = ["wss://relay.one.example"];
+  /** The state as the engine sends it after a change elsewhere: the same content, every object new. */
+  const sentAgain = (patch: StatePatch = {}) => act(() => fakeEngine.setState({ ...structuredClone(fakeEngine.state), ...patch } as StatePatch));
+  const transfer = (i: number): StatePatch => ({ transfers: { [`file-${i}`]: { state: "transferring", transferred: i * 1000, size: 10_000 } } });
+  const nostr = (relays: string[]): StatePatch => ({ nostr: { own: [], settings: { relays, autoLoadProfiles: false, publish: false } } });
+
+  function cards() {
+    let draws = 0;
+    const text = (id: string, t: string) => <MessageBubble message={{ id, text: t, sender: "peer", timestamp: 1_700_000_000_000 }} peerNick="Alice" peerPubKey="peer" />;
+    renderApp(<Profiler id="cards" onRender={() => { draws++; }}>
+      {text("m1", `my id ${DID_KEY}`)}
+      {text("m2", `follow nostr:${NPUB}`)}
+      {text("m3", encodeGroupEntryLink({ g, host }))}
+    </Profiler>);
+    return { draws: () => draws };
+  }
+
+  it("are not drawn again when nothing they show changed", async () => {
+    fakeEngine.setState({ ...nostr(RELAYS), groups: [groupView({ id: g, name: "Book club", status: "active" })] });
+    const { draws } = cards();
+    // The identity providers load once (not part of the app's first load): their draw is not counted.
+    await act(() => loadIdentityProviders());
+    expect(await screen.findByText("Book club")).toBeVisible();
+    const before = draws();
+    for (let i = 0; i < 5; i++) sentAgain(transfer(i));
+    // A group's change the card does not show (a new message in it) draws nothing either.
+    sentAgain({ groups: [groupView({ id: g, name: "Book club", status: "active", lastMessageAt: 5, lastPeerMessageAt: 5 })] });
+    expect(draws() - before).toBe(0);
+  });
+
+  it("are drawn again when what they show changes", async () => {
+    fakeEngine.setState(nostr(RELAYS));
+    cards();
+    const identity = screen.getByTestId("entity-identity");
+    expect(identity).toHaveAttribute("data-standing", "none");
+    sentAgain({ links: [linkView({ peerPubKeyZ32: "peer", identities: identitiesView({ received: [receivedView({ id: "did", provider: "did", subject: DID_KEY })] }) })] });
+    expect(identity).toHaveAttribute("data-standing", "verified");
+    expect(within(screen.getByTestId("entity-nostr")).getByTestId("entity-nostr-where")).toHaveTextContent("relay.one.example");
+    sentAgain(nostr(["wss://relay.two.example"]));
+    expect(within(screen.getByTestId("entity-nostr")).getByTestId("entity-nostr-where")).toHaveTextContent("relay.two.example");
+    expect(screen.getByTestId("entity-group")).not.toHaveAttribute("data-member");
+    sentAgain({ groups: [groupView({ id: g, name: "Book club", status: "active" })] });
+    expect(screen.getByTestId("entity-group")).toHaveAttribute("data-member", "true");
+    expect(screen.getByTestId("entity-group")).toHaveTextContent("Book club");
   });
 });

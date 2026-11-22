@@ -16,6 +16,7 @@ import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
 import { FaceCorner, IdentityMenuItem, IdentityStack } from "../components/identities/ContactMarks";
 import { shownContactName, useChosenProfile, useContactFace } from "../components/identities/contactFace";
+import { providerLabel } from "../lib/identities";
 import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
@@ -35,7 +36,7 @@ import { openOnArrow } from "../lib/menuButton";
 import { fillNames } from "../lib/fillNodes";
 import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
-import { LinkQrDialog } from "../components/chat/LinkQrDialog";
+import { CopiedStatus, LinkQrDialog } from "../components/chat/LinkQrDialog";
 import { CallNoPathNotice } from "../components/CallNoPathNotice";
 import { ChatConnection } from "../components/ChatConnection";
 import { focus } from "../lib/connection";
@@ -139,12 +140,13 @@ import { appCardsShown, panelCard, routineStacksReader } from "../lib/statusCard
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { usePageShown } from "../hooks/usePageShown";
-import { clearChatNotification } from "../lib/notifications";
+import { clearChatNotification, clearExtensionNotices } from "../lib/notifications";
 import { closeWakeNotices } from "../lib/wakePush";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
+import { refusalLine, useDhtOnly } from "../lib/delivery";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -225,6 +227,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         : null,
     [session, sharedNick],
   );
+  // Whose choice keeps this chat on DHT only, if anyone's: what a refusal of a text too long for the DHT says to do.
+  const dhtOnly = useDhtOnly(params?.peerPubKeyB64);
 
   const {
     messages,
@@ -340,6 +344,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const callDevices = useCallDevices(webrtc);
 
   const callState = webrtc.callState;
+  const offerSent = webrtc.offerSent;
   const previousCallState = useRef(callState);
   // A call's window and its ring say "Calling..." and "Connected" to a screen reader, and go as the call ends: the
   // line the call left ("Audio call declined", "Missed audio call") is said then, once, since the chat's call lines
@@ -367,9 +372,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (!quiet(callState) && quiet(before)) pauseForCall();
     // A muted chat still rings (lib/chatMute.ts, MUTE_SILENCES).
     if (callState === "incoming") return callRings(sessionId) ? startRinging("ring") : undefined;
-    if (callState === "offering") return startRinging("ringback");
+    // Ours rings back once its offer went out (`offerSent`): not while the microphone or camera prompt is open, when
+    // nothing rings the contact yet. The call window says "Calling..." meanwhile.
+    if (callState === "offering") return offerSent ? startRinging("ringback") : undefined;
     if (callState === "idle" && before !== "idle") playSound("hangup");
-  }, [callState, sessionId]);
+  }, [callState, offerSent, sessionId]);
   // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
   // The call that rings is its offer's, not the contact's latest signal (lib/lockedRing.ts, `ringingCall`).
   const ringing = ringingCall(webrtc.ringingOffer);
@@ -659,8 +666,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   };
 
   // The invite is a secret: copied marked, as the invite card's Copy. A refused copy shows the link (the invite's QR
-  // dialog) to copy by hand, never copied unmarked.
+  // dialog) to copy by hand, never copied unmarked. A copy empties the last Copied first, so a second one is said again.
   const handleCopyCode = async (text: string) => {
+    setCodeCopied(false);
     try {
       await copySecret(text);
     } catch {
@@ -839,6 +847,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (confirmDelete) {
       deleteSession(params.sessionId);
       setChatFolder(params.sessionId, undefined);
+      // Chrome keeps the extension's notifications past the page: a click on one opened a chat that is not there.
+      void clearExtensionNotices(params.sessionId);
       stopPlayingFrom(chatPath(params.sessionId), true);
       // The chat list keeps its own copy: without this it shows the deleted chat until its next refresh.
       window.dispatchEvent(new Event("session-updated"));
@@ -1030,7 +1040,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               {/* The contact's status (WISP 401 § Presence and status), and the dot's words for a screen reader; a phone shows the emoji. */}
               {paired && <PeerPresenceLine peerKey={params.peerPubKeyB64} testId="chat-presence" emojiOnPhone className="max-w-[40%] text-xs" />}
               {paired && !phoneHeader && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
-                footer={face ? t("chat.shownWith", { provider: face.providerName, key: truncatedPeerKey }) : undefined} />}
+                footer={face ? t("chat.shownWith", { provider: providerLabel(face.provider, t), key: truncatedPeerKey }) : undefined} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
               </div>
@@ -1109,10 +1119,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                   contact arrives, and this stays the way to copy the invite again until the chat is live. */}
               {inviteCode && !pairedReady && (
                 <MenuItem testId="chat-copy-invite" onClick={() => { handleCopyCode(inviteShareText(inviteCode)); closeMenu(); }}
-                  icon={codeCopied
-                    ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-accent"><polyline points="20 6 9 17 4 12" /></svg>
-                    : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>}>
-                  {codeCopied ? t("common.copied") : t("sidebar.copyInvite")}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>}>
+                  {t("sidebar.copyInvite")}
                 </MenuItem>
               )}
               {/* The invite card and its QR go with the first message: until the chat is live this shows the QR again. */}
@@ -1163,6 +1171,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             <MuteMenu chat={sessionId} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
             <TranslateMenu chat={sessionId} open={showTranslate} onClose={() => setShowTranslate(false)} anchorRef={menuRef} />
             <ChatFolderMenu chat={sessionId} open={showFolders} onClose={() => setShowFolders(false)} anchorRef={menuRef} returnFocus={optionsRef} />
+            {/* ⋮ → Copy invite closes the menu on the same click: its Copied is said out here. */}
+            <CopiedStatus copied={codeCopied} />
           </div>
         </div>
       </div>
@@ -1175,7 +1185,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
         <CallNoPathNotice iceServers={engine.state?.settings.iceServers} returnFocus={optionsRef} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
       )}
-      <ChatSearchBar search={search} />
+      <ChatSearchBar search={search} nameOf={m => nameOf(m.sender === "me" ? "me" : "peer") ?? shownName} appCards={appCards} />
       {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} appCards={appCards} />
 
@@ -1294,14 +1304,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           const error = await sendMessage(text, answering ? { ...options, replyTo: answering.id } : options);
           if (!error && answering) replied(answering);
           // The engine says why in English: said here in the app's language (lib/errorText.ts), as a group's composer does.
-          return error && problemLine(error, t);
+          return error && refusalLine(error, t, dhtOnly);
         }}
         reply={replyBar}
         translation={composerTranslation}
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), preview: editing.preview, onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .then(result => ({ error: result.error && problemLine(result.error, t) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
+            .then(result => ({ error: result.error && refusalLine(result.error, t, dhtOnly) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }

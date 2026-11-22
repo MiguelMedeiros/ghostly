@@ -112,10 +112,6 @@ async function devicesDbExists(): Promise<boolean> {
   try { return await within(probe(), DEVICE_READ_TIMINGS.existsMs, "The list of databases"); } catch { return false; }
 }
 
-/** Whether the last write was made with strict durability. False where the engine does not know the option (an old WebView). */
-let lastWriteStrict = false;
-export const lastDeviceWriteWasStrict = (): boolean => lastWriteStrict;
-
 /**
  * The last record a read checked, per profile: its write count, everything but its file lists (`heldFiles`,
  * `leftFiles`, up to some 1 MB on a standby) as JSON, and on Desktop the file text it was found equal to. A standby
@@ -179,7 +175,6 @@ function swap(profile: string, expected: number | null, record: DeviceRecord | n
 async function swapMany(writes: { profile: string; expected: number | null; record: DeviceRecord | null }[]): Promise<void> {
   const db = await openDevicesDb();
   const tx = db.transaction(STORE, "readwrite", { durability: "strict" });
-  lastWriteStrict = tx.durability === "strict";
   await new Promise<void>((resolve, reject) => {
     let refused: Error | null = null;
     tx.oncomplete = () => resolve();

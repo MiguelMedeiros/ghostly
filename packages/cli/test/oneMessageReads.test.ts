@@ -31,9 +31,10 @@ function fake() {
     }),
     forwardMessages: vi.fn(async ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(() => ({ messageIds: ["me_fwd"], sent: messageIds, error: null })) })),
   };
-  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+  const store = { compact: vi.fn(async (_options?: { scrub?: boolean }) => {}) };
+  const ctx = { runtime: { server: { node }, store, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
   const whole = () => node.getMessages.mock.calls.length + node.groupMessages.mock.calls.length;
-  return { ctx, node, whole };
+  return { ctx, node, store, whole };
 }
 
 describe("delete", () => {
@@ -64,6 +65,24 @@ describe("delete", () => {
     expect(node.deleteMessage).not.toHaveBeenCalled();
     const { COMMANDS } = await import("../src/commands");
     expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone [--wait none|confirmed|sent] [--timeout s]] [--purge]");
+  });
+
+  it("another member's message in a group says only its author deletes it, not a --everyone that is then refused as not mine", async () => {
+    const { ctx, node, store } = fake();
+    for (const chat of ["Crew", "g1", "group:g1"])
+      for (const purge of [false, true]) {
+        const said = `"${chat}" is a group, and "k:0:1" is another member's message in it: only its author deletes a group's message, for everyone`;
+        // `--purge` folds the store all the same (`foldsAnyway`), and the error says so.
+        await expect(callApi(ctx, "chat.delete", { chat, message: "k:0:1", ...(purge && { purge }) })).rejects.toMatchObject(purge
+          ? { code: "not_found", message: `The store was folded anyway, so a deleted copy of it is gone from the profile's folder. ${said}`, details: { group: "g1", purged: true } }
+          : { code: "not_found", message: said, details: { group: "g1" } });
+      }
+    expect(store.compact).toHaveBeenCalledTimes(3);
+    expect(store.compact).toHaveBeenCalledWith({ scrub: true });
+    // The --everyone that was offered says the same thing in its own words.
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "k:0:1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: "\"k:0:1\" is another member's message: only its author deletes a group's message, for everyone" });
+    expect(node.deleteMessage).not.toHaveBeenCalled();
+    expect(node.removeMessage).not.toHaveBeenCalled();
   });
 });
 
@@ -125,10 +144,10 @@ describe("delete --everyone in a group waits for an edge, as group react does", 
     expect(looks).toBe(3);
   });
 
-  it("a one-shot no edge took in time: a timeout (exit 4) that says it stays in the group and goes with a later command", async () => {
+  it("a one-shot no edge took in time: a timeout (exit 4) that says the message is gone here and its removal goes with a later command", async () => {
     const { ctx } = inGroup("one-shot", () => 0);
     await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true, timeout: 1 })).rejects.toMatchObject({
-      code: "timeout", message: expect.stringMatching(/no member's edge took it yet .*next command/), details: { messageId: "mine:0:2", edits: 3 },
+      code: "timeout", message: expect.stringMatching(/the message is gone here and no member's edge took its removal yet .*next command/), details: { messageId: "mine:0:2", edits: 3, deleted: "mine:0:2" },
     });
   });
 
@@ -193,6 +212,19 @@ describe("forward", () => {
     await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob", "chat-two", "Crew", "group:g1", "Cy", "Di", "Ed"] });
     await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1"], to: ["Bob", "Crew", "Cy", "Di", "Ed", "Flo", "nobody"] })).rejects.toMatchObject({ code: "bad_request", message: "Forward to at most 5 chats and groups at once" });
     expect(node.getMessage).toHaveBeenCalledOnce();
+    expect(node.forwardMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it("the raw engine call's secret guard reads an id named twice once, and none past 30, which the engine refuses", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: Array(50_000).fill("peer_1").concat("peer_2"), to: ["chat-two"] } });
+    expect(node.getMessage).toHaveBeenCalledTimes(2);
+    node.getMessage.mockClear();
+    await callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: Array.from({ length: 31 }, (_, i) => `peer_${i}`), to: ["chat-two"] } });
+    expect(node.getMessage).not.toHaveBeenCalled();
+    // A secret among them is still refused.
+    node.getMessage.mockResolvedValueOnce(row("chat-one", "peer_1", { text: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" }));
+    await expect(callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: ["peer_1", "peer_1"], to: ["chat-two"] } })).rejects.toMatchObject({ code: "confirm" });
     expect(node.forwardMessages).toHaveBeenCalledTimes(2);
   });
 });

@@ -3,7 +3,7 @@ import {
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterAdmin, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
   CatchUpAnswers, GROUP_ADMIN_OFF_ERROR, GROUP_LIMITS, frameBytes, meshMessageRef, type GroupMessageFrame,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
-  type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
+  type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMeta, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupLight, GroupLive, GroupView, MessagePage, OtherGroup, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import type { Removal } from "./removals";
@@ -636,7 +636,7 @@ export const MESH_GAP_AGAIN_MS = 10_000;
 export const MESH_SYNC_HOLD_MS = 1_500;
 export const MESH_SYNC_HOLD_MAX_MS = 180_000;
 /** What a mesh member asked others for, for one reachable member some of whose messages never reached it (`Groups.gapsOf`). */
-interface GapAsk { mark: string; of: Set<string>; noticed?: number; at?: number; last?: { via: string; at: number; asked: Record<string, number[]> } }
+interface GapAsk { mark: string; of: Set<string>; noticed?: number; at?: number; last?: { via: string; at: number; asked: Record<string, number[]> }; own?: { at: number; asked: Record<string, number[]> } }
 /** Where a member's gossip turns start among the members it is connected to: a number of its own, from its key. */
 const gossipStart = (key: string) => { let n = 0; for (let i = 0; i < key.length; i++) n = (n * 31 + key.charCodeAt(i)) >>> 0; return n; };
 /** How often the edges a mesh roster asks for are checked against the ones that exist (one that failed to open is tried again). */
@@ -995,6 +995,7 @@ export class Groups {
       return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
         invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
           ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}), ...(invitation.takenBack ? { takenBack: true } : {}),
+          ...(group.previous ? { kept: true } : {}),
           ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group), ...(this.gaveUp.has(group.id) && { unanswered: true }),
             ...(full && { full: { n: full.n, max: full.max } }),
             ...(this.othersKnocked.has(group.id) && { othersKnocked: true }) } : {}) } };
@@ -1397,6 +1398,13 @@ export class Groups {
     return { me: session.myKey, community: false, onHubs: this.hubs.active(groupId, session, this.now()), inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
   }
 
+  /** Me in a group I am active in, private or community alike, for its call (WISP 602): my member key, its seed, the admin's metadata, and whether I am the admin. */
+  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta; isAdmin: boolean } | undefined {
+    if (this.isCommunity(groupId)) return this.communities.callMember(groupId);
+    const session = this.sessions.get(groupId);
+    return session?.status === "active" ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta, isAdmin: session.isAdmin } : undefined;
+  }
+
   /**
    * Why this device is out of the group for good, as `fileCheck` says it; undefined while it is in it, or not loaded. A
    * community join that lost a race (`lost`) is asked again and back in by itself: its files wait, not stop for good.
@@ -1771,6 +1779,15 @@ export class Groups {
   async rename(groupId: string, name: string): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.rename(groupId, name);
     await this.session(groupId).rename(name);
+  }
+  /**
+   * The admin names (or, with null, removes) the node that forwards the group's calls: community groups only (WISP 602).
+   * `e2ee` turns sealed call media on or off; left out, the group keeps what it had.
+   */
+  async setCall(groupId: string, sfu: string | null, e2ee?: boolean): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.setCall(groupId, sfu, e2ee);
+    this.session(groupId);
+    throw new Error("Only a community group has calls through a node");
   }
 
   /**
@@ -3020,7 +3037,7 @@ export class Groups {
     }
     const lacking = session.lacking();
     out.push(...this.gapsOf(groupId, session, via, lacking));
-    this.ownGap(groupId, via, lacking);
+    this.ownGap(groupId, session, via, lacking);
     // What this sync asks for is the gossip turn's job too: the next one waits.
     if (out.length) this.lastGossip.set(groupId, now);
     return out;
@@ -3127,9 +3144,10 @@ export class Groups {
 
   /**
    * Whether a sync to `via` asks it for its own messages that never reached me, for the first time since what is
-   * missing changed: any sync names them (`miss`), and an author answers from its own log (`GROUP_LIMITS.outlog`).
+   * missing changed: any sync names them (`miss`), and an author answers from its own log (`GROUP_LIMITS.outlog`) and
+   * the frames past it members did not take at its pace (`GroupState.owed`).
    */
-  private ownGap(groupId: string, via: string, lacking: Map<string, string>): boolean {
+  private ownGap(groupId: string, session: GroupSession, via: string, lacking: Map<string, string>): boolean {
     const mark = lacking.get(via);
     if (mark === undefined) return false;
     let tried = this.gapsAsked.get(groupId);
@@ -3138,10 +3156,11 @@ export class Groups {
     const now = this.now();
     // Noticed now, if not before: its answer (its last 32) shows what is below them, which `gapsAgain` asks another for
     // `MESH_GAP_AGAIN_MS` later, not at the next gossip turn.
-    if (!entry || entry.mark !== mark) tried.set(via, (entry = { mark, of: new Set(), noticed: entry?.noticed ?? now, last: entry?.last }));
+    if (!entry || entry.mark !== mark) tried.set(via, (entry = { mark, of: new Set(), noticed: entry?.noticed ?? now, last: entry?.last, own: entry?.own }));
     if (entry.of.has(via)) return false;
     entry.of.add(via);
     entry.at = now;
+    entry.own = { at: now, asked: session.missOf(via) };
     return true;
   }
 
@@ -3199,8 +3218,17 @@ export class Groups {
     for (const [key, mark] of lacking) {
       let entry = tried.get(key);
       if (!entry) tried.set(key, (entry = { mark, of: new Set(), noticed: now }));
-      const { last } = entry;
+      const { last, own } = entry;
       if (!up(key)) continue;
+      // The author handed on some of what I asked it for (one of a burst past its pace, kept, `GroupState.owed`): it
+      // holds the rest, and is asked again, a pace's worth at a time.
+      if (own && now - own.at >= MESH_GAP_AGAIN_MS && session.filledSince(key, own.asked)) {
+        entry.of.add(key);
+        entry.at = now;
+        entry.own = { at: now, asked: session.missOf(key) };
+        try { this.host.sendOnLink(edges.get(key)!, session.syncFrame([], key)); } catch { /* it closed: the gossip turn asks it */ }
+        continue;
+      }
       if (!last) { if (now - (entry.noticed ?? now) >= MESH_GAP_AGAIN_MS) fresh.set(key, mark); continue; }
       if (now - last.at < MESH_GAP_AGAIN_MS || !up(last.via)) continue;
       if (!session.filledSince(key, last.asked)) continue;
@@ -3210,7 +3238,7 @@ export class Groups {
     const asked = this.relayAsked.get(groupId);
     for (const [via, keys] of again) {
       for (const key of keys) {
-        tried.set(key, { mark: lacking.get(key)!, of: new Set([via]), at: now, last: { via, at: now, asked: session.missOf(key) } });
+        tried.set(key, { mark: lacking.get(key)!, of: new Set([via]), at: now, last: { via, at: now, asked: session.missOf(key) }, own: tried.get(key)?.own });
         asked?.set(key, { via, at: now });
       }
       try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys, via)); } catch { /* it closed: the gossip turn asks another */ }
@@ -3279,7 +3307,7 @@ export class Groups {
       for (const key of away) asked.set(key, { via, at: now });
       const ask = [...away, ...this.gapsOf(groupId, session, via, lacking)];
       // An author is asked for its own with no `ask`: the sync alone names what is missing.
-      if (!this.ownGap(groupId, via, lacking) && !ask.length) continue;
+      if (!this.ownGap(groupId, session, via, lacking) && !ask.length) continue;
       try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(ask, via)); } catch { /* it closed: the next turn asks another */ }
     }
   }
@@ -3404,6 +3432,8 @@ export class Groups {
         if (m.frame && (completed || stored !== false)) await this.frameKept(state.id, m.id, m.frame);
         // Mine are followed too: a member's rows placed again take along the lines written after them, mine included.
         if (!completed && stored !== false) this.authorOrder.placed(state.id, { ...row, at: this.now() }, placedAbove);
+        // Deleted for everyone while its file was being taken (a whole copy completing a stripped one too): the file goes.
+        if (stored === false && file && this.isRemoved(state.id, m.id)) await this.files?.forget(state.id, m.id);
         // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645). A member away when it was
         // written and deleted got an "@" for a line it never sees.
         if (stored === false && !completed && this.isRemoved(state.id, m.id)) { this.typings.messageFrom(state.id, m.sender); return; }
