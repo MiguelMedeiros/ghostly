@@ -161,7 +161,7 @@ export const MAX_BATCH = 12;
 // longest has waited MAX_WAIT since it could board, or at once for `queue:priority`. Pull requests come in minutes
 // apart and each batch's CI takes ~20 minutes, one at a time, so leaving with the first one ready made batches of ~2
 // (15 batches on 2026-10-15/16: 1 to 4 each): more full CI runs, and a slower line. A run that holds a batch has the
-// workflow wake the train just past the deadline (`wakeIn`): GitHub runs the 5-minute schedule only every 10 to 30.
+// workflow wake the train just past the deadline (`wakeIn`): GitHub keeps the workflow's schedule only loosely.
 export const MIN_BATCH = 3;
 export const MAX_WAIT = 15 * 60_000;
 /**
@@ -267,8 +267,10 @@ export function ciState(runs) {
 }
 
 /**
- * The jobs that turned CI Success red, from the jobs of its run: each one that failed or timed out, but the gate itself,
- * with its page. A rerun adds a job with the same name, so the newest of each name counts.
+ * The jobs that turned CI Success red, from the jobs of its run: each one that failed, timed out or was cancelled, but
+ * the gate itself, with its page. A job past its `timeout-minutes` ends cancelled, and the gate never runs in a run that
+ * was cancelled (ci.yml's matrices never fail fast either), so next to a red gate a cancelled job is one that ran out of
+ * time. A rerun adds a job with the same name, so the newest of each name counts.
  */
 export function failedJobs(jobs) {
   const newest = new Map();
@@ -276,7 +278,7 @@ export function failedJobs(jobs) {
     const had = newest.get(j.name);
     if (j.name !== "CI Success" && (!had || (j.id ?? 0) >= (had.id ?? 0))) newest.set(j.name, j);
   }
-  return [...newest.values()].filter((j) => j.conclusion === "failure" || j.conclusion === "timed_out").map((j) => ({ name: j.name, url: j.html_url ?? null }));
+  return [...newest.values()].filter((j) => ["failure", "timed_out", "cancelled"].includes(j.conclusion)).map((j) => ({ name: j.name, url: j.html_url ?? null }));
 }
 
 /**
@@ -528,7 +530,7 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * it: the one in flight is no longer waiting for its own CI, and nobody behind it moves. `company` is set while the
  * next batch, this pull request in it, waits for company (`holdBatch`): how many can board, the batch size it waits
  * for, and from when it leaves anyway (a fixed time, so the comment does not change from run to run; it leaves at the
- * train's first run after it, and GitHub runs the 5-minute schedule 10 to 30 minutes apart). `stuck` is the base's
+ * train's first run after it, which the workflow starts at that time). `stuck` is the base's
  * commit once a hold for its red has lasted HOLD_HELP: the comment then says what a person can do. A lone pull request
  * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so; one whose has `refused`, GitHub's
  * refusal of the push of its rebase, says that. One with `pr.behind` ({ batch,
@@ -2134,10 +2136,13 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
     /**
      * An epic's fast-forward to a pull request's head, fetched first (a Mac's clone may not have it), from its branch
      * when GitHub made no `refs/pull/<number>/head` (as `build` and `rebase` do). One git cannot fetch is refused, not
-     * thrown: the caller sends it the batch way, whose build drops it as "missing", and the line goes on.
+     * thrown: the caller sends it the batch way, whose build drops it as "missing", and the line goes on. A head that
+     * moved since it was read is refused as GitHub refuses dev's squash merge then (409): landing the old one left the
+     * author's new commits behind a pull request the train called merged.
      */
     async landPull(base, p) {
       if (fetchPulls([p]).length) return { ok: false, message: `git could not fetch the head of #${p.number}` };
+      if (git(["rev-parse", `${ns}/pr-${p.number}`], cwd) !== p.sha) return { ok: false, status: 409, message: `the head of #${p.number} moved since it was read` };
       return this.land(base, p.sha);
     },
   };
