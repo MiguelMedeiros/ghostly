@@ -1554,9 +1554,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     past ||= null;
   }
   // Before anything boards: one that changes a workflow never boards a batch, nor is it rebased (both are pushes the
-  // queue app may not make). Up to date with dev and green, it lands alone with no push; up to date while its own full
-  // CI runs, it waits in line for that run (`waiting`); else it goes to a coordinator. Files are read only for the ones
-  // that could board, and only while nothing is in flight.
+  // queue app may not make). Up to date with dev and green, it lands alone with no push; up to date and not green yet
+  // (its own full CI running, not started, or cancelled: red never gets here, `waiting` stops it), it waits in line for
+  // that run; else it goes to a coordinator. Files are read only for the ones that could board, and only while nothing
+  // is in flight.
   if (!inFlight) {
     const ready = line().filter((p) => !waiting(p));
     await inTurns(ready, READS_AT_ONCE, async (p) => {
@@ -1570,7 +1571,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         say(`::warning::Could not merge #${p.number} alone: ${r.message}`);
         // A base or head that moved under the merge: the next run reads it again.
         if (r.status === 409 || /Base branch was modified/.test(r.message ?? "")) continue;
-      } else if (upToDate && p.ci === "pending") continue;
+      } else if (upToDate) continue;
       say(`HAND-MERGE #${p.number} (changes a workflow, which this token may not push)`);
       done.dropped.push(p.number);
       await leave(p, LABEL.handMerge, workflowText(base, p.workflows));

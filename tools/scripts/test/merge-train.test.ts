@@ -1037,6 +1037,22 @@ describe("a run of the train", () => {
     expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/Waiting: it changes a workflow \(\.github\/workflows\/e2e-full\.yml\)[^.]*never boards a batch: it lands alone once CI Success has passed/);
   });
 
+  it("keeps a pull request that changes a workflow in line while its full CI has not started on a head up to date with dev", async () => {
+    // Its CI reads none (the fast tier green, no full run yet): it needs no update, only its own run, so no coordinator.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { ci: [] });
+    repo.drafts.set("h12", fastGreen);
+    repo.add(13);
+    repo.files.set(12, [".github/workflows/e2e-full.yml"]);
+    refuseWorkflows(repo, [12]);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.members()).toEqual([11, 13]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/Waiting: it changes a workflow \(\.github\/workflows\/e2e-full\.yml\)[^.]*never boards a batch: it lands alone once CI Success has passed/);
+  });
+
   it("lands a hand-merge pull request alone once a coordinator updated it and added queue again, and takes queue:hand-merge off", async () => {
     const repo = fakeRepo();
     repo.add(21, { behind: true });
