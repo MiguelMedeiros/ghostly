@@ -322,8 +322,18 @@ describe("a link preview in a message", () => {
     expect(screen.queryByTestId("link-preview-card")).toBeNull();
   });
 
+  // An older app's card for a struck-through link opened /a~~: another page than the bubble's link above it.
+  it("opens a struck-through link as the bubble does, and is not drawn for the address with its closing ~~", () => {
+    const text = "~~https://news.example/a~~";
+    const older = renderApp(<MessageBubble message={{ id: "m13", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/a~~", t: "Old news" } }} />);
+    expect(screen.queryByTestId("link-preview-card")).toBeNull();
+    older.unmount();
+    renderApp(<MessageBubble message={{ id: "m14", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/a", t: "Old news" } }} />);
+    expect(screen.getByTestId("link-preview-card")).toHaveAttribute("href", "https://news.example/a");
+  });
+
   it("is drawn for a link outside a spoiler, even when the spoiler holds it too", () => {
-    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "`https://news.example/story`"]) {
+    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "`see https://news.example/story here`"]) {
       const view = renderApp(<MessageBubble message={{ id: "m12", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/story", t: "Ghosts are real" } }} />);
       expect(screen.getByTestId("link-preview-card"), text).toHaveTextContent("Ghosts are real");
       view.unmount();

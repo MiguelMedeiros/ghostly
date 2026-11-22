@@ -31,7 +31,7 @@ const MARKUP = /[*_~|`[]/;
  * words count (they show once tapped); a `[label](link)` is found by its label in place and by its address, after the
  * rest, so the address never runs into the words around the label.
  */
-function shownText(text: string, mentions?: readonly MentionView[]): string {
+export function shownText(text: string, mentions?: readonly MentionView[]): string {
   if (!mentions?.length && !MARKUP.test(text)) return text;
   // A group message's mentions read as its bubble shows them, "@" and the member's name now (parse/mentions).
   const key = mentions?.length ? [text, ...mentions.map(m => `${m.o}:${m.l}:${m.name}`)].join("\u0000") : text;

@@ -1,6 +1,6 @@
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
-import { closeSync, existsSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { closeSync, existsSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppHash, isAppLine, isAppUrl, readAppBundle,
@@ -53,26 +53,47 @@ const PEM = /-----BEGIN PRIVATE KEY-----\r?\n([A-Za-z0-9+/=\r\n]+)-----END PRIVA
 /** `pem`: a key made by this run, written to its file by `saveKey` only once every check passed. */
 export interface LoadedKey { signer: Signer; key: string; created: boolean; pem?: string }
 
-/** Refuses a key file that is not a plain file of this user's, or that anyone else may read or write. */
-function checkKeyFile(path: string): void {
+/**
+ * Refuses a key file that is not a plain file of this user's, and gives its mode. Whether anyone else may read or write
+ * it (`openToOthers`) is asked once `readKey` knows what it holds: a public key is no secret, so its mode is no reason
+ * to refuse it.
+ */
+function checkKeyFile(path: string): number {
   const info = statSync(path);
   if (!info.isFile()) throw new CliError("bad_request", `${path} is not a file: --key names a key file`);
-  if (process.platform === "win32") return;
+  if (process.platform === "win32") return info.mode;
   if (process.getuid && info.uid !== process.getuid()) throw new CliError("refused", `${path} is not this user's: a key file must be yours alone`);
-  if ((info.mode & 0o077) !== 0) {
-    throw new CliError("refused", `${path} may be read by others (mode ${(info.mode & 0o777).toString(8)}): run chmod 600 ${path}, and think whether the key was seen`);
-  }
+  return info.mode;
 }
+
+/** True when anyone else may read or write a key file (never on Windows, whose modes do not say it). */
+const openToOthers = (mode: number): boolean => process.platform !== "win32" && (mode & 0o077) !== 0;
+
+/**
+ * Files a --key is often given by mistake, told apart so the refusal names them: a public key (an OpenSSH line such as
+ * an id_ed25519.pub holds, or a PEM or SSH2 public key block), and an OpenSSH private key (what ssh-keygen writes).
+ */
+const PUBLIC_KEY = /^(?:(?:ssh|ecdsa-sha2|sk-ssh|sk-ecdsa-sha2)-[\w@.-]+ AAAA|-----BEGIN (?:RSA )?PUBLIC KEY-----|---- BEGIN SSH2 PUBLIC KEY ----)/m;
+const OPENSSH_KEY = /^-----BEGIN OPENSSH PRIVATE KEY-----/m;
 
 /** Reads a key file: the PEM block, an Ed25519 key, and the kind its first line names (when it names one). */
 function readKey(path: string, kind: KeyKind): LoadedKey {
-  checkKeyFile(path);
+  const mode = checkKeyFile(path);
   const text = readFileSync(path, "utf8");
+  const block = PEM.exec(text);
+  const openSsh = OPENSSH_KEY.test(text);
+  // Before, an id_ed25519.pub was refused as a key others may read, and after the chmod as holding no private key.
+  // While others may read it, still the `refused` the mode check answered.
+  if (!block && !openSsh && PUBLIC_KEY.test(text)) {
+    throw new CliError(openToOthers(mode) ? "refused" : "bad_request", `${path} is a public key, not a private one: --key names a ${kind} key file (an Ed25519 key in a PEM "PRIVATE KEY" block). Name a new path and ghostly makes one`);
+  }
+  if (openToOthers(mode)) {
+    throw new CliError("refused", `${path} may be read by others (mode ${(mode & 0o777).toString(8)}): run chmod 600 ${path}, and think whether the key was seen`);
+  }
   const other: KeyKind = kind === "publisher" ? "store" : "publisher";
   if (text.startsWith(`Ghostly ${other} key`)) {
     throw new CliError("refused", `${path} is a ${other} key: ${kind === "publisher" ? "a store key never signs an app or its revocations" : "a publisher key never signs a store index"} (WISP 1200 · Stores)`);
   }
-  const block = PEM.exec(text);
   let seed: Uint8Array | undefined;
   if (block) {
     try {
@@ -80,6 +101,9 @@ function readKey(path: string, kind: KeyKind): LoadedKey {
       const d = key.asymmetricKeyType === "ed25519" ? key.export({ format: "jwk" }).d : undefined;
       if (d) seed = fromBase64Url(d);
     } catch { /* said below, without the file's text */ }
+  }
+  if (!block && openSsh) {
+    throw new CliError("bad_request", `${path} is an OpenSSH private key (as ssh-keygen writes), which ghostly does not read: a ${kind} key is a key of its own. Name a new path with --key and ghostly makes one, or give an Ed25519 key in a PEM "PRIVATE KEY" block (openssl genpkey -algorithm ed25519)`);
   }
   if (!seed || seed.length !== 32) throw new CliError("bad_request", `${path} holds no Ed25519 private key (a PEM "PRIVATE KEY" block, as openssl genpkey -algorithm ed25519 writes)`);
   const signer = seedSigner(seed);
@@ -96,9 +120,29 @@ function makeKey(kind: KeyKind): LoadedKey {
   return { signer, key: toZ32(signer.publicKey), created: true, pem: `${KEY_HEADER[kind]}\n${privateKey.export({ type: "pkcs8", format: "pem" }) as string}` };
 }
 
+/**
+ * A --key that is a symbolic link to nothing (a key on a drive that is not mounted) or a ring of links: `existsSync`
+ * follows the link and says no, so the run makes a key, which is never written over the link. Before, Node's raw
+ * "EEXIST: file already exists" when it was written. The words name the link, where it leads, and that no key was made.
+ */
+function refuseKeyLink(path: string): void {
+  let target: string;
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return;
+    target = resolve(dirname(path), readlinkSync(path));
+  } catch { return; } // nothing there: the key is made at the path
+  let code: unknown;
+  try { statSync(path); return; } catch (error) { code = (error as { code?: unknown }).code; }
+  if (code === "ELOOP") throw new CliError("engine", `${path} is a symbolic link whose links go round in a loop (to ${target}): no key was made. Fix the link, or name another --key`);
+  if (code === "ENOENT" || code === "ENOTDIR") {
+    throw new CliError("engine", `${path} is a symbolic link to ${target}, which is not there (a drive that is not mounted?): no key was made. Make the link's target reachable, or name another --key`);
+  }
+}
+
 /** Writes a key this run made: owner-only from the start, never over a file that is there. */
 function saveKey(path: string, key: LoadedKey): void {
   if (!key.pem) return;
+  refuseKeyLink(path);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const fd = openSync(path, "wx", 0o600);
   try { writeSync(fd, key.pem); } finally { closeSync(fd); }
@@ -189,6 +233,13 @@ function saidUrl(url: string): string {
     return query ? `${said}?…` : said;
   } catch { return url; }
 }
+
+/**
+ * The first link a client fetches with a query or fragment: a private repository's raw link carries its read token
+ * there, and a bundle or a store index is public, so signed in, the token is published with it (as `app serve --url`
+ * refuses on a card).
+ */
+const tokenLink = (urls: readonly string[]) => urls.find((url) => /[?#]/.test(url));
 
 /**
  * A bundle at an https URL, as a client fetches one: `https:` only, no user or password, jsDelivr only at a full
@@ -541,6 +592,10 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     const said = checked.reason === "missing-key" ? { ...checked, detail: `${checked.detail} in ${APP_SOURCE}` } : checked;
     throw refused(`${sourcePath} and the folder's files make no valid manifest`, said, checked.detail ? { detail: checked.detail } : {});
   }
+  const source = tokenLink(checked.manifest.sources ?? []);
+  if (source) {
+    throw refused(`${sourcePath} lists the source ${saidUrl(source)}, whose query or fragment is where a private repository's token rides, and a bundle is public: list the app's link in a public repository, with no query`, { reason: "private-link", detail: "sources" });
+  }
 
   const { bytes: manifestBytes, signature } = await signAppObject(APP_PREFIXES.app, checked.manifest, key.signer);
   const bundle = assembleAppBundle(manifestBytes, canonicalJsonBytes(signature), contents.map((f) => f.bytes));
@@ -727,6 +782,10 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
 
   const valid = checkAppStoreIndex(index, { strict: true }, checked);
   if (!valid.ok) throw refused(`${indexPath} is not a valid store index`, valid);
+  for (const listing of (index as unknown as AppStoreIndex).apps) {
+    const url = tokenLink(listing.urls);
+    if (url) throw refused(`${indexPath} lists ${saidUrl(url)} for ${listing.ref}, whose query or fragment is where a private repository's token rides, and a store index is public: list the app's link in a public repository, with no query`, { reason: "private-link", detail: "apps: urls" });
+  }
   const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer, checked);
   const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);

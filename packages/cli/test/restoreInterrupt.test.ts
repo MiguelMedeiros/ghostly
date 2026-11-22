@@ -38,7 +38,7 @@ describe("a restore stopped while it runs", { timeout: 180_000 }, () => {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
     it(`by ${signal} leaves neither the profile nor its decrypted contents, and says so`, async () => {
       const name = `r-${signal.toLowerCase()}`;
-      const run = new Running(["--home", dir, "profile", "restore", file, name], { NODE_OPTIONS: `--require "${slow}"` });
+      const run = new Running(["--home", dir, "profile", "restore", file, name, "--copy"], { NODE_OPTIONS: `--require "${slow}"` });
       const until = Date.now() + 60_000;
       while (!restoring(dir).some((entry) => entry.startsWith(`.restoring-${name}-`) && existsSync(join(dir, "profiles", entry, "db", "snapshot.bin")))) {
         if (run.child.exitCode !== null || Date.now() > until) throw new Error(`no restore under way\n${run.stderr}\n${JSON.stringify(run.lines)}`);
