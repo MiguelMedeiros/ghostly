@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { lobbyKeys } from "@ghostly/core";
-import { CommunityWorld, type Peer } from "./communityWorld";
+import { CommunityWorld, RELAY_NETWORK, seededRandom, type Peer } from "./communityWorld";
 // covers: groups.community.catch-up
 
 /**
@@ -37,6 +37,32 @@ describe("a community member back within minutes", { timeout: 60_000 }, () => {
     // minute: 13 and 23 s here before (8-23 s past a minute away; 30-45 s with the relays' signaling on top).
     expect(took).toBeLessThanOrEqual(7_000);
     expect(edgeTo(member, hub) && edgeTo(hub, member)).toBe(true);
+  });
+
+  // Both apps closed (two phones put away), and one opened again first: a hub alone now, started with no memory of the
+  // member it had. The other, opened a moment later (their edge from the last run still kept) or once that edge has
+  // closed, steps up as a hub too.
+  for (const first of ["member", "admin"] as const) for (const later of [6_000, 90_000]) it(`gets the lines said while both apps were closed within seconds, the ${first}'s app back first, the other ${later / 1000} s after`, async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    const alice = world.add("alice"), bob = world.add("bob");
+    const id = await alice.groups.create("Check");
+    const link = await alice.groups.enableLink(id);
+    await bob.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await world.until(() => world.member(bob, id), 10 * 60_000);
+    await world.run(3 * 60_000);
+    const [early, late] = first === "member" ? [bob, alice] : [alice, bob];
+    alice.online = false; bob.online = false;
+    await world.run(110_000);
+    await world.restart(early);
+    await world.run(later - 3_000);
+    await early.groups.send(id, "said while you were away");
+    await world.run(3_000);
+    await world.restart(late);
+    const took = await world.until(() => world.texts(late, id).includes("said while you were away"), 3 * 60_000);
+    // Each side looked for the other's side of their edge at the background pace (and the first back read the beacon
+    // every half minute, alone): 27 s, and 61 s once the kept edge had closed (27.6 s on the web build, 3 runs). Now
+    // 5-13 s, the most of it the beacon's 10 s reading.
+    expect(took).toBeLessThanOrEqual(15_000);
   });
 
   it("a hub reads its lobby fast only a while after it dropped a member", async () => {

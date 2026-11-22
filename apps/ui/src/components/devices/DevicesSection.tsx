@@ -8,7 +8,7 @@ import { usePlatformValue } from "../../hooks/useServicesPlatform";
 import { servicesPlatform } from "../../lib/platform";
 import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
 import { Menu, MenuItem, MenuSeparator } from "../Menu";
-import { hasStandby, keepAwakeSupported, useKeepAwakeSetting } from "../../lib/keepAwake";
+import { hasStandby, keepAwakeForDevices, useKeepAwakeSetting } from "../../lib/keepAwake";
 import { AddDeviceDialog } from "./AddDeviceDialog";
 import { DeviceGlyph } from "./DeviceGlyph";
 import { HandoffProgress, MoveDialog } from "./Handoff";
@@ -171,8 +171,8 @@ export function DevicesSection() {
         </Row>
       )}
       {thisActive && view?.secretOffer && refused.dismiss && <div className="px-4 py-3"><Notice problem={refused.dismiss} testId="device-secret-offer-error" /></div>}
-      {/* On a Desktop with a standby device (WISP 06 § User experience): this device's own switch, never the profile's. */}
-      {keepAwakeSupported() && hasStandby(view) && (
+      {/* On a Desktop with a standby device (WISP 06 § User experience): this device's own switch, never the profile's. Not on Android, where it would hold nothing. */}
+      {keepAwakeForDevices() && hasStandby(view) && (
         <Row label={t("devices.section.keepAwake")} info={t("devices.section.keepAwakeHint")} testId="device-keep-awake">
           <Switch checked={keepAwake} onChange={setKeepAwake} label={t("devices.section.keepAwake")} testId="device-keep-awake-switch" />
         </Row>
@@ -281,7 +281,7 @@ function DeviceRow({ device, thisActive, busy, checked, focus, onFocused, onMove
       {(canCheck || canRename || canRemove) && (
         <div ref={anchor} className="relative">
           <button ref={menu} type="button" data-testid={device.self ? "device-menu-self" : "device-menu"} aria-haspopup="true" aria-expanded={open} aria-label={menuLabel} title={menuLabel} onClick={() => setOpen((was) => !was)}
-            className="grid h-10 w-10 max-md:h-11 max-md:w-11 cursor-pointer place-items-center rounded-lg text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+            className="grid h-10 w-10 max-md:h-[44px] max-md:w-[44px] cursor-pointer place-items-center rounded-lg text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
           </button>
           <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="device-menu-items" label={menuLabel} focusFirst>

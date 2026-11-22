@@ -1,7 +1,7 @@
 import { identityPicture, nostrPicture, type PictureAt } from "../shared/keptPictures";
 import { isRefusalId } from "../shared/refusals";
 import type { KeptPictures, KeptViews, PostedEvent } from "../shared/rpc";
-import type { EngineState, LinkView, StoredMessage } from "../shared/types";
+import type { EngineState, GroupView, LinkView, StoredMessage } from "../shared/types";
 import type { EngineClientSink } from "./server";
 
 /**
@@ -31,14 +31,23 @@ function withoutDetails(message: StoredMessage): StoredMessage {
  * typing too; a group's carries its whole member list, and a private group has an edge per member, each a whole chat
  * view with its transport log. One this client was sent last as it is now (its pictures left out the same way) is left
  * out, and the state names every chat's, edge's and group's id in order (`keptViews`): the page keeps the rest, and an
- * id no longer there is a chat, edge or group gone.
+ * id no longer there is a chat, edge or group gone. A view that is the engine's same object as in the last state (it
+ * keeps an unchanged chat's view, `pushedState`) is not written out again to tell: a file's progress sends a state
+ * every 250 ms, and writing out 2,000 chats' views cost ~8 ms per tab each time.
+ *
+ * A group whose view changed goes without its member list when that list is the one this client was sent last
+ * (`keptViews.members`): a message in a community changes its `lastMessageAt`, and its 256 members went again with each
+ * one, about 37 KB per tab per message.
  *
  * A history's and a change's rows go without their details record (`withoutDetails`).
  */
 export function copyingSink(post: (message: PostedEvent) => void): EngineClientSink {
   let sent: Pick<EngineState, "payments" | "wallet"> | null = null;
   let pictures = new Map<string, string>();
-  let views = new Map<string, string>();
+  // Per view sent last: the engine's view it was copied from, its marks, and the two as one text.
+  let views = new Map<string, { view: object; mark: string; key: string }>();
+  // Per group, its member list as this client has it now, as one text.
+  let members = new Map<string, string>();
   return {
     post: (message) => {
       if (message.kind === "messages" || message.kind === "message-changes") return post({ ...message, messages: message.messages.map(withoutDetails) });
@@ -75,19 +84,21 @@ export function copyingSink(post: (message: PostedEvent) => void): EngineClientS
       };
       const ownKept = same("avatar", settings?.avatar);
       if (ownKept) kept.avatar = true;
-      const nowViews = new Map<string, string>();
+      const nowViews = new Map<string, { view: object; mark: string; key: string }>();
       const keptViews: KeptViews = {};
       // The views in `list` this client was sent last as they are now, with the same pictures left out (`marks`): those
-      // stay out, and `keptViews` lists every id in order. A list with an id twice goes whole.
-      const leaveOutSame = <T extends { id: string }>(list: T[], kind: "links" | "edges" | "groups", marks: (id: string) => unknown): T[] => {
+      // stay out, and `keptViews` lists every id in order. A list with an id twice goes whole. `engine`: the views
+      // `list` was made from, in its order; one the same object as last time, with the same marks, is the same copy.
+      const leaveOutSame = <T extends { id: string }>(list: T[], engine: T[], kind: "links" | "edges" | "groups", marks: (id: string) => unknown): T[] => {
         if (!list) return list;
         const left = new Set<string>();
-        for (const view of list) {
+        for (const [i, view] of list.entries()) {
           const name = `${kind}:${view.id}`;
           if (nowViews.has(name)) return list;
-          const key = `${JSON.stringify(marks(view.id)) ?? ""}\n${JSON.stringify(view)}`;
-          nowViews.set(name, key);
-          if (views.get(name) === key) left.add(view.id);
+          const mark = JSON.stringify(marks(view.id)) ?? "", had = views.get(name);
+          const key = had?.view === engine[i] && had.mark === mark ? had.key : `${mark}\n${JSON.stringify(view)}`;
+          nowViews.set(name, { view: engine[i], mark, key });
+          if (had?.key === key) left.add(view.id);
         }
         if (!left.size) return list;
         keptViews[kind] = list.map((view) => view.id);
@@ -96,13 +107,30 @@ export function copyingSink(post: (message: PostedEvent) => void): EngineClientS
         if (kind === "links") for (const id of left) { delete kept.received?.[id]; delete kept.nostr?.[id]; }
         return list.filter((view) => !left.has(view.id));
       };
+      const nowMembers = new Map<string, string>();
+      // The groups going (`list`) whose member list is the one this client was sent last: they go without it, named in
+      // `keptViews.members`. A group left out whole keeps the list it had. A list with an id twice goes as it is.
+      const leaveOutMembers = (list: GroupView[]): GroupView[] => {
+        if (!list || !groups) return list;
+        const going = new Set(list.map((view) => view.id));
+        for (const view of groups) if (!going.has(view.id) && members.has(view.id)) nowMembers.set(view.id, members.get(view.id)!);
+        if (going.size < list.length) return list;
+        return list.map((view) => {
+          const text = JSON.stringify(view.members) ?? "";
+          nowMembers.set(view.id, text);
+          if (members.get(view.id) !== text) return view;
+          (keptViews.members ??= []).push(view.id);
+          const { members: _, ...without } = view;
+          return without as GroupView;
+        });
+      };
       const postedLinks = leaveOut(links, "links", "peerAvatar")?.map(contactProfiles);
       const postedEdges = edges && leaveOut(edges, "edges", "peerAvatar");
       const postedGroups = leaveOut(groups, "groups", "picture");
       const keptLinks = new Set(kept.links), keptEdges = new Set(kept.edges), keptGroups = new Set(kept.groups);
-      const sentLinks = leaveOutSame(postedLinks, "links", (id) => [keptLinks.has(id), kept.received?.[id], kept.nostr?.[id]]);
-      const sentEdges = postedEdges && leaveOutSame(postedEdges, "edges", (id) => keptEdges.has(id));
-      const sentGroups = leaveOutSame(postedGroups, "groups", (id) => keptGroups.has(id));
+      const sentLinks = leaveOutSame(postedLinks, links, "links", (id) => [keptLinks.has(id), kept.received?.[id], kept.nostr?.[id]]);
+      const sentEdges = postedEdges && leaveOutSame(postedEdges, edges, "edges", (id) => keptEdges.has(id));
+      const sentGroups = leaveOutMembers(leaveOutSame(postedGroups, groups, "groups", (id) => keptGroups.has(id)));
       for (const list of ["links", "edges", "groups", "received", "nostr"] as const) {
         const value = kept[list];
         if (Array.isArray(value) ? !value.length : value && !Object.keys(value).length) delete kept[list];
@@ -123,6 +151,7 @@ export function copyingSink(post: (message: PostedEvent) => void): EngineClientS
       sent = { payments, wallet };
       pictures = now;
       views = nowViews;
+      members = nowMembers;
     },
   };
 }

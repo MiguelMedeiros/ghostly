@@ -28,6 +28,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     isDataLinkOpen = false;
     supportsFiles = true;
     canSendText = true;
+    textRoom = true;
     textDelivery = "stream";
     groupsSupport = false;
     supportsGroupVersion = vi.fn(() => false);

@@ -53,7 +53,7 @@ export function RailAction({ testId, label, title = label, accent, active, count
   return (
     <button type="button" data-testid={testId} onClick={onClick} title={title} aria-label={label} aria-current={active ? "page" : undefined}
       className="current-mark group relative flex h-12 w-full shrink-0 items-center justify-center cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
-      <span className={`relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${accent ? "bg-accent text-panel-header group-hover:bg-accent-hover"
+      <span className={`relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${accent ? "bg-accent text-panel-header group-hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText]"
         : active ? "bg-surface-hover text-text-primary" : "text-text-secondary group-hover:bg-surface-hover group-hover:text-text-primary"}`}>
         {children}
         {!!count && <span aria-hidden="true" data-testid={`${testId}-count`} className={`absolute -top-1 -end-1 min-w-5 h-5 inline-flex items-center justify-center rounded-full px-1 text-[11px] font-bold leading-none ${badge(false)}`}>{count > 99 ? "99+" : count}</span>}

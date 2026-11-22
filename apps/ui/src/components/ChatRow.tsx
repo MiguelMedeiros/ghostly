@@ -26,6 +26,8 @@ import { sameValue } from "../lib/sameValue";
 import type { ChatListDensity } from "../lib/settings";
 import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
+import { canRetryFile, fileNeverSent } from "../lib/fileStatus";
+import { useTransferValue } from "../hooks/useServicesPlatform";
 import { paymentLine, storedPaymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
 import { refusedRowText } from "../lib/refusedLine";
@@ -112,7 +114,7 @@ function rowLabel(t: Translate, name: string, state: (string | false | undefined
 
 /** A button in the row's actions: a round target that lights up under the pointer, and in the accent while it is on. */
 const rowAction = (hover = "hover:text-accent") =>
-  `flex h-7 w-7 items-center justify-center rounded-full text-text-secondary transition-colors cursor-pointer hover:bg-text-primary/10 ${hover} aria-pressed:text-accent aria-expanded:bg-text-primary/10 aria-expanded:text-accent data-[muted]:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`;
+  `flex h-7 w-7 items-center justify-center rounded-full text-text-secondary transition-colors cursor-pointer hover:bg-text-primary/10 ${hover} data-[pinned]:text-accent aria-expanded:bg-text-primary/10 aria-expanded:text-accent data-[muted]:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`;
 
 /**
  * The row's actions, laid over its marks and time (RowText's `timeCover`). Pointer devices only: a phone opens the
@@ -157,8 +159,10 @@ function RowMute({ chat, mentions }: { chat: string; mentions?: boolean }) {
 }
 
 /** The two (or, comfortable, three) lines beside the avatar, shared by chats and groups. */
-function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-muted", sub, preview, previewId, trailing, timeCover }: {
+function RowText({ name, nameClass, nameId, marks, status, time, timeClass = "text-text-muted", sub, preview, previewId, trailing, timeCover }: {
   name: ReactNode; nameClass: string;
+  /** The name's id: what the buttons beside the row's open button (an invitation's Accept, Decline...) are described by. */
+  nameId?: string;
   /** The preview line's id: what the row's button is described by. */
   previewId?: string;
   /** After the name: the contact's verified identities (identities/ContactMarks.tsx), which give way before the time does. */
@@ -174,7 +178,7 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
       <div className="contact-row relative flex items-baseline gap-2">
         <span className="flex flex-1 min-w-0 items-center gap-1.5">
           {/* In its own direction, on the box that cuts it: a Latin name in Arabic is cut at its end, not its start. */}
-          <span data-testid="chat-row-name" dir="auto" className={`min-w-0 truncate chat-text-row-name ${nameClass}`}>{name}</span>
+          <span id={nameId} data-testid="chat-row-name" dir="auto" className={`min-w-0 truncate chat-text-row-name ${nameClass}`}>{name}</span>
           {marks}
         </span>
         {(status || time || timeCover) && <span className="relative flex shrink-0 items-baseline gap-2">
@@ -312,8 +316,13 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   // again. Elsewhere (Apps off, a v0.4 chat) nothing is asked of the engine.
   const appCards = appCardsShown(p.paired ? p.chatId : undefined, useAppsAvailable());
   const installed = useInstalledApps(appCards && p.lastMessage?.card?.kind === "app");
+  // A file of mine whose bytes did not go, or whose copy into this device failed, is "Not sent", as its bubble says:
+  // only a transfer that failed is read, as there, so its progress draws no row again.
+  const mine = p.lastMessage?.sender === "me" ? p.lastMessage : undefined;
+  const failedTransfer = useTransferValue(mine?.file?.id, (transfer) => (transfer?.state === "failed" ? transfer : null));
+  const fileFailed = !!mine?.file && (canRetryFile(mine.file, failedTransfer, servicesPlatform) || fileNeverSent(failedTransfer));
   // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
-  const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
+  const live = waitsForLive(fileFailed ? undefined : mine, useDhtOnly(p.peerPubKey));
   // A text of mine with no delivery state: delivered once the contact's acknowledgement covers it, by the link its
   // bubble reads (platform/useChat.ts). Only that yes or no draws the row again.
   const acked = useEngineValue(state => {
@@ -390,7 +399,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           ? <span data-testid="chat-row-note" className="text-text-muted">{p.note}</span>
           : p.lastMessage
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
-              {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} acked={acked} live={live} />}
+              {p.lastMessage.sender === "me" && <DeliveryMark delivery={fileFailed ? "failed" : p.lastMessage.delivery} acked={acked} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : refused !== undefined ? refused
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
@@ -409,7 +418,8 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           // the hand is under the pointer all the way: it keeps its marks and time, not buttons that cannot be used.
           !p.reorder?.dragging && <RowActions active={p.active}>
             <RowMute chat={p.chatId} />
-            <button type="button" title={pinLabel} aria-label={pinLabel} aria-pressed={p.pinned} data-testid="chat-row-pin"
+            {/* Named for what it does next (Pin, Unpin), so it is no toggle: "Unpin chat, pressed" read as unpinned. */}
+            <button type="button" title={pinLabel} aria-label={pinLabel} data-pinned={p.pinned || undefined} data-testid="chat-row-pin"
               onClick={e => { e.stopPropagation(); p.onTogglePin(); }} className={rowAction()}>
               <PinIcon active={p.pinned} />
             </button>
@@ -475,10 +485,11 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   // Another group came under its id: said first, as the person has to pick on its page (`GroupOthers`).
   const status = group.others?.length ? t("sidebar.group.others") : invitation ? invitationStatus(group, t)
     : group.status !== "active" ? (group.statusReason ? problemText(group.statusReason, t).title : group.status && groupStatusText(group.status, t)) : members(group.members.length);
-  // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
+  // The latest reaction, while nothing was said after it (WISP 400 § Reactions). Its message's row is the group page's,
+  // not the list's: the note says what it is (`kind`), and a group draws an app card as its text (`appCardsShown`).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
   const note = reacted && reactionNoteText(reacted, authorName(group, reacted.by, t), t);
-  const previewId = useId();
+  const previewId = useId(), nameId = useId();
   const size = AVATAR[density];
   return (
     <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || t("group.chat.unnamed")} className={rowClass(active, density)}>
@@ -491,6 +502,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
         <RowText
           name={group.name || t("group.chat.unnamed")}
           previewId={previewId}
+          nameId={nameId}
           nameClass={unread ? "text-text-primary font-semibold" : "text-text-primary"}
           time={time}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
@@ -505,10 +517,11 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
           </span>}
         />
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}
-        {/* On a phone, a thumb's height and apart: a Decline that went is said to the inviter. */}
-        {invitation?.takenBack && <div className="mt-1.5 flex gap-2 max-md:gap-3"><TakenBackDelete busy={busy} answer={answer} /></div>}
-        {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2 max-md:gap-3"><InvitationButtons busy={busy} answer={answer} /></div>}
-        {invitation?.viaLink && invitation.unanswered && <div className="mt-1.5 flex gap-2 max-md:gap-3"><LinkTryAgain busy={busy} answer={answer} /></div>}
+        {/* On a phone, a thumb's height and apart: a Decline that went is said to the inviter. Outside the open button,
+            each is described by the group's name, or two invitations' buttons all sounded alike ("Accept", "Accept"). */}
+        {invitation?.takenBack && <div className="mt-1.5 flex gap-2 max-md:gap-3"><TakenBackDelete busy={busy} answer={answer} describedBy={nameId} /></div>}
+        {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2 max-md:gap-3"><InvitationButtons busy={busy} answer={answer} describedBy={nameId} /></div>}
+        {invitation?.viaLink && invitation.unanswered && <div className="mt-1.5 flex gap-2 max-md:gap-3"><LinkTryAgain busy={busy} answer={answer} describedBy={nameId} /></div>}
         {invitation && refused && <InvitationRefusal refused={refused} className="mt-1" />}
       </div>
     </div>

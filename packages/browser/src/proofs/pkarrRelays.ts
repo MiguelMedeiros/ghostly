@@ -1,4 +1,4 @@
-import { DEFAULT_RELAYS } from "@ghostly/core";
+import { DEFAULT_RELAYS, normalizeRelayUrl } from "@ghostly/core";
 
 /**
  * The profile's Pkarr relays (Network settings), which a did:dht proof is read from, as every other Pkarr read: a
@@ -10,4 +10,10 @@ export function setPkarrRelaySource(read: () => readonly string[] | undefined): 
 export function pkarrRelays(): string[] {
   const relays = source();
   return relays?.length ? [...relays] : [...DEFAULT_RELAYS];
+}
+
+/** Whether `url` is under one of the profile's Pkarr relays (`<relay>/…`). */
+export function isOwnPkarrRelayUrl(url: URL): boolean {
+  if (url.username || url.password) return false;
+  return pkarrRelays().map(normalizeRelayUrl).some(relay => relay !== null && url.href.startsWith(`${relay}/`));
 }

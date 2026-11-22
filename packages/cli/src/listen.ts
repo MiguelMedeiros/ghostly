@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { contactKeyOf, nameKey, namedByThem } from "./apiKit";
+import { contactKeyOf, groupPrefixed, nameKey, namedByThem, sharedGroupIds } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
+import { shellWord } from "./shellWord";
 import type { GhostlyEvent } from "./events";
 import { jsonOut } from "./jsonOut";
 import { turnRef } from "./turnRefs";
@@ -88,34 +89,59 @@ export class Allowlist {
 /**
  * `--from` and `--group` as ids, resolved once at start: a contact key as that key (whatever any chat is named), else a
  * chat by its id or a label this side gave it, as `call auto on --from` (`findOwnNamedChat`): a prefix of its id or the
- * name its contact gave itself is refused, since another contact could call itself that; a group by id, prefix or name.
- * A name that later changes (or a contact who renames themselves) moves nothing.
+ * name its contact gave itself is refused, since another contact could call itself that; a group only by its id (or
+ * `group:<id>`): its name or a prefix of its id is refused, with its id. A name that later changes (or a contact who
+ * renames themselves) moves nothing.
  */
 export async function allowlist(from: readonly string[], groups: readonly string[], call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>): Promise<Allowlist> {
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
   for (const ref of from) {
     const key = contactKeyOf(ref);
     if (key !== undefined) { keys.add(key); continue; }
-    const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from")) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
-    // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
-    if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
-    chats.add(chat.id);
+    chats.add(await fromChat(ref, call));
   }
-  for (const ref of groups) groupIds.add(((await otherFlag(call("group.get", { group: ref }), ref, "--group")) as { id: string }).id);
+  for (const ref of groups) {
+    const group = (await otherFlag(call("group.get", { group: ref }), ref, "--group", call)) as { id: string; name?: string | null };
+    // A group has no label given here: its name is its admin's, its id its creator's, so a prefix is theirs too. Another
+    // group's admin could rename theirs to it (and the lookup prefers a group this profile is in over an invitation).
+    if (group.id !== ref && group.id !== groupPrefixed(ref)) throw namedByAdmin(ref, group);
+    groupIds.add(group.id);
+  }
   return new Allowlist(chats, keys, groupIds, peerOf);
+}
+
+/** The chat `--from <ref>` names (not a contact key): its id, or `namedByThem` when only its contact chose `ref`. */
+async function fromChat(ref: string, call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<string> {
+  const chat = (await otherFlag(call("chat.get", { chat: ref }), ref, "--from", call)) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
+  // A label compared as the lookup compares it (`nameKey`): the string given to `chat rename` names its chat.
+  if (chat.id !== ref && (!nameKey(ref) || nameKey(chat.label) !== nameKey(ref))) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
+  return chat.id;
+}
+
+/** `--group`'s refusal: `ref` found `group` only by its name or a prefix of its id, both chosen by others. */
+function namedByAdmin(ref: string, group: { id: string; name?: string | null }): CliError {
+  return new CliError("bad_request", `${JSON.stringify(ref)} names a group only by what others chose (its name, a prefix of its id): use its id: ghostly listen --group ${shellWord(group.id, group.id)}`, { group: group.id, name: group.name ?? null });
 }
 
 /**
  * A `--from` that names a group, or a `--group` a chat: said with the flag that takes it. The lookup's own hint named
- * `ghostly group show` (or `chat show`), which lists nothing. A chat is named by its id: `--from` refuses a prefix of it
- * or the name its contact chose, which `--group`'s lookup took.
+ * `ghostly group show` (or `chat show`), which lists nothing. Each is named by its id: `--from` refuses a prefix of a chat's
+ * id or the name its contact chose, `--group` a group's name or a prefix of its id. A `--group` that found its chat
+ * only so is refused as `--from` refuses it, with no `--from` to paste.
  */
-async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group"): Promise<unknown> {
+async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" | "--group", call: (method: string, params: Record<string, unknown>) => Promise<unknown>): Promise<unknown> {
   try { return await lookup; } catch (error) {
     const other = flag === "--from" ? "group" : "chat";
+    // A name more than one group has: `--group` with the id of the one meant (`matches`), not `group show`. Asked of the
+    // group lookup: a `not_found` with `matches` may hold chats (`group:<name>` a chat's label has).
+    if (flag === "--from" && error instanceof CliError && error.code === "not_found" && Array.isArray(error.details?.matches)) {
+      const shared = await call("group.get", { group: ref }).then(() => undefined, sharedGroupIds);
+      if (shared) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ghostly listen --group <group>, with the id of the group meant (ghostly group list)`, { matches: shared });
+    }
     if (!(error instanceof CliError) || error.code !== "not_found" || typeof error.details?.[other] !== "string") throw error;
-    const named = other === "chat" ? error.details.chat as string : ref;
-    const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);
+    if (other === "chat" && contactKeyOf(ref) === undefined) await fromChat(ref, call);
+    const named = error.details[other] as string;
+    const shown = shellWord(named, error.details[other] as string);
     throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }
@@ -202,9 +228,12 @@ export function checkWebhook(url: string, from = "--webhook"): URL {
   return parsed;
 }
 
+/** A cursor file that is there and read, but holds no event number: the one refusal --since takes as its start. */
+class NoEventNumber extends CliError {}
+
 /**
  * The event number a cursor file holds, or undefined when there is no file (a first start: live events). A file that is
- * there and holds no whole number (empty, half-written, edited by hand) is refused, naming the file and what it holds:
+ * there and holds no whole number (empty, half-written, edited by hand) is refused, naming the file and how much it holds:
  * taken as no cursor, the listener started at the journal's end and skipped every event since the last one handled,
  * without a word, and its next write replaced the file.
  */
@@ -215,8 +244,34 @@ export function readCursor(path: string | undefined): number | undefined {
   const trimmed = text.trim();
   const value = trimmed === "" ? NaN : Number(trimmed);
   if (Number.isSafeInteger(value) && value >= 0 && /^\d+$/.test(trimmed)) return value;
-  const shown = trimmed === "" ? "nothing" : JSON.stringify(trimmed.length > 32 ? `${trimmed.slice(0, 32)}…` : trimmed);
-  throw new CliError("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
+  // Measured, never quoted: a --cursor pointed at a seed or key file by mistake put its start on stderr, which a service
+  // manager keeps in its journal.
+  const words = trimmed.split(/\s+/).length, bytes = Buffer.byteLength(trimmed);
+  const shown = trimmed === "" ? "nothing" : `${words} ${words === 1 ? "word" : "words"}, ${bytes} ${bytes === 1 ? "byte" : "bytes"}`;
+  throw new NoEventNumber("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
+}
+
+/**
+ * Where listen starts: after the event number the cursor file holds, else after `since` (--since: the first start's
+ * place). Before, --since won without a word, and a unit with `--since 0 --cursor f` ran every handled event's hook
+ * again at each restart. A cursor file that holds no number is refused unless --since is given, which starts it; one
+ * that cannot be read, or a folder, is refused either way (before, --since started it too and its hook ran again).
+ * `known`, once the journal's last event is: says on stderr where it starts. A cursor past it (a profile restored from a
+ * backup, a journal reset, a cursor copied from another profile) starts with new events; before, stderr said "starting
+ * after it" (or nothing, without --since) and the next event wrote a lower number over the file.
+ */
+export function startAt(since: number | undefined, cursor: string | undefined, say: (line: string) => void): { from: number | undefined; known(lastSeq: number): void } {
+  let kept: number | undefined;
+  if (since === undefined) kept = readCursor(cursor);
+  else try { kept = readCursor(cursor); } catch (error) { if (!(error instanceof NoEventNumber)) throw error; /* --since starts it */ }
+  return {
+    from: kept ?? since,
+    known: (lastSeq) => {
+      if (kept === undefined) return;
+      if (kept > lastSeq) say(`ghostly: ${cursor} holds event ${kept}, past this profile's last event (${lastSeq}): starting with new events`);
+      else if (since !== undefined && kept !== since) say(`ghostly: ${cursor} holds event ${kept}: starting after it, not after --since ${since}`);
+    },
+  };
 }
 
 /**
@@ -228,7 +283,7 @@ export function readCursor(path: string | undefined): number | undefined {
 export function checkCursor(path: string | undefined): void {
   if (!path) return;
   const folder = dirname(resolve(path));
-  if (!statSync(folder).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);
+  if (!statSync(folder).isDirectory()) throw new CliError("not_found", `${folder} is a file, not a folder`);
   accessSync(folder, constants.W_OK | constants.X_OK);
 }
 
@@ -359,6 +414,15 @@ function runExec(command: string, event: GhostlyEvent, toStderr: boolean, profil
 const RETRY_MAX_MS = 60_000;
 
 /**
+ * The TLS error a failed post met, as Node names it (`DEPTH_ZERO_SELF_SIGNED_CERT`, `ERR_SSL_WRONG_VERSION_NUMBER` for
+ * https:// to a plain http server), or null for any other failure.
+ */
+function tlsFailure(error: unknown): string | null {
+  const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+  return typeof code === "string" && /^ERR_(SSL|TLS)_|CERT|SELF_SIGNED|UNABLE_TO_/.test(code) ? code : null;
+}
+
+/**
  * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, posted
  * once: before, three times with backoff, three refusals in the bridge's log for an event stderr said was not tried again).
  * A bridge that is not there (refused connection, timeout, 5xx, 408, 429) has not handled the event: it is tried again,
@@ -368,7 +432,7 @@ const RETRY_MAX_MS = 60_000;
 async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<true | number> {
   let wait = retryMs, holding = false;
   for (let attempt = 0; ; attempt++) {
-    let down = true, status = 0;
+    let down = true, status = 0, tls: string | null = null;
     try {
       // A redirect is not followed: it would post the event to wherever it points, off this machine too. stderr names the
       // bridge by its origin only: its token is in the path or query (no user:password@, `checkWebhook`).
@@ -380,11 +444,18 @@ async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<tru
       }
       status = response.status;
       down = status >= 500 || status === 408 || status === 429;
-    } catch { /* not there: tried again */ }
+    } catch (error) {
+      // Not there: tried again. A TLS failure answers each try and fails the same way; it is held too (the cursor stays
+      // before the event, so a listen restarted with the way out below delivers it), but said for what it is. Before, it
+      // was "not answering", and waiting changed nothing.
+      tls = tlsFailure(error);
+    }
     if (!down) return status;
     if (down && attempt >= 2 && !holding) {
       holding = true;
-      process.stderr.write(`ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
+      process.stderr.write(tls
+        ? `ghostly: the webhook at ${url.origin} failed TLS (${tls}): holding event ${event.seq} (${event.type}) until it passes; on this machine give it as http://, or restart listen with NODE_EXTRA_CA_CERTS set to the file of the certificate that signed the bridge's\n`
+        : `ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
     }
     await new Promise((resolve) => setTimeout(resolve, wait));
     wait = Math.min(wait * 2, RETRY_MAX_MS);
@@ -401,8 +472,8 @@ export interface EventHandler {
   /**
    * Takes no more events and resolves once no hook runs: one at work gets `EXEC_STOP_MS` to end on its own (the cursor
    * then moves past its event), else it and what it started are sent SIGTERM, then SIGKILL, and the cursor stays before
-   * its event, handed again at the next start. Before, a stop left the hook running on its own, and the restarted listen
-   * ran that event's hook a second time alongside it.
+   * its event, handed again at the next start (without a cursor, stderr says how to get it: `--since`). Before, a stop
+   * left the hook running on its own, and the restarted listen ran that event's hook a second time alongside it.
    */
   stop(): Promise<void>;
 }
@@ -502,7 +573,12 @@ export function eventHandler(options: ListenOptions): EventHandler {
       return;
     }
     hook.stopped = true;
-    process.stderr.write(`ghostly: stopped while --exec ran on event ${hook.event.seq} (${hook.event.type}): ended it, and the event is handed again at the next start\n`);
+    // Only a cursor keeps where it stopped: without one the next start begins at the journal's end, and the event is
+    // reached again only from the place before it.
+    const { seq, type } = hook.event;
+    process.stderr.write(options.cursor
+      ? `ghostly: stopped while --exec ran on event ${seq} (${type}): ended it, and the event is handed again at the next start\n`
+      : `ghostly: stopped while --exec ran on event ${seq} (${type}): ended it; with no --cursor it is not handed again (start with --since ${seq - 1} to run it again)\n`);
     hook.signal("SIGTERM");
     if (!(await within(hook.ended, stopMs))) { hook.signal("SIGKILL"); await hook.ended; }
   };
@@ -590,14 +666,19 @@ export function followDaemon(address: DaemonAddress, client: DaemonClient, handl
     if (current) current.resume(); else reconnect(0);
   });
   // A feed that took no event yet goes on after the last seq the daemon had when it subscribed: one that restarts
-  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started).
-  const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
-    if (current !== c) return;
-    current = null;
-    reconnect(1000);
-  }).then((answer) => {
-    if (feed.since === undefined && typeof answer?.lastSeq === "number") feed.since = answer.lastSeq;
-    return answer;
-  });
+  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started). So does
+  // one started past the daemon's last event (a cursor from a backup, `startAt`): it waited at the cursor's number, and
+  // the daemon replays nothing up to it. Not once it took an event since: that is where it is.
+  const follow = (c: DaemonClient) => {
+    const asked = feed.since;
+    return c.subscribe(asked, feed.take, () => {
+      if (current !== c) return;
+      current = null;
+      reconnect(1000);
+    }).then((answer) => {
+      if (typeof answer?.lastSeq === "number" && feed.since === asked && (asked === undefined || asked > answer.lastSeq)) feed.since = answer.lastSeq;
+      return answer;
+    });
+  };
   return { subscribed: follow(client), close: () => { clearTimeout(holding); current?.close(); } };
 }

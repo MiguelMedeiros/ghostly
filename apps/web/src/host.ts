@@ -12,7 +12,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { testSwitch } from "@ghostly/browser/shared/features";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { closeServiceView, parseServicesHost } from "./svc/protocol";
-import { SERVICE_LOCKED, hostErrorText, serviceFraming, serviceWindowsClosedSince, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+import { SERVICE_LOCKED, hostErrorText, serviceAppWords, serviceFrameTitle, serviceFraming, serviceWindowsClosedSince, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { activeProfileId, listProfiles } from "../../ui/src/lib/profiles";
 import { OPENED_KEY } from "../../ui/src/lib/openedServices";
@@ -121,6 +121,21 @@ if (servicesHost) {
   });
 }
 /**
+ * Every app a chat lists, noted as the list comes (`noteListed`): one opened here before the opened-apps list was kept
+ * is on no list, and would keep what it stored after Delete chat, Clear all data and Delete profile. Nothing of it
+ * loads while no chat lists one.
+ */
+if (openServices) {
+  engine.subscribe(() => {
+    const state = engine.state;
+    if (!state) return;
+    const links = [...state.links, ...(state.edges ?? [])].filter((link) => link.peerServices?.some((s) => s.type === "http"));
+    if (!links.length) return;
+    const profile = activeProfileId();
+    void import("./svc/forget").then(({ noteListed }) => noteListed(profile, links)).catch(() => {});
+  });
+}
+/**
  * Hide my IP from contacts is on: a contact's app does not open here. No policy this page sends keeps a Chromium browser
  * from connecting to a server a frame in the app points at (its "Preload pages" connects before the policy refuses the
  * frame), and that server would see this device's address. The extension (`RELAY_ONLY_REFUSED` in its background.ts)
@@ -150,9 +165,9 @@ export const webHost = createInPageHost({
   // Iroh through a relay (WISP 102): where WebRTC cannot connect, before the chat drops to the DHT.
   // A new profile gets its default Mainnet wallets, never under test (see defaultWalletsAllowed).
   // Mini-apps by the build's flag (APPS_ENABLED); on whatever it says in the e2e suite's build (VITE_APPS_TEST, fixed at build time),
-  // and held items read from its local S3 server there.
+  // held items read from its local S3 server there, and a group call's pass taken with its local LiveKit's ws:// address.
   // The apps that come with Ghostly are read from this build's own files (`builtInAppOption`), never from a server of theirs.
-  node: { ...testPace(), ...testReactions(), irohWeb: testIroh(), servicesSupport: openServices, defaultWallets: defaultWalletsAllowed(), ...builtInAppOption(), ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, holdLoopback: true } : {}) },
+  node: { ...testPace(), ...testReactions(), irohWeb: testIroh(), servicesSupport: openServices, defaultWallets: defaultWalletsAllowed(), ...builtInAppOption(), ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, holdLoopback: true, groupCallLoopback: true } : {}) },
 
   /**
    * The deployed build says what it is in `/version.json`, on this origin and
@@ -206,12 +221,15 @@ export const webHost = createInPageHost({
     await openServiceView({
       host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title, relayOnly,
       send: (request) => offline() ? Promise.reject(new GhostlyHttpError("offline", "Your contact is offline")) : node.request(peerPubKeyZ32, serviceId, request),
-      presence: { offline, watch: (changed) => engine.subscribe(changed) },
+      // Try again reaches the contact now, as the chat's Reconnect does.
+      presence: { offline, watch: (changed) => engine.subscribe(changed), connect: async () => { const link = engine.linkByPeer(peerPubKeyZ32); if (link) await engine.call("connect", { linkId: link.id }); } },
       words: {
-        unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), callOn: t("services.window.callOn", { app: title }),
-        tooSlow: t("services.window.tooSlow", { app: title }), offline: t("services.window.offline", { app: title }), retry: t("services.window.retry"),
-        blocked: t("services.window.blocked", { app: title }), unguarded: t("services.window.unguarded", { app: title }),
+        unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"),
+        retry: t("services.window.retry"), reaching: t("services.window.reaching"),
+        ...serviceAppWords(title, t),
+        openLink: (site) => t("services.window.openLink", { site }),
         ...serviceFraming(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
+        frameTitle: serviceFrameTitle(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
         hostError: (headers) => hostErrorText(headers, title, t),
       },
     });
