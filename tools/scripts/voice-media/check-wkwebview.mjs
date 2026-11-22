@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { decodeInPage, loadFixtures, playInPage, rateInPage } from "../../../e2e/support/voice-media.mjs";
+import { decodeInPage, describeState, loadFixtures, playInPage, rateInPage, shouldRetry } from "../../../e2e/support/voice-media.mjs";
 import { desktopPolicy, inWebView } from "./webview.mjs";
 
 /**
@@ -14,11 +14,22 @@ if (process.platform !== "darwin") {
   process.exit(0);
 }
 const policy = process.argv.includes("--policy") && process.argv[process.argv.indexOf("--policy") + 1] === "none" ? undefined : desktopPolicy();
-const results = inWebView(playInPage, [loadFixtures()], { csp: policy });
+// A play stalled at 0.00 s with no media error is played once more in a fresh WebView (a new element and object
+// URL): a busy macOS runner now and then leaves the AAC recording there for the whole 8 s. A media error or a
+// refused play() fails at once, and so does a second stall (voice-media.mjs's shouldRetry).
+const voices = loadFixtures();
+const results = inWebView(playInPage, [voices], { csp: policy });
+const stalled = voices.filter(({ name }) => shouldRetry(results[name], 1));
+if (stalled.length) {
+  for (const { name } of stalled) console.log(`↻ ${name} stalled at ${results[name].state.currentTime.toFixed(2)} s (${describeState(results[name].state)}), playing again`);
+  const again = inWebView(playInPage, [stalled], { csp: policy });
+  for (const { name } of stalled) results[name] = { ...again[name], retried: true };
+}
 let failed = 0;
 for (const [name, result] of Object.entries(results)) {
   if (!result.played) failed++;
-  console.log(`${result.played ? "✓" : "✗"} ${name.padEnd(28)} canPlayType=${JSON.stringify(result.canPlay)}${result.error ? `  ${result.error}` : ""}`);
+  const notes = [result.error, !result.played && `(${describeState(result.state)})`, result.retried && (result.played ? "(played on the second try)" : "(on the second try too)")].filter(Boolean);
+  console.log(`${result.played ? "✓" : "✗"} ${name.padEnd(28)} canPlayType=${JSON.stringify(result.canPlay)}${notes.length ? `  ${notes.join(" ")}` : ""}`);
 }
 if (failed) {
   console.error(`\n${failed} recording(s) do not play in WKWebView${policy ? " under Desktop's CSP (try --policy none: a policy problem, or a codec one?)" : ""}.`);

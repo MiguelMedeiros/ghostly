@@ -129,6 +129,10 @@ describe("talking to the wallet", () => {
     expect(noInfo.capabilities.send).toBe(true);
     const info = await (await connect(await wallet({ alias: "Test hub" }))).info();
     expect(info.alias).toBe(`Test hub via ${new URL(relay.url).host}`);
+    // The wallet's own name, without the characters that hide text or reorder it.
+    const hidden = await (await connect(await wallet({ alias: "\u202eTest\u200b hub\ufeff" }))).info();
+    expect(hidden.alias).toBe(`Test hub via ${new URL(relay.url).host}`);
+    expect((await (await connect(await wallet({ alias: "\u200b\u2066" }))).info()).alias).toBe(`NWC wallet via ${new URL(relay.url).host}`);
   });
 
   it("reads only answers signed by the wallet, about its request, of the method asked, and not oversized", async () => {

@@ -35,13 +35,13 @@ describe("what a file's status line says", () => {
     ["moving, no speed yet", t({}), "62% of 4.2 GB"],
     ["no connection", t({ stage: "waiting" }), "Waiting for connection · 62% done"],
     ["no connection, nothing moved", t({ stage: "waiting", transferred: 0 }), "Waiting for connection · 4.2 GB"],
-    ["sent, the contact decides", t({ stage: "asking", direction: "out", transferred: 0 }), "Waiting for Ana to accept · 4.2 GB"],
+    ["sent, the contact decides", t({ stage: "asking", direction: "out", transferred: 0 }), "Waiting for \u2068Ana\u2069 to accept · 4.2 GB"],
     ["received, this person decides", t({ stage: "asking", direction: "in", transferred: 0 }), "4.2 GB · waiting for your answer"],
-    ["sent, the contact's turn", t({ stage: "queued", direction: "out" }), "Queued by Ana · 62% done"],
+    ["sent, the contact's turn", t({ stage: "queued", direction: "out" }), "Queued by \u2068Ana\u2069 · 62% done"],
     ["paused here", t({ stage: "paused", pausedBy: "me" }), "Paused · 62% of 4.2 GB"],
-    ["paused by the contact", t({ stage: "paused", pausedBy: "peer" }), "Paused by Ana · 62% of 4.2 GB"],
+    ["paused by the contact", t({ stage: "paused", pausedBy: "peer" }), "Paused by \u2068Ana\u2069 · 62% of 4.2 GB"],
     ["checking", t({ stage: "verifying" }), "Checking the file… 4.2 GB"],
-    ["sent, arrived, the contact checks it", t({ stage: "verifying", direction: "out", transferred: f.size }), "Arrived, Ana is checking it… 4.2 GB"],
+    ["sent, arrived, the contact checks it", t({ stage: "verifying", direction: "out", transferred: f.size }), "Arrived, \u2068Ana\u2069 is checking it… 4.2 GB"],
     ["copying before the offer", t({ stage: "preparing" }), "Preparing… 62% of 4.2 GB"],
     ["declined", { state: "failed", transferred: 0, size: f.size, error: "Declined by your contact" } as FileTransferState, "Declined"],
     ["cancelled", { state: "failed", transferred: 0, size: f.size, error: "Cancelled by the sender" } as FileTransferState, "Cancelled"],
@@ -80,7 +80,7 @@ describe("FileBubble: files/3", () => {
   it("an offer asks the person, with the room here, and answers through the engine", async () => {
     show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB, room: 12 * GB });
     expect(screen.getByTestId("file-offer")).toHaveTextContent("Ana wants to send movie.mkv (4.2 GB).");
-    expect(screen.getByTestId("file-room")).toHaveTextContent("12.0 GB free on this device");
+    expect(screen.getByTestId("file-room")).toHaveTextContent("12.0 GB left on this device");
     expect(screen.queryByTestId("file-progress")).toBeNull();
     fireEvent.click(screen.getByTestId("file-accept"));
     await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([{ linkId: "chat1", fileId: "chat1-in-abc", action: "accept" }]));
@@ -131,15 +131,37 @@ describe("FileBubble: files/3", () => {
   it("an offer of a name with nothing to break at wraps inside the bubble", () => {
     const name = `report_${"x".repeat(150)}.bin`;
     show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB }, { name });
-    const line = screen.getByText(`Ana wants to send ${name} (4.2 GB).`);
+    const line = screen.getByTestId("file-offer").querySelector("p")!;
+    expect(line).toHaveTextContent(`Ana wants to send ${name} (4.2 GB).`);
     // jsdom lays nothing out: the line must be allowed to break inside the name (e2e/web/file-offer-layout.spec.ts measures it).
     expect(line.className).toContain("[overflow-wrap:anywhere]");
   });
 
-  it("an offer larger than the room here cannot be accepted", () => {
+  it("an offer larger than the room shown still takes Accept, which reads the room again: refused, it says why and keeps waiting", async () => {
     show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB, room: 1 * GB });
-    expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 1.0 GB free on this device");
-    expect(screen.getByTestId("file-accept")).toBeDisabled();
+    expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 1.0 GB left on this device");
+    // The room shown may be old (space made since): Accept is not turned off, and the engine reads the room again.
+    expect(screen.getByTestId("file-accept")).not.toBeDisabled();
+    fakeEngine.on("fileAction", () => { throw new Error("No room on this device for this file (1.0 GB free)"); });
+    fireEvent.click(screen.getByTestId("file-accept"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: file().id, action: "accept" }));
+    fireEvent.click(await screen.findByTestId("file-why"));
+    expect(screen.getByTestId("file-why-text")).toHaveTextContent("No room on this device. Free some space, then try again.");
+    // Still offered: it can be taken once there is room, or declined.
+    expect(screen.getByTestId("file-accept")).not.toBeDisabled();
+    expect(screen.getByTestId("file-decline")).not.toBeDisabled();
+  });
+
+  it("Accept refused for the files still coming says so, with the room left, beside the room line that says it does not fit", async () => {
+    // As the engine shows it: the room left beside a file still coming (13.4 MB of 38.9 MB free), below the file's size.
+    show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 27_262_976, room: 14_050_000 });
+    // "Left", as Accept says it: the device has 38.9 MB free, and "13.4 MB free" above "13.4 MB left of 38.9 MB free" read as two answers.
+    expect(screen.getByTestId("file-room")).toHaveTextContent("Not enough space: 13.4 MB left on this device");
+    fakeEngine.on("fileAction", () => { throw new Error("No room on this device for this file beside the files still coming (13.4 MB left of 38.9 MB free)"); });
+    fireEvent.click(screen.getByTestId("file-accept"));
+    fireEvent.click(await screen.findByTestId("file-why"));
+    expect(screen.getByTestId("file-why-text")).toHaveTextContent("No room beside the files still coming. 13.4 MB left of 38.9 MB free. Wait for them to arrive, or cancel one, then try again.");
+    expect(screen.getByTestId("file-accept")).not.toBeDisabled();
   });
 
   it("a moving transfer pauses and cancels; paused here it resumes; paused by the contact it does not", async () => {
@@ -160,7 +182,7 @@ describe("FileBubble: files/3", () => {
   it("a file sent from here that arrived whole has no Cancel: too late, the contact keeps it; one arriving here still has", () => {
     const whole = { state: "transferring", direction: "out", transferred: 4.2 * GB, size: 4.2 * GB } as const;
     const view = show({ ...whole, stage: "verifying" }, { id: "chat1-out-late" });
-    expect(screen.getByTestId("file-status")).toHaveTextContent("Arrived, Ana is checking it… 4.2 GB");
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Arrived, \u2068Ana\u2069 is checking it… 4.2 GB");
     expect(screen.queryByTestId("file-cancel")).toBeNull();
     // Offered again after a quiet spell, or waiting for a connection, every byte still there. No Pause either: paused,
     // it could be cancelled.
@@ -505,5 +527,16 @@ describe("a moving file's progress bar", () => {
     const bar = screen.getByRole("progressbar", { name: "movie.mkv" });
     expect(bar).toHaveAttribute("aria-valuenow", "50");
     expect(bar.getAttribute("aria-valuetext")?.replace(/\u00a0/g, " ")).toMatch(/^50% de 4[.,]2 GB$/);
+  });
+});
+
+// A long name cut with … at its end hid what the file is on a phone (a tooltip is no help there): it wraps, its end kept.
+describe("a long file name", () => {
+  it("wraps onto more lines and keeps its extension in sight", () => {
+    show(null, { name: "Payment receipt.pdf (signed copy for your records).exe", size: 1024 });
+    const name = screen.getByTestId("file-name");
+    expect(name).toHaveTextContent("Payment receipt.pdf (signed copy for your records).exe");
+    expect(name).not.toHaveClass("truncate");
+    expect(name.className).toContain("[overflow-wrap:anywhere]");
   });
 });

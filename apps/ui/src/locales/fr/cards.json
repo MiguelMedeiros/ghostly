@@ -1,30 +1,30 @@
 {
   "board": {
     "card": {
-      "botLabel": "De :",
-      "chatLabel": "Discussion :",
+      "botLabel": "De :",
+      "chatLabel": "Discussion :",
       "checks": {
         "failing": "Vérifications en échec",
         "passing": "Vérifications réussies",
         "pending": "Vérifications en cours"
       },
       "details": "Détails",
-      "filesLabel": "Fichiers :",
+      "filesLabel": "Fichiers :",
       "from": "{{bot}} dans {{chat}}",
       "in": "dans {{chat}}",
       "openPr": "Ouvrir sur {{host}}",
       "parts": "{{done}} sur {{total}} terminées",
-      "prLabel": "Pull request :",
+      "prLabel": "Pull request :",
       "prState": {
         "closed": "Fermée",
         "draft": "Brouillon",
         "merged": "Fusionnée",
         "open": "Ouverte"
       },
-      "statusLabel": "État :",
+      "statusLabel": "État :",
       "steps": "{{done}} sur {{total}}",
-      "tagsLabel": "Étiquettes :",
-      "updatedLabel": "Mise à jour :"
+      "tagsLabel": "Étiquettes :",
+      "updatedLabel": "Mise à jour :"
     },
     "clearFinished": "Effacer les terminées",
     "clearFinishedHint": "Masque sur cet appareil les tâches terminées, échouées et annulées. La prochaine mise à jour d'un bot en ramène une.",
@@ -47,7 +47,7 @@
       "status": "État"
     },
     "hideOlder": "Masquer les anciennes",
-    "info": "Les cartes de tâche des bots, de toutes les discussions. Les tâches terminées et arrêtées restent un jour. Une carte ne fait que montrer la tâche : son bot change l'état.",
+    "info": "Les cartes de tâche des bots, de toutes les discussions. Les tâches terminées et arrêtées restent un jour. Une carte ne fait que montrer la tâche : son bot change l'état.",
     "me": "Vous",
     "noMatch": "Aucune tâche ne correspond",
     "none": "Aucune",
@@ -90,8 +90,8 @@
   },
   "routine": {
     "cron": "Cron",
-    "label": "Routine : {{name}}, {{state}}",
-    "lastRun": "Dernière exécution : {{result}}",
+    "label": "Routine : {{name}}, {{state}}",
+    "lastRun": "Dernière exécution : {{result}}",
     "next": "Prochaine {{when}}",
     "noRuns": "Pas encore lancée",
     "result": {
@@ -107,7 +107,7 @@
     }
   },
   "task": {
-    "branch": "Branche :",
+    "branch": "Branche :",
     "elapsed": {
       "blocked": "bloquée depuis {{duration}}",
       "queued": "en attente depuis {{duration}}",
@@ -121,9 +121,9 @@
       "running": "En cours",
       "skipped": "Ignoré"
     },
-    "label": "Tâche : {{title}}, {{status}}",
-    "labelProgress": "Tâche : {{title}}, {{status}}, {{progress}}%",
-    "now": "Maintenant :",
+    "label": "Tâche : {{title}}, {{status}}",
+    "labelProgress": "Tâche : {{title}}, {{status}}, {{progress}}%",
+    "now": "Maintenant :",
     "pr": "PR #{{number}}",
     "prNoNumber": "Pull request",
     "progress": "Progression",
@@ -142,14 +142,14 @@
   "usage": {
     "accountLabel": "Compte",
     "info": "Ce que le bot dit qu'il lui reste. Ghostly ne le vérifie pas.",
-    "label": "{{name}} : {{left}} % restants",
-    "labelResets": "{{name}} : {{left}} % restants, renouvelé {{time}}",
+    "label": "{{name}} : {{left}} % restants",
+    "labelResets": "{{name}} : {{left}} % restants, renouvelé {{time}}",
     "left": "{{left}} % restants",
     "leftLabel": "Restant",
     "resets": "renouvelé {{time}}",
     "resetsLabel": "Renouvelé",
     "stale": "pas mis à jour récemment",
-    "staleHint": "Chiffres anciens : le bot ne les a pas mis à jour récemment, ou la fenêtre s'est renouvelée.",
+    "staleHint": "Chiffres anciens : le bot ne les a pas mis à jour récemment, ou la fenêtre s'est renouvelée.",
     "title": "Utilisation",
     "updatedLabel": "Mis à jour",
     "used": "{{used}} sur {{limit}} utilisés",
@@ -158,7 +158,7 @@
   },
   "working": {
     "label": "Au travail",
-    "quiet": "Au travail ? · dernière mise à jour {{ago}}",
+    "quiet": "Au travail ? · dernière mise à jour {{ago}}",
     "stale": "Aucune mise à jour depuis {{duration}}"
   }
 }

@@ -143,6 +143,19 @@ describe("names and times", () => {
     expect(voiceDownloadName("audio/ogg;codecs=opus", ts)).toMatch(/\.ogg$/);
   });
 
+  it("every type a voice message may have saves with its own extension, never .audio", () => {
+    // The CLI sends a FLAC as a voice note (`file send --voice`); a peer's file may say audio/x-wav or audio/mp3.
+    const ts = new Date(2026, 8, 27, 14, 1, 30).getTime();
+    const extensions = {
+      "audio/webm": "webm", "audio/ogg": "ogg", "audio/opus": "opus", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/mpeg": "mp3", "audio/mp3": "mp3",
+      "audio/aac": "aac", "audio/wav": "wav", "audio/x-wav": "wav", "audio/wave": "wav", "audio/flac": "flac", "audio/x-flac": "flac",
+    };
+    for (const [mime, extension] of Object.entries(extensions)) {
+      expect(isPlayableAudioType(mime), mime).toBe(true);
+      expect(voiceDownloadName(mime, ts), mime).toBe(`Ghostly voice 2026-09-27 14.01.30.${extension}`);
+    }
+  });
+
   it("a time no date can hold makes a name without one, never NaN", () => {
     // Past Date's end (8.64e15) yet a safe integer, as a sender may claim one.
     expect(voiceDownloadName("audio/webm", 8_700_000_000_000_000)).toBe("Ghostly voice.webm");

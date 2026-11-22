@@ -76,12 +76,20 @@ function stopWait(ctx: ApiContext, linkId: string): void {
   timersOf(ctx).delete(linkId);
 }
 
+/**
+ * The longest a hold's timer waits before it reads the wall clock again. Timers run on a clock that stops while the
+ * machine sleeps: one timer for the whole hold, after a sleep past its end, kept the chat on DHT only for as long again
+ * as the hold had left when the machine went to sleep, while `holdOf` no longer reported it.
+ */
+const HOLD_CHECK_MS = 60_000;
+
 function schedule(ctx: ApiContext, linkId: string, until: number): void {
   stopWait(ctx, linkId);
   const timer = setTimeout(() => {
     timersOf(ctx).delete(linkId);
-    expire(ctx, linkId);
-  }, Math.max(0, until - Date.now()));
+    if (until > Date.now()) schedule(ctx, linkId, until);
+    else expire(ctx, linkId);
+  }, Math.min(HOLD_CHECK_MS, Math.max(0, until - Date.now())));
   // A one-shot leaves when its command is done; the next start takes the hold back.
   timer.unref?.();
   timersOf(ctx).set(linkId, () => clearTimeout(timer));
@@ -114,6 +122,16 @@ export function holdOf(ctx: ApiContext, linkId: string): number | null {
   return until !== undefined && until > Date.now() ? until : null;
 }
 
+/**
+ * When the chat's hold ends, or null for none, as what waits in a held chat reads it: also a hold whose time is up and
+ * that has not ended yet (its release is under way, or waits for the chat to open: `expire`), which `holdOf` no longer
+ * reports while the chat is still on DHT only. Read as no hold, a text or edit waiting through it was said to wait
+ * for a transport to be chosen, and it goes by itself.
+ */
+export function holdEnds(ctx: ApiContext, linkId: string): number | null {
+  return readHolds(ctx)[linkId]?.until ?? null;
+}
+
 /** Keeps the chat off its direct link for `minutes` (again: from now). */
 export function holdChat(ctx: ApiContext, link: LinkView, minutes: number): Promise<number> {
   return inTurn(ctx, link.id, async () => {
@@ -123,12 +141,15 @@ export function holdChat(ctx: ApiContext, link: LinkView, minutes: number): Prom
     if (now.deliveryMode === "dht" && !held) throw new CliError("refused", "This chat is on DHT only already, by its own choice: chat transport auto leaves it");
     if (!now.profile) throw new CliError("unavailable", "A chat of the older protocol has no DHT only");
     const until = Date.now() + minutes * 60_000;
+    // The hold before DHT only, taken back if the switch fails: the store never has the chat on DHT only while
+    // holds.json has no hold to end it (a profile backup reads that file again after the store).
+    editHold(ctx, link.id, { until, since: held?.since ?? Date.now() });
     if (now.deliveryMode !== "dht") {
       try { await node(ctx).setChatTransport({ linkId: link.id, transport: "dht" }); } catch (error) {
+        editHold(ctx, link.id, held ?? null);
         throw new CliError("unavailable", error instanceof Error ? error.message : String(error));
       }
     }
-    editHold(ctx, link.id, { until, since: held?.since ?? Date.now() });
     schedule(ctx, link.id, until);
     ctx.hub.emit("chat.held", `chat.held:${link.id}:${until}`, { chat: link.id, until });
     return until;
@@ -164,7 +185,15 @@ export function forgetHold(ctx: ApiContext, linkId: string): Promise<void> {
   });
 }
 
-/** At start: holds whose time is up end now, the others are timed again. */
+/**
+ * At start: holds whose time is up end now, the others are timed again. A hold whose chat the store does not have is
+ * dropped, with no release said: a profile restored from a backup taken while that chat was removed (the backup reads
+ * holds.json before and after its store) had it, and its end said `chat.released` for a chat it never had.
+ */
 export function resumeHolds(ctx: ApiContext): void {
-  for (const [linkId, hold] of Object.entries(readHolds(ctx))) schedule(ctx, linkId, hold.until);
+  const chats = new Set(state(ctx).links.map((link) => link.id));
+  const holds = readHolds(ctx), gone = Object.keys(holds).filter((linkId) => !chats.has(linkId));
+  for (const linkId of gone) delete holds[linkId];
+  if (gone.length) writeHolds(ctx, holds);
+  for (const [linkId, hold] of Object.entries(holds)) schedule(ctx, linkId, hold.until);
 }

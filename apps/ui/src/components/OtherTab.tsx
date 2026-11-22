@@ -19,7 +19,8 @@ const WORDS: Record<OtherTabState, [TranslationKey, TranslationKey]> = {
 /**
  * "Ghostly is already open in another tab": what a second tab of the same profile shows while the first holds the
  * profile (or, opened for a share or a link, that it went to that tab). Drawn by the web entry before any provider
- * exists, so it is handed its translator, in the profile's language as the app would be.
+ * exists, so it is handed its translator, in the profile's language as the app would be. Redrawn in place as the share
+ * or link goes over, its words are a polite status, so a screen reader hears whether the tab can be closed.
  */
 export function OtherTab({ state, t }: { state: OtherTabState; t: Translate }) {
   const [said, hint] = WORDS[state];
@@ -27,8 +28,10 @@ export function OtherTab({ state, t }: { state: OtherTabState; t: Translate }) {
     <div data-testid="other-tab" data-state={state} style={{ height: "100vh", display: "grid", placeItems: "center", background: "#0b141a", color: "#8696a0", font: "15px system-ui", textAlign: "center", padding: 24 }}>
       <div>
         <div style={{ fontSize: 48 }} aria-hidden="true">👻</div>
-        <p>{t(said)}</p>
-        <p style={{ fontSize: 13 }}>{t(hint)}</p>
+        <div role="status" aria-live="polite" aria-atomic="true" data-testid="other-tab-said">
+          <p>{t(said)}</p>
+          <p style={{ fontSize: 13 }}>{t(hint)}</p>
+        </div>
       </div>
     </div>
   );

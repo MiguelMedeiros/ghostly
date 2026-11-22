@@ -133,7 +133,11 @@ export function recordingMime(isTypeSupported: (mime: string) => boolean): { rec
   return null;
 }
 
-const EXTENSIONS: Record<string, string> = { "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/mpeg": "mp3", "audio/aac": "aac", "audio/wav": "wav" };
+/** One for each type of `PLAYABLE_AUDIO`: a voice message may be any of them (the CLI sends a FLAC as one). */
+const EXTENSIONS: Record<string, string> = {
+  "audio/webm": "webm", "audio/ogg": "ogg", "audio/opus": "opus", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/mpeg": "mp3", "audio/mp3": "mp3",
+  "audio/aac": "aac", "audio/wav": "wav", "audio/x-wav": "wav", "audio/wave": "wav", "audio/flac": "flac", "audio/x-flac": "flac",
+};
 
 /** A time no date can hold (past Date's end, NaN) makes a name without one, never "NaN-NaN-NaN". */
 function voiceName(prefix: string, mime: string, timestamp: number): string {

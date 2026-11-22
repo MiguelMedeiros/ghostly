@@ -1,8 +1,9 @@
 /**
  * The contacts' apps this device opened, by profile and chat, so what each kept on its origin goes when the chat is
  * deleted, the profile's data is cleared or the profile is deleted. The origin is named from the chat's key: a later
- * chat never opens it again, so nothing else would clear it. The web (apps/web/src/svc/forget.ts) and Desktop
- * (desktop/host.ts) each note theirs in the shape that names their origin, and clear it their own way.
+ * chat never opens it again, so nothing else would clear it. The web (apps/web/src/svc/forget.ts), Desktop
+ * (desktop/host.ts) and the extension (apps/extension/src/host.ts) each note theirs in the shape that names their
+ * origin, and clear it their own way.
  */
 
 /** Not under any profile's prefix (`ghostly_`): the list outlives one profile's Clear all data, and holds every profile's. */
@@ -33,10 +34,28 @@ export function openedServices<T extends Opened>(valid: (entry: Record<string, u
   };
   return {
     list,
-    /** Noted before the app opens: whatever it keeps there from then on is cleared with the chat. */
-    note(opened: T): void {
+    /**
+     * Noted before the app opens: whatever it keeps there from then on is cleared with the chat. Several at once read
+     * and write the list once: each read checks every entry.
+     */
+    note(...opened: T[]): void {
       const entries = list();
-      if (!entries.some((o) => same(o, opened))) save([...entries, opened]);
+      const before = entries.length;
+      for (const one of opened) if (!entries.some((o) => same(o, one))) entries.push(one);
+      if (entries.length > before) save(entries);
+    },
+    /**
+     * As `note`, for apps a chat only lists: none past `max` of its profile and chat on the list, as a contact may list
+     * new ones at any time. One opened is noted (`note`) whatever the count.
+     */
+    noteUpTo(max: number, ...listed: T[]): void {
+      const entries = list();
+      const before = entries.length;
+      for (const one of listed) {
+        if (entries.some((o) => same(o, one))) continue;
+        if (entries.filter((o) => o.profile === one.profile && o.tag === one.tag).length < max) entries.push(one);
+      }
+      if (entries.length > before) save(entries);
     },
     /**
      * Clears the origins of the apps opened from one chat (`tag`) or by one profile (`profile`), one at a time or, with
