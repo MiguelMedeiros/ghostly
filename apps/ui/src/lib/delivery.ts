@@ -53,11 +53,14 @@ export function waitsForLive(message: Pick<ChatMessage, "delivery" | "file"> | u
 
 /**
  * What a waiting text of mine waits for when the contact is online, by why it waits (its `deliveryError`): room in the
- * contact's windows (`MESSAGE_PACED`), or the texts before it, which it never passes (`NotSent.BEHIND`).
+ * contact's windows (`MESSAGE_PACED`), or the texts before it, which it never passes (`NotSent.BEHIND`). Its mark's
+ * keys, named whole so the keys test sees them asked for.
  */
-function waitsFor(delivery: Delivery, error?: string): "Paced" | "Behind" | undefined {
+function waitsFor(delivery: Delivery, error?: string) {
   if (delivery !== "waiting") return undefined;
-  return error === MESSAGE_PACED ? "Paced" : error === NotSent.BEHIND ? "Behind" : undefined;
+  return error === MESSAGE_PACED ? { label: "chat.delivery.waitingPaced", hint: "chat.delivery.hint.waitingPaced" } as const
+    : error === NotSent.BEHIND ? { label: "chat.delivery.waitingBehind", hint: "chat.delivery.hint.waitingBehind" } as const
+    : undefined;
 }
 
 /**
@@ -84,7 +87,7 @@ export function useDeliveryWords() {
     label: (delivery: Delivery, live?: DhtOnlyBy, error?: string) =>
       offline(delivery, live) ? t("chat.delivery.offline")
       : delivery === "waiting" && live ? t("chat.delivery.waitingLive")
-      : waitsFor(delivery, error) ? t(`chat.delivery.waiting${waitsFor(delivery, error)!}`)
+      : waitsFor(delivery, error) ? t(waitsFor(delivery, error)!.label)
       : delivery === "waiting" || delivery === "held" ? t("chat.delivery.waiting")
       : delivery === "sending" || delivery === "queued" ? t("chat.delivery.sending")
       : delivery === "failed" ? t("chat.delivery.failed")
@@ -95,7 +98,7 @@ export function useDeliveryWords() {
       offline(delivery, live) ? t("chat.delivery.hint.offline")
       : group && delivery === "sent" ? t("chat.delivery.hint.sentGroup")
       : delivery === "waiting" && live ? t(live === "you" ? "chat.delivery.hint.waitingLiveYou" : "chat.delivery.hint.waitingLiveContact")
-      : waitsFor(delivery, error) ? t(`chat.delivery.hint.waiting${waitsFor(delivery, error)!}`)
+      : waitsFor(delivery, error) ? t(waitsFor(delivery, error)!.hint)
       : t(`chat.delivery.hint.${delivery}`),
     retry: t("chat.delivery.retry"),
   };
