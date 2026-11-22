@@ -149,6 +149,17 @@ export const buttonOptions: Record<string, OptionSpec> = {
   once: { type: "boolean", description: "Each person answers once: after a press their app offers the buttons no more" },
   id: { type: "string", description: "The question's id (default: made up, ask-…)" },
 };
+/**
+ * Bounds of list flags the engine counts, written out (the packages that hold them are not loaded here; test/flagCaps.test.ts
+ * checks they match): `group send --mention` (MENTION_LIMITS.count). Each value is counted once, as the method counts it.
+ * Past them, a usage error (exit 2) naming the flag before the profile opens: before, the method refused them after the
+ * profile opened (`bad_request`, exit 1), a one-shot online first. Not `forward --to`: the method counts the chats and
+ * groups its words name, and a chat named by its name and its id is one of the 5, which only the open profile knows.
+ */
+export const LIST_LIMITS = { mention: 16 } as const;
+export const listAtMost = (options: Parsed["options"], flag: keyof typeof LIST_LIMITS): void =>
+  given(flag, Array.isArray(options[flag]) ? [...new Set(options[flag] as unknown[])] : undefined, LIST_LIMITS[flag]);
+
 /** The group's entry link lets anyone join: printed only when asked for. */
 export const showSecret: Record<string, OptionSpec> = { "show-secret": { type: "boolean", description: "Print the group's entry link (anyone who has it can join)" } };
 /** A pending chat's invite code lets whoever reads it take the chat: printed only when asked for. */
@@ -313,8 +324,8 @@ function oneWord(options: Parsed["options"], flag: string, words: readonly strin
   if (options[flag] !== undefined && !words.includes(options[flag] as string)) throw new CliError("usage", `--${flag} takes ${listed(words)}, not ${shownValue(options[flag])}`);
 }
 
-/** A flag given more times than the card holds: a usage error that says how many it takes. */
-function given(flag: string, values: unknown, max: number): void {
+/** A flag given more times than the card (or the method) holds: a usage error that says how many it takes. */
+export function given(flag: string, values: unknown, max: number): void {
   if (Array.isArray(values) && values.length > max) throw new CliError("usage", `--${flag} is given at most ${max} times, not ${values.length}`);
 }
 

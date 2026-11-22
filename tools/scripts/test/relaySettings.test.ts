@@ -77,7 +77,7 @@ describe("the relays' settings", () => {
   it.each([
     [{ GHOSTLY_RELAY_CLOUDFLARE: "0" }, "0.0.0.0"],
     [{ GHOSTLY_RELAY_CLOUDFLARE: "1" }, "127.0.0.1"],
-    [{ GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_PROXIES: "1" }, "127.0.0.1"],
+    [{ GHOSTLY_RELAY_CLOUDFLARE: "0", GHOSTLY_RELAY_PROXIES: "1" }, "127.0.0.1"],
     [{ GHOSTLY_RELAY_CLOUDFLARE: "1", HOST: "0.0.0.0" }, "0.0.0.0"],
   ])("the HyperDHT relay listens where %j says: %s", (env, host) => {
     expect(hyperdhtSettings(env).host).toBe(host);
@@ -169,6 +169,13 @@ describe("the relays' settings", () => {
     expect(() => hyperdhtSettings({ GHOSTLY_HYPERDHT_TESTNET: "3", GHOSTLY_HYPERDHT_BOOTSTRAP: "127.0.0.1:1" }))
       .toThrow('GHOSTLY_HYPERDHT_TESTNET="3": expected no GHOSTLY_HYPERDHT_BOOTSTRAP with it (the testnet is a network of its own)');
     expect(hyperdhtSettings({ GHOSTLY_HYPERDHT_TESTNET: "0", GHOSTLY_HYPERDHT_BOOTSTRAP: "127.0.0.1:1" }).bootstrap).toEqual(["127.0.0.1:1"]);
+  });
+
+  it("the HyperDHT relay refuses CF-Connecting-IP and X-Forwarded-For together, of which it would read only the first", () => {
+    expect(() => hyperdhtSettings({ GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_PROXIES: "1" }))
+      .toThrow('GHOSTLY_RELAY_PROXIES="1": expected no GHOSTLY_RELAY_CLOUDFLARE=1 with it (behind Cloudflare set GHOSTLY_RELAY_CLOUDFLARE alone; behind nginx or Caddy set GHOSTLY_RELAY_CLOUDFLARE=0)');
+    expect(hyperdhtSettings({ GHOSTLY_RELAY_CLOUDFLARE: "0", GHOSTLY_RELAY_PROXIES: "1" })).toMatchObject({ cloudflare: false, proxies: 1 });
+    expect(hyperdhtSettings({ GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_PROXIES: "0" })).toMatchObject({ cloudflare: true, proxies: 0 });
   });
 
   it("the HyperDHT relay's start line names its network: its own testnet, the bootstrap nodes or the public one", () => {

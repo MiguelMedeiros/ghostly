@@ -20,8 +20,12 @@ export interface FileBytes {
   append(id: string, offset: number, bytes: Uint8Array): Promise<void>;
   /** What was appended so far survives a crash. */
   flush(id: string): Promise<void>;
-  /** Writing is over for now: flushed, and the file let go so it can be read elsewhere. */
-  close(id: string): Promise<void>;
+  /**
+   * Writing is over for now: flushed, and the file let go so it can be read elsewhere. `flush: false` lets it go
+   * without forcing its bytes to disk: they get there all the same, unless the device itself goes down first. A
+   * backend with nothing to skip flushes anyway.
+   */
+  close(id: string, flush?: boolean): Promise<void>;
   /** Bytes stored, or null when there is no such file. */
   size(id: string): Promise<number | null>;
   /** Cuts the file to `size` bytes (a transfer going back to its last durable point). */

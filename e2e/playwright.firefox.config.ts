@@ -16,6 +16,8 @@ export default defineConfig({
   testDir: "./web",
   testMatch: ["apps-sandbox.spec.ts", "apps-chess.spec.ts", "services-web-open.spec.ts"],
   outputDir: "../test-results/firefox",
+  // The headless CLI the services specs' bot runs, built once before the workers start, as in the main suite.
+  globalSetup: "./support/headlessBuild.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,

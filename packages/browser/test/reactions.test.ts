@@ -752,7 +752,8 @@ describe("the reactions store", () => {
     Object.assign(host, { message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id), memberKey: () => key });
     const whole = vi.spyOn(host, "messages");
     const mine = async (id: string, emoji: string) => { const out = await reactions.mine("group:g", id, emoji); return "error" in out ? out.error : out.reaction.e; };
-    const refusal = "Your reaction to this message went out before you were invited back, and stays as it is";
+    // From before, not "went out": no edge may have taken it before the removal.
+    const refusal = "Your reaction to this message is from before you were removed and invited back, and stays as it is";
     expect(await mine("a:1:0", "❤️")).toBe(refusal);
     expect(await mine("a:1:0", "")).toBe(refusal);
     expect(rows[1].reactions?.me).toEqual({ e: "👍", n: 200, at: 200 });
