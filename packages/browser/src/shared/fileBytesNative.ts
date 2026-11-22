@@ -58,6 +58,9 @@ export class NativeFileBytes implements FileBytes {
     return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes as number[]);
   }
   async digest(id: string): Promise<string> { return (await this.invoke("file_bytes_digest", this.args(id))) as string; }
+  async link(fromSpace: string, fromId: string, id: string): Promise<void> {
+    await this.invoke("file_bytes_link", this.args(id, { fromSpace, fromId: checkFileId(fromId) }));
+  }
   async remove(id: string): Promise<void> { await this.invoke("file_bytes_remove", this.args(id)); }
   async removeWhere(prefix: string): Promise<void> {
     if (prefix && !/^[A-Za-z0-9_-]{1,200}$/.test(prefix)) throw new Error("Invalid file id");

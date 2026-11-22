@@ -160,6 +160,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   setServiceShared: "{ serviceId, peerPubKeyZ32, shared }",
   updateSettings: "{ settings }",
   setCallSignal: "{ linkId, signal }",
+  callOfferHeld: "{ linkId, ts }",
   setTyping: "{ linkId, typing, kind?, status? }",
   setGroupTyping: "{ groupId, typing, kind?, status? }",
   setPresence: "{ presence }",
@@ -199,6 +200,10 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   rotateGroup: "{ groupId }",
   setGroupPicture: "{ groupId, picture }",
   renameGroup: "{ groupId, name }",
+  setGroupCall: "{ groupId, sfu, e2ee? }",
+  groupCallToken: "{ groupId }",
+  groupCallKey: "{ groupId }",
+  groupCallModerate: "{ groupId, act, target?, src? }",
   forgetGroup: "{ groupId }",
   setGroupManage: "{ groupId, on }",
   deviceEnrollInvite: "{ name }",
@@ -292,6 +297,7 @@ export const DESTRUCTIVE_CALLS: ReadonlyMap<string, string> = new Map([
   ["removeLink", "deletes a chat's keys and history on this device"],
   ["leaveGroup", "deletes a group's history and files on this device"],
   ["forgetGroup", "deletes a group's history on this device"],
+  ["switchGroup", "leaves the group held under this id and deletes its history on this device"],
   ["deviceRemove", "takes a device off this profile"],
 ]);
 
@@ -305,3 +311,29 @@ export const SECRET_RESULTS: ReadonlySet<string> = new Set([
   "usdtExportBackup", "arkExportBackup", "barkExportBackup", "sparkExportBackup", "fedimintExportBackup",
   "fedimintSpendNotes",
 ]);
+
+/**
+ * Calls whose answer holds one secret among what a script needs: the CLI prints it `<hidden>` unless `--show-secret`,
+ * as `wallet receive` leaves it out. A Cashu mint quote's id is not locked to a key: whoever holds it can mint the
+ * ecash its invoice pays for. A group call's pass (`token`) lets whoever holds it into the call as this member until
+ * it expires, and the node's TURN servers come with their passwords, as `settings get` hides them. A group's call key
+ * (`groupCallKey`) opens the group's sealed call media. `a[].b` is the `b` of each entry in the list `a`.
+ */
+const SECRET_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  walletReceiveLightning: ["quote"],
+  groupCallToken: ["token", "iceServers[].credential"],
+  groupCallKey: ["key"],
+};
+
+export function hideSecretFields(method: string, result: unknown, showSecret = false): unknown {
+  const fields = SECRET_FIELDS[method];
+  if (!fields || showSecret || !result || typeof result !== "object") return result;
+  const shown = { ...(result as Record<string, unknown>) };
+  for (const field of fields) {
+    const [list, inner] = field.split("[].");
+    if (inner === undefined) { if (shown[field] !== undefined) shown[field] = "<hidden>"; continue; }
+    const entries = shown[list];
+    if (Array.isArray(entries)) shown[list] = entries.map((entry: unknown) => entry && typeof entry === "object" && (entry as Record<string, unknown>)[inner] !== undefined ? { ...entry, [inner]: "<hidden>" } : entry);
+  }
+  return shown;
+}

@@ -12,13 +12,13 @@ describe("the push relay's limit per push endpoint (infra/services/push-relay)",
   // The push service, on loopback: every post to it is counted by endpoint and answered `status` (201 unless the
   // test says otherwise for its token). Nothing leaves the machine.
   const relayed = async (limits: Record<string, number>, status = (_token: string) => 201) => {
-    const relay = await startRelay({ hosts: [/^127\.0\.0\.1$/], proxies: 1, limits });
+    const relay = await startRelay({ hosts: [/^127\.0\.0\.1$/, /(^|\.)notify\.windows\.com$/], proxies: 1, limits });
     close = relay.close;
     const real = globalThis.fetch;
     const delivered = new Map<string, number>();
     vi.stubGlobal("fetch", (input: string, init?: RequestInit) => {
       const url = String(input);
-      if (!url.startsWith("https://127.0.0.1/")) return real(input, init);
+      if (!url.startsWith("https://127.0.0.1/") && !url.startsWith("https://wns.notify.windows.com/")) return real(input, init);
       delivered.set(url, (delivered.get(url) ?? 0) + 1);
       const token = /t=([^,]+)/.exec(String((init?.headers as Record<string, string>).Authorization))?.[1] ?? "";
       return Promise.resolve(new Response(null, { status: status(token) }));
@@ -111,6 +111,44 @@ describe("the push relay's limit per push endpoint (infra/services/push-relay)",
     for (let address = 0; address < 60; address++) statuses.push((await post(address, `https://127.0.0.1/sub/one#${address}`)).status);
     expect(statuses.filter(status => status === 200)).toHaveLength(DEFAULT_LIMITS.perEndpoint);
     expect([...delivered.values()].reduce((sum, n) => sum + n, 0)).toBe(DEFAULT_LIMITS.perEndpoint);
+  });
+
+  it("counts an endpoint as the push service routes it: a query or a percent-spelt path is refused, not a new budget", async () => {
+    const { delivered, post } = await relayed({ perMinute: 100, perEndpoint: 2 });
+    expect((await post(1, "https://127.0.0.1/sub/one")).status).toBe(200);
+    // The push service routes on the path, percent-decoded, and reads no query: each of these is the same subscription.
+    for (const endpoint of ["https://127.0.0.1/sub/one?1", "https://127.0.0.1/sub/one?x=1", "https://127.0.0.1/sub/%6Fne", "https://127.0.0.1/%73ub/one"]) {
+      const response = await post(2, endpoint);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "Not a push endpoint" });
+    }
+    expect((await post(3, "https://127.0.0.1/sub/one")).status).toBe(200);
+    expect((await post(4, "https://127.0.0.1/sub/one")).status).toBe(429);
+    expect([...delivered.entries()]).toEqual([["https://127.0.0.1/sub/one", 2]]);
+  });
+
+  it("at its defaults, 60 addresses each with its own query or spelling forward 30 to one endpoint, not 60", async () => {
+    const spellings = [(n: number) => `?${n}`, (n: number) => `?x=${n}`, (n: number) => (n % 2 ? "" : "?")];
+    for (const spelling of spellings) {
+      const { delivered, post } = await relayed({});
+      for (let address = 0; address < 60; address++) await post(address, `https://127.0.0.1/sub/one${spelling(address)}`);
+      expect([...delivered.values()].reduce((sum, n) => sum + n, 0)).toBeLessThanOrEqual(DEFAULT_LIMITS.perEndpoint);
+      await close?.();
+      close = undefined;
+    }
+  });
+
+  it("forwards a WNS endpoint, its one token counted however it is spelt", async () => {
+    const { delivered, post } = await relayed({ perMinute: 100, perEndpoint: 2 });
+    expect((await post(1, "https://wns.notify.windows.com/w/?token=AbC%2bd%3d")).status).toBe(200);
+    expect((await post(2, "https://wns.notify.windows.com/w/?token=AbC%2Bd%3D&")).status).toBe(200);
+    expect((await post(3, "https://wns.notify.windows.com/w/?token=%41bC%2Bd=")).status).toBe(429);
+    expect((await post(3, "https://wns.notify.windows.com/w/?token=Other")).status).toBe(200);
+    for (const endpoint of ["https://wns.notify.windows.com/w/?token=AbC%2bd%3d&token=x", "https://wns.notify.windows.com/w/?token=AbC%2bd%3d&x=1",
+      "https://wns.notify.windows.com/w/?x=AbC", "https://wns.notify.windows.com/w/?token=", "https://wns.notify.windows.com/%77/?token=Other"]) {
+      expect((await post(4, endpoint)).status).toBe(400);
+    }
+    expect([...delivered.values()].reduce((sum, n) => sum + n, 0)).toBe(3);
   });
 
   it("at its defaults, bounds one endpoint below what a few dozen addresses could send", async () => {

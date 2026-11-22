@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, configure, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -339,6 +339,11 @@ describe("a refused lock password in Add a device", () => {
 });
 
 describe("the floating card", () => {
+  // The card's own time runs on a fake clock that also keeps real time: `wait(ms)` passes it at once.
+  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] }); });
+  afterEach(() => { vi.useRealTimers(); });
+  const wait = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
   function Harness() {
     const notice = useToast(1_000);
     return <>
@@ -357,7 +362,7 @@ describe("the floating card", () => {
     expect(screen.queryByTestId("toast")).toBeNull();
     await user.click(screen.getByRole("button", { name: "show" }));
     expect(screen.getByTestId("toast")).toBeInTheDocument();
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
+    await wait(1_100);
     expect(screen.queryByTestId("toast")).toBeNull();
   });
 
@@ -365,16 +370,16 @@ describe("the floating card", () => {
     const { user } = renderApp(<Harness />);
     await user.click(screen.getByRole("button", { name: "show" }));
     await user.hover(screen.getByTestId("toast"));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_300)));
+    await wait(1_300);
     expect(screen.getByTestId("toast")).toBeInTheDocument();
     await user.unhover(screen.getByTestId("toast"));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
+    await wait(1_100);
     expect(screen.queryByTestId("toast")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "show" }));
     await user.tab();
     expect(screen.getByTestId("toast-close")).toHaveFocus();
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_300)));
+    await wait(1_300);
     expect(screen.getByTestId("toast")).toBeInTheDocument();
   });
 
@@ -398,7 +403,7 @@ describe("the floating card", () => {
     }
     const { user } = renderApp(<Refusal />, { language: "ja" });
     await user.click(await screen.findByRole("button", { name: "show" }));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_500)));
+    await wait(1_500);
     expect(screen.getByTestId("toast")).toBeInTheDocument();
   });
 

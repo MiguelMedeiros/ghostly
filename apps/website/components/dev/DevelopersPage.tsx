@@ -145,8 +145,9 @@ export function DevelopersPage() {
                         ) : c ? (
                           <LevelBadge level={c} small />
                         ) : (
-                          <span className="dim" aria-label="not supported">
-                            {t.availability.none}
+                          <span className="dim">
+                            <span aria-hidden="true">{t.availability.none}</span>
+                            <span className="sr-only">{t.availability.noneSaid}</span>
                           </span>
                         )}
                       </td>

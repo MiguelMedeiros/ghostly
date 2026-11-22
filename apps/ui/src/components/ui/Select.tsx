@@ -290,7 +290,7 @@ export function Select<V extends string = string>({
               data-active={i === active || undefined}
               onMouseMove={() => { if (usable(i) && i !== active) setActive(i); }}
               onClick={() => { if (usable(i)) choose(i); }}
-              className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 data-[active]:bg-surface-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-40 max-md:min-h-11"
+              className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 data-[active]:bg-surface-hover forced-colors:data-[active]:outline-2 forced-colors:data-[active]:-outline-offset-2 forced-colors:data-[active]:outline-[color:Highlight] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 max-md:min-h-11"
             >
               {o.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{o.icon}</span>}
               <span className="flex min-w-0 flex-1 flex-col items-start">

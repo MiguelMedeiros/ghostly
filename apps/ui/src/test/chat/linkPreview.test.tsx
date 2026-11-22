@@ -1,11 +1,15 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkPreview } from "@ghostly/core";
+import { engine } from "@ghostly/browser/platform/engine";
 import { MessageInput } from "../../components/MessageInput";
 import { MessageBubble } from "../../components/MessageBubble";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { forgetLinkPreviews } from "../../lib/linkPreviewFetch";
+import { PREVIEW_DEBOUNCE_MS } from "../../hooks/useLinkPreviewDraft";
+import { setSessionDraft } from "../../lib/storage";
 import { renderApp } from "../render";
+import { fakeEngine } from "../fakeEngine";
 
 // covers: chat.link-preview.compose, chat.link-preview.render, chat.location.card
 
@@ -37,10 +41,17 @@ beforeEach(() => { onSend.mockReset().mockResolvedValue(null); forgetLinkPreview
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("a link preview in the composer", () => {
+  // The text's rest (PREVIEW_DEBOUNCE_MS) runs on a fake clock that also keeps real time: `rest()` passes it at once.
+  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] }); });
+  afterEach(() => { vi.useRealTimers(); });
+  /** Past the time the text rests before its link is read, and a little more: what would be asked has been by now. */
+  const rest = () => act(() => vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS + 100));
+
   it("is read from the page once the text rests, shown, and sent with the message", async () => {
     const fetch = sites();
     composer();
     type("look https://news.example/story?utm_source=feed&id=9");
+    await rest();
     const card = await screen.findByTestId("composer-link-preview");
     await waitFor(() => expect(card).toHaveAttribute("data-status", "ready"));
     expect(within(card).getByTestId("composer-link-preview-title")).toHaveTextContent("Ghosts are real");
@@ -56,15 +67,34 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(screen.queryByTestId("composer-link-preview")).toBeNull());
   });
 
+  it("draws the page's title and description in their own direction", async () => {
+    sites();
+    composer();
+    type("look https://news.example/story");
+    await rest();
+    const card = await screen.findByTestId("composer-link-preview");
+    await waitFor(() => expect(card).toHaveAttribute("data-status", "ready"));
+    for (const id of ["composer-link-preview-title", "composer-link-preview-description"]) {
+      expect(within(card).getByTestId(id), id).toHaveAttribute("dir", "auto");
+    }
+    // The site's name and the host share a line: each keeps its own direction there, the host left to right. Without it,
+    // an Arabic site name in English was drawn with its "!" before its first word, and in Arabic the host came first.
+    const line = within(card).getByTestId("composer-link-preview-site");
+    expect(line).toHaveTextContent("Example News · news.example");
+    expect([...line.querySelectorAll("bdi")].map(bdi => [bdi.textContent, bdi.getAttribute("dir")]))
+      .toEqual([["Example News", null], ["news.example", "ltr"]]);
+  });
+
   it("can be removed: the link then goes as plain text, and is not read again in that draft", async () => {
     const fetch = sites();
     composer();
     type("https://news.example/a");
+    await rest();
     await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
     fireEvent.click(screen.getByTestId("link-preview-remove"));
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     type("https://news.example/a and more");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://news.example/a and more"));
@@ -75,33 +105,148 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     const view = composer(false);
     type("https://news.example/a");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     view.unmount();
 
     composer();
     type("my router http://192.168.0.1/ and http://printer.local/");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(fetch).not.toHaveBeenCalled();
     // CORS refused: the fetch fails as a network error does, and there is simply no card.
     fetch.mockRejectedValue(new TypeError("Failed to fetch"));
     type("https://closed.example/page");
+    await rest();
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByTestId("composer-link-preview")).toBeNull());
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page"));
   });
 
+  // Hide my IP from contacts: the site a link names learns this device's address when it is read, as a picture link
+  // someone sent would (MessageBubble). A pasted link may be a contact's, so with it on nothing is read; it goes as text.
+  it("asks nothing with Hide my IP on: the link goes as plain text", async () => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    const fetch = sites();
+    composer();
+    type("look https://their-server.example/page");
+    await rest();
+    expect(screen.queryByTestId("composer-link-preview")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    send();
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("look https://their-server.example/page"));
+  });
+
+  it("asks nothing for a kept draft's link before the engine says whether Hide my IP is on", async () => {
+    engine.state = null;
+    setSessionDraft("chat-kept", "look https://their-server.example/page");
+    const fetch = sites();
+    renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews draftId="chat-kept" /></LockScreenProvider>);
+    expect(field().value).toBe("look https://their-server.example/page");
+    await rest();
+    expect(fetch).not.toHaveBeenCalled();
+    // Once the engine says it is off, the preview is made.
+    act(() => fakeEngine.update({ settings: { relayOnly: false } }));
+    await rest();
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(String(fetch.mock.calls[0][0])).toBe("https://their-server.example/page");
+  });
+
+  it("of a message being edited goes with the edit while its link stays: saved at once, or the site failing now", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    const kept: LinkPreview = { u: "https://news.example/story", t: "Ghosts are real", s: "Example News" };
+    const onSave = vi.fn<(text: string, extra?: { preview?: LinkPreview }) => Promise<string | null>>().mockResolvedValue(null);
+    const editing = (text: string) => renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews
+      edit={{ key: "me_1", text, snippet: text, preview: kept, onSave, onClose: () => {} }} /></LockScreenProvider>);
+    const save = () => fireEvent.keyDown(field(), { key: "Enter" });
+
+    // Enter at once: no new preview made yet, the message's own goes with the edit.
+    let view = editing("look https://news.example/story");
+    await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+    type("Look https://news.example/story");
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
+    view.unmount();
+
+    // The site fails now: the card stays as it was.
+    onSave.mockClear();
+    view = editing("look https://news.example/story");
+    await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+    type("Look https://news.example/story");
+    await rest();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
+    view.unmount();
+
+    // Removed with ×, or another link: it does not go.
+    onSave.mockClear();
+    view = editing("look https://news.example/story");
+    await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
+    fireEvent.click(screen.getByTestId("link-preview-remove"));
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://news.example/story", undefined));
+    view.unmount();
+    onSave.mockClear();
+    editing("look https://news.example/story");
+    await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+    type("look https://other.example/page");
+    save();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://other.example/page", undefined));
+  });
+
+  it("of a message being edited still goes with the edit when no new one may be made: Hide my IP on, or previews off", async () => {
+    const fetch = sites();
+    const kept: LinkPreview = { u: "https://news.example/story", t: "Ghosts are real", s: "Example News" };
+    const onSave = vi.fn<(text: string, extra?: { preview?: LinkPreview }) => Promise<string | null>>().mockResolvedValue(null);
+    const editing = (text: string, linkPreviews: boolean) => renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews={linkPreviews}
+      edit={{ key: "me_1", text, snippet: text, preview: kept, onSave, onClose: () => {} }} /></LockScreenProvider>);
+    const save = () => fireEvent.keyDown(field(), { key: "Enter" });
+
+    for (const [hideIp, linkPreviews] of [[true, true], [false, false]] as const) {
+      fakeEngine.update({ settings: { relayOnly: hideIp } });
+      onSave.mockClear();
+      let view = editing("look https://news.example/story", linkPreviews);
+      await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+      type("Look https://news.example/story");
+      await rest();
+      expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+      save();
+      await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
+      view.unmount();
+
+      // Removed with ×, it does not go; nor with its link gone.
+      onSave.mockClear();
+      view = editing("look https://news.example/story", linkPreviews);
+      await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
+      fireEvent.click(screen.getByTestId("link-preview-remove"));
+      save();
+      await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://news.example/story", undefined));
+      view.unmount();
+      onSave.mockClear();
+      view = editing("look https://news.example/story", linkPreviews);
+      await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+      type("look, no link");
+      save();
+      await waitFor(() => expect(onSave).toHaveBeenCalledWith("look, no link", undefined));
+      view.unmount();
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("is not made for a link inside a spoiler: its card would tell what the spoiler hides", async () => {
     const fetch = sites();
     composer();
     type("guess the ending: ||https://news.example/ending||");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     // The same link outside the spoiler too: it shows, so its card tells nothing hidden.
     type("read https://news.example/ending, or guess: ||https://news.example/ending||");
+    await rest();
     await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
     expect(fetch).toHaveBeenCalledOnce();
   });
@@ -185,6 +330,15 @@ describe("a link preview in a message", () => {
     }
   });
 
+  it("draws the page's words in their own direction", () => {
+    renderApp(<MessageBubble message={{ id: "m13", text: "https://news.example/story", sender: "peer", timestamp: 1_700_000_000_000,
+      preview: { u: "https://news.example/story", t: "مرحبا بكم!", d: "Hello world!", s: "أخبار" } }} />);
+    // In the app's direction, an English title in Arabic was drawn "!Hello world", an Arabic one in English with its "!" at its end's far side.
+    for (const id of ["link-preview-title", "link-preview-description", "link-preview-site"]) {
+      expect(screen.getByTestId(id), id).toHaveAttribute("dir", "auto");
+    }
+  });
+
   it("shows nothing extra for a message without a preview or a place", () => {
     renderApp(<MessageBubble message={{ id: "m3", text: "https://news.example/story", sender: "peer", timestamp: 1_700_000_000_000 }} />);
     expect(screen.queryByTestId("message-link-cards")).toBeNull();
@@ -252,6 +406,30 @@ describe("a location card", () => {
       expect(screen.getByTestId("location-map")).toBeInTheDocument();
       expect(outside).toHaveFocus();
     } finally { outside.remove(); }
+  });
+
+  it("asks again before loading the map of another place a contact's edit names, and forgets a failed one's line", () => {
+    const at = (text: string, seq?: number) => ({ id: "m15", text, sender: "peer" as const, timestamp: 1_700_000_000_000,
+      ...(seq && { edit: { seq, at: 1_700_000_000_000 + seq, history: [] } }) });
+    const { container, rerender } = renderApp(<MessageBubble message={at(torre)} />);
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // Shown for the Torre de Belém: an edit to another place is not what Show map was pressed for.
+    rerender(<MessageBubble message={at("meet me at geo:48.8584,2.2945", 1)} />);
+    expect(screen.getByTestId("location-coordinates")).toHaveTextContent("48.85840, 2.29450");
+    expect(container.querySelector("img[src*='openstreetmap']")).toBeNull();
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // The same place again (a typo fixed around it): the map stays as it was asked for.
+    rerender(<MessageBubble message={at("meet me there: geo:48.8584,2.2945", 2)} />);
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
+    // A map that failed to load: its line is not said of the next place, which loads once asked.
+    fireEvent.error(screen.getByTestId("location-map").querySelector("img")!);
+    expect(screen.getByRole("status")).toHaveTextContent("The map could not load");
+    rerender(<MessageBubble message={at(torre, 3)} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.click(screen.getByTestId("location-show-map"));
+    expect(screen.getByTestId("location-map").querySelectorAll("img")).toHaveLength(4);
   });
 
   it("names the map link's site cut at its start, as a preview's address", () => {

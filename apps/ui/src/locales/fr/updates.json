@@ -1,7 +1,7 @@
 {
   "applyHint": "Mettre à jour met fin à vos appels et connexions.",
   "auto": "Rechercher les mises à jour automatiquement",
-  "autoDescription": "Désactivé : seulement quand vous appuyez sur Rechercher",
+  "autoDescription": "Désactivé : seulement quand vous appuyez sur Rechercher",
   "available": "Ghostly {{version}} est disponible",
   "checkNow": "Rechercher",
   "checking": "Recherche...",
