@@ -112,6 +112,16 @@ export function split(units, seconds, of) {
   return shards;
 }
 
+/**
+ * The ALONE files no unit runs and tools/scripts/quarantine.json does not hold (`quarantined`, its files): renamed or
+ * removed. A quarantined file is out of every Vitest's list (the nightly runs it), so the shards plan without it.
+ * @param {{ files: string[], alone: boolean }[]} units
+ * @param {string[]} quarantined
+ */
+export function unlistedAlone(units, quarantined) {
+  return ALONE.filter((file) => !quarantined.includes(file) && !units.some((u) => u.alone && u.files[0] === file));
+}
+
 /** Every package's files as units: the package, less its ALONE files, and each ALONE file. */
 function units() {
   const out = [];
@@ -121,7 +131,8 @@ function units() {
     out.push({ id: name, dir, files: files.filter((f) => !alone.includes(f)), alone: false, whole: !alone.length });
     for (const file of alone) out.push({ id: file, dir, files: [file], alone: true, whole: false });
   }
-  for (const file of ALONE) if (!out.some((u) => u.alone && u.files[0] === file)) throw new Error(`ALONE names ${file}, which no package's Vitest lists`);
+  const quarantined = JSON.parse(readFileSync(join(root, "tools/scripts/quarantine.json"), "utf8")).map((entry) => entry.file);
+  for (const file of unlistedAlone(out, quarantined)) throw new Error(`ALONE names ${file}, which no package's Vitest lists`);
   return out;
 }
 

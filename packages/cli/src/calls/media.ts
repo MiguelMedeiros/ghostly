@@ -106,7 +106,10 @@ export function loadCallStack(): Promise<CallStack | string> {
     // libdatachannel takes a name there (`localhost`) without a word and gathers no candidate: each call failed 30 s later.
     // Not echoed: the contact's app shows this reason, and the name may be one of this network's.
     const bind = process.env.GHOSTLY_CALL_BIND;
-    if (bind && !isIP(bind)) return "Calls are off on this headless Ghostly: GHOSTLY_CALL_BIND takes an IP address of this machine, such as 127.0.0.1, not a name";
+    // An address in brackets (`[::1]`) or with a space from an env file is not a name: say what to take off instead.
+    if (bind && !isIP(bind)) return isIP(bind.trim().replace(/^\[(.*)\]$/, "$1"))
+      ? "Calls are off on this headless Ghostly: GHOSTLY_CALL_BIND takes an IP address of this machine without brackets or spaces, such as 127.0.0.1 or ::1"
+      : "Calls are off on this headless Ghostly: GHOSTLY_CALL_BIND takes an IP address of this machine, such as 127.0.0.1, not a name";
     try {
       const ndc = (await import("node-datachannel")) as unknown as CallStack["ndc"] & { default?: CallStack["ndc"] };
       const lib = (ndc.PeerConnection ? ndc : ndc.default!) as CallStack["ndc"];

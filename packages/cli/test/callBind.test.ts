@@ -19,6 +19,15 @@ describe("GHOSTLY_CALL_BIND", () => {
     expect(await callsWith("127.0.0.1:5000")).toMatch(/GHOSTLY_CALL_BIND takes an IP address/);
   });
 
+  it("an address in brackets or with a stray space turns calls off and says to write it bare, not that it is a name", async () => {
+    // libdatachannel would not take these either; the reason sent the person looking for a hostname that isn't there.
+    for (const bind of ["[::1]", " 127.0.0.1", "127.0.0.1 ", "[::1] "]) {
+      const reason = await callsWith(bind);
+      expect(reason).toMatch(/GHOSTLY_CALL_BIND takes an IP address of this machine without brackets or spaces/);
+      expect(reason).not.toMatch(/not a name/);
+    }
+  });
+
   it("an address, IPv4 or IPv6, keeps calls on", async () => {
     for (const bind of ["127.0.0.1", "0.0.0.0", "::1"]) expect(typeof await callsWith(bind)).toBe("object");
   });

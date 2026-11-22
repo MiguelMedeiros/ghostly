@@ -53,6 +53,30 @@ describe("the event stream", () => {
     expect(events.map((e) => e.id)).toEqual(["chat.renamed:c2:1000"]);
   });
 
+  it("remembers the chats a live session carried in this run, after they go down (chat connect's resuming)", async () => {
+    const { h } = await hub("was-live.jsonl");
+    const live = { textDelivery: "stream", dataLink: "open", pairing: { status: "ready", transport: "hyperdht/1" } } as Partial<LinkView>;
+    h.baseline(state([link("c1", live), link("c2")]), new Map());
+    h.sink.post({ kind: "state", state: state([link("c1"), link("c2"), link("c3", live)]) });
+    h.sink.post({ kind: "state", state: state([link("c1"), link("c2"), link("c3")]) });
+    expect(["c1", "c2", "c3"].map((id) => h.wasLive(id))).toEqual([true, false, true]);
+  });
+
+  it("reads no payment while the payments are the same object as in the last state", async () => {
+    const { h, events } = await hub("same-payments.jsonl");
+    let reads = 0;
+    const payment = { id: "p1", linkId: "c1", kind: "payment", direction: "in", amount: 21, unit: "sat", state: "settled", createdAt: 5 };
+    Object.defineProperty(payment, "state", { get: () => { reads++; return "settled"; }, enumerable: true });
+    const payments = { p1: payment };
+    h.baseline({ ...state([link("c1")]), payments } as unknown as EngineState, new Map());
+    const before = reads;
+    h.sink.post({ kind: "state", state: { ...state([link("c1", { label: "bot" })]), payments } as unknown as EngineState });
+    expect(reads).toBe(before);
+    expect(events.map((e) => e.id)).toEqual(["chat.renamed:c1:1000"]);
+    h.sink.post({ kind: "state", state: { ...state([link("c1", { label: "bot" })]), payments: { ...payments, p2: { ...payment, id: "p2", state: "pending" } } } as unknown as EngineState });
+    expect(events.map((e) => e.id)).toEqual(["chat.renamed:c1:1000", "payment.created:p2"]);
+  });
+
   it("reports messages, delivery changes, deletions, and chat changes once each", async () => {
     const { h, events } = await hub("a.jsonl");
     h.baseline(state([link("c1")]), new Map([["c1", [message("c1", "old")]]]));

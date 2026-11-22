@@ -5,8 +5,9 @@
  * and HEIF (HEIC, AVIF), without decoding or re-encoding a pixel.
  *
  * Fail-closed: a file that is one of these pictures, by its bytes or by its type, and whose metadata cannot be removed
- * (truncated, malformed, a part this does not know) is refused with `NO_PICTURE_METADATA`, never sent as it was. Any
- * other file goes as it is.
+ * (truncated, malformed, a part this does not know) is refused with `NO_PICTURE_METADATA`, never sent as it was. So is
+ * a JPEG XL or a JPEG 2000 in its boxes (their Exif, XMP and GeoJP2 boxes are not removed here). Any other file goes
+ * as it is.
  */
 import { exifOrientation } from "./image";
 
@@ -29,7 +30,10 @@ const STRIPPED_TYPES = new Set([
 /** HEIF brands (HEIC, AVIF, the generic `mif1`): an MP4 video's `ftyp` names none of them. */
 const HEIF_BRANDS = new Set(["heic", "heix", "heim", "heis", "hevc", "hevx", "mif1", "mif2", "msf1", "avif", "avis"]);
 
-type Kind = "jpeg" | "png" | "webp" | "heif" | "gif" | "tiff";
+type Kind = "jpeg" | "png" | "webp" | "heif" | "gif" | "tiff" | "boxes";
+
+/** The signature box a JPEG XL (`JXL `) or a JPEG 2000 (`jP  `) in boxes starts with. */
+const SIGNATURE_BOXES = new Set(["JXL ", "jP  "]);
 
 const u16be = (b: Uint8Array, at: number) => (b[at]! << 8) | b[at + 1]!;
 const u32be = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
@@ -45,6 +49,7 @@ function kindOf(b: Uint8Array): Kind | undefined {
   if (starts(b, 0, "GIF87a") || starts(b, 0, "GIF89a")) return "gif";
   // TIFF, and BigTIFF (refused): camera raw files (DNG, CR2, NEF, ARW) are TIFF too.
   if (starts(b, 0, "II*\0") || starts(b, 0, "MM\0*") || starts(b, 0, "II+\0") || starts(b, 0, "MM\0+")) return "tiff";
+  if (b.length >= 12 && u32be(b, 0) === 12 && SIGNATURE_BOXES.has(text(b, 4, 4)) && u32be(b, 8) === 0x0d0a870a) return "boxes";
   if (b.length >= 16 && starts(b, 4, "ftyp")) {
     const end = Math.min(b.length, u32be(b, 0));
     for (let at = 8; at + 4 <= end; at += 4) if (at !== 12 && HEIF_BRANDS.has(text(b, at, 4))) return "heif";
@@ -497,7 +502,12 @@ function stripTiff(b: Uint8Array): Uint8Array[] {
   return [out];
 }
 
-const STRIP: Record<Kind, (b: Uint8Array) => Uint8Array[]> = { jpeg: stripJpeg, png: stripPng, webp: stripWebp, heif: stripHeif, gif: stripGif, tiff: stripTiff };
+/** A JPEG XL or a JPEG 2000 in boxes: refused. */
+function refuse(): never {
+  throw new Error(NO_PICTURE_METADATA);
+}
+
+const STRIP: Record<Kind, (b: Uint8Array) => Uint8Array[]> = { jpeg: stripJpeg, png: stripPng, webp: stripWebp, heif: stripHeif, gif: stripGif, tiff: stripTiff, boxes: refuse };
 
 /**
  * A picture's bytes without its metadata, as parts to put in a Blob; undefined when the file is not a picture this

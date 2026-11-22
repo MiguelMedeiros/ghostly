@@ -1,8 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
-import { fileURLToPath } from "node:url";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import ts from "typescript";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeProjectLinks } from "../../components/HomeProjectLinks";
 import { OpenFailureNotice } from "../../components/OpenFailureNotice";
@@ -16,8 +12,8 @@ import { renderApp } from "../render";
 /*
  * A link to another site opens outside the app on every platform. A browser page opens a new tab from the link itself;
  * the Desktop WebView opens none (WKWebView, as Tauri sets it up, drops a new-window request), so there the link hands
- * the address to the system browser (`open_web_link`). Every such link takes `externalLinkProps`, and the scan below
- * fails on a `target="_blank"` written anywhere else.
+ * the address to the system browser (`open_web_link`). Every such link takes `externalLinkProps`, and the lint rule
+ * ghostly/no-blank-target (tools/eslint/) refuses a `target="_blank"` written anywhere else.
  */
 
 const tauri = vi.hoisted(() => ({ invoke: vi.fn(async (_command: string, _args?: unknown): Promise<unknown> => undefined), version: "0.4.0" }));
@@ -36,35 +32,6 @@ const update = vi.hoisted(() => ({
 }));
 vi.mock("../../contexts/UpdateContext", () => ({ useUpdate: () => update }));
 
-const SRC = join(fileURLToPath(import.meta.url), "../../..");
-const HOME = "src/lib/externalLink.ts";
-
-function sources(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) return entry.name === "test" ? [] : sources(path);
-    return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [path] : [];
-  });
-}
-
-/**
- * The lines of `text` that spell `_blank` as a string: `target="_blank"`, `target={"_blank"}`, `target: "_blank"`,
- * `window.open(url, "_blank")`. Each asks the browser for a new window, which the Desktop WebView never opens.
- */
-function blanks(file: string, text: string): number[] {
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const lines: number[] = [];
-  const visit = (node: ts.Node) => {
-    const parts = ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? [node.text]
-      : ts.isTemplateExpression(node) ? [node.head.text, ...node.templateSpans.map((span) => span.literal.text)]
-      : [];
-    if (parts.some((part) => part.trim().toLowerCase() === "_blank")) lines.push(source.getLineAndCharacterOfPosition(node.getStart()).line + 1);
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-  return lines;
-}
-
 const setDesktop = (on: boolean) => {
   const w = window as unknown as { __TAURI_INTERNALS__?: object };
   if (on) w.__TAURI_INTERNALS__ = {};
@@ -77,31 +44,6 @@ const anchor = (href: string, options?: Parameters<typeof externalLinkProps>[1])
 
 beforeEach(() => { tauri.invoke.mockReset(); tauri.invoke.mockResolvedValue(undefined); tauri.version = "0.4.0"; });
 afterEach(() => { setDesktop(false); vi.unstubAllEnvs(); });
-
-describe("a new window is asked for only through externalLinkProps", () => {
-  it("no file in apps/ui/src/ spells _blank but apps/ui/src/lib/externalLink.ts", () => {
-    // Parsing every file takes seconds on a loaded runner; only a file whose text has `_blank` can spell it.
-    const offenders = sources(SRC)
-      .map((file) => ({ file, text: readFileSync(file, "utf8") }))
-      .filter(({ text }) => /_blank/i.test(text))
-      .map(({ file, text }) => ({ name: relative(join(SRC, ".."), file), lines: blanks(file, text) }))
-      .filter(({ name, lines }) => name !== HOME && lines.length > 0)
-      .map(({ name, lines }) => `${name}:${lines.join(",")} (use externalLinkProps from ${HOME})`);
-    expect(offenders).toEqual([]);
-  });
-
-  it("the scan sees every way of writing it, and the one it allows", () => {
-    const sample = [
-      `const a = <a href={u} target="_blank">x</a>;`,
-      `const b = <a href={u} target={"_BLANK"}>x</a>;`,
-      "const c = { target: `_blank` };",
-      `window.open(u, "_blank");`,
-      `const d = <a href={u} target="_self" title="blank">x</a>;`,
-    ].join("\n");
-    expect(blanks("sample.tsx", sample)).toEqual([1, 2, 3, 4]);
-    expect(blanks(HOME, readFileSync(join(SRC, "lib/externalLink.ts"), "utf8"))).toHaveLength(1);
-  });
-});
 
 describe("externalLinkProps", () => {
   it("on the web leaves the click to the link: a new tab, no opener, no referrer", () => {

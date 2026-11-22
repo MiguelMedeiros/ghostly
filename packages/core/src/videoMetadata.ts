@@ -16,6 +16,13 @@
  * removed (truncated, malformed, a part of its movie this does not know) is refused with `NO_VIDEO_METADATA`, never sent as it was.
  * A picture (HEIF is pictureMetadata.ts's) and any other file go as they are; so does a file without a video track (an
  * M4A) here: audioMetadata.ts strips it.
+ *
+ * An AVI (a dashcam's, an older camera's) goes without what its header and its `INFO` list say: each chunk but the
+ * ones its frames and sound are made of (`avih`, `strh`, `strf`, `indx`, `vprp`, `dmlh`) becomes `JUNK`, zeroed (a
+ * stream's name `strn` and data `strd`, `IDIT`'s date, a camera's `LIST ncdt`), and the chunks of a stream that is
+ * neither pictures nor sound (a GPS or subtitle text stream) are zeroed in `movi`, so no offset moves. An ASF (WMV,
+ * WMA), an FLV and an MPEG transport stream are refused with `NO_VIDEO_METADATA` (a WMA, typed as audio, with
+ * `NO_AUDIO_METADATA`): their titles, places and dates are not removed here.
  */
 import { isStrippedPicture } from "./pictureMetadata";
 
@@ -24,6 +31,8 @@ export const VIDEO_METADATA_LIMITS = {
   maxBoxBytes: 64 * 1024 * 1024,
   /** The most top-level boxes walked (a fragmented MP4 has two per fragment). */
   maxBoxes: 100_000,
+  /** The most chunks of an AVI walked (one per frame and per piece of sound). */
+  maxChunks: 4_000_000,
   /** Bytes read first to tell a video from another file. */
   headBytes: 64,
   /** Bytes read at once for a box's header or a small box, so the next headers and `moof`s are read with it. */
@@ -448,6 +457,112 @@ async function whole(source: VideoSource, box: Box): Promise<Uint8Array> {
   return bytes;
 }
 
+// AVI: RIFF chunks.
+
+const u32le = (b: Uint8Array, at: number) => (b[at]! | (b[at + 1]! << 8) | (b[at + 2]! << 16) | (b[at + 3]! << 24)) >>> 0;
+const JUNK = Uint8Array.from("JUNK", (c) => c.charCodeAt(0));
+/** The chunks of an AVI's header its frames and sound are read with, kept; any other becomes `JUNK`. */
+const AVI_HEADER_KEEPS = new Set(["avih", "strh", "strf", "indx", "vprp", "dmlh"]);
+/** The lists of an AVI's header looked into. */
+const AVI_HEADER_LISTS = new Set(["hdrl", "strl", "odml"]);
+/** The streams whose chunks in `movi` are kept: pictures and sound. */
+const AVI_STREAMS = new Set(["vids", "auds"]);
+/** A frame's or a piece of sound's chunk in `movi`: its stream's number, then what it is. */
+const AVI_DATA = /^\d\d(dc|db|wb|pc)$/;
+
+interface Chunk { id: string; type: string; start: number; body: number; end: number; next: number }
+
+/** An AVI: `RIFF` `AVI `, then any `RIFF` `AVIX` (an OpenDML one past 1 GiB). */
+const isAvi = (head: Uint8Array) => head.length >= 12 && text(head, 0, 4) === "RIFF" && text(head, 8, 4) === "AVI ";
+
+/** An AVI without what its header and `INFO` say, nor its text and data streams' chunks; the patches in file order. */
+async function avi(source: VideoSource): Promise<VideoPatch[]> {
+  const patches: VideoPatch[] = [], size = source.size;
+  /** Whether each stream, in order, is kept (pictures or sound). */
+  const streams: boolean[] = [];
+  let chunks = 0;
+  const chunkAt = async (at: number, end: number): Promise<Chunk> => {
+    check(++chunks <= VIDEO_METADATA_LIMITS.maxChunks && at + 8 <= end);
+    const head = await source.read(at, 12);
+    check(head.length >= 8);
+    const id = text(head, 0, 4), length = u32le(head, 4), list = id === "LIST" || id === "RIFF";
+    check(!list || (length >= 4 && head.length >= 12));
+    return { id, type: list ? text(head, 8, 4) : "", start: at, body: at + (list ? 12 : 8), end: at + 8 + length, next: at + 8 + length + (length & 1) };
+  };
+  /** Zeros from `start` to `end`; a chunk made `JUNK` (`junk`) has its id replaced too. */
+  const zero = (start: number, end: number) => { if (end > start) patches.push({ start, end }); };
+  const junk = (chunk: Chunk, end = chunk.end) => {
+    if (chunk.id !== "JUNK") patches.push({ start: chunk.start, end: chunk.start + 4, bytes: JUNK });
+    zero(chunk.start + 8, end);
+  };
+  const header = async (start: number, end: number): Promise<void> => {
+    for (let at = start; at < end; ) {
+      const chunk = await chunkAt(at, end);
+      check(chunk.end <= end);
+      if (chunk.id === "LIST" && AVI_HEADER_LISTS.has(chunk.type)) await header(chunk.body, chunk.end);
+      else if (chunk.id === "strh") {
+        check(chunk.end - chunk.body >= 4);
+        streams.push(AVI_STREAMS.has(text(await source.read(chunk.body, 4), 0, 4)));
+      } else if (chunk.id === "JUNK") zero(chunk.body, chunk.end);
+      else if (!AVI_HEADER_KEEPS.has(chunk.id)) junk(chunk);
+      at = Math.min(chunk.next, end);
+    }
+  };
+  // A recording cut short (power lost in a dashcam): its lists and last chunk run past the end of the file.
+  const movi = async (start: number, end: number): Promise<void> => {
+    let at = start;
+    for (; at + 8 <= end; ) {
+      const chunk = await chunkAt(at, end), until = Math.min(chunk.end, end);
+      if (chunk.id === "LIST" && chunk.type === "rec ") await movi(chunk.body, until);
+      else if (chunk.id.startsWith("ix") || (AVI_DATA.test(chunk.id) && streams[Number(chunk.id.slice(0, 2))])) { /* kept */ }
+      else if (/^\d\d/.test(chunk.id)) zero(chunk.body, until);
+      else junk(chunk, until);
+      at = Math.min(chunk.next, end);
+    }
+    zero(at, end);
+  };
+  let at = 0;
+  for (let first = true; at + 12 <= size; first = false) {
+    const head = await source.read(at, 12);
+    if (text(head, 0, 4) !== "RIFF" || text(head, 8, 4) !== (first ? "AVI " : "AVIX")) break;
+    const form = await chunkAt(at, size), end = Math.min(form.end, size);
+    for (let inner = form.body; inner + 8 <= end; ) {
+      const chunk = await chunkAt(inner, end);
+      if (first && chunk.id === "LIST" && chunk.type === "hdrl") {
+        check(!streams.length && chunk.end <= end);
+        await header(chunk.body, chunk.end);
+      } else if (chunk.id === "LIST" && chunk.type === "movi") {
+        check(streams.length > 0);
+        await movi(chunk.body, Math.min(chunk.end, end));
+      } else if (chunk.id === "JUNK") zero(chunk.body, Math.min(chunk.end, end));
+      else if (chunk.id !== "idx1") junk(chunk, Math.min(chunk.end, end));
+      inner = Math.min(chunk.next, end);
+    }
+    at = Math.min(form.next, size);
+  }
+  // Bytes after the last RIFF (a recorder's trailer) are no part of the movie: zeros.
+  zero(at, size);
+  return patches;
+}
+
+/** An ASF (WMV, WMA): its header object's GUID. */
+const ASF = [0x30, 0x26, 0xb2, 0x75, 0x8e, 0x66, 0xcf, 0x11, 0xa6, 0xd9, 0x00, 0xaa, 0x00, 0x62, 0xce, 0x6c];
+export const isAsf = (head: Uint8Array) => head.length >= 16 && ASF.every((byte, i) => head[i] === byte);
+
+/** A video whose metadata is not removed here, so it is refused: an ASF, an FLV, an MPEG transport stream (`.ts`, `.m2ts`). */
+async function refused(source: VideoSource, head: Uint8Array): Promise<boolean> {
+  if (isAsf(head) || (head.length >= 4 && text(head, 0, 3) === "FLV" && head[3] === 1)) return true;
+  // Three packets in a row, 188 bytes apart (192 in a camcorder's M2TS, after each one's time): a sync byte, and an
+  // adaptation field control that is not the reserved 0.
+  const packetAt = (b: Uint8Array, at: number) => b[at] === 0x47 && (b[at + 3]! & 0x30) !== 0;
+  for (const [packet, offset] of [[188, 0], [192, 4]] as const) {
+    if (!packetAt(head, offset) || source.size < offset + 2 * packet + 4) continue;
+    const next = await source.read(offset + packet, packet + 4);
+    if (packetAt(next, 0) && packetAt(next, packet)) return true;
+  }
+  return false;
+}
+
 /**
  * What a file is by its first box: a movie (`FIRST_BOXES`), a file of boxes that is one when it holds a `moov` (any
  * other box found at the top of a movie: a stream's segment holds none), or another file. An HEIF picture is
@@ -503,6 +618,12 @@ export async function withoutVideoMetadata(source: Blob, mime: string): Promise<
 export async function videoMetadataPatches(file: VideoSource, mime: string, audio = false): Promise<VideoPatch[] | undefined> {
   const source = readingAhead(file);
   const head = await source.read(0, VIDEO_METADATA_LIMITS.headBytes);
+  if (isAvi(head)) {
+    const patches = await avi(source);
+    return patches.length ? patches : undefined;
+  }
+  // A WMA typed as audio is audioMetadata.ts's to refuse.
+  if (!(isAsf(head) && mime.toLowerCase().startsWith("audio/"))) check(!await refused(source, head));
   const typed = STRIPPED_TYPES.has(mime.split(";")[0]!.trim().toLowerCase());
   const container = containerOf(head, mime);
   if (!container) {

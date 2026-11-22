@@ -19,6 +19,7 @@ import { focusLost } from "../../lib/focus";
 import { problemText, type Problem } from "../../lib/problemText";
 import { localProvider } from "../../lib/providerWords";
 import { exactText } from "../../lib/exactText";
+import { listText } from "../../lib/listText";
 import { radioGroupKeys, radioTabStop } from "../../lib/radioGroup";
 import { CopiedStatus } from "../chat/LinkQrDialog";
 import { FocusSafeButton } from "../ui/FocusSafeButton";
@@ -319,7 +320,7 @@ function AdvancedProviders({ open, onToggle, labels, children }: { open: boolean
       <button type="button" data-testid="add-identity-advanced" aria-expanded={open} aria-controls="add-identity-advanced-list" onClick={onToggle}
         className="flex items-center gap-1.5 min-h-11 text-xs font-medium text-text-secondary hover:text-text-primary cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${open ? "rotate-90" : "rtl:-scale-x-100"}`}><path d="m9 6 6 6-6 6" /></svg>
-        {t("identities.add.advanced")}<span className="font-normal text-text-muted">· {labels.join(", ")}</span>
+        {t("identities.add.advanced")}<span className="font-normal text-text-muted">· {listText(labels, t)}</span>
       </button>
       {open && <div id="add-identity-advanced-list" role="list" aria-label={t("identities.add.advancedKinds")}>{children}</div>}
     </div>
@@ -347,7 +348,7 @@ function ProviderCard({ provider: p, open, onAbout, onChoose }: { provider: Iden
           <span className="min-w-0 flex-1">
             {/* The category beside the name where the card is wide enough for every name, under it otherwise: never a mix. */}
             <span className="flex flex-col items-start gap-y-1 @md:flex-row @md:items-center @md:gap-x-2">
-              <span dir="auto" className="text-sm text-text-primary truncate max-w-full">{p.label}</span>
+              <span dir="auto" className="text-sm text-text-primary break-words max-w-full">{p.label}</span>
               <CategoryPill provider={p} />
             </span>
             <span data-testid="add-identity-summary" className="block text-xs text-text-muted mt-0.5"><bdi>{p.summary}</bdi></span>

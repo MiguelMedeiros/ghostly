@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { build, type Plugin } from "vite";
-import { serviceWorkerFiles } from "./src/sw/policy";
+import { serviceWorkerFiles, type BundleFile } from "./src/sw/policy";
 
 const SW_ENTRY = fileURLToPath(new URL("./src/sw/sw.ts", import.meta.url));
 
@@ -13,23 +13,40 @@ const SW_ENTRY = fileURLToPath(new URL("./src/sw/sw.ts", import.meta.url));
  * digest of those names: its cache is named after it, so a deploy is a new worker with a cache of its own.
  * The dev server has none: the app registers it in builds only.
  */
-export function serviceWorker(buildId: string): Plugin {
+export function serviceWorker(buildId: string): Plugin[] {
   let publicFiles: string[] = [];
-  return {
-    name: "ghostly-service-worker",
+  let before: (BundleFile & { moduleIds?: readonly string[] })[] = [];
+  return [{
+    name: "ghostly-service-worker-graph",
     apply: "build",
     async buildStart() {
       const dir = fileURLToPath(new URL("./public", import.meta.url));
       publicFiles = (await readdir(dir, { withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => entry.name);
     },
-    async generateBundle(_options, bundle) {
-      const { precache, languages } = serviceWorkerFiles(publicFiles, Object.values(bundle));
+    // Before Vite's own, while the entry chunks are there: what the app loads is walked from them (`optionalFiles`).
+    // Read after, the walk started from nothing, and the worker precached none of the app's scripts.
+    generateBundle: { order: "pre", handler(_options, bundle) {
+      before = Object.values(bundle);
+    } },
+  }, {
+    name: "ghostly-service-worker",
+    apply: "build",
+    // After Vite's own: `vite:build-html` deletes an entry chunk that is nothing but imports (the `main` group took its
+    // code) and names those imports in index.html instead. A name the build never writes in the lists, and one 404
+    // fails the worker's install.
+    generateBundle: { order: "post", async handler(_options, bundle) {
+      const { precache, languages, lazy } = serviceWorkerFiles(publicFiles, before, Object.keys(bundle));
+      // What index.html loads is what the app needs to open offline: never left to the network.
+      const page = bundle["index.html"];
+      const loads = page?.type === "asset" ? [...String(page.source).matchAll(/<(?:script|link rel="stylesheet")[^>]*?(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]) : [];
+      const missing = loads.filter((path) => !precache.includes(path));
+      if (missing.length) throw new Error(`The service worker would not precache what index.html loads: ${missing.join(", ")}`);
       // The commit, and what was built from it: a rebuild of the same commit that changed a file is a new cache too.
       const version = `${buildId}-${createHash("sha256").update(precache.join("\n")).update(JSON.stringify(languages)).digest("hex").slice(0, 8)}`;
       const output = await build({
         configFile: false,
         logLevel: "warn",
-        define: { __SW_BUILD__: JSON.stringify(version), __SW_PRECACHE__: JSON.stringify(precache), __SW_LANGUAGES__: JSON.stringify(languages) },
+        define: { __SW_BUILD__: JSON.stringify(version), __SW_PRECACHE__: JSON.stringify(precache), __SW_LANGUAGES__: JSON.stringify(languages), __SW_LAZY__: JSON.stringify(lazy) },
         build: {
           write: false,
           emptyOutDir: false,
@@ -40,6 +57,6 @@ export function serviceWorker(buildId: string): Plugin {
       const chunk = (Array.isArray(output) ? output : [output]).flatMap((o) => ("output" in o ? o.output : [])).find((o) => o.type === "chunk");
       if (!chunk || chunk.type !== "chunk") throw new Error("The service worker did not build");
       this.emitFile({ type: "asset", fileName: "sw.js", source: chunk.code });
-    },
-  };
+    } },
+  }];
 }

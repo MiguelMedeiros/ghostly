@@ -53,7 +53,10 @@ function OffScreen() {
  * loop rang while the person was anywhere but that chat.
  */
 describe("a burst of a contact's calls", () => {
+  // A ring's length is read from `performance.now()` (BURST_RING_MS): on real clocks a slow render between an offer and
+  // its hang-up made a ring long enough to let the next call ring again.
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date", "performance"] });
     contact++;
     PEER = `peer${contact}`.padEnd(52, "p");
     ID = `chat-burst-${contact}`;
@@ -86,7 +89,6 @@ describe("a burst of a contact's calls", () => {
   });
 
   it("rings again off screen once a person could have redialled", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "performance"] });
     renderApp(<OffScreen />);
     signal("o");
     await act(async () => {});

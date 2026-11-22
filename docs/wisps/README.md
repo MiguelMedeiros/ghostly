@@ -53,6 +53,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 503 | Files | [Group Files](503-group-files.md) | Profile | Draft | Available |
 | 600 | Voice and video | [Voice and Video](600-media.md) | Contract | Draft | Available |
 | 601 | Voice and video | [WebRTC Media](601-webrtc-media.md) | Profile | Draft | Available |
+| 602 | Voice and video | [Group Calls through a Forwarding Node](602-group-calls.md) | Profile | Draft | Planned |
 | 700 | Local services | [Local Services](700-local-services.md) | Contract | Draft | Available |
 | 701 | Local services | [HTTP Local Service Profile](701-http-services.md) | Profile | Draft | Available |
 | 800 | Invites | [Invite and Join](800-invite-join.md) | Contract | Draft | Available |

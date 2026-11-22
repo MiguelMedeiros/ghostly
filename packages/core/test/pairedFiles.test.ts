@@ -39,6 +39,7 @@ describe("paired files with durable receipts", () => {
     const sending = t.a.send(file, source());
     await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
     expect(t.completed).not.toHaveBeenCalled(); commit(); await sending;
+    expect(t.completed).toHaveBeenCalledExactlyOnceWith(file.id, "out");
     t.a.closeAll(); t.b.closeAll();
   });
   it("refuses corrupt content even with the right byte count", async () => {
