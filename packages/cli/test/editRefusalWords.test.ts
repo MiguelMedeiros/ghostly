@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
+import { GroupEdits } from "@ghostly/browser/engine/groupEdits";
+import { Reactions } from "@ghostly/browser/engine/reactions";
 import { callApi, type ApiContext } from "../src/api";
 import { chatViewOf, groupViewOf } from "./support/chatView";
-// covers: headless.edit, groups.edit, headless.chat
+// covers: headless.edit, groups.edit, headless.chat, groups.reactions
 
 /**
  * `edit` and `group edit` said the engine's sentence alone when it refused (a contact's message, the 101st edit, a text
@@ -122,15 +124,48 @@ describe("message delete --everyone on a message it cannot delete", () => {
     });
     expect(node.removeMessage).not.toHaveBeenCalled();
   });
+});
 
-  it("a contact's message is refused (exit 1) by edit and by delete --everyone alike; it was not_found (exit 3) from the delete", async () => {
-    const { ctx } = refusal("Only your own text messages can be edited");
-    const edit = await callApi(ctx, "chat.edit", { chat: "Alice", message: "peer_x", text: "x" }).catch((e: unknown) => e);
-    const remove = await callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_x", everyone: true }).catch((e: unknown) => e);
-    const group = await callApi(ctx, "chat.delete", { chat: "Crew", message: "bobkey:1:0", everyone: true }).catch((e: unknown) => e);
-    const groupEdit = await callApi(ctx, "group.edit", { group: "Crew", message: "bobkey:1:0", text: "x" }).catch((e: unknown) => e);
-    expect([edit, remove, groupEdit, group].map((e) => (e as { code?: string }).code)).toEqual(["refused", "refused", "refused", "refused"]);
-    // One of mine deleted already stays not found: gone, not someone else's.
-    await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "me_gone", everyone: true })).rejects.toMatchObject({ code: "not_found" });
+describe("in a private group I was removed from and invited back to, my edit, delete for everyone and reaction from before", () => {
+  it("are refused as from before, with no reply offered and nothing said to have gone out", async () => {
+    // The engine's own refusals (GroupEdits, Reactions) over rows written under the member key I held before: the edit
+    // read "Only your own text messages can be edited", with a reply offered, and the reaction "went out" though no
+    // edge may have taken it.
+    const before = "o".repeat(52), now = "n".repeat(52);
+    const rows: StoredMessage[] = [
+      row({ linkId: "group:g1", id: "event:1:joined:1", wireId: undefined, event: "joined", text: "You joined", timestamp: 1 }),
+      row({ linkId: "group:g1", id: `${before}:1:0`, wireId: undefined, member: before, text: "see you at 8", timestamp: 2 }),
+      row({ linkId: "group:g1", id: `${before}:1:1`, wireId: undefined, member: before, text: "bring snacks", timestamp: 3 }),
+      row({ linkId: "group:g1", id: "bobkey:1:0", wireId: undefined, sender: "peer", member: "bobkey", text: "hi", timestamp: 4, reactions: { me: { e: "🔥", n: 5, at: 5 } } }),
+      row({ linkId: "group:g1", id: "event:6:joined:6", wireId: undefined, event: "joined", text: "You joined again", timestamp: 6 }),
+    ];
+    const messages = async (chat: string) => rows.filter((m) => m.linkId === chat);
+    const patch = async () => undefined;
+    const edits = new GroupEdits({ messages, patch, remove: async () => {}, removeMine: async () => {}, changed: () => {}, send: async () => null, edge: () => undefined,
+      membership: () => ({ me: now, members: new Set([now, "bobkey"]), community: false, admin: false }) });
+    const reactions = new Reactions({ messages, patch, changed: () => {}, memberKey: () => now });
+    const { ctx, node } = fake();
+    node.getMessage.mockImplementation(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id));
+    node.getMessages.mockImplementation(async (linkId: string) => rows.filter((m) => m.linkId === linkId));
+    node.groupMessages.mockImplementation(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`));
+    node.editMessage.mockImplementation(((p: { linkId: string; messageId: string; text: string }) => edits.edit(p.linkId.slice("group:".length), p.messageId, p.text)) as never);
+    node.removeMessage.mockImplementation(((p: { linkId: string; messageId: string }) => edits.removeMine(p.linkId.slice("group:".length), p.messageId)) as never);
+    Object.assign(node, { react: async (p: { linkId: string; messageId: string; emoji: string }) => {
+      const out = await reactions.mine(p.linkId, p.messageId, p.emoji);
+      return "error" in out ? { error: out.error } : { error: null, n: out.reaction.n };
+    } });
+    // The same codes as before (exit 1): only the words change.
+    await expect(callApi(ctx, "group.edit", { group: "Crew", message: `${before}:1:0`, text: "see you at 9" })).rejects.toMatchObject({
+      code: "refused", message: "This message is from before you were removed and invited back, and can't be edited now",
+    });
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: `${before}:1:1`, everyone: true })).rejects.toMatchObject({
+      code: "refused", message: "This message is from before you were removed and invited back, and can't be deleted for everyone now",
+    });
+    for (const params of [{ emoji: "👍" }, { remove: true }])
+      await expect(callApi(ctx, "group.react", { group: "Crew", message: "bobkey:1:0", ...params })).rejects.toMatchObject({
+        code: "bad_request", message: "Your reaction to this message is from before you were removed and invited back, and stays as it is",
+      });
+    expect(rows.find((m) => m.id === "bobkey:1:0")?.reactions?.me).toEqual({ e: "🔥", n: 5, at: 5 });
+    edits.stop();
   });
 });

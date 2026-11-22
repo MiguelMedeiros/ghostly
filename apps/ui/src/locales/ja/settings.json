@@ -12,6 +12,7 @@
   "clearAllData": "すべてのデータを消去",
   "clearAllDataConfirm": "次のものを完全に消去します：",
   "clearAllDataDescription": "このプロフィールのチャット、ID、設定。ウォレットは残ります。",
+  "clearAllDataFailed": "すべてを消去できませんでした。一部のデータがこの端末に残っている可能性があります。もう一度お試しください。",
   "clearAllDataInfo": "消去の前に、Ghostly は取り消せるものを取り消します：連絡先のために預けた項目、DID、ID証明、通知の購読。ほかのサイトに公開した証明はそこに残ります。",
   "clearAllDataItems": {
     "appsData": "インストールしたアプリとそのデータ",
@@ -24,6 +25,7 @@
     "storage": "S3 ストレージの設定と閉じているときの通知"
   },
   "clearAllDataKeeps": "残るもの：ウォレット、バックアップ、ほかのプロフィール。",
+  "clearingData": "消去中…",
   "colorScheme": "モード",
   "colorSchemes": {
     "dark": "ダーク",

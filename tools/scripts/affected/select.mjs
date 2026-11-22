@@ -109,6 +109,7 @@ export const UNIT_PROJECTS = [
       "docs/RELEASING.md": ["chromeWebStore", "npmPublish", "webLatest"],
       "{CHANGELOG.md,apps/desktop/Cargo.toml,apps/website/lib/release.ts,apps/extension/public/manifest.json,packages/browser/src/shared/features.ts}": ["bumpVersion"],
       "packages/cli/package.json": ["npmPublish", "cliShrinkwrap"],
+      "apps/website/package.json": ["websiteSteps"],
       ".gitignore": ["cliShrinkwrap"],
       "apps/desktop/src/{translate,translate_models}.rs": ["translationRuntimes"],
       "e2e/playwright.config.ts": ["e2eWorkflow"],
@@ -192,6 +193,9 @@ export function parseUnitGroup(text) {
   const count = Number(m[2]);
   return index >= 1 && index <= count ? { index, count } : null;
 }
+
+/** ci.yml's name for the draft tier's job that runs `group` ({ index, count }): the name the run page shows. */
+export const draftUnitJob = (group) => `Affected unit tests (draft ${group.index}/${group.count})`;
 
 /** The group (1-based, of `count`) a unit project runs in: the one of its first half for a project of UNIT_HALVED. */
 export function unitGroupOf(name, count) {

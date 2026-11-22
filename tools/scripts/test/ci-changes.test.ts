@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, queuedBehind, supersededBy, testedAs } from "../ci-changes.mjs";
+import { DRAFT_GATE, HOLD, PACKAGES_READ_FROM_SITE, QUEUE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, queuedBehind, supersededBy, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -632,6 +632,93 @@ describe("a ready pull request labelled queue", () => {
     expect(await queuedBehind({ pull: 7, sha, api: fake(["queue"], undefined).api })).toBe(0);
   });
 
+  // Leaving draft once its fast tier passed: the feeder adds `queue` on its next pass, and the train would cancel a full
+  // run planned before that.
+  describe("without `queue` yet, its fast tier green on this head", () => {
+    const repo = "o/r";
+    const own = 900;
+    const runsPath = `actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sha}&per_page=100`;
+    const draftRun = (over: object = {}) => ({
+      id: 899,
+      head_sha: sha,
+      status: "completed",
+      conclusion: "success",
+      path: ".github/workflows/ci.yml",
+      head_repository: { full_name: repo },
+      pull_requests: [{ number: 7 }],
+      html_url: "https://github.com/o/r/actions/runs/899",
+      ...over,
+    });
+    /** `reads`: the pull request as each read of it finds it. */
+    const waiting = (reads: { labels?: string[]; draft?: boolean; head?: string }[], { behind = 3, runs = [draftRun()], gate = "CI Success (draft)" } = {}) => {
+      const asked: string[] = [];
+      let settled = 0;
+      let read = 0;
+      const api = async (path: string) => {
+        asked.push(path);
+        if (path === "pulls/7") {
+          const pr = reads[Math.min(read++, reads.length - 1)];
+          return { labels: (pr.labels ?? []).map((name) => ({ name })), draft: pr.draft ?? false, head: { sha: pr.head ?? sha }, base: { ref: "dev" } };
+        }
+        if (path === `compare/dev...${sha}`) return { behind_by: behind };
+        if (path === runsPath) return { workflow_runs: runs };
+        const job = path.match(/^actions\/runs\/(\d+)\/jobs\?per_page=100$/);
+        if (job) return { jobs: [{ name: gate, conclusion: "success" }] };
+        throw new Error(path);
+      };
+      const settle = async () => {
+        settled++;
+      };
+      return { asked, settled: () => settled, ask: () => queuedBehind({ pull: 7, sha, api, run: own, repo, settle, polls: 4 }) };
+    };
+
+    it("names the labels and the gate as the merge train does", async () => {
+      const train = await import("../merge-train.mjs");
+      expect([QUEUE, HOLD, DRAFT_GATE]).toEqual([train.LABEL.queue, train.HOLD, train.DRAFT_GATE]);
+    });
+
+    it("plans the fast tier when the feeder adds `queue` while it waits", async () => {
+      const { ask, asked, settled } = waiting([{}, {}, { labels: ["queue"] }]);
+      expect(await ask()).toBe(3);
+      expect(settled()).toBe(2);
+      expect(asked.slice(0, 4)).toEqual(["pulls/7", `compare/dev...${sha}`, runsPath, "actions/runs/899/jobs?per_page=100"]);
+    });
+
+    it("runs everything when `queue` does not come in time", async () => {
+      const { ask, settled } = waiting([{}]);
+      expect(await ask()).toBe(0);
+      expect(settled()).toBe(4);
+    });
+
+    it("stops waiting, and runs everything, on `queue:hold`, a draft again or another head", async () => {
+      for (const then of [{ labels: ["queue:hold"] }, { draft: true }, { head: "7".repeat(40) }]) {
+        const { ask, settled } = waiting([{}, then, { labels: ["queue"] }]);
+        expect(await ask()).toBe(0);
+        expect(settled()).toBe(1);
+      }
+    });
+
+    it("does not wait at the base's tip, held, or without a green fast tier of this pull request on this head", async () => {
+      for (const [reads, opts] of [
+        [[{}], { behind: 0 }],
+        [[{ labels: ["queue:hold"] }], {}],
+        [[{ labels: ["queue:priority", "queue:hold"] }], {}],
+        [[{}], { runs: [] }],
+        [[{}], { gate: "CI Success" }],
+        [[{}], { runs: [draftRun({ conclusion: "failure" })] }],
+        [[{}], { runs: [draftRun({ status: "in_progress", conclusion: null })] }],
+        [[{}], { runs: [draftRun({ id: own })] }],
+        [[{}], { runs: [draftRun({ pull_requests: [{ number: 8 }] })] }],
+        [[{}], { runs: [draftRun({ head_repository: { full_name: "fork/r" } })] }],
+        [[{}], { runs: [draftRun({ path: ".github/workflows/other.yml" })] }],
+      ] as const) {
+        const { ask, settled } = waiting([...reads, { labels: ["queue"] }], opts);
+        expect(await ask(), JSON.stringify([reads, opts])).toBe(0);
+        expect(settled()).toBe(0);
+      }
+    });
+  });
+
   it("names the queue and the batch in its notice, not leaving draft", () => {
     const notice = plan(["apps/website/app/page.tsx"], { draft: true, queued: true }).why.find((w) => w.startsWith("Queued"));
     expect(notice).toBe(
@@ -734,6 +821,12 @@ describe("the errors of a red CI Success", () => {
       status: 1,
       errors: ["::error::Tauri Backend ended failure", "::error::Website browser checks was skipped, but this change needs it"],
     });
+  });
+
+  it("names the range of the draft's unit test groups, since their one result does not say which failed", () => {
+    const draft = { DRAFT: "true", FULL: "false", AFFECTED_GATE: "true", FRONTEND_TESTS: "skipped", FRONTEND_BUILD: "skipped" };
+    expect(gate({ ...draft, AFFECTED: "failure" })).toEqual({ status: 1, errors: ["::error::Affected unit tests (draft 1/4 to 4/4): one or more groups ended failure"] });
+    expect(gate({ ...draft, AFFECTED: "skipped" })).toEqual({ status: 1, errors: ["::error::Affected unit tests (draft 1/4 to 4/4) was skipped, but this change needs it"] });
   });
 
   it("blames Changed paths, not the plan, when that job did not pass", () => {

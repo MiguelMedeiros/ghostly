@@ -29,6 +29,14 @@ const BESIDE_CHUNKS = [
   { entry: "@ghostly/iroh-web", file: "ghostly_iroh_web_bg.wasm" },
 ];
 
+/**
+ * A `<package>/<file>.wasm?url` import of a package npm installs with the CLI (Bark, BDK, Fedimint) is that package's
+ * own file, found at run time as its JavaScript is: a copy beside the chunks would ship the same bytes twice (~21 MB).
+ */
+const INSTALLED = new Set(Object.keys((JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { dependencies: Record<string, string> }).dependencies));
+const INSTALLED_WASM = /^((?:@[^/]+\/)?[^/@.][^/]*)\/(.+\.wasm)\?url$/;
+const INSTALLED_WASM_ID = "\0ghostly-installed-wasm:";
+
 /** The folder Node finds package `name` in when it looks from `dir` (each `node_modules` up the tree), or null. */
 function packageDir(dir: string, name: string): string | null {
   for (let at = dir; ; at = dirname(at)) {
@@ -133,6 +141,18 @@ function walletSdksOnNode(): Plugin {
       }
       // The Fedimint client's worker thread, plain JavaScript that runs as written (src/runtime/fedimint.ts finds it).
       this.emitFile({ type: "asset", fileName: "assets/fedimintWorker.mjs", source: readFileSync(new URL("./src/runtime/fedimintWorker.mjs", import.meta.url)) });
+    },
+    resolveId(source) {
+      const match = INSTALLED_WASM.exec(source);
+      if (!match || !INSTALLED.has(match[1]!)) return;
+      // Here first: a file the package does not export fails the build, not a wallet at run time.
+      require.resolve(`${match[1]}/${match[2]}`);
+      return `${INSTALLED_WASM_ID}${match[1]}/${match[2]}`;
+    },
+    load(id) {
+      if (!id.startsWith(INSTALLED_WASM_ID)) return;
+      const file = JSON.stringify(id.slice(INSTALLED_WASM_ID.length));
+      return `import { createRequire } from "node:module";\nimport { pathToFileURL } from "node:url";\nexport default pathToFileURL(createRequire(import.meta.url).resolve(${file})).href;\n`;
     },
     transform(code, id) {
       const rule = ON_NODE.find((r) => r.file.test(id));

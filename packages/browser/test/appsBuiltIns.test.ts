@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { canonicalJsonBytes } from "@ghostly/core";
 import type { BuiltInApp } from "../src/engine/appDefaults";
+import { AppFetchError } from "../src/engine/appFetch";
 import { BUILT_IN_APPS_KEY, builtInsDue } from "../src/engine/apps";
 import { snapshotDatabase } from "../src/backup/database";
 import { PROFILE_SETTINGS_KEYS, STORES, clearProfileStores, databaseName, store, wrap } from "../src/shared/idb";
@@ -249,6 +250,18 @@ describe("opened from the build", () => {
     expect(await appRows()).toEqual([]);
     expect(await bundleIds()).toEqual([]);
     expect(net.requests).toEqual([]);
+  });
+
+  it("a carried file whose read fails says why (offline, the host not reached, its status), not that the build lacks it", async () => {
+    const v1 = await bundle();
+    const store = apps(net, { readBuiltIn, builtIns: [chess(v1.digest)] });
+    for (const failed of [new AppFetchError("offline", "Offline"), new AppFetchError("network", "Failed to fetch"), new AppFetchError("status", "The host answered 503", 503)]) {
+      carried = failed;
+      await expect(store.preview({ builtIn: REF })).rejects.toBe(failed);
+    }
+    // Read again once it loads.
+    carried = v1.bytes;
+    expect((await store.preview({ builtIn: REF })).digest).toBe(v1.digest);
   });
 
   it("one the person removed, or has installed, is not opened from the build", async () => {

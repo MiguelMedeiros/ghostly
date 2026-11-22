@@ -199,6 +199,14 @@ describe("BIP 21 links", () => {
     expect(previewText(`bitcoin:${BC1Q}?label=${"a".repeat(139)}%F0%9F%98%80`)).toBeTruthy();
   });
 
+  it("ends before a direction mark typed after it, keeping an emoji", () => {
+    // An Arabic or Hebrew keyboard puts a mark before the full stop: the address kept it and no card was shown.
+    expect(findMoney(`ادفع bitcoin:${BC1Q}‏.`)).toMatchObject({ type: "onchain", request: { address: BC1Q } });
+    expect(findMoney(`ادفع bitcoin:${BC1Q}?amount=0.001‏.`)).toMatchObject({ type: "onchain", request: { amountSat: 100_000 } });
+    expect(findMoney(`bitcoin:${BC1Q}?label=Pizza%20\u{1F355}⁩`)).toMatchObject({ request: { label: "Pizza \u{1F355}" } });
+    expect(findUsdtAddress(`usdt ethereum:${EVM}@137‎`)?.request.uri).toBe(`ethereum:${EVM}@137`);
+  });
+
   it("is not fooled by a link with a bad address", () => {
     expect(findMoney(`bitcoin:${corrupt(BC1Q)}?amount=1 and some words to make it long`)).toBeNull();
   });

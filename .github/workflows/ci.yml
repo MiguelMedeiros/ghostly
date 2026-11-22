@@ -58,7 +58,9 @@ jobs:
   #   Many sessions push drafts at once, and the free plan runs about 20 jobs at a time (5 on macOS).
   # - So does a ready pull request that already has `queue` and whose head is behind its base: the merge train boards
   #   it on that fast tier, and its batch's full run on the base's tip is the gate. Its gate job is "CI Success (draft)"
-  #   too. At the base's tip (where the train rebases a lone pull request) it runs everything, as without `queue`.
+  #   too. At the base's tip (where the train rebases a lone pull request) it runs everything, as without `queue`. One
+  #   behind its base whose "CI Success (draft)" already passed on its head (it left draft after that) waits up to about
+  #   3 minutes for the feeder's `queue` before it plans: the train would cancel a full run it started without.
   # - Website: runs when the pull request changes something the site reads (apps/website/, docs/, the files its
   #   scripts copy or quote; the list is tested against those scripts).
   # - The Desktop jobs on macOS: skipped only when every change is in apps/website/ or docs/, which the app never reads.
@@ -70,7 +72,7 @@ jobs:
   # A push to dev whose tree a pull request into dev's green CI Success already tested (the merge train's batch head, or
   # a pull request merged at a head that held dev's tip; ci-changes.mjs's testedAs) runs only Tauri Backend, whose run
   # on dev saves the Cargo cache pull requests restore, and that only builds when the cache for its key is missing.
-  # Any doubt runs everything.
+  # (npm-cache, which saves the npm cache, runs on every push to dev without asking this job.) Any doubt runs everything.
   # A merge queue entry plans from everything it would put on dev (its base against its head: every queued pull
   # request up to it) and is never a draft. If that diff cannot be read it runs everything instead of failing, which
   # would drop it and every pull request behind it from the queue.
@@ -153,7 +155,8 @@ jobs:
           fi
           # Ready, with `queue` already, and behind its base: the merge train boards it on the fast tier and its batch
           # runs everything (ci-changes.mjs's queuedBehind). At the base's tip it runs everything: the train lands a lone
-          # pull request on its own run there.
+          # pull request on its own run there. Without `queue` yet, but with its fast tier green on this head, it waits a
+          # little for the label first.
           queued=false
           if [[ "$draft" == "false" ]] && node tools/scripts/ci-changes.mjs --queued-behind; then
             draft=true
@@ -194,12 +197,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The test map reads what a pull request adds against the merge commit's first parent.
+          fetch-depth: 2
 
       - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: "npm"
+        uses: ./.github/actions/node-npm
 
       - name: Install dependencies
         run: npm ci
@@ -222,6 +225,11 @@ jobs:
           [[ $types_result == passed ]] || echo "::error::The TypeScript check failed (npm run typecheck): see its group above"
           [[ $lint_result == passed && $types_result == passed ]]
 
+      # Reads apps/ui/src/locales/ alone, in a second: every file's keys in order, Brazilian Portuguese, Arabic standby
+      # said one way. Each problem names the file and the key.
+      - name: Locale files (npm run locales:sort -- --check)
+        run: npm run locales:sort -- --check
+
       # docs/changelog/unreleased/<slug>.md: one file per changelog entry, put into CHANGELOG.md at release
       # (tools/scripts/changes.mjs).
       - name: Changelog entries are well formed
@@ -234,27 +242,37 @@ jobs:
         run: node tools/scripts/quarantine.mjs
 
       # Runs no test: reads e2e/features.json and what every test says it covers (docs/TESTING.md). The map goes to
-      # the run's summary page: it is not committed.
+      # the run's summary page: it is not committed. On a pull request, what it adds (a test file, a feature) is checked
+      # against its base, the merge commit's first parent (the checkout's second commit).
       - name: Test map (every feature has a test)
-        run: npm run test:map -- --summary
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+        run: npm run test:map -- --summary ${BASE:+--base=$BASE}
 
+  # npm run test:app in three shards of about the same time, as the packages' below (tools/scripts/test-shards.mjs
+  # --app): one runner took it in 9-13 minutes, the UI's tests 11 of them, the longest job of a ready run. The name
+  # keeps "Frontend tests (app)" at its start, the name the merge train knows the job by.
   frontend-tests:
-    name: Frontend tests (app)
+    name: Frontend tests (app) ${{ matrix.shard }}/3
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The 3 below and in the name must match this list.
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: "npm"
+        uses: ./.github/actions/node-npm
 
       # `npm test` is test:packages (the shards below) then test:app (here). A test added beside the two would run
-      # nowhere; tools/scripts/test-shards.mjs checks test:packages is a list of workspaces it knows how to split.
+      # nowhere; tools/scripts/test-shards.mjs checks test:packages is a list of workspaces it knows how to split, and
+      # test:app a list of `vitest run -c <config>` scripts.
       - name: The two halves are all of npm test
         run: |
           test="$(node -p 'require("./package.json").scripts.test')"
@@ -266,8 +284,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Unit tests (npm run test:app)
-        run: npm run test:app
+      - name: Unit tests (npm run test:app, shard ${{ matrix.shard }} of 3)
+        run: node tools/scripts/test-shards.mjs --app ${{ matrix.shard }} 3 --report-dir "$RUNNER_TEMP/test-reports"
+
+      # Each file's time, for `node tools/scripts/test-shards.mjs --record` after a test file gets slower.
+      - name: Keep the test times
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-test-reports-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-reports
+          retention-days: 14
+          if-no-files-found: ignore
 
   # The packages' unit tests (npm run test:packages) in four shards of about the same time, each on its own runner
   # (tools/scripts/test-shards.mjs, by tools/scripts/test-durations.json). One runner took them in 6.5 minutes, package after
@@ -290,10 +318,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: "npm"
+        uses: ./.github/actions/node-npm
 
       - name: Install dependencies
         run: npm ci
@@ -328,7 +353,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The 4 below and in the name must match this list.
+        # The 4 below, in the name and in CI Success's check must match this list.
         group: [1, 2, 3, 4]
     steps:
       # The pull request's merge commit and its first parent, the base it is merged onto: their difference is the change.
@@ -338,10 +363,7 @@ jobs:
           fetch-depth: 2
 
       - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: "npm"
+        uses: ./.github/actions/node-npm
 
       - name: Install dependencies
         run: npm ci
@@ -356,8 +378,9 @@ jobs:
   # ============================================
   # The shards above run on x64 only. Here: the CLI packed as npm publishes it, installed into an empty folder the way
   # `npm install -g @ghostlytools/cli` does (its dependencies from npm, so node-datachannel's linux-arm64 build comes
-  # from its own optional package), must start a daemon with WebRTC and calls on. Then the CLI's whole test suite, the
-  # two-peer story included: pairing, messages, files and a voice call over libdatachannel, on arm64.
+  # from its own optional package), must start a daemon with WebRTC and calls on. The CLI's whole test suite on arm64
+  # (the two-peer story, a voice call over libdatachannel) runs nightly in cli-arm64-nightly.yml: on x64 the packages
+  # shards above already run it on every pull request.
   # No Rust: the Iroh WebAssembly the CLI bundles is committed (packages/iroh-web/pkg).
   cli-linux-arm64:
     name: CLI on Linux ARM64
@@ -365,16 +388,13 @@ jobs:
     if: needs.changes.outputs.packages == 'true'
     runs-on: ubuntu-24.04-arm
     # A daemon that never exits would otherwise hold the runner for 6 hours.
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: "npm"
+        uses: ./.github/actions/node-npm
 
       - name: Install dependencies
         run: npm ci
@@ -418,15 +438,6 @@ jobs:
           $ghostly daemon stop
           trap - EXIT
 
-      # The CLI's own suite, as the packages shards run it on x64 (its Vitest builds dist/ again first). Skipped here as
-      # on x64: fedimint (a regtest federation) and payments (a test mint), which need the Docker e2e services, the long
-      # chat bench, and the ffmpeg comparisons in voicePeaks when ffmpeg is missing.
-      - name: jq for the Claude Code agent example
-        run: command -v jq || { sudo apt-get update && sudo apt-get install -y jq; }
-
-      - name: CLI tests
-        run: npm run test -w @ghostlytools/cli
-
   frontend-build:
     name: Frontend builds
     needs: changes
@@ -437,10 +448,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22"
-          cache: "npm"
+        uses: ./.github/actions/node-npm
 
       - name: Install dependencies
         run: npm ci
@@ -716,6 +724,72 @@ jobs:
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # ============================================
+  # The npm cache the other jobs restore
+  # ============================================
+  # Every job restores the npm cache (.github/actions/node-npm) and none saves it: a pull request's copy served that
+  # pull request alone, and after a lock file change each one saved its own (6.5 GB of the 10 GB cache, which pushed
+  # dev's Cargo caches out). This job saves dev's, once per lock file and runner. On every push to dev, whatever
+  # `changes` planned: a push whose tree a pull request already tested runs no Node job, so before it no dev run saved
+  # the ARM64 key, and the macOS one waited for the nightly. When dev's entry for the key is there it stops at the
+  # lookup (no download).
+  npm-cache:
+    name: Save the npm cache (${{ matrix.runner }}, ${{ matrix.lock }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each runner and lock file a job restores from: the key holds the runner's OS and architecture.
+        include:
+          - runner: ubuntu-24.04
+            lock: package-lock.json
+            dir: .
+          - runner: ubuntu-24.04-arm
+            lock: package-lock.json
+            dir: .
+          - runner: macos-15
+            lock: package-lock.json
+            dir: .
+          - runner: ubuntu-24.04
+            lock: apps/website/package-lock.json
+            dir: apps/website
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The key .github/actions/node-npm restores, and only whether it exists.
+      - name: Is the npm cache saved already
+        id: lookup
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ matrix.lock }}-${{ hashFiles(matrix.lock) }}
+          lookup-only: true
+
+      - name: Setup Node.js
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      # What npm ci downloads is what the cache holds; the packages' install scripts add nothing to it.
+      - name: Fill the npm cache
+        if: steps.lookup.outputs.cache-hit != 'true'
+        working-directory: ${{ matrix.dir }}
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Save the npm cache
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.npm
+          key: ${{ steps.lookup.outputs.cache-primary-key }}
+
+  # ============================================
   # Website - Next.js
   # ============================================
   # Only when the pull request changes something the site reads (see `changes`). The checks here (drafts too), the
@@ -737,11 +811,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        uses: ./.github/actions/node-npm
         with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: apps/website/package-lock.json
+          lock: apps/website/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -768,9 +840,10 @@ jobs:
       - name: ESLint
         run: npm run lint
 
-      # WISP content lives in docs/wisps only: every WISP has the header rows the site reads, and the site
-      # holds no text of its own per WISP (scripts/check-single-source.mjs).
-      - name: WISP content has one source
+      # Every scripts/*.test.mjs of the site (the package's test script), among them WISP content has one source:
+      # every WISP has the header rows the site reads, and the site holds no text of its own per WISP
+      # (scripts/check-single-source.mjs). A failing one is named in the step's log.
+      - name: Site script tests (npm test)
         run: npm test
 
       - name: TypeScript check
@@ -801,11 +874,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        uses: ./.github/actions/node-npm
         with:
-          node-version: "22"
-          cache: "npm"
-          cache-dependency-path: apps/website/package-lock.json
+          lock: apps/website/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -959,16 +1030,20 @@ jobs:
           # Skipped only counts when `changes` chose to skip that job.
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$2" == "false" ) ]]; }
           # One error per job that did not pass, by the name the run page shows: the summary alone hid it among the skips.
+          # A matrix has one result for all its jobs: the error names their range and says so ($4), and each job names
+          # its own failure.
           failed=0
           check() {
             ok "$2" "$3" && return
-            if [[ "$2" == "skipped" ]]; then echo "::error::$1 was skipped, but this change needs it"; else echo "::error::$1 ended $2"; fi
+            if [[ "$2" == "skipped" ]]; then echo "::error::$1 was skipped, but this change needs it"
+            elif [[ -n "${4:-}" ]]; then echo "::error::$1: $4 ended $2"
+            else echo "::error::$1 ended $2"; fi
             failed=1
           }
           check "Frontend lint and types" "$FRONTEND_CHECKS" "$LINT"
           check "Frontend tests (app)" "$FRONTEND_TESTS" "$FULL"
           check "Frontend builds" "$FRONTEND_BUILD" "$FULL"
-          check "Affected unit tests (draft)" "$AFFECTED" "$AFFECTED_GATE"
+          check "Affected unit tests (draft 1/4 to 4/4)" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"
           check "Frontend tests (packages)" "$PACKAGES_TESTS" "$PACKAGES"
           check "CLI on Linux ARM64" "$CLI_ARM64" "$PACKAGES"
           check "Tauri Backend" "$TAURI" "$RUST"

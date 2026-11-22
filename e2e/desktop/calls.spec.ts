@@ -45,7 +45,8 @@ const picture = (p: DesktopPerson) => p.app.execute<{ width: number; time: numbe
  * stream "not supported") on a live track with frames coming is the engine's: the fresh canvas says whether this
  * page can play any canvas stream then, or only this one cannot. Twice it could not. A fourth films a canvas drawn in
  * memory (`willReadFrequently`), not on the GPU (`memory`): on the loop's Intel GPU WebKit's Skia GPU worker crashed in
- * Mesa, so a failure where only the memory canvas plays points at the GPU canvas.
+ * Mesa, so a failure where only the memory canvas plays points at the GPU canvas. When none plays, WebKit's GStreamer
+ * GL context was broken from the start: why the apps here run without the GL video sink (`webkitMediaEnv`).
  */
 const noPicture = (p: DesktopPerson) => p.app.executeAsync<string>(`
   const done = arguments[arguments.length - 1];
