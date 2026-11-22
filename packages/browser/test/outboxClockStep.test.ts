@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Outbox, RESEND_POLICY, type Resender } from "../src/engine/outbox";
+import os from "node:os";
+import { bootClock, Outbox, RESEND_POLICY, type Resender } from "../src/engine/outbox";
 import type { StoredMessage } from "../src/shared/types";
 // covers: chat.paired.offline-send, delivery.hold.text
 
@@ -9,10 +10,13 @@ afterEach(() => vi.useRealTimers());
 /**
  * A text to a contact who is away, in an outbox whose wall clock the test sets (`step`), the way the device clock is
  * set by hand or by NTP; timers and the monotonic clock run on as before. `row`: what its row holds when it starts.
+ * `sleep`: the machine suspended as Linux and Android do it, the wall clock (and the boot clock, where `boot` gives the
+ * outbox one) moved on while the monotonic clock and the timers stood still. `boot: false` is a platform with none (a
+ * browser, Android's WebView).
  */
-function away(divert?: Resender["divert"], row: Partial<StoredMessage> = {}) {
+function away(divert?: Resender["divert"], row: Partial<StoredMessage> = {}, options: { boot?: boolean } = {}) {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
-  let offset = 0;
+  let offset = 0, slept = 0;
   const stored: StoredMessage = { linkId: "clock-step", id: `me_${WIRE}`, wireId: WIRE, text: "hello", sender: "me", timestamp: Date.now(), via: "datalink", delivery: "sending", ...row };
   const store = {
     read: async () => [{ ...stored }],
@@ -20,9 +24,10 @@ function away(divert?: Resender["divert"], row: Partial<StoredMessage> = {}) {
       if (stored.delivery !== "delivered") Object.assign(stored, extra, { delivery, deliveryError: error });
     },
   };
+  const boot = options.boot === undefined ? {} : { boot: options.boot ? () => 5 * DAY + performance.now() + slept : null };
   const box = new Outbox(store, async () => "You are offline.", 20_000, undefined,
-    { resender: { ready: () => false, ...(divert && { divert }) }, now: () => Date.now() + offset });
-  return { row: stored, box, step: (ms: number) => { offset += ms; } };
+    { resender: { ready: () => false, ...(divert && { divert }) }, now: () => Date.now() + offset, ...boot });
+  return { row: stored, box, step: (ms: number) => { offset += ms; }, sleep: (ms: number) => { offset += ms; slept += ms; } };
 }
 
 /** When the text was handed to store-and-forward, after the clock was stepped by `ms` 10 s after it was queued. */
@@ -86,5 +91,78 @@ describe("a text queued for an away contact, when the device clock steps", () =>
     await vi.advanceTimersByTimeAsync(20 * MINUTE);
     expect(t.row.delivery).toBe("failed");
     await t.box.stop();
+  });
+});
+
+describe("a text queued for an away contact, when the machine sleeps (the monotonic clock and the timers stand still)", () => {
+  it("is handed to store-and-forward at its first check after the wake, not a minute of running later", async () => {
+    let at: number | undefined;
+    const t = away(async () => { at ??= performance.now() - start; return true; }, {}, { boot: false });
+    const start = performance.now();
+    await t.box.transmit(t.row.id);
+    // Its checks at 5 s, then 20 s: asleep an hour in between.
+    await vi.advanceTimersByTimeAsync(10_000);
+    t.sleep(60 * MINUTE);
+    await vi.advanceTimersByTimeAsync(10 * MINUTE);
+    expect(at).toBe(20_000);
+    await t.box.stop();
+  });
+
+  it("asleep 9 days where the platform has a boot clock (Linux), fails at its first check after the wake", async () => {
+    const t = away(undefined, {}, { boot: true });
+    await t.box.transmit(t.row.id);
+    await vi.advanceTimersByTimeAsync(10_000);
+    t.sleep(9 * DAY);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(t.row).toMatchObject({ delivery: "failed", deliveryError: expect.stringContaining("Not confirmed within 7 days") });
+    await t.box.stop();
+  });
+
+  it("asleep 3 days where the platform has a boot clock, still goes within the rest of its week", async () => {
+    const t = away(undefined, {}, { boot: true });
+    await t.box.transmit(t.row.id);
+    await vi.advanceTimersByTimeAsync(10_000);
+    t.sleep(3 * DAY);
+    await vi.advanceTimersByTimeAsync(4 * DAY - 15 * MINUTE);
+    expect(t.row.delivery).toBe("queued");
+    await vi.advanceTimersByTimeAsync(20 * MINUTE);
+    expect(t.row.delivery).toBe("failed");
+    await t.box.stop();
+  });
+
+  it("with a boot clock, a clock set forward 8 days while awake still gives the text its week", async () => {
+    const t = away(undefined, {}, { boot: true });
+    await t.box.transmit(t.row.id);
+    await vi.advanceTimersByTimeAsync(10_000);
+    t.step(8 * DAY);
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.windowMs - 15 * MINUTE);
+    expect(t.row.delivery).toBe("queued");
+    await vi.advanceTimersByTimeAsync(20 * MINUTE);
+    expect(t.row.delivery).toBe("failed");
+    await t.box.stop();
+  });
+
+  it("without a boot clock (a browser), a sleep looks like a clock set forward: it fails a week of running later", async () => {
+    const t = away(undefined, {}, { boot: false });
+    await t.box.transmit(t.row.id);
+    await vi.advanceTimersByTimeAsync(10_000);
+    t.sleep(9 * DAY);
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.windowMs - 15 * MINUTE);
+    expect(t.row.delivery).toBe("queued");
+    await vi.advanceTimersByTimeAsync(20 * MINUTE);
+    expect(t.row.delivery).toBe("failed");
+    await t.box.stop();
+  });
+});
+
+describe("bootClock", () => {
+  it.runIf(process.platform === "linux")("on Linux reads the boot time, which counts a suspend", () => {
+    const read = bootClock();
+    expect(read).toBeTypeOf("function");
+    expect(Math.abs(read!() - os.uptime() * 1000)).toBeLessThan(2_000);
+  });
+
+  it.runIf(process.platform !== "linux")("elsewhere gives none: the monotonic clock is what there is", () => {
+    expect(bootClock()).toBeUndefined();
   });
 });

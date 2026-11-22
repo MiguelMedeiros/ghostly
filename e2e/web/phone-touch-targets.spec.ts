@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
+import { APP_URL, STORE_URL, serveStore, testStore } from "../support/appStore";
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { smallTargets } from "../support/touchTargets";
@@ -503,8 +504,9 @@ test("on a 320 px phone the chat's search field keeps room for the words once th
     await field.fill("zzqx nothing here");
     await expect(count).toHaveText(/\S/);
     await expect(page.getByTestId("chat-search-older")).toBeDisabled();
-    expect(await field.evaluate((el) => el.clientWidth), `${language}: the search field's width`).toBeGreaterThanOrEqual(120);
+    // The field as drawn: Chromium 158's clientWidth of a search input leaves its padding out (116 for the same 128 px).
     const fieldBox = (await field.boundingBox())!, countBox = (await count.boundingBox())!;
+    expect(fieldBox.width, `${language}: the search field's width`).toBeGreaterThanOrEqual(120);
     expect(countBox.y, `${language}: the count is under the field`).toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
     const small = await smallTargets(page, 44, "[data-testid=chat-search] button");
     expect(small.map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`), `${language}: search bar controls under 44 × 44 px`).toEqual([]);
@@ -564,6 +566,78 @@ test("on a phone every control in Settings, Profile, Services and the first dial
 
   expect(seen, "controls seen").toBeGreaterThan(80);
   expect(small, "controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
+ * Share to… (something another app shared, waiting for a chat) opens only from a share, so no walk above reaches it:
+ * its Cancel took taps on 76 × 40 px (56 × 40 in Arabic) in the Android app. A text and a file shared into the installed
+ * web app on a phone, its picker's controls measured each in view.
+ */
+test("on a phone the Share to… picker's chats and Cancel are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:app.pwa.share-target"] }, async ({ peer }) => {
+  test.skip(!!process.env.E2E_WEB_URL, "posts a form to the share target, which the deployed CSP refuses");
+  const { page } = await peer("share-targets", { mobile: true, viewport: { width: 375, height: 667 }, serviceWorkers: "allow" });
+  await page.getByTestId("sidebar-new-more").click();
+  await page.getByTestId("new-group").click();
+  await page.getByTestId("new-group-name").fill("Shared here");
+  await page.getByTestId("new-group-create").click();
+  await page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();
+  await page.goto("/#/");
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
+  await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL ?? "")).toMatch(/\/sw\.js$/);
+  // What the system does when a person shares into the installed app: a navigation that posts the manifest's form.
+  await page.evaluate(() => {
+    const form = Object.assign(document.createElement("form"), { method: "post", enctype: "multipart/form-data", action: "/share-target" });
+    form.append(Object.assign(document.createElement("input"), { type: "hidden", name: "text", value: "Look at this" }));
+    const files = Object.assign(document.createElement("input"), { type: "file", name: "files", multiple: true });
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(["boo"], "ghost.txt", { type: "text/plain" }));
+    files.files = transfer.files;
+    form.append(files);
+    document.body.append(form);
+    form.submit();
+  });
+  const picker = page.getByTestId("share-picker");
+  await expect(picker.getByTestId("share-files")).toHaveText("ghost.txt");
+  await expect(picker.getByTestId("share-group")).toBeVisible();
+
+  const small: string[] = [];
+  const controls = await picker.locator("button, a[href], [role=button]").all();
+  for (const control of controls) {
+    if (!(await control.isVisible())) continue;
+    await control.evaluate((el) => { el.scrollIntoView({ block: "center" }); el.setAttribute("data-measured", ""); });
+    // Only a control a tap reaches is measured: the page's fade-in over it first gone.
+    await expect.poll(() => control.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return el.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2));
+    })).toBe(true);
+    for (const target of await smallTargets(page, 44, "[data-measured]")) small.push(`${target.name} ${target.width}×${target.height} (${target.stops})`);
+    await control.evaluate((el) => el.removeAttribute("data-measured"));
+  }
+  expect(controls.length, "the picker's controls").toBeGreaterThanOrEqual(2);
+  expect(small, "the Share to… picker's controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
+ * The banner that offers a new version shows only once the server serves one, so the screens above never reach it: its
+ * Later (×) took taps on 11 × 20 px and Reload on 29 px of height. At 375 and 320 px, in English and in Arabic.
+ */
+test("on a phone the new version banner's Reload and Later are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:app.updates.web"] }, async ({ peer }, testInfo) => {
+  const alice = await peer("update-banner-targets", { mobile: true, viewport: { width: 375, height: 667 } });
+  const { page } = alice;
+  await page.route("**/version.json", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ version: "9.9.9", build: "newer" }) }));
+  const banner = page.getByTestId("update-banner");
+  const small: string[] = [];
+  for (const [language, dir] of [["en", "ltr"], ["ar", "rtl"]] as const) {
+    await speak(alice, language, dir);
+    await expect(banner).toBeVisible();
+    for (const width of [375, 320]) {
+      await page.setViewportSize({ width, height: 667 });
+      await expect(banner.getByRole("button")).toHaveCount(2);
+      for (const target of await smallTargets(page, 44, "[data-testid=update-banner] button")) small.push(`${language} at ${width} px: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+      await page.screenshot({ path: testInfo.outputPath(`update-banner-${language}-${width}.png`) });
+    }
+  }
+  expect(small, "the new version banner's controls under 44 × 44 px on a phone").toEqual([]);
 });
 
 /**
@@ -631,4 +705,35 @@ test("on a phone the emoji panel's categories, skin tone, Emoji / GIF switch and
   }
 
   expect(small, "the emoji panel's controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
+ * An app's or a store's own description, a few lines high until Show all, shows only when it is longer than that, so
+ * no walk above reaches it: its Show all took taps on 46 × 16 px. A store and an app with a twelve-line description,
+ * checked on Add, at 375 px in English and 320 px in Arabic.
+ */
+test("on a phone Show all under an app's or a store's description is a 44 px target", { tag: ["@feature:app.mobile-layout", "@feature:apps.page", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  const description = Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a description that says what this is for.`).join("\n");
+  const alice = await peer("description-targets", { mobile: true, viewport: { width: 375, height: 667 } });
+  const { page } = alice;
+  await serveStore(alice.context, await testStore({ description }));
+  const small: string[] = [];
+  for (const [language, dir, width] of [["en", "ltr", 375], ["ar", "rtl", 320]] as const) {
+    await page.setViewportSize({ width, height: 667 });
+    await page.goto("/#/apps");
+    await speak(alice, language, dir);
+    for (const [url, more] of [[STORE_URL, "apps-add-store-description-more"], [APP_URL, "app-description-more"]]) {
+      await page.getByTestId("apps-add").click();
+      await page.getByTestId("apps-add-url").fill(url);
+      await page.getByTestId("apps-add-check").click();
+      const button = page.getByTestId(more);
+      await expect(button).toBeVisible();
+      await button.evaluate((el) => { el.scrollIntoView({ block: "center" }); el.setAttribute("data-measured", ""); });
+      for (const target of await smallTargets(page, 44, "[data-measured]")) small.push(`${language} at ${width} px: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+      await page.screenshot({ path: testInfo.outputPath(`${more}-${language}-${width}.png`) });
+      await page.keyboard.press("Escape");
+      await expect(button).toHaveCount(0);
+    }
+  }
+  expect(small, "Show all under a description under 44 × 44 px on a phone").toEqual([]);
 });

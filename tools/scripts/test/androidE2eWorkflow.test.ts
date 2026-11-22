@@ -44,9 +44,12 @@ describe("android-e2e.yml", () => {
     expect(covered("packages/core/src/index.ts")).toBe(false);
   });
 
-  it("runs nightly on dev, a second, older emulator only then", () => {
+  it("runs nightly on dev, on an emulator whose WebView the app takes", () => {
     expect(on).toMatch(/^ {2}schedule:\n {4}- cron: "[\d*/, ]+"$/m);
-    expect(text).toContain("api-level: ${{ fromJSON(github.event_name == 'schedule' && '[35, 30]' || '[35]') }}");
+    // Not API 30: its image's WebView 83 is below the app's minimum (MainActivity.kt MIN_WEBVIEW 111), so the app
+    // showed its update screen and every spec failed, every night.
+    expect(text).toContain("api-level: [35]");
+    expect(text).not.toMatch(/api-level: .*\b30\b/);
     expect(text).toContain("api-level: ${{ matrix.api-level }}");
     // A pull request's run is still cancelled by its next push; a scheduled one never.
     expect(text).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");

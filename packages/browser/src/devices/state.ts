@@ -39,6 +39,8 @@ export interface DeviceNetwork {
   iceServers?: { urls: string; username?: string; credential?: string }[];
   /** The push relay a browser page hands a wake-up to (Settings, Network): how a standby web app wakes another device. */
   pushRelay?: string;
+  /** "Hide my IP from contacts" is on: a Desktop keeps off the DHT, so its links read the relays at a browser's pace. */
+  relayOnly?: boolean;
 }
 
 /** A push target as the device record keeps it: a subscription, the VAPID pair it was made with, base64url throughout. */
@@ -156,6 +158,20 @@ export interface LeftFile {
 }
 
 /**
+ * A file a handoff left for later on the device it came from (`on`, its signing key), as the device that took the
+ * profile notes it: its records name it by `ids`, and its bytes are fetched over the device link (`handoffFiles.ts`).
+ */
+export interface FetchFile {
+  sha256: string;
+  size: number;
+  /** The ids of its records in the profile: the bytes are written under the first, and copied for the others. */
+  ids: string[];
+  on: string;
+}
+/** The most files a record lists to fetch: each is over the "Bring large files later" size, so few profiles come near. */
+export const MAX_FETCH_FILES = 2_000;
+
+/**
  * A grant this device sent while adding a device whose `enroll-done` never came back (WISP 06 § Adding a device): that
  * device holds `D` and is in no record. It is noted before the grant leaves, and dropped in the write that adds the
  * device; one that stays is shown as "Not finished", and is what moving the set to a new `D` (removal) has to cover.
@@ -192,7 +208,16 @@ export interface EarlierDeviceSet {
    * subscription, its wallets' home marks): stored in the move's own write, so a reload or a crash after it still clears them.
    */
   removed?: string;
+  /**
+   * Staying devices this set's frame went to over a live link, each with the secret that frame named then (base64url):
+   * such a device may hold that secret though its `set-ack` never came, and opens only that set's link (`links.ts`).
+   * Only devices still pending, at most one entry per device and secret. An older build ignores it.
+   */
+  delivered?: { key: string; d: string }[];
 }
+
+/** At most this many `delivered` entries per earlier set: every pending device, under every secret a record keeps. */
+export const MAX_DELIVERED = MAX_DEVICES * (MAX_EARLIER_SETS + 1);
 
 /**
  * After this device accepted a `set-update` (WISP 06 § Removing a device): the new device list, shown once ("Your
@@ -270,6 +295,8 @@ export interface DeviceRecord {
   settle?: { at: number | null; sources: string[] };
   /** Written at quiesce: the files left for later. */
   leftFiles?: LeftFile[];
+  /** Written with the release a taker holds: the files the handoff left for later on the device it came from, until fetched. */
+  fetchFiles?: FetchFile[];
   /**
    * Written at quiesce: every file the frozen copy holds, by digest. A pull says these are here (`handoff-have`) and
    * copies them into the staged state, without opening the frozen copy's database.
@@ -424,6 +451,8 @@ export function transition(from: DeviceRecord | null, profile: string, to: Store
   // A device that runs the profile again changes and deletes its files: the list of what its frozen copy held is of
   // another copy, and a pull would claim files no longer here.
   if (to === "active" && !("heldFiles" in patch)) delete next.heldFiles;
+  // A take that lost: the files to fetch were for the profile it would have run.
+  if (from.state === "taking" && to !== "active" && !("fetchFiles" in patch)) delete next.fetchFiles;
   return checked(rising(from, next));
 }
 
@@ -466,6 +495,7 @@ function isNetwork(value: unknown): value is DeviceNetwork {
   const n = value as Record<string, unknown>;
   if (n.off !== undefined && typeof n.off !== "boolean") return false;
   if (n.readRelays !== undefined && typeof n.readRelays !== "boolean") return false;
+  if (n.relayOnly !== undefined && typeof n.relayOnly !== "boolean") return false;
   if (n.pushRelay !== undefined && (typeof n.pushRelay !== "string" || n.pushRelay.length > 2048)) return false;
   if (n.hyperdhtRelay !== undefined && (typeof n.hyperdhtRelay !== "string" || n.hyperdhtRelay.length > 2048)) return false;
   if (n.relays !== undefined && !texts(n.relays, 16)) return false;
@@ -509,6 +539,7 @@ function isPush(value: unknown): value is DevicePush {
 export function isEarlierSet(value: unknown): value is EarlierDeviceSet {
   const set = value as Partial<EarlierDeviceSet> | null;
   if (!set || typeof set !== "object" || !bytes(set.d) || !bytes(set.tombstone) || !text(set.setUpdate) || !Array.isArray(set.pending) || !set.pending.every(bytes)) return false;
+  if (set.delivered !== undefined && (!Array.isArray(set.delivered) || set.delivered.length > MAX_DELIVERED || !set.delivered.every((entry) => !!entry && typeof entry === "object" && bytes(entry.key) && bytes(entry.d)))) return false;
   return set.pending.length <= MAX_DEVICES && (set.foreign === undefined || set.foreign === true) && optional(set.removed, bytes);
 }
 
@@ -568,6 +599,12 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (r.leftFiles !== undefined) {
     if (!Array.isArray(r.leftFiles)) return bad("leftFiles");
     for (const file of r.leftFiles as Partial<LeftFile>[]) if (!file || !bytes(file.sha256) || !count(file.size, Number.MAX_SAFE_INTEGER) || !text(file.where)) return bad("a file left for later");
+  }
+  if (r.fetchFiles !== undefined) {
+    if (!Array.isArray(r.fetchFiles) || r.fetchFiles.length > MAX_FETCH_FILES) return bad("fetchFiles");
+    for (const file of r.fetchFiles as Partial<FetchFile>[]) {
+      if (!file || !bytes(file.sha256) || !count(file.size, Number.MAX_SAFE_INTEGER) || !bytes(file.on) || !Array.isArray(file.ids) || !file.ids.length || file.ids.length > 64 || !file.ids.every(text)) return bad("a file to fetch");
+    }
   }
   if (r.heldFiles !== undefined) {
     if (!Array.isArray(r.heldFiles)) return bad("heldFiles");

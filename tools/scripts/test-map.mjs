@@ -7,8 +7,10 @@
 //                tag: ["@feature:x", "@client:extension"]  counts for a client other than its folder's
 //   vitest/Rust  // covers: chat.paired.send, chat.paired.receipts     anywhere in the file
 //                // covers-gated: wallet.lightning.lnd.pay            only runs with its infrastructure
+//   any test     // guards: #1234                                     guards the bug of that issue, not a feature
 //
 //   node tools/scripts/test-map.mjs            check; print the summary and what is wrong
+//   node tools/scripts/test-map.mjs --base=origin/dev   also check what the branch adds since its merge base (below)
 //   node tools/scripts/test-map.mjs --matrix   also print every feature's row
 //   node tools/scripts/test-map.mjs --write    also write the map as Markdown to docs/test-map.md (not committed)
 //   node tools/scripts/test-map.mjs --summary  also append it to $GITHUB_STEP_SUMMARY (CI shows it on the run's page)
@@ -16,11 +18,19 @@
 //
 // It fails when a feature has no test at all and is not in e2e/allow-untested.json, when a tag or
 // a covers comment names a feature that does not exist, and when the allow list names a feature
-// that is tested by now (take it off the list) or does not exist.
+// that is tested by now (take it off the list) or does not exist. For a `kind: feature` that exists in a client with
+// e2e tests (web, extension, desktop), "tested" on the list means an ungated e2e test: the list then also holds why a
+// feature has unit tests only.
+//
+// With --base (CI passes the pull request's base), what the branch adds must do better than what is there already: a
+// test file it adds that declares nothing (no @feature tag, `covers:` or `guards:` line) fails with its path, where an
+// older one only warns; and a `kind: feature` it adds to e2e/features.json needs an ungated e2e test in one of its
+// clients, or a reason in e2e/allow-untested.json.
 //
 // It also fails when e2e/features.json is out of order: infrastructure, features and paths each sorted by key (id,
 // glob), one entry per line. Parallel pull requests then add lines at different places instead of all appending to
 // the end of an area or of the paths map, and do not conflict. `--fix` sorts it.
+import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync, existsSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,7 +49,14 @@ const E2E_CLIENTS = ["web", "extension", "desktop"];
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$/;
 const SKIP_DIRS = new Set(["node_modules", "dist", "target", ".git", ".claude", "coverage", "website", "notes-local", "gen", "test-results", "playwright-report"]);
 
-const args = new Set(process.argv.slice(2));
+const argv = process.argv.slice(2);
+const baseArgs = argv.filter((arg) => /^--base=.+/.test(arg));
+const args = new Set(argv.filter((arg) => !baseArgs.includes(arg)));
+const FLAGS = ["--matrix", "--warnings", "--write", "--summary", "--fix"];
+if ([...args].some((arg) => !FLAGS.includes(arg)) || baseArgs.length > 1) {
+  console.error(`usage: npm run test:map [-- ${FLAGS.map((f) => `[${f}]`).join(" ")} [--base=<rev>]]`);
+  process.exit(2);
+}
 const errors = [];
 const warnings = [];
 const read = (path) => readFileSync(join(ROOT, path), "utf8");
@@ -96,6 +113,24 @@ for (const f of inventory.features) {
   features.set(f.id, { ...f, hits: Object.fromEntries(COLUMNS.map((c) => [c, new Set()])) });
 }
 
+// ---------- what the branch adds (--base) ----------
+// Since the merge base, so a branch behind its base is judged on its own changes. A renamed file is not added.
+const added = { files: new Set(), features: new Set() };
+if (baseArgs.length) {
+  const base = baseArgs[0].slice("--base=".length);
+  const git = (...rest) => execFileSync("git", rest, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    const since = git("merge-base", base, "HEAD").trim();
+    for (const p of git("diff", "--name-only", "--diff-filter=A", "-M", since, "HEAD").split("\n")) if (p) added.files.add(p);
+    let before = [];
+    try { before = JSON.parse(git("show", `${since}:${FEATURES}`)).features ?? []; } catch { /* no inventory there: every feature is new */ }
+    const old = new Set(before.map((f) => f.id));
+    for (const f of inventory.features) if (!old.has(f.id)) added.features.add(f.id);
+  } catch (error) {
+    errors.push(`--base=${base}: cannot read what the branch adds (${String(error.stderr || error.message).trim().split("\n")[0]})`);
+  }
+}
+
 // ---------- the tests ----------
 function walk(dir, out = []) {
   for (const name of readdirSync(join(ROOT, dir))) {
@@ -112,13 +147,29 @@ const isSpec = (p) => p.startsWith("e2e/") && /\.spec\.[cm]?[jt]sx?$/.test(p);
 const isUnit = (p) => !p.startsWith("e2e/") && /\.test\.[cm]?[jt]sx?$/.test(p);
 const isRust = (p) => p.endsWith(".rs");
 
-const tested = { specs: 0, specsTagged: 0, units: 0, unitsTagged: 0, rust: 0 };
+const tested = { specs: 0, specsTagged: 0, units: 0, unitsTagged: 0, rust: 0, guarded: 0 };
 const lineOf = (text, index) => text.slice(0, index).split("\n").length;
 
 function hit(id, column, file, line) {
   const f = features.get(id);
   if (!f) { errors.push(`${file}:${line}: unknown feature "${id}" (add it to ${FEATURES} or fix the id)`); return; }
   f.hits[column].add(file);
+}
+
+/** Whether the file has a `// guards: #<issue>` line (a test that guards a bug, not a feature); a malformed one fails. */
+function guards(file, text) {
+  let any = false;
+  for (const m of text.matchAll(/^[ \t]*(?:\/\/+|\*|#)[ \t]*guards:[ \t]*(.*)$/gm)) {
+    const refs = m[1].split(/[\s,]+/).filter(Boolean);
+    if (refs.length && refs.every((r) => /^#[1-9]\d*$/.test(r))) { any = true; tested.guarded++; }
+    else errors.push(`${file}:${lineOf(text, m.index)}: guards: names issues as #<number> (guards: #1234, #1240)`);
+  }
+  return any;
+}
+/** A test file that declares nothing: an error when the branch adds it (--base), a warning for one already there. */
+function undeclared(file, what) {
+  if (added.files.has(file)) errors.push(`${file}: a new test file declares nothing (${what}): add a @feature tag or // covers: line, or // guards: #<issue> for the bug it guards (docs/TESTING.md)`);
+  else warnings.push(`${file}: ${what}`);
 }
 
 for (const file of files.filter(isSpec)) {
@@ -143,7 +194,7 @@ for (const file of files.filter(isSpec)) {
     if (!literals.some((l) => m.index > l.start && m.index < l.end)) errors.push(`${file}:${lineOf(text, m.index)}: "${m[0]}" outside a tag: [...] is not read; put it in the test's tags`);
   }
   if (any) tested.specsTagged++;
-  else warnings.push(`${file}: no @feature tag`);
+  else if (!guards(file, text)) undeclared(file, "no @feature tag");
 }
 
 for (const file of files.filter((p) => isUnit(p) || isRust(p))) {
@@ -158,7 +209,7 @@ for (const file of files.filter((p) => isUnit(p) || isRust(p))) {
   if (rust) { if (any) tested.rust++; continue; }
   tested.units++;
   if (any) tested.unitsTagged++;
-  else warnings.push(`${file}: no // covers: comment`);
+  else if (!guards(file, text)) undeclared(file, "no // covers: comment");
 }
 
 // ---------- the paths map (npm run test:affected) ----------
@@ -171,9 +222,15 @@ for (const p of unmapped) warnings.push(`${p}: no glob in ${FEATURES} "paths" (n
 
 // ---------- the verdict ----------
 const covered = (f) => COLUMNS.some((c) => f.hits[c].size > 0);
+// A feature a person uses in a client with e2e tests wants an ungated one there; anything else, any test.
+const e2eClients = (f) => E2E_CLIENTS.filter((c) => f.clients.includes(c));
+const wantsE2e = (f) => f.kind === "feature" && e2eClients(f).length > 0;
+const testedEnough = (f) => (wantsE2e(f) ? e2eClients(f).some((c) => f.hits[c].size > 0) : covered(f));
 for (const f of features.values()) {
-  if (covered(f) && allow[f.id] !== undefined) errors.push(`${ALLOW}: ${f.id} is tested now (${COLUMNS.filter((c) => f.hits[c].size).join(", ")}); take it off the list`);
-  if (!covered(f) && allow[f.id] === undefined) errors.push(`${f.id}: no test covers it (tag one, or add it to ${ALLOW} with the reason)`);
+  if (testedEnough(f) && allow[f.id] !== undefined) errors.push(`${ALLOW}: ${f.id} is tested now (${COLUMNS.filter((c) => f.hits[c].size).join(", ")}); take it off the list`);
+  if (allow[f.id] !== undefined) continue;
+  if (added.features.has(f.id) && wantsE2e(f) && !testedEnough(f)) errors.push(`${f.id}: a new feature needs an ungated e2e test in ${e2eClients(f).join(", ")} (tag one, or add it to ${ALLOW} with the reason)`);
+  else if (!covered(f)) errors.push(`${f.id}: no test covers it (tag one, or add it to ${ALLOW} with the reason)`);
 }
 for (const [id, reason] of Object.entries(allow)) {
   if (!features.has(id)) errors.push(`${ALLOW}: ${id} is not a feature`);
@@ -202,7 +259,7 @@ function printConsole() {
   console.log(`test map: ${summary.features} features, ${summary.covered} with a test (${pct(summary.covered)}), ${summary.untested} without one`);
   console.log(`  ${COLUMNS.map((c) => `${COLUMN_TITLE[c]} ${summary.columns[c]}`).join(" · ")}`);
   console.log(`  e2e in any client ${summary.e2eAny} · unit only ${summary.unitOnly} · gated only ${summary.gatedOnly}`);
-  console.log(`  tests read: ${tested.specs} e2e specs (${tested.specsTagged} tagged), ${tested.units} unit files (${tested.unitsTagged} tagged), ${tested.rust} Rust files with covers`);
+  console.log(`  tests read: ${tested.specs} e2e specs (${tested.specsTagged} tagged), ${tested.units} unit files (${tested.unitsTagged} tagged), ${tested.rust} Rust files with covers, ${tested.guarded} guards: lines`);
   if (args.has("--matrix")) {
     const w = Math.max(...all.map((f) => f.id.length));
     console.log(`\n${"feature".padEnd(w)}  ${COLUMNS.map((c) => c.slice(0, 5).padStart(5)).join(" ")}`);

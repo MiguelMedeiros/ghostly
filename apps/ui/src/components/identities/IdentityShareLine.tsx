@@ -4,7 +4,7 @@ import { IDENTITY_CHALLENGE_WINDOW, identityRefusal } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { focus } from "../../lib/connection";
 import { clockTime } from "../../lib/time";
-import { useEngineValue } from "../../lib/identities";
+import { receivedRefusal, useEngineValue } from "../../lib/identities";
 import { playSwitch, reducedMotion } from "../deck/motion";
 import "../deck/deck.css";
 import { IdCardFace } from "./IdCardFace";
@@ -57,12 +57,13 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
   // The identity as this app holds it now (mine: my proof, theirs: what the contact presented), else as the entry kept it.
   const state: ShareState = entry.kind === "stopped" ? (entry.reason === "revoked" ? "revoked" : "withdrawn") : shareState(entry, link);
   // The contact's share still being checked turns Not checked when its window ends: nothing else draws the line again
-  // then. Once more after each wake while it still checks (a clock set back wakes it early).
+  // then. Once more after each wake while it still checks (a clock set back wakes it early). Never past the longest a
+  // timer holds (about 24.8 days): one set further fires at once, and each wake set the next, a draw every millisecond.
   const [wakes, wake] = useReducer((n: number) => n + 1, 0);
   const expires = state === "verifying" && !mine ? entry.at + IDENTITY_CHALLENGE_WINDOW * 1000 : undefined;
   useEffect(() => {
     if (expires === undefined) return;
-    const timer = setTimeout(wake, Math.max(0, expires - Date.now()) + 1);
+    const timer = setTimeout(wake, Math.min(Math.max(0, expires - Date.now()) + 1, 2 ** 31 - 1));
     return () => clearTimeout(timer);
   }, [expires, wakes]);
   const card = shareIdCard(entry, state, {
@@ -90,6 +91,9 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
   }
   // Mine refused: only a refusal this app writes, never the contact's own words as this app's line (identityRefusal).
   const why = state !== "failed" ? undefined : mine ? identityRefusal(entry.error) : entry.error;
+  // The line is cut to one row: its tooltip reads it in full, in the same words (never the English it came from).
+  // Theirs refused here: said from this side (receivedRefusal), not in the words the contact was sent.
+  const reason = why && (mine ? problemLine(why, t, "proof") : receivedRefusal(why, t));
   // A mouse over the card: the deck's flourish, once (it ends at rest by itself). Never for a finger, nor with reduced motion.
   const flourish = (e: PointerEvent<HTMLButtonElement>) => {
     if (e.pointerType === "mouse" && !reducedMotion()) playSwitch({ glow: null, incoming: e.currentTarget, outgoing: null, dir: 1 });
@@ -107,7 +111,7 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
         <span id={`${id}-caption`} className="min-w-0 truncate" data-testid="identity-share-text">{mine ? t("identities.share.captionMine") : fillNames(t("identities.share.captionTheirs"), { contact })}</span>
         {time}
       </p>
-      {why && <p id={`${id}-reason`} className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={why}>{problemLine(why, t, "proof")}</p>}
+      {reason && <p id={`${id}-reason`} className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={reason}>{reason}</p>}
     </div>
   );
 }

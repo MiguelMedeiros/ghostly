@@ -2,13 +2,14 @@
 // Native ESM avoids Playwright's CJS loader changing the SDK's conditional exports.
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import { ArkNote, InMemoryContractRepository, InMemoryWalletRepository, MnemonicIdentity, Wallet } from "@arkade-os/sdk";
+import { ArkNote, EsploraProvider, InMemoryContractRepository, InMemoryWalletRepository, MnemonicIdentity, RestArkProvider, RestIndexerProvider, Wallet } from "@arkade-os/sdk";
 import { ARK_REGTEST, note } from "./ark-regtest/regtest.mjs";
 if (process.env.GHOSTLY_ARK_REGTEST !== "1") throw new Error("Local regtest opt-in required");
 const mnemonic = generateMnemonic(wordlist);
 const funder = await Wallet.create({
   identity: MnemonicIdentity.fromMnemonic(mnemonic, { isMainnet: false }),
-  arkServerUrl: ARK_REGTEST.server, esploraUrl: ARK_REGTEST.esplora,
+  // Providers, not URLs: SDK 0.5 ignores `arkServerUrl` and would reach its default (mainnet) server.
+  operatorProvider: new RestArkProvider(ARK_REGTEST.server), indexerProvider: new RestIndexerProvider(ARK_REGTEST.server), onchainProvider: new EsploraProvider(ARK_REGTEST.esplora),
   walletMode: "hd", settlementConfig: false,
   storage: { walletRepository: new InMemoryWalletRepository(), contractRepository: new InMemoryContractRepository() },
 });

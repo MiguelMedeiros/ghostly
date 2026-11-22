@@ -137,6 +137,7 @@
       "needsKey": "Precisa de uma chave",
       "noFederation": "Sem federação",
       "noSource": "Sem fonte",
+      "shared": "Usa o saldo do {{name}}",
       "unavailable": "Indisponível"
     },
     "deck": {
@@ -159,6 +160,7 @@
       "usdtLocal": "EVM local · token de teste",
       "usdtSepolia": "Sepolia · token de teste"
     },
+    "sameBalance": "Mesmo saldo do seu cartão {{name}}",
     "status": {
       "away": "Em outro lugar",
       "checkSettings": "Verifique os ajustes",
@@ -176,7 +178,6 @@
   "cashu": {
     "add": "Adicionar",
     "addMintPlaceholder": "Adicionar um mint: https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "Pedindo ao mint…",
     "backupCopied": "Backup copiado. Quem tiver esses tokens tem os sats.",
     "contactHint": "Pagando um contato? Use ⚡ no chat.",
@@ -190,7 +191,7 @@
       "perProofTest": "{{fee}} sat de teste por prova (cerca de 1 sat de teste por pagamento)"
     },
     "history": {
-      "fee": "taxa {{amount}}",
+      "fee": "taxa {{amount}} {{unit}}",
       "feesPaid": "Taxas pagas: {{amount}} {{unit}}",
       "movements": "{{count}} movimentações",
       "movementsOne": "1 movimentação",
@@ -212,12 +213,18 @@
     "paid": "Pago.",
     "pastePlaceholder": "Cole uma fatura Lightning, um endereço Lightning ou um token ecash",
     "payAmount": "Pagar {{amount}} {{unit}}",
+    "payFailed": "O pagamento falhou: o destinatário não foi pago.",
+    "payFailedBack": "O que estava reservado para ele voltou ao seu saldo.",
+    "payFailedFee": "O que estava reservado para ele voltou ao seu saldo, menos {{amount}} {{unit}} que o mint ficou como taxa (no histórico).",
     "payLine": "Pagar {{amount}}{{fees}}",
     "pendingMint": "O pagamento ainda está pendente no mint.",
+    "pendingMintNext": "Ele se resolve sozinho; nada é pago de novo. Até o mint responder, o valor aparece como reservado abaixo do saldo.",
     "primary": "Principal",
     "received": "⚡ {{amount}} {{unit}} recebidos",
     "redeem": "Resgatar token ecash",
     "redeemed": "{{amount}} {{unit}} resgatados.",
+    "redeemed_one": "{{amount}} {{unit}} resgatado.",
+    "redeemed_other": "{{amount}} {{unit}} resgatados.",
     "remove": "Remover",
     "removeLastMint": "Este é o último mint da carteira: removê-lo remove a carteira {{label}} e o cartão Lightning dela.",
     "removeMint": "Remover {{name}}",
@@ -227,6 +234,8 @@
     "removeMintQuestion": "Remover {{name}}?",
     "setAside": "{{amount}} {{unit}} reservados",
     "setAsideInfo": "Reservados para um pagamento que o mint ainda não confirmou. Saem com o pagamento ou voltam ao seu saldo assim que o mint responder.",
+    "setAside_one": "{{amount}} {{unit}} reservado",
+    "setAside_other": "{{amount}} {{unit}} reservados",
     "settings": "Ajustes",
     "testBalance": "{{amount}} sats de teste (sem valor)",
     "testBalance_one": "{{amount}} sat de teste (sem valor)",
@@ -382,7 +391,7 @@
     "cashuMints": "os mints Cashu",
     "cashuSettings": "Ajustes do Cashu",
     "commentFor": "Um comentário para {{to}} (opcional)",
-    "confirmWhat": "{{amount}} sats (mais uma taxa de até {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (mais uma taxa de até {{fee}} {{feeUnit}})",
     "connecting": "Conectando à fonte…",
     "domainLine": "{{answered}} {{limits}}",
     "done": "Pronto",
@@ -610,6 +619,9 @@
     "noAmount": "Esta fatura não tem valor. Peça uma com o valor.",
     "paste": "Colar",
     "scan": "Escanear"
+  },
+  "sentEcash": {
+    "title": "Enviado em uma conversa excluída"
   },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
@@ -873,6 +885,22 @@
       "github": "Ele pede um login do GitHub, então o Ghostly não pede por você.",
       "login": "Ele pede um login, então o Ghostly não pede por você."
     }
+  },
+  "total": {
+    "away": "Em {{device}}, fora do total",
+    "federation": "Ecash guardado pela federação",
+    "info": "O total soma só os saldos que o Ghostly conseguiu ler agora. Um cartão que não deu para ler fica de fora, e a Testnet nunca entra na soma da Mainnet.",
+    "label": "Saldos",
+    "mint": "Ecash guardado pelas suas mints",
+    "none": "Não configurado",
+    "ready": "Pronto para gastar agora",
+    "shared": "Mesmo saldo de {{name}}, contado uma vez",
+    "title": "De onde vem o saldo",
+    "total": "Total",
+    "uncounted": "{{count}} cartões fora do total",
+    "uncounted_one": "{{count}} cartão fora do total",
+    "unknown": "Não deu para ler agora, fora do total",
+    "waiting": "{{amount}} {{unit}} ainda não disponíveis"
   },
   "ui": {
     "amountIn": "Valor em {{unit}}",

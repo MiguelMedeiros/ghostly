@@ -1,4 +1,5 @@
 import type { Translate } from "../contexts/I18nContext";
+import { didRefusal } from "./didRefusals";
 import { DESKTOP_SAVE_REFUSED, knownErrorParts, rawError, readable } from "./errorText";
 import { english } from "./english";
 
@@ -17,6 +18,8 @@ export interface Problem {
   next?: string;
   /** The error as it was thrown, for the ⓘ: only when the title does not already say all of it. */
   detail?: string;
+  /** Why, in the app's language, behind the same ⓘ: what the short title leaves out (errorText's `info`). */
+  info?: string;
   tone: ProblemTone;
 }
 
@@ -82,6 +85,9 @@ export function problemText(cause: unknown, t: Translate = english, fallback: Pr
   // Known also without the final period a message around it took ("…: <reason>. Nothing was saved").
   const parts = knownErrorParts(raw, t) ?? (raw && !raw.endsWith(".") ? knownErrorParts(`${raw}.`, t) : null);
   if (parts) return { tone: "error", ...parts };
+  // A DID's or a DID signature's refusal (lib/didRefusals.ts): said in the language too, never as the engine's English.
+  const did = didRefusal(raw, t);
+  if (did) return { tone: "error", ...did };
   if (fallback === "proof") return { tone: "error", title: t(FALLBACK_TITLE.proof), ...(raw && { detail: raw }) };
   if (raw && readable(raw) && !PROTOCOL.some((p) => p.test(raw))) return { tone: "error", title: raw };
   // "Not a relay address: ftp://x": the words before the first colon say it, the rest goes behind the ⓘ.

@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, GhostLink, NO_PICTURE_METADATA, NO_VIDEO_METADATA, REMOVED_TEXT, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, withoutVideoMetadata, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
+import { ChatFiles, GhostLink, NO_PICTURE_METADATA, NO_VIDEO_METADATA, REMOVED_TEXT, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, withoutAudioMetadata, withoutVideoMetadata, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
 import { H264_MP4, PLACE, hasPlace, withMovie, xyzUdta } from "../../core/test/support/videoFixtures";
+import { taggedM4a, taggedMp3 } from "../../core/test/support/audioFixtures";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { copyForForward, forwardError, forwardKind } from "../src/engine/forwards";
@@ -181,6 +182,23 @@ describe("a group file", () => {
   });
 });
 
+describe("a sent file", () => {
+  // Its transfer cancelled or declined, its staged copy goes (`FileDesk`), its record and bubble stay: its bytes never
+  // come back, so it never "has not arrived yet".
+  it("whose staged copy went, its transfer cancelled: not on this device any more", async () => {
+    const id = `link-a-out-${crypto.randomUUID()}`, size = 64 * 1024;
+    const storage = await fileBytes();
+    await storage.append(id, 0, pattern(0, size));
+    await fileStore.put({ id, linkId: "link-a", direction: "out", wireId: "w1", createdAt: 1, metadata: { name: "a.bin", size, mime: "application/octet-stream", timestamp: 1 },
+      bytes: storage.kind, digest: digestOf(size) });
+    await fileStore.patch(id, { wire3: { id: "w1", direction: "out", state: "cancelled", confirmed: 16_384, since: 1, error: "You cancelled it", file: { name: "a.bin", size, mime: "application/octet-stream", timestamp: 1 } } as FileTransferRecord });
+    await storage.remove(id);
+    const target = { linkId: "link-b", wireId: "w2", timestamp: 2, file: { id: `link-b-out-${crypto.randomUUID()}`, name: "a.bin", size, mime: "application/octet-stream" } };
+    await expect(copyForForward(id, target, async () => false)).rejects.toThrow("The file is not on this device any more");
+    expect(await fileStore.get(target.file.id)).toBeUndefined();
+  });
+});
+
 describe("a copy whose source goes while it is copied", () => {
   /** A received file kept in file storage, and a copy of it for chat `link-b` whose first step runs `meanwhile`. */
   async function copying(meanwhile: (id: string) => Promise<void>) {
@@ -230,7 +248,7 @@ describe("a copy whose source goes while it is copied", () => {
 });
 
 // covers: files.video.metadata
-describe("a received video", () => {
+describe("a received video or audio file", () => {
   // From an app that sent it as it was recorded: it says where.
   const recorded = withMovie(H264_MP4, [xyzUdta()]);
   const bytesOf = async (blob: Blob) => new Uint8Array(await blob.arrayBuffer());
@@ -289,6 +307,64 @@ describe("a received video", () => {
     expect(Buffer.compare(sent, stripped)).toBe(0);
   });
 
+  // covers: files.audio.metadata
+  for (const kept of ["blob", "storage"] as const)
+    for (const [as, name, mime, bytes, voice] of [
+      ["a voice note", "voice.m4a", "audio/mp4", taggedM4a(), { duration: 1200, peaks: [1, 2, 3] }],
+      ["an audio file", "memo.mp3", "audio/mpeg", taggedMp3(), undefined],
+    ] as const)
+      it(`goes on as ${as} (kept in ${kept}) without its first sender's tags: the digest is the stripped copy's`, async () => {
+        const { id, target } = await received(bytes, name, mime, kept);
+        if (voice) target.file = { ...target.file, voice } as typeof target.file;
+        const stripped = await bytesOf((await withoutAudioMetadata(new Blob([bytes]), mime))!);
+        const file = await copyForForward(id, target);
+        const sent = await copied(target.file.id);
+        expect(hasPlace(sent)).toBe(false);
+        expect(Buffer.compare(sent, stripped)).toBe(0);
+        expect(file).toMatchObject({ size: bytes.length, ...(voice && { voice }) });
+        expect(await fileStore.get(target.file.id)).toMatchObject({ digest: createHash("sha256").update(stripped).digest("base64url") });
+        expect(hasPlace(await copied(id))).toBe(true);
+      });
+
+  // 20 chats as four Forwards of five: each copy is read once to be made; its digest, the same for every chat (the
+  // stripped bytes depend only on the source and its type), is read back from storage once per Forward, not per chat.
+  it("copied for 20 chats, a 24 MiB video is hashed once per Forward, as a plain file is copied: the same bytes and digest in every copy", { timeout: 60_000 }, async () => {
+    const size = 24 * 1024 * 1024;
+    const tail = new Uint8Array(size - recorded.length);
+    tail.set(new TextEncoder().encode(PLACE), tail.length - PLACE.length);
+    const padded = Buffer.concat([recorded, tail]);
+    const storage = await fileBytes();
+    const stripped = await bytesOf((await withoutVideoMetadata(new Blob([padded]), "video/mp4"))!);
+    const strippedDigest = createHash("sha256").update(stripped).digest("base64url");
+    // A plain file is no video by its bytes either: one that is would be stripped as one.
+    for (const [bytes, name, mime, video, digest] of [
+      [padded, "VID_0004.mp4", "video/mp4", { duration: 1000, width: 64, height: 64 }, strippedDigest],
+      [pattern(0, size), "data.bin", "application/octet-stream", undefined, digestOf(size)],
+    ] as const) {
+      const { id, target } = await received(bytes, name, mime, "storage", video);
+      const digests = vi.spyOn(storage, "digest"), reads = vi.spyOn(storage, "read");
+      const copies: string[] = [];
+      for (let forward = 0; forward < 4; forward++) {
+        const same = new Map<string, string>();
+        for (let chat = 0; chat < 5; chat++) {
+          const file = { ...target.file, id: `link-b-out-${crypto.randomUUID()}` };
+          await copyForForward(id, { ...target, file }, undefined, same);
+          copies.push(file.id);
+        }
+      }
+      const read = reads.mock.results.length ? (await Promise.all(reads.mock.results.map(r => r.value as Promise<Uint8Array>))).reduce((n, part) => n + part.length, 0) : 0;
+      // `digest` reads the whole copy again (by itself, not through `read`).
+      expect({ digests: digests.mock.calls.length, copiesRead: Math.round(read / size) }).toEqual({ digests: video ? 4 : 0, copiesRead: 20 });
+      digests.mockRestore();
+      reads.mockRestore();
+      for (const copy of copies) expect(await fileStore.get(copy)).toMatchObject({ digest, metadata: { size: video ? stripped.length : size } });
+      // The bytes stored are the ones the digest says, the last copy as the first.
+      for (const copy of [copies[0]!, copies.at(-1)!]) expect(createHash("sha256").update(await copied(copy)).digest("base64url")).toBe(digest);
+      for (const copy of copies) await removeStored(copy);
+      await removeStored(id);
+    }
+  });
+
   it("whose metadata cannot be removed is refused as one sent from here is, and no copy is kept", async () => {
     for (const kept of ["blob", "storage"] as const) {
       const { id, target } = await received(recorded.subarray(0, 500), "cut.mp4", "video/mp4", kept, { duration: 1000, width: 64, height: 64 });
@@ -329,6 +405,23 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     await vi.waitFor(() => expect(t.a.got).toHaveLength(2));
     expect(t.a.got.map(m => [m.text, m.forwarded])).toEqual([["first", 1], ["seen before", 5]]);
     expect(forwardedMany(t.a.got[1]!.forwarded)).toBe(true);
+  });
+
+  // One Forward to two chats: the copy without the video's metadata is hashed once, and each chat's copy checks out.
+  it("forwards a video to two chats hashing its stripped copy once, and each contact's copy checks out", async () => {
+    const t = await setup();
+    const recorded = withMovie(H264_MP4, [xyzUdta()]);
+    const video = Buffer.concat([recorded, new Uint8Array(2.5 * 1024 * 1024 - recorded.length)]);
+    t.a.offerBytes("vid-0000001", "clip.mp4", "video/mp4", video);
+    const received = await t.row(t.a, m => m.id === "peer_vid-0000001");
+    await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    const digests = vi.spyOn(await fileBytes(), "digest");
+    cleanup.push(async () => { digests.mockRestore(); });
+    const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id, t.a.id] });
+    expect(results.map(r => r.error)).toEqual([null, null]);
+    expect(digests).toHaveBeenCalledTimes(1);
+    for (const contact of [t.b, t.a])
+      await vi.waitFor(() => expect([...contact.records.values()].filter(r => r.direction === "in" && r.state === "done")).toHaveLength(1), { timeout: 20_000 });
   });
 
   /** A file Alice sent, received here whole and kept in file storage (not in a Blob), so it is copied a step at a time. */

@@ -20,7 +20,20 @@ const active: DeviceSetView = { state: "active", devices: [{ key: DESKTOP, name:
 const alone: DeviceSetView = { state: "active", devices: [{ key: DESKTOP, name: "Desktop", slot: 0, self: true, active: true }] };
 const handoff = (step: HandoffView["step"]): HandoffView => ({ role: "giver", device: "Phone", key: PHONE, step, bytes: 0, total: 0 });
 
-afterEach(() => { localStorage.clear(); fakeEngine.keepAwake = undefined; });
+const ANDROID_APP = "Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36";
+
+/** The Android app: Tauri's page in Android's WebView. */
+function androidApp() {
+  (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue(ANDROID_APP);
+}
+
+afterEach(() => {
+  localStorage.clear();
+  fakeEngine.keepAwake = undefined;
+  delete (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__;
+  vi.restoreAllMocks();
+});
 
 describe("when the computer is kept awake", () => {
   it("with the switch on and a standby device; and during a handoff on either side, switch or not", () => {
@@ -116,6 +129,50 @@ describe("how often the device set is asked for", () => {
       expect(fakeEngine.callsTo("deviceHandoffView").length - before).toBe(12);
     } finally { vi.useRealTimers(); }
   });
+
+  it("with the switch off, a profile with a device set reads the set once and then only looks for a handoff", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const keepAwake = vi.fn(async (on: boolean) => on);
+      fakeEngine.keepAwake = keepAwake;
+      let step: HandoffView["step"] | null = null;
+      fakeEngine.on("deviceSet", () => active);
+      fakeEngine.on("deviceHandoffView", () => (step ? handoff(step) : null));
+      renderHook(() => useComputerAwake());
+      await minute();
+      // On Desktop each read of the set reads the device state's file too: only the handoff can keep it awake here.
+      expect(fakeEngine.callsTo("deviceSet")).toHaveLength(1);
+      expect(fakeEngine.callsTo("deviceHandoffView")).toHaveLength(13);
+      expect(keepAwake).not.toHaveBeenCalledWith(true, false);
+      // A handoff still keeps it awake within 5 s.
+      step = "copying";
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(keepAwake).toHaveBeenLastCalledWith(true, false);
+      expect(fakeEngine.callsTo("deviceSet")).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("never in the Android app, where the devices hold nothing: only its files keep it running", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      androidApp();
+      const keepAwake = vi.fn(async (on: boolean) => on);
+      fakeEngine.keepAwake = keepAwake;
+      localStorage.setItem("ghostly_keep_awake", "1");
+      fakeEngine.on("deviceSet", () => active);
+      fakeEngine.on("deviceHandoffView", () => handoff("copying"));
+      renderHook(() => useComputerAwake());
+      renderHook(() => useDeviceSet(0));
+      await minute();
+      expect(fakeEngine.callsTo("deviceHandoffView")).toHaveLength(0);
+      // Read once, by the page alone.
+      expect(fakeEngine.callsTo("deviceSet")).toHaveLength(1);
+      expect(keepAwake).toHaveBeenLastCalledWith(false, false);
+      act(() => fakeEngine.update({ transfers: { "l-in-1": { state: "transferring", transferred: 10, size: 100, direction: "in", rate: 5 } } }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      expect(keepAwake).toHaveBeenLastCalledWith(true, true);
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe("the switch", () => {
@@ -141,6 +198,16 @@ describe("the switch", () => {
     expect(fakeEngine.callsTo("updateSettings")).toEqual([]);
     await user.click(toggle);
     await waitFor(() => expect(keepAwake).toHaveBeenLastCalledWith(false, false));
+  });
+
+  it("is not there in the Android app, where the devices hold nothing", async () => {
+    androidApp();
+    fakeEngine.keepAwake = vi.fn(async (on: boolean) => on);
+    fakeEngine.on("deviceSet", () => active);
+    fakeEngine.on("deviceTurnCheck", () => null);
+    renderApp(<DevicesSection />);
+    await screen.findAllByTestId("device-row");
+    expect(screen.queryByTestId("device-keep-awake")).toBeNull();
   });
 
   it("is not there where the app cannot keep its computer awake, nor without a standby device", async () => {

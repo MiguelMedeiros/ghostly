@@ -583,6 +583,8 @@ struct Reading {
     /// Cleared by a read waiting for it that is not a background one: the read asks within the whole minute, not
     /// within the background share (`BACKGROUND_SHARE_THIRDS`).
     background: Arc<std::sync::atomic::AtomicBool>,
+    /// Told when `background` is cleared: a read that found its share spent and waits on its lookup asks again.
+    joined: Arc<tokio::sync::Notify>,
 }
 
 /// The read that asks the relays for its key while others wait (`Pkarr::relay_turn`); dropped, it lets them go.
@@ -592,6 +594,7 @@ struct Lead {
     id: u64,
     urgent: Arc<std::sync::atomic::AtomicBool>,
     background: Arc<std::sync::atomic::AtomicBool>,
+    joined: Arc<tokio::sync::Notify>,
     _done: watch::Sender<()>,
 }
 
@@ -1499,7 +1502,23 @@ impl Pkarr {
         lead: Box<Lead>,
     ) -> &'static str {
         let source;
-        if let Some(url) = self.pick_relay_for(Some(key), true, lead.background()) {
+        let mut url = self.pick_relay_for(Some(key), true, lead.background());
+        // A background read past its share waits on the lookup; a read someone waits on that joins it meanwhile asks
+        // within the whole minute, as it would have on its own, rather than wait out the lookup for nothing.
+        let mut waited = false;
+        if url.is_none() && lead.background() && self.newest(key).is_none() {
+            if let Some(done) = lookup.clone() {
+                waited = true;
+                let joined = tokio::select! {
+                    _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(done)) => false,
+                    _ = lead.joined.notified() => true,
+                };
+                if joined && self.newest(key).is_none() {
+                    url = self.pick_relay_for(Some(key), true, false);
+                }
+            }
+        }
+        if let Some(url) = url {
             let read = self.relay_get(&url, key);
             tokio::pin!(read);
             let answer = match lookup.clone() {
@@ -1555,7 +1574,9 @@ impl Pkarr {
         } else if self.newest(key).is_none() {
             // No relay to ask (budget or background share spent, or every one left alone): the lookup is all there is.
             if let Some(done) = lookup {
-                let _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(done)).await;
+                if !waited {
+                    let _ = tokio::time::timeout(BACKGROUND_LOOKUP_WAIT, finished(done)).await;
+                }
                 self.went(Path::Dht);
             }
             source = "dht";
@@ -1593,10 +1614,12 @@ impl Pkarr {
                     .urgent
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
-            if !background {
-                reading
+            if !background
+                && reading
                     .background
-                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                    .swap(false, std::sync::atomic::Ordering::Relaxed)
+            {
+                reading.joined.notify_one();
             }
             return RelayTurn::Wait(reading.done.clone());
         }
@@ -1609,11 +1632,13 @@ impl Pkarr {
         let (done_tx, done) = watch::channel(());
         let urgent = Arc::new(std::sync::atomic::AtomicBool::new(urgent));
         let background = Arc::new(std::sync::atomic::AtomicBool::new(background));
+        let joined = Arc::new(tokio::sync::Notify::new());
         reads.reading = Some(Reading {
             id,
             done,
             urgent: urgent.clone(),
             background: background.clone(),
+            joined: joined.clone(),
         });
         state.next_reading += 1;
         RelayTurn::Lead(Box::new(Lead {
@@ -1622,6 +1647,7 @@ impl Pkarr {
             id,
             urgent,
             background,
+            joined,
             _done: done_tx,
         }))
     }
@@ -4904,5 +4930,49 @@ mod background_relay_share {
         // A read someone waits on gets it: 14 left is more than the 12 a second opinion leaves.
         pkarr.resolve_with(&key, false, true).await.unwrap();
         assert_eq!((gets_of(&a, &key), gets_of(&b, &key)), (3, 1));
+    }
+
+    #[tokio::test]
+    async fn a_read_someone_waits_on_that_joins_a_background_read_past_its_share_asks_the_relay() {
+        // UDP blocked, a VPN: reads go to the relay, and lookups hear from no node for as long as they run.
+        let relay = pkarr_relay().await;
+        let nowhere: SocketAddrV4 = format!("127.0.0.1:{}", closed_port()).parse().unwrap();
+        let pkarr = Pkarr::direct(
+            Dht::mainline(Some(vec![nowhere])).unwrap(),
+            &[relay.url.parse().unwrap()],
+        )
+        .unwrap()
+        .reusing_for(Duration::ZERO);
+        pkarr.inner.state.lock().unwrap().dht_silent = DHT_SILENT_LOOKUPS;
+        pkarr.with_budget(&relay.url.parse().unwrap(), |budget| {
+            for _ in 0..SHARE {
+                budget.spend(Instant::now(), true);
+            }
+        });
+        // A joiner's key, nothing known of it yet: a watch reads it in the background, its lookup hearing nothing.
+        let contact = published(&relay, "offer");
+        let (_running, lookup) = watch::channel(LOOKING);
+        pkarr
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .lookups
+            .insert(contact.clone(), lookup);
+        let started = Instant::now();
+        let (_, got) = tokio::join!(pkarr.resolve_with(&contact, true, false), async {
+            // A signal is due in the open chat: an urgent read of the same key, while the background one waits.
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            pkarr.resolve_with(&contact, false, true).await
+        });
+        assert_eq!(
+            got.as_ref().map(value).as_deref(),
+            Some("offer"),
+            "after {:?}, {} GETs of 40",
+            started.elapsed(),
+            gets(&relay)
+        );
+        assert_eq!(gets_of(&relay, &contact), 1);
+        assert!(started.elapsed() < BACKGROUND_LOOKUP_WAIT);
     }
 }

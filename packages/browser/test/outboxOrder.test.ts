@@ -467,6 +467,64 @@ describe("while the contact is away, a file's offer takes its place on the DHT f
     expect(said.slice(10)).toEqual(Array.from({ length: 10 }, (_, i) => `f${10_001 + i} live`));
     await box.stop();
   });
+
+  // Three texts written a minute apart to an away contact, with no held items: each kept a check every five minutes
+  // that read the chat's whole history and could not send it, 36 whole reads an hour (180,000 rows at 5,000 messages)
+  // for as long as the contact stayed away, up to the 7-day window.
+  it("texts waiting for an away contact read none of the chat's history at their checks, and go once it is live", async () => {
+    vi.useFakeTimers();
+    const rows = Array.from({ length: 5_000 }, (_, i) => row(i + 1, "delivered")), sent: string[] = [];
+    const counted = { reads: 0, rows: 0 }, state = { live: false };
+    const store = {
+      read: async () => { counted.reads++; counted.rows += rows.length; return rows.map(m => ({ ...m })); },
+      get: async (id: string) => { const m = rows.find(r => r.id === id); return m && { ...m }; },
+      getMany: async (ids: string[]) => ids.map(id => { const m = rows.find(r => r.id === id); return m && { ...m }; }),
+      update: async (id: string, delivery: Delivery, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        const found = rows.find(m => m.id === id);
+        if (found && found.delivery !== "delivered") Object.assign(found, extra, { delivery, deliveryError: error });
+      },
+    };
+    // The contact's receipt comes as each goes.
+    const box: Outbox = new Outbox(store, async m => { sent.push(m.text); await box.received(m.wireId!); return null; }, 60_000, undefined, { resender: { ready: () => state.live } });
+    await box.recover();
+    for (const n of [10_001, 10_002, 10_003]) {
+      // As the engine does for a text the chat cannot carry: stored waiting, then handed over.
+      rows.push(row(n, "waiting", { timestamp: Date.now(), deliveryError: "Sent when your contact is reachable." }));
+      await box.wait(`me_${wire(n)}`, "Sent when your contact is reachable.");
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    counted.reads = 0; counted.rows = 0;
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(counted).toEqual({ reads: 0, rows: 0 });
+    expect(sent).toEqual([]);
+    // Still within its window: each waits, and each goes at its next check once the contact is reachable.
+    expect([10_001, 10_002, 10_003].map(n => rows.find(m => m.id === `me_${wire(n)}`)?.delivery)).toEqual(["waiting", "waiting", "waiting"]);
+    state.live = true;
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(sent).toEqual(["m10001", "m10002", "m10003"]);
+    await box.stop();
+  });
+
+  it("a text waiting for an away contact still fails at the end of its window, read by id", async () => {
+    vi.useFakeTimers();
+    const rows = Array.from({ length: 1_000 }, (_, i) => row(i + 1, "delivered"));
+    const counted = { reads: 0 };
+    const box = new Outbox({
+      read: async () => { counted.reads++; return rows.map(m => ({ ...m })); },
+      get: async (id: string) => { const m = rows.find(r => r.id === id); return m && { ...m }; },
+      getMany: async (ids: string[]) => ids.map(id => { const m = rows.find(r => r.id === id); return m && { ...m }; }),
+      update: async (id, delivery, error, extra) => { const found = rows.find(m => m.id === id); if (found && found.delivery !== "delivered") Object.assign(found, extra, { delivery, deliveryError: error }); },
+    }, async () => null, 60_000, undefined, { resender: { ready: () => false }, monotonic: () => Date.now(), boot: null });
+    await box.recover();
+    rows.push(row(2_000, "waiting", { timestamp: Date.now() }));
+    await box.wait(`me_${wire(2_000)}`, "Sent when your contact is reachable.");
+    const reads = counted.reads;
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.windowMs + 10 * 60_000);
+    expect(rows[1_000].delivery).toBe("failed");
+    expect(counted.reads).toBe(reads);
+    await box.stop();
+  });
 });
 
 /**

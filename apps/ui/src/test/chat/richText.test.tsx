@@ -4,6 +4,7 @@ import { MessageBubble } from "../../components/MessageBubble";
 import { previewText } from "../../lib/chatList";
 import type { ChatMessage } from "../../lib/types";
 import { renderApp } from "../render";
+import { plainSpaces } from "../timeSpaces";
 
 // covers: chat.rich.format, chat.rich.code, chat.rich.spoiler, chat.rich.blob, chat.rich.time, chats.list.rows
 
@@ -44,7 +45,7 @@ describe("formatting", () => {
 
   it("leaves big emoji, pictures and money as they were", () => {
     const { container, unmount } = bubble("👻");
-    expect(container.querySelector(".text-\\[42px\\]")).toHaveTextContent("👻");
+    expect(container.querySelector(".chat-text-emoji")).toHaveTextContent("👻");
     unmount();
     bubble("https://media.giphy.com/media/abc123/200w");
     expect(screen.queryByTestId("message-text")).toBeNull();
@@ -96,6 +97,20 @@ describe("spoilers", () => {
       expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
       expect(outside).toHaveFocus();
     } finally { outside.remove(); }
+  });
+
+  it("cover the new words of a contact's edit again, and stay shown when the edit leaves them as they were", async () => {
+    const draw = (text: string) => <MessageBubble message={message(text)} peerPubKey="peer" />;
+    const { user, rerender } = bubble("the answer is ||forty two||");
+    await user.click(screen.getByTestId("rich-spoiler"));
+    expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
+    // Only the words around it change: what was uncovered is still the same.
+    rerender(draw("the answer, as said, is ||forty two||"));
+    expect(screen.getByTestId("rich-spoiler")).toHaveAttribute("data-shown");
+    // New words under it: covered, until tapped again.
+    rerender(draw("the answer, as said, is ||a new secret||"));
+    expect(screen.getByTestId("rich-spoiler")).not.toHaveAttribute("data-shown");
+    expect(screen.getByRole("button", { name: "Hidden text. Tap to show it" }).firstElementChild).toHaveAttribute("aria-hidden", "true");
   });
 
   it("keep a link inside unreachable until shown", async () => {
@@ -223,12 +238,13 @@ describe("times", () => {
     const { user } = bubble("standup at 14:00 UTC");
     const time = screen.getByTestId("rich-time");
     const button = within(time).getByRole("button", { name: "14:00 UTC" });
-    const local = new Date(Date.UTC(2026, 8, 25, 14)).toLocaleString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
-    expect(button).toHaveAttribute("title", `${local} your time`);
+    // Its spaces aside (timeSpaces.ts): the space before "AM"/"PM" is held by the app on one runtime and not another.
+    const local = plainSpaces(new Date(Date.UTC(2026, 8, 25, 14)).toLocaleString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" }));
+    expect(plainSpaces(button.getAttribute("title")!)).toBe(`${local} your time`);
     expect(time.querySelector("time")).toHaveAttribute("datetime", "2026-09-25T14:00:00.000Z");
     expect(screen.queryByTestId("rich-time-local")).toBeNull();
     await user.click(button);
-    expect(screen.getByTestId("rich-time-local")).toHaveTextContent(`(${local} your time)`);
+    expect(plainSpaces(screen.getByTestId("rich-time-local").textContent!)).toContain(`(${local} your time)`);
   });
 
   it("leaves a time without a zone alone", () => {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bech32 } from "@scure/base";
 import { Amount, MeltChangeError, MintOperationError, PaymentRequest, getEncodedToken, getTokenMetadata, type Proof } from "@cashu/cashu-ts";
 import { CashuWallet, assertAmount, normalizeMintUrl } from "../src/engine/wallet";
-import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
+import { MELT_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
 import { TEST_MINT } from "../src/shared/mints";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import type { PendingMelt, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
@@ -154,6 +154,16 @@ describe("ecash in", () => {
     await expect(wallet.receiveToken("cashuBnotatoken")).rejects.toThrow("That is not a valid ecash token");
     // A token of another unit is a token: said as such, not as an invalid one.
     await expect(wallet.receiveToken(tokenFrom(MINT, [8], "usd"))).rejects.toThrow("This ecash is in usd: only sat ecash can be redeemed here");
+    expect(mint.receive).not.toHaveBeenCalled();
+  });
+
+  it("names a token's unit only when it looks like one: the unit is its sender's free text", async () => {
+    const { wallet } = setup();
+    await expect(wallet.receiveToken(tokenFrom(MINT, [8], "USD"))).rejects.toThrow("This ecash is in USD: only sat ecash can be redeemed here");
+    const unnamed = "This ecash is in another unit: only sat ecash can be redeemed here";
+    for (const unit of ["usd\u202eereh tuo kcehc", "sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example/now", "u".repeat(600), "usd\u200b"]) {
+      await expect(wallet.receiveToken(tokenFrom(MINT, [8], unit)), JSON.stringify(unit)).rejects.toThrow(unnamed);
+    }
     expect(mint.receive).not.toHaveBeenCalled();
   });
 
@@ -446,7 +456,8 @@ describe("Lightning out", () => {
 
     expect(ensure).toHaveBeenCalledWith(["00newkeyset00001"]);
     expect(secrets()).toEqual(["c", "change"]);
-    expect(rows<WalletTx>("walletTx")).toMatchObject([{ fee: 6 }]);
+    // Its melt quote: the screen that left it pending reads from it that the payment went through.
+    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "lightning-out", fee: 6, quote: "m1" }]);
     expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), true);
   });
 
@@ -479,7 +490,7 @@ describe("Lightning out", () => {
   });
 
   it("an unpaid payment whose proofs are partly spent gives back only the unspent ones", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [] });
     const { wallet, events } = setup();
@@ -489,7 +500,7 @@ describe("Lightning out", () => {
     mint.checkProofsStates.mockResolvedValueOnce([{ state: "SPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
     mint.checkProofsStates.mockImplementation(async (asked: unknown[]) => asked.map(() => ({ state: "UNSPENT" })));
     // Given up once no request of the payment can reach the mint any more.
-    await vi.advanceTimersByTimeAsync(CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
+    await vi.advanceTimersByTimeAsync(MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS);
     expect(secrets()).toEqual(["b", "c", "d"]);
     expect(rows<StoredProof>("proofs").some((p) => p.unchecked), "checked, and found unspent").toBe(false);
     expect(rows<WalletTx>("walletTx").filter((tx) => tx.kind === "fee"), "a proof spent elsewhere is no fee of this payment").toEqual([]);
@@ -523,9 +534,9 @@ describe("Lightning out", () => {
 
   describe("a melt whose answer was lost", () => {
     /** A melt request's longest life plus the margin for a mint slow to act on it: past it, none can reach the mint. */
-    const OVERDUE = CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
-    // The wallet's clock moves with the polls: a melt is only given up once its request can no longer land.
-    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); });
+    const OVERDUE = MELT_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
+    // The wallet's clocks (wall and monotonic) move with the polls: a melt is only given up once its request can no longer land.
+    beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] }); });
 
     it("stays pending while its request may still reach the mint, and is paid when the mint acts on it late", async () => {
       mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));

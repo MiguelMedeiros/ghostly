@@ -78,10 +78,78 @@ pub async fn read_clipboard_text<R: tauri::Runtime>(
     bounded(text)
 }
 
-/// Copies a secret someone asked to copy (an invite, a device's link, a group's link, ecash), marked sensitive: Android
-/// 13 and up shows dots for it in the copy preview, and keyboards keep it out of their clipboard history. The WebView's
-/// own copy cannot mark it. Android only; the page copies elsewhere (`copySecret` in `apps/ui/src/lib/shareLink.ts`).
-/// Main window only, as the paste.
+/// Where a secret is copied to: the system clipboard, marked, in the app; a stand-in in tests (as [`ClipboardSource`]).
+#[derive(Clone)]
+#[cfg_attr(mobile, allow(dead_code))]
+pub struct SecretSink(Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>);
+
+impl SecretSink {
+    /// Android and iOS: none (Android's sensitive copy is Kotlin's, in `copy_secret`).
+    #[cfg(mobile)]
+    pub fn system() -> Self {
+        Self(Arc::new(|_| {
+            Err("No sensitive copy on this platform".into())
+        }))
+    }
+
+    /// The text goes on the clipboard with each system's mark for a password: Windows keeps it out of its clipboard
+    /// history and its cloud clipboard, and tells other clipboard monitors to leave it; a Mac's clipboard managers
+    /// skip it (`org.nspasteboard.ConcealedType`); on Linux, Klipper and the managers that follow it do
+    /// (`x-kde-passwordManagerHint`). The WebView's copy can set none of them.
+    #[cfg(desktop)]
+    pub fn system() -> Self {
+        // X11 serves a copy only while one of the app's clipboards is open: closing arboard's last one takes the copy
+        // with it (a marked copy is never handed to a clipboard manager). One stays open.
+        #[cfg(target_os = "linux")]
+        let held: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
+        Self(Arc::new(move |text| {
+            #[cfg(target_os = "linux")]
+            let mut held = held.lock().map_err(|_| "Clipboard unavailable")?;
+            #[cfg(target_os = "linux")]
+            let clipboard = match held.as_mut() {
+                Some(clipboard) => clipboard,
+                None => held.insert(arboard::Clipboard::new().map_err(|e| e.to_string())?),
+            };
+            #[cfg(not(target_os = "linux"))]
+            let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+            marked(clipboard.set())
+                .text(text)
+                .map_err(|e| e.to_string())
+        }))
+    }
+
+    #[cfg(test)]
+    pub fn fixed(write: impl Fn(String) -> Result<(), String> + Send + Sync + 'static) -> Self {
+        Self(Arc::new(write))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn marked(set: arboard::Set<'_>) -> arboard::Set<'_> {
+    use arboard::SetExtWindows;
+    // Monitoring for other apps that watch the clipboard; history and cloud for Windows' own (Win+V, synced devices).
+    set.exclude_from_monitoring()
+        .exclude_from_history()
+        .exclude_from_cloud()
+}
+
+#[cfg(target_os = "macos")]
+fn marked(set: arboard::Set<'_>) -> arboard::Set<'_> {
+    use arboard::SetExtApple;
+    set.exclude_from_history()
+}
+
+#[cfg(all(desktop, not(any(target_os = "windows", target_os = "macos"))))]
+fn marked(set: arboard::Set<'_>) -> arboard::Set<'_> {
+    use arboard::SetExtLinux;
+    set.exclude_from_history()
+}
+
+/// Copies a secret someone asked to copy (an invite, a device's link, a group's link, ecash), marked sensitive. Android
+/// 13 and up shows dots for it in the copy preview, and keyboards keep it out of their clipboard history; on Desktop
+/// the system's clipboard history, its cloud clipboard and clipboard managers leave it out ([`SecretSink::system`]).
+/// The WebView's own copy cannot mark it (`copySecret` in `apps/ui/src/lib/shareLink.ts`). Main window only, as the
+/// paste.
 #[tauri::command]
 pub async fn copy_secret<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
@@ -94,10 +162,22 @@ pub async fn copy_secret<R: tauri::Runtime>(
     {
         crate::android::copy_secret(text).await
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
     {
         drop(text);
         Err("No sensitive copy on this platform".into())
+    }
+    #[cfg(desktop)]
+    {
+        let sink = window
+            .try_state::<SecretSink>()
+            .ok_or("Clipboard unavailable")?
+            .inner()
+            .clone();
+        // X11 may wait on the clipboard: off the main thread, as the paste.
+        tauri::async_runtime::spawn_blocking(move || (sink.0)(text))
+            .await
+            .map_err(|e| e.to_string())?
     }
 }
 
@@ -110,7 +190,7 @@ fn bounded(text: String) -> Result<String, String> {
 
 /// A paste made ready for the page: the files it may read, or a picture's PNG.
 enum Ready {
-    Files(Vec<(PathBuf, String, u64)>),
+    Files(PastedFiles),
     Png(Vec<u8>),
     Nothing,
 }
@@ -287,22 +367,56 @@ pub fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, S
     Ok(out)
 }
 
+/// The files of a paste or a drop ([`pasted_files`], [`regular_files`]), and the names of those left out, for the page
+/// to say.
+#[derive(Debug, Default, PartialEq)]
+pub struct PastedFiles {
+    /// The files the page may have, with the names it shows and their sizes.
+    pub files: Vec<(PathBuf, String, u64)>,
+    /// Files past the most one paste brings ([`MAX_PASTED_FILES`]).
+    pub past_limit: Vec<String>,
+    /// What is no regular file (a folder), or could not be seen (gone meanwhile, no access).
+    pub left_out: Vec<String>,
+}
+
 /// The files of a paste the page may read: regular files only (a copied folder is not sent),
-/// each once, at most [`MAX_PASTED_FILES`], with their names and sizes. On Linux arboard drops the
+/// each once, at most [`MAX_PASTED_FILES`], with their names and sizes; the rest by name. On Linux arboard drops the
 /// CRLF line end of the file manager's `text/uri-list` (RFC 2483, as GTK and Qt write it) before
 /// decoding, so a '\r' left at the end of a path is the file's own name (`%0D`) and stays.
-pub fn pasted_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
+pub fn pasted_files(paths: Vec<PathBuf>) -> PastedFiles {
+    let mut pasted = regular_files(paths);
+    if pasted.files.len() > MAX_PASTED_FILES {
+        pasted.past_limit = pasted
+            .files
+            .split_off(MAX_PASTED_FILES)
+            .into_iter()
+            .map(|(_, name, _)| name)
+            .collect();
+    }
+    pasted
+}
+
+/// [`pasted_files`] with no limit on how many: for files the page never reads in itself (a drop picked on its file
+/// input, as + → Document picks any number). A name that is not UTF-8 (Latin-1, from an old archive or a USB stick) is
+/// shown with what of it can be: the file is read from its own path.
+pub fn regular_files(paths: Vec<PathBuf>) -> PastedFiles {
     let mut seen = std::collections::HashSet::new();
-    paths
-        .into_iter()
-        .filter(|path| path.is_absolute() && seen.insert(path.clone()))
-        .filter_map(|path| {
-            let meta = std::fs::metadata(&path).ok()?;
-            let name = path.file_name()?.to_str()?.to_string();
-            meta.is_file().then_some((path, name, meta.len()))
-        })
-        .take(MAX_PASTED_FILES)
-        .collect()
+    let mut pasted = PastedFiles::default();
+    for path in paths {
+        if !path.is_absolute() || !seen.insert(path.clone()) {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy()
+            .into_owned();
+        match std::fs::metadata(&path) {
+            Ok(meta) if meta.is_file() => pasted.files.push((path, name, meta.len())),
+            _ => pasted.left_out.push(name),
+        }
+    }
+    pasted
 }
 
 /// What a paste brought that the page could not see itself: files copied in a file manager,
@@ -312,7 +426,7 @@ pub fn pasted_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
 #[tauri::command]
 pub async fn read_clipboard_files<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
-) -> Result<Vec<PastedItem>, String> {
+) -> Result<ShelvedFiles, String> {
     if window.label() != "main" {
         return Err("Not allowed from this window".into());
     }
@@ -340,32 +454,51 @@ pub async fn read_clipboard_files<R: tauri::Runtime>(
         .try_state::<PasteShelf>()
         .ok_or("Clipboard unavailable")?;
     Ok(match pasted {
-        Ready::Nothing => Vec::new(),
+        Ready::Nothing => ShelvedFiles::default(),
         Ready::Png(png) => {
             let size = png.len() as u64;
-            vec![PastedItem {
-                token: shelf.put(Held::Bytes(Arc::new(png))),
-                name: None,
-                size,
-                mime: Some("image/png".into()),
-            }]
+            ShelvedFiles {
+                items: vec![PastedItem {
+                    token: shelf.put(Held::Bytes(Arc::new(png))),
+                    name: None,
+                    size,
+                    mime: Some("image/png".into()),
+                }],
+                ..Default::default()
+            }
         }
         Ready::Files(files) => shelve_files(&shelf, files),
     })
 }
 
+/// What a paste or a drop brought onto the shelf, for the page's sheet, and the names of the files it left out
+/// ([`PastedFiles`]): the page says them beside the sheet.
+#[derive(serde::Serialize, Debug, Default, PartialEq)]
+pub struct ShelvedFiles {
+    pub items: Vec<PastedItem>,
+    #[serde(rename = "pastLimit")]
+    pub past_limit: Vec<String>,
+    #[serde(rename = "leftOut")]
+    pub left_out: Vec<String>,
+}
+
 /// Files ([`pasted_files`]'s) on the shelf, for the page to read by token: a paste's, or a drop's
 /// (`dropped_files`).
-pub fn shelve_files(shelf: &PasteShelf, files: Vec<(PathBuf, String, u64)>) -> Vec<PastedItem> {
-    files
-        .into_iter()
-        .map(|(path, name, size)| PastedItem {
-            token: shelf.put(Held::Path(path)),
-            name: Some(name),
-            size,
-            mime: None,
-        })
-        .collect()
+pub fn shelve_files(shelf: &PasteShelf, pasted: PastedFiles) -> ShelvedFiles {
+    ShelvedFiles {
+        items: pasted
+            .files
+            .into_iter()
+            .map(|(path, name, size)| PastedItem {
+                token: shelf.put(Held::Path(path)),
+                name: Some(name),
+                size,
+                mime: None,
+            })
+            .collect(),
+        past_limit: pasted.past_limit,
+        left_out: pasted.left_out,
+    }
 }
 
 /// Something another app shared into Ghostly (Android's "Share to Ghostly"), for the page's share picker: its text,
@@ -402,6 +535,7 @@ pub fn shelve_share(
 ) -> IncomingShare {
     let mimes: std::collections::HashMap<PathBuf, Option<String>> = files.iter().cloned().collect();
     let files = pasted_files(files.into_iter().map(|(path, _)| path).collect())
+        .files
         .into_iter()
         .map(|(path, name, size)| {
             let mime = mimes.get(&path).cloned().flatten();
@@ -625,6 +759,76 @@ mod tests {
         assert_eq!(read(main), Err("Clipboard unavailable".into()));
     }
 
+    fn copy(window: tauri::WebviewWindow<MockRuntime>, text: &str) -> Result<(), String> {
+        tauri::async_runtime::block_on(copy_secret(window, text.into()))
+    }
+
+    #[test]
+    fn a_secret_is_copied_natively_and_only_for_the_ghostly_window() {
+        let copied = Arc::new(Mutex::new(Vec::<String>::new()));
+        let kept = copied.clone();
+        let app = mock_builder()
+            .manage(SecretSink::fixed(move |text| {
+                kept.lock().unwrap().push(text);
+                Ok(())
+            }))
+            .build(tauri::generate_context!(test = true))
+            .expect("app");
+        for label in ["svc-1", "main-2", "Main"] {
+            let url = "ghostly-svc://atlas.peer/".parse().unwrap();
+            let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::CustomProtocol(url))
+                .build()
+                .unwrap();
+            assert_eq!(
+                copy(window, "https://ghostly.tools/#ghostly1abc"),
+                Err("Not allowed from this window".into())
+            );
+        }
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        assert_eq!(copy(main, "https://ghostly.tools/#ghostly1abc"), Ok(()));
+        assert_eq!(
+            *copied.lock().unwrap(),
+            vec!["https://ghostly.tools/#ghostly1abc".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_failed_secret_copy_is_an_error() {
+        let app = mock_builder()
+            .manage(SecretSink::fixed(|_| Err("no display".into())))
+            .build(tauri::generate_context!(test = true))
+            .expect("app");
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        assert_eq!(copy(main, "cashuB…"), Err("no display".into()));
+    }
+
+    /// The real clipboard: a secret is offered with KDE's password hint beside the text, which Klipper and the
+    /// managers that follow it keep out of their history, and stays pasteable after the copy. Run alone, under an Xvfb
+    /// or a headless Sway of its own (`cargo test -- --ignored the_real_clipboard`).
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "takes the clipboard of the display it runs on"]
+    fn on_the_real_clipboard_a_secret_is_marked_for_clipboard_managers() {
+        // Kept, as the app keeps it: on X11 the copy goes with the sink's clipboard.
+        let sink = SecretSink::system();
+        (sink.0)("https://ghostly.tools/#ghostly1abc".into()).unwrap();
+        let targets = crate::copied_files::targets();
+        assert!(
+            targets
+                .iter()
+                .any(|target| target == "x-kde-passwordManagerHint"),
+            "no password hint among {targets:?}"
+        );
+        assert_eq!(
+            (ClipboardSource::system().0)(),
+            Ok("https://ghostly.tools/#ghostly1abc".into())
+        );
+    }
+
     fn scratch() -> PathBuf {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
@@ -651,7 +855,7 @@ mod tests {
     }
 
     fn files(window: &tauri::WebviewWindow<MockRuntime>) -> Result<Vec<PastedItem>, String> {
-        tauri::async_runtime::block_on(read_clipboard_files(window.clone()))
+        tauri::async_runtime::block_on(read_clipboard_files(window.clone())).map(|read| read.items)
     }
 
     /// Everything a paste brought, read the way the page reads it: `step` bytes at a time.
@@ -904,7 +1108,15 @@ mod tests {
             dir.join("a.txt"),
             PathBuf::from("relative.txt"),
         ]);
-        assert_eq!(picked, vec![(dir.join("a.txt"), "a.txt".into(), 3)]);
+        // What is left out is named, for the page to say so.
+        assert_eq!(
+            picked,
+            PastedFiles {
+                files: vec![(dir.join("a.txt"), "a.txt".into(), 3)],
+                past_limit: Vec::new(),
+                left_out: vec!["folder".into(), "missing.bin".into()],
+            }
+        );
         let many: Vec<PathBuf> = (0..MAX_PASTED_FILES + 5)
             .map(|i| {
                 let path = dir.join(format!("{i}.txt"));
@@ -912,7 +1124,57 @@ mod tests {
                 path
             })
             .collect();
-        assert_eq!(pasted_files(many).len(), MAX_PASTED_FILES);
+        let pasted = pasted_files(many);
+        assert_eq!(pasted.files.len(), MAX_PASTED_FILES);
+        assert_eq!(
+            pasted.past_limit,
+            (MAX_PASTED_FILES..MAX_PASTED_FILES + 5)
+                .map(|i| format!("{i}.txt"))
+                .collect::<Vec<_>>()
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A paste past the most one brings: the page reads the first, and hears the rest by name.
+    #[test]
+    fn a_paste_names_the_files_it_left_out() {
+        let dir = scratch();
+        let mut paths: Vec<PathBuf> = (0..MAX_PASTED_FILES + 1)
+            .map(|i| {
+                let path = dir.join(format!("p{i}.txt"));
+                std::fs::write(&path, b"x").unwrap();
+                path
+            })
+            .collect();
+        std::fs::create_dir(dir.join("Photos")).unwrap();
+        paths.push(dir.join("Photos"));
+        let app = paste_app(PasteSource::fixed(move || Ok(Pasted::Files(paths.clone()))));
+        let main = main_window(&app);
+        let read = tauri::async_runtime::block_on(read_clipboard_files(main.clone())).unwrap();
+        assert_eq!(read.items.len(), MAX_PASTED_FILES);
+        assert_eq!(
+            (read.past_limit, read.left_out),
+            (
+                vec![format!("p{MAX_PASTED_FILES}.txt")],
+                vec!["Photos".to_string()]
+            )
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A Latin-1 name from an old archive or a USB stick is no UTF-8: the file is read from its own path, and shown
+    /// with what of its name can be.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_whose_name_is_not_utf8_comes_with_a_name_that_can_be_shown() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = scratch();
+        let latin = dir.join(std::ffi::OsStr::from_bytes(b"caf\xe9.txt"));
+        std::fs::write(&latin, b"x").unwrap();
+        assert_eq!(
+            pasted_files(vec![latin.clone()]).files,
+            vec![(latin, "caf\u{FFFD}.txt".into(), 1)]
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -1059,7 +1321,7 @@ mod tests {
             panic!("a file manager's copy brought no files");
         };
         assert_eq!(
-            pasted_files(paths),
+            pasted_files(paths).files,
             vec![(dir.join("id_ed25519"), "id_ed25519".into(), 6)]
         );
         drop(file_manager);

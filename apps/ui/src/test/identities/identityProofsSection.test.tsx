@@ -300,6 +300,24 @@ describe("IdentityProofsSection", () => {
       run.mockRestore();
     });
 
+    it("says the record's take-down out loud, in a status line there before it starts", async () => {
+      const { user, engine } = renderApp(<IdentityProofsSection />);
+      engine.on("removeIdentityProof", () => undefined);
+      let progress!: (line: string) => void;
+      const run = vi.spyOn(atproto.unpublish!, "run").mockImplementation((_proof, ctx) => { progress = ctx.onProgress; return new Promise<void>(() => {}); });
+      act(() => engine.update({ identityProofs: [bluesky()] }));
+      await user.click(cards()[0]);
+      await user.click(screen.getByTestId("identity-proof-remove"));
+      const live = screen.getByTestId("identity-proof-remove-live");
+      expect(live).toHaveAttribute("role", "status");
+      expect(live).toHaveTextContent(/^$/);
+      await user.click(screen.getByTestId("identity-proof-remove-confirm"));
+      act(() => progress("Deleting the record on pds.example.com…"));
+      expect(live).toHaveTextContent("Deleting the record on pds.example.com…");
+      expect(screen.getByTestId("identity-proof-remove-live")).toBe(live);
+      run.mockRestore();
+    });
+
     it("when the record cannot be deleted, says so and can remove the proof without it", async () => {
       const { user, engine } = renderApp(<IdentityProofsSection />);
       engine.on("removeIdentityProof", () => undefined);
@@ -381,5 +399,14 @@ describe("IdentityProofsSection", () => {
     expect([...line.querySelectorAll("bdi")].map(bdi => bdi.textContent)).toEqual(["Nostr signature (NIP-01, BIP-340)", "accounts.google.com (OIDC)", "accounts.google.com (OIDC)"]);
     expect(line.textContent).toMatch(/^Nostr signature \(NIP-01, BIP-340\)\. يقول accounts\.google\.com \(OIDC\) إن/);
     expect(line.textContent).not.toContain("{{");
+  });
+
+  it("says how a Nostr proof was checked in the app's language, still in its own direction", () => {
+    const npub = "a".repeat(64);
+    const { engine } = renderApp(<IdentityProofsSection />, { language: "ar" });
+    act(() => engine.update({ identityProofs: [proofView({ id: "n", provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature (NIP-01, BIP-340)" } })] }));
+    const how = within(panel()).getByText((_, el) => el?.tagName === "BDI" && !!el.textContent?.startsWith("توقيع Nostr"));
+    expect(how).toHaveTextContent("توقيع Nostr (NIP-01, BIP-340)");
+    expect(how.parentElement!.textContent).not.toContain("signature");
   });
 });

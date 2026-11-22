@@ -9,6 +9,7 @@ import {
   type ResolvedLink,
   type ResolvedMessage,
 } from "./records";
+import { PKARR_FUTURE_SKEW_MS } from "./pkarr";
 import type { ServiceAd } from "./services";
 import type { SignalSight } from "./signal";
 import { RelaysFailedError } from "./relay";
@@ -338,6 +339,8 @@ export class LinkSession {
   private upkeepOnly = false;
   /** The last write this link asked for was a background one (`retryDelay`). */
   private wroteInBackground = false;
+  /** The records built for a packet that did not go out, and what they say: a try again of the same reuses them (`publishOnce`). */
+  private unsent: { says: string; built: ReturnType<typeof buildLinkRecords> } | null = null;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastActivity = Date.now();
@@ -472,9 +475,9 @@ export class LinkSession {
     if (read) this.pollNow();
   }
 
-  /** This side's packet goes out now, unless one already did. */
+  /** This side's packet goes out now, unless one already did (in this run, once it left DHT only: `presenceDue`). */
   ensureAdvertised(): void {
-    if (!this.running || this.lastPublishedAt > 0 || this.publishing) return;
+    if (!this.running || (this.lastPublishedAt > 0 && !this.presenceDueOut) || this.publishing) return;
     void this.publish().catch(() => {});
   }
 
@@ -835,21 +838,25 @@ export class LinkSession {
       // 200 chats on the web, the packets built for that were a quarter of the script of a page left alone.
       const held = this.transport.publishHeld?.(this.identity.pubKeyZ32, options);
       if (held) throw held;
-      const built = buildLinkRecords(
-        this.identity.pubKeyZ32,
-        {
-          messages: this.sentBuffer,
-          ackTimestamp: this.myAck,
-          nick: this.nick,
-          callSignal: this.callSignal,
-          rtcSignal,
-          services: advertise ? this.getServices() : undefined,
-          transports: advertise ? this.transports : null,
-        },
-        this.encKey,
-      );
+      const state = {
+        messages: this.sentBuffer,
+        ackTimestamp: this.myAck,
+        nick: this.nick,
+        callSignal: this.callSignal,
+        rtcSignal,
+        services: advertise ? this.getServices() : undefined,
+        transports: advertise ? this.transports : null,
+      };
+      // A try again of a packet that did not go out, saying the same: the records built for it, not sealed anew. Each
+      // sealing is new bytes, and a group edge that is down hands every new packet to members (`CarriedTransport`): an
+      // edge to a member who left handed two of them the same packet again at each try the relays' budget held, every
+      // few seconds (35 KB a minute on an idle web app with two such edges, bug hunt 2026-11-08).
+      const says = JSON.stringify(state);
+      const built = this.unsent?.says === says ? this.unsent.built : buildLinkRecords(this.identity.pubKeyZ32, state, this.encKey);
+      this.unsent = { says, built };
       keptMessages = built.keptMessages;
       await this.transport.publish(this.identity, built.records, options);
+      this.unsent = null;
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
       traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, error: String(error), ...(waiting && { waiting, retryInMs: error.retryInMs }) });
@@ -964,7 +971,9 @@ export class LinkSession {
           if (fresh.length > 0) this.events.onMessages?.(fresh, batch);
         }
 
-        if (read && batch.packetTimestamp > this.peerPacketAt) this.peerPacketAt = batch.packetTimestamp;
+        // No further ahead than readers take a date (`newerPacket`): anyone holding the invite can date a packet under the
+        // peer's key, and a later offer dated before this one does not read as seen arriving (`offerIsFresh`).
+        if (read && batch.packetTimestamp > this.peerPacketAt) this.peerPacketAt = Math.min(batch.packetTimestamp, Date.now() + PKARR_FUTURE_SKEW_MS);
         // How long ago the peer published is measured on this clock, from when its packet was first read here.
         const seenAt = batch.packetTimestamp === wasSeen ? presenceSeenAt(this.presence) : Math.max(readBefore, Math.min(batch.packetTimestamp, Date.now()));
         const online = batch.services !== null && Date.now() - seenAt < PRESENCE_WINDOW;

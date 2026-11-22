@@ -149,6 +149,7 @@
       "needsKey": "تحتاج إلى مفتاح",
       "noFederation": "لا يوجد اتحاد",
       "noSource": "لا يوجد مصدر",
+      "shared": "يستخدم رصيد {{name}}",
       "unavailable": "غير متاحة"
     },
     "deck": {
@@ -175,6 +176,7 @@
       "usdtLocal": "EVM محلية · رمز تجريبي",
       "usdtSepolia": "Sepolia · رمز تجريبي"
     },
+    "sameBalance": "نفس رصيد بطاقة {{name}}",
     "status": {
       "away": "في مكان آخر",
       "checkSettings": "تحقق من الإعدادات",
@@ -192,7 +194,6 @@
   "cashu": {
     "add": "إضافة",
     "addMintPlaceholder": "أضف دار سك: \u2066https://…\u2069",
-    "amountSats": "{{amount}} sats",
     "askingMint": "جارٍ سؤال دار السك…",
     "backupCopied": "نُسخت النسخة الاحتياطية. من يملك هذه الرموز يملك الـ sats.",
     "contactHint": "تدفع لجهة اتصال؟ استخدم ⚡ في المحادثة.",
@@ -206,7 +207,7 @@
       "perProofTest": "{{fee}} sat تجريبي لكل إثبات (نحو 1 sat تجريبي لكل دفعة)"
     },
     "history": {
-      "fee": "رسوم {{amount}}",
+      "fee": "رسوم {{amount}} {{unit}}",
       "feesPaid": "الرسوم المدفوعة: {{amount}} {{unit}}",
       "movements": "{{count}} حركات",
       "movementsOne": "حركة واحدة",
@@ -231,8 +232,12 @@
     "paid": "تم الدفع.",
     "pastePlaceholder": "الصق فاتورة Lightning أو عنوان Lightning أو رمز ecash",
     "payAmount": "ادفع {{amount}} {{unit}}",
+    "payFailed": "فشلت الدفعة: لم يُدفع للمستفيد.",
+    "payFailedBack": "ما حُجز لها عاد إلى رصيدك.",
+    "payFailedFee": "ما حُجز لها عاد إلى رصيدك، ناقصًا {{amount}} {{unit}} احتفظت بها دار السك رسمًا (في السجل).",
     "payLine": "ادفع {{amount}}{{fees}}",
     "pendingMint": "لا تزال الدفعة معلّقة لدى دار السك.",
+    "pendingMintNext": "تُحسم الدفعة من تلقاء نفسها، ولن يُدفع شيء مرة أخرى. وإلى أن تجيب دار السك، يظهر المبلغ محجوزًا تحت الرصيد.",
     "primary": "الرئيسية",
     "received": "⚡ استُلم {{amount}} {{unit}}",
     "redeem": "استرداد رمز ecash",
@@ -246,6 +251,8 @@
     "removeMintQuestion": "إزالة {{name}}؟",
     "setAside": "{{amount}} {{unit}} محجوزة",
     "setAsideInfo": "محجوزة لدفعة لم تؤكدها دار السك بعد. تخرج مع الدفعة أو تعود إلى رصيدك عندما تجيب دار السك.",
+    "setAside_one": "{{amount}} {{unit}} محجوز",
+    "setAside_other": "{{amount}} {{unit}} محجوزة",
     "settings": "الإعدادات",
     "testBalance": "{{amount}} sats تجريبية (بلا قيمة)",
     "testBalance_one": "{{amount}} sat تجريبي (بلا قيمة)",
@@ -412,7 +419,7 @@
     "cashuMints": "دور السك في Cashu",
     "cashuSettings": "إعدادات Cashu",
     "commentFor": "تعليق إلى {{to}} (اختياري)",
-    "confirmWhat": "{{amount}} sats (مع رسوم تصل إلى {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (مع رسوم تصل إلى {{fee}} {{feeUnit}})",
     "connecting": "جارٍ الاتصال بالمصدر…",
     "domainLine": "{{answered}} {{limits}}",
     "done": "تم",
@@ -644,6 +651,9 @@
     "noAmount": "هذه الفاتورة بلا مبلغ. اطلب واحدة بالمبلغ.",
     "paste": "لصق",
     "scan": "مسح"
+  },
+  "sentEcash": {
+    "title": "أُرسل في محادثة محذوفة"
   },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
@@ -907,6 +917,25 @@
       "github": "يطلب تسجيل الدخول عبر GitHub، لذا لا يطلب Ghostly نيابةً عنك.",
       "login": "يطلب تسجيل الدخول، لذا لا يطلب Ghostly نيابةً عنك."
     }
+  },
+  "total": {
+    "away": "على {{device}}، خارج المجموع",
+    "federation": "ecash يحتفظ به الاتحاد",
+    "info": "يجمع المجموع فقط الأرصدة التي تمكّن Ghostly من قراءتها الآن. البطاقة التي تعذّرت قراءتها تبقى خارجه، ولا تُجمع Testnet مع Mainnet أبدًا.",
+    "label": "الأرصدة",
+    "mint": "ecash تحتفظ به منافذ السكّ الخاصة بك",
+    "none": "غير مُعدّة",
+    "ready": "جاهز للإنفاق الآن",
+    "shared": "الرصيد نفسه في {{name}}، يُحسب مرة واحدة",
+    "title": "مصدر الرصيد",
+    "total": "المجموع",
+    "uncounted": "{{count}} بطاقات خارج المجموع",
+    "uncounted_many": "{{count}} بطاقةً خارج المجموع",
+    "uncounted_one": "بطاقة واحدة خارج المجموع",
+    "uncounted_other": "{{count}} بطاقة خارج المجموع",
+    "uncounted_two": "بطاقتان خارج المجموع",
+    "unknown": "تعذّرت قراءته الآن، خارج المجموع",
+    "waiting": "{{amount}} {{unit}} غير قابلة للإنفاق بعد"
   },
   "ui": {
     "amountIn": "المبلغ بـ {{unit}}",

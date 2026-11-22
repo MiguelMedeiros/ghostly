@@ -1,5 +1,5 @@
 import {
-  budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_MAX_VALIDITY, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
+  budgetRetryMs, emptyIdentityLedger, fromBase64Url, isDiscoveryBudgetError, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_CHALLENGE_WINDOW, IDENTITY_MAX_VALIDITY, IDENTITY_REVOCATION_LABEL, isIdentityBinding, newIdentityBinding,
   identityRefusal, receivedIdentityStatus, revokesIdentity, toBase64Url,
   boundIdentityDisplay, type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type SharedIdentity, type VerifiedIdentity,
 } from "@ghostly/core";
@@ -40,9 +40,15 @@ export interface IdentityLinkHost {
   keys(linkId: string): { mine?: string; theirs?: string };
   linkIds(): string[];
   online(): boolean;
+  /** How a proof is read from the addresses it names. Default: `fetch`. */
+  fetcher?: typeof fetch;
+  /** How the profile's own Pkarr relays are read for a did:dht (`boundedIdentityFetch`). Default: `fetcher`. */
+  relayFetcher?: typeof fetch;
   /** Settings → Hide my IP from contacts: a contact's proof is then checked only on hosts this app names (`fixedIdentityHosts`). */
   relayOnly?(): boolean;
   emit(): void;
+  /** One chat's view is to be built again: a contact's proof it shows expired, or its re-check fell due, by the time alone. */
+  redraw?(linkId: string): void;
   /** The public profile kept for an identity (PUBLIC-PROFILES.md), shown only while its proof is current and verified. */
   publicProfile?(provider: string, subject: string): PublicProfileView | undefined;
   /** Pkarr (the Ghost DHT or its relays): publish records under a key, read a key's latest records. */
@@ -57,8 +63,15 @@ const REVOCATIONS_CHECKED_AT = "identityRevocationsCheckedAt";
 /** The lookup under way: when it began (ms) and the proofs it already looked up (`linkId|id`), so one cut short goes on from the rest. */
 const REVOCATIONS_ROUND = "identityRevocationsRound";
 interface LookupRound { startedAt: number; done: string[] }
+/**
+ * The contacts' withdrawn proofs whose revocation lookups after the withdraw (`WITHDRAWN_REVOCATION_TRIES_MS`) have not
+ * ended (`linkId|id`): a stop drops their timers, so the next start plans them again.
+ */
+const WITHDRAWN_LOOKUPS = "identityWithdrawnLookups";
 /** Relays and the DHT forget a record within hours: republish revocations this often while the app runs. */
 const REPUBLISH_MS = 60 * 60_000;
+/** The longest a timer waits; a redraw further off waits again from there. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 /**
  * A revocation is kept (with its sealed seed) this long past its expiry by this device's clock, which may be the one that
  * is wrong: the contacts decide expiry by theirs. Only a clock ahead by more than the longest a proof may last (400 days)
@@ -119,7 +132,7 @@ const now = () => Math.floor(Date.now() / 1000);
  * A share of mine as every reader gets it (the app, the CLI, `getState`): its reason only in words this app writes
  * (identityRefusal), else none. A ledger kept from before that check holds the contact's own words there.
  */
-const ownRefusal = (s: SharedIdentity): SharedIdentity => {
+const ownRefusal = ({ held: _held, ...s }: SharedIdentity): SharedIdentity => {
   if (s.error === undefined || identityRefusal(s.error) !== undefined) return s;
   const { error: _contactWords, ...rest } = s;
   return rest;
@@ -141,6 +154,9 @@ export class IdentityProofs {
   /** When `round` was last written (ms), and how many proofs it gained since: `noteRound`. */
   private roundSavedAt = 0;
   private roundUnsaved = 0;
+  /** `WITHDRAWN_LOOKUPS`, and the run of lookups under way for each (a newer withdraw of the same proof replaces it). */
+  private withdrawnLookups = new Set<string>();
+  private withdrawalRuns = new Map<string, object>();
   /**
    * How the last Pkarr read of each contact's proof went (`revoked`), by proof id: answered, could not run (offline, no
    * relay answered), or held back by the relays' budget, which takes reads again in this many ms.
@@ -173,22 +189,29 @@ export class IdentityProofs {
   private greeted = new Set<string>();
   /** Automatic re-checks that could not reach the server, by chat and proof: how many in a row, and when to try again (ms). */
   private recheckBackoff = new Map<string, { failures: number; until: number }>();
+  /** When the automatic re-check asked each provider with a `recheck.perHour` (ms), this last hour, by provider id. */
+  private recheckedAt = new Map<string, number[]>();
+  /** Each chat's next change of its view by the time alone (s), and the timer that has it built again then: `linkView`. */
+  private redrawTimers = new Map<string, { at: number; timer: ReturnType<typeof setTimeout> }>();
   private readonly fetch: ReturnType<typeof boundedIdentityFetch>;
 
   constructor(private host: IdentityLinkHost, private providers: () => readonly IdentityProofProvider[] = loadedIdentityProviders) {
-    this.fetch = boundedIdentityFetch({ online: host.online });
+    this.fetch = boundedIdentityFetch({ online: host.online, ...(host.fetcher && { fetcher: host.fetcher }), ...(host.relayFetcher && { relayFetcher: host.relayFetcher }) });
   }
 
   /** The profile's proofs, and the providers that check and show them: loaded here, not with the app. */
   async load(): Promise<void> {
     const providers = loadIdentityProviders();
     const settings = await store(STORES.settings, "readonly");
-    [this.proofs, this.revocations, this.revocationsCheckedAt, this.round] = await Promise.all([
+    let pending: string[];
+    [this.proofs, this.revocations, this.revocationsCheckedAt, this.round, pending] = await Promise.all([
       wrap<StoredIdentityProof[] | undefined>(settings.get(KEY)).then(v => v ?? []),
       wrap<Revocation[] | undefined>(settings.get(REVOCATIONS)).then(v => v ?? []),
       wrap<number | undefined>(settings.get(REVOCATIONS_CHECKED_AT)).then(v => typeof v === "number" ? v : 0),
       wrap<LookupRound | undefined>(settings.get(REVOCATIONS_ROUND)).then(v => typeof v?.startedAt === "number" && Array.isArray(v.done) ? v : undefined),
+      wrap<unknown>(settings.get(WITHDRAWN_LOOKUPS)).then(v => Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : []),
     ]);
+    this.withdrawnLookups = new Set(pending);
     await providers;
   }
   /** Background work: republish revocations, look up the contacts' proofs for revocations. */
@@ -205,7 +228,14 @@ export class IdentityProofs {
     // A clock set back since then waits 12 h at most.
     const due = Math.min(REVOCATION_CHECK_MS, this.revocationsCheckedAt + REVOCATION_CHECK_MS - Date.now());
     this.lookUpIn(Math.max(60_000, due));
+    // A contact's proof withdrawn shortly before the last stop: its lookups after the withdraw start over.
+    for (const key of this.withdrawnLookups) {
+      const at = key.lastIndexOf("|");
+      this.afterWithdrawal(key.slice(0, at), key.slice(at + 1));
+    }
     every(AUTO_RECHECK_TICK_MS, AUTO_RECHECK_FIRST_MS, () => this.recheckDue());
+    // A contact's request whose challenge ended unanswered, with no request after it, leaves the timeline within a window.
+    every(IDENTITY_CHALLENGE_WINDOW * 1000, IDENTITY_CHALLENGE_WINDOW * 1000, () => this.expireChallenges());
     this.unlisten ??= whenDataKeyDropped(() => this.forgetSeeds());
   }
   /** The network is back: a revocation lookup that could not run, and a revocation not published offline, go now. */
@@ -239,6 +269,12 @@ export class IdentityProofs {
     this.stops++;
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
+    for (const { timer } of this.redrawTimers.values()) clearTimeout(timer);
+    this.redrawTimers.clear();
+    // Every chat's exchange ends as if its link closed: no pacing timer outlives the engine, and a start after this
+    // greets each chat again when its link is ready.
+    for (const x of this.exchanges.values()) x.stop();
+    this.greeted.clear();
     this.lookupTimer = undefined;
     // The lookup under way ends here: what it read since its last write is kept for the next start.
     this.saveRound();
@@ -323,7 +359,7 @@ export class IdentityProofs {
 
   private async local(id: string): Promise<LocalIdentityProof | undefined> {
     const p = this.proofs.find(x => identityStatement(x.binding).id === id);
-    return p && { statement: identityStatement(p.binding), evidence: p.evidence, seed: await this.seedOf(id, p.seed) };
+    return p && { statement: identityStatement(p.binding), evidence: p.evidence, seed: await this.seedOf(id, p.seed), account: p.verified.subject };
   }
 
   // -- the profile's proofs --------------------------------------------------------------------
@@ -505,7 +541,8 @@ export class IdentityProofs {
   }
   /**
    * The contacts' proofs due for an automatic re-check (`AUTO_RECHECK_AFTER_S`), the longest unchecked first, as many
-   * at a time as keep up with them (`AUTO_RECHECK_SPREAD_TICKS`), one after the other a few seconds apart. A proof whose
+   * at a time as keep up with them (`AUTO_RECHECK_SPREAD_TICKS`), one after the other a few seconds apart, and no more
+   * an hour of a provider's than its `recheck.perHour`. A proof whose
    * record or key is gone shows unconfirmed with the reason, as after "Check again"; one whose server could not be reached (or a network that went away meanwhile) is left as it was and backs off.
    */
   async recheckDue(): Promise<void> {
@@ -521,12 +558,19 @@ export class IdentityProofs {
         due.push({ linkId, r });
       }
     }
-    const batch = Math.min(AUTO_RECHECK_MAX_BATCH, Math.max(AUTO_RECHECK_BATCH, Math.ceil(due.length / AUTO_RECHECK_SPREAD_TICKS)));
+    let batch = Math.min(AUTO_RECHECK_MAX_BATCH, Math.max(AUTO_RECHECK_BATCH, Math.ceil(due.length / AUTO_RECHECK_SPREAD_TICKS)));
     let first = true;
-    for (const { linkId, r } of due.sort((a, b) => a.r.checkedAt - b.r.checkedAt).slice(0, batch)) {
+    for (const { linkId, r } of due.sort((a, b) => a.r.checkedAt - b.r.checkedAt)) {
+      if (batch === 0) return;
+      // A provider whose server limits lookups per IP: past its hour's share, its proofs wait for a later time.
+      const perHour = this.providers().find(p => p.id === r.binding.provider)?.recheck?.perHour;
+      const recent = perHour === undefined ? undefined : (this.recheckedAt.get(r.binding.provider) ?? []).filter(t => t > Date.now() - 3_600_000 && t <= Date.now());
+      if (recent && recent.length >= perHour!) continue;
+      batch--;
       if (!first && !await this.recheckPause(AUTO_RECHECK_GAP_MS)) return;
       first = false;
       if (this.ended || !this.running || !this.host.online()) return;
+      if (recent) this.recheckedAt.set(r.binding.provider, [...recent, Date.now()]);
       const key = `${linkId}|${r.id}`;
       try {
         await this.exchange(linkId)?.recheck(r.id, { keepUnavailable: true });
@@ -545,6 +589,13 @@ export class IdentityProofs {
       this.wakeRecheck = () => { clearTimeout(timer); this.wakeRecheck = undefined; resolve(false); };
     });
   }
+  /** Every chat's challenges whose window ended unanswered, and their verifying lines (`IdentityExchange.expire`). */
+  async expireChallenges(): Promise<void> {
+    for (const linkId of this.host.linkIds()) {
+      if (this.ended || !this.running) return;
+      if (this.host.ledger(linkId)?.challenges.length) await this.exchange(linkId)?.expire().catch(() => {});
+    }
+  }
   /** The 12 h lookup's wait between two reads, or for the budget: false when `stop` ended it. */
   private lookupPause(ms: number): Promise<boolean> {
     return new Promise(resolve => {
@@ -556,20 +607,42 @@ export class IdentityProofs {
   private revocable(r: ReceivedIdentity): boolean {
     return r.status !== "revoked" && Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity) > now();
   }
-  /** A proof the contact just withdrew: looked up for its revocation a few times (`WITHDRAWN_REVOCATION_TRIES_MS`). */
-  private afterWithdrawal(linkId: string, id: string, tries: readonly number[] = WITHDRAWN_REVOCATION_TRIES_MS): void {
-    const [wait, ...rest] = tries;
-    if (wait === undefined) return;
-    const timer = setTimeout(() => {
-      this.timers = this.timers.filter(t => t !== timer);
-      const r = this.host.ledger(linkId)?.received.find(x => x.id === id);
-      if (!r || r.status !== "withdrawn" || !this.revocable(r)) return;
-      void (async () => {
-        const next = this.host.online() ? await this.exchange(linkId)?.recheck(id, { revocationOnly: true }).catch(() => undefined) : undefined;
-        if (next?.status !== "revoked") this.afterWithdrawal(linkId, id, rest);
-      })();
-    }, wait);
-    this.timers.push(timer);
+  /**
+   * A proof the contact just withdrew: looked up for its revocation a few times (`WITHDRAWN_REVOCATION_TRIES_MS`). Kept
+   * (`WITHDRAWN_LOOKUPS`) until they end, so a stop before then has them start over at the next start, not wait 12 h.
+   */
+  private afterWithdrawal(linkId: string, id: string): void {
+    const key = `${linkId}|${id}`, run = {}, stops = this.stops;
+    this.withdrawalRuns.set(key, run);
+    if (!this.withdrawnLookups.has(key)) { this.withdrawnLookups.add(key); this.saveWithdrawnLookups(); }
+    // A stop since keeps it for the next start; a newer withdraw of the same proof has its own run.
+    const current = () => this.stops === stops && this.withdrawalRuns.get(key) === run;
+    const end = () => {
+      this.withdrawalRuns.delete(key);
+      if (this.withdrawnLookups.delete(key)) this.saveWithdrawnLookups();
+    };
+    const next = ([wait, ...rest]: readonly number[]) => {
+      if (wait === undefined) return end();
+      const timer = setTimeout(() => {
+        this.timers = this.timers.filter(t => t !== timer);
+        if (!current()) return;
+        const r = this.host.ledger(linkId)?.received.find(x => x.id === id);
+        if (!r || r.status !== "withdrawn" || !this.revocable(r)) return end();
+        void (async () => {
+          const found = this.host.online() ? await this.exchange(linkId)?.recheck(id, { revocationOnly: true }).catch(() => undefined) : undefined;
+          if (!current()) return;
+          if (found?.status === "revoked") end(); else next(rest);
+        })();
+      }, wait);
+      this.timers.push(timer);
+    };
+    next(WITHDRAWN_REVOCATION_TRIES_MS);
+  }
+  /** Not waited on, as `saveRound`: the writes keep their order. */
+  private saveWithdrawnLookups(): void {
+    if (this.ended) return;
+    const keys = [...this.withdrawnLookups];
+    void transact([STORES.settings], stores => { stores[STORES.settings].put(keys, WITHDRAWN_LOOKUPS); }).catch(() => {});
   }
 
   /** Every engine state builds these: each chat's ledger is read once for all the proofs, not once per proof. */
@@ -700,6 +773,22 @@ export class IdentityProofs {
     this.exchanges.get(linkId)?.stop();
     this.exchanges.delete(linkId);
     this.errors.delete(linkId);
+    this.redrawAt(linkId, undefined);
+  }
+
+  /** Has the chat's view built again at `at` (s): nothing stored changes when a proof expires, so nothing else would. */
+  private redrawAt(linkId: string, at: number | undefined): void {
+    const armed = this.redrawTimers.get(linkId);
+    if (armed?.at === at) return;
+    if (armed) clearTimeout(armed.timer);
+    this.redrawTimers.delete(linkId);
+    if (at === undefined || !this.host.redraw) return;
+    const timer = setTimeout(() => {
+      this.redrawTimers.delete(linkId);
+      if (at * 1000 > Date.now()) this.redrawAt(linkId, at);
+      else this.host.redraw?.(linkId);
+    }, Math.min(at * 1000 - Date.now(), MAX_TIMER_MS));
+    this.redrawTimers.set(linkId, { at, timer });
   }
 
   linkView(linkId: string, supported: boolean): LinkIdentitiesView | undefined {
@@ -707,21 +796,30 @@ export class IdentityProofs {
     if (!ledger) return undefined;
     const { mine, theirs } = this.host.keys(linkId);
     const t = now();
-    return {
+    // The soonest a proof shown expires or its re-check falls due: the view is built again then.
+    let next = Infinity;
+    const view: LinkIdentitiesView = {
       support: supported,
       contactProviders: supported ? this.exchanges.get(linkId)?.contactProviders?.slice() : undefined,
       shared: ledger.shared.map(ownRefusal),
       received: ledger.received.map(r => {
         const provider = this.providers().find(p => p.id === r.binding.provider);
         const status = receivedIdentityStatus(r, theirs, mine, t);
+        const ends = Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity);
+        if ((status === "verified" || status === "unconfirmed") && ends > t) next = Math.min(next, ends);
+        const due = provider?.recheck && r.checkedAt <= t ? r.checkedAt + provider.recheck.afterSeconds : Infinity;
+        if (due > t) next = Math.min(next, due);
         const publicProfile = status === "verified" ? this.host.publicProfile?.(r.binding.provider, r.verified.subject) : undefined;
+        // A check stored while this device's clock ran ahead reads as done now, not at that future date.
         return { id: r.id, provider: r.binding.provider, subject: r.verified.subject, verified: r.verified, display: r.display,
-          status, verifiedAt: r.verifiedAt, checkedAt: r.checkedAt,
+          status, verifiedAt: Math.min(r.verifiedAt, t), checkedAt: Math.min(r.checkedAt, t),
           expiresAt: Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity), error: r.error,
           recheckDue: !!provider?.recheck && (r.checkedAt > t || t - r.checkedAt >= provider.recheck.afterSeconds),
           ...(publicProfile ? { publicProfile } : {}) };
       }),
       error: this.errors.get(linkId),
     };
+    this.redrawAt(linkId, next === Infinity ? undefined : next);
+    return view;
   }
 }

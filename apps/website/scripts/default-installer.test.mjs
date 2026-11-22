@@ -42,6 +42,21 @@ test("an Android phone gets the release's APK, an iPhone nothing", () => {
   assert.equal(defaultInstaller("Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) Mobile/15E148 Safari/604.1", "iPhone", undefined, 5), undefined);
 });
 
+// The APK is arm64-v8a for Android 8.0 and up (docs/ANDROID.md): a phone it can't install on is not led to it.
+test("an Android phone the APK can't install on gets nothing marked", () => {
+  // A 32-bit ARM kernel (armv7l): no arm64 code runs there.
+  assert.equal(defaultInstaller(firefox("Android 9; Mobile"), "Linux armv7l", undefined, 5), undefined);
+  assert.equal(defaultInstaller(chrome("Linux; Android 10; K").replace("Safari", "Mobile Safari"), "Linux armv7l", undefined, 5), undefined);
+  // Older than Android 8.0, where the browser says so (Chrome's reduced userAgent always says "Android 10").
+  assert.equal(defaultInstaller(firefox("Android 7.1.2; Mobile"), "Linux aarch64", undefined, 5), undefined);
+  assert.equal(defaultInstaller("Mozilla/5.0 (Linux; U; Android 6.0.1; en-us; SM-G920F) AppleWebKit/537.36 Mobile Safari/537.36", "", undefined, 5), undefined);
+  // A 32-bit browser on a 64-bit phone (armv8l), an emulator on its x86_64 host (the site's phone tests), and no
+  // platform at all, still get it.
+  assert.equal(defaultInstaller(chrome("Linux; Android 10; K").replace("Safari", "Mobile Safari"), "Linux armv8l", undefined, 5), "androidApk");
+  assert.equal(defaultInstaller(chrome("Linux; Android 10; K").replace("Safari", "Mobile Safari"), "Linux x86_64", undefined, 5), "androidApk");
+  assert.equal(defaultInstaller(firefox("Android 8.0; Mobile"), "", undefined, 5), "androidApk");
+});
+
 test("the APK's name and link follow the version, as the Release workflow names it", () => {
   assert.equal(assetNames("1.10.0").androidApk, "ghostly-1.10.0-android-arm64.apk");
   assert.equal(downloads("2.0.1").androidApk, "https://github.com/MiguelMedeiros/ghostly/releases/download/v2.0.1/ghostly-2.0.1-android-arm64.apk");

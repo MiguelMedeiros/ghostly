@@ -2,6 +2,7 @@ import { getStorageProfile } from "./storage";
 import { markFirstStart } from "./nameStep";
 import { cleanOwnName } from "./ownName";
 import { sizeIn } from "./sizeText";
+import { textSizeOf, type TextSize } from "./textSize";
 import type { Translate } from "../locales/translate";
 
 export type ColorScheme = "dark" | "light" | "system";
@@ -44,6 +45,8 @@ export interface AppSettings {
   /** Turns animations off, on top of the system's own preference. */
   reduceMotion: boolean;
   chatListDensity: ChatListDensity;
+  /** How large the chat's words are (lib/textSize.ts), on this device only. */
+  textSize: TextSize;
   /**
    * Where the layout has a side list (a wide window): the list folded to a rail of the chats' pictures, for more room
    * for the open chat. Kept on this device only; a phone's list is unchanged.
@@ -97,6 +100,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultNickname: "",
   reduceMotion: false,
   chatListDensity: "compact",
+  textSize: "default",
   chatListCollapsed: false,
   checkForUpdates: true,
   linkPreviews: true,
@@ -152,6 +156,7 @@ export function loadSettings(): AppSettings {
       // Cleaned as it is saved now: a name kept before, of spaces or zero-width characters only, is no name.
       defaultNickname: typeof parsed.defaultNickname === "string" ? cleanOwnName(parsed.defaultNickname) : DEFAULT_SETTINGS.defaultNickname,
       chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
+      textSize: textSizeOf(parsed.textSize),
       chatListCollapsed: parsed.chatListCollapsed === true,
       linkPreviews: parsed.linkPreviews !== false,
       translateMessages: parsed.translateMessages === true,
@@ -182,9 +187,7 @@ export function formatBytes(bytes: number, t?: Translate): string {
   return sizeIn(bytes / Math.pow(1024, i), units[i], t, 2);
 }
 
-export const APP_WEBSITE = "https://github.com/MiguelMedeiros/ghostly";
-/** Where every client sends someone who installs a new version by hand. */
-export const RELEASES_URL = `${APP_WEBSITE}/releases/latest`;
+export { APP_WEBSITE, RELEASES_URL } from "./appWebsite";
 export const APP_LICENSE = "MIT";
 
 export function saveSettings(settings: AppSettings): void {
@@ -336,14 +339,6 @@ export async function verifyPassword(
   return constantTimeEqual(await pbkdf2(password, salt, iterations), expected);
 }
 
-export const TIMEOUT_OPTIONS = [
-  { value: 1, label: "1 minute" },
-  { value: 5, label: "5 minutes" },
-  { value: 15, label: "15 minutes" },
-  { value: 30, label: "30 minutes" },
-  { value: 60, label: "1 hour" },
-] as const;
-
 export const LANGUAGE_OPTIONS: { value: Language; label: string; native: string }[] = [
   { value: "en", label: "English", native: "English" },
   { value: "pt", label: "Portuguese", native: "Português" },
@@ -353,12 +348,6 @@ export const LANGUAGE_OPTIONS: { value: Language; label: string; native: string 
   { value: "zh", label: "Chinese", native: "中文" },
   { value: "ja", label: "Japanese", native: "日本語" },
   { value: "ar", label: "Arabic", native: "العربية" },
-];
-
-export const THEME_OPTIONS: { value: Theme; label: string }[] = [
-  { value: "dark", label: "Dark" },
-  { value: "light", label: "Light" },
-  { value: "system", label: "System" },
 ];
 
 export const COLOR_SCHEME_OPTIONS: { value: ColorScheme; labelKey: string }[] = [

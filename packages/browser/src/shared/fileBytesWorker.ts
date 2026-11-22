@@ -21,10 +21,12 @@ export type WorkerRequest = { n: number; space: string } & (
   | { op: "probe" }
   | { op: "stage"; id: string; source: Blob }
   | { op: "append"; id: string; offset: number; bytes: Uint8Array }
-  | { op: "flush" | "close" | "size" | "digest" | "remove"; id: string }
+  | { op: "flush" | "size" | "digest" | "remove"; id: string }
+  | { op: "close"; id: string; flush?: boolean }
   | { op: "truncate"; id: string; size: number }
   | { op: "read"; id: string; offset: number; length: number }
-  | { op: "removeWhere"; prefix: string });
+  | { op: "removeWhere"; prefix: string }
+  | { op: "dropSpace" });
 
 /** `name`: the error's own name when it says what happened (`QuotaExceededError`: no room left). */
 export type WorkerReply = { n: number } & ({ ok: true; value?: unknown } | { ok: false; error: string; name?: string } | { progress: number });
@@ -70,12 +72,12 @@ async function handle(space: string, id: string, create = true): Promise<SyncHan
   return opened;
 }
 
-function release(space: string, id: string): void {
+function release(space: string, id: string, flush = true): void {
   const key = `${space}/${id}`;
   const held = open.get(key);
   if (!held) return;
   open.delete(key);
-  try { held.flush(); } finally { held.close(); }
+  try { if (flush) held.flush(); } finally { held.close(); }
 }
 
 function readAt(sync: SyncHandle, offset: number, length: number): Uint8Array {
@@ -188,7 +190,7 @@ async function runRequest(request: WorkerRequest): Promise<{ value?: unknown; tr
       return {};
     }
     case "flush": open.get(`${space}/${request.id}`)?.flush(); return {};
-    case "close": release(space, request.id); return {};
+    case "close": release(space, request.id, request.flush !== false); return {};
     case "size": {
       const held = open.get(`${space}/${request.id}`);
       if (held) return { value: held.getSize() };
@@ -242,6 +244,17 @@ async function runRequest(request: WorkerRequest): Promise<{ value?: unknown; tr
       const names: string[] = [];
       for await (const name of (dir as unknown as { keys(): AsyncIterable<string> }).keys()) if (name.startsWith(request.prefix)) names.push(name);
       for (const name of names) { release(space, name); await dir.removeEntry(name).catch(() => {}); }
+      return {};
+    }
+    case "dropSpace": {
+      // After every request on its files, and with their handles closed: a file left open (one a move was writing when
+      // it stopped) is locked, and the folder's removal failed on it, leaving every file not yet removed in place.
+      if (!SPACE.test(space)) throw new Error("Invalid profile space");
+      const prefix = `${space}/`;
+      await Promise.all([...queues].filter(([key]) => key.startsWith(prefix)).map(([, run]) => run));
+      for (const key of [...open.keys()]) if (key.startsWith(prefix)) release(space, key.slice(prefix.length));
+      const root = await navigator.storage.getDirectory().then((dir) => dir.getDirectoryHandle("ghostly-files")).catch(() => null);
+      await root?.removeEntry(space, { recursive: true }).catch((error: { name?: string }) => { if (error?.name !== "NotFoundError") throw error; });
       return {};
     }
   }

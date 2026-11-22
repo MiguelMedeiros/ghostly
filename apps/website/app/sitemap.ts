@@ -22,6 +22,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     entry("/wisps", 0.8),
     entry("/roadmap", 0.8),
     ...references.map((ref) => entry(`/wisps/${ref.slug}`, 0.6)),
+    entry("/android", 0.8),
     entry("/cli", 0.7),
     entry("/developers/agents", 0.7),
     entry("/developers/agents/threat-model", 0.6),

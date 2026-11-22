@@ -141,3 +141,13 @@ test("in Arabic an invoice card's amount reads ⚡, the number, then its unit, f
   expect(words.number.left - words.sats.right).toBeGreaterThanOrEqual(2);
   expect(words.test.right).toBeLessThanOrEqual(words.sats.left);
 });
+
+test("in Arabic the Ghostly ID card's One key per chat keeps the app's font, so its letters stay joined", { tag: ["@feature:app.i18n", "@feature:proofs.ghostly-card"] }, async ({ peer }) => {
+  const { page } = await peer("ar-id-card", { mobile: true });
+  await useLanguage(page, "ar");
+  await page.getByTestId("mobile-tab-identities").click();
+  // A monospace font draws Arabic letters apart in fixed cells ("م ح ا د ث ة"); the words take the app's font.
+  const subject = page.locator(".id-card-subject:visible").filter({ hasText: "مفتاح لكل محادثة" }).first();
+  await expect(subject).toBeVisible();
+  expect(await subject.evaluate((element) => getComputedStyle(element).fontFamily)).not.toMatch(/mono/i);
+});

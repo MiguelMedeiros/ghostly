@@ -1,4 +1,4 @@
-import type { CommunityMessageFrame, DiscoveryStatus, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { CommunityMessageFrame, DiscoveryStatus, GroupEditFrame, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, PersonStatus, Presence, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -242,9 +242,10 @@ export interface StoredGroup {
    * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
    * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, which carry my
    * signed leave (`bye`) to the admin. `bye` is kept without hubs too: opening the group's link again takes it along
-   * (`owedBye`).
+   * (`owedBye`). An admin that leaves keeps its `farewells` here too, and the edges to them: `heard`, when the admin my
+   * leave went to took it, and the tombstone stays for those farewells alone.
    */
-  left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
+  left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame; heard?: number };
   /**
    * Left while the admin was away, then back by the group's link before it heard the leave: the signed leave of my old
    * key, said to the admin on my new key's edge, so it takes the old key out (it was in every roster twice for good,
@@ -297,16 +298,21 @@ export interface StoredGroup {
  */
 export interface GroupLive {
   top: string;
-  state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "alone" | "provisional" | "nicks" | "unsaid">;
+  state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "owed" | "alone" | "provisional" | "nicks" | "unsaid">;
   came?: StoredGroup["came"];
 }
 
 /**
- * What a pin or a deletion for everyone changes of a private group's record, in a row of its own (settings store,
- * `groupLightKey`), apart from `GroupLive` so that a message does not write them too: there while the record is behind
- * on them, deleted each time the record is written whole (`engine/groupRows.ts`).
+ * What a pin, a deletion for everyone, a change of hubs or a member's edit changes of a private group's record, in a
+ * row of its own (settings store, `groupLightKey`), apart from `GroupLive` so that a message does not write them too:
+ * there while the record is behind on them, deleted each time the record is written whole (`engine/groupRows.ts`).
+ * `hubs`: the record's (`StoredGroup.hubs`); absent in a row from before it was kept here, where the record's count.
+ * `large`: the members noted in `StoredGroup.large` since the record was written, which the record's are added to.
+ * `relayEdits`: the state's (`GroupState.relayEdits`); absent in rows from before it was kept here, whose record holds
+ * them. `of`: what the record held of them when the row was written (a hash); a record that holds something else now
+ * was written by an app from before since, and counts. Absent in rows from before it.
  */
-export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[] }
+export interface GroupLight { pin?: StoredPin; removedIds: string[]; removals: Removal[]; hubs?: string[]; large?: string[]; relayEdits?: GroupEditFrame[]; of?: string }
 
 export interface GroupMemberView {
   key: string;
@@ -409,8 +415,10 @@ export interface GroupView {
    * while that chat was up: the answer is offered again. Through a link (`viaLink`): nobody answered it for an hour of
    * this run (`JOIN_GIVE_UP_MS`), so the knocks stopped; accepting knocks again.
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
+   * `kept`: an invitation to a group this device was in (removed, or left): that group and its history are kept under it,
+   * and come back if it is declined.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; kept?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
   /**
    * Other groups that came under this one's id (a contact's invitation, or a link opened) while it was here: kept beside
    * it until the person picks the real one (`keepGroup`, `switchGroup` with the other's `linkId` or `link`).
@@ -439,6 +447,12 @@ export interface GroupView {
   canSend: boolean;
   /** The group's picture (a JPEG data URL the engine checked), set by its admin; absent for none. */
   picture?: string;
+  /**
+   * The node that forwards a community group's calls, as its admin's statement names it (WISP 602); absent for none.
+   * `e2ee: 1` when the group asks for sealed call media (WISP 602 § End-to-end encryption): an app that cannot seal
+   * does not join.
+   */
+  call?: { sfu: string; e2ee?: 1 };
   /**
    * A private group past 16 members that runs on hubs (WISP 902 · Group Mesh § Hubs): `hub` when I am one. Absent for
    * the full mesh.
@@ -606,6 +620,8 @@ export interface PendingMelt {
   /** Set when the invoice pays a contact's payment request. */
   paymentId?: string;
   createdAt: number;
+  /** When the mint answered the melt request itself (left pending): no request of it can land any more, so UNPAID is final. */
+  answeredAt?: number;
   /** Came with a restored copy of the profile: its change is as old as the copy, and is checked like the copy's ecash. */
   restored?: boolean;
 }
@@ -796,7 +812,10 @@ export interface WalletTx {
   amount: number;
   fee: number;
   note?: string;
-  /** `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. Absent on older records. */
+  /**
+   * `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. `lightning-out`, and
+   * the `fee` of a failed one: its melt quote, so a payment left pending on screen knows how it ended. Absent on older records.
+   */
   quote?: string;
 }
 
@@ -851,6 +870,12 @@ export interface WalletAwaitingView {
   paymentId?: string;
   /** Lightning: the card it goes through. */
   card?: string;
+  /**
+   * `sent`: its bubble, with the chat's Take it back, is in no chat that can be opened: the chat it went in was deleted
+   * since (or joined again by the same invite, without its old history), or its group is gone. The Wallet page offers
+   * it instead. A group member who left, whose edge closed, leaves the bubble in the group: not this.
+   */
+  chatGone?: true;
 }
 
 /**
@@ -869,9 +894,10 @@ export interface WalletInstanceView {
   receive?: boolean;
   /**
    * At home on another device (WISP 06 § Wallets that stay home): that device's name ("" when this device does not know
-   * it), and when its coins expire (Ark, Bark). It is never opened here, and takes no payment here.
+   * it), its signing key (what Remove <device> matches it by), and when its coins expire (Ark, Bark). It is never
+   * opened here, and takes no payment here.
    */
-  home?: { device: string; expiresAt?: number };
+  home?: { device: string; key?: string; expiresAt?: number };
 }
 
 /**
@@ -1158,13 +1184,22 @@ export interface ReactionNote {
   /** Who reacted: `me`, `peer`, or a group member's key. */
   by: string;
   emoji: string;
-  /** A line of the message it went to. */
+  /** A line of the message it went to: an app card's never with its bundle's link (`withoutAppLink`). */
   snippet: string;
   /** The message was mine. */
   mine: boolean;
   /** The message's id here: an edit of it changes `snippet`. */
   message?: string;
+  /**
+   * A group's note: what the message is where its text is only an English fallback, so the chat list (which holds no
+   * group's rows) says it in the reader's language: a voice message's or a video's length (milliseconds), an app card's
+   * name. Absent for any other message, on a 1:1 chat's (the list reads its row), and on notes made before it.
+   */
+  kind?: ReactionNoteKind;
 }
+
+/** `ReactionNote.kind`: a voice message, a video, or an app card (WISP 405 § An app) by its ref, title and version. */
+export type ReactionNoteKind = { voice: number } | { video: number } | { app: { ref: string; title: string; version?: string } };
 
 /** How a message was edited (WISP 400 § Edits). */
 export interface MessageEdit {
@@ -1470,6 +1505,21 @@ export interface Settings {
    * nothing is said, and a contact's typing is still shown.
    */
   sendTyping?: boolean;
+  /**
+   * Whether paired contacts see when this profile is online (WISP 401 § Presence and status, "Share when I'm online").
+   * Absent means yes; off, no presence is said (a set status still is), and a contact's is still shown.
+   */
+  sharePresence?: boolean;
+  /**
+   * Whether a headless daemon running this profile (the CLI's `settings set daemonPresence true`) says it is active
+   * while it runs, as a page does on input. Absent means no: kept only while on. The apps never read it.
+   */
+  daemonPresence?: boolean;
+  /**
+   * The status this profile set (availability, emoji, text, until when), said to every paired contact whose app offers
+   * `status/1`. Set and cleared through `setOwnStatus`/`clearOwnStatus`, never a settings patch; this device's own.
+   */
+  ownStatus?: PersonStatus;
   /**
    * Whether files are downloaded without asking where the rules allow it (WISP 503: a group's voice messages, and its
    * files up to 8 MiB within 256 MiB a group). Absent means on; off, each waits for a Download.
@@ -1819,6 +1869,13 @@ export interface LinkView {
   callsUnavailable?: string | null;
   /** Paired 1:1 chats: the contact is typing now (`typing/1` on the live session). Absent otherwise. Never stored. */
   peerTyping?: boolean;
+  /**
+   * Paired 1:1 chats: the contact is online and shares it (`status/1`): active or idle. Absent otherwise; ends with the
+   * session. Never stored.
+   */
+  peerPresence?: Presence;
+  /** Paired 1:1 chats: the status the contact set, while it lasts (heard on a live session, kept until the engine stops). */
+  peerStatus?: PersonStatus;
   /** Paired 1:1 chats: this side's wake-up token for this chat (the push worker's table), when it shared its subscription. */
   wakeToken?: string;
   /** Paired 1:1 chats: the contact was told not to wake this side while the chat is muted (`setWakeMuted`). */

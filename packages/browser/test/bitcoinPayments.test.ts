@@ -206,6 +206,35 @@ it("a contact's txid is no proof: with a Bitcoin Core source, a request settles 
   expect(desk.payment("r1")).toMatchObject({ state: "settled", txid: paid });
 });
 
+it("a Bitcoin Core source at home on another device is never opened here: no answer to a contact's ask, no address, no request", async () => {
+  const { BitcoinService } = await import("../src/engine/paymentAdapters/providers/bitcoinService");
+  const { BitcoindOnchain, bitcoindRpc } = await import("../src/engine/paymentAdapters/providers/bitcoind");
+  const { MockBitcoind } = await import("./helpers/mockBitcoind");
+  const { setAwayWallets } = await import("../src/engine/paymentAdapters/away");
+  const node = new MockBitcoind();
+  const config = { url: "http://127.0.0.1:18443", wallet: "ghostly", user: "u", password: "test-only-password" };
+  const connects = vi.fn();
+  const descriptor = { ...bitcoindRpc, platforms: ["web" as const], create: (_s: unknown, host: { mode: "testnet" | "mainnet"; signal?: AbortSignal }) => { connects(); return BitcoindOnchain.connect(config, host.mode, node.transport, host.signal); } };
+  const make = () => new BitcoinService("testnet", () => [descriptor], () => ({ platform: "web", cashu: {} as CashuWallet }), vi.fn());
+  const home = make();
+  await home.start(); await home.sources.set("bitcoind", { url: config.url, user: config.user, password: config.password }); await home.stop();
+  // The profile moved to this device; the wallet stayed at home on the Desktop.
+  setAwayWallets(new Map([["bitcoin:testnet", "Desktop"]]));
+  onTestFinished(() => setAwayWallets(new Map()));
+  const service = make();
+  await service.start();
+  connects.mockClear();
+  const { host, sent } = setup();
+  const desk = new PaymentDesk({} as CashuWallet, host, undefined, undefined, undefined, undefined, service);
+  await desk.start();
+  await desk.onPaymentAsk("l", { id: "ask_000001", timestamp: 1, amount: { value: "900", asset: "sat" }, method: "bitcoin", network: "testnet" });
+  expect(sent, "the contact's ask gets no request with the wallet's address").toEqual([]);
+  await expect(desk.request({ linkId: "l", amount: 900, timestamp: 2, method: "bitcoin", network: "testnet" })).rejects.toThrow("Bitcoin can't be used here. Use it on Desktop.");
+  await expect(service.receiveAddress()).rejects.toThrow("Bitcoin can't be used here. Use it on Desktop.");
+  expect(connects, "never connected here").not.toHaveBeenCalled();
+  expect(service.sources.active).toBeUndefined();
+});
+
 it("replays a pending on-chain request and a payment's receipt when the contact reconnects", async () => {
   seed("payments", [
     { id: "r1", linkId: "l", kind: "request", direction: "out", amount: 10, unit: "sat", state: "pending", createdAt: 1, target: target() },

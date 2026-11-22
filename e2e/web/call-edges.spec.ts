@@ -184,6 +184,43 @@ async function blockMedia(p: Peer): Promise<void> {
   });
 }
 
+/** Refuses the camera only, as a person who allows the microphone and blocks the camera: the microphone still works. */
+async function blockCamera(p: Peer): Promise<void> {
+  await p.page.evaluate(() => {
+    const md = navigator.mediaDevices;
+    const ask = md.getUserMedia.bind(md);
+    Object.defineProperty(md, "getUserMedia", {
+      configurable: true,
+      value: async (c?: MediaStreamConstraints) => {
+        if (c?.video) throw new DOMException("Permission denied", "NotAllowedError");
+        return ask(c);
+      },
+    });
+  });
+}
+
+test("a camera that is blocked turns a video call into a voice call, placed or answered", { tag: ["@feature:calls.media-blocked", "@feature:calls.video"] }, async ({ peer }) => {
+  const [alice, bob] = await linked(peer);
+  await blockCamera(bob);
+  const notice = bob.page.getByTestId("call-media-problem");
+
+  // Placing: it rang nothing at all, and said "the mic or camera".
+  await bob.page.getByTitle("Video call").click();
+  await expect(notice).toContainText("No access to the camera, so video is off");
+  await alice.page.getByTitle("Accept audio call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-status")).toHaveText(/\d:\d\d/);
+  await bob.page.getByTestId("call-hang-up").click();
+  for (const p of [alice, bob]) await noCall(p);
+  await callButtonsBack(alice);
+
+  // Answering: it hung up on both sides.
+  await alice.page.getByTitle("Video call").click();
+  await bob.page.getByTitle("Accept video call").click();
+  await expect(notice).toContainText("No access to the camera, so video is off");
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-status")).toHaveText(/\d:\d\d/);
+  await bob.page.getByTestId("call-hang-up").click();
+});
+
 test("on an installed iPhone a call's notice at the top of the chat is below the status bar, inside the screen", { tag: ["@feature:calls.media-blocked", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { mobile: true, viewport: { width: 375, height: 740 } })]);
   await linkLegacy(alice, bob);
@@ -211,13 +248,16 @@ test("a microphone that is blocked says so, and the caller stops ringing", { tag
   await expect(bob.page.getByText("Incoming audio call...")).toBeVisible();
   await bob.page.getByTitle("Accept audio call").click();
   await expect(bob.page.getByTestId("call-media-problem")).toHaveAttribute("data-problem", "denied");
-  await expect(bob.page.getByTestId("call-media-problem")).toContainText("No access to the mic or camera");
+  // A voice call asked for the microphone only: the notice names it, not "the mic or camera".
+  await expect(bob.page.getByTestId("call-media-problem")).toContainText("No access to the mic");
+  await expect(bob.page.getByTestId("call-media-problem")).not.toContainText("camera");
   for (const p of [alice, bob]) await noCall(p);
   for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call couldn't connect")).toBeVisible();
 
-  // Calling with it blocked: the same reason, and the chat's "started" line is not left alone.
+  // Calling with it blocked: the same reason (the video call asked for the microphone alone too, and that failed), and
+  // the chat's "started" line is not left alone.
   await bob.page.getByTitle("Video call").click();
-  await expect(bob.page.getByTestId("call-media-problem")).toBeVisible();
+  await expect(bob.page.getByTestId("call-media-problem")).toContainText("No access to the mic");
   await noCall(bob);
   await callButtonsBack(bob);
   await expect(chat(bob).getByText("Video call couldn't connect")).toBeVisible();

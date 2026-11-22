@@ -2,11 +2,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { appCardId } from "@ghostly/core";
+import { appCardId, checkStatusCard } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { reportAppFrames } from "../src/appEvents";
 import type { ServedApp } from "../src/appServe";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.api
 
 /** A served app in a chat, over a fake engine: what `app open` and `app close` ask of it, and what they refuse first. */
@@ -22,10 +23,11 @@ function fake({ mode = "daemon", apps = true, served = [CHESS] }: { mode?: strin
   dirs.push(dir);
   writeFileSync(join(dir, "apps.json"), JSON.stringify(served));
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [] }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [] }) as unknown as EngineState,
     appId: ({ linkId, ref }: { linkId: string; ref: string }) => ({ app: `id:${linkId}:${ref.split("/")[1]}` }),
     appOpen: vi.fn(async () => ({ app: "id" })),
     appClose: vi.fn(),
+    appsCloseOf: vi.fn(),
     appSend: vi.fn(async (): Promise<{ error: string | null }> => ({ error: null })),
     sendMessage: vi.fn(async (): Promise<{ error: string | null; refused?: boolean; messageId?: string }> => ({ error: null, messageId: "me_1" })),
   };
@@ -42,6 +44,15 @@ describe("app open", () => {
     expect(await callApi(ctx, "app.open", { chat: "Alice", ref: "chess" })).toEqual({ chat: "chat-one", app: REF, version: "2.3.0", card: "me_1", peer: null, live: false });
     expect(node.appOpen).toHaveBeenCalledWith({ linkId: "chat-one", ref: REF, version: "2.3.0" });
     expect(node.sendMessage).toHaveBeenCalledWith({ linkId: "chat-one", text: "", card: { kind: "app", id: appCardId(REF), ref: REF, digest: CHESS.digest, sequence: 4, title: "Chess", version: "2.3.0", url: CHESS.url, opened: true } });
+  });
+
+  it("leaves out a version longer than a card takes, as a person's app does, so the card still goes", async () => {
+    const version = "1.2.0-beta.3+20261106.a1b2c3d4e5f6a7b8";
+    const { ctx, node } = fake({ served: [{ ...CHESS, version }] });
+    expect(await callApi(ctx, "app.open", { chat: "Alice", ref: "chess" })).toMatchObject({ version, card: "me_1" });
+    const { card } = (node.sendMessage.mock.calls[0] as unknown as [{ card: Record<string, unknown> }])[0];
+    expect(card).not.toHaveProperty("version");
+    expect(checkStatusCard(card)).not.toHaveProperty("error");
   });
 
   it("sends no card when the contact's app is open there already, or with noCard", async () => {
@@ -90,6 +101,18 @@ describe("app close", () => {
     const { ctx, node } = fake();
     expect(await callApi(ctx, "app.close", { chat: "Alice", ref: "chess" })).toEqual({ chat: "chat-one", app: REF, closed: true });
     expect(node.appClose).toHaveBeenCalledWith({ linkId: "chat-one", ref: REF });
+  });
+
+  it("closes an app unserved on a daemon in every chat, which `app close` no longer names", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "app.open", { chat: "Alice", ref: "chess" });
+    expect(await callApi(ctx, "app.unserve", { ref: "chess" })).toMatchObject({ unserved: REF, apps: 0 });
+    expect(node.appsCloseOf).toHaveBeenCalledWith(REF);
+    await expect(callApi(ctx, "app.close", { chat: "Alice", ref: "chess" })).rejects.toMatchObject({ code: "not_found" });
+    // A one-shot holds no app open: it only changes the list.
+    const oneShot = fake({ mode: "one-shot" });
+    await callApi(oneShot.ctx, "app.unserve", { ref: "chess" });
+    expect(oneShot.node.appsCloseOf).not.toHaveBeenCalled();
   });
 });
 

@@ -30,6 +30,10 @@ import { TURN_MAX } from "./turnRecord";
  *   (`id`) when it goes on in a new session.
  * - `handoff-pake` frame 3 carries `c`, the proof of the context (see `handoffContext`), and `wrong` when the taker
  *   found the password wrong (so the giver counts it at once rather than at its timeout).
+ * - A file left for later (`handoff-file-request`) is answered as a part is sent: `handoff-data` pieces of the part
+ *   `file/<sha256>`, confirmed with `handoff-ack`, at most `HANDOFF_WINDOW` unconfirmed. The pieces are sealed with
+ *   `handoffFileKey` of the session, as the handoff that left the file has ended and its stream key with it. The request
+ *   says from which byte (`o`), so a dropped link goes on where it was.
  *
  * A session's stream key: `HKDF-SHA256(ikm = X25519(e_A, e_B) || K, salt = the session's transcript hash (32 bytes),
  * info = "ghostly-handoff-stream/1", 32)`. `K` is the password proof's key on a pull's first session and empty on a
@@ -428,11 +432,24 @@ export function readHandoffDone(frame: DeviceFrame): number | null {
   return frame.t === HANDOFF_DONE && isCount(frame.seq) ? frame.seq : null;
 }
 
-export const handoffFileRequestFrame = (sha256B64: string): DeviceFrame => ({ t: HANDOFF_FILE_REQUEST, sha256: sha256B64 });
+/** `handoff-file-request` (the active device): a file left for later, from byte `offset` (what it already wrote). */
+export const handoffFileRequestFrame = (sha256B64: string, offset = 0): DeviceFrame => ({ t: HANDOFF_FILE_REQUEST, sha256: sha256B64, ...(offset ? { o: offset } : {}) });
 export const handoffFileMissingFrame = (sha256B64: string): DeviceFrame => ({ t: HANDOFF_FILE_MISSING, sha256: sha256B64 });
-export function readHandoffFileFrame(frame: DeviceFrame): { missing: boolean; sha256: string } | null {
+export function readHandoffFileFrame(frame: DeviceFrame): { missing: boolean; sha256: string; offset: number } | null {
   if ((frame.t !== HANDOFF_FILE_REQUEST && frame.t !== HANDOFF_FILE_MISSING) || !isText(frame.sha256, DIGEST)) return null;
-  return { missing: frame.t === HANDOFF_FILE_MISSING, sha256: frame.sha256 };
+  if (frame.o !== undefined && (frame.t !== HANDOFF_FILE_REQUEST || !isCount(frame.o, MAX_PART))) return null;
+  return { missing: frame.t === HANDOFF_FILE_MISSING, sha256: frame.sha256, offset: (frame.o as number | undefined) ?? 0 };
+}
+
+/**
+ * The key the pieces of a file left for later are sealed with (see the top of this file): `HKDF-SHA256(ikm = D, salt =
+ * the session's transcript hash (32 bytes), info = "ghostly-handoff-file/1", 32)`. Both devices hold the device-set
+ * secret `D`; no password and no exchange of its own, as the person already moved the profile.
+ */
+export function handoffFileKey(d: Uint8Array, transcriptHash: string): Uint8Array {
+  if (d.length !== 32) throw new Error("A device-set secret is 32 bytes");
+  if (!HEX.test(transcriptHash)) throw new Error("A transcript hash is 64 lower-case hex digits");
+  return hkdf(sha256, d, hexToBytes(transcriptHash), utf8Encode("ghostly-handoff-file/1"), 32);
 }
 
 // -- versions -------------------------------------------------------------------------------------------------------
@@ -466,31 +483,38 @@ export interface HandoffAttempts {
 
 export const NO_ATTEMPTS: HandoffAttempts = { recent: [], total: 0 };
 
+/**
+ * When the lock-out ends by this clock, if it has not: one more than an hour away was stamped by a clock that ran ahead,
+ * and is over (WISP 06 § Failure table, clocks wrong by days).
+ */
+const lockedUntil = (attempts: HandoffAttempts | undefined, now: number): number | undefined =>
+  attempts?.until !== undefined && now < attempts.until && attempts.until - now <= HANDOFF_ATTEMPTS.hourMs ? attempts.until : undefined;
+
 /** Whether a device may try now: `refused` after 15 failures with no success, until the person lets it try again. */
 export function handoffAttemptAllowed(attempts: HandoffAttempts | undefined, now: number): "ok" | "locked-out" | "refused" {
   if (!attempts) return "ok";
   if (attempts.total >= HANDOFF_ATTEMPTS.total) return "refused";
-  if (attempts.until !== undefined && now < attempts.until) return "locked-out";
+  if (lockedUntil(attempts, now) !== undefined) return "locked-out";
   return "ok";
 }
-
 /**
  * One more failure. The giver counts an attempt as failed when it answers the first message, before it learns the
  * outcome, and takes it back on success: a taker that stops after the second message has used a try.
  */
 export function handoffAttemptFailed(attempts: HandoffAttempts | undefined, now: number): HandoffAttempts {
-  const recent = [...(attempts?.recent ?? []).filter((at) => now - at < HANDOFF_ATTEMPTS.hourMs), now];
+  // A failure stamped later than now (a clock that ran ahead) counts as now, so it still ages out.
+  const recent = [...(attempts?.recent ?? []).map((at) => Math.min(at, now)).filter((at) => now - at < HANDOFF_ATTEMPTS.hourMs), now];
   const total = (attempts?.total ?? 0) + 1;
   if (recent.length >= HANDOFF_ATTEMPTS.perHour) return { recent: [], total, until: now + HANDOFF_ATTEMPTS.hourMs };
-  return { recent, total, ...(attempts?.until !== undefined && now < attempts.until ? { until: attempts.until } : {}) };
+  const until = lockedUntil(attempts, now);
+  return { recent, total, ...(until !== undefined ? { until } : {}) };
 }
 
 /** A proof that held: the count starts again. */
 export const handoffAttemptSucceeded = (): HandoffAttempts => ({ recent: [], total: 0 });
 
 /** Seconds until a locked-out device may try again (for `handoff-busy`). */
-export const handoffRetryAfter = (attempts: HandoffAttempts | undefined, now: number): number =>
-  attempts?.until !== undefined && attempts.until > now ? Math.ceil((attempts.until - now) / 1000) : 0;
-
-/** Two digests compared. */
-export const sameDigest = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && bytesEqual(a, b);
+export const handoffRetryAfter = (attempts: HandoffAttempts | undefined, now: number): number => {
+  const until = lockedUntil(attempts, now);
+  return until !== undefined ? Math.ceil((until - now) / 1000) : 0;
+};

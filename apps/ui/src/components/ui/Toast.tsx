@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, type FocusEvent, type 
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import type { ToastMessage } from "../../hooks/useToast";
+import { ownDirection } from "../../lib/ownDirection";
 import { touchOnly } from "../../lib/touchOnly";
 
 /**
@@ -43,7 +44,8 @@ export function Toast({ toast, onDismiss, place = "screen", testId = "toast" }: 
           </span>
           <span className="min-w-0 flex-1 text-sm leading-snug text-text-primary break-words">
             {toast.title && <span data-testid={`${testId}-title`} className="block font-semibold">{toast.title}</span>}
-            <span data-testid={`${testId}-text`} className={`block ${toast.title ? "text-text-secondary" : ""}`}>{toast.text}</span>
+            {/* An English error shown as it came keeps its own direction in Arabic; the app's own words keep the page's. */}
+            <span data-testid={`${testId}-text`} dir={ownDirection(toast.text)} className={`block ${toast.title ? "text-text-secondary" : ""}`}>{toast.text}</span>
           </span>
           <button type="button" onClick={onDismiss} aria-label={t("common.close")} data-testid={`${testId}-close`}
             className="-me-1.5 -mt-1 grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-lg leading-none text-text-muted hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">

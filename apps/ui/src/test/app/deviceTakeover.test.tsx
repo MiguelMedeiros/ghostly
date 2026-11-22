@@ -12,6 +12,7 @@ import { bundleDidSeed, openProfileBackup, restoreOpenedBackup, sameIdentityProf
 import { markUncheckedRestore, restoreForTakeover } from "../../lib/restoreGuard";
 import { switchProfile } from "../../lib/profiles";
 import { fakeEngine, groupView } from "../fakeEngine";
+import { plainSpaces } from "../timeSpaces";
 import { renderApp } from "../render";
 // covers: devices.takeover, devices.restore-guard
 
@@ -19,7 +20,7 @@ import { renderApp } from "../render";
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
 
 const KEY = "A".repeat(43);
-const bundleDevices = { d: toBase64Url(new Uint8Array(32).fill(5)), set: [{ key: KEY, name: "MacBook" }, null], turn: 500, takeovers: 0 };
+const bundleDevices: { d: string; set: ({ key: string; name: string } | null)[]; turn: number; takeovers: number; active?: number } = { d: toBase64Url(new Uint8Array(32).fill(5)), set: [{ key: KEY, name: "MacBook" }, null], turn: 500, takeovers: 0, active: 0 };
 
 vi.mock("../../lib/profileBackup", async (original) => ({
   ...(await original<typeof import("../../lib/profileBackup")>()),
@@ -69,6 +70,25 @@ describe("restoring a backup where a device set exists (WISP 06)", () => {
     await user.click(screen.getByTestId("restore-guard-cancel"));
     expect(screen.queryByTestId("restore-guard")).toBeNull();
     expect(restoreOpenedBackup).not.toHaveBeenCalled();
+  });
+
+  it("with the record expired, names the device the bundle says was active, not the device in the first slot", async () => {
+    const PHONE = "B".repeat(43);
+    const { user, engine } = await pickBackup({ ...bundleDevices, set: [{ key: KEY, name: "Desktop" }, { key: PHONE, name: "Phone" }], active: 1 });
+    engine.on("deviceTurnPeek", () => ({ result: "none" }));
+    await user.click(screen.getByTestId("restore-go"));
+    expect(await screen.findByTestId("restore-guard-title")).toHaveTextContent("This profile is active on Phone");
+  });
+
+  it("with the record expired, a bundle from before it said which device was active names none", async () => {
+    const { active: _active, ...old } = bundleDevices;
+    const { user, engine } = await pickBackup({ ...old, set: [{ key: KEY, name: "Desktop" }, { key: "B".repeat(43), name: "Phone" }] });
+    engine.on("deviceTurnPeek", () => ({ result: "none" }));
+    await user.click(screen.getByTestId("restore-go"));
+    expect(await screen.findByTestId("restore-guard-title")).toHaveTextContent("This profile is active on another device");
+    expect(screen.getByTestId("restore-guard-title")).not.toHaveTextContent("Desktop");
+    await user.click(screen.getByTestId("restore-add-instead"));
+    expect(await screen.findByText(/On your other device, open Profile, then Add a device/)).toBeInTheDocument();
   });
 
   it("Add this device instead says where to start, and restores nothing", async () => {
@@ -146,13 +166,14 @@ describe("a replaced device (WISP 06 § User experience: \"Use here\", \"It wasn
 
   it("each kept copy says when it was kept, and its Discard says which copy it removes", async () => {
     const a = Date.UTC(2026, 9, 2, 9, 30), b = Date.UTC(2026, 10, 1, 18, 5);
-    const when = (at: number) => new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(at);
+    // Its spaces aside (timeSpaces.ts): the space before "AM"/"PM" is held by the app on one runtime and not another.
+    const when = (at: number) => plainSpaces(new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(at));
     renderApp(<ForkRows forks={["ghostly_a", "ghostly_b"]} keptAt={{ ghostly_a: a, ghostly_b: b }} />);
     const rows = await screen.findAllByTestId("settings-fork");
-    expect(rows.map((row) => row.textContent)).toEqual([expect.stringContaining(`Kept ${when(a)}`), expect.stringContaining(`Kept ${when(b)}`)]);
+    expect(rows.map((row) => plainSpaces(row.textContent!))).toEqual([expect.stringContaining(`Kept ${when(a)}`), expect.stringContaining(`Kept ${when(b)}`)]);
     expect(new Set(rows.map((row) => row.textContent)).size).toBe(2);
-    expect(screen.getAllByTestId("settings-fork-discard").map((button) => button.getAttribute("aria-label"))).toEqual([`Discard: Kept ${when(a)}`, `Discard: Kept ${when(b)}`]);
-    expect(screen.getByRole("button", { name: `Discard: Kept ${when(b)}` })).toBe(screen.getAllByTestId("settings-fork-discard")[1]);
+    expect(screen.getAllByTestId("settings-fork-discard").map((button) => plainSpaces(button.getAttribute("aria-label")!))).toEqual([`Discard: Kept ${when(a)}`, `Discard: Kept ${when(b)}`]);
+    expect(screen.getByRole("button", { name: (name) => plainSpaces(name) === `Discard: Kept ${when(b)}` })).toBe(screen.getAllByTestId("settings-fork-discard")[1]);
   });
 
   it("copies an older build kept without a time are numbered, and no two rows read the same", async () => {
@@ -259,6 +280,27 @@ describe("the forced takeover on the standby screen", () => {
     expect(screen.getByTestId("takeover-password")).toHaveFocus();
     expect(screen.getByTestId("takeover-password")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByTestId("takeover-go")).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("Escape and the × do nothing during the check, so its answer is still said in the dialog", async () => {
+    const { user, engine } = renderApp(<DeviceStandby gate={{ state: "superseded", activeDevice: "Phone" }} />);
+    let refuse = () => {};
+    engine.on("deviceTakeoverInfo", () => ({ offered: true, device: "Phone", copy: "frozen", password: true }));
+    engine.on("deviceTakeover", () => new Promise((_, reject) => { refuse = () => reject(new Error("takeover-password: Wrong password.")); }));
+    await user.click(await screen.findByTestId("takeover-open"));
+    await user.type(screen.getByTestId("takeover-password"), "not it");
+    await user.type(screen.getByTestId("takeover-name"), "Phone");
+    await user.click(screen.getByTestId("takeover-lost-no"));
+    await user.click(screen.getByTestId("takeover-go"));
+    expect(await screen.findByTestId("takeover-checking")).toBeInTheDocument();
+    screen.getByTestId("takeover-dialog").dispatchEvent(new Event("cancel", { cancelable: true }));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByTestId("takeover-dialog")).toBeInTheDocument();
+    act(() => refuse());
+    expect(await screen.findByTestId("takeover-error")).toHaveTextContent("Wrong password.");
+    // Once it answered, the × closes it again.
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByTestId("takeover-dialog")).toBeNull());
   });
 
   it("Use here keeps the keyboard on its button while the pull starts, and starts it once", async () => {

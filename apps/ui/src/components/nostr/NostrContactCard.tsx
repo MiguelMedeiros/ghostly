@@ -9,6 +9,7 @@ import { NostrPublishDialog } from "./NostrPublishDialog";
 import { externalLinkProps } from "../../lib/externalLink";
 import { problemLine } from "../../lib/problemText";
 import { initial } from "../../lib/initial";
+import { shownUrl } from "../../lib/parse";
 
 
 /**
@@ -55,10 +56,12 @@ export function NostrContactCard({ linkId, view, name, compact = false, turning 
           <div className="flex items-start gap-3">
             {profile.avatar ? <img src={profile.avatar} alt="" data-testid="nostr-profile-avatar" className="w-12 h-12 rounded-full object-cover shrink-0" /> : <div className="w-12 h-12 rounded-full bg-surface-alt shrink-0 grid place-items-center text-text-muted" aria-hidden="true">{initial(profile.name ?? "?")}</div>}
             <div className="min-w-0 flex-1 space-y-0.5">
-              <p className="text-sm text-text-primary break-words" data-testid="nostr-profile-name">{profile.name ?? t("identities.nostr.noName")}{profile.handle && <span className="text-xs text-text-muted"> · @{profile.handle}</span>}</p>
-              {profile.nip05 && <p data-testid="nostr-profile-nip05" className="break-all">{profile.nip05} <span className="text-[11px]">{t("identities.nostr.nip05Unchecked")}</span></p>}
-              {profile.about && <p className="whitespace-pre-wrap break-words text-text-secondary" data-testid="nostr-profile-about">{profile.about}</p>}
-              {profile.website && <a {...externalLinkProps(profile.website)} rel="noopener noreferrer nofollow" className="text-accent underline break-all">{profile.website}</a>}
+              {/* What the key published, each in its own direction: in the app's, an Arabic app drew "@alice" as "alice@". */}
+              <p className="text-sm text-text-primary break-words" data-testid="nostr-profile-name">{profile.name ? <bdi>{profile.name}</bdi> : t("identities.nostr.noName")}{profile.handle && <span className="text-xs text-text-muted"> · <bdi>@{profile.handle}</bdi></span>}</p>
+              {profile.nip05 && <p data-testid="nostr-profile-nip05" className="break-all"><span dir="ltr">{profile.nip05}</span> <span className="text-[11px]">{t("identities.nostr.nip05Unchecked")}</span></p>}
+              {profile.about && <p dir="auto" className="whitespace-pre-wrap break-words text-text-secondary" data-testid="nostr-profile-about">{profile.about}</p>}
+              {/* An address, left to right as the activity panel's: in Arabic a bare host's closing "/" was drawn first. */}
+              {profile.website && <a {...externalLinkProps(profile.website)} rel="noopener noreferrer nofollow" dir="ltr" data-testid="nostr-profile-website" className="text-accent underline break-all"><bdi>{shownUrl(profile.website)}</bdi></a>}
               {profile.hasPicture && !profile.avatar && <p className="text-[11px]">{t("identities.nostr.pictureHost")}</p>}
             </div>
           </div>
@@ -98,7 +101,7 @@ export function NostrContactCard({ linkId, view, name, compact = false, turning 
             <ul className="space-y-2" data-testid="nostr-notes">
               {notes.list.map(note => (
                 <li key={note.id} data-testid="nostr-note" className="rounded-lg border border-border p-2 space-y-0.5">
-                  <p className="text-text-primary whitespace-pre-wrap break-words">{note.content}</p>
+                  <p dir="auto" className="text-text-primary whitespace-pre-wrap break-words">{note.content}</p>
                   <p className="text-[11px]">{ago(note.createdAt)}{note.reply ? ` · ${t("identities.nostr.aReply")}` : ""}</p>
                 </li>
               ))}

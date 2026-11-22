@@ -21,13 +21,28 @@ const FREEZE_AFTER_MS = 15_000;
 /** The web peer's side of the file: its status line, and what shows once it is through. */
 type Side = { status: Locator; done: Locator };
 
-/** "12% of 209.7 MB · …": the percent; 100 once through; 0 while the line shows none ("Waiting for your contact…"). */
-async function percent({ status, done }: Side): Promise<number> {
-  if (await done.isVisible()) return 100;
-  const text = (await status.textContent({ timeout: 5_000 }).catch(() => "")) ?? "";
-  const match = /(\d+)\s*%/.exec(text);
-  return match ? Number(match[1]) : 0;
+/**
+ * Once its bytes are all across, the status line shows no percent ("Arrived, … is checking it… 209.7 MB" or "Checking
+ * the file… 209.7 MB", then the size) a while before the side's own mark that it is through. Read as 0 in
+ * that gap, a file at 98% looked as if it had gone back to nothing. How long that gap may last.
+ */
+const THROUGH_MS = 60_000;
+
+/** One reading: the percent, 100 once through; null while the line shows none (the gap above, or "Not sent"). */
+type Reading = { percent: number | null; line: string };
+
+/** "12% of 209.7 MB · …": the percent; 100 once through; null while the line shows none. */
+async function read({ status, done }: Side): Promise<Reading> {
+  if (await done.isVisible()) return { percent: 100, line: "through" };
+  const line = (await status.textContent({ timeout: 5_000 }).catch(() => "")) ?? "";
+  const match = /(\d+)\s*%/.exec(line);
+  return { percent: match ? Number(match[1]) : null, line };
 }
+
+/** The percent while under way: 0 before the line shows one ("Waiting for your contact…"). */
+const underWay = async (side: Side) => (await read(side)).percent ?? 0;
+
+const shown = ({ percent, line }: Reading) => percent === null ? `no percent ("${line}")` : `${percent}%`;
 
 /** Each of the app's processes (its own, the WebView's renderer) as Android has them: frozen or not, and its oom adj. */
 function processState(app: AndroidApp): string {
@@ -40,26 +55,32 @@ function processState(app: AndroidApp): string {
 
 /**
  * The app away for AWAY_MS while `side` (the web peer's, always in front) is read: the percent once Android would have
- * frozen it, at the end, and every reading.
+ * frozen it, at the end, and every reading. A line with no percent at the end, after the percents before it, is a
+ * file through its bytes or one that failed: only the side's mark that it is through, within THROUGH_MS, makes it 100.
+ * `late` is null when the line showed no percent already when Android would have frozen the app.
  */
-async function whileAway(app: AndroidApp, side: Side, away: () => void, back: () => void): Promise<{ late: number; to: number; seen: string[] }> {
+async function whileAway(app: AndroidApp, side: Side, away: () => void, back: () => void): Promise<{ late: number | null; to: number; seen: string[] }> {
   away();
   const seen: string[] = [];
-  let late = -1;
+  let late: number | null | undefined;
   for (let at = STEP_MS; at <= AWAY_MS; at += STEP_MS) {
     await new Promise((done) => setTimeout(done, STEP_MS));
-    const now = await percent(side);
-    if (late < 0 && at >= FREEZE_AFTER_MS) late = now;
-    seen.push(`${at / 1000}s ${now}% [${processState(app)}]`);
+    const now = await read(side);
+    if (late === undefined && at >= FREEZE_AFTER_MS) late = now.percent;
+    seen.push(`${at / 1000}s ${shown(now)} [${processState(app)}]`);
   }
-  const to = await percent(side);
+  const end = await read(side);
   back();
-  console.log(`  [away] from ${late}% at ${FREEZE_AFTER_MS / 1000}s to ${to}%: ${seen.join(", ")}`);
-  return { late, to, seen };
+  seen.push(`end ${shown(end)}`);
+  console.log(`  [away] from ${late === null ? "no percent" : `${late}%`} at ${FREEZE_AFTER_MS / 1000}s: ${seen.join(", ")}`);
+  if (end.percent === null) {
+    await expect.poll(() => side.done.isVisible(), { timeout: THROUGH_MS, message: `through after its percent went: ${seen.join(", ")}` }).toBe(true);
+  }
+  return { late: late ?? null, to: end.percent ?? 100, seen };
 }
 
 /** Moved on after Android would have frozen the app, or through. */
-const movedOn = ({ late, to }: { late: number; to: number }) => to === 100 || to > late;
+const movedOn = ({ late, to }: { late: number | null; to: number }) => to === 100 || (late !== null && to > late);
 
 test.beforeEach(({}, testInfo) => testInfo.setTimeout(8 * 60_000));
 
@@ -73,7 +94,7 @@ test("a file received keeps moving with the app in the background", { tag: ["@fe
   await chat(app.peer).getByTestId("file-bubble").last().getByTestId("file-accept").click({ timeout: 90_000 });
   const row = chat(web).locator("[data-message-row]").filter({ hasText: "to-android.bin" }).last();
   const side: Side = { status: row.getByTestId("file-status"), done: row.locator('[data-testid="message-delivery"][data-delivery="delivered"]') };
-  await expect.poll(() => percent(side), { timeout: 120_000 }).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => underWay(side), { timeout: 120_000 }).toBeGreaterThanOrEqual(1);
 
   const away = await whileAway(app, side, app.background, app.foreground);
   expect(movedOn(away), `moved on with the app in the background: ${away.seen.join(", ")}`).toBe(true);
@@ -93,7 +114,7 @@ test("a file sent keeps moving with the screen off", { tag: ["@feature:android.f
   const bubble = chat(web).getByTestId("file-bubble").filter({ hasText: "from-android.bin" }).last();
   await bubble.getByTestId("file-accept").click({ timeout: 90_000 });
   const side: Side = { status: bubble.getByTestId("file-status"), done: bubble.getByTestId("file-save") };
-  await expect.poll(() => percent(side), { timeout: 120_000 }).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => underWay(side), { timeout: 120_000 }).toBeGreaterThanOrEqual(1);
 
   const off = () => void app.adb.run("shell", "input", "keyevent", "KEYCODE_SLEEP");
   const on = () => {

@@ -198,12 +198,12 @@ export function UsageView({ card, at, time, marks }: { card: UsageCard; at: numb
         className="block w-full cursor-pointer rounded-t-[9px] px-3.5 pt-2.5 pb-1 text-start focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         <span className="flex min-w-0 items-center gap-2">
           <UsageGauge left={left} level={level} className="!w-6 !h-2" />
-          <bdi data-testid="status-card-title" className="min-w-0 flex-1 truncate text-[13.5px] font-semibold leading-5">{nameOf(card, t)}</bdi>
-          <span className={`shrink-0 text-[12px] font-medium leading-5 tabular-nums ${USAGE_TONE[level].text}`}>{t("cards.usage.left", { left })}</span>
+          <bdi data-testid="status-card-title" className="min-w-0 flex-1 truncate chat-text-card-heading font-semibold chat-text-leading-5">{nameOf(card, t)}</bdi>
+          <span className={`shrink-0 chat-text-card-small font-medium chat-text-leading-5 tabular-nums ${USAGE_TONE[level].text}`}>{t("cards.usage.left", { left })}</span>
         </span>
       </button>
       {open && <div id={detailsId} className="mx-3.5 mt-1 border-t border-text-primary/10 pb-1 pt-2"><UsageDetails entry={entry} now={now} /></div>}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 px-3.5 pb-2 pt-1 text-[11.5px] leading-4 text-text-secondary">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 px-3.5 pb-2 pt-1 chat-text-card-meta chat-text-leading-4 text-text-secondary">
         {resets && <span data-testid="status-card-resets" className="min-w-0 truncate">{resets}</span>}
         {(time || marks) && <span className="ms-auto flex shrink-0 items-center gap-[3px] text-[11px]">{time}{marks}</span>}
       </div>

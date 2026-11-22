@@ -1,0 +1,111 @@
+/* /android: page rules are prefixed an-; the blocks and copy lines are /cli's (cl-). */
+.an-hero {
+  padding-block: calc(var(--nav-h) + 64px) 56px;
+  background: radial-gradient(ellipse at 80% 20%, rgba(74, 222, 128, 0.06), transparent 60%);
+}
+.an-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 48px;
+  align-items: center;
+}
+.an-hero-copy {
+  display: grid;
+  gap: 20px;
+  justify-items: start;
+}
+.an-title {
+  font-size: clamp(40px, 6vw, 76px);
+}
+.an-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+.an-version {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 0.72em;
+  font-weight: 500;
+  opacity: 0.75;
+}
+.an-needs {
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+/* Only where a phone can scan it: a computer's screen. */
+.an-qr {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  max-width: 240px;
+  margin: 0;
+  padding: 22px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  text-align: center;
+}
+.an-qr-code {
+  width: 180px;
+  height: 180px;
+}
+
+.an-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+.an-step {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+}
+.an-step-n {
+  font-family: var(--font-jetbrains), ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--mint);
+}
+.an-step h3 {
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.an-step p {
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.an-prose {
+  max-width: 46em;
+  line-height: 1.6;
+}
+
+@media (max-width: 900px) {
+  .an-hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+}
+@media (max-width: 720px), (hover: none) and (pointer: coarse) {
+  .an-qr {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
+  .an-hero {
+    padding-block: calc(var(--nav-h) + 40px) 40px;
+  }
+  .an-actions {
+    display: grid;
+    width: 100%;
+  }
+  .an-actions .btn {
+    width: 100%;
+    white-space: normal;
+  }
+}

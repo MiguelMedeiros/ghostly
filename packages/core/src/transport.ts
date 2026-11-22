@@ -50,7 +50,9 @@ export interface PkarrRequestOptions {
   watch?: boolean;
   /**
    * A 1:1 chat's read of a contact that went away from a live session within `DEPARTED_READ_MS` (link.ts): an app that
-   * restarts publishes its offer then. A few may go over the relay's minute (`DEPARTED_READS` in relay.ts).
+   * restarts publishes its offer then. So is a chat's read of the mailbox of a contact on DHT only, this side not, out of
+   * the background (`DhtDelivery.departedRead`): its envelope saying it left is what the live link waits on. A few may go
+   * over the relay's minute (`DEPARTED_READS` in relay.ts).
    */
   departed?: boolean;
   /**
@@ -115,9 +117,17 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
  * whoever publishes tries again then, and says nothing is wrong meanwhile.
  */
 export class DiscoveryBudgetError extends Error {
-  readonly code = "discovery-budget";
-  constructor(readonly retryInMs: number, message = "Discovery request budget reached; retry shortly") {
-    super(message);
+  declare readonly code: "discovery-budget";
+  declare readonly retryInMs: number;
+  constructor(retryInMs: number, message = "Discovery request budget reached; retry shortly") {
+    // Made at every request the budget holds, thousands a minute with many contacts away, and never a failure: no
+    // stack, which took a tenth of such a daemon's CPU. Where the engine has no such limit (Firefox), as it was.
+    const errors = Error as { stackTraceLimit?: number };
+    const limit = errors.stackTraceLimit;
+    if (typeof limit === "number") errors.stackTraceLimit = 0;
+    try { super(message); } finally { if (typeof limit === "number") errors.stackTraceLimit = limit; }
+    this.code = "discovery-budget";
+    this.retryInMs = retryInMs;
     this.name = "DiscoveryBudgetError";
   }
 }

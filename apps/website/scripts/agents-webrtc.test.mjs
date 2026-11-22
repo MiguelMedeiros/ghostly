@@ -16,9 +16,11 @@ function withoutWebRtc() {
 }
 
 test("the agents FAQ says what stops without WebRTC as the CLI does: calls, not groups", () => {
-  // With no RTCPeerConnection a group's links go native (packages/browser/src/engine/node.ts `keepsGroupNative`,
-  // WISP 902 § Transports); the CLI's calls need WebRTC (packages/cli/src/runtime/engine.ts).
-  assert.match(read("packages/browser/src/engine/node.ts"), /keepsGroupNative[\s\S]*?typeof RTCPeerConnection === "undefined"/);
+  // With no RTCPeerConnection (`contactRtc`) a group's links go native (packages/browser/src/engine/node.ts
+  // `keepsGroupNative`, WISP 902 § Transports); the CLI's calls need WebRTC (packages/cli/src/runtime/engine.ts).
+  const node = read("packages/browser/src/engine/node.ts");
+  assert.match(node, /keepsGroupNative[\s\S]*?!this\.contactRtc\(\)/);
+  assert.match(node, /private contactRtc\(\): boolean \{\s*return typeof RTCPeerConnection !== "undefined" &&/);
   assert.match(read("packages/cli/src/runtime/engine.ts"), /"Calls need WebRTC, which is off on this headless Ghostly"/);
   const sentence = withoutWebRtc();
   assert.doesNotMatch(sentence, /groups do not work/, `groups work without WebRTC: "${sentence}"`);

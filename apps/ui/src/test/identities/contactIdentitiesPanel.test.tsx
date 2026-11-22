@@ -72,7 +72,7 @@ describe("ContactIdentitiesPanel", () => {
         receivedView({ id: "r6", status: "previous-key" }),
         receivedView({ id: "r7", provider: "domain", subject: "example.org" }),
       ]));
-      expect(screen.getByRole("radiogroup", { name: "Identities shared by Alice" })).toBeInTheDocument();
+      expect(screen.getByRole("radiogroup", { name: "Identities shared by \u2068Alice\u2069" })).toBeInTheDocument();
       const faces = theirs().map(card => card.querySelector<HTMLElement>("[data-deck=face]")!);
       expect(faces.map(f => [f.dataset.status, f.querySelector(".id-card-status")!.textContent])).toEqual([
         ["verified", "Verified"],
@@ -235,9 +235,28 @@ describe("ContactIdentitiesPanel", () => {
         expect(nameLine(card)).toHaveTextContent("Nome: assinado por GitLab");
       });
 
+      it("a name the account set for itself, in Portuguese", async () => {
+        const card = await backIn("pt", google("Signed by Microsoft; name set on the account, not checked by Microsoft"));
+        expect(nameLine(card)).toHaveTextContent("Nome: assinado por Microsoft; nome definido na conta, não verificado por Microsoft");
+        expect(nameLine(card)).not.toHaveTextContent(/Signed|checked/);
+      });
+
+      it("a name the account set for itself, beside an email the provider checked, in Arabic", async () => {
+        const card = await backIn("ar", google("Signed by Google; email verified by Google; name set on the account, not checked by Google"));
+        expect(nameLine(card)).toHaveTextContent("الاسم: موقَّع من Google؛ تحققت Google من البريد الإلكتروني؛ الاسم مضبوط في الحساب، لم تتحقق منه Google");
+      });
+
       it("any other source as written", async () => {
         const card = await backIn("pt", google("Signed by Google; email verified by Microsoft"));
         expect(nameLine(card)).toHaveTextContent("Nome: Signed by Google; email verified by Microsoft");
+      });
+
+      it("how a Nostr proof was checked, in Arabic", async () => {
+        const npub = "a".repeat(64);
+        const card = await backIn("ar", receivedView({ provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature (NIP-01, BIP-340)" } }));
+        const how = card.querySelector("dl")!.querySelector("bdi")!;
+        expect(how).toHaveTextContent("توقيع Nostr (NIP-01, BIP-340)");
+        expect(how).not.toHaveTextContent(/signature/);
       });
     });
 
@@ -279,6 +298,62 @@ describe("ContactIdentitiesPanel", () => {
       await turnOver(user, 0);
       await user.click(screen.getByTestId("chat-identity-recheck"));
       expect(await screen.findByTestId("chat-identities-error")).toHaveTextContent("Offline: this identity cannot be checked now");
+      // Said by the alert alone, not twice.
+      expect(screen.getByTestId("chat-identity-recheck-live")).toHaveTextContent(/^$/);
+    });
+
+    describe("says Check again out loud: Checking…, then what it found", () => {
+      async function recheck(after: ReceivedIdentityView) {
+        const { user, engine } = open(withReceived([receivedView({ id: "r1" })]));
+        let finish!: () => void;
+        engine.on("recheckIdentityProof", () => new Promise<void>(resolve => { finish = resolve; }));
+        await turnOver(user, 0);
+        // There before the press, so its first words are heard.
+        const live = screen.getByTestId("chat-identity-recheck-live");
+        expect(live).toHaveAttribute("role", "status");
+        expect(live).toHaveTextContent(/^$/);
+        screen.getByTestId("chat-identity-recheck").focus();
+        await user.keyboard("{Enter}");
+        expect(live).toHaveTextContent(/^Checking…$/);
+        await act(async () => { finish(); });
+        // The reply comes before the new state: the card as it was is not said as the result.
+        expect(live).toHaveTextContent(/^Checking…$/);
+        act(() => engine.update(withReceived([after])));
+        expect(screen.getByTestId("chat-identity-recheck-live")).toBe(live);
+        return live;
+      }
+
+      it("confirmed again", async () => {
+        expect(await recheck(receivedView({ id: "r1", checkedAt: now() }))).toHaveTextContent(/^Checked again: Verified$/);
+      });
+
+      it("failed, with why", async () => {
+        expect(await recheck(receivedView({ id: "r1", status: "unconfirmed", error: "DNS lookup failed", checkedAt: now() })))
+          .toHaveTextContent(/^Check failed: This proof couldn't be verified$/);
+      });
+
+      it("revoked, though Check again is gone then", async () => {
+        const live = await recheck(receivedView({ id: "r1", status: "revoked", checkedAt: now() }));
+        expect(screen.queryByTestId("chat-identity-recheck")).toBeNull();
+        expect(live).toHaveTextContent(/^Revoked/);
+      });
+
+      it("the same record (a check in the same second, same result): what it is, a second after the reply", async () => {
+        const same = receivedView({ id: "r1" });
+        const { user, engine } = open(withReceived([same]));
+        let finish!: () => void;
+        engine.on("recheckIdentityProof", () => new Promise<void>(resolve => { finish = resolve; }));
+        await turnOver(user, 0);
+        const live = screen.getByTestId("chat-identity-recheck-live");
+        await user.click(screen.getByTestId("chat-identity-recheck"));
+        vi.useFakeTimers();
+        onTestFinished(() => { vi.useRealTimers(); });
+        await act(async () => { finish(); });
+        act(() => engine.update(withReceived([{ ...same }])));
+        expect(live).toHaveTextContent(/^Checking…$/);
+        act(() => { vi.advanceTimersByTime(1000); });
+        expect(live).toHaveTextContent(/^Checked again: Verified$/);
+      });
     });
 
     it("holds the Nostr key's profile, follows and notes on the Nostr card's back, with a short relay note", async () => {
@@ -287,6 +362,24 @@ describe("ContactIdentitiesPanel", () => {
       const card = await turnOver(user, 0);
       for (const id of ["nostr-load-profile", "nostr-load-follows", "nostr-load-notes"]) expect(within(card).getByTestId(id)).toBeInTheDocument();
       expect(within(card).getByTestId("nostr-contact-note")).toHaveTextContent(/^Loading asks your relays \(.*\), which learn your IP address and this key\./);
+    });
+
+    it("draws what the Nostr key published in its own direction: its name, @handle, NIP-05, about and posts", async () => {
+      const npub = "npub1example";
+      const fetched = { fetchedAt: now(), relays: ["wss://relay.one.example"], stale: false };
+      const nostr = { subject: npub, npub,
+        profile: { ...fetched, found: true, profile: { name: "محمد", handle: "alice", nip05: "_@example.com", about: "مرحبا بكم!", hasPicture: false, eventAt: now(), eventId: "e" } },
+        notes: { ...fetched, count: 1, more: false, hidden: 0, authorMuted: false } } as NonNullable<LinkView["nostr"]>[number];
+      const { user, engine } = open({ links: [paired({ identities: identitiesView({ received: [receivedView({ provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature" } })] }), nostr: [nostr] })] });
+      engine.on("nostrContactNotes", () => [{ id: "n1", createdAt: now(), content: "Hello (all)", reply: false }]);
+      const card = await turnOver(user, 0);
+      // In an Arabic app "@alice" after an Arabic name was drawn "alice@", and "_@example.com" as "example.com …@_"
+      // (measured in Chromium): each is a run of its own.
+      const name = within(card).getByTestId("nostr-profile-name");
+      expect([...name.querySelectorAll("bdi")].map(b => b.textContent)).toEqual(["محمد", "@alice"]);
+      expect(within(card).getByText("_@example.com")).toHaveAttribute("dir", "ltr");
+      expect(within(card).getByTestId("nostr-profile-about")).toHaveAttribute("dir", "auto");
+      expect((await within(card).findByText("Hello (all)"))).toHaveAttribute("dir", "auto");
     });
   });
 
@@ -314,9 +407,12 @@ describe("ContactIdentitiesPanel", () => {
       expect(engine.callsTo("loadPublicGraph")).toEqual([]);
     });
 
-    it("the panel closed asks nothing", () => {
-      renderApp(<p>no panel</p>).engine.update(withReceived([pubky()]));
-      expect(screen.queryByTestId("contact-activity")).not.toBeInTheDocument();
+    it("the panel closed asks nothing", async () => {
+      const { engine } = renderApp(<p>no panel</p>);
+      act(() => engine.update(withReceived([pubky()])));
+      await act(async () => {});
+      expect(engine.callsTo("loadPublicPosts")).toEqual([]);
+      expect(engine.callsTo("loadPublicGraph")).toEqual([]);
     });
 
     it("shows the engine's error for the chat", () => {

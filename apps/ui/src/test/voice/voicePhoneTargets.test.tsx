@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
+import { escapeRegExp } from "../regExp";
 import { renderApp } from "../render";
 import { installFakeAudio, installFakeMedia, removeFakeMedia } from "./fakeMedia";
 
@@ -65,7 +66,7 @@ describe("the voice recorder's bar on a phone", () => {
   });
 
   it("nothing in the bar clips that larger area, and the buttons draw no ::after of their own", () => {
-    const rule = (selector: string) => VOICE_CSS.match(new RegExp(`^${selector.replace(/[.-]/g, "\\$&")} \\{([^}]*)\\}`, "m"))?.[1] ?? "";
+    const rule = (selector: string) => VOICE_CSS.match(new RegExp(`^${escapeRegExp(selector)} \\{([^}]*)\\}`, "m"))?.[1] ?? "";
     for (const holder of [".voice-bar", ".voice-confirm"]) {
       expect(rule(holder), holder).not.toBe("");
       expect(rule(holder), holder).not.toMatch(/overflow|clip-path|contain:/);

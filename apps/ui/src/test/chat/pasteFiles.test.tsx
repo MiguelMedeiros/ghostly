@@ -243,6 +243,17 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     expect(onSendFile.mock.calls.map(([f]) => [f.name, f.type, f.size])).toEqual([["scan.pdf", "application/pdf", 4], ["notes", "", 1]]);
   });
 
+  it("a paste the platform brought only some files of names the ones it left out", async () => {
+    const names = Array.from({ length: 12 }, (_, i) => `p${33 + i}.txt`);
+    fakeEngine.readClipboardFiles = vi.fn(async () => Object.assign([held("p1.txt", [1])], { pastLimit: names }));
+    composer();
+    paste(field(), {});
+    const open = await screen.findByTestId("attachment-sheet");
+    // The first ten names, then the rest unnamed: the line stays one to read.
+    expect(await within(open).findByRole("alert")).toHaveTextContent(
+      `Only the first 32 files were added. Left out: ${names.slice(0, 10).join(", ")}, …. Add the rest with + → Document.`);
+  });
+
   it("text, or files the paste already showed, never ask the platform", async () => {
     fakeEngine.readClipboardFiles = vi.fn(async () => []);
     composer();
@@ -378,6 +389,42 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     composer();
     expect(paste(field(), {})).toBe(true);
     expect(paste(field(), { html: `<img src="https://example.com/photo.png">`, text: "https://example.com/photo.png" })).toBe(true);
+  });
+
+  // iOS Safari (the iPhone's web app): a PDF copied in Files reaches the page as a paste of "Files" with no file in it,
+  // no text, and at most a web link beside it. WebKit reads only pictures off the iPhone's clipboard.
+  it("files the browser kept to itself say so, with the file picker one tap away, never silence", async () => {
+    const { user } = composer();
+    const input = screen.getByTestId<HTMLInputElement>("file-input");
+    const pick = vi.spyOn(input, "click").mockImplementation(() => {});
+    for (const types of [["Files"], ["Files", "text/uri-list"]]) {
+      expect(paste(field(), { types })).toBe(false);
+      expect(await screen.findByRole("alert")).toHaveTextContent("The browser did not hand over the file you copied. Choose it from your files.");
+      expect(sheet()).toBeNull();
+    }
+    await user.click(screen.getByTestId("composer-toast-action"));
+    expect(pick).toHaveBeenCalledTimes(1);
+  });
+
+  it("files the browser kept, where files cannot go, say why instead; where they have no place, the paste is left alone", async () => {
+    const { unmount } = composer({ fileUnavailable: "Update both peers to send files" });
+    expect(paste(field(), { types: ["Files"] })).toBe(false);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Update both peers to send files");
+    expect(screen.queryByTestId("composer-toast-action")).toBeNull();
+    unmount();
+    composer({ onSendFile: undefined });
+    expect(paste(field(), { types: ["Files"] })).toBe(true);
+  });
+
+  it("files the browser kept, pasted with the sheet open, say so inside the sheet without a picker beside it", async () => {
+    composer();
+    paste(field(), { files: [png()] });
+    const open = await screen.findByTestId("attachment-sheet");
+    expect(paste(within(open).getByTestId("attachment-caption"), { types: ["Files"] })).toBe(false);
+    expect(await within(open).findByText("The browser did not hand over the file you copied. Choose it from your files.")).toBeInTheDocument();
+    expect(within(open).queryByTestId("composer-toast-action")).toBeNull();
+    // The picture waiting there stays, alone.
+    expect(within(open).getAllByTestId("attachment-image")).toHaveLength(1);
   });
 
   /** What a web browser's Copy image shows WebKitGTK's page: the picture's HTML, no picture; Firefox adds its address as text. */

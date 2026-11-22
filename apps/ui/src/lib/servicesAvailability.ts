@@ -1,5 +1,6 @@
 import type { PeerLinkState } from "./platform";
 import { englishT, type Translate } from "../locales/translate";
+import { isolate } from "./ownStatus";
 
 /** Why apps cannot travel in this chat right now, as a kind (`servicesUnavailable` says it in words). */
 export type ServicesBlock = "not-live" | "contact-older" | "contact-cannot";
@@ -19,8 +20,8 @@ export function servicesBlock(peer: PeerLinkState | null | undefined): ServicesB
 export function servicesUnavailable(peer: PeerLinkState | null | undefined, name: string, tr: Translate = englishT): string | null {
   switch (servicesBlock(peer)) {
     case "not-live": return tr("chat.services.notLive");
-    case "contact-older": return tr("chat.services.contactOlder", { name });
-    case "contact-cannot": return tr("chat.services.contactCannot", { name });
+    case "contact-older": return tr("chat.services.contactOlder", { name: isolate(name) });
+    case "contact-cannot": return tr("chat.services.contactCannot", { name: isolate(name) });
     default: return null;
   }
 }
