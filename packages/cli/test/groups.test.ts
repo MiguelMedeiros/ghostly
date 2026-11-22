@@ -687,9 +687,9 @@ describe("a group not joined yet, said the same by every command", () => {
       const node = (ctx as unknown as { runtime: { server: { node: Record<string, unknown> } } }).runtime.server.node;
       const removeMessage = vi.fn(async () => ({ error: null, e: 1 }));
       Object.assign(node, { getMessage: vi.fn(async () => undefined), editMessage: vi.fn(async () => ({ error: "You are not in this group", refused: true })), removeMessage });
-      // Same code as before (not_found, exit 3): only the words change.
-      await expect(callApi(ctx, "group.edit", { group: ref, message: "m1", text: "fixed" }), ref).rejects.toMatchObject({ code: "not_found", message });
-      await expect(callApi(ctx, "chat.delete", { chat: `group:${held.id}`, message: "m1", everyone: true }), ref).rejects.toMatchObject({ code: "not_found", message: message.replace(`'${ref}'`, `group:${held.id}`) });
+      // Refused (exit 1), as react and pin: it was not_found (exit 3), as if the message were missing.
+      await expect(callApi(ctx, "group.edit", { group: ref, message: "m1", text: "fixed" }), ref).rejects.toMatchObject({ code: "refused", message });
+      await expect(callApi(ctx, "chat.delete", { chat: `group:${held.id}`, message: "m1", everyone: true }), ref).rejects.toMatchObject({ code: "refused", message: message.replace(`'${ref}'`, `group:${held.id}`) });
       expect(removeMessage).not.toHaveBeenCalled();
     }
   });
