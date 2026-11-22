@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "../affected/files.mjs";
@@ -874,7 +875,30 @@ describe("--unit-group: the draft tier's unit projects over a few runners", () =
     expect(count).toBeGreaterThan(UNIT_ALONE.length);
     expect(job).toContain(`name: Affected unit tests (draft \${{ matrix.group }}/${count})`);
     expect(job).toMatch(new RegExp(`run: node tools/scripts/test-affected\\.mjs .*--unit-group \\$\\{\\{ matrix\\.group \\}\\}/${count}( |$)`, "m"));
+    // CI Success gets one result for every group: it names the range, and each group names its own failures.
+    expect(ci).toContain(`check "Affected unit tests (draft 1/${count} to ${count}/${count})" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"`);
   });
+
+  it("names, in CI, its group's job and each unit project that failed, the job the run page shows", () => {
+    const bin = mkdtempSync(join(tmpdir(), "affected-npx-"));
+    try {
+      // Every vitest run fails at once.
+      writeFileSync(join(bin, "npx"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      const run = (env: Record<string, string>) =>
+        spawnSync(process.execPath, [script, "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--unit-group", "1/4", "--files", "packages/core/src/http.ts"], {
+          encoding: "utf8",
+          timeout: 60_000,
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, ...env },
+        });
+      const ci = run({ GITHUB_ACTIONS: "true" });
+      expect(ci.status).toBe(1);
+      expect(ci.stdout.split("\n").filter((l) => l.startsWith("::error::"))).toEqual(["::error::Affected unit tests (draft 1/4): unit ui failed"]);
+      // Not in a terminal.
+      expect(run({ GITHUB_ACTIONS: "" }).stdout).not.toContain("::error::");
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
 
 describe("the cli's halves (tools/vitest.shards.ts): vitest --shard cut by time", () => {
