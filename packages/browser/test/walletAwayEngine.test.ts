@@ -43,6 +43,7 @@ describe("a wallet at home on another device, through the engine", () => {
       ["lightningRetrySource", () => node.lightningRetrySource({ network: "testnet", card: "cashu" })],
       ["lightningReconfigureSource", () => node.lightningReconfigureSource({ values: {}, network: "testnet", card: "cashu" })],
       ["lightningRefresh", () => node.lightningRefresh({ network: "testnet", card: "cashu" })],
+      ["lightningClearSource", () => node.lightningClearSource({ network: "testnet", card: "cashu" })],
       // A card away is never made this device's default for receiving.
       ["lightningSetReceive", () => node.lightningSetReceive({ network: "testnet", card: "cashu" })],
       // A Bitcoin Core source at home on another device: its record there is never written over from here.

@@ -1,5 +1,7 @@
 import { expect, test } from "../support/fixtures";
 import { countCommits, median, seed } from "../support/chatPerf";
+import { budget } from "../support/perfBudget";
+import type { Page } from "@playwright/test";
 
 /**
  * A chat list of 300 chats: every row is in the page, and the browser draws only those near the list's view
@@ -26,17 +28,23 @@ const SWITCH_SHARE = 0.5;
 // A trace's DOM snapshots and a video would be measured with the app.
 test.use({ trace: "off", video: "off" });
 
-test("a list of 300 chats keeps every row in the page, scrolls with no React commit, and switches Light/Dark cheaply", { tag: ["@feature:chats.list.rows"] }, async ({ peer }) => {
+/** Bob's list of 300 chats, every row in the page, the page quiet. */
+async function longList(page: Page) {
+  await seed(page, Array.from({ length: CHATS }, (_, i) => ({ label: `Chat ${i + 1}`, count: 1, lean: true })));
+  // Seeded after load: a reload hands the hook to React, and shows the chats.
+  await page.reload();
+  const list = page.getByTestId("chat-list");
+  await expect(list.getByTestId("chat-row")).toHaveCount(CHATS);
+  // The page quiet: the chats read, their faces drawn.
+  await page.waitForTimeout(1_500);
+  return list;
+}
+
+test("a list of 300 chats keeps every row in the page and scrolls with no React commit", { tag: ["@feature:chats.list.rows"] }, async ({ peer }) => {
   test.setTimeout(3 * 60_000);
   const bob = await peer("long-list-bob", { viewport: { width: 1280, height: 800 } });
   await bob.context.addInitScript(countCommits);
-  await seed(bob.page, Array.from({ length: CHATS }, (_, i) => ({ label: `Chat ${i + 1}`, count: 1, lean: true })));
-  // Seeded after load: a reload hands the hook to React, and shows the chats.
-  await bob.page.reload();
-  const list = bob.page.getByTestId("chat-list");
-  await expect(list.getByTestId("chat-row")).toHaveCount(CHATS);
-  // The page quiet: the chats read, their faces drawn.
-  await bob.page.waitForTimeout(1_500);
+  const list = await longList(bob.page);
 
   // Most rows are left to the browser: in the page, not drawn.
   const skipped = await list.evaluate(el => [...el.querySelectorAll<HTMLElement>("[data-testid=chat-row]")]
@@ -80,6 +88,12 @@ test("a list of 300 chats keeps every row in the page, scrolls with no React com
   // The scroll's own commits: none (a couple of the page's own at most, as while idle).
   expect(scroll.commits, "React commits during the scroll").toBeLessThanOrEqual(idle.commits + 2);
   await expect(list.getByTestId("chat-row")).toHaveCount(CHATS);
+});
+
+test("a list of 300 chats switches Light/Dark cheaply", { tag: ["@feature:chats.list.rows", "@perf"] }, async ({ peer }) => {
+  test.setTimeout(3 * 60_000);
+  const bob = await peer("long-list-bob", { viewport: { width: 1280, height: 800 } });
+  await longList(bob.page);
 
   // Light/Dark: the style and layout of each switch, forced at once and timed. Each as the app draws the list, then the
   // same switch with every row drawn (the list before content-visibility), in turns: a host busy with other work slows
@@ -119,5 +133,5 @@ test("a list of 300 chats keeps every row in the page, scrolls with no React com
   // busy host adds lands on a few switches at random, so the median of the eight.
   const ratio = median(switches.app.map((t, i) => t / switches.drawn[i]));
   console.log(`chat-list-long-perf Light/Dark (ms): ${JSON.stringify({ ...switches, ratio: Math.round(ratio * 100) / 100 })}`);
-  expect(ratio, "median Light/Dark switch, style and layout, over the same switch with every row drawn").toBeLessThan(SWITCH_SHARE);
+  budget("chat list of 300, median Light/Dark switch over the same with every row drawn", ratio, SWITCH_SHARE, "share");
 });

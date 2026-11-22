@@ -3,6 +3,7 @@ import {
   CHUNK_KIND,
   LIMITS,
   encodeControl,
+  isHeaderList,
   sendBody,
   type ChunkFrame,
   type FrameChannel,
@@ -91,12 +92,14 @@ export function resolveTargetUrl(target: LocalTarget, path: string): string | nu
   if (!path.startsWith("/") || path.startsWith("//")) return null;
   for (const char of path) {
     const code = char.codePointAt(0) ?? 0;
-    if (code <= 32 || code === 127 || char === "\\") return null;
+    if (code <= 32 || code === 127) return null;
   }
-  // Encoded separators survive URL normalization here but not in every server:
-  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   const queryAt = path.indexOf("?");
   const pathPart = queryAt === -1 ? path : path.slice(0, queryAt);
+  // Some servers read `\` in the path as `/`. In the query a browser's fetch leaves it raw (`?path=C:\x`), so it passes.
+  if (pathPart.includes("\\")) return null;
+  // Encoded separators survive URL normalization here but not in every server:
+  // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   if (/%(2f|5c|2e)/i.test(pathPart)) return null;
   if (pathPart.split("/").some(climbsOut)) return null;
   let url: URL;
@@ -187,6 +190,22 @@ export function sanitizeRequestHeaders(headers: HeaderList): HeaderList {
   });
 }
 
+/**
+ * A cookie's `Path` as the client sees the app: without the target's base path, which the client never sees (as
+ * `relativizeLocation` takes it off), so a cookie the app keeps on `/notes` is sent back to its `/home` at `/`. One
+ * outside the base path would never be sent at all and goes on `/`; one that does not start with `/` the browser
+ * ignores, so it stays.
+ */
+function cookieOnClient(cookie: string, target: LocalTarget): string {
+  if (!target.basePath) return cookie;
+  return cookie.replace(/;\s*path\s*=\s*([^;]*)/gi, (attribute, value: string) => {
+    const path = value.trim();
+    if (!path.startsWith("/")) return attribute;
+    const under = path === target.basePath || path.startsWith(`${target.basePath}/`);
+    return `; Path=${under ? path.slice(target.basePath.length) || "/" : "/"}`;
+  });
+}
+
 /** `from`: the local URL of the request answered, the one a relative `Location` is read against. */
 export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget, from?: string): HeaderList {
   const out: HeaderList = [];
@@ -200,7 +219,7 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
       if (location !== null) out.push([name, location]);
     } else if (lower === "set-cookie") {
       // The cookie belongs to the virtual origin on the client, not to localhost.
-      out.push([name, value.replace(/;\s*domain\s*=[^;]*/gi, "")]);
+      out.push([name, cookieOnClient(value.replace(/;\s*domain\s*=[^;]*/gi, ""), target)]);
     } else {
       out.push([name, value]);
     }
@@ -211,10 +230,11 @@ export function sanitizeResponseHeaders(headers: HeaderList, target: LocalTarget
 /**
  * The contact's headers a viewer does not pass on: each makes the browser send something to a place it names, outside
  * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
- * early connections). With Hide my IP from contacts on, that place would learn this device's address. The same list
- * as the CLI's `OPENED_SERVICE_DROPPED_HEADERS` and Desktop's `DROPPED_HEADERS`.
+ * early connections; `Speculation-Rules` prefetches and prerenders). With Hide my IP from contacts on, that place would
+ * learn this device's address. The same list as the CLI's `OPENED_SERVICE_DROPPED_HEADERS` and Desktop's
+ * `DROPPED_HEADERS`.
  */
-export const VIEWER_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+export const VIEWER_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link", "speculation-rules"];
 
 /** The directives of a contact's policy that send reports to a URL it names, dropped from it (`OPENED_SERVICE_DROPPED_DIRECTIVES`). */
 export const VIEWER_DROPPED_DIRECTIVES = ["report-uri", "report-to"];
@@ -283,11 +303,12 @@ export function viewerServicePolicy(relayOnly: boolean): string {
  * The browser features a contact's app in the extension's viewer tab may not use. Its tab is a site of its own, so
  * what the person granted it (camera, microphone, location, a device) would be a site setting of the browser's, which
  * no Delete chat, Clear all data or Delete profile reaches; denied here, the browser never asks and ignores a grant
- * made before. The web app's view is a frame of another site, which gets none of them, and Desktop's window grants none.
+ * made before. The web app's view is a frame of another site, which gets none of them, and Desktop's window grants none
+ * and is served the same value (`PERMISSIONS_POLICY` in `apps/desktop/src/viewer.rs`).
  */
 export const VIEWER_PERMISSIONS_POLICY = [
   "camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read",
-  "idle-detection", "local-fonts", "window-management", "storage-access", "publickey-credentials-create",
+  "clipboard-write", "idle-detection", "local-fonts", "window-management", "storage-access", "publickey-credentials-create",
 ].map((feature) => `${feature}=()`).join(", ");
 
 /** A contact's headers that would set the page's features: the viewer's own policy takes their place. */
@@ -350,6 +371,12 @@ function isRedirectBlocked(response: LocalResponse, target: LocalTarget, from: s
 export interface HostedHttpService {
   id: string;
   target: LocalTarget;
+  /**
+   * Aborts once this peer may no longer reach the service (stopped, removed,
+   * or the contact taken off its list): the requests still open are reset, not
+   * answered.
+   */
+  revoked?: AbortSignal;
 }
 
 export interface LocalRequest {
@@ -401,6 +428,8 @@ export class HttpHost {
   private readonly live = new Set<HostStream>();
   /** Body bytes of the streams in `live`: a peer cannot make the host hold more than `maxHostBodyBytesPerPeer`. */
   private heldBodyBytes = 0;
+  /** One listener per `revoked` signal of the open streams, not one per stream: a page opens dozens at once. */
+  private readonly revokedListeners = new Map<AbortSignal, () => void>();
 
   constructor(
     private readonly channel: FrameChannel,
@@ -417,7 +446,7 @@ export class HttpHost {
 
     const method = frame.m.toUpperCase();
     const service = this.getService(frame.s);
-    if (!service) return this.fail(frame.id, 404, "unknown-service", "This peer does not share that service.");
+    if (!service || service.revoked?.aborted) return this.fail(frame.id, 404, "unknown-service", "This peer does not share that service.");
     if (!ALLOWED_METHODS.has(method)) return this.fail(frame.id, 405, "method-not-allowed", "Method not allowed.");
     if (this.live.size >= LIMITS.maxConcurrentRequestsPerPeer) {
       return this.fail(frame.id, 503, "busy", "Too many concurrent requests.");
@@ -437,6 +466,7 @@ export class HttpHost {
     };
     this.streams.set(frame.id, stream);
     this.live.add(stream);
+    if (service.revoked) this.watchRevoked(service.revoked);
 
     if (frame.b && !BODYLESS_METHODS.has(method)) this.watchPace(stream);
     else void this.run(stream);
@@ -493,6 +523,31 @@ export class HttpHost {
     stream.abort.abort();
     if (this.isCurrent(stream)) this.streams.delete(stream.frame.id);
     if (!stream.started) this.release(stream);
+    const revoked = stream.service.revoked;
+    const listener = revoked && this.revokedListeners.get(revoked);
+    if (listener && ![...this.streams.values()].some((s) => s.service.revoked === revoked)) {
+      revoked.removeEventListener("abort", listener);
+      this.revokedListeners.delete(revoked);
+    }
+  }
+
+  /** An answer still on its way would reach someone the app is no longer shared with: those streams are reset. */
+  private watchRevoked(revoked: AbortSignal): void {
+    if (this.revokedListeners.has(revoked)) return;
+    const listener = () => {
+      this.revokedListeners.delete(revoked);
+      for (const stream of [...this.streams.values()]) {
+        if (stream.service.revoked !== revoked) continue;
+        this.end(stream);
+        try {
+          this.channel.send(encodeControl({ t: "rst", id: stream.frame.id, d: "s", e: "The app is no longer shared with you." }));
+        } catch {
+          // channel already closed
+        }
+      }
+    };
+    this.revokedListeners.set(revoked, listener);
+    revoked.addEventListener("abort", listener, { once: true });
   }
 
   /** The stream no longer counts toward the limits: its body is dropped, or its local fetch has settled. */
@@ -564,12 +619,18 @@ export class HttpHost {
         return this.fail(frame.id, 502, "redirect-blocked", "The service redirected outside of the shared target.");
       }
 
+      const headers = sanitizeResponseHeaders(response.headers, service.target, stream.url);
+      // The client drops a response past the link's header limits without a word: it would wait out the timeout.
+      if (!isHeaderList(headers)) {
+        this.end(stream);
+        return this.fail(frame.id, 502, "headers-too-large", "The local service answered with more headers than the link carries.");
+      }
       const hasBody = response.body !== null && frame.m !== "HEAD";
       const res: HttpResponseFrame = {
         t: "res",
         id: frame.id,
         st: response.status,
-        h: sanitizeResponseHeaders(response.headers, service.target, stream.url),
+        h: headers,
         b: hasBody,
       };
       this.channel.send(encodeControl(res));
@@ -671,6 +732,11 @@ export interface ClientResponse {
   body: AsyncIterable<Uint8Array>;
   /** Collects the whole body, bounded by `maxResponseBytes`. */
   bytes(): Promise<Uint8Array>;
+  /**
+   * Settles with the error the body ends in (let go unread, reset, timed out, the link closed), read up to it or not:
+   * a reader that waits on someone else before reading on learns of it. Never settles for a body that arrived whole.
+   */
+  failed?: Promise<Error>;
 }
 
 export class GhostlyHttpError extends Error {
@@ -702,10 +768,17 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
   held = 0;
   /** Bytes read so far, all told. */
   taken = 0;
+  private fail!: (error: Error) => void;
+  /** `ClientResponse.failed`. */
+  readonly failed = new Promise<Error>((resolve) => (this.fail = resolve));
+
+  /** `all`: what every queue of the same client holds, kept with this one's. */
+  constructor(private readonly all: { held: number }) {}
 
   push(chunk: Uint8Array): void {
     this.chunks.push(chunk);
     this.held += chunk.length;
+    this.all.held += chunk.length;
     this.wake?.();
   }
 
@@ -713,15 +786,18 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
     if (this.done) return;
     this.done = true;
     this.error = error ?? null;
+    if (error) this.fail(error);
     this.wake?.();
   }
 
   /** Lets go of what was not read yet, ended or not: the reader gets `error` in its place. */
   drop(error: Error): void {
     this.chunks = [];
+    this.all.held -= this.held;
     this.held = 0;
     this.done = true;
     this.error = error;
+    this.fail(error);
     this.wake?.();
   }
 
@@ -730,6 +806,7 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
       while (this.chunks.length > 0) {
         const chunk = this.chunks.shift()!;
         this.held -= chunk.length;
+        this.all.held -= chunk.length;
         this.taken += chunk.length;
         yield chunk;
       }
@@ -748,11 +825,15 @@ export class HttpClient {
   private waitingBytes = 0;
   private inFlight = 0;
   private closed = false;
+  /** Response-body bytes all this client's responses hold before their readers took them. */
+  private readonly unread = { held: 0 };
 
   constructor(private readonly channel: FrameChannel) {}
 
   async request(serviceId: string, request: ClientRequest): Promise<ClientResponse> {
     if (this.closed) throw new GhostlyHttpError("closed", "Data link is closed");
+    // The host drops a request past the link's header limits without a word: it would wait out the timeout.
+    if (!isHeaderList(request.headers ?? [])) throw new GhostlyHttpError("headers-too-large", "Request headers too large");
     if (this.inFlight >= LIMITS.maxClientInFlight) {
       const bytes = request.body?.length ?? 0;
       if (this.waiting.length >= LIMITS.maxClientWaiting || this.waitingBytes + bytes > LIMITS.maxClientWaitingBodyBytes) {
@@ -835,7 +916,7 @@ export class HttpClient {
     if (!stream || stream.queue) return;
     clearTimeout(stream.headersTimer);
 
-    const queue = new BodyQueue();
+    const queue = new BodyQueue(this.unread);
     stream.queue = queue;
     if (frame.b) this.armIdleTimer(frame.id, stream);
     else this.finish(frame.id);
@@ -849,6 +930,7 @@ export class HttpClient {
         for await (const part of queue) parts.push(part);
         return concatBytes(...parts);
       },
+      failed: queue.failed,
     });
   }
 
@@ -861,7 +943,11 @@ export class HttpClient {
       return this.abort(chunk.id, new GhostlyHttpError("response-too-large", "Response body too large"));
     }
     if (chunk.payload.length > 0) stream.queue.push(chunk.payload.slice());
-    if (stream.queue.held > LIMITS.maxUnreadResponseBytes) this.checkUnread(chunk.id, stream, stream.queue);
+    if (stream.queue.held > LIMITS.maxUnreadResponseBytes) {
+      // Many responses read slowly add up: past the client's bound, one over its own is let go without a turn.
+      if (this.unread.held > LIMITS.maxClientUnreadResponseBytes) return this.dropUnread(chunk.id, stream.queue);
+      this.checkUnread(chunk.id, stream, stream.queue);
+    }
     if (chunk.end) this.finish(chunk.id);
     else this.armIdleTimer(chunk.id, stream);
   }
@@ -879,10 +965,14 @@ export class HttpClient {
       stream.unreadCheck = undefined;
       if (queue.held <= LIMITS.maxUnreadResponseBytes) return;
       if (queue.taken > taken) return this.checkUnread(id, stream, queue);
-      const error = new GhostlyHttpError("unread", "Response body not read in time");
-      queue.drop(error);
-      this.abort(id, error);
+      this.dropUnread(id, queue);
     }, LIMITS.unreadStallMs);
+  }
+
+  private dropUnread(id: number, queue: BodyQueue): void {
+    const error = new GhostlyHttpError("unread", "Response body not read in time");
+    queue.drop(error);
+    this.abort(id, error);
   }
 
   handleReset(frame: ResetFrame): void {

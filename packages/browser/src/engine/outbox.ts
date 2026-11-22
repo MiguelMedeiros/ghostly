@@ -68,8 +68,13 @@ export interface Resender {
 export class NotSent {
   /** What a message that waits again says, in its details. */
   static readonly REASON = "No relay took it, so it has not left this device. It is sent by itself once one does.";
-  /** `error`: what the send said, kept as it was for a message queued already. */
-  constructor(readonly error: string) {}
+  /** What a new message that waits behind such a one says (`waitsItsTurn`). */
+  static readonly BEHIND = "Waits for the messages before it to go.";
+  /**
+   * `error`: what the send said, kept as it was for a message queued already. `reason`: what the message that waits
+   * again says (the contact's windows had no room for it, `MESSAGE_PACED`, rather than no relay taking it).
+   */
+  constructor(readonly error: string, readonly reason = NotSent.REASON) {}
 }
 
 /** How long one turn of an outbox may hold the next one back: a send that never returns must not stop the chat. */
@@ -338,7 +343,7 @@ export class Outbox {
 
   /** A new message a turn could not send (the link closed under it, or the ones before it still wait): it waits too. */
   private async waitsItsTurn(message: StoredMessage): Promise<void> {
-    await this.store.update(message.id, "waiting", "Waits for the messages before it to go.", { via: "datalink", resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
+    await this.store.update(message.id, "waiting", NotSent.BEHIND, { via: "datalink", resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
     this.schedule(message.id);
   }
 
@@ -590,7 +595,7 @@ export class Outbox {
       if (!(error instanceof NotSent)) this.unsent.delete(id);
       if (error instanceof NotSent && unsentBefore) {
         this.clear(id);
-        await this.notSent(id);
+        await this.notSent(id, error.reason);
       } else if (error) {
         this.clear(id);
         await this.requeue(id, error instanceof NotSent ? error.error : error);
@@ -807,13 +812,13 @@ export class Outbox {
    * A send that did not leave this device, of a message that had not gone before: it waits again, as it did, and counts
    * no attempt. It keeps the path a new message's turn gives it (`waitsItsTurn`): it goes the way the chat can carry it.
    */
-  private async notSent(id: string): Promise<void> {
+  private async notSent(id: string, reason: string): Promise<void> {
     const left = (this.attempts.get(id) ?? 1) - 1;
     if (left > 0) this.attempts.set(id, left); else this.attempts.delete(id);
     const message = await this.one(id);
     if (!message || message.delivery === "delivered") return;
     this.unsent.set(id, message.timestamp);
-    await this.store.update(id, "waiting", NotSent.REASON, { via: "datalink", resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
+    await this.store.update(id, "waiting", reason, { via: "datalink", resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
     if (!this.stopped) this.schedule(id);
   }
 

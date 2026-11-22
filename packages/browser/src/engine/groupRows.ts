@@ -1,6 +1,6 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
-import type { GroupState } from "@ghostly/core";
+import { groupMessageId, type GroupState } from "@ghostly/core";
 import type { GroupLight, GroupLive, StoredGroup } from "../shared/types";
 import type { GroupStore } from "./groups";
 
@@ -20,7 +20,7 @@ import type { GroupStore } from "./groups";
 export const SEQ_BLOCK = 1024;
 
 /** The fields of the state the small row holds. */
-const LIVE = ["seq", "seqEpoch", "seen", "sent", "alone", "provisional", "nicks", "unsaid"] as const;
+const LIVE = ["seq", "seqEpoch", "seen", "sent", "owed", "alone", "provisional", "nicks", "unsaid"] as const;
 
 /**
  * The fields of the record a row of their own holds (`GroupLight`) while nothing else of it changed: what a pin (mine
@@ -89,7 +89,7 @@ function marks(light: GroupLight, now: GroupLight, of: string): boolean {
 
 function liveOf(group: StoredGroup): GroupLive {
   const s = group.state!;
-  return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
+  return { top: topOf(s), state: { seq: s.seq, seqEpoch: s.seqEpoch, seen: s.seen, sent: s.sent, nicks: s.nicks, ...(s.owed?.length ? { owed: s.owed } : {}), ...(s.alone && { alone: s.alone }), ...(s.provisional && { provisional: s.provisional }),
     // A text saved before its row is stored (`unsaid`) is saved with its counter and frame, in the same row.
     ...(s.unsaid?.length ? { unsaid: s.unsaid } : {}) },
     ...(group.came && { came: group.came }) };
@@ -166,7 +166,7 @@ export class GroupRows {
    */
   async save(group: StoredGroup): Promise<void> {
     const written = this.written.get(group.id), state = group.state!, edits = editsOf(state);
-    if (this.raw.putGroupLive && written && holds(written.state, written.key, state) && (edits === written.edits || this.raw.putGroupLight)) {
+    if (this.raw.putGroupLive && written && holds(written.state, written.key, state, group.removedIds) && (edits === written.edits || this.raw.putGroupLight)) {
       await this.raw.putGroupLive(group.id, liveOf(group));
       written.came = cameOf(group);
       if (edits === written.edits) return;
@@ -183,7 +183,7 @@ export class GroupRows {
     // Out of the group, or not in it yet: no small row.
     if (!state) { this.written.delete(group.id); return this.raw.putGroup(group, null); }
     const was = this.written.get(group.id);
-    if (was && holds(was.state, was.key, state)) {
+    if (was && holds(was.state, was.key, state, group.removedIds)) {
       const rest = restKey(group);
       // Only a pin, a deletion for everyone, the hubs, a member's app noted or the members' edits changed: their row alone,
       // the record stays as it is.
@@ -227,7 +227,22 @@ export class GroupRows {
   }
 }
 
-/** Whether a record holding `written` (its `recordKey` `key`) holds `state` too, but for what the small row says. */
-function holds(written: GroupState, key: string, state: GroupState): boolean {
-  return written.seqEpoch === state.seqEpoch && state.seq <= written.seq && key === recordKey(state);
+/**
+ * Whether a record holding `written` (its `recordKey` `key`) holds `state` too, but for what the small row says. Not
+ * when it keeps a frame of mine whose message was deleted for everyone since (`removedIds`): the record is written whole
+ * only when the rest changes, so its copy of my last frames kept that text, readable with the secrets beside it, long
+ * after the small row's no longer did (`message delete --purge` promises it leaves the profile's folder).
+ */
+function holds(written: GroupState, key: string, state: GroupState, removedIds: readonly string[] = []): boolean {
+  return written.seqEpoch === state.seqEpoch && state.seq <= written.seq && key === recordKey(state) && !keepsRemoved(written, removedIds, state);
+}
+
+/**
+ * Whether `state` keeps the text of a frame of mine whose message (its first place, for one said again) is in `removedIds`,
+ * or a frame of mine `now` holds sealed again (a reply's line of a message deleted for everyone, `GroupSession.forget`).
+ */
+function keepsRemoved(state: GroupState, removedIds: readonly string[], now: GroupState): boolean {
+  if (state.sent.some(f => f.c && now.sent.some(g => g.e === f.e && g.n === f.n && g.xs !== f.xs))) return true;
+  if (!removedIds.length) return false;
+  return state.sent.some(f => f.c && removedIds.includes(f.o ? groupMessageId(f.s, f.o.e, f.o.n) : groupMessageId(f.s, f.e, f.n)));
 }

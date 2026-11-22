@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
+vi.mock("../src/identity", async importOriginal => (await import("./support/verifyOnce")).verifyOnce(await importOriginal()));
 import { CommunitySession, type CommunityFrame, type CommunitySessionHooks, type CommunityState } from "../src/groupCommunity";
 // covers: groups.community.leave
 

@@ -138,6 +138,22 @@ describe("the rail", () => {
     field.remove();
   });
 
+  it("folds with the key that types L on any keyboard, as Ctrl+N and Ctrl+F do", () => {
+    saveSession(chat("a", { nick: "Ana" }));
+    list();
+    // Dvorak: L is at a US keyboard's P, and the key at L's place types N.
+    fireEvent.keyDown(window, { code: "KeyL", key: "N", altKey: true, shiftKey: true });
+    expect(screen.queryByTestId("chat-rail")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { code: "KeyP", key: "L", altKey: true, shiftKey: true });
+    expect(screen.getByTestId("chat-rail")).toBeInTheDocument();
+    // A keyboard with no Latin letters (Arabic): the key at L's place.
+    fireEvent.keyDown(window, { code: "KeyL", key: "م", altKey: true, shiftKey: true });
+    expect(screen.queryByTestId("chat-rail")).not.toBeInTheDocument();
+    // A French Mac: ⌥⇧L types |, still L's key.
+    fireEvent.keyDown(window, { code: "KeyL", key: "|", altKey: true, shiftKey: true });
+    expect(screen.getByTestId("chat-rail")).toBeInTheDocument();
+  });
+
   it("stays as it is with Alt+Shift+L while a dialog is open, so the dialog gives the focus back to its opener", async () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ chatListCollapsed: true }));
     saveSession(chat("a", { nick: "Ana" }));
@@ -262,7 +278,7 @@ describe("a group on the rail", () => {
 
   it("marks an invitation, and says what it waits for as its row does", () => {
     const view = folded([groupView({ id: "g1", name: "Climbing", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: "a".padEnd(52, "y"), members: 3, accepted: false } })]);
-    expect(group()).toHaveAccessibleName("Climbing, Invited by Alice · 3 members");
+    expect(group()).toHaveAccessibleName("Climbing, Invited by \u2068Alice\u2069 · 3 members");
     expect(within(group()).getByTestId("chat-rail-invitation")).not.toHaveAttribute("data-muted");
     view.unmount();
     // Accepted, the admin's app not answered yet: nothing for me to do, so the mark is grey.

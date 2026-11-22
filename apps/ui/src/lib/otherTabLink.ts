@@ -1,4 +1,4 @@
-import { protocolLinkCode } from "./url";
+import { protocolLinkCode, undoubledRoute } from "./url";
 
 /**
  * A link opened while the profile runs in another tab (an invite, a group's link, a device code): the tab it opened
@@ -11,13 +11,16 @@ const channelName = (lock: string) => `${lock}-links`;
 
 /**
  * The route of the link this address carries (the hash without its `#`), when it carries one the app's intakes take:
- * a `ghostly1` invite or device code, a `web+ghostly:` link, a group's `/join/…` link, or a device code's link that
- * names the profile (`#<profile>#ghostly1z…`). Null for anything else: home, a chat's address, a page of the menu.
+ * a `ghostly1` invite or device code, a `web+ghostly:` link, a group's `/join/…` link, an older invite link
+ * (`/chat/ghostly1…`, `/chat/<seed>/<key>/<enc>`: what `ChatLinkIntake` never reads as a chat's address), or a device
+ * code's link that names the profile (`#<profile>#ghostly1z…`), each also with a doubled `#` before it (read as the
+ * route it doubles). Null for anything else: home, a chat's address (`/chat/<sessionId>`), a page of the menu.
  */
 export function linkInAddress(hash: string): string | null {
-  const route = hash.replace(/^#/, "");
+  const route = undoubledRoute(hash.replace(/^#/, ""));
   const pathname = route.split(/[?#]/)[0];
-  if (/^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null || /^\/join\/./.test(pathname)) return route;
+  const olderInvite = /^\/chat\/(?:ghostly1|[^/]+\/[^/])/i.test(pathname);
+  if (/^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null || /^\/join\/./.test(pathname) || olderInvite) return route;
   return /#ghostly1/i.test(route) ? route : null;
 }
 
@@ -57,6 +60,20 @@ export function takeLinks(lock: string, open: (route: string) => void): () => vo
     open(message.route);
   };
   return () => channel.close();
+}
+
+/**
+ * Links this tab opens itself, one after the other, through `open` as `takeLinks` does: each once the address carries
+ * no link any more (the intake took the one before), every `everyMs`, so none replaces another before it was taken.
+ */
+export function openInTurn(routes: readonly string[], open: (route: string) => void, everyMs = 50): void {
+  const left = [...routes];
+  const next = () => {
+    if (!left.length) return;
+    if (linkInAddress(window.location.hash) === null) open(left.shift()!);
+    if (left.length) setTimeout(next, everyMs);
+  };
+  next();
 }
 
 /**
