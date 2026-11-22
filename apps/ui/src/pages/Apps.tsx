@@ -173,8 +173,20 @@ const ListingRow = memo(function ListingRow({ listing, app, removed, storeName, 
   onInstall: (listing: AppListing) => void;
 }) {
   const { t } = useI18n();
+  // Install goes when the store takes that version down or the app is installed in another tab: its focus would drop
+  // to the page. The ref's cleanup runs while the button is still there; the row, which now says why, takes the focus,
+  // never taken from where the person went meanwhile.
+  const row = useRef<HTMLLIElement>(null);
+  const installHadFocus = useRef(false);
+  const installRef = useCallback((button: HTMLButtonElement) => () => { installHadFocus.current = document.activeElement === button; }, []);
+  useLayoutEffect(() => {
+    if (!installHadFocus.current) return;
+    installHadFocus.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) row.current?.focus({ preventScroll: true });
+  });
   return (
-    <li tabIndex={focusable ? -1 : undefined} data-testid="app-listing" data-ref={listing.ref}
+    <li ref={row} tabIndex={focusable || app || removed ? -1 : undefined} data-testid="app-listing" data-ref={listing.ref}
       className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
       {/* Install (or Installed) goes under the name when both don't fit, rather than leaving it a letter. */}
       <span className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
@@ -190,7 +202,7 @@ const ListingRow = memo(function ListingRow({ listing, app, removed, storeName, 
         </span>
       </span>
       {app ? <span className="ms-auto text-xs text-text-muted">{t("apps.store.installed")}</span>
-        : !removed && <Button data-testid="app-listing-install" className="ms-auto" aria-label={t("apps.install.installNamed", { title: listing.title })} onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
+        : !removed && <Button ref={installRef} data-testid="app-listing-install" className="ms-auto" aria-label={t("apps.install.installNamed", { title: listing.title })} onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
     </li>
   );
 });
