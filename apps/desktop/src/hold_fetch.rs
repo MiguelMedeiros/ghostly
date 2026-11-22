@@ -8,7 +8,9 @@
 //! A plain GET over HTTPS: no redirect followed, no proxy, no cookies, a bounded body. The engine checks the rest.
 //!
 //! A contact's identity proof and public data (WISP 300, PUBLIC-PROFILES.md) are read here too, for the same reason
-//! (apps/ui/src/desktop/identityFetch.ts): those reads say what they accept, and the answer says its type.
+//! (apps/ui/src/desktop/identityFetch.ts): those reads say what they accept, and the answer says its type. So is a
+//! Lightning address or LNURL service (apps/ui/src/desktop/lnurlFetch.ts), and a group's call node is asked here
+//! (`post`, apps/ui/src/desktop/groupCallFetch.ts): both are addresses another party names.
 
 use std::net::IpAddr;
 use std::sync::OnceLock;
@@ -36,6 +38,8 @@ pub struct HoldResponse {
     pub content_type: String,
     /// Empty for any status but 2xx: the engine refuses those without reading them.
     pub body_b64: String,
+    /// The answer's `Retry-After`, empty when it has none (a call node's 429, WISP 602 § Moderation).
+    pub retry_after: String,
 }
 
 /// The address if this device may read it: https, no credentials, a name or a public address. The engine has checked
@@ -103,22 +107,46 @@ async fn get(
             request = request.header(name, value);
         }
     }
+    send(request).await
+}
+
+/// One POST of a JSON request to `url` (a group's call node, WISP 602), as `get` reads.
+async fn post_json(
+    client: &reqwest::Client,
+    url: reqwest::Url,
+    body: String,
+) -> Result<HoldResponse, String> {
+    send(
+        client
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body),
+    )
+    .await
+}
+
+async fn send(request: reqwest::RequestBuilder) -> Result<HoldResponse, String> {
     let mut response = request
         .send()
         .await
         .map_err(|e| format!("unreachable: {}", reason(e)))?;
     let status = response.status().as_u16();
-    let content_type = response
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
+    let header = |name| {
+        response
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let content_type = header(reqwest::header::CONTENT_TYPE);
+    let retry_after = header(reqwest::header::RETRY_AFTER);
     if !response.status().is_success() {
         return Ok(HoldResponse {
             status,
             content_type,
             body_b64: String::new(),
+            retry_after,
         });
     }
     // Word for word what apps/ui/src/desktop/holdFetch.ts answers as an item past the largest, for the engine to refuse.
@@ -144,15 +172,24 @@ async fn get(
         status,
         content_type,
         body_b64: STANDARD.encode(body),
+        retry_after,
     })
 }
 
-/// One GET of a held item or manifest (or an identity's proof or public data) at `url`, on public addresses only.
+/// One GET of a held item or manifest (or an identity's proof or public data, a Lightning address service's answer) at
+/// `url`, on public addresses only.
 pub async fn fetch(url: String, headers: Vec<(String, String)>) -> Result<HoldResponse, String> {
     let url =
         reqwest::Url::parse(&url).map_err(|_| "The storage address is not a URL".to_string())?;
     allowed(&url)?;
     get(client()?, url, headers).await
+}
+
+/// One POST of a JSON request to a group's call node at `url`, on public addresses only.
+pub async fn post(url: String, body: String) -> Result<HoldResponse, String> {
+    let url = reqwest::Url::parse(&url).map_err(|_| "The call node is not a URL".to_string())?;
+    allowed(&url)?;
+    post_json(client()?, url, body).await
 }
 
 #[cfg(test)]
@@ -335,6 +372,76 @@ mod tests {
             !request.contains("cookie") && !request.contains("accept-x"),
             "{request}"
         );
+    }
+
+    #[tokio::test]
+    async fn a_call_node_is_asked_on_public_addresses_only_and_says_when_to_ask_again() {
+        let (port, taken) = serve(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").await;
+        for answers in [
+            vec!["192.168.1.1"],
+            vec!["127.0.0.1"],
+            vec!["93.184.215.14", "10.0.0.5"],
+        ] {
+            let client = build(Answers(
+                answers.iter().map(|a| a.parse().unwrap()).collect(),
+            ))
+            .unwrap();
+            let error = post_json(&client, at(port), "{}".into()).await.err();
+            assert!(
+                error
+                    .as_deref()
+                    .is_some_and(|e| e.contains("not a public address")),
+                "{answers:?}: {error:?}"
+            );
+        }
+        assert_eq!(taken.load(Ordering::SeqCst), 0);
+        for refused in [
+            "https://192.168.1.1",
+            "https://[fd00::1]/sfu/group-token",
+            "http://sfu.example.com/sfu/group-token",
+        ] {
+            assert!(
+                post(refused.into(), "{}".into()).await.is_err(),
+                "{refused}"
+            );
+        }
+        let error = post("https://localhost/sfu/group-token".into(), "{}".into())
+            .await
+            .unwrap_err();
+        assert!(error.contains("not a public address"), "{error}");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let asked = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // The head and the body may come in two writes: read until the body is in.
+            let mut request = Vec::new();
+            let mut chunk = [0u8; 4096];
+            while !request.ends_with(b"}") {
+                let n = stream.read(&mut chunk).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..n]);
+            }
+            let _ = stream
+                .write_all(b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\nContent-Length: 0\r\n\r\n")
+                .await;
+            String::from_utf8_lossy(&request).to_string()
+        });
+        let answer = post_json(&build(Storage).unwrap(), at(port), r#"{"v":1}"#.into())
+            .await
+            .unwrap();
+        assert_eq!((answer.status, answer.retry_after.as_str()), (429, "30"));
+        let request = asked.await.unwrap();
+        assert!(request.starts_with("POST "), "{request}");
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("content-type: application/json\r\n"),
+            "{request}"
+        );
+        assert!(request.ends_with(r#"{"v":1}"#), "{request}");
     }
 
     #[tokio::test]

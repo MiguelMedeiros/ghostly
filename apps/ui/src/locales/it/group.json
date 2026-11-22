@@ -181,6 +181,7 @@
     "fullShort": "Il gruppo è pieno",
     "hideQr": "Nascondi QR",
     "jammed": "Nessuno può entrare con il link di questo gruppo in questo momento: continua a ricevere richieste da app che non si collegano mai, e occupano i posti in cui aspetta chi arriva. Qualcuno che ha il link potrebbe farlo apposta. Crea un nuovo link e condividilo di nuovo.",
+    "madeNew": "L'admin ha creato un nuovo link",
     "note": "Chi apre questo link entra, senza essere tuo contatto né dire chi è. Entra mentre la tua app è aperta, fino a {{count}} membri.",
     "noteCommunity": "Chi apre questo link entra, senza essere contatto di nessuno né dire chi è. L'app di qualsiasi membro lo fa entrare, quindi funziona anche quando non ci sei; fino a {{count}} membri. Rimuovere qualcuno non gli impedisce di riaprire il link: per questo l'admin ne crea uno nuovo.",
     "off": "Il link è disattivato: nessuno può entrare con esso, e il link condiviso prima non funzionerà più. Attivarlo crea un nuovo link da condividere.",
@@ -188,6 +189,7 @@
     "qrTitle": "Codice QR del link del gruppo",
     "reset": "Nuovo link",
     "resetBody": "Il link condiviso finora smette di funzionare per sempre: chi lo ha e non è ancora entrato non può più entrare con esso. I membri restano nel gruppo.",
+    "resetDone": "Nuovo link creato: quello condiviso prima non funziona più",
     "resetHint": "Un nuovo link; quello attuale smette di funzionare",
     "resetTitle": "Creare un nuovo link?",
     "share": "Condividi",
@@ -199,6 +201,7 @@
     "title": "Link del gruppo",
     "tooMany": "Troppi link di gruppo aperti",
     "tooManyNext": "Elimina un gruppo che aspetta ancora di entrare o incolla il link in Unisciti.",
+    "turnedOff": "L'admin ha disattivato il link",
     "unanswered": "Chi apre il link forse non riesce a entrare: molti che hanno bussato di recente non hanno mai risposto. Un nuovo link risolve; poi condividi quello nuovo."
   },
   "makeAdmin": {
@@ -231,8 +234,10 @@
     "fullInvited": "Il gruppo è pieno ({{max}} su {{max}}), contando gli inviti ancora senza risposta ({{invited}}). Nessun altro può essere invitato finché qualcuno non esce.",
     "invite": "Invita un contatto",
     "inviteAction": "Invita",
+    "inviteLabel": "Invita {{name}}",
     "invited": "Invitato…",
     "makeAdmin": "Cedi admin",
+    "makeAdminLabel": "Cedi admin a {{name}}",
     "missing": "{{count}} messaggi di questo membro non sono ancora arrivati",
     "missingOne": "{{count}} messaggio di questo membro non è ancora arrivato",
     "needsBothHint": "I gruppi richiedono entrambe le app connesse e aggiornate",
@@ -242,6 +247,7 @@
     "notReachable": "non raggiungibile",
     "reachable": "raggiungibile",
     "remove": "Rimuovi",
+    "removeLabel": "Rimuovi {{name}}",
     "removePicture": "Rimuovi foto"
   },
   "menu": {

@@ -96,7 +96,9 @@ export function MobileTabBar() {
 
   return (
     <>
-      <nav className="mobile-tabs shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
+      {/* A landmark of its own name beside the chat list's "Chats": the words the switcher's hint uses for it. Not the
+          wide screen's "Account": Chats is one of its places. */}
+      <nav aria-label={t("tabs.bar")} className="mobile-tabs shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
         {tabs.map((tab) => {
           // Saved messages and Tasks are opened from the chat list: Chats is where they are.
           const active = pathname === tab.path || pathname.startsWith(`${tab.path}/`) || (tab.path === HOME && isChatListPage(pathname));

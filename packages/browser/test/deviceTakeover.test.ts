@@ -345,6 +345,29 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     await expect(forceTakeover(ports(desktop.store, desktop.keeper), { password: PASSWORD, name: "" })).rejects.toThrow("takeover-state");
   });
 
+  it("a standby mid-pull: the pull's staging goes before anything is written, and one that could not go refuses the takeover", async () => {
+    const PULL = { role: "taking" as const, step: "copying", id: "aGFuZG9mZg", peer: deviceSet()[0].key, staging: "ghostly_stage1", old: "ghostly", at: clock.t };
+    const phone = await device(network, 1, "standby", { handoff: PULL });
+    network.seed(phone.stored);
+    const order: string[] = [];
+    const dropping = { ...ports(phone.store, phone.keeper), dropStaging: async () => {
+      order.push(`drop after ${network.calls.length} calls`);
+      await phone.store.amend("ghostly", { handoff: { ...phone.store.record.handoff!, step: "stopped", staging: undefined } });
+    } };
+    expect((await forceTakeover(dropping, { password: PASSWORD, name: "Desktop" })).kind).toBe("start");
+    expect(order).toEqual(["drop after 0 calls"]);
+    expect(phone.store.record).toMatchObject({ state: "active", takeovers: 1 });
+
+    // The drop failed, or nothing here can drop it: the record still names the staging, and nothing goes to the turn.
+    const net = new FakeTurnNetwork();
+    const laptop = await device(net, 2, "standby", { handoff: PULL });
+    net.seed(laptop.stored);
+    await expect(forceTakeover({ ...ports(laptop.store, laptop.keeper), dropStaging: async () => { throw new Error("The file is locked"); } }, { password: PASSWORD, name: "Desktop" })).rejects.toThrow("takeover-state");
+    await expect(forceTakeover(ports(laptop.store, laptop.keeper), { password: PASSWORD, name: "Desktop" })).rejects.toThrow("takeover-state");
+    expect(net.calls).toEqual([]);
+    expect(laptop.store.record).toMatchObject({ state: "standby", handoff: { staging: "ghostly_stage1" } });
+  });
+
   it("a takeover that loses goes back to what it was, and the device it lost to goes on", async () => {
     const phone = await device(network, 1, "standby");
     // Another device already holds a higher turn than the phone will read: the laptop forces N + 1 after the phone's read.

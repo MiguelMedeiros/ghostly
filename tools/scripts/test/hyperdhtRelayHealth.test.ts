@@ -20,7 +20,8 @@ describe("the HyperDHT relay's health check (infra/services/hyperdht-relay)", ()
       expect(body).toMatchObject({ ok: false, nodes: 0 });
       expect(Object.keys(body).sort()).toEqual(["firewalled", "nodes", "ok"]);
       expect(relay.stats().sinceAnswerMs).toBeNull();
-      expect(logged).toContain("bootstrap reached no node");
+      // With what to check, on the same line.
+      expect(logged).toContain("bootstrap reached no node: check that this host can send UDP out (a tunnel, a firewall or a container network may not) and that GHOSTLY_HYPERDHT_BOOTSTRAP names running nodes; /healthz answers 503 until a node answers");
     } finally {
       await relay.close();
     }
@@ -37,7 +38,7 @@ describe("the HyperDHT relay's health check (infra/services/hyperdht-relay)", ()
       expect(Object.keys(body).sort()).toEqual(["firewalled", "nodes", "ok"]);
       expect(relay.stats().sinceAnswerMs).toBeGreaterThanOrEqual(0);
       expect(relay.stats().sinceAnswerMs).toBeLessThan(10_000);
-      expect(logged).not.toContain("bootstrap reached no node");
+      expect(logged.filter(line => line.startsWith("bootstrap reached no node"))).toEqual([]);
     } finally {
       await relay.close();
     }

@@ -63,6 +63,11 @@ const REVOCATIONS_CHECKED_AT = "identityRevocationsCheckedAt";
 /** The lookup under way: when it began (ms) and the proofs it already looked up (`linkId|id`), so one cut short goes on from the rest. */
 const REVOCATIONS_ROUND = "identityRevocationsRound";
 interface LookupRound { startedAt: number; done: string[] }
+/**
+ * The contacts' withdrawn proofs whose revocation lookups after the withdraw (`WITHDRAWN_REVOCATION_TRIES_MS`) have not
+ * ended (`linkId|id`): a stop drops their timers, so the next start plans them again.
+ */
+const WITHDRAWN_LOOKUPS = "identityWithdrawnLookups";
 /** Relays and the DHT forget a record within hours: republish revocations this often while the app runs. */
 const REPUBLISH_MS = 60 * 60_000;
 /** The longest a timer waits; a redraw further off waits again from there. */
@@ -127,7 +132,7 @@ const now = () => Math.floor(Date.now() / 1000);
  * A share of mine as every reader gets it (the app, the CLI, `getState`): its reason only in words this app writes
  * (identityRefusal), else none. A ledger kept from before that check holds the contact's own words there.
  */
-const ownRefusal = (s: SharedIdentity): SharedIdentity => {
+const ownRefusal = ({ held: _held, ...s }: SharedIdentity): SharedIdentity => {
   if (s.error === undefined || identityRefusal(s.error) !== undefined) return s;
   const { error: _contactWords, ...rest } = s;
   return rest;
@@ -149,6 +154,9 @@ export class IdentityProofs {
   /** When `round` was last written (ms), and how many proofs it gained since: `noteRound`. */
   private roundSavedAt = 0;
   private roundUnsaved = 0;
+  /** `WITHDRAWN_LOOKUPS`, and the run of lookups under way for each (a newer withdraw of the same proof replaces it). */
+  private withdrawnLookups = new Set<string>();
+  private withdrawalRuns = new Map<string, object>();
   /**
    * How the last Pkarr read of each contact's proof went (`revoked`), by proof id: answered, could not run (offline, no
    * relay answered), or held back by the relays' budget, which takes reads again in this many ms.
@@ -195,12 +203,15 @@ export class IdentityProofs {
   async load(): Promise<void> {
     const providers = loadIdentityProviders();
     const settings = await store(STORES.settings, "readonly");
-    [this.proofs, this.revocations, this.revocationsCheckedAt, this.round] = await Promise.all([
+    let pending: string[];
+    [this.proofs, this.revocations, this.revocationsCheckedAt, this.round, pending] = await Promise.all([
       wrap<StoredIdentityProof[] | undefined>(settings.get(KEY)).then(v => v ?? []),
       wrap<Revocation[] | undefined>(settings.get(REVOCATIONS)).then(v => v ?? []),
       wrap<number | undefined>(settings.get(REVOCATIONS_CHECKED_AT)).then(v => typeof v === "number" ? v : 0),
       wrap<LookupRound | undefined>(settings.get(REVOCATIONS_ROUND)).then(v => typeof v?.startedAt === "number" && Array.isArray(v.done) ? v : undefined),
+      wrap<unknown>(settings.get(WITHDRAWN_LOOKUPS)).then(v => Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : []),
     ]);
+    this.withdrawnLookups = new Set(pending);
     await providers;
   }
   /** Background work: republish revocations, look up the contacts' proofs for revocations. */
@@ -217,6 +228,11 @@ export class IdentityProofs {
     // A clock set back since then waits 12 h at most.
     const due = Math.min(REVOCATION_CHECK_MS, this.revocationsCheckedAt + REVOCATION_CHECK_MS - Date.now());
     this.lookUpIn(Math.max(60_000, due));
+    // A contact's proof withdrawn shortly before the last stop: its lookups after the withdraw start over.
+    for (const key of this.withdrawnLookups) {
+      const at = key.lastIndexOf("|");
+      this.afterWithdrawal(key.slice(0, at), key.slice(at + 1));
+    }
     every(AUTO_RECHECK_TICK_MS, AUTO_RECHECK_FIRST_MS, () => this.recheckDue());
     // A contact's request whose challenge ended unanswered, with no request after it, leaves the timeline within a window.
     every(IDENTITY_CHALLENGE_WINDOW * 1000, IDENTITY_CHALLENGE_WINDOW * 1000, () => this.expireChallenges());
@@ -255,6 +271,10 @@ export class IdentityProofs {
     this.timers = [];
     for (const { timer } of this.redrawTimers.values()) clearTimeout(timer);
     this.redrawTimers.clear();
+    // Every chat's exchange ends as if its link closed: no pacing timer outlives the engine, and a start after this
+    // greets each chat again when its link is ready.
+    for (const x of this.exchanges.values()) x.stop();
+    this.greeted.clear();
     this.lookupTimer = undefined;
     // The lookup under way ends here: what it read since its last write is kept for the next start.
     this.saveRound();
@@ -587,20 +607,42 @@ export class IdentityProofs {
   private revocable(r: ReceivedIdentity): boolean {
     return r.status !== "revoked" && Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity) > now();
   }
-  /** A proof the contact just withdrew: looked up for its revocation a few times (`WITHDRAWN_REVOCATION_TRIES_MS`). */
-  private afterWithdrawal(linkId: string, id: string, tries: readonly number[] = WITHDRAWN_REVOCATION_TRIES_MS): void {
-    const [wait, ...rest] = tries;
-    if (wait === undefined) return;
-    const timer = setTimeout(() => {
-      this.timers = this.timers.filter(t => t !== timer);
-      const r = this.host.ledger(linkId)?.received.find(x => x.id === id);
-      if (!r || r.status !== "withdrawn" || !this.revocable(r)) return;
-      void (async () => {
-        const next = this.host.online() ? await this.exchange(linkId)?.recheck(id, { revocationOnly: true }).catch(() => undefined) : undefined;
-        if (next?.status !== "revoked") this.afterWithdrawal(linkId, id, rest);
-      })();
-    }, wait);
-    this.timers.push(timer);
+  /**
+   * A proof the contact just withdrew: looked up for its revocation a few times (`WITHDRAWN_REVOCATION_TRIES_MS`). Kept
+   * (`WITHDRAWN_LOOKUPS`) until they end, so a stop before then has them start over at the next start, not wait 12 h.
+   */
+  private afterWithdrawal(linkId: string, id: string): void {
+    const key = `${linkId}|${id}`, run = {}, stops = this.stops;
+    this.withdrawalRuns.set(key, run);
+    if (!this.withdrawnLookups.has(key)) { this.withdrawnLookups.add(key); this.saveWithdrawnLookups(); }
+    // A stop since keeps it for the next start; a newer withdraw of the same proof has its own run.
+    const current = () => this.stops === stops && this.withdrawalRuns.get(key) === run;
+    const end = () => {
+      this.withdrawalRuns.delete(key);
+      if (this.withdrawnLookups.delete(key)) this.saveWithdrawnLookups();
+    };
+    const next = ([wait, ...rest]: readonly number[]) => {
+      if (wait === undefined) return end();
+      const timer = setTimeout(() => {
+        this.timers = this.timers.filter(t => t !== timer);
+        if (!current()) return;
+        const r = this.host.ledger(linkId)?.received.find(x => x.id === id);
+        if (!r || r.status !== "withdrawn" || !this.revocable(r)) return end();
+        void (async () => {
+          const found = this.host.online() ? await this.exchange(linkId)?.recheck(id, { revocationOnly: true }).catch(() => undefined) : undefined;
+          if (!current()) return;
+          if (found?.status === "revoked") end(); else next(rest);
+        })();
+      }, wait);
+      this.timers.push(timer);
+    };
+    next(WITHDRAWN_REVOCATION_TRIES_MS);
+  }
+  /** Not waited on, as `saveRound`: the writes keep their order. */
+  private saveWithdrawnLookups(): void {
+    if (this.ended) return;
+    const keys = [...this.withdrawnLookups];
+    void transact([STORES.settings], stores => { stores[STORES.settings].put(keys, WITHDRAWN_LOOKUPS); }).catch(() => {});
   }
 
   /** Every engine state builds these: each chat's ledger is read once for all the proofs, not once per proof. */

@@ -4,5 +4,6 @@
   "copyFailedShare": "无法复制。请选中下方的链接后复制，或将其分享。",
   "qrTitle": "邀请二维码",
   "shareFailed": "无法分享。请复制邀请。",
+  "shareFailedLink": "无法分享。请复制链接。",
   "title": "邀请你的联系人"
 }
