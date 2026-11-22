@@ -222,6 +222,11 @@ jobs:
           [[ $types_result == passed ]] || echo "::error::The TypeScript check failed (npm run typecheck): see its group above"
           [[ $lint_result == passed && $types_result == passed ]]
 
+      # Reads apps/ui/src/locales/ alone, in a second: every file's keys in order, Brazilian Portuguese, Arabic standby
+      # said one way. Each problem names the file and the key.
+      - name: Locale files (npm run locales:sort -- --check)
+        run: npm run locales:sort -- --check
+
       # docs/changelog/unreleased/<slug>.md: one file per changelog entry, put into CHANGELOG.md at release
       # (tools/scripts/changes.mjs).
       - name: Changelog entries are well formed
