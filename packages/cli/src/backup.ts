@@ -105,7 +105,11 @@ async function removeDeadPartials(path: string): Promise<void> {
   }
 }
 
-async function walk(root: string, dir = root, out: string[] = []): Promise<string[]> {
+/**
+ * Every file under `root`, with the size its one stat read. A second stat of each for its size, all at once, held the
+ * daemon's thread ~100 ms at 20,000 files; one removed after the walk is left out by the copy.
+ */
+async function walk(root: string, dir = root, out: { name: string; size: number }[] = []): Promise<{ name: string; size: number }[]> {
   let names: string[];
   try { names = await readdir(dir); } catch { return out; }
   for (const name of names) {
@@ -113,7 +117,7 @@ async function walk(root: string, dir = root, out: string[] = []): Promise<strin
     const found = await stat(path).catch(unlessGone);
     if (!found) continue;
     if (found.isDirectory()) await walk(root, path, out);
-    else out.push(relative(root, path));
+    else out.push({ name: relative(root, path), size: found.size });
   }
   return out;
 }
@@ -201,11 +205,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
         if (holds) holds.text = text; else settings.push({ name: HOLDS, text });
       }
       const light = bool(params, "light");
-      const found = await Promise.all((await walk(paths.files)).map(async (name) => {
-        const file = await stat(join(paths.files, name)).catch(unlessGone);
-        return file && { name, size: file.size };
-      }));
-      const all = found.filter((file) => file !== null);
+      const all = await walk(paths.files);
       // A file's name is its id: only one that could be a voice message under its larger cut is looked up.
       const kept = async (file: { name: string; size: number }) => keptInLight(file.size, false) || (file.size <= LIGHT_VOICE_BYTES && !!(await fileStore.get(basename(file.name)).catch(() => undefined))?.metadata?.voice);
       const files: typeof all = [], leftOut: typeof all = [];
