@@ -1,6 +1,6 @@
 import { defineConfig } from "vitest/config";
-import { maxWorkers, quarantined } from "../../tools/vitest.shared.ts";
+import { maxWorkers, quarantined, reporters } from "../../tools/vitest.shared.ts";
 
 export default defineConfig({
-  test: { maxWorkers, exclude: quarantined() },
+  test: { maxWorkers, reporters, exclude: quarantined() },
 });
