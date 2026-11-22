@@ -2,10 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { afterAll, describe, expect, it } from "vitest";
 import type { ApiContext } from "../src/apiKit";
-import { MAX_OPEN_CALLS, serve, type Host } from "../src/host";
+import { serve, type Host } from "../src/host";
 import { waitForGroupFrame } from "../src/waits";
 // covers: headless.daemon
 
@@ -31,47 +30,24 @@ async function served(name: string) {
   return { ...s, listeners, path: join(dir, "daemon.sock") };
 }
 
-/** A client that writes `count` chat.wait calls at once and keeps every answer by id. */
+/** A client that writes `count` chat.wait calls at once. */
 function waiter(path: string, count: number) {
   const client = connect(path);
-  type Answer = { id?: number; result?: unknown; error?: { code: string; message: string } };
-  const answers = new Map<number, Answer>();
-  createInterface({ input: client }).on("line", (line) => {
-    const message = JSON.parse(line) as Answer;
-    if (typeof message.id === "number") answers.set(message.id, message);
-  });
   const lines = Array.from({ length: count }, (_, i) => JSON.stringify({ id: i + 1, method: "chat.wait", params: { chat: "c49", until: "live", timeout: 86_400 } }) + "\n");
   client.write(lines.join(""));
-  return { client, answers };
+  return client;
 }
 
 describe.skipIf(process.platform === "win32")("a wait on the socket", () => {
   it("ends when its client's connection closes", async () => {
     const s = await served("closed");
     try {
-      const { client } = waiter(s.path, 20);
+      const client = waiter(s.path, 20);
       while (s.listeners.size < 20) await turn();
       // A bot killed in the middle of `ghostly chat wait --timeout 86400`.
       client.destroy();
       for (let i = 0; i < 50 && s.listeners.size; i++) await new Promise((resolve) => setTimeout(resolve, 10));
       expect(s.listeners.size).toBe(0);
-    } finally { await s.close(); }
-  });
-
-  it(`takes ${MAX_OPEN_CALLS} calls open per connection: the next is refused busy, and another connection still waits`, async () => {
-    const s = await served("capped");
-    try {
-      const first = waiter(s.path, MAX_OPEN_CALLS + 5);
-      while (first.answers.size < 5) await turn();
-      expect(s.listeners.size).toBe(MAX_OPEN_CALLS);
-      for (let id = MAX_OPEN_CALLS + 1; id <= MAX_OPEN_CALLS + 5; id++) expect(first.answers.get(id)?.error?.code).toBe("busy");
-      expect([...first.answers.keys()].every((id) => id > MAX_OPEN_CALLS)).toBe(true);
-      const second = waiter(s.path, 1);
-      while (s.listeners.size < MAX_OPEN_CALLS + 1) await turn();
-      first.client.destroy();
-      while (s.listeners.size > 1) await turn();
-      second.client.destroy();
-      while (s.listeners.size) await turn();
     } finally { await s.close(); }
   });
 });

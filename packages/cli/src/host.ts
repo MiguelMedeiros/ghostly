@@ -292,12 +292,6 @@ function ownerOnlyUmask(): (() => void) | null {
 /** A client's nonce: 16 to 64 bytes as lowercase hex, so the proof is over nothing but a nonce. */
 const NONCE = /^(?:[0-9a-f]{2}){16,64}$/;
 
-/**
- * The most calls one connection has open at once; the next is refused `busy` until one answers. Each open wait holds a
- * listener or a poll (`chat wait` up to a day): 100,000 written at once on one connection held 204 MB.
- */
-export const MAX_OPEN_CALLS = 1_024;
-
 /** `answering`: the calls of every connection still open, which a stopping daemon answers before it ends them. */
 function connection(daemon: ApiContext, socket: Socket, secret: Buffer, answering: Set<Promise<void>>): void {
   // The client that asked the calls still open went away (Ctrl-C on the command): `CallScope.gone`, and the waits of
@@ -307,7 +301,6 @@ function connection(daemon: ApiContext, socket: Socket, secret: Buffer, answerin
   socket.on("close", () => gone.abort());
   const ctx: ApiContext = Object.create(daemon) as ApiContext;
   ctx.closed = gone.signal;
-  let open = 0;
   const unsubscribes: (() => void)[] = [];
   // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
   let limit = MAX_UNREAD;
@@ -366,12 +359,10 @@ function connection(daemon: ApiContext, socket: Socket, secret: Buffer, answerin
       for (const event of queued) if (event.seq > last) write({ event });
       return;
     }
-    if (open >= MAX_OPEN_CALLS) { write({ id, error: new CliError("busy", `This connection has ${MAX_OPEN_CALLS} calls open: wait for one to answer, or open another connection`, { open }).toJSON() }); return; }
-    open++;
     const answered = callApi(ctx, request.method, request.params ?? {}, { gone: gone.signal }).then(
       (result) => write({ id, result: result ?? null }),
       (error) => write({ id, error: asCliError(error).toJSON() }),
-    ).finally(() => { open--; });
+    );
     answering.add(answered);
     void answered.then(() => answering.delete(answered));
   });
