@@ -11,7 +11,13 @@ export interface AtomViewProps<A extends Atom = Atom> {
   marks?: AtomMarks;
 }
 
-export interface AtomMarks { term: string; ranges: readonly [number, number][]; start: number }
+export interface AtomMarks {
+  term: string;
+  ranges: readonly [number, number][];
+  start: number;
+  /** The first of the matches an atom finds in its own words that the message may still mark (RichText's `SEARCH_MARK_BUDGET`). */
+  spend: (ranges: [number, number][]) => [number, number][];
+}
 
 /** A view for one kind of atom; typed loosely here, since each view knows its own atom's data. */
 export type AtomView = ComponentType<AtomViewProps<never>>;

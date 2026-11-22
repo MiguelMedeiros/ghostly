@@ -1,16 +1,18 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import type { DeviceKind } from "@ghostly/core";
+import type { AppManifest, DeviceKind } from "@ghostly/core";
 import type { HandoffFile, HandoffSource, HandoffStaging, HandoffStagingHost } from "@ghostly/browser/devices/handoff";
 import type { HandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { memorySink } from "@ghostly/browser/backup/stream";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
-import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, type FileBytes } from "@ghostly/browser/shared/fileBytes";
+import { bundleLength } from "@ghostly/browser/shared/appBundleLength";
+import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource } from "./profileBackup";
 import { listDeviceRecords } from "@ghostly/browser/devices/store";
 import { databaseOfSpace, newSpace, pointProfile, profileOfDatabase, recoverProfilePointer } from "./profiles";
 import { dropWalletStorageOf, keysOfSpace } from "./profileData";
 import { MEDIA_DEVICES_SUFFIX } from "./mediaDevices";
+import { linkedFilesDatabase } from "./apps/webFiles";
 
 /*
  * What the handoff needs of the app (WISP 06 § The handoff): a profile's storage as the app keeps it. The giver reads
@@ -28,6 +30,60 @@ import { MEDIA_DEVICES_SUFFIX } from "./mediaDevices";
  */
 
 const DIGEST = /^[A-Za-z0-9_-]{43}$/;
+/**
+ * An installed app's bundle: kept whole in file storage as `app-<digest>`, with no `files` row (the engine's `apps.ts`).
+ * Its record names where (`bytes`), for the version installed and the one waiting. A move hands it over by digest beside
+ * the chat files (WISP 1200 § Where installed apps live): left behind, every app on the new device needed its files and
+ * fetched them again, and one whose source no longer served that version did not open there at all (bug hunt, 2026-11-06).
+ */
+type AppVersion = { digest?: unknown; bytes?: unknown; sha256?: unknown; manifest?: unknown };
+type AppRecord = AppVersion & { ref: string; pending?: AppVersion };
+const bundleId = (digest: string) => `app-${digest}`;
+const BUNDLE_ID = /^app-[A-Za-z0-9_-]{43}$/;
+/** The whole bundle's length by its record's manifest, or none when the manifest cannot say. */
+const lengthOf = (manifest: unknown): number | undefined => {
+  try { return bundleLength(manifest as AppManifest); } catch { return undefined; }
+};
+/**
+ * Each bundle a record names, with its whole file's hash and length where the record kept the hash when the file was
+ * written: the hash is the file's only while the file has that length (a rewrite cut short leaves a shorter one).
+ */
+const bundlesOf = (app: AppRecord): { id: string; kind: unknown; sha256?: string; length?: number }[] => [app, ...(app.pending ? [app.pending] : [])]
+  .filter((version): version is AppVersion & { digest: string } => typeof version.digest === "string" && DIGEST.test(version.digest))
+  .map((version) => {
+    const length = typeof version.sha256 === "string" && DIGEST.test(version.sha256) ? lengthOf(version.manifest) : undefined;
+    return { id: bundleId(version.digest), kind: version.bytes, ...(length !== undefined && { sha256: version.sha256 as string, length }) };
+  });
+const FILE_KINDS: readonly FileBytesKind[] = ["opfs", "native", "idb"];
+
+/** The installed apps' records of a profile's database, none where it has no store for them yet. */
+async function appRecords(db: IDBDatabase): Promise<AppRecord[]> {
+  if (!db.objectStoreNames.contains("apps")) return [];
+  return ((await wrap(db.transaction("apps", "readonly").objectStore("apps").getAll())) ?? []) as AppRecord[];
+}
+
+/**
+ * The staged files that are the restored apps' bundles stay in this device's file storage, whatever their size, and
+ * their records are pointed at it (the giver's says where it kept them: another kind on another platform). Resolves to
+ * the other files, the chat files `restore` points records at.
+ */
+async function pointBundles(database: string, staged: HandoffFile[], kind: FileBytesKind): Promise<HandoffFile[]> {
+  const db = await wrap(indexedDB.open(database));
+  try {
+    const apps = await appRecords(db);
+    const named = new Set(apps.flatMap(bundlesOf).map(({ id }) => id));
+    const bundles = new Set(staged.filter((file) => named.has(file.id)).map((file) => file.id));
+    if (!bundles.size) return staged;
+    const here = (version?: { digest?: unknown }) => typeof version?.digest === "string" && bundles.has(bundleId(version.digest));
+    const tx = db.transaction("apps", "readwrite"), records = tx.objectStore("apps");
+    for (const app of apps) {
+      if (!here(app) && !here(app.pending)) continue;
+      records.put({ ...app, ...(here(app) && { bytes: kind }), ...(app.pending && here(app.pending) && { pending: { ...app.pending, bytes: kind } }) });
+    }
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onabort = tx.onerror = () => reject(tx.error ?? new Error("The apps' records could not be written")); });
+    return staged.filter((file) => !bundles.has(file.id));
+  } finally { db.close(); }
+}
 /** Where earlier builds kept the notes: one list under `ghostly-staging:<ns>`, then one key per file under it. */
 const stagingKey = (ns: string) => `ghostly-staging:${ns}`;
 /** A namespace and a file id hold no colon, so no key of one namespace begins as another's does. */
@@ -37,7 +93,8 @@ const stagedKeys = (ns: string): string[] => {
 };
 /** A staged file left as a Blob on a record of the frozen copy: that database, and the record's id. */
 type HeldBlob = { database: string; id: string };
-type Note = { ns: string; id: string; size: number; sha256: string; held?: HeldBlob };
+/** `loose`: staged without a forced write to disk (`Staging.finish`, a small file), checked again by a later page. */
+type Note = { ns: string; id: string; size: number; sha256: string; held?: HeldBlob; loose?: true };
 
 const NOTES_DB = "ghostly-staging", NOTES = "files";
 /** Every note of a namespace: an array key sorts after every string, so `[ns, []]` closes the range. */
@@ -124,6 +181,20 @@ function profileSource(database: string): HandoffSource {
       digests.set(file.id, sha);
       found.set(file.id, { file: { id: file.id, size: source.size, sha256: sha }, source });
     }
+    // The apps' bundles, where their records say they are: one not here (it needs its files on this device too) is not.
+    // Its hash is the one its record kept when the engine wrote and checked it (else read and hashed once): read whole
+    // here, 20 bundles of 16 MiB held the offer back 1.8 s, at every Move and again after a reload (bug hunt, 2026-11-14).
+    for (const { id, kind, sha256, length } of (await appRecords(peer)).flatMap(bundlesOf)) {
+      if (found.has(id) || !FILE_KINDS.includes(kind as FileBytesKind)) continue;
+      const store = (await fileBytesOf(kind as FileBytesKind).catch(() => null))?.forSpace?.(database);
+      const size = store ? await store.size(id).catch(() => null) : null;
+      if (!store || !size) continue;
+      const kept = size === length ? sha256 : undefined;
+      const sha = digests.get(id) ?? kept ?? await store.digest(id).catch(() => undefined);
+      if (!sha) continue;
+      digests.set(id, sha);
+      found.set(id, { file: { id, size, sha256: sha }, source: { size, read: (offset, length) => store.read(id, offset, length) } });
+    }
     return found;
   }
   return {
@@ -177,7 +248,9 @@ async function copyFrom(from: FileSource, to: FileBytes, file: HandoffFile): Pro
  * one is in file storage. A Blob whose record's checked digest is the file's is not copied (WISP 06 § Installing the
  * staged state: "Files `B` already held are linked into it, not copied"): `restore` puts that Blob on the staged record.
  * Copied, every file was written twice and read back once at each move back, the device's whole media history (bug hunt,
- * 2026-11-04). Resolves to whether it was left where it is.
+ * 2026-11-04). A larger one is linked where file storage can give it a second name (Desktop): the staged profile's
+ * name is a file of its own, and the frozen copy keeps its own, so a revert or a kept fork finds it as it was.
+ * Resolves to whether its Blob was left on the frozen copy's record.
  */
 async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: HandoffFile): Promise<boolean> {
   const tx = db.transaction(["files", "fileState"], "readonly");
@@ -188,6 +261,17 @@ async function copyHeldFile(db: IDBDatabase, id: string, to: FileBytes, file: Ha
   if (stored?.blob && checked && stored.digest === file.sha256 && stored.blob.size === file.size) {
     await to.remove(file.id).catch(() => {});
     return true;
+  }
+  // An app's bundle has no record: it is in the frozen copy's file storage, where this device keeps new files.
+  if (!stored && BUNDLE_ID.test(id)) { await copyFile(await spaceFiles(db.name), id, to, file); return false; }
+  // A plain file can change on disk under its record (a sync or backup tool, a bad disk): a linked one is kept only when
+  // its bytes still hash to the file's digest. `digest` reads them where they are stored (Desktop: in Rust), so nothing
+  // is written and no byte crosses into the page. A link that fails (a disk with no such names) or a file that is not
+  // the file any more is copied and checked below, which refuses the changed one.
+  if (stored && !stored.blob && stored.bytes === to.kind && to.link && checked && stored.digest === file.sha256) {
+    const same = async () => (await to.size(file.id)) === file.size && (await to.digest(file.id)) === file.sha256;
+    if (await to.link(db.name, id, file.id).then(same, () => false).catch(() => false)) return false;
+    await to.remove(file.id).catch(() => {});
   }
   const source = stored ? await fileSource(stored, db.name, false, async () => db) : null;
   if (!source) throw new Error("The file is not on this device");
@@ -246,14 +330,39 @@ class Staging implements HandoffStaging {
     })().catch((error: unknown) => { this.adopted = null; throw error; });
     return this.adopted;
   }
+  /** The files this page staged without a forced write (`finish`): whole here, whatever happens to the device later. */
+  private readonly loose = new Set<string>();
+  private checked: Promise<Set<string>> | null = null;
+
+  /**
+   * Small files an earlier page staged without a forced write: whole there, but the device may have gone down since,
+   * before their bytes reached the disk. Each is read back once against its digest before its note is believed; one
+   * that is not the file goes, and the giver sends it again. It answers the ids that went, from the first notes read.
+   */
+  private check(notes: Note[]): Promise<Set<string>> {
+    this.checked ??= (async () => {
+      const loose = notes.filter((note) => note.loose && !this.loose.has(note.id));
+      if (!loose.length) return new Set<string>();
+      const store = await spaceFiles(this.database);
+      const bad = (await Promise.all(loose.map(async ({ id, sha256 }) => ((await store.digest(id).catch(() => null)) === sha256 ? null : id)))).filter((id): id is string => id !== null);
+      if (!bad.length) return new Set<string>();
+      await inNotes("readwrite", (store) => { for (const id of bad) store.delete([this.ns, id]); });
+      await Promise.all(bad.map((id) => store.remove(id).catch(() => {})));
+      return new Set(bad);
+    })().catch((error: unknown) => { this.checked = null; throw error; });
+    return this.checked;
+  }
+  /** One read of the notes: the check of the loose ones runs on it, not on a read of its own. */
   private async notes(): Promise<Note[]> {
     await this.adopt();
-    return (await inNotes("readonly", (store) => store.getAll(notesOf(this.ns))) ?? []) as Note[];
+    const notes = (await inNotes("readonly", (store) => store.getAll(notesOf(this.ns))) ?? []) as Note[];
+    const bad = await this.check(notes);
+    return bad.size ? notes.filter((note) => !bad.has(note.id) || this.loose.has(note.id)) : notes;
   }
   /** `held`: the file is not in this namespace's storage but a Blob on that record of the frozen copy. */
-  private async note(file: HandoffFile, held?: HeldBlob): Promise<void> {
+  private async note(file: HandoffFile, held?: HeldBlob, loose = false): Promise<void> {
     await this.adopt();
-    const note: Note = { ns: this.ns, id: file.id, size: file.size, sha256: file.sha256, ...(held ? { held } : {}) };
+    const note: Note = { ns: this.ns, id: file.id, size: file.size, sha256: file.sha256, ...(held ? { held } : {}), ...(loose ? { loose: true as const } : {}) };
     await inNotes("readwrite", (store) => { store.put(note); });
   }
   private async heldBlob(id: string): Promise<HeldBlob | null> {
@@ -273,20 +382,30 @@ class Staging implements HandoffStaging {
     } catch { return []; }
   }
 
-  async begin(id: string): Promise<void> {
-    await this.forget(id);
-    await (await spaceFiles(this.database)).remove(id).catch(() => {});
+  /** Their notes in one transaction, their files removed side by side: one by one, 3,000 files took 1.6 to 2.6 s. */
+  async begin(ids: readonly string[]): Promise<void> {
+    await this.adopt();
+    await inNotes("readwrite", (store) => { for (const id of ids) store.delete([this.ns, id]); });
+    const store = await spaceFiles(this.database);
+    await Promise.all(ids.map((id) => store.remove(id).catch(() => {})));
   }
 
   async append(id: string, offset: number, bytes: Uint8Array): Promise<void> {
     await (await spaceFiles(this.database)).append(id, offset, bytes);
   }
 
+  /**
+   * The size is read while the file is still open, from its handle. A small file is let go without a forced write to
+   * disk, as the restore reads it back whole into its record anyway: forced, each took 3.8 ms, 11.5 s of the 3,000 small
+   * files' pass 1 (bug hunt, 2026-11-13). Its note says so, and a later page checks it before believing it (`check`).
+   */
   async finish(file: HandoffFile): Promise<void> {
     const store = await spaceFiles(this.database);
-    await store.close(file.id);
-    if ((await store.size(file.id)) !== file.size) throw new Error("The file was not written whole");
-    await this.note(file);
+    const size = await store.size(file.id), loose = file.size <= SMALL_FILE_BYTES;
+    await store.close(file.id, !loose);
+    if (size !== file.size) throw new Error("The file was not written whole");
+    if (loose) this.loose.add(file.id);
+    await this.note(file, undefined, loose);
   }
 
   async discard(id: string): Promise<void> {
@@ -316,12 +435,13 @@ class Staging implements HandoffStaging {
     await this.note(file);
   }
 
-  async restore(bundle: Uint8Array, files: HandoffFile[]): Promise<void> {
+  async restore(bundle: Uint8Array, staged: HandoffFile[]): Promise<void> {
     await this.dropRest();
     await restoreHandoffBundle(bundle, this.ns);
     // Each file's record points at the bytes staged for it: a small one holds them whole, a large one in file storage.
     const store = await spaceFiles(this.database);
     const kind = (await fileBytes()).kind;
+    const files = await pointBundles(this.database, staged, kind);
     const db = await wrap(indexedDB.open(this.database));
     // The frozen copies files are left on as Blobs (`copyHeld`), opened as stored once each.
     const frozen = new Map<string, IDBDatabase>();
@@ -432,6 +552,8 @@ const staging: HandoffStagingHost = {
     // staged state): never what a listed profile, this one's current state included, still names.
     await dropWalletStorageOf(database).catch(() => {});
     if (await databaseExists(database)) await dropDatabase(database);
+    // The folders and files its apps were given (linked files: handles, never copies): nothing names them once it goes.
+    if (await databaseExists(linkedFilesDatabase(database))) await dropDatabase(linkedFilesDatabase(database));
     const files = await dropFileSpace(database).then(() => null, (error: unknown) => error);
     dropKeys(ns);
     await dropNotes(ns);

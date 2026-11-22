@@ -89,7 +89,7 @@ function TotalBreakdown({ id, currency, total, onClose }: { id: string; currency
   return createPortal(<>
     <div aria-hidden="true" data-testid="wallet-total-backdrop" className="fixed inset-0 z-50 bg-black/30 animate-fade-in" />
     <div ref={ref} id={id} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid="wallet-total-breakdown" data-currency={currency} data-network={total.network} data-side={phone ? "bottom" : "end"}
-      className={`fixed z-50 flex flex-col bg-surface border-border shadow-2xl outline-none ${phone ? "inset-x-0 bottom-0 max-h-[88vh] rounded-t-2xl border-t pb-safe" : "inset-y-0 end-0 w-[min(400px,100vw)] border-s"}`}>
+      className={`fixed z-50 flex flex-col bg-surface border-border shadow-2xl outline-none ${phone ? "inset-x-0 bottom-0 max-h-[88vh] rounded-t-2xl border-t pb-safe" : "end-panel inset-y-0 end-0 border-s"}`}>
       <div className="relative flex items-start gap-3 px-4 pt-3 pb-2 border-b border-border shrink-0">
         {phone && <div aria-hidden="true" className="absolute top-1.5 inset-x-0 mx-auto h-1 w-9 rounded-full bg-border-bright" />}
         <div className="min-w-0 flex-1 pt-1">
@@ -97,7 +97,7 @@ function TotalBreakdown({ id, currency, total, onClose }: { id: string; currency
           <p className="m-0 mt-0.5 text-xs text-text-muted">{t("wallet.total.title")}</p>
         </div>
         <button type="button" data-testid="wallet-total-close" onClick={onClose} aria-label={t("common.close")} title={t("common.close")}
-          className="shrink-0 p-1.5 -me-1.5 rounded-full text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer max-md:min-h-11 max-md:min-w-11 grid place-items-center">
+          className="shrink-0 p-1.5 -me-1.5 rounded-full text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer max-md:min-h-[44px] max-md:min-w-[44px] grid place-items-center">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
         </button>
       </div>
