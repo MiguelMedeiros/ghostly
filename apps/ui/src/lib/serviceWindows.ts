@@ -145,3 +145,11 @@ export function serviceFraming(app: string, names: { label?: string; nick?: stri
   const contact = isolated(named);
   return { label: t("services.window.label", { app: isolated(app), contact }), owner: t("services.window.owner", { contact }) };
 }
+
+/**
+ * The view's label as the contact's app may read it (the web bridge's frame of the app is on its origin): named only by
+ * what the contact already knows, their own nickname or key tag, never the chat's label this side gave them.
+ */
+export function serviceFrameTitle(app: string, names: { label?: string; nick?: string } | undefined, peer: string, t: Translate): string {
+  return serviceFraming(app, { nick: names?.nick }, peer, t).label;
+}
