@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 /**
  * The first screen does not load emoji-mart's emoji data set (about 420 KiB): only the emoji panels use it, and it is
- * loaded the first time one shows (chat/emojiPanelLoad.test.tsx).
+ * loaded the first time one shows (chat/emojiPanel.test.tsx).
  */
 const { evaluated } = vi.hoisted(() => ({ evaluated: [] as string[] }));
 vi.mock("@emoji-mart/data", () => { evaluated.push("@emoji-mart/data"); return { default: { categories: [], emojis: {} } }; });

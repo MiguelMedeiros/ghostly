@@ -77,7 +77,7 @@ function pair({ bVerifies = [fakeKey] as (typeof fakeKey)[] } = {}) {
 /** `count` proofs of A, each of its own test key (a contact keeps one proof per identity); `kinds` names some of another kind. */
 async function proofs(engine: IdentityProofs, count: number, kinds: Record<number, string> = {}): Promise<string[]> {
   await transact([STORES.settings], stores => {
-    for (const key of ["identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound"]) stores[STORES.settings].delete(key);
+    for (const key of ["identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups"]) stores[STORES.settings].delete(key);
   });
   await engine.load();
   const ids: string[] = [];
@@ -182,6 +182,30 @@ describe("sharing and stopping many identities at once", () => {
     expect(p.ledgers.b.received[0]?.status).toBe("verified");
     expect(took).toBeGreaterThanOrEqual(IDENTITY_RESEND_MS);
     expect(took).toBeLessThan(IDENTITY_RESEND_MS + 5_000);
+    p.disconnect();
+  });
+
+  it("a link that dropped with 8 challenges on the way: the reconnect asks for all 8 again, and the contact's challenges from the closed link do not hold its 8 places", async () => {
+    const p = pair();
+    const ids = await proofs(p.engines.a, 8);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    p.connect();
+    // The contact saved and sent its 8 challenges; the link dropped before any reached the sharer.
+    p.state.lose = (from, f) => from === "b" && f.t === "idp-challenge";
+    for (const id of ids) await p.engines.a.share({ linkId: "chat", id });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(p.ledgers.b.challenges).toHaveLength(8);
+    p.disconnect();
+    p.state.lose = () => false;
+    await vi.advanceTimersByTimeAsync(5_000);
+    p.connect();
+    const took = await until(() => p.ledgers.a.shared.every(s => s.status === "accepted"), 15 * MINUTE);
+    expect(statuses(p.ledgers.a.shared)).toEqual({ accepted: 8 });
+    expect(statuses(p.ledgers.b.received)).toEqual({ verified: 8 });
+    // Not after the closed link's challenges ran out (5 min) and a resend came after that.
+    expect(took).toBeLessThan(IDENTITY_RESEND_MS);
+    expect(p.sent.a.filter(f => f.t === "idp-request"), "each asked once per connection").toHaveLength(16);
+    expect(p.ledgers.b.challenges).toHaveLength(0);
     p.disconnect();
   });
 

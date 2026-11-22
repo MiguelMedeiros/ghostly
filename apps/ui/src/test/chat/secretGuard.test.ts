@@ -119,6 +119,49 @@ describe("what the guard asks about", () => {
     }
   });
 
+  /**
+   * SLIP-0039's own test vectors (trezor/python-shamir-mnemonic, vectors.json): a single share of 128 and of 256 bits,
+   * an extendable one, and one share of a 2-of-3.
+   */
+  const SLIP39 = {
+    "128-bit": "duckling enlarge academic academic agency result length solution fridge kidney coal piece deal husband erode duke ajar critical decision keyboard",
+    "256-bit": "theory painting academic academic armed sweater year military elder discuss acne wildlife boring employer fused large satoshi bundle carbon diagnose anatomy hamster leaves tracks paces beyond phantom capital marvel lips brave detect luck",
+    "extendable": "testify swimming academic academic column loyalty smear include exotic bedroom exotic wrist lobe cover grief golden smart junior estimate learn",
+    "2-of-3": "shadow pistol academic always adequate wildlife fancy gross oasis cylinder mustang wrist rescue view short owner flip making coding armed",
+  };
+
+  it.each(Object.entries(SLIP39))("a SLIP39 share (Trezor's Shamir backup), %s, alone, after a label or numbered", (_, share) => {
+    for (const text of [share, `Trezor backup: ${share}`, `${share}\nkeep this safe`, share.toUpperCase(), share.split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n")]) {
+      expect(findSecret(text)).toEqual({ kind: "mnemonic" });
+    }
+  });
+
+  it("a message that is only 20 SLIP39 words, even with the checksum broken by a mistyped word", () => {
+    const typo = SLIP39["128-bit"].replace(/keyboard$/, "kidney");
+    expect(findSecret(`note: ${typo}`)).toBeNull();
+    expect(findSecret(typo)).toEqual({ kind: "mnemonic" });
+  });
+
+  /**
+   * LND's aezeeds: BIP39's English words, whose BIP39 checksum fails. Its own test vector (aezeed/cipherseed_test.go,
+   * version 0), and one made of version 0, the bytes 1 to 28 and their CRC-32C: none of the latter's 12 to 21-word
+   * windows passes BIP39's checksum or Electrum's, so only a message of nothing but it was asked about.
+   */
+  const AEZEED = {
+    lnd: "ability liquid travel stem barely drastic pact cupboard apple thrive morning oak feature tissue couch old math inform success suggest drink motion know royal",
+    counting: "abandon amount liar amount expire adjust cage candy arch gather drum bullet absurd math era live bid rhythm alien crouch range buyer mass bright",
+  };
+
+  it.each(Object.entries(AEZEED))("an LND aezeed (%s) inside other text, by its own checksum", (_, seed) => {
+    for (const text of [`my lnd seed: ${seed}`, `lncli unlock\n${seed}\nthen restart`, seed.split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n")]) {
+      expect(findSecret(text)).toEqual({ kind: "mnemonic" });
+    }
+  });
+
+  it("24 BIP39 words whose aezeed checksum fails are not an aezeed inside other text", () => {
+    expect(findSecret(`note: ${AEZEED.counting.replace(/bright$/, "abandon")}`)).toBeNull();
+  });
+
   it("a seed by each word's first four letters, as a metal backup stamps it", () => {
     for (const mnemonic of [MNEMONICS[0], MNEMONICS[4], ABANDON]) {
       const short = mnemonic.split(" ").map((w) => w.slice(0, 4)).join(" ");
@@ -149,6 +192,29 @@ describe("what the guard asks about", () => {
     ["an Electrum seed under a header, numbered", `Electrum\n${ELECTRUM.standard.split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n")}`],
   ])("a seed written as a list %s", (_, text) => {
     expect(findSecret(text)).toEqual({ kind: "mnemonic" });
+  });
+
+  /** HAMSTER in two columns, line i with word i and word i + 12, each written as `item` writes it. */
+  const twoColumns = (item: (n: number, word: string) => string, gap = "    ") => `Recovery phrase\n${HAMSTER.slice(0, 12)
+    .map((w, i) => `${item(i + 1, w)}${gap}${item(i + 13, HAMSTER[i + 12])}`).join("\n")}`;
+  const arabicIndic = (n: number) => String(n).replace(/\d/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)]);
+
+  it.each<[string, (n: number, word: string) => string, string?]>([
+    ["\"1 – word\" (an en dash, as a phone's smart punctuation writes it)", (n, w) => `${n} – ${w}`],
+    ["\"1 — word\" (an em dash)", (n, w) => `${n} — ${w}`],
+    ["\"1. word.\"", (n, w) => `${n}. ${w}.`],
+    ["\"**1.** word\" (markdown)", (n, w) => `**${n}.** ${w}`],
+    ["\"1. **word**\" (markdown)", (n, w) => `${n}. **${w}**`],
+    ["\"| 1 | word |\" (a markdown table)", (n, w) => `| ${n} | ${w} |`, " "],
+    ["\"1. word | 13. word\"", (n, w) => `${n}. ${w}`, " | "],
+    ["\"1. \\\"word\\\"\"", (n, w) => `${n}. "${w}"`],
+    ["\"word (1)\"", (n, w) => `${w} (${n})`],
+    ["\"1．word\" (a fullwidth dot, as Japanese and Chinese keyboards write it)", (n, w) => `${n}．${w}`],
+    ["\"１．word\" (fullwidth digits)", (n, w) => `${String(n).replace(/\d/g, (d) => String.fromCharCode(0xff10 + Number(d)))}．${w}`],
+    ["\"١. word\" (Arabic-Indic digits)", (n, w) => `${arabicIndic(n)}. ${w}`],
+    ["\"- 1. word\" (a bullet before each number)", (n, w) => `- ${n}. ${w}`],
+  ])("a seed in two columns written as %s", (_, item, gap) => {
+    expect(findSecret(twoColumns(item, gap))).toEqual({ kind: "mnemonic" });
   });
 
   /**
@@ -520,7 +586,8 @@ describe("what it lets through", () => {
     expect(findSecret(todo.map((item, i) => `${i + 1}. ${item}`).join("\n"))).toBeNull();
     // Twelve numbered seed words in a row, each with more on its line, are a list of things, not a seed.
     expect(findSecret(MNEMONICS[0].split(" ").map((w, i) => `${i + 1}. ${w} is fine`).join("\n"))).toBeNull();
-    expect(findSecret("that boat was huge, but this time we also went over the hill with a dog and a cat")).toBeNull();
+    expect(findSecret(MNEMONICS[0].split(" ").map((w, i) => `- ${i + 1} – ${w} (${i + 1}) is fine.`).join("\n"))).toBeNull();
+    expect(findSecret(`| # | item |\n|---|---|\n${todo.map((item, i) => `| ${i + 1} | ${item} |`).join("\n")}`)).toBeNull();    expect(findSecret("that boat was huge, but this time we also went over the hill with a dog and a cat")).toBeNull();
   });
 });
 
@@ -537,7 +604,8 @@ describe("how long it takes", () => {
     // Every window fails its checksum, so the whole budget of checksums is spent.
     ["one seed word over and over", "zoo ".repeat(MAX / 4)],
     ["seed words only", `${MNEMONICS[4].replace("title", "zoo")} `.repeat(200).slice(0, MAX)],
-    ["Spanish seed words only", `${spanish.slice(0, 23).join(" ")} `.repeat(200).slice(0, MAX)],
+    ["SLIP39 words only", "duckling enlarge academic academic agency result length solution fridge kidney coal piece deal husband erode duke ajar critical decision zero ".repeat(200).slice(0, MAX)],
+    ["Spanish seed words only",`${spanish.slice(0, 23).join(" ")} `.repeat(200).slice(0, MAX)],
     ["Japanese seed words only", `${japanese.slice(0, 23).join(IDEOGRAPHIC_SPACE)}${IDEOGRAPHIC_SPACE}`.repeat(200).slice(0, MAX)],
     ["Monero's Chinese seed words only", "苗 苯 兵 首 妻 祝 亿 丽 械 船 唱 捕 灌 拍 户 布 区 贵 比 枝 峰 难 愤 血 ".repeat(400).slice(0, MAX)],
     ["hex", "ab".repeat(MAX / 2)],
@@ -549,6 +617,8 @@ describe("how long it takes", () => {
     ["seed words with a soft hyphen in each", "zo\u00ado ".repeat(MAX / 5)],
     ["a numbered word and a line of spaces", `1 a${" ".repeat(MAX - 4)}x`],
     ["signer link schemes with no secret", "bunker://?relay=".repeat(MAX / 16)],
+    ["numbers, seed words and markdown", "| 1 | **zoo** | - ".repeat(MAX / 18)],
+    ["seed words numbered after them", "zoo (1) ".repeat(MAX / 8)],
   ])("a 16 KiB message of %s is read in well under a frame", (_, text) => {
     expect(time(text)).toBeLessThan(50);
   });

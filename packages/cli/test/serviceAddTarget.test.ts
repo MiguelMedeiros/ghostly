@@ -25,7 +25,7 @@ describe("service add's target", () => {
     ["http://127.0.0.2:4773", /^refused: Only services on this machine can be shared \(localhost, 127\.0\.0\.1 or \[::1\]\): http:\/\/127\.0\.0\.2:4773\/$/],
     ["https://example.com", /^refused: Only services on this machine can be shared \(localhost, 127\.0\.0\.1 or \[::1\]\)/],
     ["nope", /^refused: Only services on this machine/],
-    ["http://[", /^bad_request: Not a valid URL: http:\/\/\[$/],
+    ["http://[", /^bad_request: Not a valid URL$/],
     // agents#1907: port 0 is no port a web app listens on, so every contact who opened it got a failure.
     ["http://127.0.0.1:0", /^bad_request: Port 0 is not a port a web app can listen on: http:\/\/127\.0\.0\.1:0\/$/],
     ["http://localhost:0/app", /^bad_request: Port 0 is not a port/],
@@ -39,6 +39,18 @@ describe("service add's target", () => {
     const query = await add("http://localhost:8888/?token=t0ken42#also-s3cret");
     expect(query).toMatch(/^bad_request: The target cannot contain a query or fragment: http:\/\/localhost:8888\/$/);
     for (const said of [credentials, query]) for (const secret of ["s3cretpw", "user", "t0ken42", "s3cret"]) expect(said).not.toContain(secret);
+  });
+
+  // One that is no URL at all (a mistyped port, an unclosed bracket) has no parts to tell apart: it is not repeated.
+  it.each([
+    "http://127.0.0.1:80800/?token=t0ken42",
+    "http://user:s3cretpw@127.0.0.1:99999/",
+    "127.0.0.1:70000/x?key=t0ken42",
+    "http://[::1/?t=t0ken42",
+  ])("%s, no URL, is refused without being repeated", async (target) => {
+    const said = await add(target);
+    expect(said).toBe("bad_request: Not a valid URL");
+    for (const secret of ["s3cretpw", "t0ken42"]) expect(said).not.toContain(secret);
   });
 
   it("a target on this machine is added", async () => {

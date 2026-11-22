@@ -61,30 +61,43 @@ async function freePort(): Promise<number> {
   return port;
 }
 
+/**
+ * How long one WebDriver request may go unanswered. WebKitWebDriver answers each command within its script timeout
+ * (30 s) or says why; one that never answered held desktop/single-instance.spec.ts until its own 240 s were out, and
+ * the test timeout named no call (Omarchy, 2026-11-22).
+ */
+const ANSWER_MS = 60_000;
+
 /** One conversation with the driver. Errors carry what the driver said, not "500". */
 class Driver {
   constructor(
     private readonly endpoint: string,
     private readonly sessionId: string,
+    private readonly answerMs: number,
   ) {}
 
-  static async open(endpoint: string, application: string): Promise<Driver> {
-    const value = (await Driver.send(`${endpoint}/session`, "POST", {
+  static async open(endpoint: string, application: string, answerMs = ANSWER_MS): Promise<Driver> {
+    const value = (await Driver.send(`${endpoint}/session`, "POST", answerMs, {
       capabilities: { alwaysMatch: { browserName: "wry", "tauri:options": { application } } },
     })) as { sessionId: string };
-    return new Driver(endpoint, value.sessionId);
+    return new Driver(endpoint, value.sessionId, answerMs);
   }
 
-  private static async send(url: string, method: string, body?: unknown): Promise<unknown> {
+  private static async send(url: string, method: string, answerMs: number, body?: unknown): Promise<unknown> {
     // A bare "fetch failed" names no call: say which one, and what the socket said.
-    const response = await fetch(url, {
-      method,
-      ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-    }).catch((error: Error) => {
+    const answer = async () => {
+      const response = await fetch(url, {
+        method,
+        signal: AbortSignal.timeout(answerMs),
+        ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      });
+      return { response, text: await response.text() };
+    };
+    const { response, text } = await answer().catch((error: Error) => {
+      if (error.name === "TimeoutError") throw new Error(`${method} ${url}: no answer in ${answerMs / 1000} s`, { cause: error });
       const cause = (error.cause as Error | undefined)?.message;
       throw new Error(`${method} ${url}: ${error.message}${cause ? ` (${cause})` : ""}`, { cause: error });
     });
-    const text = await response.text();
     let payload: { value?: unknown };
     try {
       payload = JSON.parse(text) as { value?: unknown };
@@ -101,7 +114,7 @@ class Driver {
   }
 
   private call(method: string, path: string, body?: unknown): Promise<unknown> {
-    return Driver.send(`${this.endpoint}/session/${this.sessionId}${path}`, method, body);
+    return Driver.send(`${this.endpoint}/session/${this.sessionId}${path}`, method, this.answerMs, body);
   }
 
   /** The element reference, or null when nothing matches — the wait belongs to the test. */
@@ -242,6 +255,8 @@ export interface DesktopOptions {
   home?: string;
   /** More environment for the app, e.g. `GHOSTLY_PKARR_RELAYS` or `GHOSTLY_HYPERDHT_BOOTSTRAP`. */
   env?: Record<string, string>;
+  /** How long one WebDriver request may go unanswered (`ANSWER_MS`): shorter in the harness's own tests. */
+  answerMs?: number;
 }
 
 /** A directory for `DesktopOptions.home`, removed by the returned function. */
@@ -323,6 +338,7 @@ async function launchDesktop(application: string, options: DesktopOptions): Prom
       env: desktopTestNetworkEnv({
         GHOSTLY_E2E: "1",
         GHOSTLY_FAKE_MEDIA: "1",
+        ...webkitMediaEnv(),
         GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
         ...(options.home ? homeEnv(options.home) : {}),
         ...(bus ? { DBUS_SESSION_BUS_ADDRESS: bus.address } : {}),
@@ -361,7 +377,7 @@ async function launchDesktop(application: string, options: DesktopOptions): Prom
   };
   try {
     // The driver needs a moment to bind, and the app a while longer to boot.
-    const app = await Promise.race([died, taken, withRetries(() => Driver.open(endpoint, application), 30_000, settled.signal)])
+    const app = await Promise.race([died, taken, withRetries(() => Driver.open(endpoint, application, options.answerMs), 30_000, settled.signal)])
       .finally(() => settled.abort());
     await expectUnderTest(app);
     return { app, stop: async () => {
@@ -392,6 +408,23 @@ async function expectUnderTest(app: Driver): Promise<void> {
 }
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * WebKitGTK's media players without its GL video sink, on Linux, unless the run says otherwise
+ * (`WEBKIT_GST_DISABLE_GL_SINK=0`).
+ *
+ * The GL sink draws through one GStreamer GL context per WebKit web process, made once by wrapping WebKit's own EGL
+ * context (WebCore's PlatformDisplayGStreamer.cpp). On the loop's Xvfb (Mesa, no DRI3) that wrap sometimes fails as the
+ * first player starts ("Failed to fill in GStreamer context: could not retrieve egl config id from egl context:
+ * EGL_NOT_INITIALIZED"), and WebKit keeps the broken context for the life of the process: from then on every <video>
+ * in that window fails (`MediaError` 4, `EGL_BAD_CONTEXT` in GStreamer's output), a call window's picture and a fresh
+ * canvas stream alike, though the frames keep coming. No wait in a test brings that window's pictures back. The
+ * fallback sink hands frames to WebKit's compositor without a GStreamer GL context; Xvfb's GL is software anyway.
+ */
+export function webkitMediaEnv(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if (platform !== "linux") return {};
+  return { WEBKIT_GST_DISABLE_GL_SINK: env.WEBKIT_GST_DISABLE_GL_SINK ?? "1" };
+}
 
 /**
  * A D-Bus session bus for one app (a `dbus-daemon` of its own, ended by `stop`), or null where there is none to start

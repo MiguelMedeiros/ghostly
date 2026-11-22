@@ -281,6 +281,28 @@ describe("withdrawing", () => {
     await vi.waitFor(() => expect(w.ledgers.alice.shared[0].status).toBe("withdrawn"));
   });
 
+  it("shared again and stopped before the new share went: the contact holding the earlier one is still told", async () => {
+    const w = world();
+    const id = w.addProof();
+    await shareAndSettle(w, id);
+    expect(w.ledgers.bob.received[0].status).toBe("verified");
+    w.state.online = false;
+    await w.peers.alice.share(id, false);
+    await w.peers.alice.share(id, false);
+    await w.peers.alice.withdraw(id, false);
+    expect(w.ledgers.alice.shared).toEqual([expect.objectContaining({ id, status: "withdrawal-pending" })]);
+    expect(w.ledgers.alice.timeline?.at(-1)).toMatchObject({ kind: "stopped", proof: id });
+    w.state.online = true;
+    w.peers.alice.ready();
+    await vi.waitFor(() => expect(w.ledgers.alice.shared[0].status).toBe("withdrawn"));
+    expect(w.ledgers.bob.received[0].status).toBe("withdrawn");
+    // Once the contact has it withdrawn, a share again stopped before it went is unsent, as a first one.
+    await w.peers.alice.share(id, false);
+    w.state.online = false;
+    await w.peers.alice.withdraw(id, false);
+    expect(w.ledgers.alice.shared).toEqual([]);
+  });
+
   it("acknowledges only well-formed withdrawals, and a stray acknowledgement changes nothing", async () => {
     const w = world();
     w.state.online = false;

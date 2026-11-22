@@ -298,7 +298,7 @@ export interface StoredGroup {
  */
 export interface GroupLive {
   top: string;
-  state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "alone" | "provisional" | "nicks" | "unsaid">;
+  state: Pick<GroupState, "seq" | "seqEpoch" | "seen" | "sent" | "owed" | "alone" | "provisional" | "nicks" | "unsaid">;
   came?: StoredGroup["came"];
 }
 
@@ -620,6 +620,8 @@ export interface PendingMelt {
   /** Set when the invoice pays a contact's payment request. */
   paymentId?: string;
   createdAt: number;
+  /** When the mint answered the melt request itself (left pending): no request of it can land any more, so UNPAID is final. */
+  answeredAt?: number;
   /** Came with a restored copy of the profile: its change is as old as the copy, and is checked like the copy's ecash. */
   restored?: boolean;
 }
@@ -810,7 +812,10 @@ export interface WalletTx {
   amount: number;
   fee: number;
   note?: string;
-  /** `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. Absent on older records. */
+  /**
+   * `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. `lightning-out`, and
+   * the `fee` of a failed one: its melt quote, so a payment left pending on screen knows how it ended. Absent on older records.
+   */
   quote?: string;
 }
 
@@ -889,9 +894,10 @@ export interface WalletInstanceView {
   receive?: boolean;
   /**
    * At home on another device (WISP 06 § Wallets that stay home): that device's name ("" when this device does not know
-   * it), and when its coins expire (Ark, Bark). It is never opened here, and takes no payment here.
+   * it), its signing key (what Remove <device> matches it by), and when its coins expire (Ark, Bark). It is never
+   * opened here, and takes no payment here.
    */
-  home?: { device: string; expiresAt?: number };
+  home?: { device: string; key?: string; expiresAt?: number };
 }
 
 /**

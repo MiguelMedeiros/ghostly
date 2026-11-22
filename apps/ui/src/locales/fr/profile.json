@@ -132,6 +132,9 @@
   "nameLabel": "Nom du profil",
   "nameSaved": "Nom enregistré",
   "nameStep": {
+    "full": "C'est le maximum : {{count}} lettres.",
+    "limit": "Jusqu'à {{count}} lettres.",
+    "needName": "Saisissez un nom pour continuer.",
     "placeholder": "Votre nom",
     "save": "Continuer",
     "skip": "Passer",

@@ -71,6 +71,33 @@ jobs:
         if: ${{ !cancelled() }}
         run: node tools/scripts/quarantine.mjs --run
 
+  # The package tests that start real peers, daemons or a DHT (tools/scripts/integration-tests.json), as CI's
+  # Integration tests job runs them on batches: every night on dev too, where no batch may have run them that day.
+  integration-unit:
+    name: Integration tests
+    if: ${{ inputs.jobs != 'desktop' && inputs.jobs != 'matrix' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: The files in tools/scripts/integration-tests.json
+        run: node tools/scripts/test-shards.mjs --integration 1 1
+
   e2e-full:
     name: End-to-end, gated suites included
     # Not when only the Desktop jobs or the matrix were asked for (a scheduled run has no inputs: everything).
