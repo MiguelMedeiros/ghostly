@@ -2,6 +2,7 @@ import { useState } from "react";
 import { usePlatformValue } from "../hooks/useServicesPlatform";
 import { servicesPlatform } from "../lib/platform";
 import { useI18n } from "../contexts/I18nContext";
+import { isolate } from "../lib/ownStatus";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 
@@ -46,7 +47,7 @@ export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPu
           // edge on a 320 px phone, its start cut off in Arabic (agents#1629). The whole name is in the title. Forced
           // colors fill it with the page's colour: a border there, or it read as bold text beside "Apps you can open:".
           className="flex items-center gap-1.5 px-3 py-1 bg-accent text-on-accent rounded-full text-xs font-bold hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] transition-colors cursor-pointer max-w-full min-w-0"
-          title={t("chat.services.openTheirs", { service: service.name ?? service.id })}>
+          title={t("chat.services.openTheirs", { service: isolate(service.name ?? service.id) })}>
           <svg className="shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
           <span data-testid="open-service-name" className="truncate" dir="auto">{service.name ?? service.id}</span>
         </button>

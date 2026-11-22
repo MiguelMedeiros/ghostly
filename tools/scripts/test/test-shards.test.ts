@@ -1,8 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
-import { ALONE, WORKERS, packages, slowWarnings, split, staleWarning, unlistedAlone } from "../test-shards.mjs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { quarantined } from "../../vitest.shared.ts";
+import { ALONE, WORKERS, appSuites, integrationFiles, integrationLeft, packages, reportTimes, slowWarnings, split, staleWarning, unlistedAlone } from "../test-shards.mjs";
 
 const unit = (id: string, files: string[], alone = false) => ({ id, dir: id, files, alone });
 
@@ -112,5 +113,72 @@ describe("the packages shards", () => {
     // Renamed or removed, with no quarantine: a name to fix in ALONE.
     expect(unlistedAlone([unit("cli", ["packages/cli/test/a.test.ts"])], [])).toEqual([long]);
     expect(unlistedAlone([unit(long, [long], true)], [])).toEqual([]);
+  });
+
+  it("record a file's median time over the reports of several runs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "test-shards-"));
+    const file = "tools/scripts/test/test-shards.test.ts";
+    const other = "tools/scripts/test/merge-train.test.ts";
+    const report = (name: string, results: [string, number][]) => {
+      writeFileSync(join(dir, name), JSON.stringify({ testResults: results.map(([f, took]) => ({ name: join("/home/runner/work/ghostly/ghostly", f), status: "passed", startTime: 1000, endTime: 1000 + took * 1000 })) }));
+      return join(dir, name);
+    };
+    // One slow runner (40 s) does not set the record; with two runs it is their mean.
+    const runs = [report("a.json", [[file, 10], [other, 4]]), report("b.json", [[file, 40], [other, 6]]), report("c.json", [[file, 12]])];
+    expect(reportTimes(runs)).toEqual({ [file]: 12, [other]: 5 });
+  });
+});
+
+describe("the integration tests", () => {
+  const repo = resolve(import.meta.dirname, "../../..");
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("are package test files, each named once, in order, and the file that runs alone among them", () => {
+    const list = integrationFiles();
+    expect(list.length).toBeGreaterThan(0);
+    expect(list).toEqual([...new Set(list)].sort());
+    for (const file of list) expect([file, existsSync(join(repo, file))]).toEqual([file, true]);
+    expect(list.filter((f) => !/^packages\/(core|browser|cli|sdk)\/test\/[\w.-]+\.test\.ts$/.test(f))).toEqual([]);
+    for (const file of ALONE) expect(list).toContain(file);
+  });
+
+  it("are out of the shards' and the draft tier's Vitests (GHOSTLY_INTEGRATION=0) and in a plain npm test", () => {
+    const cli = join(repo, "packages/cli");
+    vi.stubEnv("GHOSTLY_INTEGRATION", "0");
+    expect(quarantined(undefined, cli)).toContain("test/twoPeers.test.ts");
+    expect(quarantined(undefined, cli)).not.toContain("test/connectionError.test.ts");
+    vi.stubEnv("GHOSTLY_INTEGRATION", "1");
+    expect(quarantined(undefined, cli)).not.toContain("test/twoPeers.test.ts");
+    vi.stubEnv("GHOSTLY_INTEGRATION", undefined);
+    expect(quarantined(undefined, cli)).not.toContain("test/twoPeers.test.ts");
+  });
+
+  it("refuse a listed file no package's Vitest lists, but not one tools/scripts/quarantine.json holds", () => {
+    const [a, b] = ["packages/cli/test/a.test.ts", "packages/cli/test/b.test.ts"];
+    expect(integrationLeft([unit("cli", [a])], [a, b], [])).toEqual([b]);
+    expect(integrationLeft([unit("cli", [a])], [a, b], [b])).toEqual([]);
+    expect(integrationLeft([unit("cli", [a]), unit(b, [b], true)], [a, b], [])).toEqual([]);
+  });
+});
+
+describe("the app shards", () => {
+  it("test what npm run test:app tests, each Vitest by its config", () => {
+    expect(appSuites()).toEqual([
+      { name: "test:ui", dir: ".", config: "apps/ui/vitest.ui.config.ts" },
+      { name: "test:matrix", dir: ".", config: "e2e/matrix/vitest.config.ts" },
+      { name: "test:scripts", dir: ".", config: "tools/scripts/vitest.config.ts" },
+    ]);
+  });
+
+  it("cut the UI's tests by their files across the shards, and name its reports and warnings for the app", () => {
+    const seconds = { u1: 120, u2: 100, u3: 90, u4: 80, s1: 60, m1: 1 };
+    const ui = { ...unit("test:ui", ["u1", "u2", "u3", "u4"]), whole: true };
+    const shards = split([ui, { ...unit("test:matrix", ["m1"]), whole: true }, { ...unit("test:scripts", ["s1"]), whole: true }], seconds, 3);
+    // The UI's 390 s are over the 150 s each shard gets: whole, one runner would take 390 and the others 60 and 1.
+    expect(shards.map((s) => s.load)).toEqual([121, 160, 170]);
+    expect(shards.flatMap((s) => s.units.flatMap((u) => u.files)).sort()).toEqual(Object.keys(seconds).sort());
+    expect(shards.every((s) => s.units.some((u) => u.id === "test:ui" && !u.whole))).toBe(true);
+    const many = Array.from({ length: 5 }, (_, i) => `new${i}`);
+    expect(staleWarning([unit("test:ui", many)], {}, "app")).toContain("so the app shards are uneven: download the app-test-reports-* artifacts");
   });
 });

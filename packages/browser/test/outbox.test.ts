@@ -865,7 +865,7 @@ describe("texts the contact's windows have no room for yet", () => {
     for (const text of ["a", "b", "c", "d"]) await write(text);
     expect(arrived).toEqual(["a", "b"]);
     expect(rows[2]).toMatchObject({ delivery: "waiting", deliveryError: PACED });
-    expect(rows[3].delivery).toBe("waiting");
+    expect(rows[3]).toMatchObject({ delivery: "waiting", deliveryError: NotSent.BEHIND });
     // Many checks with no room: none of them is a send that counts, so none of them ends failed.
     await vi.advanceTimersByTimeAsync(30 * 60_000);
     expect(rows.every(r => r.delivery !== "failed")).toBe(true);
