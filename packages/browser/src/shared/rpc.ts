@@ -157,9 +157,10 @@ export interface EngineApi {
    * on a live session. `messageId`: the row's id, or its wire id. `refused`: not something to edit; `missing` with it,
    * once the message was looked for: whether no message goes by that id. In a group
    * (`group:<id>`, WISP 902 § Edits) it goes to the members; `mentions`: members named by the new text beyond those the
-   * message already named.
+   * message already named. `held`: this side's DHT only is a hold that ends by itself (the CLI's `chat disconnect
+   * --hold`), so an edit too long for the DHT packet waits for the live session instead of being refused.
    */
-  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: StatusCard }): { error: string | null; refused?: boolean; missing?: boolean; messageId?: string; note?: string };
+  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: StatusCard; held?: boolean }): { error: string | null; refused?: boolean; missing?: boolean; messageId?: string; note?: string };
   retryMessage(params: { linkId: string; messageId: string }): void;
   /**
    * Reacts to a message (WISP 400 § Reactions): `linkId` a chat's link or `group:<id>`, `messageId` the message's id

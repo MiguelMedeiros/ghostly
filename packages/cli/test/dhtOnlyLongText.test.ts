@@ -129,13 +129,14 @@ function clock(until: number): string {
 
 /**
  * A hold (`chat disconnect --hold`) is this side's DHT only for a while, which ends by itself. A text past 256 bytes
- * waits through it and goes when it ends; a text or an edit the DHT packet cannot carry (about 249-256 bytes, an edit
- * about 215 and up) is refused there. The note, an explicit `--wait`'s timeout and the refusals said to choose a live
- * transport (`chat transport <chat> auto`, which ends the hold the person asked for). They say when the hold ends, and
- * the command that ends it now; once it ended, both texts reach the contact, and the same edit is taken and reaches
- * them too. One hold for all of it: each is a real 30 s.
+ * waits through it and goes when it ends, and so does an edit the DHT packet cannot carry (about 215 bytes and up), as
+ * in a chat that is only away: it was refused there while a text of the same chat waited and went. A text the packet
+ * cannot carry (about 249-256 bytes) is refused anywhere on the DHT floor. The note, an explicit `--wait`'s timeout and
+ * that refusal said to choose a live transport (`chat transport <chat> auto`, which ends the hold the person asked
+ * for). They say when the hold ends, and the command that ends it now; once it ended, both texts and the edit reach the
+ * contact. One hold for all of it: each is a real 30 s.
  */
-it("under a hold, a text past 256 bytes and a text or an edit too long for the DHT packet say when the hold ends, and go then with nothing chosen", { timeout: 300_000 }, async () => {
+it("under a hold, a text past 256 bytes and an edit too long for the DHT packet say when the hold ends and go then with nothing chosen; a too-long text's refusal names the hold", { timeout: 300_000 }, async () => {
   for (const dir of [carol, dave]) {
     ok(await as(dir, "settings", "set", "relays", JSON.stringify(relays.map((r) => r.url))));
     const daemon = new Running(["--home", dir, "daemon"], env);
@@ -161,16 +162,14 @@ it("under a hold, a text past 256 bytes and a text or an edit too long for the D
 
   const refusedHeld = (act: string) => `this chat is held on the DHT only until ${clock(until)}: ${act} then, or now with ghostly chat connect dave, or shorten it`;
   const longEdit = "e".repeat(223);
-  const edit = error(await as(carol, "edit", "dave", id, longEdit, "--wait", "none"), "refused", 1).message;
-  expect(edit).toBe(`Too long for the DHT (an edit fits about 214 bytes there once sealed): ${refusedHeld("make the edit")}`);
+  const keptEdit = ok(await as(carol, "edit", "dave", id, longEdit, "--wait", "none"));
+  expect(keptEdit).toMatchObject({ edits: 1, confirmed: false, note: `Too long for the DHT packet as an edit: ${held}` });
   const text = error(await as(carol, "send", "dave", "x".repeat(252), "--wait", "none"), "refused", 1).message;
   expect(text).toBe(`Too long for the DHT (a text fits about 248 bytes there once sealed): ${refusedHeld("send it")}`);
 
-  // What the words say: the hold ends by itself, both texts reach the contact with no transport chosen, and the edit
-  // made then reaches them too.
+  // What the words say: the hold ends by itself, and both texts and the edit kept reach the contact with no transport
+  // chosen and nothing made again.
   await expect.poll(async () => (ok(await as(dave, "chat", "history", "carol", "--limit", "10")).messages as { text: string; from: string }[])
-    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited)).length, { timeout: 150_000, interval: 2_000 }).toBe(2);
-  await expect.poll(async () => ok(await as(carol, "chat", "show", "dave")), { timeout: 60_000, interval: 2_000 }).toMatchObject({ heldUntil: null, deliveryMode: "stream", live: true });
-  ok(await as(carol, "edit", "dave", id, longEdit, "--wait", "confirmed", "--timeout", "60"));
-  expect((ok(await as(dave, "chat", "history", "carol", "--limit", "10")).messages as { text: string; from: string }[]).some((m) => m.from === "peer" && m.text === longEdit)).toBe(true);
+    .filter((m) => m.from === "peer" && (m.text === long || m.text === waited || m.text === longEdit)).length, { timeout: 150_000, interval: 2_000 }).toBe(3);
+  expect(ok(await as(carol, "chat", "show", "dave"))).toMatchObject({ heldUntil: null, deliveryMode: "stream" });
 });
