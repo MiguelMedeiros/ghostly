@@ -193,6 +193,9 @@ export function parseUnitGroup(text) {
   return index >= 1 && index <= count ? { index, count } : null;
 }
 
+/** ci.yml's name for the draft tier's job that runs `group` ({ index, count }): the name the run page shows. */
+export const draftUnitJob = (group) => `Affected unit tests (draft ${group.index}/${group.count})`;
+
 /** The group (1-based, of `count`) a unit project runs in: the one of its first half for a project of UNIT_HALVED. */
 export function unitGroupOf(name, count) {
   const alone = UNIT_ALONE.indexOf(name);

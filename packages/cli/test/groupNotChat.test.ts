@@ -161,7 +161,7 @@ describe("listen --from a group, --group a chat", () => {
 
   it("names the flag that takes it, not chat show or group show", async () => {
     await expect(allowlist(["Crew"], [], call, async () => null)).rejects.toMatchObject({
-      code: "not_found", message: '"Crew" is a group, not a chat: ghostly listen --group Crew', details: { group: "g1crew" },
+      code: "not_found", message: '"Crew" is a group, not a chat: ghostly listen --group g1crew', details: { group: "g1crew" },
     });
     await expect(allowlist([], ["Alice"], call, async () => null)).rejects.toMatchObject({
       code: "not_found", message: '"Alice" is a chat, not a group: ghostly listen --from chat-one', details: { chat: "chat-one" },
@@ -212,7 +212,8 @@ describe("a hint naming a group a shell would expand", () => {
   it.each(["$5 lunch", "a`echo x`b", "x!y"])("%s: the command offered names the same group", async (name) => {
     expect(await offered(call(name)("chat.send", { chat: name, text: "hi" }))).toEqual(["ghostly", "group", "send", name, "[text...]"]);
     expect(await offered(call(name)("chat.history", { chat: name }))).toEqual(["ghostly", "group", "history", name]);
-    expect(await offered(allowlist([name], [], call(name), async () => null))).toEqual(["ghostly", "listen", "--group", name]);
+    // listen offers the group's id: --group refuses its name (its admin chose it).
+    expect(await offered(allowlist([name], [], call(name), async () => null))).toEqual(["ghostly", "listen", "--group", crew.id]);
   });
 
   /**

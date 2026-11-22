@@ -1,5 +1,7 @@
 {
   "added": "{{app}} added. Choose who can open it under People.",
+  "allowNamed": "Allow {{app}}",
+  "allowNext": "Allow asks your browser for access to {{host}}, on every port. Removing every app at {{host}} gives it back.",
   "fromContacts": "From your contacts",
   "fromContactsEmpty": "Apps your contacts share show up here.",
   "ghostlyOnline": "Ghostly online",
@@ -29,6 +31,7 @@
   "shareLocal": "Share a local service",
   "shareNamed": "Share {{app}}",
   "status": {
+    "needsAccess": "Not allowed in this browser yet: contacts can't open {{app}}",
     "notShared": "Not shared with anyone yet",
     "offline": "Not reachable while offline",
     "sharedCount": "Shared with {{count}} contacts",
