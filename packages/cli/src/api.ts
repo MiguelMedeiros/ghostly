@@ -1046,7 +1046,13 @@ const METHODS: Record<string, Method> = {
       const ok = until === "live" ? isLive(now)
         : until === "text" ? now.textDelivery === "stream" || now.textDelivery === "dht" || now.textDelivery === "hold"
         : !!now.peerParticipationKey || !!now.pairingProgress?.peerSeen || now.pairing?.status === "ready" || isLive(now);
-      return ok ? now : undefined;
+      if (ok) return now;
+      // A chat on DHT only by this side's choice never goes live while it stays so: refused as `chat connect` refuses
+      // it, at the start or the moment it turns so. A hold ends by itself: that one is waited for. So is the contact's
+      // choice: read from their last word on the DHT, it may be gone already (both sides back on `auto`, then a wait).
+      const off = until === "live" ? offLive(ctx, now) : undefined;
+      if (off && "refusal" in off && off.refusal.details?.reason === "dht-only") throw off.refusal;
+      return undefined;
     }, ms, `chat ${ref} ${chatState(until).to}`).catch((error: unknown) => { throw until === "live" ? liveNeverCame(ctx, link.id, ref, error) : error; });
     return chatJson(view);
   },
