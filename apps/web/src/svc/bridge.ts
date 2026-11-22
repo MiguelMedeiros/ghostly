@@ -60,8 +60,9 @@ export function watchUse(win: Window): () => boolean {
 /**
  * Whether the page in the app's frame may be shown: one the clipboard guard ran first in (`CLIPBOARD_GUARD_SCRIPT`
  * marks the document it watches and leaves its window's `execCommand` fixed in place), or one that runs no script (an
- * empty frame; a page that is not HTML, which the app's page sends with `script-src 'none'`). A page whose policy or
- * browser refused the guard, or one this page cannot read (a `sandbox` policy of its own), is not.
+ * empty frame; a PDF, which the app's page sends with `script-src 'none'`). A page whose policy or browser refused the
+ * guard, or one this page cannot read (a `sandbox` policy of its own, or the one every other page the guard cannot go
+ * into is sent with), is not.
  */
 export function guardedPage(frame: HTMLIFrameElement): boolean {
   try {

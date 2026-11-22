@@ -280,6 +280,14 @@ const NO_SCRIPTS_CSP = "script-src 'none'";
  */
 const NO_SCRIPTS_OR_FRAMES_CSP = "script-src 'none'; frame-src 'none'; object-src 'none'";
 
+/**
+ * And for any of them but a PDF: an origin of its own. Its window is a realm the guard never ran in, and the app's page
+ * reads it by its index (`window[0]`) from the moment it commits; the guard's own look at a frame comes at its `load`,
+ * which the contact holds off for as long as it likes (an answer that never ends). A PDF keeps its origin: a PDF viewer
+ * may refuse a sandboxed frame, and Chromium's loads as it commits, so the guard reaches it then.
+ */
+const OWN_ORIGIN_CSP = "sandbox allow-forms";
+
 /** The `Sec-Fetch-Dest` (a request's `destination`) of a page: the ones the guard goes into. */
 const DOCUMENT_DESTINATIONS = new Set(["document", "iframe", "frame", "object", "embed", "fencedframe"]);
 
@@ -395,7 +403,8 @@ const LOOK_BYTES = 64 * 1024;
  * hashes (`allowingViewerGuard`) and `VIEWER_GUARD_CSP` goes along. A page (`destination`, null when the browser did not say)
  * that is HTML gets the guards first in it, in their order; one they cannot be put in (another type, more than one type, a
  * compressed, UTF-16 or ISO-2022-JP body, a type with a quote or a backslash in it, an escape byte before the guard's
- * place) runs no script at all. Anything that is not a page passes as it was. The caller adds Ghostly's own policy as before.
+ * place) runs no script at all, and but for a PDF has an origin of its own (`OWN_ORIGIN_CSP`). Anything that is not a
+ * page passes as it was. The caller adds Ghostly's own policy as before.
  */
 export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable<Uint8Array>, destination: string | null, guards: readonly PageGuard[] = [WEBRTC_GUARD]): Promise<{ headers: HeaderList; body: AsyncIterable<Uint8Array> }> {
   const hashes = guards.map((guard) => guard.hash);
@@ -417,7 +426,7 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
   const essence = type.split(";")[0].trim();
   const html = essence === "text/html" && !unreadable && !/["\\]/.test(type);
   const noFrames = !/^(application\/pdf$|image\/(?!svg)|video\/|audio\/)/.test(essence);
-  const refused: [string, string] = ["content-security-policy", noFrames ? NO_SCRIPTS_OR_FRAMES_CSP : NO_SCRIPTS_CSP];
+  const refused: [string, string] = ["content-security-policy", [noFrames ? NO_SCRIPTS_OR_FRAMES_CSP : NO_SCRIPTS_CSP, ...(essence === "application/pdf" ? [] : [OWN_ORIGIN_CSP])].join("; ")];
   const encoded = values("content-encoding").some((encoding) => !["", "identity"].includes(encoding));
   const noScripts = () => ({ headers: [...out, refused], body });
   if (!html || encoded) return noScripts();
