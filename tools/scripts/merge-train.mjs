@@ -2060,10 +2060,13 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
     /**
      * An epic's fast-forward to a pull request's head, fetched first (a Mac's clone may not have it), from its branch
      * when GitHub made no `refs/pull/<number>/head` (as `build` and `rebase` do). One git cannot fetch is refused, not
-     * thrown: the caller sends it the batch way, whose build drops it as "missing", and the line goes on.
+     * thrown: the caller sends it the batch way, whose build drops it as "missing", and the line goes on. A head that
+     * moved since it was read is refused as GitHub refuses dev's squash merge then (409): landing the old one left the
+     * author's new commits behind a pull request the train called merged.
      */
     async landPull(base, p) {
       if (fetchPulls([p]).length) return { ok: false, message: `git could not fetch the head of #${p.number}` };
+      if (git(["rev-parse", `${ns}/pr-${p.number}`], cwd) !== p.sha) return { ok: false, status: 409, message: `the head of #${p.number} moved since it was read` };
       return this.land(base, p.sha);
     },
   };
