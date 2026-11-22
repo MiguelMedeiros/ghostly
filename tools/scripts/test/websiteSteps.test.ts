@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+// guards: #8396
+
 /**
  * The Website job's step names, as the run's page shows them: a step that runs every one of the site's script tests
  * (`npm test` in apps/website) must not carry the name of one of them, or a red link-text test reads as another check
