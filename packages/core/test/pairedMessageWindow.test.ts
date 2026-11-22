@@ -164,7 +164,11 @@ describe("texts a contact sends on a paired session", () => {
     const onTextRoom = vi.fn();
     const { a, b, sent, messages } = pair({ events: { onTextRoom } }, 20);
     void a.connect(10_000);
-    for (let i = 0; i < 100 && !(a.isDataLinkOpen && b.isDataLinkOpen); i++) await vi.advanceTimersByTimeAsync(10);
+    // The handshake's crypto settles on the real event loop, not on the fake clock: a slow runner needs real turns too.
+    for (let i = 0; i < 500 && !(a.isDataLinkOpen && b.isDataLinkOpen); i++) {
+      await vi.advanceTimersByTimeAsync(10);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
     expect(a.isDataLinkOpen && b.isDataLinkOpen).toBe(true);
     const { burst, burstWindowMs } = MESSAGE_RECEIVE_LIMITS;
     for (let n = 0; n < burst; n++) expect(await b.sendMessage(`text ${n}`, 1_790_000_000_000 + n, id(n))).toBeNull();
