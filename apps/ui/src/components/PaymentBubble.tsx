@@ -20,6 +20,7 @@ import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { focusLost, working } from "../lib/focus";
 import { useFocusKept } from "../hooks/useFocusKept";
+import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 /** A mint as a person knows it: its own name, else its host (the full URL says nothing more to them). */
 const mintLabel = (m: { url: string; name: string }) => {
@@ -245,12 +246,12 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
               {lnConfirming && !lnOver ? <ConfirmRealMoney what={t("payments.bubble.amountSats", { amount: formatAmount(payment.amount, t.language) })} busy={busy} onSend={() => payLightning(true)} onBack={() => setLnConfirming(false)} /> : (
                 <div className="flex gap-2">
                   <button className={button} data-testid="payment-lightning-approve" disabled={lnOver} {...working(running === "lightning")} onClick={() => { if (busy) return; if (network === "mainnet") setLnConfirming(true); else void payLightning(false); }}>{t("payments.bubble.approve")}</button>
-                  <button className={quiet} disabled={busy} onClick={() => setLnReview(null)}>{t("common.cancel")}</button>
+                  <FocusSafeButton className={quiet} disabled={busy} onClick={() => setLnReview(null)}>{t("common.cancel")}</FocusSafeButton>
                 </div>
               )}
             </div>
           )}
-          <button ref={reviewButton} data-testid="payment-pay" className={button} {...working(running === "review")} disabled={(busy && running !== "review") || !feeInput || (!payment.target && !viaLightning && !selectedMint) || !!review || !!unfinished || !!lnReview} onClick={() => run(async () => {
+          <FocusSafeButton ref={reviewButton} data-testid="payment-pay" className={button} {...working(running === "review")} disabled={(busy && running !== "review") || !feeInput || (!payment.target && !viaLightning && !selectedMint) || !!review || !!unfinished || !!lnReview} onClick={() => run(async () => {
             if (viaLightning) {
               // What the Lightning source would spend, shown before anything is asked of it.
               const quote = await payer.quoteInvoice(payment.invoice!);
@@ -264,7 +265,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
             setReview(await onNet.preparePayment({target,amount:payment.amount,feeCap:tokenPayment?parsePaymentAmount(feeInput,18):Number(feeInput),payee:peerPubKey,linkId:payment.linkId,requestId:payment.id}));
           }, "review")}>
             {running === "review" ? t("payments.bubble.preparing") : t("payments.bubble.review")}
-          </button>
+          </FocusSafeButton>
           </>}
           {externalUri && (
             <button className={quiet} data-testid="payment-external" aria-expanded={external} title={t("payments.bubble.externalTitle")} onClick={() => setExternal((open) => !open)}>

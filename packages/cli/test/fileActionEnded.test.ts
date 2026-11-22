@@ -24,9 +24,9 @@ beforeAll(async () => {
   registerFileBytes("native", async () => new NodeFileBytes(join(dir, "files")), true);
 });
 
-function world(transfers: Record<string, FileTransferView>) {
+function world(transfers: Record<string, FileTransferView>, links: LinkView[] = [link]) {
   const node = {
-    getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers }) as unknown as EngineState,
+    getState: () => ({ links, groups: [], settings: {}, transport: {}, transfers }) as unknown as EngineState,
     fileAction: vi.fn(),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
@@ -38,18 +38,24 @@ const ended = (direction: "in" | "out", error: string, retry = false) =>
   ({ state: "failed", transferred: 8_388_608, size: 12_582_912, direction, error, ...(retry ? { retry } : {}) }) as FileTransferView;
 
 describe("file actions on an ended 1:1 transfer", () => {
-  it("pause, resume, cancel, accept and decline of a received file the sender cancelled are refused with its words", async () => {
+  it("pause, resume, cancel, accept and decline of a received file the sender cancelled are refused with its words and the way out", async () => {
     const { ctx, node } = world({ [IN]: ended("in", "Cancelled by the sender") });
-    for (const action of ["pause", "resume", "cancel", "accept", "decline"]) {
-      await expect(callApi(ctx, "file.action", { file: IN, action })).rejects.toMatchObject({ code: "refused", message: "It ended: Cancelled by the sender" });
+    for (const action of ["pause", "resume", "cancel", "accept", "decline", "request"]) {
+      await expect(callApi(ctx, "file.action", { file: IN, action })).rejects.toMatchObject({
+        code: "refused", message: "It ended: Cancelled by the sender (ask the contact to send it again)",
+        details: { file: IN, chat: "chat-one", reason: "cancelled", by: "contact" },
+      });
     }
     expect(node.fileAction).not.toHaveBeenCalled();
   });
 
-  it("pause, resume and cancel of a sent file this side cancelled are refused; accept and decline are not for a sent file", async () => {
+  it("pause and resume of a sent file this side cancelled are refused naming file send; accept and decline are not for a sent file", async () => {
     const { ctx, node } = world({ [OUT]: ended("out", "You cancelled it") });
-    for (const action of ["pause", "resume", "cancel"]) {
-      await expect(callApi(ctx, "file.action", { file: OUT, action })).rejects.toMatchObject({ code: "refused", message: "It ended: You cancelled it" });
+    for (const action of ["pause", "resume", "resend"]) {
+      await expect(callApi(ctx, "file.action", { file: OUT, action })).rejects.toMatchObject({
+        code: "refused", message: "It ended: You cancelled it (send it again: ghostly file send chat-one <path>)",
+        details: { file: OUT, chat: "chat-one", reason: "cancelled", by: "me" },
+      });
     }
     for (const action of ["accept", "decline"]) {
       await expect(callApi(ctx, "file.action", { file: OUT, action })).rejects.toMatchObject({ code: "bad_request" });
@@ -57,16 +63,49 @@ describe("file actions on an ended 1:1 transfer", () => {
     expect(node.fileAction).not.toHaveBeenCalled();
   });
 
+  /** A script could not tell "the contact said no" from "I already did it" without reading the English. */
+  it("resend of a sent file the contact cancelled or declined names file send, with who ended it", async () => {
+    for (const [words, reason] of [["Cancelled by your contact", "cancelled"], ["Declined by your contact", "declined"]] as const) {
+      const { ctx, node } = world({ [OUT]: ended("out", words) });
+      await expect(callApi(ctx, "file.action", { file: OUT, action: "resend" })).rejects.toMatchObject({
+        code: "refused", message: `It ended: ${words} (send it again: ghostly file send chat-one <path>)`,
+        details: { file: OUT, chat: "chat-one", reason, by: "contact" },
+      });
+      expect(node.fileAction).not.toHaveBeenCalled();
+    }
+  });
+
+  it("a second cancel of what this side cancelled, or decline of what it declined, answers as the first did", async () => {
+    for (const [id, direction, words, action] of [[OUT, "out", "You cancelled it", "cancel"], [IN, "in", "You cancelled it", "cancel"], [IN, "in", "You declined it", "decline"]] as const) {
+      const { ctx, node } = world({ [id]: ended(direction, words) });
+      await expect(callApi(ctx, "file.action", { file: id, action })).resolves.toMatchObject({ chat: "chat-one", file: id, action, transfer: { state: "failed", error: words } });
+      expect(node.fileAction).not.toHaveBeenCalled();
+    }
+  });
+
   it("a sent file that failed and can go again names file resend", async () => {
     const { ctx } = world({ [OUT]: ended("out", "The contact stopped answering", true) });
-    await expect(callApi(ctx, "file.action", { file: OUT, action: "resume" })).rejects.toMatchObject({ code: "refused", message: "It ended: The contact stopped answering (file resend sends it again)" });
+    await expect(callApi(ctx, "file.action", { file: OUT, action: "resume" })).rejects.toMatchObject({
+      code: "refused", message: "It ended: The contact stopped answering (file resend sends it again)",
+      details: { file: OUT, chat: "chat-one", reason: "failed", by: null },
+    });
   });
 
   it("an ended transfer known only from its record (after a restart) is refused too", async () => {
     await fileStore.put({ id: "chat-one-in-r", linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "r.bin", size: 10, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "failed", transferred: 4, size: 10, error: "You declined it" } } as never);
     const { ctx, node } = world({});
-    await expect(callApi(ctx, "file.action", { file: "chat-one-in-r", action: "accept" })).rejects.toMatchObject({ code: "refused", message: "It ended: You declined it" });
+    await expect(callApi(ctx, "file.action", { file: "chat-one-in-r", action: "accept" })).rejects.toMatchObject({
+      code: "refused", message: "It ended: You declined it (ask the contact to send it again)",
+      details: { file: "chat-one-in-r", chat: "chat-one", reason: "declined", by: "me" },
+    });
     expect(node.fileAction).not.toHaveBeenCalled();
+  });
+
+  it("file wait on a transfer the contact cancelled says who ended it, as the actions do", async () => {
+    const { ctx } = world({ [OUT]: ended("out", "Cancelled by your contact") });
+    await expect(callApi(ctx, "file.wait", { file: OUT, timeout: 1 })).rejects.toMatchObject({
+      message: "Cancelled by your contact", details: { file: OUT, chat: "chat-one", retry: false, reason: "cancelled", by: "contact" },
+    });
   });
 
   it("a transfer still moving takes the action", async () => {
@@ -94,7 +133,10 @@ describe("file actions on an ended 1:1 transfer", () => {
   it("file save of a received file that ended says it ended, not that it is on its way", async () => {
     await fileStore.put({ id: IN, linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "big.bin", size: 12_582_912, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 8_388_608, size: 12_582_912 } } as never);
     const { ctx } = world({ [IN]: ended("in", "Cancelled by the sender") });
-    await expect(callApi(ctx, "file.save", { file: IN, path: join(dir, "big.bin") })).rejects.toMatchObject({ code: "refused", message: "It ended: Cancelled by the sender" });
+    await expect(callApi(ctx, "file.save", { file: IN, path: join(dir, "big.bin") })).rejects.toMatchObject({
+      code: "refused", message: "It ended: Cancelled by the sender (ask the contact to send it again)",
+      details: { file: IN, reason: "cancelled", by: "contact" },
+    });
   });
 
   it("pause of a file being checked is refused: the engine would do nothing and it ends done", async () => {
@@ -112,5 +154,106 @@ describe("file actions on an ended 1:1 transfer", () => {
       await expect(callApi(ctx, "file.action", { file: OUT, action: "pause" })).rejects.toMatchObject({ code: "refused", message: "Too late to pause: it arrived whole, and the contact keeps it" });
       expect(node.fileAction).not.toHaveBeenCalled();
     }
+  });
+
+  it("accept of an offer larger than the room left now is refused with the room (it keeps waiting); before, it started and failed part way", async () => {
+    await fileStore.put({ id: IN, linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "big.bin", size: 24_465_408, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 24_465_408 } } as never);
+    const { ctx, node } = world({ [IN]: { state: "transferring", stage: "asking", transferred: 0, size: 24_465_408, direction: "in", room: 16_228_352 } as FileTransferView });
+    // As the engine's `FileDesk.accept` refuses it.
+    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file (15.5 MB free)"), { room: 16_228_352, size: 24_465_408, coming: 0 }));
+    await expect(callApi(ctx, "file.action", { file: IN, action: "accept" })).rejects.toMatchObject({
+      code: "refused", message: `big.bin (24.5 MB) does not fit: 16.2 MB free. Free some space, then ghostly file accept ${IN} again (or file decline)`,
+      details: { reason: "no_room", room: 16_228_352 },
+    });
+    // Any other engine error goes on as it came (the daemon's `asCliError` names it, as before).
+    node.fileAction.mockRejectedValueOnce(new Error("No such file transfer"));
+    await expect(callApi(ctx, "file.action", { file: IN, action: "accept" })).rejects.not.toHaveProperty("code");
+  });
+
+  /**
+   * A file that fits the room but not beside a file already taken that still comes: the line said "No room … (38.8 MB
+   * free)" for a 27.3 MB file, the room in binary MB and the size in decimal, and neither the other file nor the way out.
+   */
+  it("accept refused for no room beside a file still coming names the file, its size, the room and what still comes, in file save's MB", async () => {
+    const id = "chat-one-in-room";
+    await fileStore.put({ id, linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "b26.bin", size: 27_262_976, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 27_262_976 } } as never);
+    const { ctx, node } = world({ [id]: { state: "transferring", stage: "asking", transferred: 0, size: 27_262_976, direction: "in", room: 40_714_240 } as FileTransferView });
+    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file (38.8 MB free)"), { room: 40_714_240, size: 27_262_976, coming: 27_262_976 }));
+    await expect(callApi(ctx, "file.action", { file: id, action: "accept" })).rejects.toMatchObject({
+      code: "refused",
+      message: `b26.bin (27.3 MB) does not fit: 40.7 MB free, and 27.3 MB of files still coming need it first. Free some space, then ghostly file accept ${id} again (or file decline)`,
+      details: { reason: "no_room", room: 40_714_240 },
+    });
+  });
+
+  /**
+   * On a nearly full disk, where this refusal is met: sizes under a megabyte read "(0.1 MB) does not fit: 0 MB free",
+   * or the same 0.1 MB on both sides, where the engine's line (released) said "48.0 KB free". What is needed rounds up
+   * and the room down, so a file a few bytes short of the room never reads as if it fit ("(61 KB) … 61 KB free").
+   */
+  it("accept refused for no room on a nearly full disk names sizes under a megabyte in KB, not 0 MB, never as if it fit", async () => {
+    const id = "chat-one-in-small";
+    await fileStore.put({ id, linkId: "chat-one", createdAt: 1, direction: "in", metadata: { name: "notes.txt", size: 61_440, mime: "text/plain", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 61_440 } } as never);
+    const { ctx, node } = world({ [id]: { state: "transferring", stage: "asking", transferred: 0, size: 61_440, direction: "in", room: 49_152 } as FileTransferView });
+    const refused = async (size: number, coming: number, room: number) => {
+      node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file"), { room, size, coming }));
+      return ((await callApi(ctx, "file.action", { file: id, action: "accept" }).catch((e: unknown) => e)) as Error).message;
+    };
+    const tail = `. Free some space, then ghostly file accept ${id} again (or file decline)`;
+    expect(await refused(61_440, 0, 49_152)).toBe(`notes.txt (62 KB) does not fit: 49 KB free${tail}`);
+    expect(await refused(40_960, 20_480, 49_152)).toBe(`notes.txt (41 KB) does not fit: 49 KB free, and 21 KB of files still coming need it first${tail}`);
+    expect(await refused(512, 0, 0)).toBe(`notes.txt (512 B) does not fit: 0 B free${tail}`);
+    // A few bytes short: rounded to nearest these read "(61 KB) … 61 KB free", "41 + 20 KB … 61 KB free", "(1 MB) … 1 MB free".
+    expect(await refused(61_000, 0, 60_999)).toBe(`notes.txt (61 KB) does not fit: 60 KB free${tail}`);
+    expect(await refused(40_600, 20_400, 60_600)).toBe(`notes.txt (41 KB) does not fit: 60 KB free, and 21 KB of files still coming need it first${tail}`);
+    expect(await refused(1_000_400, 0, 999_600)).toBe(`notes.txt (1.1 MB) does not fit: 999 KB free${tail}`);
+    // The unit is chosen after rounding up: not "1000 KB".
+    expect(await refused(999_001, 0, 0)).toBe(`notes.txt (1 MB) does not fit: 0 B free${tail}`);
+    expect(await refused(24_460_000, 0, 24_450_000)).toBe(`notes.txt (24.5 MB) does not fit: 24.4 MB free${tail}`);
+  });
+
+  /**
+   * The files still coming that hold the room are named, with their chat and the command that cancels each: the line
+   * said only how many MB of them there were, and nothing said which files, nor in which chat, to cancel to make room.
+   */
+  it("accept refused for no room beside the files still coming names them, their chats and how to cancel each", async () => {
+    const id = "chat-one-in-named";
+    const bob = { ...link, id: "chat-two", label: undefined, peerNick: "Bob", peerPubKeyZ32: "pbob" } as unknown as LinkView;
+    const carol = { ...link, id: "chat-three", label: "Carol", peerPubKeyZ32: "pcarol" } as unknown as LinkView;
+    const put = (fileId: string, linkId: string, name: string, size: number) => fileStore.put({ id: fileId, linkId, createdAt: 1, direction: "in", metadata: { name, size, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size } } as never);
+    await put(id, "chat-one", "holiday.zip", 30_000_000);
+    await put("chat-two-in-big", "chat-two", "backup.iso", 25_000_000);
+    await put("chat-three-in-song", "chat-three", "song.flac", 10_000_000);
+    const taken = (size: number, transferred: number, patch: Partial<FileTransferView> = {}) => ({ state: "transferring", direction: "in", size, transferred, ...patch }) as FileTransferView;
+    const { ctx, node } = world({
+      [id]: taken(30_000_000, 0, { stage: "asking", room: 4_000_000 }),
+      "chat-two-in-big": taken(25_000_000, 1_000_000),
+      "chat-three-in-song": taken(10_000_000, 4_000_000, { stage: "paused", pausedBy: "peer" }),
+      "chat-four-in-nameless": taken(2_000_000, 0),
+      // Not holding the room: one still asked about, one sent from here, one ended, a group's file.
+      "chat-two-in-asked": taken(50_000_000, 0, { stage: "asking" }),
+      "chat-two-out-sent": { state: "transferring", direction: "out", size: 70_000_000, transferred: 0 } as FileTransferView,
+      "chat-two-in-failed": { state: "failed", direction: "in", size: 80_000_000, transferred: 0, error: "You cancelled it" } as FileTransferView,
+      "group-g1-in-x": taken(90_000_000, 0),
+    }, [link, bob, carol, { ...link, id: "chat-four", label: undefined, peerNick: undefined } as unknown as LinkView]);
+    node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file beside the files still coming (3.8 MB left of 38.1 MB free)"), { room: 40_000_000, size: 30_000_000, coming: 32_000_000 }));
+    await expect(callApi(ctx, "file.action", { file: id, action: "accept" })).rejects.toMatchObject({
+      code: "refused",
+      message: "holiday.zip (30 MB) does not fit: 40 MB free, and 32 MB of files still coming need it first: "
+        + "backup.iso from Bob (24 MB to come: ghostly file cancel chat-two-in-big), "
+        + "song.flac from Carol (6 MB to come: ghostly file cancel chat-three-in-song), "
+        + "a file from chat-four (2 MB to come: ghostly file cancel chat-four-in-nameless). "
+        + `Free some space or cancel one of them, then ghostly file accept ${id} again (or file decline)`,
+      // The contract a script reads is the same: the code, the reason and the room.
+      details: { reason: "no_room", room: 40_000_000 },
+    });
+    // Past three, the rest are counted.
+    await put("chat-two-in-small", "chat-two", "small.bin", 1_000_000);
+    const more = world({ [id]: taken(30_000_000, 0, { stage: "asking" }), "chat-two-in-big": taken(25_000_000, 1_000_000), "chat-three-in-song": taken(10_000_000, 4_000_000),
+      "chat-four-in-nameless": taken(2_000_000, 0), "chat-two-in-small": taken(1_000_000, 0) }, [link, bob, carol, { ...link, id: "chat-four", label: undefined } as unknown as LinkView]);
+    more.node.fileAction.mockRejectedValueOnce(Object.assign(new Error("No room on this device for this file beside the files still coming (3.8 MB left of 38.1 MB free)"), { room: 40_000_000, size: 30_000_000, coming: 33_000_000 }));
+    const error = (await callApi(more.ctx, "file.action", { file: id, action: "accept" }).catch((e: unknown) => e)) as Error;
+    expect(error.message).toContain("(2 MB to come: ghostly file cancel chat-four-in-nameless) and 1 more. Free some space or cancel one of them");
+    expect(error.message).not.toContain("small.bin");
   });
 });

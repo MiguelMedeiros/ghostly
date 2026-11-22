@@ -46,7 +46,7 @@ export function FolderNameDialog({ name = "", onClose, onSave, returnFocus }: { 
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} className={QUIET}>{t("common.cancel")}</button>
         <button type="submit" disabled={!kept} data-testid="folder-name-save"
-          className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent">{name ? t("common.save") : t("sidebar.folder.create")}</button>
+          className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent">{name ? t("common.save") : t("sidebar.folder.create")}</button>
       </div>
     </form>
   </dialog>, document.body);
@@ -66,7 +66,7 @@ export function DeleteFolderDialog({ name, onClose, onConfirm, returnFocus }: { 
     <p id={`${id}-body`} className="mt-2 text-sm text-text-muted">{t("sidebar.folder.deleteBody")}</p>
     <div className="mt-5 flex justify-end gap-2">
       <button ref={cancel} onClick={onClose} className={QUIET}>{t("common.cancel")}</button>
-      <button onClick={onConfirm} data-testid="folder-delete-confirm" className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger">{t("sidebar.folder.delete")}</button>
+      <button onClick={onConfirm} data-testid="folder-delete-confirm" className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-danger">{t("sidebar.folder.delete")}</button>
     </div>
   </dialog>, document.body);
 }

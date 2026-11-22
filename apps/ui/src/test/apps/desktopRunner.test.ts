@@ -206,7 +206,9 @@ it("refuses a request over 66 KiB without sending it", async () => {
   await expect(window.ghostly.storage.set("\u0001".repeat(256), "x".repeat(64 * 1024 - 2))).resolves.toBeNull();
   expect(sent).toHaveLength(2);
   await expect(window.ghostly.storage.set("k", "é".repeat(33 * 1024))).rejects.toThrow("too-large");
-  await expect(window.ghostly.storage.set("k", new Array(8 * 1024 * 1024).fill(0))).rejects.toThrow("too-large");
+  // A value that is no string, 256 KiB as JSON ("0," each): far over 66 KiB. Bigger only costs time, as the runner walks
+  // and writes all of it before it measures.
+  await expect(window.ghostly.storage.set("k", new Array(128 * 1024).fill(0))).rejects.toThrow("too-large");
   expect(sent).toHaveLength(2);
 });
 

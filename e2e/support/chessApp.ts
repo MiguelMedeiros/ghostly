@@ -117,7 +117,8 @@ export async function openStoreInstall(page: Page): Promise<Locator> {
   const listed = page.getByTestId("app-store").filter({ hasText: STORE_NAME });
   await listed.getByTestId("app-listing-install").click();
   const screen = page.getByTestId("app-install");
-  await expect(screen.getByTestId("app-store-line")).toHaveText(`In ${STORE_NAME}`);
+  // A store other than the official one is shown with its fingerprint after its name.
+  await expect(screen.getByTestId("app-store-line")).toHaveText(new RegExp(`^In ${STORE_NAME.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( \\S{4}){4}$`));
   return screen;
 }
 

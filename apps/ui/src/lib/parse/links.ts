@@ -1,4 +1,4 @@
-import { LINK_TRAILING, linkStop, linkTail } from "@ghostly/core";
+import { LINK_STOP_CHARS, LINK_TRAILING, linkStop, linkTail } from "@ghostly/core";
 import type { Detector } from "./types";
 
 const CLOSERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
@@ -61,7 +61,9 @@ export function shownUrl(url: string): string {
 /** Web addresses, over http(s) only: `javascript:` and `data:` never become links. */
 export const link: Detector<"link", { url: string }> = {
   kind: "link",
-  pattern: /https?:\/\/\S+/gi,
+  // Up to a space or the punctuation a link stops at (`linkStop`): a run of links each ended by "،" or "。", with no
+  // space, is read once, not again from each link to the end of the run.
+  pattern: new RegExp(`https?:\\/\\/[^\\s${LINK_STOP_CHARS}]+`, "gi"),
   lead: /https?:\/\//gi,
   accept(match) {
     const url = linkEnd(match[0]);

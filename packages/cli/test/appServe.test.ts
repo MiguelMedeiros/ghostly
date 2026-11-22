@@ -73,6 +73,16 @@ describe("app serve", () => {
     expect(servedApps(dir)).toEqual([]);
   });
 
+  it("refuses to grant files, which no bot is given, even when the manifest asks it", async () => {
+    const { dir, ctx, file } = profile();
+    const picks = vector("an app that asks for files");
+    expect(picks.read.manifest.permissions).toEqual(["chat", "files"]);
+    await expect(callApi(ctx, "app.serve", { bundle: file("picks", picks.bytes), grant: ["chat", "files"] })).rejects.toMatchObject({ code: "refused", message: expect.stringContaining("files cannot be granted") });
+    expect(servedApps(dir)).toEqual([]);
+    const { served } = await callApi(ctx, "app.serve", { bundle: file("picks", picks.bytes), grant: ["chat"] }) as { served: { granted: string[] } };
+    expect(served.granted).toEqual(["chat"]);
+  });
+
   it("refuses a card url with a query or fragment: a private file's read token would go to contacts", async () => {
     const { dir, ctx, file } = profile();
     const url = "https://raw.githubusercontent.com/ana/chess/main/app.ghostlyapp";
@@ -119,8 +129,16 @@ describe("app serve", () => {
     const { dir, ctx, file } = profile(true);
     const { served } = await callApi(ctx, "app.serve", { bundle: file("plain", plain.bytes), grant: ["chat"] }) as { served: { ref: string } };
     await expect(callApi(ctx, "app.unserve", { ref: "nothing" })).rejects.toMatchObject({ code: "not_found" });
-    expect(await callApi(ctx, "app.unserve", { ref: served.ref.split("/")[1] })).toEqual({ unserved: served.ref, apps: 0, offered: true });
+    // This engine started while the app was served: it offers apps/1 until the next start.
+    expect(await callApi(ctx, "app.unserve", { ref: served.ref.split("/")[1] })).toEqual({ unserved: served.ref, apps: 0, offered: true, restart: true });
     expect(servedApps(dir)).toEqual([]);
+    expect(await callApi(ctx, "app.served")).toEqual({ apps: [], offered: true, restart: true });
+  });
+
+  it("asks for no restart while the list and the engine agree", async () => {
+    const { ctx, file } = profile(true);
+    expect(await callApi(ctx, "app.serve", { bundle: file("plain", plain.bytes), grant: ["chat"] })).not.toHaveProperty("restart");
+    expect(await callApi(profile().ctx, "app.served")).toEqual({ apps: [], offered: false });
   });
 });
 

@@ -312,6 +312,23 @@ describe("AddIdentityDialog", () => {
       expect(start).toBeEnabled();
     });
 
+    it("says the lookup out loud: a status line there from the start, then what was found, and nothing over a refusal's alert", async () => {
+      const { user } = dialog();
+      await openDid(user);
+      const live = screen.getByTestId("add-identity-preview-live");
+      expect(live).toHaveAttribute("role", "status");
+      expect(live.textContent).toBe("");
+      await user.type(screen.getByTestId("add-identity-subject"), DID_KEY);
+      expect(screen.getByTestId("add-identity-preview-live")).toBe(live);
+      expect(live).toHaveTextContent("Looking it up…");
+      await vi.waitFor(() => expect(screen.getByTestId("add-identity-start")).toBeEnabled(), { timeout: 3000 });
+      expect(live).toHaveTextContent("Found: did:key, the key is the identifier");
+      await user.clear(screen.getByTestId("add-identity-subject"));
+      await user.type(screen.getByTestId("add-identity-subject"), "did:plc:ewvi7nxzyoun6zhxrhs64oiz");
+      await screen.findByTestId("add-identity-preview-error", {}, { timeout: 3000 });
+      expect(live.textContent).toBe("");
+    });
+
     it("names a method it does not check, and cannot start", async () => {
       const { user } = dialog();
       await openDid(user);
@@ -534,7 +551,7 @@ describe("AddIdentityDialog", () => {
       expect(finish).toBeDisabled();
       await user.type(screen.getByTestId("add-identity-paste"), "not a signature");
       await user.click(finish);
-      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----");
+      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("That is not the whole signaturePaste it from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----.");
       // Refused in the page: nothing reached the engine.
       expect(engine.callsTo("completeIdentityProof")).toEqual([]);
     });

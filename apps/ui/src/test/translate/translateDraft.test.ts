@@ -30,6 +30,16 @@ describe("what of a draft is translated", () => {
     expect(words(`pay ${xmr} today`)).toEqual(["pay", "today"]);
   });
 
+  it("a link or payment link ends where the bubble's does, so the sentence after it is translated too", () => {
+    const text = "見て https://a.example/x。明日会いましょう";
+    expect(words(text)).toEqual(["見て", "。明日会いましょう"]);
+    expect(joinParts(draftParts(text), ["Look", ". See you tomorrow"])).toBe("Look https://a.example/x. See you tomorrow");
+    expect(words("看 www.a.example/x，明天见")).toEqual(["看", "，明天见"]);
+    expect(words("付款 bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.1。谢谢")).toEqual(["付款", "。谢谢"]);
+    // Inside the address, what the bubble keeps stays kept.
+    expect(words("see https://a.example/x_(y) ok")).toEqual(["see", "ok"]);
+  });
+
   it("each line goes on its own, and its spaces and line breaks stay", () => {
     expect(words("  bom dia\n\ntudo bem?  ")).toEqual(["bom dia", "tudo bem?"]);
     expect(joinParts(draftParts("  bom dia\n\ntudo bem?  "), ["good morning", "all good?"])).toBe("  good morning\n\nall good?  ");

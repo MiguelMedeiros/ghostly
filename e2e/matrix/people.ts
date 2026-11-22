@@ -214,8 +214,25 @@ export async function desktopPerson(name: string, options: {
     canWrite: () => run<boolean>(`const box = document.querySelector('[placeholder="Message…"]'); return !!box && !box.disabled;`),
     hash: () => run<string>(`return location.hash;`),
     say: async (text) => {
+      const box = '[placeholder="Message…"]';
       await expect.poll(() => person.canWrite(), { timeout: 60_000 }).toBe(true);
-      await app().type('[placeholder="Message…"]', `${text}`);
+      // The text goes in whole, as `join` puts the invite in, and only Enter is a key. Typed key by key, a loaded host's
+      // WebKitWebDriver now and then ends the run of keys with a bare "unknown error", with no telling how many landed.
+      const entered = await run<string | null>(`
+        const box = document.querySelector(arguments[0]);
+        if (!box) return null;
+        box.focus();
+        document.execCommand("insertText", false, arguments[1]);
+        return box.value;`, box, text);
+      expect(entered, `${name}'s message box holds the text`).toBe(text);
+      // Enter sends it and empties the box. A failed call may still have pressed it: Enter again only when the box still
+      // holds the text a while later, so the text never goes twice.
+      const left = () => run<string | null>(`return document.querySelector(arguments[0])?.value ?? null;`, box);
+      await expect(async () => {
+        if (await left() !== text) return;
+        await app().type(box, "\uE007").catch(() => {});
+        await expect.poll(left, { timeout: 10_000 }).not.toBe(text);
+      }, `${name} sends “${text}”`).toPass({ timeout: 60_000 });
     },
     shows: (text) => run<boolean>(`
       const pane = document.querySelector(".chat-wallpaper");
