@@ -37,7 +37,7 @@ export function handoffProfileHost(): HandoffProfileHost | null {
  * does not move. These are the versions `packages/browser/package.json` pins; a test checks the two agree.
  */
 export const WALLET_SDK_PINS: Readonly<Record<string, string>> = {
-  ark: "0.4.76",
+  ark: "0.5.4",
   bark: "0.27.0",
   breez: "0.28.2",
   fedimint: "eea6a3c98909",

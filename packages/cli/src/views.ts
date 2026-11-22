@@ -1,6 +1,7 @@
-import { groupPayLineId, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
+import { groupMemberOfLink, groupPayLineId, groupPayTwin } from "@ghostly/browser/shared/groupPayNotes";
 import type { GroupPayNote, GroupView, LinkView, MessageFile, PaymentView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { StatusCard } from "@ghostly/core";
+import { shellWord } from "./shellWord";
 
 /**
  * The JSON shapes the CLI and the daemon answer with. They are the contract bots code against (WISP 1100), kept
@@ -297,15 +298,27 @@ export function groupMessageJson(message: StoredMessage, group: Pick<GroupView, 
  * tells them (`groupPayTwin`): the requester's own request, the request as it came over the edge, a payment answering
  * it. Only for a note whose line is in `notes` (the group's, by note id): a twin of nothing is no twin.
  */
-export function groupPayTwins(messages: readonly StoredMessage[], notes: ReadonlyMap<string, GroupPayNote>, payments: Readonly<Record<string, Pick<PaymentView, "kind" | "requestId"> | undefined>>,
-  myKey: string | undefined): Map<string, string> {
+export function groupPayTwins(messages: readonly StoredMessage[], notes: ReadonlyMap<string, GroupPayNote>, payments: Readonly<Record<string, Pick<PaymentView, "kind" | "requestId" | "linkId"> | undefined>>,
+  group: Pick<GroupView, "members" | "myKey"> | undefined): Map<string, string> {
   const twins = new Map<string, string>();
   for (const m of messages) {
     if (!m.paymentId || m.groupPay) continue;
-    const note = groupPayTwin(m, payments[m.paymentId], (id) => notes.get(id), myKey);
+    const note = groupPayTwin(m, payments[m.paymentId], (id) => notes.get(id), group?.myKey, (linkId) => groupMemberOfLink(group, linkId));
     if (note && notes.has(note)) twins.set(m.id, groupPayLineId(note));
   }
   return twins;
+}
+
+/**
+ * A link join reads `status: "invited"` though nobody invited it: its `note` says that it knocks at the link and how to
+ * stop it. Nothing for anything else.
+ */
+function knockNote(group: GroupView): { note: string } | undefined {
+  if (group.status || !group.invitation?.viaLink) return undefined;
+  const id = shellWord(group.id, group.id);
+  return { note: group.invitation.unanswered
+    ? `You opened its link and nobody let you in: ghostly group accept ${id} knocks again, ghostly group decline ${id} drops it`
+    : `You opened its link and knock until a member's app lets you in (stage says how far): ghostly group decline ${id} stops it` };
 }
 
 /**
@@ -328,12 +341,20 @@ export function groupJson(group: GroupView, showSecret = false) {
     members: group.members.map((m) => ({ key: m.key, name: m.nick ?? null, role: m.role, me: m.me, online: m.online,
       ...(m.hub ? { hub: true } : {}), ...(m.viaHub ? { viaHub: true } : {}), ...(m.hubRole ? { hubRole: m.hubRole } : {}) })),
     ...(group.hubs ? { hubs: group.hubs } : {}),
-    invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null } : null,
+    // A join nobody answered (the knocks stopped: `group accept` knocks again) and an invitation its sender took back
+    // (`group accept` refuses it) said, as the app's card does: before, both read as a live "invited", stage "knocked".
+    // A link join's `linkId` is the engine's id for the knock, no chat `chat show` knows.
+    invitation: group.invitation ? { chat: group.invitation.viaLink ? null : group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null,
+      ...knockNote(group),
+      ...(group.invitation.unanswered ? { unanswered: true } : {}), ...(group.invitation.takenBack ? { takenBack: true } : {}) } : null,
     // Other groups that came under this id (a contact's invitation, with the chat it came over, or a link opened): kept
     // beside it until the person picks (`engine keepGroup {groupId}`, or `engine switchGroup {groupId, to: <chat or link>}`).
     ...(group.others?.length ? { others: group.others.map((o) => ("link" in o ? { link: showSecret ? o.link : "<hidden>" } : { chat: o.linkId, name: o.name, members: o.members })) } : {}),
     community: group.community ?? null,
     picture: !!group.picture,
+    // The node that forwards a community group's calls, as its admin named it, and whether its media is sealed end to end
+    // (WISP 602; `group call`).
+    call: group.call ? { sfu: group.call.sfu, e2ee: group.call.e2ee === 1 } : null,
     pin: pinJson(group.pin),
   };
 }

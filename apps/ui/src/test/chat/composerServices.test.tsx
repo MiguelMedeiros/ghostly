@@ -118,7 +118,7 @@ describe("the composer's Shared services row", () => {
     act(() => view.engine.update({ links: [live({ sessionOffers: { mine: both.mine, peer: null }, capabilities: { files: true, payments: false, services: false } })] }));
     row = await openPlus(view.user);
     expect(row).toBeEnabled();
-    expect(row).toHaveAttribute("title", "Ana needs an updated Ghostly to open shared services.");
+    expect(row).toHaveAttribute("title", "⁨Ana⁩ needs an updated Ghostly to open shared services.");
   });
 
   it("is greyed with the reason where nothing in it can be chosen: the contact's app cannot open apps", async () => {
@@ -127,7 +127,7 @@ describe("the composer's Shared services row", () => {
     act(() => view.engine.update({ links: [live({ sessionOffers: { mine: both.mine, peer: ["calls/1"] }, capabilities: { files: true, payments: false, services: false } })] }));
     const row = await openPlus(view.user);
     expect(row).toBeDisabled();
-    expect(row).toHaveAttribute("title", "Ana's app cannot open or share apps (the web app cannot reach local apps).");
+    expect(row).toHaveAttribute("title", "⁨Ana⁩'s app cannot open or share apps (the web app cannot reach local apps).");
     expect(row).toHaveTextContent(/^Shared services$/);
     await view.user.click(row);
     expect(screen.queryByTestId("chat-services")).not.toBeInTheDocument();
@@ -169,6 +169,27 @@ describe("the chat's apps strip", () => {
     expect(label.className).toMatch(/\btruncate\b/);
     expect(label).toHaveAttribute("dir", "auto");
     expect(open.getAttribute("title")).toContain(name);
+  });
+});
+
+describe("the chat's Services dialog's Open", () => {
+  it("is named with its app for a screen reader, the word on screen first: two apps' Opens sound different", async () => {
+    localApps(true);
+    const opened: string[] = [];
+    const openService = fakeEngine.openService;
+    fakeEngine.openService = async (...args: unknown[]) => { opened.push(String(args[1])); };
+    try {
+      const view = renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />);
+      act(() => view.engine.update({ links: [live({ peerServices: [{ id: "demo", type: "http", name: "Demo" }, { id: "wiki", type: "http" }] })] }));
+      const dialog = screen.getByRole("dialog");
+      expect(within(dialog).getAllByTestId("chat-service-open").map((b) => b.textContent)).toEqual(["Open", "Open"]);
+      await view.user.click(within(dialog).getByRole("button", { name: "Open Demo, served from your contact's machine" }));
+      // An app with no name of its own goes by its ID, as its row shows it.
+      await view.user.click(within(dialog).getByRole("button", { name: "Open wiki, served from your contact's machine" }));
+      expect(opened).toEqual(["demo", "wiki"]);
+    } finally {
+      fakeEngine.openService = openService;
+    }
   });
 });
 

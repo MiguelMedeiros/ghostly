@@ -1,11 +1,11 @@
-import { protocolLinkCode } from "./url";
+import { protocolLinkCode, undoubledRoute } from "./url";
 
 /**
  * A link opened while the profile runs in another tab (an invite, a group's link, a device code): the tab it opened
  * in waits for the profile's lock, so it hands the link to the tab that holds it, as a share is handed over. Over a
  * channel of the profile's own, named after its peer lock, so another profile's tab never takes it.
  */
-type LinkMessage = { type: "link"; id: string; route: string } | { type: "link-taken"; id: string };
+type LinkMessage = { type: "link"; id: string; route: string } | { type: "link-taken" | "link-dropped"; id: string };
 
 const channelName = (lock: string) => `${lock}-links`;
 
@@ -13,22 +13,23 @@ const channelName = (lock: string) => `${lock}-links`;
  * The route of the link this address carries (the hash without its `#`), when it carries one the app's intakes take:
  * a `ghostly1` invite or device code, a `web+ghostly:` link, a group's `/join/…` link, an older invite link
  * (`/chat/ghostly1…`, `/chat/<seed>/<key>/<enc>`: what `ChatLinkIntake` never reads as a chat's address), or a device
- * code's link that names the profile (`#<profile>#ghostly1z…`). Null for anything else: home, a chat's address
- * (`/chat/<sessionId>`), a page of the menu.
+ * code's link that names the profile (`#<profile>#ghostly1z…`), each also with a doubled `#` before it (read as the
+ * route it doubles). Null for anything else: home, a chat's address (`/chat/<sessionId>`), a page of the menu.
  */
 export function linkInAddress(hash: string): string | null {
-  const route = hash.replace(/^#/, "");
+  const route = undoubledRoute(hash.replace(/^#/, ""));
   const pathname = route.split(/[?#]/)[0];
-  const olderInvite = /^\/chat\/(?:ghostly1|[^/]+\/)/i.test(pathname);
+  const olderInvite = /^\/chat\/(?:ghostly1|[^/]+\/[^/])/i.test(pathname);
   if (/^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null || /^\/join\/./.test(pathname) || olderInvite) return route;
   return /#ghostly1/i.test(route) ? route : null;
 }
 
 /**
  * Hands `route` to the tab that holds `lock`, every `everyMs` until one takes it (the first ask can come before that
- * tab listens), and calls `onTaken` once one did. Returns what stops it: this tab took the lock itself.
+ * tab listens), and calls `onTaken` once one did, or `onDropped` once one on standby refused it (`dropLinks`). Returns
+ * what stops it: this tab took the lock itself.
  */
-export function forwardLink(lock: string, route: string, onTaken: () => void, everyMs: number): () => void {
+export function forwardLink(lock: string, route: string, onTaken: () => void, everyMs: number, onDropped: () => void = onTaken): () => void {
   if (typeof BroadcastChannel === "undefined") return () => {};
   const channel = new BroadcastChannel(channelName(lock));
   const id = crypto.randomUUID();
@@ -36,9 +37,11 @@ export function forwardLink(lock: string, route: string, onTaken: () => void, ev
   const timer = setInterval(ask, everyMs);
   const stop = () => { clearInterval(timer); channel.close(); };
   channel.onmessage = (event: MessageEvent<LinkMessage>) => {
-    if (event.data?.type !== "link-taken" || event.data.id !== id) return;
+    const answer = event.data?.type;
+    if ((answer !== "link-taken" && answer !== "link-dropped") || event.data.id !== id) return;
     stop();
-    onTaken();
+    if (answer === "link-taken") onTaken();
+    else onDropped();
   };
   return stop;
 }
@@ -55,6 +58,34 @@ export function takeLinks(lock: string, open: (route: string) => void): () => vo
     if (taken.has(message.id)) return;
     taken.add(message.id);
     open(message.route);
+  };
+  return () => channel.close();
+}
+
+/**
+ * Links this tab opens itself, one after the other, through `open` as `takeLinks` does: each once the address carries
+ * no link any more (the intake took the one before), every `everyMs`, so none replaces another before it was taken.
+ */
+export function openInTurn(routes: readonly string[], open: (route: string) => void, everyMs = 50): void {
+  const left = [...routes];
+  const next = () => {
+    if (!left.length) return;
+    if (linkInAddress(window.location.hash) === null) open(left.shift()!);
+    if (left.length) setTimeout(next, everyMs);
+  };
+  next();
+}
+
+/**
+ * This tab holds `lock` on a device on standby (WISP 06 § The gate): it opens no link, and a link another tab hands
+ * over is refused at once, so that tab drops it from its address rather than keeping it there for a tab that never will.
+ */
+export function dropLinks(lock: string): () => void {
+  if (typeof BroadcastChannel === "undefined") return () => {};
+  const channel = new BroadcastChannel(channelName(lock));
+  channel.onmessage = (event: MessageEvent<LinkMessage>) => {
+    const message = event.data;
+    if (message?.type === "link" && typeof message.id === "string") channel.postMessage({ type: "link-dropped", id: message.id } satisfies LinkMessage);
   };
   return () => channel.close();
 }

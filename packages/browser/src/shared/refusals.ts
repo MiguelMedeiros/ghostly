@@ -1,4 +1,4 @@
-import type { WalletNetwork } from "@ghostly/core";
+import { engineText, parseEngineError, type WalletNetwork } from "@ghostly/core";
 import type { PaymentRefusedNotice } from "./types";
 
 /*
@@ -21,6 +21,13 @@ export const isRefusalId = (id: string): boolean => REFUSAL_ID.test(id);
 const REFUSAL_TEXT = /^Could not receive (?:(a payment)|(Fedimint ecash)|(\d[\d.,'\u00a0\u202f ]*) (test )?sats): ([\s\S]+)$/;
 /** A reason longer than this is not one the engine wrote: it is cut, as a damaged copy must not fill a chat. */
 const REASON_LIMIT = 500;
+/** "This ecash is in …" with any unit: an older engine named a token's unit whatever its sender wrote there. */
+const OTHER_UNIT = /^This ecash is in [\s\S]*: only sat ecash can be redeemed here$/;
+
+/** A stored reason as it is said: cut, and a token's unit that is not one (`ecashUnitError`) not named. */
+function storedReason(reason: string): string {
+  return OTHER_UNIT.test(reason) && !parseEngineError(reason) ? engineText("ecashUnnamedUnit") : reason.slice(0, REASON_LIMIT);
+}
 
 const NETWORKS: readonly WalletNetwork[] = ["mainnet", "testnet"];
 
@@ -65,7 +72,7 @@ export function paymentRefusal(row: { id: string; text: string; notice?: unknown
       ...(amount !== undefined && { amount }),
       ...(network && { network }),
       ...(stored.method === "fedimint" && { method: "fedimint" as const }),
-      reason: stored.reason.slice(0, REASON_LIMIT),
+      reason: storedReason(stored.reason),
     };
   }
   const line = REFUSAL_TEXT.exec(row.text);
@@ -79,6 +86,6 @@ export function paymentRefusal(row: { id: string; text: string; notice?: unknown
     // "test sats" was never written before the notice; "sats" then said nothing of the network.
     ...(test && { network: "testnet" as const }),
     ...(fedimint && { method: "fedimint" as const }),
-    reason: reason!.slice(0, REASON_LIMIT),
+    reason: storedReason(reason!),
   };
 }

@@ -27,8 +27,8 @@ export function ProgressBar({ card, className = "" }: { card: TaskCard; classNam
   return (
     <div role="progressbar" aria-label={t("cards.task.progress")} aria-valuemin={0} aria-valuemax={100} {...(progress !== undefined && { "aria-valuenow": progress })}
       data-testid="status-card-progress" data-progress={progress ?? ""}
-      className={`h-1 w-full overflow-hidden rounded-full bg-text-primary/10 ${className}`}>
-      <div className={`h-full rounded-full ${STATUS_TONE[card.status].bar} transition-[width] duration-300 motion-reduce:transition-none`} style={{ width: `${shown}%` }} />
+      className={`progress-track h-1 w-full overflow-hidden rounded-full bg-text-primary/10 ${className}`}>
+      <div className={`progress-fill h-full rounded-full ${STATUS_TONE[card.status].bar} transition-[width] duration-300 motion-reduce:transition-none`} style={{ width: `${shown}%` }} />
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { renderApp } from "../render";
 afterEach(() => {
   vi.restoreAllMocks();
   fakeEngine.features = { ...fakeEngine.features, shareLocalServices: false };
+  delete fakeEngine.localAccessAllowed;
 });
 
 describe("Share on the Services page", () => {
@@ -33,5 +34,31 @@ describe("Share on the Services page", () => {
 
     expect(asked).toHaveBeenCalledTimes(1);
     expect(engine.callsTo("addService")).toEqual([{ name: "Atlas", target: "localhost:3400" }]);
+  });
+
+  // The extension stops an app whose host's site access was taken back in Chrome. Its Share switch turned on again
+  // without asking, and its contacts were refused until a second click on the card's Allow.
+  it("asks for the app's address again when its Share is turned back on, and says so when the answer is no", async () => {
+    fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
+    fakeEngine.localAccessAllowed = async () => false;
+    const asked = vi.spyOn(fakeEngine, "requestLocalAccess").mockResolvedValue(false);
+    const { user, engine } = renderApp(<Services />, { route: "/services" });
+    act(() => engine.update({ services: [{ id: "atlas", name: "Atlas", target: "http://localhost:3400", enabled: false, requests: 0, createdAt: 1 }] }));
+    await user.click(await screen.findByRole("switch", { name: "Share Atlas" }));
+
+    expect(asked).toHaveBeenCalledWith("http://localhost/*", "http://localhost:3400");
+    expect(engine.callsTo("setServiceEnabled")).toEqual([]);
+    expect(await screen.findByText("Not allowed in this browser yet: contacts can't open Atlas")).toBeInTheDocument();
+  });
+
+  it("says what to do after a no to the permission the form's Share asked", async () => {
+    fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
+    vi.spyOn(fakeEngine, "requestLocalAccess").mockResolvedValue(false);
+    const { user } = renderApp(<Services />, { route: "/services" });
+    await user.click(await screen.findByTestId("add-service"));
+    await user.type(screen.getByTestId("service-name"), "Atlas");
+    await user.type(screen.getByTestId("service-target"), "localhost:3400{Enter}");
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Ghostly needs your permission to reach that local address. Try again, and choose Allow when you're asked.");
   });
 });

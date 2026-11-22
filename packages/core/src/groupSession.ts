@@ -12,7 +12,7 @@ import {
 } from "./groupCommits";
 import {
   encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupName, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaToHand, keepPastGroupMeta, nextGroupMetaRevision, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
-  type GroupMeta, type GroupMetaChange, type GroupMetaFrame, type GroupMetaStatement,
+  type GroupMeta, type GroupMetaBody, type GroupMetaChange, type GroupMetaFrame, type GroupMetaStatement,
 } from "./groupMeta";
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
 import { groupReplyAuthor, readReply, REPLY_LIMITS, wireReply, type WireReply } from "./replies";
@@ -42,6 +42,12 @@ export const GROUP_LIMITS = {
   /** Own messages kept for catch-up: count and total ciphertext bytes. */
   outlog: 32,
   outlogBytes: 128 * 1024,
+  /**
+   * Own messages past that log that members may not have taken (`GroupState.owed`): count and total ciphertext bytes.
+   * With the log, the 256 a member takes in one answer.
+   */
+  owed: 224,
+  owedBytes: 512 * 1024,
   /** Frames waiting for an epoch (or its secret) that has not arrived yet. */
   waiting: 64,
   waitingBytes: 1024 * 1024,
@@ -199,6 +205,12 @@ export interface GroupState {
   /** My own frames, newest last, for members who missed them. */
   sent: GroupMessageFrame[];
   /**
+   * My own frames that fell out of `sent` though members may not have taken them (said past the pace they apply,
+   * `AuthorPace`), oldest first, until a sync of each other member of their epoch shows it holds them. At most
+   * `GROUP_LIMITS.owed` and `owedBytes`. Absent in states from before they were kept.
+   */
+  owed?: GroupMessageFrame[];
+  /**
    * Other members' frames, in the order they arrived, for members who missed them. Absent in states from before revision
    * 0.9. With an app that keeps each frame with its message (`GroupSession`'s `onRows`), only the ones from before it
    * did, until newer ones take their place.
@@ -327,10 +339,16 @@ const ANSWER_WINDOW_MS = 5_000;
  */
 const UNNAMED_KEPT_MS = 60_000;
 /**
+ * After the admin role moved to me: how long I still take the statement of the admin I took it from (WISP 902
+ * § Metadata), one that was on its way while the commit reached me first. Past it, only the admin's is taken, as for anyone.
+ */
+export const GROUP_TAKEOVER_META_MS = 10 * 60_000;
+/**
  * One member's messages (or edits) taken: its whole log handed back at once twice over (`AUTHOR_BURST`: an edge opening
  * hears it, with what the member says live beside it, and the edits its app says again), then
  * `GROUP_LIMITS.messagesPerAuthor` and `messageBytesPerAuthor` per `messageWindowMs`, as a community's `MessagePace`.
  * One not taken is neither seen nor kept nor passed on, so a sync still names it (`miss`) and a catch-up hands it again.
+ * Every member refuses the same live frames, so only the author holds them: past its log, it keeps them (`owed`).
  * What another member hands on in its answer to my sync (or what waited for a secret) is counted too, and may run the
  * author's allowance below nothing by one answer's worth (`AUTHOR_OWED`): a catch-up holds more than a burst, and lands
  * at once; the author's next frames wait until the pace pays it back. Not counted, a member at the other end of my sync
@@ -342,21 +360,35 @@ const AUTHOR_OWED = {
   messages: { frames: GROUP_LIMITS.relay, bytes: GROUP_LIMITS.relayBytes },
   edits: { frames: GROUP_LIMITS.handOnEdits, bytes: GROUP_LIMITS.relayEditBytes },
 } as const;
+/**
+ * The pace my own frames go at, as members count it, with half their burst and the room left spent on a frame it does
+ * not take (one a member may take still): an edge opening hands my log again, and frames arrive closer together than I
+ * said them, so a frame members refuse is never one this takes.
+ */
+const OWN_BURST = { frames: GROUP_LIMITS.outlog, bytes: GROUP_LIMITS.outlogBytes };
 class AuthorPace {
-  private frames: number = AUTHOR_BURST.frames;
-  private bytes: number = AUTHOR_BURST.bytes;
+  private frames: number;
+  private bytes: number;
   private at: number | undefined;
 
-  constructor(private readonly owed: { frames: number; bytes: number }) {}
+  constructor(private readonly owed: { frames: number; bytes: number }, private readonly burst = AUTHOR_BURST) {
+    this.frames = burst.frames; this.bytes = burst.bytes;
+  }
 
-  /** `answer`: handed on in an answer to my sync, or waited, so it may run the allowance below nothing (`owed`). */
-  take(bytes: number, now: number, answer = false): boolean {
+  /**
+   * `answer`: handed on in an answer to my sync, or waited, so it may run the allowance below nothing (`owed`).
+   * `spend`: one not taken still spends what is left of the allowance.
+   */
+  take(bytes: number, now: number, answer = false, spend = false): boolean {
     const elapsed = Math.max(0, now - (this.at ?? now)) / GROUP_LIMITS.messageWindowMs;
     this.at = now;
-    this.frames = Math.min(AUTHOR_BURST.frames, this.frames + elapsed * GROUP_LIMITS.messagesPerAuthor);
-    this.bytes = Math.min(AUTHOR_BURST.bytes, this.bytes + elapsed * GROUP_LIMITS.messageBytesPerAuthor);
+    this.frames = Math.min(this.burst.frames, this.frames + elapsed * GROUP_LIMITS.messagesPerAuthor);
+    this.bytes = Math.min(this.burst.bytes, this.bytes + elapsed * GROUP_LIMITS.messageBytesPerAuthor);
     const floor = answer ? this.owed : { frames: 0, bytes: 0 };
-    if (this.frames + floor.frames < 1 || this.bytes + floor.bytes < bytes) return false;
+    if (this.frames + floor.frames < 1 || this.bytes + floor.bytes < bytes) {
+      if (spend) { this.frames = Math.max(0, this.frames - 1); this.bytes = Math.max(0, this.bytes - bytes); }
+      return false;
+    }
     this.frames -= 1; this.bytes -= bytes;
     return true;
   }
@@ -489,6 +521,22 @@ function missingIn(frame: GroupSyncFrame, from: string): (f: GroupMessageFrame) 
 }
 
 /**
+ * Whether a member's sync shows it holds my frame `f`: it has seen up to it, and does not name it missing among all its
+ * gaps, or among the newest it names when they are more than a sync holds (`GROUP_LIMITS.miss`).
+ */
+function heldIn(frame: GroupSyncFrame): (f: GroupMessageFrame) => boolean {
+  const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
+  const miss = frame.miss && typeof frame.miss === "object" ? frame.miss as Record<string, Record<string, unknown>> : {};
+  return f => {
+    const high = have[f.s]?.[f.e];
+    if (!Number.isSafeInteger(high) || (high as number) < f.n) return false;
+    const gaps = miss[f.s]?.[f.e];
+    if (!Array.isArray(gaps)) return true;
+    return !gaps.includes(f.n) && (gaps.length < GROUP_LIMITS.miss || gaps.some(n => typeof n === "number" && n < f.n));
+  };
+}
+
+/**
  * My own messages and the ones I kept of other members, as one list for a member catching up: each log keeps its own
  * order (mine as I sent them, the others' as they reached me, which no member's clock can change), and the two are
  * merged by the time each frame says, mine first when they say the same. A member whose clock is off moves only
@@ -581,10 +629,26 @@ export class GroupSession {
   private namesTaken = new Map<string, RateWindow>();
   /** Messages, and apart from them edits, taken per author (`AuthorPace`). In memory only. */
   private messagePace = new Map<string, AuthorPace>();
+  /**
+   * My own frames as members pace them (`OWN_BURST`), and those of mine in `sent` it did not take: one of them that falls
+   * out of `sent` goes to `owed`. Then, per frame of `owed`, the members whose sync showed they hold it. In memory only:
+   * after a start, each owed frame waits for a sync of every member.
+   */
+  private ownPace = new AuthorPace({ frames: 0, bytes: 0 }, OWN_BURST);
+  private overPace = new Set<string>();
+  private owedHeld = new Map<string, Set<string>>();
   private editPace = new Map<string, AuthorPace>();
   private queue = Promise.resolve();
   /** Metadata frames that name a commit or an epoch I do not have yet, one signed by the admin and one by anyone else (`waitMeta`): tried again when the chain moves. */
   private pendingMeta: { admin?: WaitingMeta; other?: WaitingMeta } = {};
+  /** The admin as of the last `metaFollowsChain`. In memory only. */
+  private adminSeen: string | undefined;
+  /**
+   * After the admin role moved to me (`metaFollowsChain`): whom from, until when I take their statement, and the last
+   * one of theirs I signed again (what I held then, until one of theirs comes). `vouched`: the latest of theirs another
+   * member's sync said it holds; `held`: the latest of theirs no other member has shown it holds yet. In memory only.
+   */
+  private takeover: { from: string; until: number; base: GroupMeta | undefined; vouched?: { e: number; r: number }; held?: { from: string; raw: unknown; s: GroupMetaStatement } } | undefined;
   /** While `handle` runs: the frames it took that a hub passes on (`handle`'s result). */
   private passOn: GroupEdgeFrame[] | null = null;
   /** The frames kept to hand on that the app holds with its messages, oldest first; undefined when the state holds them all. */
@@ -610,6 +674,12 @@ export class GroupSession {
    * word, so it never counts as seen. In memory only: the syncs come again when the edges do.
    */
   private heard = new Map<string, Map<number, number>>();
+  /**
+   * Per author and epoch, the highest number of its own signed frames I did not take at its pace (`AuthorPace`): what
+   * `lacking` names, so the author is asked for it again (it keeps it, `GroupState.owed`). Every member refuses the
+   * same frames of a burst, all past the last one it took, so nothing else shows they are missing. In memory only.
+   */
+  private refused = new Map<string, Map<number, number>>();
   /**
    * Per member: until when what comes over its edge may be its answer to my sync (`syncFrame`), a catch-up and not a
    * message written just now. Each frame of the answer keeps it open: it goes a slice at a time. In memory only.
@@ -669,6 +739,7 @@ export class GroupSession {
     this.provisional = new Set((state.provisional ?? []).slice(-GROUP_LIMITS.provisional));
     for (const [key, record] of Object.entries(state.names ?? {})) this.nickAt.set(key, record.v);
     this.chainMovedAt = this.clock();
+    this.adminSeen = this.admin;
   }
   private clock(): number { return this.hooks.clock?.() ?? Date.now(); }
 
@@ -821,7 +892,7 @@ export class GroupSession {
    */
   lacking(): Map<string, string> {
     const out = new Map<string, string>();
-    for (const sender of new Set([...Object.keys(this.state.seen), ...this.heard.keys()])) {
+    for (const sender of new Set([...Object.keys(this.state.seen), ...this.heard.keys(), ...this.refused.keys()])) {
       if (sender === this.myKey || !rosterHas(this.roster, sender)) continue;
       // The numbers themselves: what the author writes next arrives, and changes nothing of what is missing.
       const marks = Object.entries(this.missOf(sender)).map(([e, gaps]) => `${e}:${gaps.join(".")}`);
@@ -834,13 +905,21 @@ export class GroupSession {
    * What a sync names in `miss` for one sender now: per epoch, the newest `GROUP_LIMITS.miss` numbers that never arrived.
    * And, for an epoch of which none arrived, the newest numbers another member said it has (`heard`): a member back
    * after someone joined, whose author wrote 32 since (all its own answer holds), had nothing below them to ask for.
+   * And, first, the oldest of those past the highest seen up to the highest of its frames I refused at its pace
+   * (`refused`): its answer brings them oldest first, so what is named changes as they come.
    */
   missOf(sender: string): Record<string, number[]> {
     const out: Record<string, number[]> = {};
-    const seen = this.state.seen[sender] ?? {};
-    for (const [e, entry] of Object.entries(seen)) { const gaps = this.gaps(entry); if (gaps.length) out[e] = gaps; }
+    const seen = this.state.seen[sender] ?? {}, refused = this.refused.get(sender);
+    for (const e of new Set([...Object.keys(seen), ...[...refused?.keys() ?? []].map(String)])) {
+      const entry = seen[e] ?? { high: -1, window: [] }, top = refused?.get(Number(e)) ?? -1;
+      const gaps: number[] = [];
+      for (let n = entry.high + 1; n <= top && gaps.length < GROUP_LIMITS.miss; n++) gaps.push(n);
+      if (entry.high >= 0) gaps.push(...this.gaps(entry).slice(0, GROUP_LIMITS.miss - gaps.length));
+      if (gaps.length) out[e] = gaps;
+    }
     for (const [e, high] of this.heard.get(sender) ?? []) {
-      if (seen[e]) continue;
+      if (seen[e] || out[e]) continue;
       const numbers: number[] = [];
       for (let n = high; n >= 0 && numbers.length < GROUP_LIMITS.miss; n--) numbers.push(n);
       out[e] = numbers;
@@ -889,7 +968,16 @@ export class GroupSession {
   }
   private persist(): Promise<void> {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
-    return this.hooks.save(structuredClone(this.state));
+    return this.hooks.save(this.copy());
+  }
+  /**
+   * The state as a save takes it: the session goes on changing its own. The chain carries the whole roster at every
+   * commit and is never compacted (1.4 ms a deep copy at 271 commits in a group of 31, 0.1 ms for the rest), and a
+   * commit on it is signed and never changes: the copy shares the commits, in an array of its own.
+   */
+  private copy(): GroupState {
+    const { chain, ...rest } = this.state;
+    return { ...structuredClone(rest), chain: chain.slice() };
   }
   /**
    * A save within `GROUP_LIMITS.saveWithinMs`, for what a received message, commit or secret changes (what was seen,
@@ -903,7 +991,7 @@ export class GroupSession {
     this.saveTimer = setTimeout(() => {
       this.saveTimer = undefined;
       // Between two frames, never in the middle of one being handled.
-      void this.serialize(() => this.hooks.save(structuredClone(this.state))).catch(() => {});
+      void this.serialize(() => this.hooks.save(this.copy())).catch(() => {});
     }, GROUP_LIMITS.saveWithinMs);
   }
   /** Writes what is waiting to be saved now (before a restart, in tests). */
@@ -969,6 +1057,8 @@ export class GroupSession {
       this.requireAdmin();
       if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
       await this.commit("remove", memberKey, now, left);
+      // The admin before me, removed (not leaving, the case `takesOver` is for): what they sign is no longer taken.
+      if (!left && memberKey === this.takeover?.from) this.takeover = undefined;
     });
   }
 
@@ -1030,8 +1120,15 @@ export class GroupSession {
     if (this.state.relay?.length) this.state.relay = this.state.relay.filter(f => this.handsOn(f.s));
     if (this.onRows?.length) this.onRows = this.onRows.filter(f => this.handsOn(f.s));
     // An author out of the roster edits nothing any more, but its removals stand: a member away when one was said still
-    // takes it from me (WISP 902 § Edits).
-    if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s) || this.isRemovalEdit(f));
+    // takes it from me (WISP 902 § Edits). One I carry unread (of an epoch before I was let in) may be one: kept, for the
+    // members of that epoch to tell.
+    if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s) || this.carriedUnread(f) || this.isRemovalEdit(f));
+  }
+
+  /** An edit of an epoch I was not a member of (let in after it): kept and handed on unread (WISP 902 § Edits, "Carried unread"). */
+  private carriedUnread(frame: GroupEditFrame): boolean {
+    const commit = this.state.chain[frame.e];
+    return !!commit && !rosterHas(commit.m, this.myKey);
   }
 
   /** Whether a kept edit is a removal (WISP 400 § Delete for everyone): its box, under its epoch's key, says `rm`. */
@@ -1169,6 +1266,7 @@ export class GroupSession {
     this.state.statusReason = reason;
     this.state.secrets = {};
     this.state.sent = [];
+    delete this.state.owed;
     delete this.state.unsaid;
     this.state.relay = [];
     if (this.onRows) this.onRows = [];
@@ -1222,6 +1320,7 @@ export class GroupSession {
       this.state.unsaid = [...(this.state.unsaid ?? []), ownKey(frame)];
       const unsend = async (free: boolean) => {
         this.state.sent = this.state.sent.filter(f => f !== frame);
+        this.overPace.delete(ownKey(frame));
         this.state.unsaid = (this.state.unsaid ?? []).filter(key => key !== ownKey(frame));
         if (free && this.state.seqEpoch === epoch && this.state.seq === n + 1) this.state.seq = n;
         await this.persist().catch(() => {});
@@ -1321,11 +1420,81 @@ export class GroupSession {
       ...(nk ? { nk, ns: toBase64Url(sign(nickSigned(header, nk), this.identity.seed)) } : {}) };
   }
 
-  /** Into my bounded log, for members who missed it. */
+  /** Into my bounded log, for members who missed it; one said past the pace members apply goes on to `owed` when it falls out. */
   private logOwn(frame: GroupMessageFrame): void {
+    if (!this.ownPace.take(frameBytes(frame), this.now(), false, true)) this.overPace.add(ownKey(frame));
     this.state.sent.push(frame);
     let bytes = this.state.sent.reduce((sum, f) => sum + f.c.length, 0);
-    while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) bytes -= this.state.sent.shift()!.c.length;
+    while (this.state.sent.length > GROUP_LIMITS.outlog || bytes > GROUP_LIMITS.outlogBytes) {
+      const out = this.state.sent.shift()!;
+      bytes -= out.c.length;
+      if (this.overPace.delete(ownKey(out))) this.owe(out);
+    }
+  }
+
+  private owe(frame: GroupMessageFrame): void {
+    const owed = [...this.state.owed ?? [], frame];
+    let bytes = owed.reduce((sum, f) => sum + f.c.length, 0);
+    while (owed.length > GROUP_LIMITS.owed || bytes > GROUP_LIMITS.owedBytes) {
+      const gone = owed.shift()!;
+      bytes -= gone.c.length;
+      this.owedHeld.delete(ownKey(gone));
+    }
+    this.state.owed = owed;
+  }
+
+  /** Drops from `owed` each frame every other member of its epoch has shown, in a sync, that it holds. */
+  private owedTaken(from: string, frame: GroupSyncFrame): void {
+    if (!this.state.owed?.length) return;
+    const holds = heldIn(frame);
+    const owed = this.state.owed.filter(f => {
+      const key = ownKey(f);
+      let held = this.owedHeld.get(key);
+      if (holds(f)) { if (!held) this.owedHeld.set(key, held = new Set()); held.add(from); }
+      const readers = this.state.chain[f.e]?.m;
+      const waits = !!readers && this.others.some(k => rosterHas(readers, k) && !held?.has(k));
+      if (!waits) this.owedHeld.delete(key);
+      return waits;
+    });
+    if (owed.length === this.state.owed.length) return;
+    this.state.owed = owed;
+    this.persistSoon();
+  }
+
+  /**
+   * My message `id` was deleted for everyone: its frame, and each copy said again, keep their place in my log (`nextSeq`,
+   * `couldRead`, the removal's copies) and lose what they said. The log is in the saved state beside the epochs' secrets,
+   * so the text stayed readable from the profile until 32 later sends pushed it out (`message delete --purge` promises
+   * it leaves the folder). A reply of mine that quotes it keeps its place and its reply, its line sealed again empty
+   * and signed whole again (`sig` does not cover the box). A member's frame of it, or quoting it, I kept to hand on goes:
+   * I cannot sign theirs, and its author hands it on. Saved soon, as a community's `forget`; `flush` writes it now.
+   */
+  forget(id: string): void {
+    const emptied = (f: GroupMessageFrame): GroupMessageFrame => !f.c ? f : this.messageIdOf(f) === id
+      ? { t: f.t, g: f.g, e: f.e, s: f.s, n: f.n, ts: f.ts, nn: "", c: "", sig: "", ...(f.o ? { o: f.o } : {}) } : this.unquoted(f, id);
+    // The ones past my log that members may not have taken (`owed`) are in the saved state too.
+    const sent = this.state.sent.map(emptied), owed = this.state.owed?.map(emptied);
+    const gone = (f: GroupMessageFrame) => this.messageIdOf(f) === id || !!this.quoting(f, id);
+    const relay = this.state.relay?.filter(f => !gone(f)), rows = this.onRows?.filter(f => !gone(f));
+    if (sent.every((f, i) => f === this.state.sent[i]) && (owed ?? []).every((f, i) => f === this.state.owed![i])
+      && relay?.length === this.state.relay?.length && rows?.length === this.onRows?.length) return;
+    this.state.sent = sent;
+    if (owed) this.state.owed = owed;
+    if (relay) this.state.relay = relay;
+    if (rows) this.onRows = rows;
+    this.persistSoon();
+  }
+  /** The reply a frame's box holds, when it quotes `id` with a line of it. */
+  private quoting(f: GroupMessageFrame, id: string): WireReply | undefined {
+    const secret = f.r && this.secret(f.e), reply = secret ? this.openReply(epochKeys(secret, this.id, f.e).message, f) : undefined;
+    return reply?.i === id && reply.s ? reply : undefined;
+  }
+  /** My frame `f` without the line of `id` it quotes (`forget`); `f` itself when it quotes none. */
+  private unquoted(f: GroupMessageFrame, id: string): GroupMessageFrame {
+    const reply = this.quoting(f, id);
+    if (!reply) return f;
+    const r = encryptText(epochKeys(this.secret(f.e)!, this.id, f.e).message, replyAad(f), JSON.stringify({ ...reply, s: "" }));
+    return { ...f, r, xs: toBase64Url(sign(messageSignedWhole({ ...f, r }), this.identity.seed)) };
   }
 
   /**
@@ -1798,7 +1967,12 @@ export class GroupSession {
       delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.fl; delete raw.o; delete raw.xs;
     }
     // At its author's pace, once it is known to be theirs; handed on in an answer to my sync, one catch-up past it.
-    if (!this.paced(this.messagePace, raw.s, frameBytes(raw), relayed && (answer || waited))) return;
+    if (!this.paced(this.messagePace, raw.s, frameBytes(raw), relayed && (answer || waited))) {
+      let byEpoch = this.refused.get(raw.s);
+      if (!byEpoch) this.refused.set(raw.s, byEpoch = new Map());
+      byEpoch.set(raw.e, Math.max(byEpoch.get(raw.e) ?? -1, raw.n));
+      return;
+    }
     // Said again under a later epoch (its author was behind, `resealBehind`): the message it first was, by that one's id.
     const first = raw.o === undefined ? null : readFirstPlace(raw.o, raw.e);
     if (raw.o !== undefined && !first) return;
@@ -1869,9 +2043,11 @@ export class GroupSession {
     if (!held && !this.paced(this.editPace, raw.s, raw.c.length + 400, raw.s !== from && (this.awaitsAnswer(from) || waited))) return;
     // Of an epoch from before I was let in (a hub let in after the message): nothing for me to read, but the author's
     // signed word for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and
-    // most members of that epoch reach the author only through whoever is a hub now.
+    // most members of that epoch reach the author only through whoever is a hub now. An author out of the roster: kept
+    // all the same, unread, since it may be a removal (a member hands on only those of a leaver), and handed at catch-up
+    // to the members of that epoch, who tell.
     if (!rosterHas(commit.m, this.myKey)) {
-      if (member && this.keepEdit(raw)) { this.persistSoon(); this.took(cleanEdit(raw)); }
+      if (this.keepEdit(raw)) { this.persistSoon(); if (member) this.took(cleanEdit(raw)); }
       return;
     }
     const secret = this.secret(raw.e);
@@ -1996,6 +2172,10 @@ export class GroupSession {
     for (const [sender, bySender] of Object.entries(this.state.seen)) {
       for (const e of Object.keys(bySender)) if (Number(e) < this.epoch - GROUP_LIMITS.secrets) delete bySender[e];
       if (!Object.keys(bySender).length) delete this.state.seen[sender];
+    }
+    for (const [sender, byEpoch] of this.refused) {
+      for (const e of byEpoch.keys()) if (e < this.epoch - GROUP_LIMITS.secrets) byEpoch.delete(e);
+      if (!byEpoch.size) this.refused.delete(sender);
     }
   }
 
@@ -2177,6 +2357,8 @@ export class GroupSession {
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(GROUP_LIMITS.syncAnswers, GROUP_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
     this.hear(frame);
+    this.owedTaken(from, frame);
+    await this.vouch(from, frame.mt);
     if (frame.e > this.epoch) {
       this.syncedEpoch.set(from, frame.e);
       if (!this.awaitsAnswer(from)) this.ask(from);
@@ -2239,7 +2421,8 @@ export class GroupSession {
     // once to each member, counted once sent (`answers`), not here: an answer that takes this one's place before it
     // goes still has them.
     const handed = this.leaversHanded.get(from);
-    const gone = (this.state.relayEdits ?? []).filter(f => !rosterHas(this.roster, f.s) && readable(f) && !handed?.has(editKey(f)));
+    // A hub I count on gets them unread too: it carries them to the members of their epoch, whose only edge it may be.
+    const gone = (this.state.relayEdits ?? []).filter(f => !rosterHas(this.roster, f.s) && (readable(f) || (carrier && !!this.state.chain[f.e])) && !handed?.has(editKey(f)));
     answer.push(...gone.slice(-GROUP_LIMITS.handOnEdits));
     // Or last, those after every message.
     answer.push(...metas.map(m => m.frame));
@@ -2259,16 +2442,16 @@ export class GroupSession {
    */
   private handOut(to: string, frames: GroupEdgeFrame[]): void { this.answers.handOut(to, frames); }
 
-  /** My own messages a member's sync says it lacks, from my bounded log, for the epochs it was a member of. */
+  /** My own messages a member's sync says it lacks, from my bounded log (and `owed`), for the epochs it was a member of. */
   private handOwn(to: string, frame: GroupSyncFrame): void {
     for (const sent of this.ownLacked(to, frame)) this.hooks.send(to, sent);
   }
   private ownLacked(to: string, frame: GroupSyncFrame): GroupMessageFrame[] {
     const lacks = missingIn(frame, to);
-    return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent) && !this.isRemoved(sent));
+    return [...this.state.owed ?? [], ...this.state.sent].filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent) && !this.isRemoved(sent));
   }
-  /** A frame of a message deleted for everyone (`hooks.removed`): handed to nobody, its removal is what they get. */
-  private isRemoved(f: GroupMessageFrame): boolean { return !!this.hooks.removed?.(this.messageIdOf(f)); }
+  /** A frame of a message deleted for everyone (`hooks.removed`, or one of mine `forget` emptied): handed to nobody, its removal is what they get. */
+  private isRemoved(f: GroupMessageFrame): boolean { return !f.c || !!this.hooks.removed?.(this.messageIdOf(f)); }
 
   // -- metadata (WISP 902 § Metadata) ---------------------------------------
 
@@ -2312,15 +2495,17 @@ export class GroupSession {
   /**
    * Signs a body under my current commit, keeps it and sends it to every member. Inside `serialize`. Like a commit, only
    * with admin work on and a good turn read (WISP 06 § Forced takeover): refused otherwise, or, `quiet`, not made.
+   * `taken`: a former admin's statement signed again (`signAgainTaken`): the line credits them, and the one held is not
+   * kept to hand on when it was no change (an older statement signed again).
    */
-  private async publishMeta(body: string, now: number, quiet = false): Promise<void> {
+  private async publishMeta(body: string, now: number, quiet = false, taken?: { by: string; replaces: boolean }): Promise<void> {
     const refused = this.hooks.adminWork?.() === false ? new Error(GROUP_ADMIN_OFF_ERROR)
       : this.hooks.adminTurn && !(await this.hooks.adminTurn()) ? engineError("groupTurnUnconfirmed") : undefined;
     if (refused) { if (quiet) return; throw refused; }
     const before = this.state.meta;
     const meta = signGroupMeta({ g: this.id, e: this.epoch, h: commitHash(this.top), r: nextGroupMetaRevision(before, this.epoch, this.seqFloor()), ts: now }, body, this.identity.seed, this.myKey);
     this.state.meta = meta;
-    this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, meta);
+    if (!taken?.replaces) this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, meta);
     await this.persist();
     const secret = this.secret(this.epoch);
     if (secret) {
@@ -2328,7 +2513,7 @@ export class GroupSession {
       for (const key of this.others) this.hooks.send(key, frame);
     }
     const change = groupMetaChange(before, meta, this.state.name);
-    if (change) this.hooks.metaChanged?.(this.myKey, change, meta.ts);
+    if (change) this.hooks.metaChanged?.(taken?.by ?? this.myKey, change, meta.ts);
     this.hooks.changed();
   }
 
@@ -2348,20 +2533,26 @@ export class GroupSession {
   /**
    * A metadata statement: kept when it is newer than mine, its commit is on my chain, its signer was
    * the admin of that commit and is the admin now, its signature holds, and it opens under the epoch
-   * it names into metadata Ghostly shows. One naming what I do not have yet waits for the chain.
+   * it names into metadata Ghostly shows. One naming what I do not have yet waits for the chain. Just after the admin
+   * role moved to me, the former admin's is signed again as mine (`takesOver`).
    */
   private async receiveMeta(from: string, raw: unknown): Promise<void> {
     const frame = parseGroupMetaFrame(raw);
     if (!frame || frame.statement.g !== this.id || typeof frame.k !== "number" || !rosterHas(this.roster, from)) return;
-    const s = frame.statement;
-    if (!groupMetaNewer(s, this.state.meta)) return;
+    const s = frame.statement, taking = this.takesOver(s);
+    if (!taking && !groupMetaNewer(s, this.state.meta)) return;
     if (s.e > this.epoch || frame.k > this.epoch) { this.waitMeta(from, raw, s); return; }
     const commit = this.state.chain[s.e];
-    if (commitHash(commit) !== s.h || rosterAdmin(commit.m) !== s.by || this.admin !== s.by || !verifyGroupMetaSignature(s)) return;
+    if (commitHash(commit) !== s.h || rosterAdmin(commit.m) !== s.by || (!taking && this.admin !== s.by) || !verifyGroupMetaSignature(s)) return;
     const secret = this.secret(frame.k);
     if (!secret) { this.waitMeta(from, raw, s); return; }
     const opened = openGroupMeta(frame, epochKeys(secret, this.id, frame.k).message);
     if (!opened) return;
+    if (taking) {
+      if (this.vouches(from, s)) await this.signAgainTaken(opened.meta, opened.body);
+      else this.holdTaken(from, raw, s);
+      return;
+    }
     const before = this.state.meta;
     this.state.meta = opened.meta;
     this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, opened.meta);
@@ -2372,6 +2563,60 @@ export class GroupSession {
     if (change) this.hooks.metaChanged?.(this.metaAuthor(before, s), change, opened.meta.ts);
     this.hooks.changed();
     this.took({ t: "group-meta", ...s, k: frame.k as number, nn: frame.nn, c: frame.c });
+  }
+
+  /**
+   * Whether I take a statement though its signer is no longer the admin (WISP 902 § Metadata): I am the admin since
+   * moments ago, they were the admin before me, and it is later than the one of theirs I signed again. A member who had
+   * not synced when the role moved to them signed again what they held (or nothing), and the statement on its way would
+   * be refused for good: their next rename, picture or hubs change would then be built on the older body.
+   */
+  private takesOver(s: GroupMetaStatement): boolean {
+    const t = this.takeover;
+    return !!t && this.isAdmin && s.by === t.from && this.clock() <= t.until && groupMetaNewer(s, t.base);
+  }
+
+  /**
+   * Whether a statement I would take (`takesOver`) was on its way when the role moved, as far as I can tell: a member
+   * other than its signer handed it to me, or said in a sync it holds that one or a later one under the same commit.
+   * The former admin alone could sign new ones after the hand-over, each taken for the whole group.
+   */
+  private vouches(from: string, s: GroupMetaStatement): boolean {
+    const v = this.takeover?.vouched;
+    return from !== s.by || (!!v && v.e === s.e && v.r >= s.r);
+  }
+
+  /** The former admin's statement nobody else has shown it holds: the latest is kept until a sync does (`vouch`). */
+  private holdTaken(from: string, raw: unknown, s: GroupMetaStatement): void {
+    const t = this.takeover!;
+    if (!t.held || groupMetaNewer(s, t.held.s)) t.held = { from, raw, s };
+  }
+
+  /**
+   * A member's sync names the statement it holds: one signed under a commit of the admin before me, by another member
+   * than them, vouches for theirs up to it, and the one held is taken if it now is.
+   */
+  private async vouch(from: string, tag: unknown): Promise<void> {
+    const t = this.takeover, v = parseGroupMetaTag(tag);
+    if (!t || !v || from === t.from || !this.state.chain[v.e] || rosterAdmin(this.state.chain[v.e].m) !== t.from) return;
+    if (t.vouched && !groupMetaNewer(v, t.vouched)) return;
+    t.vouched = v;
+    const held = t.held;
+    if (held && this.vouches(held.from, held.s)) { t.held = undefined; await this.receiveMeta(held.from, held.raw); }
+  }
+
+  /**
+   * The former admin's statement, taken (`takesOver`): signed again as mine, each field I changed since keeping my
+   * value. Dated as theirs, and credited to them, when I changed nothing; what I held was then no change to hand on.
+   */
+  private async signAgainTaken(meta: GroupMeta, theirs: GroupMetaBody): Promise<void> {
+    const t = this.takeover!, base = groupMetaBody(t.base), mine = groupMetaBody(this.state.meta);
+    t.base = meta;
+    const pick = <K extends keyof GroupMetaBody>(k: K) => JSON.stringify(mine[k]) === JSON.stringify(base[k]) ? theirs[k] : mine[k];
+    const body = encodeGroupMetaBody({ name: pick("name"), pic: pick("pic"), hubs: pick("hubs"), call: pick("call") });
+    if (body === this.state.meta?.body) return;
+    const changed = encodeGroupMetaBody(mine) !== encodeGroupMetaBody(base);
+    await this.publishMeta(body, changed ? this.clock() : meta.ts, true, { by: meta.by, replaces: !changed });
   }
 
   /**
@@ -2401,6 +2646,12 @@ export class GroupSession {
 
   /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */
   private async metaFollowsChain(): Promise<void> {
+    if (this.admin !== this.adminSeen) {
+      // The role moved to me: what the admin before me signed may still be on its way (`takesOver`).
+      const from = this.adminSeen;
+      this.takeover = this.isAdmin && from && from !== this.myKey ? { from, until: this.clock() + GROUP_TAKEOVER_META_MS, base: this.state.meta } : undefined;
+      this.adminSeen = this.admin;
+    }
     const { admin, other } = this.pendingMeta;
     this.pendingMeta = {};
     for (const pending of [admin, other]) if (pending) await this.receiveMeta(pending.from, pending.frame);
