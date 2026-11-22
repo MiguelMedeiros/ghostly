@@ -9,6 +9,7 @@ import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { messageJson } from "../src/views";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.reactions
 
 /** `react` and `group react`, reactions in history, and the stream's `message.reaction` / `group.reaction`. */
@@ -19,7 +20,7 @@ const group = { id: "g1", name: "Crew", createdAt: 1, profile: "community", isAd
 /** `unconfirmed`: the numbers of my reactions the contact has not confirmed; a reaction made adds the next one. */
 function fake(result: { error: string | null; refused?: boolean } = { error: null }, mode: "daemon" | "one-shot" = "daemon", unconfirmed: number[] = []) {
   const node = {
-    getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     react: vi.fn(async () => { if (!result.error) unconfirmed.push(Math.max(0, ...unconfirmed) + 1); return result; }),
     chatUnconfirmed: vi.fn(() => ({ reactions: [...unconfirmed], pin: null })),
   };
@@ -77,6 +78,14 @@ describe("react in a 1:1 chat, without a daemon", () => {
     expect(await callApi(fake(undefined, "one-shot").ctx, "chat.react", { chat: "Alice", message: "peer_x", emoji: "👍", wait: "none" })).toMatchObject({ confirmed: false });
     // A daemon goes on saying it: it waits only when asked.
     await expect(callApi(fake().ctx, "chat.react", { chat: "Alice", message: "peer_x", emoji: "👍", wait: "confirmed", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: /still goes by itself while this profile is online/ });
+  });
+
+  it("a timeout's details name the message and the emoji, as edit's and message delete's do: a bot that retries has them there", async () => {
+    const error = await callApi(fake(undefined, "one-shot").ctx, "chat.react", { chat: "Alice", message: "peer_x", emoji: "👍", timeout: 1 }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ code: "timeout" });
+    expect((error as { details: unknown }).details).toEqual({ chat: "chat-one", messageId: "peer_x", emoji: "👍" });
+    const back = await callApi(fake(undefined, "one-shot").ctx, "chat.react", { chat: "Alice", message: "peer_x", remove: true, timeout: 1 }).catch((e: unknown) => e);
+    expect((back as { details: unknown }).details).toEqual({ chat: "chat-one", messageId: "peer_x", emoji: null });
   });
 
   it("takes --wait and --timeout, checked before anything is sent", async () => {

@@ -234,12 +234,18 @@
     "listSeparator": "، ",
     "sendUnavailable": "يدفع الطلب إلى المجموعة عضو واحد؛ لتدفع لشخص، اختره بدلًا من ذلك",
     "status": {
-      "claimedPaid": "{{names}} دفع · بانتظار محفظة {{to}}",
+      "claimedPaid": "{{names}} دفعوا · بانتظار محفظة {{to}}",
+      "claimedPaidByMe": "دفعتَ · بانتظار محفظة {{to}}",
+      "claimedPaidToMe": "{{names}} دفعوا · بانتظار محفظتك",
+      "claimedPaidWithMe": "أنت و{{names}} دفعتم · بانتظار محفظة {{to}}",
       "closed": "مغلق",
       "paid": "مدفوع",
       "paidBy": "دفعه {{name}}",
+      "paidByMe": "دفعتَه",
       "saysPaid": "{{names}} يقول إنه دفع · بانتظار محفظة {{to}}",
+      "saysPaidToMe": "{{names}} يقول إنه دفع · بانتظار محفظتك",
       "sent": "أُرسل · بانتظار {{name}}",
+      "sentToMe": "أُرسل · بانتظار محفظتك",
       "takenBack": "مُسترد",
       "waiting": "بانتظار الدفع"
     },
@@ -247,9 +253,16 @@
     "theGroup": "المجموعة",
     "title": {
       "asked": "طلب {{to}} من {{from}}",
+      "askedByMe": "طلبتَ من {{from}}",
       "askedGroup": "طلب {{to}} من المجموعة",
+      "askedGroupByMe": "طلبتَ من المجموعة",
+      "askedMe": "طلب {{to}} منك",
       "paying": "{{from}} يدفع لـ {{to}}",
-      "sent": "أرسل {{from}} إلى {{to}}"
+      "payingByMe": "تدفع لـ {{to}}",
+      "payingMe": "{{from}} يدفع لك",
+      "sent": "أرسل {{from}} إلى {{to}}",
+      "sentByMe": "أرسلتَ إلى {{to}}",
+      "sentToMe": "أرسل {{from}} إليك"
     },
     "why": {
       "noPayments": "تطبيقه لا يقبل المدفوعات في المجموعات (يحتاج إلى تحديث)، أو أوقف كل الطرق",

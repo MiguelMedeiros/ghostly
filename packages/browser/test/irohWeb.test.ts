@@ -1,12 +1,11 @@
 import "fake-indexeddb/auto";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { resolve } from "node:path";
 import { afterAll, expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, createLink, type NativeEndpoint, type PairingState } from "@ghostly/core";
 import { db } from "../src/engine/db";
 import { createIrohWebEndpoint, type IrohWasm } from "../src/platform/irohWeb";
-import { nativePeer } from "./helpers/nativePeer";
+import { IROH_PEER, nativePeer } from "./helpers/nativePeer";
 // covers-gated: transport.iroh-web
 
 /**
@@ -16,7 +15,7 @@ import { nativePeer } from "./helpers/nativePeer";
  * wasm computed. Runs when GHOSTLY_IROH_RELAY_URL is set (the e2e infra's relay: `npm run e2e:infra:use` writes it to .env.e2e).
  */
 const RELAY = process.env.GHOSTLY_IROH_RELAY_URL;
-const NATIVE = resolve("../../target/debug/examples/iroh-peer");
+const NATIVE = IROH_PEER;
 
 const loadNode = async (): Promise<IrohWasm> => {
   const module = await import("@ghostly/iroh-web");

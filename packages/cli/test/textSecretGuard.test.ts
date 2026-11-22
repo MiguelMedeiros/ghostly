@@ -54,6 +54,26 @@ describe("the secret guard on names and other texts that leave the device", { ti
     error(await ghostly(["--home", dir, "file", "send", "nope", path, "--name", SEED, "--force"]), "not_found", 3);
   });
 
+  it("file send holds the name that goes out: the file's own, and a key split by a character the name drops", async () => {
+    const dir = home("file-own-name-secret");
+    ok(await ghostly(["--home", dir, "profile", "create", "bot", "--use"]));
+    const keyNamed = join(dir, `${NSEC}.txt`);
+    writeFileSync(keyNamed, "a");
+    const path = join(dir, "a.txt");
+    writeFileSync(path, "a");
+    const { group } = ok(await ghostly(["--home", dir, "group", "create", "team", "--mesh"])) as { group: string };
+    const split = (cut: string) => `${NSEC.slice(0, 30)}${cut}${NSEC.slice(30)}.txt`;
+    for (const target of ["nope", group]) {
+      expect(error(await ghostly(["--home", dir, "file", "send", target, keyNamed]), "confirm", 5).message, target).toMatch(/name looks like a secret.*--force/);
+      for (const cut of [":", "/", " ", "⠀"]) {
+        expect(error(await ghostly(["--home", dir, "file", "send", target, path, "--name", split(cut)]), "confirm", 5).message, `${target} ${JSON.stringify(cut)}`).toMatch(/name looks like a secret.*--force/);
+      }
+    }
+    // With --force it goes on, to the chat this profile does not have.
+    error(await ghostly(["--home", dir, "file", "send", "nope", keyNamed, "--force"]), "not_found", 3);
+    error(await ghostly(["--home", dir, "file", "send", "nope", path, "--name", split(":"), "--force"]), "not_found", 3);
+  });
+
   it("app revoke refuses a seed as the reason unless --force", async () => {
     const dir = home("revoke-reason-secret");
     mkdirSync(join(dir, "app"));

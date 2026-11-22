@@ -1,5 +1,5 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { ETHEREUM_USDT, SEPOLIA_TEST_USDT, type WalletNetwork } from "@ghostly/core";
+import { ETHEREUM_USDT, SEPOLIA_TEST_USDT, trimEndOf, type WalletNetwork } from "@ghostly/core";
 import { cut, insideUrl, trimUriEnd, URI_MAX_CHARS } from "./money-text";
 
 /** The EVM chains a USDT wallet here runs on, by EIP-155 chain ID. */
@@ -53,7 +53,8 @@ export function eip681Number(value: string): bigint | null {
   const match = /^(\d+)(?:\.(\d+))?(?:e(\d{1,3}))?$/i.exec(value);
   if (!match) return null;
   const fraction = match[2] ?? "", exponent = Number(match[3] ?? "0");
-  if (fraction.replace(/0+$/, "").length > exponent) return null;
+  // Its zeros off in one pass (`trimEndOf`): a `/0+$/` retried from every zero of a long run that does not end it.
+  if (trimEndOf(fraction, "0").length > exponent) return null;
   return BigInt(match[1] + fraction.padEnd(exponent, "0").slice(0, exponent));
 }
 
