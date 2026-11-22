@@ -220,6 +220,24 @@ it("a path that is wrong on this machine is named as the person typed it: a fold
   expect(readFileSync(notes, "utf8")).toBe("NOTES");
 });
 
+// The backup is written beside --out under a name of its own first: a folder it may not write named that file
+// (`x.ghostly-backup.partial-<pid>-<hex>`, never there), and a name of 227 to 255 bytes, which the file system takes,
+// was refused as too long once that name's ~28 bytes were added to it.
+it("--out that cannot be written is named as the person typed it, and a name the file system takes is written", async () => {
+  const dir = home("backup-out-names");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
+  const locked = join(dir, "ro");
+  mkdirSync(locked, { mode: 0o500 });
+  const denied = join(locked, "x.ghostly-backup");
+  expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", denied, "--no-passphrase"], { env: NO_PASS }), "refused", 1).message).toBe(`Not allowed to write or read ${denied}`);
+  expect(readdirSync(locked)).toEqual([]);
+  const long = join(dir, `${"b".repeat(255 - ".ghostly-backup".length)}.ghostly-backup`);
+  expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", long, "--no-passphrase"], { env: NO_PASS }))).toMatchObject({ path: long, protection: "none" });
+  const tooLong = join(dir, `${"c".repeat(256 - ".ghostly-backup".length)}.ghostly-backup`);
+  expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", tooLong, "--no-passphrase"], { env: NO_PASS }), "bad_request", 1).message).toBe(`A name in ${tooLong} is too long for this file system (at most 255 bytes)`);
+  expect(readdirSync(dir).filter((name) => name.includes("partial")), "no half-written file left").toEqual([]);
+});
+
 // A passphrase file that was a folder named no path, one given as "" (an unset variable) said "No such file or folder: "
 // and an empty one "comes from --passphrase-file" to someone who gave it; `--out ""` was the current folder. A picture
 // that is a folder was not_found "No file" for a path that is there, and an evidence file that is a folder named no path.
