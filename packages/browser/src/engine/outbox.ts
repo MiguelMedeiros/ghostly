@@ -68,6 +68,8 @@ export interface Resender {
 export class NotSent {
   /** What a message that waits again says, in its details. */
   static readonly REASON = "No relay took it, so it has not left this device. It is sent by itself once one does.";
+  /** What a new message that waits behind such a one says (`waitsItsTurn`). */
+  static readonly BEHIND = "Waits for the messages before it to go.";
   /**
    * `error`: what the send said, kept as it was for a message queued already. `reason`: what the message that waits
    * again says (the contact's windows had no room for it, `MESSAGE_PACED`, rather than no relay taking it).
@@ -341,7 +343,7 @@ export class Outbox {
 
   /** A new message a turn could not send (the link closed under it, or the ones before it still wait): it waits too. */
   private async waitsItsTurn(message: StoredMessage): Promise<void> {
-    await this.store.update(message.id, "waiting", "Waits for the messages before it to go.", { via: "datalink", resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
+    await this.store.update(message.id, "waiting", NotSent.BEHIND, { via: "datalink", resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
     this.schedule(message.id);
   }
 
