@@ -780,19 +780,27 @@ export class Apps {
   private readonly held = new Map<string, Promise<InstalledApp | undefined>>();
   private heldStores: Promise<Map<string, AddedAppStore>> | null = null;
   /**
-   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `<index digest> <listed digest> <pin>
-   * <installed digest> <waiting digest>`): the same index listing the same, for the same app, is not peeked again at
-   * every check. Only the ones the last check read or wrote stay (`listingsRead`): a store that lists new URLs at each
-   * index does not grow them, and none the index still lists goes (with a count kept, the oldest going first, a check
-   * of more than that dropped each before it was read, and peeked every one again). A store's go when it is removed.
+   * Listing URLs whose peek showed nothing to take (`<store> <ref> <url>` → `seen`: `<index digest> <listed digest>
+   * <pin> <installed digest> <waiting digest>`, and when): the same index listing the same, for the same app, is not
+   * peeked again at every check. A URL pinned to a commit (`isPinnedAppUrl`) never changes, so its miss lasts while
+   * `seen` does; any other may (a raw HEAD still cached at the old version when the store signed its index, then
+   * caught up), so its miss lasts an hour, as `refusedReads` do, and the next check after that peeks it again. Only the
+   * ones the last check read or wrote stay (`listingsRead`): a store that lists new URLs at each index does not grow
+   * them, and none the index still lists goes (with a count kept, the oldest going first, a check of more than that
+   * dropped each before it was read, and peeked every one again). A store's go when it is removed.
    */
-  private readonly listingMisses = new Map<string, string>();
+  private readonly listingMisses = new Map<string, { seen: string; at: number }>();
   /** The `listingMisses` the update check running now read or wrote; null outside a check. */
   private listingsRead: Set<string> | null = null;
 
   private missListing(missed: string, seen: string): void {
-    this.listingMisses.set(missed, seen);
+    this.listingMisses.set(missed, { seen, at: this.now() });
     this.listingsRead?.add(missed);
+  }
+  /** `url`'s peek for `missed` showed nothing to take against `seen`, and is not due again (`listingMisses`). */
+  private listingMissed(missed: string, seen: string, url: string): boolean {
+    const miss = this.listingMisses.get(missed);
+    return miss?.seen === seen && (isPinnedAppUrl(url) || this.checkedWithin(miss.at, APP_CHECK_TIMINGS.freshMs));
   }
   /**
    * URLs whose whole read the update check, or a fetch of missing files, refused (a file hash that does not hold, a bad
@@ -1070,24 +1078,6 @@ export class Apps {
     const app = isAppRef(ref) ? await this.app(ref) : undefined;
     if (!app && this.ran.has(ref)) fail("not-installed", "This app is not installed");
     if (app) await this.stillRunnable(app, digest);
-  }
-  /**
-   * Writes an app's record, keeping the revocations the record holds now (one kept since the caller read it among them).
-   * Only while the app has a record: one uninstalled since the caller read it (another tab, Uninstall while Update was
-   * busy) is not put back with its data gone. False: not written.
-   */
-  private async putApp(app: InstalledApp): Promise<boolean> {
-    const tx = (await openDb()).transaction(STORES.apps, "readwrite");
-    let put = false;
-    const read = tx.objectStore(STORES.apps).get(app.ref);
-    read.onsuccess = () => {
-      const now = read.result as InstalledApp | undefined;
-      if (!now) return;
-      tx.objectStore(STORES.apps).put(withRevocations(app, now.revocations ?? []));
-      put = true;
-    };
-    try { await done(tx); } finally { this.held.delete(app.ref); }
-    return put;
   }
   /**
    * Writes an app's record back only while it is still the record `was` (`sameRecord`), read and written in one
@@ -2243,7 +2233,7 @@ export class Apps {
       for (const url of listingUrls(listing.urls)) {
         const missed = `${s.key} ${app.ref} ${url}`;
         if (candidates.has(url)) continue;
-        if (s.digest !== undefined && this.listingMisses.get(missed) === seen) { this.listingsRead?.add(missed); continue; }
+        if (s.digest !== undefined && this.listingMissed(missed, seen, url)) { this.listingsRead?.add(missed); continue; }
         candidates.set(url, { sequence: listing.sequence, ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
       }
     }
@@ -2282,7 +2272,7 @@ export class Apps {
     for (const [url, want] of [...candidates].sort(([, a], [, b]) => b.sequence - a.sequence)) {
       // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
       // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
-      // index lists the same.
+      // index lists the same (`listingMisses`: for an hour, unless it is pinned to a commit).
       let holds = want.holds;
       if (want.peek) {
         let peek: ReturnType<typeof peekAppManifest>;
@@ -2442,14 +2432,30 @@ export class Apps {
     return { status: "needs-files" };
   }
 
-  /** The installed version's files, fetched again, written back. */
+  /**
+   * The installed version's files, fetched again, written back. Where they are is written only over the record read
+   * (as Install and the update check write): one changed while the files were written (another version installed, an
+   * update accepted, another tab) is read and judged again, so the older record is never put back over it.
+   */
   private async filesBack(app: InstalledApp, bytes: Uint8Array, stores: AddedAppStore[]): Promise<AppRunStatus> {
     const kind = await this.writeBundle(app.digest, bytes);
-    // Uninstalled meanwhile: its files go again.
-    const now = await this.app(app.ref);
-    if (!now || now.digest !== app.digest || (now.bytes !== kind && !(await this.putApp({ ...now, bytes: kind })))) {
-      await this.removeBundle(kind, app.digest);
-      fail("not-installed", "This app is not installed");
+    let now: InstalledApp | undefined;
+    for (;;) {
+      now = await this.app(app.ref);
+      // Uninstalled meanwhile: its files go again.
+      if (!now) {
+        await this.removeBundle(kind, app.digest);
+        fail("not-installed", "This app is not installed");
+      }
+      // Another version installed meanwhile: the files fetched are not its own, and Open goes on with the one installed
+      // (its files fetched in turn when they are not here either). Not through `fetchFiles`: a fetch of that version
+      // under way may be waiting on this one.
+      if (now.digest !== app.digest) {
+        await this.removeUnusedBundle(app.ref, kind, app.digest);
+        return this.fetchFilesOf(now);
+      }
+      // A store pinned meanwhile (Install of this version from a store's listing) is the one written.
+      if (now.bytes === kind || await this.putAppIfUnchanged({ ...now, bytes: kind }, now, "kept")) break;
     }
     // Every page reads the list again, as when Open drops them: an Open from a chat's card (or another tab) fetched
     // them, and every card and row still said they were missing, its icon unread, until the next update check.
