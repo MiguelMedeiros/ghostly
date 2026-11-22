@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
+import { useBackCloses } from "../../hooks/useDismiss";
 import { safeAreaInsets } from "../../hooks/useFloatingBox";
 
 export interface SelectOption<V extends string = string> {
@@ -24,6 +25,11 @@ export interface SelectProps<V extends string = string> {
   /** Submits the value with a form, through a hidden input. */
   name?: string;
   disabled?: boolean;
+  /**
+   * Working on a choice just made: it opens no list and takes no keys but Tab, yet keeps the focus. `disabled` would drop
+   * a keyboard's focus to the page.
+   */
+  busy?: boolean;
   /** `sm` for tight places (a chat bubble). */
   size?: "md" | "sm";
   /** As wide as its value (up to the line) instead of the whole line: for a `Row`'s control. */
@@ -53,7 +59,7 @@ type Place = { left: number; width: number; maxHeight: number } & ({ top: number
  * Enter/Space to choose, Escape to close without choosing, Tab to choose and move on).
  */
 export function Select<V extends string = string>({
-  value, options, onChange, placeholder = "", id, name, disabled = false, size = "md", fit = false,
+  value, options, onChange, placeholder = "", id, name, disabled = false, busy = false, size = "md", fit = false,
   "aria-label": ariaLabel, "aria-labelledby": labelledBy, "aria-describedby": describedBy, "data-testid": testId, ref,
 }: SelectProps<V>) {
   const uid = useId();
@@ -88,7 +94,7 @@ export function Select<V extends string = string>({
   const start = () => (selected >= 0 ? selected : first());
 
   const show = (at: number) => {
-    if (disabled || !options.length) return;
+    if (disabled || busy || !options.length) return;
     setHost(trigger.current?.closest("dialog") ?? document.body);
     setPlace(null);
     setActive(at);
@@ -119,7 +125,7 @@ export function Select<V extends string = string>({
   const printable = (e: KeyboardEvent) => e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
 
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
-    if (disabled) return;
+    if (disabled || busy) return;
     const handled = () => { e.preventDefault(); e.stopPropagation(); };
     if (!open) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") { handled(); show(start()); }
@@ -187,6 +193,9 @@ export function Select<V extends string = string>({
     };
   }, [open, host]);
 
+  // Back (Android's back gesture) closes it alone, as a menu, and the page or dialog under it stays; focus never left the button.
+  useBackCloses(() => setOpen(false), open);
+
   // A press anywhere else, or focus moving elsewhere, closes it without choosing.
   useEffect(() => {
     if (!open) return;
@@ -198,11 +207,15 @@ export function Select<V extends string = string>({
     return () => { document.removeEventListener("pointerdown", down, true); document.removeEventListener("focusin", focus, true); };
   }, [open]);
 
+  // The active option comes into view once the list has its place, and each time another option becomes active. Not
+  // on a re-measure (a resize, a scroll of the page): that scrolled a list the person had scrolled back to the chosen
+  // option, under the pointer about to press another.
+  const placed = place !== null;
   useEffect(() => {
-    if (open && active >= 0) document.getElementById(optionId(active))?.scrollIntoView?.({ block: "nearest" });
+    if (open && placed && active >= 0) document.getElementById(optionId(active))?.scrollIntoView?.({ block: "nearest" });
     // optionId is derived from uid, which never changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, active, place]);
+  }, [open, active, placed]);
 
   const small = size === "sm";
   // Every side is set: a popover's own style (inset: 0) would fill in any side left out.
@@ -226,12 +239,14 @@ export function Select<V extends string = string>({
         data-testid={testId}
         data-value={value}
         disabled={disabled}
+        aria-disabled={busy || undefined}
+        aria-busy={busy || undefined}
         title={current ? [current.label, current.description].filter(Boolean).join(" — ") : undefined}
         onClick={() => (open ? setOpen(false) : show(start()))}
         onKeyDown={onKeyDown}
         // Space would click the button again on release in some browsers, reopening what Space just closed.
         onKeyUp={e => { if (e.key === " ") e.preventDefault(); }}
-        className={`${fit ? "inline-flex w-auto" : "flex w-full"} min-w-0 max-w-full items-center gap-2 rounded-lg border border-border bg-input-bg text-start text-text-primary transition-colors hover:border-border-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border ${open ? "border-border-bright" : ""} ${small ? "min-h-8 px-2 py-1 text-xs max-md:min-h-11" : "min-h-10 px-3 py-2 text-sm max-md:min-h-11"}`}
+        className={`${fit ? "inline-flex w-auto" : "flex w-full"} min-w-0 max-w-full items-center gap-2 rounded-lg border border-border bg-input-bg text-start text-text-primary transition-colors hover:border-border-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${open ? "border-border-bright" : ""} ${small ? "min-h-8 px-2 py-1 text-xs max-md:min-h-11" : "min-h-10 px-3 py-2 text-sm max-md:min-h-11"}`}
       >
         {current?.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{current.icon}</span>}
         {/* A label is often not the app's words (a microphone's, a mint's, a card's name): laid out by its own letters, so
@@ -275,7 +290,7 @@ export function Select<V extends string = string>({
               data-active={i === active || undefined}
               onMouseMove={() => { if (usable(i) && i !== active) setActive(i); }}
               onClick={() => { if (usable(i)) choose(i); }}
-              className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 data-[active]:bg-surface-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-40 max-md:min-h-11"
+              className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 data-[active]:bg-surface-hover forced-colors:data-[active]:outline-2 forced-colors:data-[active]:-outline-offset-2 forced-colors:data-[active]:outline-[color:Highlight] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 max-md:min-h-11"
             >
               {o.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{o.icon}</span>}
               <span className="flex min-w-0 flex-1 flex-col items-start">

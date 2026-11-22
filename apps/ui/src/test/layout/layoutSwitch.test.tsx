@@ -36,7 +36,9 @@ function useMountId() {
 vi.mock("../../pages/Chat", () => ({
   Chat: ({ sessionId }: { sessionId: string }) => <div data-testid="stub-chat" data-mount={useMountId()}>{sessionId}</div>,
 }));
-vi.mock("../../components/Sidebar", () => ({ Sidebar: () => <nav data-testid="stub-sidebar" /> }));
+vi.mock("../../components/Sidebar", () => ({
+  Sidebar: () => <nav data-testid="stub-sidebar" data-mount={useMountId()}><input aria-label="Search" /></nav>,
+}));
 vi.mock("../../components/MobileTabBar", () => ({ MobileTabBar: () => null }));
 vi.mock("../../components/InstallApp", () => ({ InstallSteps: () => null }));
 // Desktop's menu and shortcuts need the lock screen's provider, which is not what this is about.
@@ -77,5 +79,20 @@ describe("the layout switch at 768px", () => {
     expect(await mounted("stub-page")).toBe(first);
     turn(true);
     expect(await mounted("stub-page")).toBe(first);
+  });
+
+  // The list holds its search and its New group and Join dialogs, with what was typed in them.
+  it("keeps the chat list mounted, and the focus in it, from a phone to two panes and back", async () => {
+    mobile = true;
+    renderApp(<Routes><Route path="/*" element={<App />} /></Routes>, { route: "/" });
+    const first = await mounted("stub-sidebar");
+    const search = screen.getByRole("textbox", { name: "Search" });
+    act(() => search.focus());
+    turn(false);
+    expect(await mounted("stub-sidebar")).toBe(first);
+    expect(search).toHaveFocus();
+    turn(true);
+    expect(await mounted("stub-sidebar")).toBe(first);
+    expect(search).toHaveFocus();
   });
 });

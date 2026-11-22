@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, configure, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -94,6 +94,19 @@ describe("a refused lock password in Settings", () => {
     expect(stored()).toBe(hash);
   }, 30_000);
 
+  it("a password changed in another tab since this one opened: the old one is no longer the current one", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    // The extension's other tab changes it; this page has not heard yet.
+    const hash = await lockWith("second secret");
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.click(screen.getByRole("button", { name: "Remove password" }));
+    expect(await screen.findByTestId("settings-notice-title")).toHaveTextContent("Password not removed");
+    expectRefused(screen.getByTestId("settings-password-current"), "settings-password-current-error", "Incorrect password");
+    expect(stored()).toBe(hash);
+  }, 30_000);
+
   it("too short, then not the same twice: each under its own field, with the card", async () => {
     const { user } = await renderSettings();
     await user.click(screen.getByTestId("settings-lock"));
@@ -158,6 +171,55 @@ describe("opening the lock password form", () => {
     expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("settings-password-edit"));
     expect(screen.getByTestId("settings-password-current")).toHaveFocus();
+  });
+});
+
+describe("closing the lock password form", () => {
+  it("Cancel hands the focus back to the Lock Screen switch that opened it, not to the page", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-lock")).toHaveFocus();
+  });
+
+  it("a password set: the focus goes back to the Lock Screen switch", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.type(screen.getByTestId("settings-password-new"), "spooky");
+    await user.type(screen.getByTestId("settings-password-confirm"), "spooky");
+    await user.click(screen.getByRole("button", { name: "Set password" }));
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password set successfully");
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-lock")).toHaveFocus();
+  }, 30_000);
+
+  it("a password changed: the focus goes back to Change password", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.type(screen.getByTestId("settings-password-new"), "second secret");
+    await user.type(screen.getByTestId("settings-password-confirm"), "second secret{Enter}");
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password changed successfully");
+    expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-password-edit")).toHaveFocus();
+  }, 30_000);
+
+  it("a password removed: Change password goes with it, so the focus goes to the Lock Screen switch", async () => {
+    await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "first secret");
+    await user.click(screen.getByRole("button", { name: "Remove password" }));
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password removed");
+    expect(screen.queryByTestId("settings-password-edit")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-lock")).toHaveFocus();
+  }, 30_000);
+
+  it("Settings opened with the focus on the page: nothing takes it", async () => {
+    await renderSettings();
+    expect(document.body).toHaveFocus();
   });
 });
 
@@ -277,6 +339,11 @@ describe("a refused lock password in Add a device", () => {
 });
 
 describe("the floating card", () => {
+  // The card's own time runs on a fake clock that also keeps real time: `wait(ms)` passes it at once.
+  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] }); });
+  afterEach(() => { vi.useRealTimers(); });
+  const wait = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
   function Harness() {
     const notice = useToast(1_000);
     return <>
@@ -295,7 +362,7 @@ describe("the floating card", () => {
     expect(screen.queryByTestId("toast")).toBeNull();
     await user.click(screen.getByRole("button", { name: "show" }));
     expect(screen.getByTestId("toast")).toBeInTheDocument();
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
+    await wait(1_100);
     expect(screen.queryByTestId("toast")).toBeNull();
   });
 
@@ -303,16 +370,16 @@ describe("the floating card", () => {
     const { user } = renderApp(<Harness />);
     await user.click(screen.getByRole("button", { name: "show" }));
     await user.hover(screen.getByTestId("toast"));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_300)));
+    await wait(1_300);
     expect(screen.getByTestId("toast")).toBeInTheDocument();
     await user.unhover(screen.getByTestId("toast"));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
+    await wait(1_100);
     expect(screen.queryByTestId("toast")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "show" }));
     await user.tab();
     expect(screen.getByTestId("toast-close")).toHaveFocus();
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_300)));
+    await wait(1_300);
     expect(screen.getByTestId("toast")).toBeInTheDocument();
   });
 
@@ -336,7 +403,7 @@ describe("the floating card", () => {
     }
     const { user } = renderApp(<Refusal />, { language: "ja" });
     await user.click(await screen.findByRole("button", { name: "show" }));
-    await act(() => new Promise((resolve) => setTimeout(resolve, 1_500)));
+    await wait(1_500);
     expect(screen.getByTestId("toast")).toBeInTheDocument();
   });
 

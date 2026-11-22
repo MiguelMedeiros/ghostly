@@ -1,7 +1,9 @@
-import { sha256 } from "@noble/hashes/sha2.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { createBase58check } from "@scure/base";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { MONERO_WORDS } from "./monero-words";
+import { SLIP39_WORDS } from "./slip39-words";
 
 /**
  * What the composer asks about before a message goes: text that looks like a secret someone could take funds or an
@@ -9,10 +11,12 @@ import { MONERO_WORDS } from "./monero-words";
  *
  * Detection is local and synchronous, and a finding never carries the text it found: only what kind it is and, for
  * ecash, the amount decoded here. Ark, Spark and Fedimint wallets are BIP39 seeds or raw keys, caught by the rules
- * below; Fedimint ecash notes are plain base64 with no prefix, so they are not recognised.
+ * below; Fedimint ecash notes are plain base64 with no prefix, so they are not recognised. A `node-login` is what the
+ * wallet sources ask for to reach a node: an LND macaroon, a Core Lightning rune, a bitcoind RPC password or cookie.
+ * A `signer-link` is a NIP-46 remote signer's connection link with its secret (`bunker://…?secret=…`).
  */
 export type SecretFinding =
-  | { kind: "mnemonic" | "nsec" | "bitcoin-key" | "hex-key" }
+  | { kind: "mnemonic" | "nsec" | "bitcoin-key" | "hex-key" | "node-login" | "signer-link" }
   | { kind: "cashu"; amount: number | null; unit: string };
 
 export type SecretKind = SecretFinding["kind"];
@@ -27,6 +31,8 @@ interface SeedWords {
   /** A message that is nothing but this many of these words counts, checksum or not. */
   wholeMessage: number[];
   checksumHolds: (indices: number[]) => boolean;
+  /** One that costs far more, tried on runs of `length` words, on `SLOW_CHECKSUM_BUDGET` of them per message at most. */
+  slowChecksum?: { length: number; holds: (indices: number[]) => boolean };
 }
 
 const englishWords = (text: string) => text.toLowerCase().match(/[a-z]+/g);
@@ -46,6 +52,8 @@ function lazyIndex(list: readonly string[], spell: (word: string) => string): ()
 }
 
 const MNEMONIC_LENGTHS = [12, 15, 18, 21, 24];
+/** BIP39's checksum, or LND's aezeed's (24 words of the same list with a CRC of their own). */
+const englishChecksumHolds = (indices: number[]) => bip39ChecksumHolds(indices) || aezeedChecksumHolds(indices);
 const BIP39: SeedWords = {
   index: lazyIndex(wordlist, (word) => word),
   words: englishWords,
@@ -55,8 +63,15 @@ const BIP39: SeedWords = {
    * checksum of its own, which BIP39's caught only by chance, about 3 in 10).
    */
   wholeMessage: [...MNEMONIC_LENGTHS, 16],
-  checksumHolds: bip39ChecksumHolds,
+  checksumHolds: englishChecksumHolds,
+  /** Electrum's: its seeds are 12 words of the same list with a version where BIP39's checksum is. */
+  slowChecksum: { length: 12, holds: electrumVersionHolds },
 };
+/**
+ * The English list by each word's first four letters, as a metal backup stamps it and Trezor and Coldcard take it
+ * ("aban abil …"): no two words start with the same four. A longer word is not read here, so prose still breaks a run.
+ */
+const BIP39_SHORT: SeedWords = { ...BIP39, index: lazyIndex(wordlist, (word) => word.slice(0, 4)) };
 /** Monero's classic seed (Monero GUI, monero-wallet-cli): 25 words of its own list, or MyMonero's 13. */
 const MONERO: SeedWords = {
   index: lazyIndex(MONERO_WORDS, (word) => word),
@@ -65,7 +80,15 @@ const MONERO: SeedWords = {
   wholeMessage: [25, 13],
   checksumHolds: moneroChecksum(MONERO_WORDS, 3),
 };
-let seeds = [BIP39, MONERO];
+/** A SLIP39 share (Trezor's Shamir backup, or its single-share one): 20 words for a 128-bit secret, 33 for 256. */
+const SLIP39: SeedWords = {
+  index: lazyIndex(SLIP39_WORDS, (word) => word),
+  words: englishWords,
+  lengths: [20, 33],
+  wholeMessage: [20, 33],
+  checksumHolds: slip39ChecksumHolds,
+};
+let seeds = [BIP39, BIP39_SHORT, MONERO, SLIP39];
 
 /**
  * BIP39's own lists in the app's other languages, which a wallet set to one of them shows its seed in: the same
@@ -74,7 +97,7 @@ let seeds = [BIP39, MONERO];
  * first download) and the CLI with the guard.
  */
 export function addSeedLists(lists: readonly (readonly string[])[], moneroLists: readonly [list: readonly string[], prefix: number][] = []): void {
-  seeds = [BIP39, MONERO, ...lists.map((list): SeedWords => ({
+  seeds = [BIP39, BIP39_SHORT, MONERO, SLIP39, ...lists.map((list): SeedWords => ({
     index: lazyIndex(list, fold),
     words: foldedWords,
     lengths: MNEMONIC_LENGTHS,
@@ -88,8 +111,13 @@ export function addSeedLists(lists: readonly (readonly string[])[], moneroLists:
     checksumHolds: moneroChecksum(list, prefix),
   }))];
 }
-/** Checksums tried per message and word list at most: a 16 KiB run of seed words stays a few milliseconds. */
+/** Checksums tried per message and word list at most: a 16 KiB run of seed words that holds no seed stays ~25 ms. */
 const CHECKSUM_BUDGET = 4096;
+/**
+ * Slow checksums tried per message and word list at most: Electrum's is an HMAC-SHA512, and tried on every 12 words of
+ * the budget it took 60 to 120 ms per 16 KiB run of seed words that holds none (a contact's text forwarded, 30 at once).
+ */
+const SLOW_CHECKSUM_BUDGET = 256;
 
 const NSEC = /\bnsec1[02-9ac-hj-np-z]{58}(?![02-9ac-hj-np-z])/i;
 const EXTENDED_PRIVATE = /\b[xtyzuvYZUV]prv[1-9A-HJ-NP-Za-km-z]{100,}/;
@@ -99,10 +127,24 @@ const HEX_SECRET = /\b(?:0x)?(?:[0-9a-fA-F]{128}|[0-9a-fA-F]{64})\b/g;
  * Monero's keys count too: "Private spend key" and "Spend key (private)" (Cake Wallet, MyMonero). A bare "spend key" or
  * "view key" does not, as a wallet's public keys are written that way too.
  */
-const SECRET_CONTEXT = /priv(?:ate)?[\s_-]*(?:(?:spend|view)[\s_-]*)?key|(?:spend|view)[\s_-]*key[\s_-]*\(\s*private|secret|seed|mnemonic|nsec|xprv|\bwif\b|recovery|passphrase/i;
+const SECRET_CONTEXT = /priv(?:ate)?[\s_-]*(?:(?:spend|view)[\s_-]*)?key|(?:spend|view)[\s_-]*key[\s_-]*\(\s*private|secret|seed|mnemonic|nsec|xprv|\bwif\b|recovery|passphrase|password/i;
+/** A bitcoind login: its cookie file (`__cookie__:<hex>`), `rpcpassword=`, or the bitcoind source's own words. */
+const NODE_CONTEXT = /__cookie__|rpc[\s_-]*pass(?:word)?|\bcookie\b/i;
 /** How far from a 64-hex string a word like "seed" still counts as saying what it is. */
 const CONTEXT_REACH = 48;
-const CASHU_TOKEN = /\bcashu([AB])([A-Za-z0-9_\-+/]{20,}={0,2})/g;
+/** A macaroon (version 2) with a location, as LND writes it: `02 01 <length> lnd …`, in hex or base64. */
+const MACAROON_HEX = /\b0201[0-9a-fA-F]{96,}\b/g;
+const MACAROON_BASE64 = /(?<![\w+/-])AgE[\w+/-]{60,}={0,2}/g;
+/** A Core Lightning rune: base64url of a 32-byte authcode and the restrictions. */
+const RUNE = /(?<![\w-])[\w-]{43,}={0,2}(?![\w=-])/g;
+/** The restrictions of a rune that `createrune` made: its unique id first (`=0`, `=3&method=…`). */
+const RUNE_RESTRICTIONS = /^=\d+(?:[&|][ -~]*)?$/;
+const RUNE_WORD = /\brunes?\b/i;
+/** A NIP-46 signer's connection link, as it is or percent-encoded inside another link. */
+const SIGNER_LINK = /\b(?:bunker|nostrconnect)(?::|%3A)(?:\/\/|%2F%2F)/i;
+/** Its `secret` parameter, with a value: the token the signer takes a new session with. */
+const SIGNER_SECRET = /(?:[?&]|%3F|%26)secret(?:=|%3D)(?![&#]|%26|$)/i;
+const CASHU_TOKEN =/\bcashu([AB])([A-Za-z0-9_\-+/]{20,}={0,2})/g;
 
 /**
  * Characters that take no room on screen: format characters (zero-width space, soft hyphen, word joiner, the joiners,
@@ -120,25 +162,43 @@ const base58check = createBase58check(sha256);
 export function findSecret(text: string): SecretFinding | null {
   const visible = text.replace(INVISIBLE, "");
   const readings = visible === text ? [text] : [text, visible];
+  let asWritten: Map<SeedWords["words"], string[] | null> | undefined;
   if (readings.some((reading) => {
     // A text's words are read once per way of reading them, not once per list: the other languages' 13 lists share one.
     const words = new Map<SeedWords["words"], string[] | null>();
+    const first = (asWritten ??= words);
+    const listed = numbered(reading);
+    const listedWords = new Map<SeedWords["words"], string[] | null>();
     return seeds.some((seed) => {
       if (!words.has(seed.words)) words.set(seed.words, seed.words(reading));
-      return hasMnemonic(words.get(seed.words)!, seed);
+      const read = words.get(seed.words)!;
+      // The same words as the text as written (its invisible characters were between them): read already. A zero-width
+      // space before a long run of seed words read it twice, twice the time.
+      if (!(words !== first && sameWords(read, first.get(seed.words)!)) && hasMnemonic(read, seed)) return true;
+      if (!listed) return false;
+      if (!listedWords.has(seed.words)) {
+        const read = seed.words(listed.words.join(" "));
+        listedWords.set(seed.words, read?.length === listed.words.length ? read : null);
+      }
+      return hasMnemonic(inOrder(listed.numbers, listedWords.get(seed.words)!, seed), seed);
     });
   })) return { kind: "mnemonic" };
   if (readings.some((reading) => NSEC.test(reading))) return { kind: "nsec" };
   if (readings.some((reading) => EXTENDED_PRIVATE.test(reading) || hasWif(reading))) return { kind: "bitcoin-key" };
+  if (readings.some(hasSignerLink)) return { kind: "signer-link" };
+  if (readings.some(hasNodeLogin)) return { kind: "node-login" };
   if (readings.some(hasHexSecret)) return { kind: "hex-key" };
   const tokens = readings.map(findCashu);
   return tokens.find((found) => found?.kind === "cashu" && found.amount !== null) ?? tokens.find((found) => found) ?? null;
 }
 
+const sameWords = (a: string[] | null, b: string[] | null) => a === b || (a !== null && b !== null && a.length === b.length && a.every((word, i) => word === b[i]));
+
 /**
  * 12 to 24 words in a row from the English BIP39 list whose checksum holds, anywhere in the text; or a message that
  * is nothing but 12, 15, 16, 18, 21 or 24 of those words (a seed with one word mistyped is still most of a seed). The
- * same for Monero's English list, 25 or 13 words, and for BIP39's and Monero's lists in the app's other languages.
+ * same for Monero's English list, 25 or 13 words, SLIP39's, 20 or 33, and for BIP39's and Monero's lists in the app's
+ * other languages.
  * Prose breaks a run at once: "the", "a", "is", "to", "and", "of" and "I" are on neither English list, nor "de",
  * "la", "a", "e" on the others.
  *
@@ -150,16 +210,32 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
   const shortest = Math.min(...seed.lengths);
   if (!tokens || tokens.length < shortest) return false;
   const index = seed.index();
-  let budget = CHECKSUM_BUDGET;
+  let budget = CHECKSUM_BUDGET, slowBudget = SLOW_CHECKSUM_BUDGET;
   let run: number[] = [];
+  const slow = seed.slowChecksum;
+  /**
+   * A run's inner windows for the slow checksum, tried once every run's ends were: a seed pasted in a message is where
+   * the words on no list (or the message) start or stop its run. Tried in order, 267 seed words before one spent them.
+   */
+  const inner: number[][] = [];
   const seedLike = (start: number, length: number) => {
-    const window = run.slice(start, start + length);
-    const counts = new Map<number, number>();
-    for (const word of window) counts.set(word, (counts.get(word) ?? 0) + 1);
-    if (counts.size === 1) return false;
-    const [most, times] = [...counts].reduce((a, b) => (b[1] > a[1] ? b : a));
+    // The one word said in more than half the window, if there is one (Boyer and Moore's vote), and how often it is.
+    let most = -1, votes = 0, times = 0;
+    for (let i = start; i < start + length; i++) {
+      if (votes === 0) most = run[i];
+      votes += run[i] === most ? 1 : -1;
+    }
+    for (let i = start; i < start + length; i++) if (run[i] === most) times++;
+    if (times === length) return false;
     if (times > length / 2 && (run[start - 1] === most || run[start + length] === most)) return false;
-    return seed.checksumHolds(window);
+    const window = run.slice(start, start + length);
+    if (seed.checksumHolds(window)) return true;
+    if (slow === undefined || length !== slow.length) return false;
+    if (start > 0 && start + length < run.length) {
+      if (inner.length < SLOW_CHECKSUM_BUDGET) inner.push(window);
+      return false;
+    }
+    return slowBudget-- > 0 && slow.holds(window);
   };
   const check = () => {
     if (run.length >= shortest) {
@@ -178,19 +254,116 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
     if (at !== undefined) run.push(at);
     else if (check()) return true;
   }
-  return check();
+  return check() || inner.some((window) => slowBudget-- > 0 && slow!.holds(window));
+}
+
+/**
+ * A seed written as a numbered list: "1. abandon", "Word 2: ability", "3) able", one word to a number and nothing else
+ * before the next number or the line's end. Read in the numbers' order, so a header above it ("Recovery phrase"), the
+ * word "word" in its labels and a list in two columns ("1. … 13. …") still make one run. The spaces on each side of a
+ * mark are one run when the mark is not there: two that could split it tried every split, and a draft of a number, a
+ * word and long runs of spaces took the reader minutes.
+ *
+ * As people write such a list too: "1 – word" (a phone's smart dash), markdown ("**1.** word", "| 1 | word |"), the
+ * word in quotes or with a period, a bullet or a "|" between the columns, the number after the word ("word (1)"), and
+ * any script's digits, and the fullwidth "１．word" a Japanese or Chinese keyboard writes.
+ */
+const BETWEEN = String.raw`[^\S\r\n]*(?:[,;.|*_"'“”‘’«»」』•·\-–—，；．｜、。][^\S\r\n]*){0,6}`;
+const NUMBERED = new RegExp(String.raw`(?<![\p{L}\p{N}.,])(?:word\s*)?[#＃]?(\p{Nd}{1,2})\s*(?:[*_]{0,2}[.:)|\-–—．：）｜][*_]{0,2}\s*|[*_]{1,2}\s*)?["'“‘«「『*_]{0,2}(\p{L}+)(?=${BETWEEN}(?:$|\r?\n|(?:word\s*)?[#＃]?\p{Nd}))`, "gimu");
+const NUMBER_AFTER = new RegExp(String.raw`(?<![\p{L}\p{N}])(\p{L}+)[^\S\r\n]*[(\[（](\p{Nd}{1,2})[)\]）](?=${BETWEEN}(?:$|\r?\n|\p{L}+[^\S\r\n]*[(\[（]\p{Nd}))`, "gmu");
+
+function numbered(text: string): { numbers: number[]; words: string[] } | null {
+  let pairs = [...text.matchAll(NUMBERED)].map(([, number, word]) => [number, word]);
+  if (pairs.length < 12) pairs = [...text.matchAll(NUMBER_AFTER)].map(([, word, number]) => [number, word]);
+  return pairs.length < 12 ? null : { numbers: pairs.map(([number]) => digits(number)), words: pairs.map(([, word]) => word) };
+}
+
+/** A number in any script's digits: each block of them runs 0 to 9 in order. */
+function digits(number: string): number {
+  return Array.from(number).reduce((value, digit) => {
+    const at = digit.codePointAt(0)!;
+    let zero = at;
+    while (/\p{Nd}/u.test(String.fromCodePoint(zero - 1))) zero--;
+    return value * 10 + ((at - zero) % 10);
+  }, 0);
+}
+
+/**
+ * The words of `seed`'s list put at their numbers, when they are numbered 1 to n with none missing or twice; what is
+ * not on the list is left out ("Here are your 24 words").
+ */
+function inOrder(numbers: number[], words: string[] | null, seed: SeedWords): string[] | null {
+  if (!words) return null;
+  const index = seed.index(), placed: string[] = [];
+  let count = 0;
+  for (let i = 0; i < words.length; i++) {
+    if (!index.has(words[i])) continue;
+    if (numbers[i] < 1 || placed[numbers[i] - 1] !== undefined) return null;
+    placed[numbers[i] - 1] = words[i];
+    count++;
+  }
+  return count === placed.length ? placed : null;
+}
+
+/**
+ * Electrum (electrum/mnemonic.py): a seed's HMAC-SHA512 under "Seed version" starts with its version in hex, "01"
+ * standard, "100" segwit, "101" and "102" two-factor. Its seeds are 12 words; a random 12 pass one time in 200.
+ */
+function electrumVersionHolds(indices: number[]): boolean {
+  if (indices.length !== 12) return false;
+  const mac = hmac(sha512, utf8.encode("Seed version"), utf8.encode(indices.map((index) => wordlist[index]).join(" ")));
+  return mac[0] === 0x01 || (mac[0] === 0x10 && mac[1] >> 4 <= 2);
+}
+
+/** The words' 11-bit indices one after the other, first bit first, as BIP39 and aezeed read them. */
+function elevenBits(indices: number[]): Uint8Array {
+  const bytes = new Uint8Array(Math.ceil((indices.length * 11) / 8));
+  indices.forEach((index, i) => {
+    for (let b = 0; b < 11; b++) if (index & (1 << (10 - b))) { const at = i * 11 + b; bytes[at >> 3] |= 0x80 >> (at & 7); }
+  });
+  return bytes;
 }
 
 /** BIP39: the words' 11-bit indices are the entropy followed by the first bits of its SHA-256. */
 function bip39ChecksumHolds(indices: number[]): boolean {
   const bits = indices.length * 11, checksumBits = bits / 33, entropyBytes = (bits - checksumBits) / 8;
-  const bytes = new Uint8Array(Math.ceil(bits / 8));
-  indices.forEach((index, i) => {
-    for (let b = 0; b < 11; b++) if (index & (1 << (10 - b))) { const at = i * 11 + b; bytes[at >> 3] |= 0x80 >> (at & 7); }
-  });
+  const bytes = elevenBits(indices);
   const expected = sha256(bytes.subarray(0, entropyBytes))[0] >> (8 - checksumBits);
   const got = bytes[entropyBytes] >> (8 - checksumBits);
   return expected === got;
+}
+
+/**
+ * LND's aezeed (lnd/aezeed/cipherseed.go): 24 words are 33 bytes, the version, the enciphered seed and its salt, then
+ * a big-endian CRC-32C of those 29. It holds without the passphrase; a random 24 words pass one time in 4 billion.
+ */
+function aezeedChecksumHolds(indices: number[]): boolean {
+  if (indices.length !== 24) return false;
+  const bytes = elevenBits(indices);
+  return crc(CRC32C_TABLE, bytes.subarray(0, 29)) === new DataView(bytes.buffer).getUint32(29);
+}
+
+/** SLIP-0039's RS1024 generator, by the bit of the checksum's top word that adds each one. */
+const RS1024 = [0xe0e040, 0x1c1c080, 0x3838100, 0x7070200, 0xe0e0009, 0x1c0c2412, 0x38086c24, 0x3090fc48, 0x21b1f890, 0x3f3f120];
+const SHAMIR = Array.from("shamir", (c) => c.charCodeAt(0));
+const SHAMIR_EXTENDABLE = Array.from("shamir_extendable", (c) => c.charCodeAt(0));
+
+/**
+ * SLIP-0039: RS1024 over the customization string and the words' 10-bit indices comes out at 1. The string is
+ * "shamir_extendable" when the share says it is extendable (the bit after the 15-bit identifier), "shamir" if not.
+ * The last three words are the checksum: a random run passes one time in a billion.
+ */
+function slip39ChecksumHolds(indices: number[]): boolean {
+  return rs1024(rs1024(1, (indices[1] >> 4) & 1 ? SHAMIR_EXTENDABLE : SHAMIR), indices) === 1;
+}
+
+function rs1024(checksum: number, values: number[]): number {
+  for (const value of values) {
+    const top = checksum >>> 20;
+    checksum = ((checksum & 0xfffff) << 10) ^ value;
+    for (let i = 0; i < 10; i++) if ((top >>> i) & 1) checksum ^= RS1024[i];
+  }
+  return checksum;
 }
 
 /**
@@ -207,20 +380,25 @@ function moneroChecksum(list: readonly string[], prefix: number): (indices: numb
   };
 }
 
-const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, n) => {
+const crcTable = (polynomial: number) => Uint32Array.from({ length: 256 }, (_, n) => {
   let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  for (let k = 0; k < 8; k++) c = c & 1 ? polynomial ^ (c >>> 1) : c >>> 1;
   return c;
 });
+/** CRC-32 (the zlib one) and CRC-32C (Castagnoli's), bit-reversed. */
+const CRC32_TABLE = crcTable(0xedb88320);
+const CRC32C_TABLE = crcTable(0x82f63b78);
 
 const utf8 = new TextEncoder();
 
-/** CRC-32 (the zlib one) of text in UTF-8. */
-function crc32(text: string): number {
-  let crc = 0xffffffff;
-  for (const byte of utf8.encode(text)) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
+function crc(table: Uint32Array, bytes: Uint8Array): number {
+  let value = 0xffffffff;
+  for (const byte of bytes) value = table[(value ^ byte) & 0xff] ^ (value >>> 8);
+  return (value ^ 0xffffffff) >>> 0;
 }
+
+/** CRC-32 (the zlib one) of text in UTF-8. */
+const crc32 = (text: string) => crc(CRC32_TABLE, utf8.encode(text));
 
 /** A WIF private key: base58check with version 0x80 (mainnet) or 0xef (testnet), 32 bytes and an optional 0x01. */
 function hasWif(text: string): boolean {
@@ -233,14 +411,80 @@ function hasWif(text: string): boolean {
   return false;
 }
 
+/** Whether `context` is said within reach of `match`, before or after it. */
+function beside(text: string, match: RegExpExecArray, context: RegExp): boolean {
+  const before = text.slice(Math.max(0, match.index - CONTEXT_REACH), match.index);
+  const after = text.slice(match.index + match[0].length, match.index + match[0].length + CONTEXT_REACH);
+  return context.test(before) || context.test(after);
+}
+
 /** 64 or 128 hex digits with "private key", "secret", "seed" or the like close by. A bare hash is not asked about. */
 function hasHexSecret(text: string): boolean {
-  for (const match of text.matchAll(HEX_SECRET)) {
-    const before = text.slice(Math.max(0, match.index - CONTEXT_REACH), match.index);
-    const after = text.slice(match.index + match[0].length, match.index + match[0].length + CONTEXT_REACH);
-    if (SECRET_CONTEXT.test(before) || SECRET_CONTEXT.test(after)) return true;
+  return hexBeside(text, SECRET_CONTEXT);
+}
+
+function hexBeside(text: string, context: RegExp): boolean {
+  for (const match of text.matchAll(HEX_SECRET)) if (beside(text, match, context)) return true;
+  return false;
+}
+
+/**
+ * A `bunker://` or `nostrconnect://` link with its secret: whoever reads it can open a session with the person's remote
+ * signer. Read one string at a time, from its first scheme on, so a long string of schemes is read once.
+ */
+function hasSignerLink(text: string): boolean {
+  for (const [word] of text.matchAll(/\S+/g)) {
+    const at = word.search(SIGNER_LINK);
+    if (at >= 0 && SIGNER_SECRET.test(word.slice(at))) return true;
   }
   return false;
+}
+
+/** A login to a node: a macaroon, a rune, or 64 hex digits that bitcoind's cookie or `rpcpassword` names. */
+function hasNodeLogin(text: string): boolean {
+  if (hexBeside(text, NODE_CONTEXT)) return true;
+  for (const [hex] of text.matchAll(MACAROON_HEX)) if (hex.length % 2 === 0 && isMacaroon(Uint8Array.from(hex.match(/../g)!, (b) => parseInt(b, 16)))) return true;
+  for (const [text64] of text.matchAll(MACAROON_BASE64)) if (isMacaroon(tryBase64(text64))) return true;
+  for (const match of text.matchAll(RUNE)) if (isRune(text, match)) return true;
+  return false;
+}
+
+const printable = (bytes: Uint8Array) => bytes.every((b) => b >= 0x20 && b <= 0x7e);
+/** Bytes as a string of one character each, however many there are. */
+const binary = (bytes: Uint8Array) => Array.from(bytes, (b) => String.fromCharCode(b)).join("");
+
+function tryBase64(text: string): Uint8Array | null {
+  try { return fromBase64(text); } catch { return null; }
+}
+
+/** Whether `text` is exactly how `bytes` are written in padded base64url: nothing left over in its last letter. */
+function canonicalBase64url(text: string, bytes: Uint8Array): boolean {
+  return btoa(binary(bytes)).replace(/\+/g, "-").replace(/\//g, "_") === text;
+}
+
+/** Version 2 with a location (LND's "lnd"), the identifier next, and the 32-byte signature last. */
+function isMacaroon(bytes: Uint8Array | null): boolean {
+  if (!bytes || bytes[0] !== 2 || bytes[1] !== 1) return false;
+  const length = bytes[2];
+  return length > 0 && length < 128 && printable(bytes.subarray(3, 3 + length)) && bytes[3 + length] === 2
+    && bytes.length >= 3 + length + 36 && bytes[bytes.length - 34] === 6 && bytes[bytes.length - 33] === 32;
+}
+
+/**
+ * A rune decodes to a hash, which is never text, and then its restrictions, which always are: the unique id first
+ * when `createrune` made it, padded as it prints it. One with no restriction (or an older one with no id, or with its
+ * padding taken off) counts only beside the word "rune".
+ * Hex is read as a hash or a key above, never as a rune.
+ */
+function isRune(text: string, match: RegExpExecArray): boolean {
+  if (/^[0-9a-fA-F]+=*$/.test(match[0])) return false;
+  const bytes = tryBase64(match[0]);
+  if (!bytes || bytes.length < 32 || printable(bytes.subarray(0, 32))) return false;
+  const tail = bytes.subarray(32);
+  if (!printable(tail)) return false;
+  const restrictions = binary(tail);
+  if (canonicalBase64url(match[0], bytes) && RUNE_RESTRICTIONS.test(restrictions)) return true;
+  return (!restrictions || /^\w*[!=/^$~<>{}#]/.test(restrictions)) && beside(text, match, RUNE_WORD);
 }
 
 /** Every Cashu token in the text, with their amounts added up when all of them decode and share one unit. */

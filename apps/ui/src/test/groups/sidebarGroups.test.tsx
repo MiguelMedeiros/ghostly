@@ -32,7 +32,7 @@ describe("Sidebar: groups in the chat list", () => {
   it("shows an invitation with who sent it and how big the group is, to accept", async () => {
     const { user, engine } = sidebar([invitation()]);
     engine.on("acceptGroupInvitation", () => undefined);
-    expect(row()).toHaveTextContent("Invited by Alice · 3 members");
+    expect(row()).toHaveTextContent("Invited by \u2068Alice\u2069 · 3 members");
     await user.click(within(row()).getByTestId("group-accept"));
     expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
     // Answering does not open the group.
@@ -82,7 +82,7 @@ describe("Sidebar: groups in the chat list", () => {
       const { user, engine } = sidebar([invitation(), { ...invitation({ contact: "" }), id: "group-2" }]);
       engine.on("acceptGroupInvitation", () => { throw new Error("The contact who invited you is not connected. Try again when they are."); });
       await user.click(within(row()).getByTestId("group-accept"));
-      expect(within(row()).getByTestId("group-answer-refused")).toHaveTextContent("Alice is not connected yet. Try again in a moment.");
+      expect(within(row()).getByTestId("group-answer-refused")).toHaveTextContent("\u2068Alice\u2069 is not connected yet. Try again in a moment.");
       await user.click(within(row("group-2")).getByTestId("group-accept"));
       expect(within(row("group-2")).getByTestId("group-answer-refused")).toHaveTextContent("The contact who invited you is not connected yet. Try again in a moment.");
       act(() => { vi.advanceTimersByTime(REFUSAL_SHOWN_MS); });
@@ -103,6 +103,8 @@ describe("Sidebar: groups in the chat list", () => {
     ["a community's link, knocked", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "knocked" }), profile: "community" as const }, "Waiting to be let in…"],
     ["a community's link a member answers", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "answered" }), profile: "community" as const }, "A member is letting you in…"],
     ["a full community", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "full", full: { n: 256, max: 256 } }), profile: "community" as const }, "This group is full"],
+    ["a full private group", invitation({ accepted: true, viaLink: true, admin: "", stage: "full", full: { n: 32, max: 32 } }), "This group is full"],
+    ["a private group waiting for its members' updates", invitation({ accepted: true, viaLink: true, admin: "", stage: "blocked", full: { n: 8, max: 32 } }), "This group is waiting for updates"],
     // As the page says it: nothing more is waited on, only the current link gets in.
     ["a community's link replaced while it was let in", { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "replaced" }), profile: "community" as const }, "This link was replaced or turned off"],
   ])("says it is joining for %s, with nothing to answer", (_, group, status) => {

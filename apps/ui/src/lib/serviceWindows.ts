@@ -13,10 +13,27 @@ export function setServiceWindowsCloser(next: (() => void) | null): void {
   closer = next;
 }
 
+/** How many times they were closed for the lock: an open still on its way then never shows its app. */
+let closes = 0;
+
 /** Closes every one of them, where the app has them. */
 export function closeServiceWindows(): void {
+  closes += 1;
   closer?.();
 }
+
+/**
+ * Read by an opener before its first wait: the returned function says whether they were closed since (the profile
+ * locked, here or in another tab). There is nothing to close until the app is on screen, so the opener asks after every
+ * wait, and one that finds them closed shows nothing (`lockedSince` for an app, `apps/open.ts`).
+ */
+export function serviceWindowsClosedSince(): () => boolean {
+  const at = closes;
+  return () => closes !== at;
+}
+
+/** Why an open that the profile's lock overtook showed nothing. */
+export const SERVICE_LOCKED = "The profile locked before the contact's app opened";
 
 /*
  * On the web a contact's app is drawn over the whole app (apps/web/src/svc/opener.ts), a call's windows with it: it
@@ -24,16 +41,25 @@ export function closeServiceWindows(): void {
  */
 let viewCloser: (() => void) | null = null;
 let callWindows = 0;
+/** Others drawn over the whole app that make way too: a video filling the window (Desktop on Linux). */
+const makingWay = new Set<() => void>();
 
 /** How to close a contact's app drawn over the app: set by the web host. */
 export function setServiceViewCloser(next: (() => void) | null): void {
   viewCloser = next;
 }
 
+/** Calls `leave` when a call's window comes on screen, until the returned end. */
+export function onCallWindowShown(leave: () => void): () => void {
+  makingWay.add(leave);
+  return () => { makingWay.delete(leave); };
+}
+
 /** A call's window (a ringing call, a call full screen or small) on screen, from its effect: returns its end. */
 export function callWindowShown(): () => void {
   callWindows += 1;
   viewCloser?.();
+  for (const leave of [...makingWay]) leave();
   return () => { callWindows -= 1; };
 }
 
@@ -41,6 +67,40 @@ export function callWindowShown(): () => void {
 export function callWindowOn(): boolean {
   return callWindows > 0;
 }
+
+/*
+ * A video filling the window (Desktop on Linux) is drawn over everything. A call already in its small window when it
+ * started stays over it: its End call and Mute in reach, a video call's picture in sight.
+ */
+let filling = 0;
+const fillingWatchers = new Set<() => void>();
+
+/** A video fills the window, from its effect: returns its end. */
+export function windowFilled(): () => void {
+  filling += 1;
+  for (const watch of [...fillingWatchers]) watch();
+  return () => {
+    filling -= 1;
+    for (const watch of [...fillingWatchers]) watch();
+  };
+}
+
+/** For `useSyncExternalStore`: `watch` is called when a video starts or stops filling the window. */
+export function watchWindowFilled(watch: () => void): () => void {
+  fillingWatchers.add(watch);
+  return () => { fillingWatchers.delete(watch); };
+}
+
+/** Whether a video fills the window now. */
+export function windowFilledNow(): boolean {
+  return filling > 0;
+}
+
+/**
+ * A name the contact chose (their app's, their own) in a sentence: isolated, so a name in another direction cannot
+ * turn it around ("Notes!" read "!Notes" in Arabic).
+ */
+const isolated = (name: string) => `⁨${name}⁩`;
 
 const HOST_ERRORS: Record<string, TranslationKey> = {
   unreachable: "services.window.notAnswering",
@@ -61,7 +121,17 @@ export function hostErrorText(headers: readonly (readonly [string, string])[], a
   if (code === undefined) return null;
   console.warn(`The contact's machine answered for ${app}: ${code}`);
   const key = HOST_ERRORS[code];
-  return key ? t(key, { app }) : t("services.window.failed");
+  return key ? t(key, { app: isolated(app) }) : t("services.window.failed");
+}
+
+/** The open view's lines that name the contact's app: what it says while the app opens, or why it cannot. */
+export function serviceAppWords(app: string, t: Translate) {
+  const named = { app: isolated(app) };
+  return {
+    loading: t("services.window.loading", named), callOn: t("services.window.callOn", named), tooSlow: t("services.window.tooSlow", named),
+    offline: t("services.window.offline", named), stillOffline: t("services.window.stillOffline", named),
+    blocked: t("services.window.blocked", named), unguarded: t("services.window.unguarded", named),
+  };
 }
 
 /**
@@ -72,6 +142,14 @@ export function hostErrorText(headers: readonly (readonly [string, string])[], a
  */
 export function serviceFraming(app: string, names: { label?: string; nick?: string } | undefined, peer: string, t: Translate): { label: string; owner: string } {
   const named = names?.label?.trim() || names?.nick?.trim() || t("common.unnamedContact", { key: contactTag(peer) });
-  const contact = `\u2068${named}\u2069`;
-  return { label: t("services.window.label", { app, contact }), owner: t("services.window.owner", { contact }) };
+  const contact = isolated(named);
+  return { label: t("services.window.label", { app: isolated(app), contact }), owner: t("services.window.owner", { contact }) };
+}
+
+/**
+ * The view's label as the contact's app may read it (the web bridge's frame of the app is on its origin): named only by
+ * what the contact already knows, their own nickname or key tag, never the chat's label this side gave them.
+ */
+export function serviceFrameTitle(app: string, names: { label?: string; nick?: string } | undefined, peer: string, t: Translate): string {
+  return serviceFraming(app, { nick: names?.nick }, peer, t).label;
 }

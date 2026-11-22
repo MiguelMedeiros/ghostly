@@ -1,0 +1,1 @@
+Receipts said again on reconnect: the payee answers a receipt for a request it already marked paid with `pay-res ok`, and the payer stops sending the receipts of a request the payee said is paid. Until then each goes at every reconnect for a week after the payment, then once per run of the app.

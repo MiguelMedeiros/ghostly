@@ -2,12 +2,14 @@ import { fileURLToPath } from "node:url";
 import type { Page } from "@playwright/test";
 import { chat, expect, test } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /** Chromium's fake microphone plays this on a loop (voice-messages.spec.ts). */
 const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.url));
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",

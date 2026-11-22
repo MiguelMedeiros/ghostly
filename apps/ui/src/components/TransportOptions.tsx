@@ -3,7 +3,7 @@ import { automaticTransport, type PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportIcon } from "./TransportIcon";
 import { focus, transportName } from "../lib/connection";
-import { liveTransport, ownTransports, transportOptions } from "../lib/transportEvents";
+import { liveTransport, namedReason, ownTransports, transportOptions } from "../lib/transportEvents";
 import { useI18n } from "../contexts/I18nContext";
 import { radioGroupKeys, radioTabStop } from "../lib/radioGroup";
 
@@ -20,13 +20,15 @@ export type ConnectionChoice = PairedTransport | "auto" | "dht";
  *
  * `dhtBlocked`: why DHT only cannot be chosen now (a call on in the chat: its hang-up crosses the live link DHT only
  * closes). The option is off and says so on screen, at every width.
+ *
+ * `relayOnly`: "Hide my IP from contacts" is on, which is why the Desktop's own Iroh and HyperDHT are off.
  */
-export function TransportOptions({ link, disabled = false, dhtBlocked, onChoose }: {
-  link: LinkView; disabled?: boolean; dhtBlocked?: string; onChoose(choice: ConnectionChoice): void;
+export function TransportOptions({ link, disabled = false, dhtBlocked, relayOnly = false, onChoose }: {
+  link: LinkView; disabled?: boolean; dhtBlocked?: string; relayOnly?: boolean; onChoose(choice: ConnectionChoice): void;
 }) {
   const { t } = useI18n();
-  const dhtRow = useRef<HTMLButtonElement>(null), dhtFocused = useRef(false);
-  const options = transportOptions(link, t);
+  const group = useRef<HTMLDivElement>(null), dhtRow = useRef<HTMLButtonElement>(null), dhtFocused = useRef(false), autoFocused = useRef(false);
+  const options = transportOptions(link, t, relayOnly);
   const own = ownTransports(link), local = options.filter(o => own.includes(o.transport));
   // One transport in this app (web, the extension): nothing to choose between, only to know why.
   const single = local.length <= 1;
@@ -34,17 +36,25 @@ export function TransportOptions({ link, disabled = false, dhtBlocked, onChoose 
   const current = liveTransport(link), automatic = link.transportAutomatic ?? link.preferredTransport === undefined;
   const peerDht = link.dhtDelivery?.peerMode === "dht";
   const dhtOff = !dht ? dhtBlocked : undefined;
+  const toTabStop = () => group.current?.querySelector<HTMLElement>('[role="radio"][tabindex="0"]')?.focus({ preventScroll: true });
   // DHT only turned off under the focus (a call rang in meanwhile): a browser drops the focus to the page, and Tab
   // and Escape leave the panel. It goes to the group's Tab stop instead.
   useLayoutEffect(() => {
     if (!dhtOff || !dhtFocused.current) return;
     dhtFocused.current = false;
     const active = document.activeElement;
-    if (active === dhtRow.current || !active || active === document.body) dhtRow.current?.parentElement?.querySelector<HTMLElement>('[role="radio"][tabindex="0"]')?.focus({ preventScroll: true });
+    if (active === dhtRow.current || !active || active === document.body) toTabStop();
   }, [dhtOff]);
-  // An app with no WebRTC (Linux Desktop) puts its first native transport first.
-  const automaticHint = own.includes("webrtc/1") ? t("connection.option.automaticHint")
-    : t("connection.option.automaticHintNative", { transport: transportName(automaticTransport(own)) });
+  // Automatic chosen out of DHT only with a native transport out of reach (the web, Iroh's relay down): this app now
+  // runs one transport, so the Automatic row goes from under the focus. The same: the Tab stop, the one now checked.
+  useLayoutEffect(() => {
+    if (!single || !autoFocused.current) return;
+    autoFocused.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) toTabStop();
+  }, [single]);
+  // Iroh where this app runs it, else WebRTC, else HyperDHT; WebRTC first with Fallback off (`automaticTransport`).
+  const automaticHint = t("connection.option.automaticFirst", { transport: transportName(automaticTransport(own, link.transportFallback ?? true)) });
   function choose(choice: ConnectionChoice) {
     // A single transport here: choosing it means leaving DHT only, back to the app's rule.
     if (single && choice !== "dht") choice = "auto";
@@ -61,8 +71,10 @@ export function TransportOptions({ link, disabled = false, dhtBlocked, onChoose 
   const stop = radioTabStop(rows), offset = single ? 0 : 1;
   const tabIndex = (row: number) => (row === stop ? 0 : -1);
   return (
-    <div role="radiogroup" aria-label={t("connection.option.group")} data-testid="transport-options" onKeyDown={radioGroupKeys}>
+    <div ref={group} role="radiogroup" aria-label={t("connection.option.group")} data-testid="transport-options" onKeyDown={radioGroupKeys}>
+      {/* A browser that blurs a row as it goes says where to: nowhere (no `relatedTarget`) keeps the mark. */}
       {!single && <Option testId="connection-option-auto" {...rows[0]} tabIndex={tabIndex(0)} onClick={() => choose("auto")}
+        onFocus={() => { autoFocused.current = true; }} onBlur={to => { if (to) autoFocused.current = false; }}
         icon={<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3" /><path d="M18 3v4h-4M6 21v-4h4" /></svg>}
         hint={automaticHint} label={t("connection.option.automatic")} />}
       {/* Every transport, what this app lacks too: off, and why. */}
@@ -86,15 +98,15 @@ export function TransportOptions({ link, disabled = false, dhtBlocked, onChoose 
 
 function Option({ ref, label, hint, off, offShown = false, mark, icon, checked, inUse = false, disabled, tabIndex, onClick, onFocus, onBlur, testId }: {
   ref?: Ref<HTMLButtonElement>; label: string; hint?: string; off?: string; offShown?: boolean; mark?: string; icon: ReactNode; checked: boolean; inUse?: boolean; disabled: boolean; tabIndex: number;
-  onClick(): void; onFocus?(): void; onBlur?(): void; testId: string;
+  onClick(): void; onFocus?(): void; onBlur?(to: Element | null): void; testId: string;
 }) {
   return (
     // One line: the radio is what is chosen; the mark ("In use · 42 ms") is what carries the chat now, which may be
     // another row. The longer word on a row (why it is off, what it does) is its tooltip and accessible description;
     // on a narrow screen, with no hover to show a tooltip, why an option is off is a second line too (`offShown`: at
     // every width, for a reason that passes, as a call does).
-    <button ref={ref} type="button" role="radio" aria-checked={checked} aria-label={label} aria-description={hint} disabled={disabled} tabIndex={tabIndex} data-testid={testId} data-in-use={inUse ? "" : undefined} onClick={onClick} onFocus={onFocus} onBlur={onBlur}
-      title={hint ? `${label}: ${hint}` : undefined}
+    <button ref={ref} type="button" role="radio" aria-checked={checked} aria-label={label} aria-description={hint} disabled={disabled} tabIndex={tabIndex} data-testid={testId} data-in-use={inUse ? "" : undefined} onClick={onClick} onFocus={onFocus} onBlur={onBlur && (e => onBlur(e.relatedTarget))}
+      title={hint ? namedReason(label, hint) : undefined}
       className={`flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1 text-start text-xs transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover ${focus} disabled:cursor-default max-md:min-h-11 ${checked ? "text-text-primary" : "text-text-secondary"} ${disabled && !checked ? "opacity-60" : ""}`}>
       <span aria-hidden="true" className={`flex shrink-0 ${checked ? "text-accent" : ""}`}>{icon}</span>
       <span className="flex min-w-0 flex-1 flex-col">
@@ -105,7 +117,7 @@ function Option({ ref, label, hint, off, offShown = false, mark, icon, checked, 
         {inUse && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent" />}{mark}
       </span>}
       <span aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${checked ? "border-accent" : "border-border"}`}>
-        {checked && <span className="h-2 w-2 rounded-full bg-accent" />}
+        {checked && <span className="h-2 w-2 rounded-full bg-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight]" />}
       </span>
     </button>
   );

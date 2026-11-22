@@ -10,15 +10,21 @@ import type { BoundChannel, NativeEndpoint } from "@ghostly/core";
  * app share one node, and a listener is announced only while its chat has no live channel.
  */
 
-type Node = { destroyed: boolean; destroy(): Promise<void>; findPeer(key: Uint8Array): AsyncIterable<{ peer?: unknown }> };
+type Node = {
+  destroyed: boolean; destroy(): Promise<void>; findPeer(key: Uint8Array): AsyncIterable<{ peer?: unknown }>;
+  ping(to: object, options?: object): Promise<unknown>;
+};
 type Testnet = { nodes: { io: { onrequest: (req: Request, external: boolean) => void } }[]; bootstrap: { host: string; port: number }[]; destroy(): Promise<void> };
 type Request = { internal: boolean; command: number; from: { port: number } };
 
 const built = vi.hoisted(() => [] as Node[]);
+/** The PINGs the endpoints' nodes sent through `ping()`: hyperdht's announcer keepalive (and a dial's LAN probe). */
+const pinged = vi.hoisted(() => ({ count: 0 }));
 vi.mock("hyperdht", async (original) => {
   const DHT = (await original<{ default: new (options: object) => Node }>()).default;
   class Seen extends DHT {
     constructor(options: object) { super(options); built.push(this); }
+    ping(to: object, options?: object) { pinged.count++; return super.ping(to, options); }
   }
   return { default: Seen };
 });
@@ -69,11 +75,15 @@ async function announced(endpoint: NativeEndpoint): Promise<boolean> {
   } finally { await asker.destroy(); }
 }
 
-/** The PINGs (dht-rpc's command 0) the network's nodes took in `ms` from now. */
+/**
+ * The PINGs the endpoints' nodes sent in `ms` from now. Not every PING the network took: its own nodes check their
+ * routing tables (dht-rpc's `_pingSome`, every 40 s on each node at a random offset, two to four PINGs), and two of
+ * them landing in one window counted 4 for a session that sent none.
+ */
 async function pingsIn(ms: number): Promise<number> {
-  const from = heard.length;
+  const from = pinged.count;
   await new Promise((resolve) => setTimeout(resolve, ms));
-  return heard.slice(from).filter((req) => req.internal && req.command === 0).length;
+  return pinged.count - from;
 }
 
 it("every chat's listener runs on one DHT node, which stays until the last one closes", async () => {
@@ -109,7 +119,7 @@ it("a chat's listener is not announced while its chat is live on it, and is agai
   // Live: neither side announces its listener (Alice dialled out on hers), and the session goes on unharmed.
   await vi.waitFor(async () => { expect(await announced(bob)).toBe(false); }, { timeout: 10_000, interval: 500 });
   expect(await announced(alice)).toBe(false);
-  expect(await pingsIn(6500)).toBeLessThanOrEqual(2);
+  expect(await pingsIn(6500)).toBe(0);
   await says(mine, theirs, "live without a listener");
   // Past hyperdht's 10 s handshake window too, which `server.suspend()` would have ended the stream in.
   await new Promise((resolve) => setTimeout(resolve, 4000));

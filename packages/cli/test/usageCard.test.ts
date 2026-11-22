@@ -6,6 +6,7 @@ import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
 import { CliError, EXIT } from "../src/errors";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.usage
 
 /** `usage send` (WISP 405 § Usage) against an engine that keeps what it is sent. */
@@ -17,7 +18,7 @@ function fake() {
   let n = 0;
   const card = (raw: unknown) => { const checked = checkStatusCard(raw); if ("error" in checked) throw new Error(checked.error); return checked.card; };
   const node = {
-    getState: () => ({
+    chatView: chatViewOf, getState: () => ({
       links: [link("chat-one", { label: "Miguel" }), link("chat-two", { label: "Ana" }), link("old-chat", { label: "Old", profile: undefined }), link("invite", { peerPubKeyZ32: "" })],
       groups: [], settings: {}, transport: {},
     }) as unknown as EngineState,
@@ -81,6 +82,25 @@ describe("usage send", () => {
       if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
     }
     for (const flag of ["resets", "also"] as const) expect(COMMANDS["usage send"]!.options![flag].description).toMatch(/no zone: local time/);
+  });
+
+  it("refuses a day the month does not have in --resets and --also, where the card showed the next month's first day", () => {
+    expect(() => params(["Miguel", "--left", "40", "--resets", "2026-04-31"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes a day the month has (2026-04 has 30), not \"2026-04-31\"" }));
+    expect(() => params(["Miguel", "--left", "40", "--also", "week=80@2026-02-30"])).toThrow(expect.objectContaining({ code: "usage", message: "--also takes a day the month has (2026-02 has 28), not \"2026-02-30\"" }));
+  });
+
+  it("refuses a --resets or --also time more than a year ahead as a usage error (exit 2) that names the flag and the last time it takes", () => {
+    const zone = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2026, 10, 4, 11, 30, 20) });
+      // Before, bad_request (exit 1): "Status card: resetsAt is a time in milliseconds, within a year", and windows[0].resetsAt.
+      expect(() => params(["Miguel", "--left", "40", "--resets", "2028-01-01"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes a time within a year from now (until 2027-11-05 11:30), not \"2028-01-01\"" }));
+      expect(() => params(["Miguel", "--left", "40", "--also", "week=80@2028-01-01"])).toThrow(expect.objectContaining({ code: "usage", message: "--also takes a time within a year from now (until 2027-11-05 11:30), not \"2028-01-01\"" }));
+      expect(params(["Miguel", "--left", "40", "--resets", "2027-11-05 11:30", "--also", "week=80@2026-11-01"]).card).toMatchObject({ resetsAt: Date.UTC(2027, 10, 5, 11, 30), windows: [{ resetsAt: Date.UTC(2026, 10, 1) }] });
+    } finally {
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
   });
 
   it("refuses a report that says no quota as a usage error (exit 2) that names the flag, not the card's field", () => {

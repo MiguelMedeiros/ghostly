@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { GroupChat } from "../../pages/GroupChat";
@@ -45,6 +45,34 @@ describe("An invitation's answer this app cannot give now", () => {
       });
     }
   }
+
+  it("Accept keeps the keyboard focus while it goes, takes no second press, and keeps it when refused", async () => {
+    let refuse!: (error: Error) => void;
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined)
+      .update({ groups: [groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Ana", admin: ALICE, members: 3, accepted: false } })] });
+    const { user, engine } = renderApp(<Routes><Route path="/" element={<p>Chat list</p>} /><Route path="/group/:groupId" element={<GroupChat />} /></Routes>,
+      { route: "/group/group-1" });
+    engine.on("acceptGroupInvitation", () => new Promise((_, reject) => { refuse = reject; }));
+    const invitation = screen.getByTestId("group-invitation");
+    const accept = within(invitation).getByTestId("group-accept");
+    accept.focus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("acceptGroupInvitation")).toHaveLength(1);
+    // Busy, not disabled: a disabled button would drop the focus to the page, and leave it there on a refusal.
+    expect(accept).toHaveFocus();
+    expect(accept).toBeEnabled();
+    expect(accept).toHaveAttribute("aria-busy", "true");
+    expect(within(invitation).getByTestId("group-decline")).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    await user.click(within(invitation).getByTestId("group-decline"));
+    expect(engine.callsTo("acceptGroupInvitation")).toHaveLength(1);
+    expect(engine.callsTo("declineGroupInvitation")).toHaveLength(0);
+    accept.focus();
+    await act(async () => { refuse(new Error("The admin is gone")); });
+    expect(await screen.findByTestId("group-answer-refused")).toBeInTheDocument();
+    expect(accept).not.toHaveAttribute("aria-busy");
+    expect(accept).toHaveFocus();
+  });
 
   it("an error nothing knows keeps its words behind the ⓘ", async () => {
     const { line, user } = await answer("en", "group-accept", "The admin is gone");

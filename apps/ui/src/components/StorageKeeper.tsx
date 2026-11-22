@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { useInstallState } from "../lib/installPrompt";
 import { considerPersist } from "../lib/storagePersistence";
 import { sweepInterruptedRestores } from "../lib/restoreJournal";
@@ -11,7 +12,8 @@ import { sweepInterruptedRestores } from "../lib/restoreJournal";
  * closed while it ran): never listed, it would stay on the device for good. Draws nothing.
  */
 export function StorageKeeper({ hasChats }: { hasChats: boolean }) {
-  const wallets = useServicesPlatform()?.wallet?.getState()?.wallets?.length ?? 0;
+  // The number of wallets only: the platform's whole state drew this, in the chat list, on every engine state.
+  const wallets = usePlatformValue(() => servicesPlatform?.wallet?.getState()?.wallets?.length ?? 0);
   const install = useInstallState();
   const hasData = hasChats || wallets > 0;
   useEffect(() => { void considerPersist(hasData); }, [hasData, install]);

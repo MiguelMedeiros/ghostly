@@ -1,10 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { ReloadButton } from "../ui/ReloadButton";
+import { SearchStatus } from "../ui/SearchStatus";
 import { emojiCategories, emojiFailedAgain, emojiLoaded, emojiOf, loadEmoji, recentEmoji, rememberEmoji, searchEmoji, setSkinTone, skinTone, withSkin } from "../../lib/emoji";
 import { radioGroupKeys } from "../../lib/radioGroup";
 import { EMOJI_CATEGORY_ICONS } from "./icons";
-import { CategoryBar, PanelSearch } from "./PanelParts";
+import { CategoryBar, PanelSearch, type TabPanel } from "./PanelParts";
 
 interface Cell { native: string; name: string }
 interface Section { id: string; title: string; cells: Cell[] }
@@ -17,7 +18,7 @@ function scrollToSection(box: HTMLElement | null, id: string) {
 
 const TONES = ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"];
 
-type EmojiTabProps = { onPick: (emoji: string) => void; autoFocus?: boolean };
+type EmojiTabProps = { onPick: (emoji: string) => void; autoFocus?: boolean; panel?: TabPanel };
 
 /**
  * The panel's emoji, once their data set is here (`loadEmoji`: the first panel shown loads it, not the first screen).
@@ -36,7 +37,7 @@ export function EmojiTab(props: EmojiTabProps) {
   if (state === "ready") return <LoadedEmojiTab {...props} />;
   const busy = state === "loading" || state === "retrying";
   return (
-    <div className="expression-tab" data-testid="emoji-tab" aria-busy={busy || undefined}>
+    <div className="expression-tab" data-testid="emoji-tab" aria-busy={busy || undefined} {...props.panel}>
       {(state === "failed" || state === "retrying") && <div className="expression-trouble" data-testid="emoji-trouble" role="status">
         <p>{t("composer.emojiNotLoading")}</p>
         <button type="button" className="expression-retry" data-testid="emoji-retry" aria-busy={busy || undefined}
@@ -52,7 +53,7 @@ export function EmojiTab(props: EmojiTabProps) {
  * in one scrolling grid. The icons jump to their category and follow the scroll. The recent row is the one the
  * panel opened with, so the grid does not move under a pointer while picking several.
  */
-function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
+function LoadedEmojiTab({ onPick, autoFocus, panel }: EmojiTabProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [skin, setSkin] = useState(skinTone);
@@ -60,6 +61,7 @@ function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
   const [recent] = useState(recentEmoji);
   const scroller = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
+  const skinButton = useRef<HTMLButtonElement>(null);
   const jumpTo = useRef<string | null>(null);
 
   const sections = useMemo<Section[]>(() => [
@@ -125,19 +127,32 @@ function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
     else if (e.key === "ArrowDown" && first) { e.preventDefault(); rove(first); }
   };
 
+  // The tone row is a layer of its own inside the panel: closing it (a tone chosen, or Escape) gives the focus back to
+  // its button, before the row it sat in is gone, and its Escape closes only the row, not the panel around it.
+  const closeSkins = () => {
+    skinButton.current?.focus({ preventScroll: true });
+    setChoosingSkin(false);
+  };
+  const skinEscape = (e: KeyboardEvent) => {
+    if (e.key !== "Escape" || !choosingSkin) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeSkins();
+  };
+
   const shown = results ? [results] : sections;
   return (
-    <div className="expression-tab" data-testid="emoji-tab">
+    <div className="expression-tab" data-testid="emoji-tab" {...panel}>
       <CategoryBar label={t("composer.emojiCategories")} testIdPrefix="emoji-category" active={results ? null : active} onChoose={choose}
         items={sections.map((s) => ({ id: s.id, label: s.title, icon: EMOJI_CATEGORY_ICONS[s.id] }))} />
       <PanelSearch value={query} onChange={setQuery} placeholder={t("composer.searchEmoji")} inputRef={search} onKeyDown={searchKeys}
-        after={<div className="relative">
-          <button type="button" data-testid="emoji-skin" aria-label={t("composer.skinTone")} title={t("composer.skinTone")} aria-expanded={choosingSkin}
-            onClick={() => setChoosingSkin((v) => !v)} className="expression-skin">{TONES[skin]}</button>
+        after={<div className="relative" onKeyDown={skinEscape}>
+          <button ref={skinButton} type="button" data-testid="emoji-skin" aria-label={t("composer.skinTone")} title={t("composer.skinTone")} aria-expanded={choosingSkin}
+            onClick={() => setChoosingSkin((v) => !v)} className="expression-skin tap-target">{TONES[skin]}</button>
           {/* Choosing closes the row, so the arrows only move; Space or Enter chooses. */}
           {choosingSkin && <div role="radiogroup" aria-label={t("composer.skinTone")} className="expression-skins" data-testid="emoji-skins" onKeyDown={radioGroupKeys}>
             {TONES.map((tone, i) => <button key={tone} type="button" role="radio" aria-checked={i === skin} aria-label={tone} data-testid={`emoji-skin-${i}`} tabIndex={i === skin ? 0 : -1}
-              onClick={() => { setSkin(i); setSkinTone(i); setChoosingSkin(false); }}>{tone}</button>)}
+              onClick={() => { setSkin(i); setSkinTone(i); closeSkins(); }}>{tone}</button>)}
           </div>}
         </div>} />
       <div ref={scroller} className="expression-scroll" data-testid="emoji-grid" onScroll={followScroll} onClick={click} onKeyDown={keys}
@@ -145,6 +160,7 @@ function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
         {shown.map((section, i) => <EmojiSection key={section.id} section={section} first={i === 0} />)}
         {results && !results.cells.length && <p className="expression-empty">{t("composer.noEmoji")}</p>}
       </div>
+      <SearchStatus testId="emoji-found" text={!results ? "" : results.cells.length ? t("composer.emojiFound", { count: results.cells.length }) : t("composer.noEmoji")} />
     </div>
   );
 }

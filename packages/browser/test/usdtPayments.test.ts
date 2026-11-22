@@ -25,10 +25,14 @@ it('waits for chain confirmation and does not reuse a receipt to settle a differ
  await desk.start();
  const payment={id:'p',requestId:'r1',timestamp:createdAt,amount:{value:'1000000',asset:'testusdt'},endpoint:[ENDPOINT.usdt,JSON.stringify({txid:'0x'+'a'.repeat(64)})] as [string,string]};
  await desk.onPayment('l',payment);expect(desk.payment('r1')?.state).toBe('pending');
- await desk.onPayment('l',{...payment,id:'p2',requestId:'r2'});expect(desk.payment('p2')).toBeUndefined();
- await desk.onPayment('l',{...payment,id:'p3',requestId:'r2',endpoint:[ENDPOINT.usdt,JSON.stringify({txid:'0x'+'A'.repeat(64)})]});expect(desk.payment('p3'),'the same hash in capitals is the same transaction').toBeUndefined();
+ // Named for another request too (one amount: older requests): only waiting, it holds neither; the chain decides.
+ await desk.onPayment('l',{...payment,id:'p2',requestId:'r2'});expect(desk.payment('p2')?.state).toBe('pending');
  receipt.mockResolvedValue({settled:true});await desk.reconcileUsdtReceipts();
  expect(desk.payment('r1')?.state).toBe('settled');expect(desk.payment('r2')?.state).toBe('pending');
+ expect(desk.payment('p2'),'the first paid; never both').toMatchObject({state:'failed',error:'This transaction already paid another request'});
+ await desk.onPayment('l',{...payment,id:'p3',requestId:'r2',endpoint:[ENDPOINT.usdt,JSON.stringify({txid:'0x'+'A'.repeat(64)})]});
+ expect(desk.payment('p3'),'the same hash in capitals is the same transaction').toMatchObject({state:'failed',error:'This transaction already paid another request'});
+ expect(desk.payment('r2')?.state).toBe('pending');
 });
 it('one transaction is one received payment: its receipt under a new payment id is not checked or stored again',async()=>{
  const t=target();const createdAt=Date.now();

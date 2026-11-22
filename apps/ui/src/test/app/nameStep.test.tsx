@@ -155,6 +155,34 @@ describe("What should people call you?", () => {
     }
   });
 
+  // A link another tab forwards (`takeLinks`), or the installed app's launch with one, puts it in this page's address: a
+  // popstate onto an entry with no layer on it. That is no answer: the step stays over the chat it opened, name and all.
+  it("a link that reaches the page while it asks leaves it open, with the name typed; Back still closes it", async () => {
+    history.replaceState(null, "", "#/");
+    askNameIn("");
+    const { user } = renderApp(<NameStep />);
+    await settle();
+    const input = await screen.findByTestId("name-step-input");
+    await user.type(input, "Casper");
+    await waitFor(() => expect(typeof (history.state as Record<string, unknown> | null)?.ghostlyLayer).toBe("number"));
+
+    // `location.hash = link` as a browser does it (happy-dom fires no popstate for it): a new entry, then a popstate.
+    await act(async () => {
+      history.pushState(null, "", "#ghostly1link");
+      dispatchEvent(new PopStateEvent("popstate", { state: null }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.getByTestId("name-step")).toBeTruthy();
+    expect((screen.getByTestId("name-step-input") as HTMLInputElement).value).toBe("Casper");
+    expect(nameStepPending(), "still asked").toBe(true);
+    await waitFor(() => expect(typeof (history.state as Record<string, unknown> | null)?.ghostlyLayer, "Back has an entry to close it again").toBe("number"));
+
+    await act(async () => { history.back(); await new Promise((resolve) => setTimeout(resolve, 50)); });
+    await waitFor(() => expect(screen.queryByTestId("name-step")).toBeNull());
+    expect(location.hash).toBe("#ghostly1link");
+    expect(nameStepPending()).toBe(false);
+  });
+
   it("is never asked without the mark", async () => {
     // A profile that has run before: its settings are saved.
     localStorage.setItem(settingsKeyFor(""), JSON.stringify({ language: "en" }));

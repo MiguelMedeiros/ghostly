@@ -20,9 +20,10 @@ import { LANGUAGES, LOCALES, flatten } from "./locales";
 /**
  * Pages whose words were written into the component rather than looked up with `t()`: the check here does not
  * compare with en.json (a literal is in no locale file), it compares what English shows with what another language
- * shows. A string that reads the same in both is one nobody translated, unless it is a name that stays as it is.
+ * shows. A string that reads the same in both is one nobody translated, unless it is a name that stays as it is,
+ * or has no letter (the quotes and question mark left around a name in its own <bdi>).
  */
-const SAME_IN_EVERY_LANGUAGE = /^(?:Ghostly|GitHub|S3|Personal|Ana|Work|[A-Z]|[\d,.\s]+ sats|localhost:3400|[\d\s.,:·+↻…✓-]*|v?\d+\.\d+\.\d+.*|(?:[\d.,]+ (?:ms|s|min|h|bytes|KB|MB|kbit\/s) ?)+)$/;
+const SAME_IN_EVERY_LANGUAGE = /^(?:Ghostly|GitHub|S3|Personal|Ana|Work|[A-Z]|[\d,.\s]+ sats|localhost:3400|[^\p{L}]*|v?\d+\.\d+\.\d+.*|(?:[\d.,]+ (?:ms|s|min|h|bytes|KB|MB|kbit\/s) ?)+)$/u;
 
 /**
  * What a person sees or hears: text, and the labels screen readers and tooltips read out. Text marked
@@ -56,7 +57,7 @@ const SCREENS: Screen[] = [
   { name: "Services, where sharing needs another app", render: () => <Services /> },
   { name: "Services, sharing a local app", share: true, render: () => <Services />, open: async (user) => { await user.click(await screen.findByTestId("add-service")); } },
   { name: "Home", render: () => <Home /> },
-  { name: "the chat list's search with nothing found", render: () => <UpdateProvider><Sidebar /></UpdateProvider>, open: async (user) => { await user.type(screen.getByRole("textbox"), "zzzz"); } },
+  { name: "the chat list's search with nothing found", render: () => <UpdateProvider><Sidebar /></UpdateProvider>, open: async (user) => { await user.type(screen.getByRole("searchbox"), "zzzz"); } },
   { name: "a file's details, sent live and confirmed", render: () => details(FILE_SENT), open: detailsLoaded },
   { name: "a payment request's details, on the DHT floor", render: () => details(REQUEST_ON_DHT), open: detailsLoaded },
 ];

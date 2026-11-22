@@ -5,7 +5,7 @@ import { createIdentity } from "../src/identity";
 import { parseLocalTarget, utf8Decode, type LocalFetch } from "../src";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
 import type { FrameChannel } from "../src/frames";
-import { PairedCalls } from "../src/pairedCalls";
+import { CALL_RATE_WINDOW_MS, CALL_RECEIVE_LIMIT, PairedCalls } from "../src/pairedCalls";
 import { CALL_SIGNAL_MAX_AGE_MS, heardCallSignal, parseCallSignal } from "../src/callSignal";
 // covers: calls.paired.negotiate, calls.signal, services.paired.negotiate, services.http, transport.native-pool
 
@@ -219,6 +219,60 @@ describe("calls on a paired session (calls/1)", () => {
     await vi.waitFor(() => expect(b.calls).toEqual([good]));
   });
 
+  it("takes at most the receive limit of signals per window, counted before they are read; the rest are dropped", async () => {
+    // A contact's app that loops offers and hang-ups set how often this side ran the call and wrote a missed-call line.
+    let side!: FrameChannel;
+    const { a, b } = pair();
+    const connect = a.endpoint.connect;
+    a.endpoint.connect = async descriptor => { const bound = await connect(descriptor); side = bound.channel; return bound; };
+    await live(a, b);
+    await vi.waitFor(() => expect(b.link.supportsCalls).toBe(true));
+    // Malformed ones count too: a flood of them costs as much as one of signals.
+    for (let i = 0; i < 20; i++) side.send(JSON.stringify({ t: "paired-call", s: "not a signal" }));
+    const base = Date.now();
+    for (let i = 0; i < CALL_RECEIVE_LIMIT + 30; i++) {
+      const signal = i % 2 ? JSON.stringify({ t: "h", ts: base + i }) : JSON.stringify({ ...JSON.parse(offer()), ts: base + i });
+      side.send(JSON.stringify({ t: "paired-call", s: signal }));
+    }
+    await vi.waitFor(() => expect(b.calls).toHaveLength(CALL_RECEIVE_LIMIT - 20));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(b.calls).toHaveLength(CALL_RECEIVE_LIMIT - 20);
+    expect(CALL_RATE_WINDOW_MS).toBeGreaterThan(0);
+  });
+
+  it("a person's busiest minute of calls stays well inside the receive limit", async () => {
+    let side!: FrameChannel;
+    const { a, b } = pair();
+    const connect = a.endpoint.connect;
+    a.endpoint.connect = async descriptor => { const bound = await connect(descriptor); side = bound.channel; return bound; };
+    await live(a, b);
+    await vi.waitFor(() => expect(b.link.supportsCalls).toBe(true));
+    let ts = Date.now();
+    const at = (signal: string, extra: object = {}) => JSON.stringify({ ...JSON.parse(signal), ...extra, ts: ++ts });
+    const minute: string[] = [];
+    // Three calls placed by the contact, each started over 4 times on a newer offer (`MAX_RESTARTS`) and hung up.
+    for (let call = 0; call < 3; call++) {
+      for (let restart = 0; restart <= 4; restart++) minute.push(at(offer()));
+      minute.push(at(hangUp()));
+    }
+    // One answered by the contact, its path lost twice and restarted every 8 s for 30 s each time (the restart offers'
+    // answers), the camera and the screen turned on and off five times each, then hung up.
+    minute.push(at(answer(), { o: ts }));
+    for (let restart = 0; restart < 8; restart++) minute.push(at(answer(), { re: ts }));
+    for (let i = 0; i < 5; i++) minute.push(at(hangUp(), { t: "v", v: 1, k: "c" }), at(hangUp(), { t: "v", v: 0 }), at(hangUp(), { t: "v", v: 1, k: "s" }), at(hangUp(), { t: "v", v: 0 }));
+    minute.push(at(hangUp()));
+    // One the contact placed and restarted itself: 8 restart offers over the same two lost paths.
+    minute.push(at(offer()));
+    for (let restart = 0; restart < 8; restart++) minute.push(at(offer(), { t: "r" }));
+    minute.push(at(hangUp()));
+    // The session dropped and came back ten times on the way: the latest signal said again each time, counted, not news.
+    const frames = minute.flatMap((signal, i) => i % 5 === 4 && i < 50 ? [signal, signal] : [signal]);
+    expect(frames).toHaveLength(68);
+    expect(frames.length * 2).toBeLessThanOrEqual(CALL_RECEIVE_LIMIT);
+    for (const signal of frames) side.send(JSON.stringify({ t: "paired-call", s: signal }));
+    await vi.waitFor(() => expect(b.calls).toEqual(minute));
+  });
+
   it("is off when either side does not offer it, and says why", async () => {
     const { a, b } = pair({ b: { callsSupport: false } });
     await live(a, b);
@@ -383,6 +437,28 @@ describe("a live session giving its native listener to a chat in use", () => {
     expect(a.link.canYieldEndpoint("iroh/1", IDLE)).toBe(true);
   });
 
+  it("a file sent on a live session says nothing about transports; a retry still does", async () => {
+    const policies: string[] = [];
+    const sink = { write: async () => {}, close: async () => {}, abort: () => {} };
+    const { a, b } = pair({
+      a: { events: { onFileIncoming: () => sink } }, b: { events: { onFileIncoming: () => sink } },
+      drop: { a: (data) => { if (data.includes(`"t":"paired-policy"`)) policies.push(data); return false; } },
+    });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsFiles).toBe(true));
+    const before = policies.length;
+    // Each file sent used to send the transport policy again: a dozen in a minute used up the contact's 10
+    // (POLICY_RECEIVE_LIMIT), and a transport choice made then waited for it.
+    async function* bytes() { yield new Uint8Array(8); }
+    for (let i = 0; i < 12; i++) {
+      await a.link.sendFile({ id: String(i).padStart(22, "f"), name: `${i}.bin`, size: 8, mime: "application/octet-stream", timestamp: Date.now() }, bytes());
+    }
+    expect(policies.length - before).toBe(0);
+    // The person's retry is still one.
+    await a.link.connect();
+    await vi.waitFor(() => expect(policies.length - before).toBe(1));
+  });
+
   it("a call is on from an answer either side gave until a hang-up or a clear; an offer nobody answers rings only so long", () => {
     let now = 1_000_000;
     const calls = new PairedCalls(() => now);
@@ -437,6 +513,21 @@ describe("shared apps on a paired session (services/1)", () => {
     expect((await a.link.request("private", { method: "GET", path: "/" })).status).toBe(404);
   });
 
+  it("a request on a live session says nothing about transports: a page's every file used to send the transport policy again", async () => {
+    const policies: string[] = [];
+    const { a, b } = pair({
+      b: hosting(async () => ({ status: 200, headers: [], body: [new TextEncoder().encode("ok")] })),
+      drop: { a: (data) => { if (data.includes(`"t":"paired-policy"`)) policies.push(data); return false; } },
+    });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.presenceServices()).toEqual(["atlas"]));
+    const before = policies.length;
+    // A shared app's page and its files: one request each. The contact reads 10 policies a minute (POLICY_RECEIVE_LIMIT),
+    // so these used up its budget, and a transport choice made in that minute waited for it.
+    for (let i = 0; i < 12; i++) expect((await a.link.request("atlas", { method: "GET", path: `/file${i}.js` })).status).toBe(200);
+    expect(policies.length - before).toBe(0);
+  });
+
   it("travels over none of it when the contact does not offer services/1 (the web app)", async () => {
     const localFetch = vi.fn<LocalFetch>(async () => ({ status: 200, headers: [], body: [] }));
     const { a, b } = pair({ a: { servicesSupport: false }, b: hosting(localFetch) });
@@ -458,6 +549,24 @@ describe("shared apps on a paired session (services/1)", () => {
     expect(a.presenceServices()).toEqual([]);
     expect(a.link.supportsServices).toBe(false);
     expect(localFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("paying a contact on a live session", () => {
+  it("each payment step says nothing about transports", async () => {
+    const policies: string[] = [];
+    const { a, b } = pair({ drop: { a: (data) => { if (data.includes(`"t":"paired-policy"`)) policies.push(data); return false; } } });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsPayments).toBe(true));
+    const before = policies.length;
+    // An ask, a request and a payment: each used to send the transport policy again, out of the contact's 10 a minute.
+    const amount = { value: "100", asset: "sat" };
+    for (let i = 0; i < 4; i++) {
+      await a.link.sendPaymentAsk({ id: `ask${i}`, timestamp: Date.now(), amount, method: "bitcoin", network: "testnet" });
+      await a.link.sendPaymentRequest({ id: `req${i}`, timestamp: Date.now(), amount, endpoints: [], network: "testnet" });
+      await a.link.sendPayment({ id: `pay${i}`, timestamp: Date.now(), amount, endpoint: ["bitcoin", "tb1q"] });
+    }
+    expect(policies.length - before).toBe(0);
   });
 });
 

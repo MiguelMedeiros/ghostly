@@ -1,6 +1,6 @@
 import type { Parsed } from "../args";
 import { CALL_RATES, isCallRate } from "../calls/pcm";
-import { CliError } from "../errors";
+import { CliError, shownValue } from "../errors";
 import { type Command, rate, refs } from "./shared";
 
 /**
@@ -9,21 +9,31 @@ import { type Command, rate, refs } from "./shared";
  */
 function rateOf(options: Parsed["options"]): number | undefined {
   const value = options.rate;
-  if (value !== undefined && !isCallRate(value)) throw new CliError("usage", `--rate takes ${CALL_RATES.slice(0, -1).join(", ")} or ${CALL_RATES.at(-1)}, not ${JSON.stringify(value)}`);
+  if (value !== undefined && !isCallRate(value)) throw new CliError("usage", `--rate takes ${CALL_RATES.slice(0, -1).join(", ")} or ${CALL_RATES.at(-1)}, not ${shownValue(value)}`);
   return value;
+}
+
+/**
+ * The `<chat|call>` a command names: left out, the only call. Given as "" or blank (an unset variable in a script:
+ * `call hangup "$CALL"`), it names none and is a usage error before the profile opens: it was read as left out, and
+ * hung up, answered or flushed whatever call was on.
+ */
+export function callRef(call: string | undefined, usage: string): string | undefined {
+  if (call !== undefined && !call.trim()) throw new CliError("usage", `<chat|call> ${JSON.stringify(call)} names no chat or call: name one, or leave it out for the only call: ghostly ${usage}`);
+  return call;
 }
 
 /** Voice calls: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
   "call answer": {
     method: "call.answer", usage: "call answer [<chat|call>] [--rate 48000]", summary: "Answer a call that rings (the only one, or the one named)",
-    args: ["call...?"], options: { rate: rate }, params: ({ options }, a) => ({ call: a.call, rate: rateOf(options) }),
+    args: ["call...?"], options: { rate: rate }, params: ({ options }, a) => ({ call: callRef(a.call, "call answer [<chat|call>] [--rate 48000]"), rate: rateOf(options) }),
   },
   "call auto": {
     method: "call.auto", usage: "call auto [on|off] [--from <chat>]... [--rate 48000]", summary: "Answer calls by themselves: from anyone, or the chats named (kept in the profile)",
     args: ["mode...?"], options: { from: { type: "list", description: "Only calls from this chat: its id, its contact's key or a label given here with chat rename (again for more)" }, rate: rate },
     params: ({ options }, a) => {
-      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `call auto takes on or off, not ${JSON.stringify(a.mode)}: ghostly call auto [on|off] [--from <chat>]... [--rate 48000]`);
+      if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", `call auto takes on or off, not ${shownValue(a.mode)}: ghostly call auto [on|off] [--from <chat>]... [--rate 48000]`);
       // Without `on` the chats and the rate would be dropped without a word.
       if (a.mode !== "on" && (options.from !== undefined || options.rate !== undefined)) throw new CliError("usage", "--from and --rate go with on: ghostly call auto on --from <chat>");
       refs(options.from, "from", "chat");
@@ -31,8 +41,8 @@ export const commands: Record<string, Command> = {
       return a.mode === "on" ? { on: true, from: options.from, rate: rateOf(options) } : { on: false };
     },
   },
-  "call flush": { method: "call.flush", usage: "call flush [<chat|call>]", summary: "Drop the audio queued and not played yet (barge-in)", args: ["call...?"], params: (_, a) => ({ call: a.call }) },
-  "call hangup": { method: "call.hangup", usage: "call hangup [<chat|call>]", summary: "Hang up, or decline a call that rings", args: ["call...?"], params: (_, a) => ({ call: a.call }) },
+  "call flush": { method: "call.flush", usage: "call flush [<chat|call>]", summary: "Drop the audio queued and not played yet (barge-in)", args: ["call...?"], params: (_, a) => ({ call: callRef(a.call, "call flush [<chat|call>]") }) },
+  "call hangup": { method: "call.hangup", usage: "call hangup [<chat|call>]", summary: "Hang up, or decline a call that rings", args: ["call...?"], params: (_, a) => ({ call: callRef(a.call, "call hangup [<chat|call>]") }) },
   "call list": { method: "call.list", usage: "call list", summary: "Calls on now, their audio sockets, and auto-answer" },
   "call start": {
     method: "call.start", usage: "call start <chat> [--rate 48000]", summary: "Call a contact (voice); the result names the call's audio socket (daemon)",

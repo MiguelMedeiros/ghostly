@@ -6,6 +6,7 @@ import { join } from "node:path";
 // here). A variable the shell already set wins.
 const infraEnv = join(import.meta.dirname, "..", "..", ".env.e2e");
 if (existsSync(infraEnv)) process.loadEnvFile(infraEnv);
+const { CHROMIUM_SANDBOX } = await import("../support/chromiumSandbox");
 
 /**
  * End-to-end tests for the native Android app (apps/desktop built for Android, docs/ANDROID.md) on an emulator: the
@@ -48,7 +49,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
     actionTimeout: 30_000,
     serviceWorkers: "block",
-    launchOptions: { args: ["--disable-features=WebRtcHideLocalIpsWithMdns", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] },
+    launchOptions: { chromiumSandbox: CHROMIUM_SANDBOX, args: ["--disable-features=WebRtcHideLocalIpsWithMdns", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] },
   },
   webServer: deployed
     ? undefined

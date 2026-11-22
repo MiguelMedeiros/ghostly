@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Wallet } from "../../pages/Wallet";
 import { networkState, walletCard } from "../../components/walletCardData";
 import type { WalletState } from "../../lib/platform";
-import { amountText, formatAmount, formatTokenAmount, readAmount } from "../../lib/amount";
+import { amountInput, amountText, formatAmount, formatTokenAmount, readAmount } from "../../lib/amount";
 import { Amount } from "../../components/wallet/ui";
 import { previewText } from "../../lib/chatList";
 import type { Language } from "../../lib/settings";
@@ -157,6 +157,20 @@ describe("in Portuguese", () => {
   });
 });
 
+describe("an amount field", () => {
+  it("takes Arabic-Indic and full-width digits as typed, in Latin digits, instead of dropping them", async () => {
+    let meant = "";
+    const Field = () => { const [value, setValue] = useState(""); meant = value; return <Amount value={value} onChange={setValue} unit="sats" testId="amount" />; };
+    const { user } = renderApp(<Field />, { language: "ar" });
+    for (const [typed, shown] of [["١٠٠", "100"], ["٥٠٠٠", "5000"], ["1٠٠", "100"], ["۱۲۳", "123"], ["１００", "100"], ["1００", "100"], ["２１", "21"]]) {
+      await user.clear(screen.getByTestId("amount"));
+      await user.type(screen.getByTestId("amount"), typed);
+      expect(screen.getByTestId("amount"), typed).toHaveValue(shown);
+      expect(meant, typed).toBe(shown);
+    }
+  });
+});
+
 describe("an amount typed", () => {
   const meaning = (text: string, language: Language, decimals = 6) => { const read = readAmount(text, language, decimals); return read.ok ? read.value : read.why; };
   it.each(LANGUAGES)("in %s reads the language's decimal point, its grouping only in groups of three, and refuses what could be either", (language) => {
@@ -174,5 +188,22 @@ describe("an amount typed", () => {
     expect(meaning(`21${group}000`, language, 0)).toBe("21000");
     expect(meaning("", language)).toBe("");
     expect(amountText("1000.5", language)).toBe(`1000${point}5`);
+  });
+
+  it.each(LANGUAGES)("in %s in Arabic-Indic or full-width digits reads as the same digits in Latin", (language) => {
+    const comma = formatTokenAmount("15", 1, language) === "1,5";
+    const [point, group] = comma ? [",", "."] : [".", ","];
+    const typed = (text: string) => meaning(amountInput(text, language), language);
+    expect(amountInput("١٠٠", language)).toBe("100");
+    expect(amountInput("۱۲۳۴۵۶۷۸۹۰", language)).toBe("1234567890");
+    expect(amountInput("１２３４５６７８９０", language)).toBe("1234567890");
+    expect(typed("1٠٠")).toBe("100");
+    expect(typed("1００")).toBe("100");
+    // The Arabic marks say which is which: ٫ is always the decimal point, ٬ always groups.
+    expect(typed("١٬٠٠٠٫٥")).toBe("1000.5");
+    expect(typed("1٫5")).toBe("1.5");
+    // Full-width marks are the ASCII ones, as ambiguous as those.
+    expect(amountInput(`１${group === "," ? "，" : "．"}０００`, language)).toBe(`1${group}000`);
+    expect(amountInput(`１${point === "," ? "，" : "．"}５`, language)).toBe(`1${point}5`);
   });
 });

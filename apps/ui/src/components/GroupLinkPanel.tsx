@@ -4,7 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
-import { copyText, shareLink } from "../lib/shareLink";
+import { copySecret, shareLink } from "../lib/shareLink";
 import { groupLinkUrl } from "../lib/groups";
 import { COMMUNITY_LIMITS, MAX_GROUP_MEMBERS } from "@ghostly/core";
 import { GroupAvatar } from "./GroupAvatar";
@@ -12,6 +12,8 @@ import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { GroupLinkAskDialog } from "./GroupLinkAskDialog";
+import { NAME, withName } from "./apps/aroundName";
+import { isolate } from "../lib/ownStatus";
 
 function ShareIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>;
@@ -27,6 +29,25 @@ function CopyIcon() {
  * or turns it off.
  */
 export function GroupLinkPanel({ group, large = false }: { group: GroupView; large?: boolean }) {
+  const { t } = useI18n();
+  // What became of the link while the panel is open, said once: the address field took another link, or the panel
+  // swapped to its "off" line, and nothing read either. The admin hears their New link; a member, what the admin did.
+  // The admin's own Turn off and Turn on say themselves: the focus moves to the button in the pressed one's place.
+  const url = groupLinkUrl(group), urlWas = useRef(url);
+  const [changed, setChanged] = useState("");
+  useEffect(() => {
+    const was = urlWas.current;
+    urlWas.current = url;
+    if (was === url) return;
+    setChanged(group.isAdmin ? (was && url ? t("group.link.resetDone") : "") : url ? t("group.link.madeNew") : t("group.link.turnedOff"));
+  }, [url, group.isAdmin, t]);
+  return <>
+    <LinkPanel group={group} large={large} />
+    <p role="status" data-testid="group-link-live" className="sr-only">{changed}</p>
+  </>;
+}
+
+function LinkPanel({ group, large }: { group: GroupView; large: boolean }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
@@ -61,33 +82,39 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   };
   const copy = async () => {
     setError(null);
-    try { await copyText(url); flash("copied"); } catch { setError({ tone: "error", title: t("group.link.copyFailed") }); }
+    try { await copySecret(url); flash("copied"); } catch { setError({ tone: "error", title: t("group.link.copyFailed") }); }
   };
   const share = async () => {
     setError(null);
     try {
-      const outcome = await shareLink(url, group.name ? t("group.link.shareTitle", { name: group.name }) : t("group.link.shareTitleUnnamed"), shareButton.current);
+      // The group's name isolated in the title the share sheet shows, a line in the app's direction.
+      const outcome = await shareLink(url, group.name ? t("group.link.shareTitle", { name: isolate(group.name) }) : t("group.link.shareTitleUnnamed"), shareButton.current);
       if (outcome !== "cancelled") flash(outcome);
     } catch { setError({ tone: "error", title: t("group.link.shareFailed") }); }
   };
   const note = full ? t("group.link.full", { count: cap }) : community ? t("group.link.noteCommunity", { count: cap }) : t("group.link.note", { count: cap });
 
+  // A community member's panel stays open while the admin turns the link off (the Share dialog): only the admin turns it
+  // on again, so a member is told so, with no button the engine would refuse.
   if (!url) return <div className={large ? "text-center" : "mt-4"} data-testid="group-link" data-state="off">
     {!large && <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>}
-    <p className="mt-1 text-sm text-text-muted">{t("group.link.off")}</p>
-    <button ref={enableButton} disabled={full} aria-disabled={busy || undefined} onClick={() => { if (!busy) void run(() => engine.call("enableGroupLink", { groupId: group.id }), true); }} data-testid="group-link-enable"
-      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>
+    <p className="mt-1 text-sm text-text-muted">{group.isAdmin ? t("group.link.off") : t("group.link.offMember")}</p>
+    {group.isAdmin && <button ref={enableButton} disabled={full} aria-disabled={busy || undefined} onClick={() => { if (!busy) void run(() => engine.call("enableGroupLink", { groupId: group.id }), true); }} data-testid="group-link-enable"
+      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>}
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;
 
   const field = <input readOnly dir="ltr" value={url} aria-label={t("group.link.title")} data-testid="group-link-url" onFocus={e => e.currentTarget.select()}
     className={`min-w-0 flex-1 rounded-lg bg-input-bg px-3 font-mono text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent ${large ? "py-2.5 text-xs" : "py-1.5 text-[11px]"}`} />;
+  // Copy and Share are drawn by their fill: a border in forced colors only, where the fill is gone (as devices/DeviceDialog's primaryButton).
+  // Large, they share a row from their own width up (flex-auto), so at a larger text size the second goes under the
+  // first rather than past the dialog's edge.
   const copyButton = <button onClick={() => void copy()} data-testid="group-link-copy"
-    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-semibold ${large ? "min-h-11 flex-1 bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover max-md:min-h-11 max-md:px-3"}`}>
+    className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-semibold forced-colors:border forced-colors:border-[color:ButtonText] ${large ? "min-h-11 flex-auto bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "shrink-0 bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover max-md:min-h-11 max-md:px-3"}`}>
     <CopyIcon /><span>{said === "copied" ? t("group.link.copied") : t("common.copy")}</span>
   </button>;
   const shareButtonEl = <button ref={shareButton} onClick={() => void share()} data-testid="group-link-share"
-    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover ${large ? "min-h-11 flex-1 px-4 text-sm" : "px-2.5 py-1.5 text-xs max-md:min-h-11 max-md:px-3"}`}>
+    className={`inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] ${large ? "min-h-11 flex-auto px-4 text-sm" : "shrink-0 px-2.5 py-1.5 text-xs max-md:min-h-11 max-md:px-3"}`}>
     <ShareIcon /><span>{said === "shared" ? t("group.link.shared") : t("group.link.share")}</span>
   </button>;
   // For every member who sees the panel, not the admin alone: a community group's member hands its link out too.
@@ -112,7 +139,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   if (large) return <div className="flex flex-col gap-3" data-testid="group-link" data-state="on">
     {qr}
     <div className="flex">{field}</div>
-    <div className="flex gap-2">{shareButtonEl}{copyButton}</div>
+    <div className="flex flex-wrap gap-2">{shareButtonEl}{copyButton}</div>
     <p data-testid="group-link-note" className={`rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed ${full ? "text-warn-ink" : "text-text-secondary"}`}>{note}</p>
     {adminControls}
     {error && <Notice problem={error} className="text-center text-xs" />}
@@ -140,7 +167,8 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
   const backdrop = useBackdropDismiss(onClose);
   useBackCloses(onClose);
   useEffect(() => {
-    const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
+    // `opener` read as it closes, not now: what it names may have changed meanwhile (the header's Share, gone with the link).
+    const before = document.activeElement as HTMLElement | null, opener = () => returnFocus?.current;
     const element = dialog.current!; element.showModal();
     // Share first, not the address field (which would select itself and scroll to its end). Then scrolled into view by
     // scrollIntoView, which keeps it clear of the sticky footer (the dialog's scroll-padding below) in every engine.
@@ -149,15 +177,25 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
     share?.scrollIntoView?.({ block: "nearest" });
     return () => {
       element.close();
-      const back = before && before !== document.body && before.isConnected ? before : opener;
-      back?.focus();
+      const back = before && before !== document.body && before.isConnected ? before : opener();
+      if (back?.isConnected) back.focus();
     };
   }, [returnFocus]);
+  // The link turned off or on elsewhere (the admin, another of my devices) swaps the panel with what had the focus:
+  // Done, the dialog's next stop, has it rather than the page.
+  const done = useRef<HTMLButtonElement>(null);
+  const linkOn = !!group.entryLink, wasOn = useRef(linkOn);
+  useEffect(() => {
+    if (wasOn.current === linkOn) return;
+    wasOn.current = linkOn;
+    const active = document.activeElement;
+    if (!active || active === document.body || active === dialog.current) done.current?.focus();
+  }, [linkOn]);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-share-dialog"
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[92dvh] overflow-y-auto scroll-pb-20 rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 text-center">
       <GroupAvatar picture={group.picture} size={64} testId="group-share-avatar" className="mx-auto mb-3 bg-accent/15" />
-      <h2 id={`${id}-title`} className="break-words text-lg font-semibold">{created ? (group.name ? t("group.share.ready", { name: group.name }) : t("group.share.readyUnnamed")) : (group.name ? t("group.share.title", { name: group.name }) : t("group.share.titleUnnamed"))}</h2>
+      <h2 id={`${id}-title`} className="break-words text-lg font-semibold">{created ? (group.name ? withName(t("group.share.ready", { name: NAME }), group.name) : t("group.share.readyUnnamed")) : (group.name ? withName(t("group.share.title", { name: NAME }), group.name) : t("group.share.titleUnnamed"))}</h2>
       <p className="mt-1 text-sm text-text-muted">{created ? t("group.share.createdHint") : t("group.share.hint")}</p>
     </div>
     <GroupLinkPanel group={group} large />
@@ -165,7 +203,7 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
         4.5rem high (pt-2, a min-h-11 button, pb-5); the dialog's scroll-pb-20 is that plus room for a focus ring, so
         whatever the focus or a scroll into view brings up (Share on open, the next button on Tab) stops above it. */}
     <div className="sticky -bottom-5 -mx-5 -mb-5 mt-4 bg-sidebar-bg px-5 pb-5 pt-2">
-      <button onClick={onClose} data-testid="group-share-done" className="min-h-11 w-full rounded-lg px-4 text-sm text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">
+      <button ref={done} onClick={onClose} data-testid="group-share-done" className="min-h-11 w-full rounded-lg px-4 text-sm text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">
         {created ? t("group.share.open") : t("group.share.done")}
       </button>
     </div>

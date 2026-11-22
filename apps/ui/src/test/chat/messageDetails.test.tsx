@@ -215,15 +215,19 @@ describe("opening and closing", () => {
     expect(section("path")).toBeNull();
   });
 
-  it("each value that copies is a thumb's height on a phone, at least 24 px", async () => {
-    // They were 17 px tall, 2 px apart: a mis-tap copied the row above or below.
+  it("each value that copies is at least 24 px tall at every width, not only on a phone", async () => {
+    // They were 17-18 px tall, 2 px apart: a mis-tap or a near miss with a mouse copied the row above or below.
     fakeEngine.on("messageDetails", () => textView());
     const { user } = bubble();
     await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     const copies = screen.getAllByTestId("message-details-copy");
     expect(copies.length).toBeGreaterThan(1);
-    for (const copy of copies) expect(copy.className.split(/\s+/)).toContain("max-md:min-h-6");
+    for (const copy of copies) {
+      const classes = copy.className.split(/\s+/);
+      expect(classes).toContain("min-h-6");
+      expect(classes.filter(c => /^[\w-]+:min-h-/.test(c))).toEqual([]);
+    }
   });
 
   it("Tab and Shift+Tab go round the panel's own buttons, never to the chat behind it", async () => {
@@ -478,6 +482,22 @@ describe("the words", () => {
     const clock = (tag: string) => new Intl.DateTimeFormat(tag, { hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23" } as Intl.DateTimeFormatOptions).format(1_700_000_000_000);
     expect(model.sections[1].rows[0].value).toBe(clock("pt-BR"));
     expect(buildDetails(message(), null, { t: translateWith(locales.ar, "ar") }).sections[1].rows[0].value).toBe(clock("ar"));
+  });
+
+  it.each(Object.keys(locales) as (keyof typeof locales)[])("a text that did not go is Not sent as in its bubble, in %s", (language) => {
+    const t = translateWith(locales[language], language);
+    const state = buildDetails(message({ delivery: "failed" }), null, { t }).sections.find(s => s.id === "delivery")!.rows[0];
+    expect(state.value).toBe(t("chat.delivery.failed"));
+    expect(buildDetails(message({ delivery: "failed" }), null).json).toMatchObject({ delivery: { State: "Not sent" } });
+  });
+
+  it("in another language, each send's outcome too, with the engine's reason kept as it came", () => {
+    const sends = (t?: ReturnType<typeof translateWith>) => buildDetails(message({ delivery: "queued" }), textView({
+      details: { sends: [{ at: 1_700_000_000_100, path: "webrtc/1", relayed: false, result: "sent" }, { at: 1_700_000_020_100, path: "webrtc/1", relayed: false, result: "failed", error: "closed" }, { at: 1_700_000_050_100, path: "hyperdht/1", relayed: true }], attempts: 3 },
+    }), t && { t }).sections.find(s => s.id === "path")!.rows.find(r => r.value.includes("\n"))!.value.split("\n");
+    expect(sends().map(line => line.replace(/^.*\(/, "("))).toEqual(["(sent)", "(failed: closed)", "(sending)"]);
+    for (const [language, said] of [["pt", ["(enviado)", "(falhou: closed)", "(enviando)"]], ["ar", ["(أُرسل)", "(فشل: closed)", "(جارٍ الإرسال)"]]] as const)
+      expect(sends(translateWith(locales[language], language)).map(line => line.replace(/^.*\(/, "("))).toEqual(said);
   });
 
   it("in Arabic, a duration says short units, right for every number (a full noun changes form from 3 to 10)", () => {

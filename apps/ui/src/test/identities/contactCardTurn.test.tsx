@@ -54,6 +54,29 @@ it("waits again when the card is turned back and over once more", async () => {
   await waitFor(() => expect(screen.getByTestId("chat-identity-recheck")).toBeEnabled());
 });
 
+// Cards turns the card face up and gives the deck back once the turn is over: the keys go to the card that was turned,
+// not to the page (a frame after the press, the deck was not there yet and the back left with the focus on it).
+it("gives Cards' focus to the turned card once the deck is back", async () => {
+  const { user } = open();
+  const cards = () => within(screen.getByTestId("chat-identities-received")).getAllByTestId("chat-identity-received");
+  await user.click(cards()[0]);
+  await waitFor(() => expect(screen.getByTestId("chat-identity-cards")).toHaveFocus());
+  await user.keyboard("{Enter}");
+  await waitFor(() => expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument());
+  await waitFor(() => expect(cards()[0]).toHaveFocus());
+});
+
+it("gives Cards' focus to the turned card with motion reduced too", async () => {
+  document.documentElement.dataset.reduceMotion = "true";
+  turn.textContent = `.deck-flip-card{transition-property:none;transition-duration:0s}`;
+  const { user } = open();
+  await user.click(screen.getByTestId("chat-identity-ghostly"));
+  await waitFor(() => expect(screen.getByTestId("chat-identity-cards")).toHaveFocus());
+  await user.keyboard("{Enter}");
+  await waitFor(() => expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.getByTestId("chat-identity-ghostly")).toHaveFocus());
+});
+
 // A key is compared character by character with what the contact reads out: left to right in every language.
 it("shows the contact's Ghostly key left to right", async () => {
   const { user } = open();

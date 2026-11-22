@@ -31,6 +31,7 @@ test.afterAll(async () => { await listeners?.close(); });
 interface Hook {
   open(launch: { ref: string; version: string; title: string; permissions: string[]; entry: string; chat?: { linkId: string } | null; files?: Record<string, string>; unguarded?: boolean }): number;
   status(handle: number): { phase: string; stopped: string | null };
+  inputs(): number;
   stored(ref: string, scope: string): Record<string, unknown>;
   calls(): { op: string; ref: string; scope?: string; key?: string }[];
   sent(): { linkId: string; ref: string; data: unknown }[];
@@ -59,6 +60,7 @@ async function open(page: Page, ref: string, entry: string, extra: { permissions
 }
 
 const stored = (page: Page, ref: string, scope = "alone") => page.evaluate(({ ref, scope }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.stored(ref, scope), { ref, scope });
+const inputs = (page: Page) => page.evaluate(() => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.inputs());
 const status = (page: Page, handle: number) => page.evaluate((handle) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.status(handle), handle);
 
 /** Hits per tag, for the report. */
@@ -445,6 +447,203 @@ test("an app may ask for the pointer after a click (mouse look): its sandbox no 
   await page.frameLocator(`iframe[data-app="${ref}"]`).locator("#pad").click();
   await expect.poll(async () => (await stored(page, ref)).lock).toBeDefined();
   expect(["held", "WrongDocumentError"]).toContain((await stored(page, ref)).lock);
+});
+
+test("an app writes nothing to the clipboard: not on load, not in a tap, not from a timer after one", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page, context, browserName }) => {
+  // Read only, for the check at the end. Playwright's Chromium lets the copy through even on load, with no tap.
+  if (browserName === "chromium") await context.grantPermissions(["clipboard-read"]);
+  await appPage(page);
+  const ref = "evilpublisherkey/clipboard";
+  // Every way the app has to `execCommand` a clipboard command, on a selected textarea; the browser's answer (true:
+  // it wrote) goes to storage. And the async Clipboard API, which only Chromium refuses for the frame's `allow=""`:
+  // whether the app finds each of its calls ("none": it does not), and how a write it tries ends.
+  const entry = `<!doctype html><title>clip</title><body style="margin:0"><textarea id=t></textarea><div id=pad style="width:100vw;height:90vh"></div><script>
+    const g = window.ghostly, t = document.getElementById("t"), proto = Document.prototype;
+    const exec = proto.execCommand;
+    const api = {};
+    const asks = (tag) => {
+      const c = navigator.clipboard, out = { item: typeof ClipboardItem === "function" ? "there" : "none" };
+      const text = "bc1q-APP-" + tag + "-api";
+      const writes = {
+        writeText: () => c.writeText(text),
+        write: () => c.write([new ClipboardItem({ "text/plain": new Blob([text], { type: "text/plain" }) })]),
+      };
+      for (const way of ["writeText", "write", "readText", "read"]) {
+        if (!c || typeof c[way] !== "function") { out[way] = "none"; continue; }
+        if (!writes[way]) { out[way] = "there"; continue; }
+        out[way] = "pending";
+        try {
+          writes[way]().then(() => { out[way] = "wrote"; g.storage.set("api", api); }, (e) => { out[way] = e.name; g.storage.set("api", api); });
+        } catch (e) { out[way] = e.name; }
+      }
+      api[tag] = out;
+      g.storage.set("api", api);
+    };
+    const framed = () => {
+      try {
+        const frame = document.createElement("iframe");
+        document.body.appendChild(frame);
+        const w = frame.contentWindow, c = w && w.navigator.clipboard;
+        if (!c || typeof c.writeText !== "function") { g.storage.set("framed", "none"); return; }
+        c.writeText("bc1q-APP-framed").then(() => g.storage.set("framed", "wrote"), (e) => g.storage.set("framed", e.name));
+      } catch (e) { g.storage.set("framed", e.name); }
+    };
+    asks("load");
+    const tries = (tag) => {
+      const out = {};
+      const ways = {
+        copy: () => document.execCommand("copy"),
+        COPY: () => document.execCommand("COPY"),
+        cut: () => document.execCommand("cut"),
+        paste: () => document.execCommand("paste"),
+        taken: () => exec.call(document, "copy"),
+        proto: () => proto.execCommand.call(document, "copy", false),
+        other: () => document.implementation.createHTMLDocument("").execCommand("copy"),
+      };
+      for (const way in ways) {
+        t.value = "bc1q-APP-" + tag + "-" + way;
+        t.select();
+        try { out[way] = ways[way](); } catch (e) { out[way] = e.name; }
+      }
+      g.storage.set(tag, out);
+    };
+    tries("load");
+    let taps = 0;
+    document.getElementById("pad").addEventListener("pointerdown", () => {
+      if (taps++) return;
+      asks("tap");
+      framed();
+      tries("tap");
+      t.value = "";
+      t.focus();
+      const typed = document.execCommand("insertText", false, "typed");
+      g.storage.set("edit", typed + " " + t.value);
+      setTimeout(() => tries("timer"), 1000);
+    });
+    g.storage.set("ready", true);
+  </script>`;
+  await open(page, ref, entry);
+  await expect.poll(() => stored(page, ref)).toMatchObject({ ready: true });
+  await page.frameLocator(`iframe[data-app="${ref}"]`).locator("#pad").click();
+  await expect.poll(async () => (await stored(page, ref)).timer, { timeout: 10_000 }).toBeDefined();
+  const seen = await stored(page, ref);
+  test.info().annotations.push({ type: `clipboard (${browserName})`, description: JSON.stringify(seen) });
+  for (const tag of ["load", "tap", "timer"]) {
+    for (const [way, wrote] of Object.entries(seen[tag] as Record<string, unknown>)) expect(`${tag} ${way}: ${String(wrote)}`).toBe(`${tag} ${way}: false`);
+  }
+  // The app finds no async Clipboard API, on load or in a tap (WebKit and Firefox let it write, on load too).
+  const none = { item: "none", writeText: "none", write: "none", readText: "none", read: "none" };
+  expect(seen.api).toEqual({ load: none, tap: none });
+  // Nor through a frame it makes.
+  expect(seen.framed).toBeDefined();
+  expect(seen.framed).not.toBe("wrote");
+  // None of the app's text is in the system clipboard, and an editing command still edits.
+  if (browserName === "chromium") expect(await page.evaluate(() => navigator.clipboard.readText())).not.toContain("bc1q-APP");
+  expect(seen.edit).toBe("true typed");
+});
+
+test("the person's copy and cut in an app put what they selected on the clipboard, never what the app's listeners say", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }) => {
+  await appPage(page);
+  const ref = "evilpublisherkey/swap";
+  // Every place an app can listen for the person's copy or cut, each one swapping what goes on the clipboard.
+  const entry = `<!doctype html><title>swap</title><body><p><span id=shown>bc1qREALADDRESS</span></p><textarea id=t>bc1qCUTADDRESS</textarea><script>
+    const g = window.ghostly;
+    const swap = (where) => (e) => {
+      g.storage.set("heard", where);
+      try { e.clipboardData.setData("text/plain", "bc1qSWAPPEDBYAPP"); } catch (error) { /* refused */ }
+      e.preventDefault();
+    };
+    for (const type of ["copy", "cut"]) {
+      addEventListener(type, swap("window capture"), true);
+      addEventListener(type, swap("window"));
+      document.addEventListener(type, swap("document"), true);
+      document.addEventListener(type, swap("document"));
+      document.getElementById("shown").addEventListener(type, swap("element"));
+      document.getElementById("t").addEventListener(type, swap("element"));
+    }
+    window.oncopy = swap("oncopy");
+    document.body.oncut = swap("oncut");
+    g.storage.set("ready", true);
+  </script>`;
+  await open(page, ref, entry);
+  await expect.poll(() => stored(page, ref)).toMatchObject({ ready: true });
+  const frame = page.frameLocator(`iframe[data-app="${ref}"]`);
+  // What the clipboard holds, pasted by the person into a field of the page itself.
+  const pasted = async () => {
+    await page.evaluate(() => { const field = document.createElement("textarea"); field.id = "pasted"; document.body.append(field); });
+    await page.locator("#pasted").focus();
+    await page.keyboard.press("ControlOrMeta+V");
+    const value = await page.locator("#pasted").inputValue();
+    await page.evaluate(() => document.getElementById("pasted")!.remove());
+    return value;
+  };
+
+  await frame.locator("#shown").dblclick();
+  await page.keyboard.press("ControlOrMeta+C");
+  expect(await pasted()).toBe("bc1qREALADDRESS");
+
+  // A click, as the person does: a focus moved into the app by script alone is taken back (the app beside a chat cannot take it).
+  // The person typed the paste in Ghostly's own field, so the pointer comes back onto the app for this click.
+  await page.mouse.move(0, 0);
+  await frame.locator("#t").click();
+  await page.keyboard.press("ControlOrMeta+A");
+  await page.keyboard.press("ControlOrMeta+X");
+  expect(await pasted()).toBe("bc1qCUTADDRESS");
+  // The cut took the text out, as a cut does.
+  await expect(frame.locator("#t")).toHaveValue("");
+  // None of the app's listeners heard either.
+  expect((await stored(page, ref)).heard).toBeUndefined();
+
+  // An app that opens its document again (which erases the window's listeners) and listens in the new one.
+  const reopened = "evilpublisherkey/reopen";
+  await open(page, reopened, `<!doctype html><title>reopen</title><body><script>
+    const g = window.ghostly;
+    setTimeout(() => {
+      document.open();
+      const body = document.appendChild(document.createElement("html")).appendChild(document.createElement("body"));
+      body.innerHTML = "<span id=shown>bc1qREALADDRESS</span>";
+      document.addEventListener("copy", (e) => { g.storage.set("heard", true); e.clipboardData.setData("text/plain", "bc1qSWAPPEDBYAPP"); e.preventDefault(); });
+      g.storage.set("ready", true);
+    }, 100);
+  </script>`);
+  await expect.poll(() => stored(page, reopened)).toMatchObject({ ready: true });
+  await page.frameLocator(`iframe[data-app="${reopened}"]`).locator("#shown").dblclick();
+  await page.keyboard.press("ControlOrMeta+C");
+  expect(await pasted()).toBe("bc1qREALADDRESS");
+  expect((await stored(page, reopened)).heard).toBeUndefined();
+});
+
+test("an app that opens its document again keeps the runner's listeners: no other frame's message, a # link ends it, the person's taps count", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }) => {
+  await appPage(page);
+  const ref = "evilpublisherkey/reopen-listeners";
+  // `document.open()` with no close erases the window's listeners and the app runs on, in a document of its own making.
+  const handle = await open(page, ref, `<!doctype html><title>reopen</title><body><script>
+    const g = window.ghostly;
+    setTimeout(() => {
+      document.open();
+      const body = document.appendChild(document.createElement("html")).appendChild(document.createElement("body"));
+      body.innerHTML = "<div id=pad style='width:100vw;height:100vh'></div>";
+      addEventListener("message", (e) => g.storage.set("heard", String(e.data)));
+      document.getElementById("pad").addEventListener("click", () => setTimeout(() => { location.hash = "#gone"; }, 1000));
+      g.storage.set("ready", true);
+    }, 100);
+  </script>`);
+  await expect.poll(() => stored(page, ref)).toMatchObject({ ready: true });
+  // What another frame of the page posts to it, as one more app frame would (parent.frames[i]).
+  await page.evaluate((ref) => document.querySelector<HTMLIFrameElement>(`iframe[data-app="${ref}"]`)!.contentWindow!.postMessage("from another frame", "*"), ref);
+  const before = await inputs(page);
+  // The person's tap in the app, after which the app follows a link to "#gone".
+  await page.frameLocator(`iframe[data-app="${ref}"]`).locator("#pad").click();
+  await page.waitForTimeout(3_000);
+  expect.soft((await stored(page, ref)).heard).toBeUndefined();
+  expect.soft(await inputs(page)).toBeGreaterThan(before);
+  expect.soft(await status(page, handle)).toEqual({ phase: "stopped", stopped: "navigated" });
 });
 
 test("Chess, as it is built, runs under the runner's lock", {

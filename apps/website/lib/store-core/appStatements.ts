@@ -2,8 +2,9 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, fromZ32, toBase64Url, toZ32, utf8Encode } from "./bytes";
-import { canonicalJsonBytes, readCanonicalJson, type CanonicalJsonRefusal, type JsonValue } from "./canonicalJson";
+import { canonicalJsonBytes, canonicalJsonListEntries, readCanonicalJson, type CanonicalJsonRefusal, type JsonValue } from "./canonicalJson";
 import type { Signer } from "./signer";
+import { hasVisible, stripHidden } from "./text";
 
 /*
  * Signed statements of WISP 1200 (Apps · Signatures): every signed object is signed the same way, Ed25519 over the
@@ -33,6 +34,11 @@ export const APP_STATEMENT_LIMITS = {
   reason: 200,
   /** Revocations in one `ghostly-revoke.json`. */
   revocations: 4096,
+  /**
+   * One signed revocation's canonical bytes: twice the largest a valid one can be (64 digests, a 32-character name and
+   * a 200-character reason of 4-byte characters: about 4.1 KB), so a reader refuses a larger entry before parsing it.
+   */
+  revocationBytes: 8192,
 } as const;
 
 /** A z-base32 Ed25519 public key: 52 characters that decode to 32 bytes and encode back to the same text. */
@@ -197,7 +203,18 @@ export interface SignedAppRevocation { statement: AppRevokeStatement; signature:
 export type AppRevocationRefusal = "bad-revocation" | AppSignatureRefusal;
 
 const isSequence = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 1;
-const isPlainLine = (v: unknown, max: number): v is string => typeof v === "string" && [...v].length <= max && !/\p{Cc}/u.test(v);
+
+/**
+ * One line of an app's text, from `min` to `max` code points: a title, a tagline, a store's name, a removal's or a
+ * revocation's reason. It is shown alone (a heading, a window title), so it holds no control character and none of
+ * what `stripHidden` takes from a nickname (invisible and direction-changing characters, line and paragraph
+ * separators), and when it is not empty it shows something (`hasVisible`). The joiners an emoji or a script needs stay.
+ */
+export const isAppLine = (v: unknown, max: number, min = 0): v is string => {
+  if (typeof v !== "string") return false;
+  const length = [...v].length;
+  return length >= min && length <= max && stripHidden(v) === v && (v === "" || hasVisible(v));
+};
 
 /** Checks a revocation statement's shape; the reason it is refused, or null. */
 export function checkAppRevokeStatement(value: unknown): string | null {
@@ -212,7 +229,7 @@ export function checkAppRevokeStatement(value: unknown): string | null {
     if (!Array.isArray(d) || d.length < 1 || d.length > APP_STATEMENT_LIMITS.revokeDigests) return "digests is not 1 to 64 digests";
     if (!d.every(isAppHash) || new Set(d).size !== d.length) return "digests holds a bad or repeated digest";
   } else if (!isSequence(v.upTo)) return "upTo is not a sequence";
-  if (v.reason !== undefined && !isPlainLine(v.reason, APP_STATEMENT_LIMITS.reason)) return "reason is not one line of 200 characters";
+  if (v.reason !== undefined && !isAppLine(v.reason, APP_STATEMENT_LIMITS.reason)) return "reason is not one line of 200 characters";
   return null;
 }
 
@@ -273,14 +290,27 @@ export function verifyAppRevocation(revocation: SignedAppRevocation, checked?: A
  * file, as a store index's `revoked` does. With `checked`, a revocation it holds is not checked again.
  */
 export function readAppRevocations(bytes: Uint8Array, checked?: AppRevocationsChecked): { ok: true; revocations: SignedAppRevocation[] } | { ok: false; reason: CanonicalJsonRefusal | AppRevocationRefusal; detail?: string } {
-  const read = readCanonicalJson(bytes);
-  if (!read.ok) return read;
-  if (!Array.isArray(read.value) || read.value.length > APP_STATEMENT_LIMITS.revocations) return { ok: false, reason: "bad-revocation", detail: "Not a list of at most 4096 revocations" };
   const revocations: SignedAppRevocation[] = [];
-  for (const entry of read.value) {
-    const one = readAppRevocation(entry, checked);
+  const entries = appRevocationsFileEntries(bytes);
+  let next = entries.next();
+  for (; !next.done; next = entries.next()) {
+    const read = readCanonicalJson(next.value);
+    if (!read.ok) return read;
+    const one = readAppRevocation(read.value, checked);
     if (!one.ok) return one;
     revocations.push(one.revocation);
   }
-  return { ok: true, revocations };
+  return next.value ?? { ok: true, revocations };
+}
+
+/**
+ * The entries of a `ghostly-revoke.json`, each as its own bytes, one at a time and with nothing parsed: a file past
+ * 4096 entries, or with one larger than any revocation can be, is refused there, however large it is. It ends with null
+ * when the list closed. Each entry read alone (`readCanonicalJson`, then `readAppRevocation`) refuses exactly the files
+ * reading the file whole refuses.
+ */
+export function* appRevocationsFileEntries(bytes: Uint8Array): Generator<Uint8Array, { ok: false; reason: "not-json" | "bad-revocation"; detail?: string } | null, void> {
+  const end = yield* canonicalJsonListEntries(bytes, APP_STATEMENT_LIMITS.revocations, APP_STATEMENT_LIMITS.revocationBytes);
+  if (end === "not-list") return { ok: false, reason: "bad-revocation", detail: "Not a list of at most 4096 revocations" };
+  return end && { ok: false, reason: end };
 }

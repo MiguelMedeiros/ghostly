@@ -70,7 +70,7 @@ export class OpfsFileBytes implements FileBytes {
     return this.call({ op: "append", id: checkFileId(id), offset, bytes: copy }, [copy.buffer]);
   }
   flush(id: string): Promise<void> { return this.call({ op: "flush", id: checkFileId(id) }); }
-  close(id: string): Promise<void> { return this.call({ op: "close", id: checkFileId(id) }); }
+  close(id: string, flush = true): Promise<void> { return this.call({ op: "close", id: checkFileId(id), ...(flush ? {} : { flush }) }); }
   size(id: string): Promise<number | null> { return this.call({ op: "size", id: checkFileId(id) }); }
   truncate(id: string, size: number): Promise<void> { return this.call({ op: "truncate", id: checkFileId(id), size }); }
   read(id: string, offset: number, length: number): Promise<Uint8Array> {
@@ -93,10 +93,8 @@ export class OpfsFileBytes implements FileBytes {
 
   room(): Promise<number | null> { return storageRoom(); }
 
-  async dropSpace(space: string): Promise<void> {
-    try {
-      const root = await (await navigator.storage.getDirectory()).getDirectoryHandle("ghostly-files");
-      await root.removeEntry(space, { recursive: true });
-    } catch (error) { if ((error as { name?: string })?.name !== "NotFoundError") throw error; }
+  /** In the worker, which closes the handles it holds open there first: an open file cannot be removed. */
+  dropSpace(space: string): Promise<void> {
+    return this.forSpace(space).call({ op: "dropSpace" });
   }
 }

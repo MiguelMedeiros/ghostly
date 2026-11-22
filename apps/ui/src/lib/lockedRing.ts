@@ -1,4 +1,4 @@
-import { parseCallSignal } from "@ghostly/core";
+import { parseCallSignal, signalHasVideo, type CallSignal } from "@ghostly/core";
 import { RING_MS } from "@ghostly/react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { sessionIdForPeer } from "./storage";
@@ -11,6 +11,15 @@ export function offerSession(linkId: string, signal: string): string | undefined
   if (parseCallSignal(signal)?.t !== "o") return undefined;
   const peer = engine.state?.links.find((link) => link.id === linkId)?.peerPubKeyZ32;
   return peer ? sessionIdForPeer(peer) : undefined;
+}
+
+/**
+ * The call that rings in a chat, read from the offer that rang (`useWebRTC`'s `ringingOffer`), never from the
+ * contact's latest signal: a picture change they send while it rings neither turns an audio call into a video one, nor
+ * takes the offer's place in a handover. `signal` is the offer as the engine hands it on.
+ */
+export function ringingCall(offer: CallSignal | null): { signal?: string; ts?: number; video: boolean } {
+  return offer ? { signal: JSON.stringify(offer), ts: offer.ts, video: signalHasVideo(offer) } : { video: false };
 }
 
 /**

@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "Consegnato (ricevuta arrivata)",
-    "failed": "Non riuscito",
+    "failed": "Non inviato",
     "held": "Custodito per il contatto",
     "queued": "Non ancora confermato, riparte da solo",
     "sending": "Invio in corso",
@@ -141,7 +141,7 @@
   "path": {
     "aRelay": "un relay",
     "dht": "Base DHT (Pkarr)",
-    "direct": "{{name}}, diretto",
+    "direct": "{{name}}, senza relay",
     "hold": "Archivio in custodia (hold/1)",
     "legacyDatalink": "WebRTC (chat di compatibilità)",
     "legacyDht": "DHT (chat di compatibilità)",
@@ -161,6 +161,12 @@
     "timing": "Tempi",
     "voice": "Voce",
     "wire": "Rete"
+  },
+  "send": {
+    "failed": "non riuscito",
+    "failedBecause": "non riuscito: {{error}}",
+    "sending": "invio in corso",
+    "sent": "inviato"
   },
   "storage": {
     "blob": "l'intero file in IndexedDB",

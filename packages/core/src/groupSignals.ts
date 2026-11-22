@@ -106,6 +106,8 @@ export interface CarriedHooks {
 export class CarriedTransport implements PkarrTransport {
   /** My last packet while the edge is down: what a member that just became reachable is handed. */
   private mine: Uint8Array | null = null;
+  /** The records `mine` holds, as members last took them, and when. */
+  private handed: { said: string; at: number } | null = null;
   private lastTimestamp = 0n;
   /** The date each packet `stamp` signed carries: the relays' transport takes it rather than check the signature again. */
   private readonly dated = new WeakMap<Uint8Array, bigint>();
@@ -173,10 +175,17 @@ export class CarriedTransport implements PkarrTransport {
       const held = this.inner.publishHeld?.(identity.pubKeyZ32, options);
       if (held) { this.unsigned = { identity, records }; throw held; }
     }
+    // The records members took a moment ago (`SIGNAL_REPLY_MS`), again: the link trying once more what the relays' budget
+    // held back. Members have them: the relays get that very packet. Signed and handed again at each try, an edge to a
+    // member who left sent two frames every few seconds that no member could pass on (35 KB a minute on an idle web app
+    // with two such edges, bug hunt 2026-11-08). A member who can pass it on later is handed it then (`latest`).
+    const said = JSON.stringify(records);
+    if (this.mine && this.handed?.said === said && Date.now() - this.handed.at < SIGNAL_REPLY_MS) return this.toRelays(identity, records, this.mine, options);
     const payload = this.newest = this.stamp(identity, records);
     this.mine = payload;
     let carried = { taken: 0, sure: false };
     try { carried = this.hooks.carry(payload); } catch { /* nobody took it */ }
+    this.handed = carried.taken ? { said, at: Date.now() } : null;
     // The relays wait only when the way through members is known to work, or as good as: a member that took the
     // packet may not reach the other end (after a restart, two members answering the same one each hold the other's
     // answer), and an answer held back for nothing is read a poll later.
@@ -335,6 +344,8 @@ export class CarriedTransport implements PkarrTransport {
     if (this.unsigned) {
       const { identity, records } = this.unsigned;
       this.unsigned = null;
+      // Other records than the ones handed last: a publish of those must not send this packet (`handed`).
+      this.handed = null;
       this.mine = this.newest = this.stamp(identity, records);
     }
     return this.mine;

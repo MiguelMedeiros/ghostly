@@ -9,7 +9,7 @@
 | Implementation | Experimental provider `atproto`: `packages/core/src/atprotoRepo.ts`, `atprotoIdentity.ts`, `packages/browser/src/proofs/atproto/`, `proofs/providers/atproto.ts`. Real servers find the client metadata at ghostly.tools |
 | Summary | Show a contact that you control a Bluesky (AT Protocol) account, checked from its signed repository without logging in. |
 | Availability | Available |
-| Notes | Approved once on your own server, asking only for Ghostly's records; the record is public. |
+| Notes | Approved once on your own server, asking only for Ghostly's records, or for the whole account on a server that refuses the narrow permission; the record is public. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee.
 

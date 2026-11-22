@@ -12,6 +12,9 @@ it("a row of a restored wallet: free ecash is to be checked, a swap is a copy's,
   expect(restoredWalletRow(STORES.proofs, proof("free"))).toEqual(proof("free", { unchecked: true }));
   expect(restoredWalletRow(STORES.proofs, proof("held", { reserved: true })), "ecash a payment holds is left to that payment").toEqual(proof("held", { reserved: true }));
   expect(restoredWalletRow(STORES.swaps, { id: "swap-1", kind: "send" })).toEqual({ id: "swap-1", kind: "send", restored: true });
+  // A Lightning payment or an invoice in flight is a copy's too: what it brings is checked like the copy's ecash.
+  expect(restoredWalletRow(STORES.melts, { quote: "melt-1", secrets: ["a"] })).toEqual({ quote: "melt-1", secrets: ["a"], restored: true });
+  expect(restoredWalletRow(STORES.quotes, { quote: "q-1", paid: true })).toEqual({ quote: "q-1", paid: true, restored: true });
   for (const state of ["pending", "submitted", "unknown"]) expect((restoredWalletRow(STORES.intents, intent("a", state)) as ReturnType<typeof intent>).review.state).toBe("unknown");
   for (const state of ["settled", "failed"]) expect(restoredWalletRow(STORES.intents, intent("a", state))).toEqual(intent("a", state));
   // An on-chain review never approved is cancelled: a restored profile never sends it. Approved ones are unknown, as above.
@@ -27,7 +30,7 @@ it("a row of a restored wallet: free ecash is to be checked, a swap is a copy's,
 
 it("a database that came back whole is marked in place, once or twice the same", async () => {
   await openDb();
-  await transact([STORES.proofs, STORES.swaps, STORES.intents, STORES.payments], (s) => {
+  await transact([STORES.proofs, STORES.swaps, STORES.intents, STORES.payments, STORES.melts, STORES.quotes], (s) => {
     s[STORES.proofs].put(proof("free"));
     s[STORES.proofs].put(proof("held", { reserved: true }));
     s[STORES.swaps].put({ id: "swap-1", mint: "https://mint.example", kind: "send", swap: { inputs: [] }, createdAt: 1 });
@@ -35,6 +38,8 @@ it("a database that came back whole is marked in place, once or twice the same",
     s[STORES.intents].put(intent("done", "settled"));
     s[STORES.intents].put({ review: { id: "review", state: "pending", method: "bitcoin", amount: 21 }, prepared: { txid: "ab", signed: "00" } });
     s[STORES.payments].put({ id: "p", state: "pending" });
+    s[STORES.melts].put({ quote: "melt-1", mint: "https://mint.example", secrets: ["held"], outputs: [] });
+    s[STORES.quotes].put({ quote: "q-1", mint: "https://mint.example", amount: 21, paid: true, outputs: [] });
   });
   for (let round = 0; round < 2; round++) {
     await markRestoredWallet();
@@ -42,5 +47,7 @@ it("a database that came back whole is marked in place, once or twice the same",
     expect(await all(STORES.swaps)).toEqual([{ id: "swap-1", mint: "https://mint.example", kind: "send", swap: { inputs: [] }, createdAt: 1, restored: true }]);
     expect((await all(STORES.intents) as ReturnType<typeof intent>[]).map((i) => [i.review.id, i.review.state]).sort()).toEqual([["done", "settled"], ["open", "unknown"], ["review", "cancelled"]]);
     expect(await all(STORES.payments)).toEqual([{ id: "p", state: "pending" }]);
+    expect(await all(STORES.melts)).toEqual([{ quote: "melt-1", mint: "https://mint.example", secrets: ["held"], outputs: [], restored: true }]);
+    expect(await all(STORES.quotes)).toEqual([{ quote: "q-1", mint: "https://mint.example", amount: 21, paid: true, outputs: [], restored: true }]);
   }
 });

@@ -19,6 +19,22 @@ export function sendAppCommand(command: AppCommand): void {
 type Keys = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "repeat">;
 
 /**
+ * Whether `e` is the key of `letter` (lower case), as `appCommandForKey` reads one: the character it types decides, and
+ * its place on a US keyboard only when it types no ASCII character (Arabic, Russian, kana).
+ */
+export function isLetterKey(e: Pick<KeyboardEvent, "key" | "code">, letter: string): boolean {
+  return /^[\x20-\x7e]$/.test(e.key) ? e.key.toLowerCase() === letter : e.code === `Key${letter.toUpperCase()}`;
+}
+
+/**
+ * `isLetterKey` for a chord with Alt (⌥): on a Mac ⌥ makes a key type another character, some of them ASCII (⌥⇧L is |
+ * on a French Mac), so only a Latin letter typed decides and any other character goes by the key's place.
+ */
+export function isAltLetterKey(e: Pick<KeyboardEvent, "key" | "code">, letter: string): boolean {
+  return /^[a-z]$/i.test(e.key) ? e.key.toLowerCase() === letter : e.code === `Key${letter.toUpperCase()}`;
+}
+
+/**
  * The command Ctrl+N or Ctrl+, stands for, with no other modifier and not held down; null for any other key.
  *
  * The character the key types decides. Its place on a US keyboard decides only when it types no ASCII character

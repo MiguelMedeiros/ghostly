@@ -1,7 +1,11 @@
 import { useId, useState, type ReactNode } from "react";
+import type { GroupPayNote } from "@ghostly/browser/shared/types";
 import { useI18n } from "../../contexts/I18nContext";
 import type { ChatSearch } from "../../hooks/useChatSearch";
 import { matchRanges } from "../../lib/chatSearch";
+import type { ChatMessage } from "../../lib/types";
+import { spokenShort } from "./spokenMessage";
+import { draftDirection } from "../../lib/documentLanguage";
 import { useComposition } from "../../hooks/useComposition";
 
 /**
@@ -36,14 +40,22 @@ export function SearchIcon({ className }: { className?: string }) {
   return <svg {...icon} className={className}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>;
 }
 
-const button ="shrink-0 grid place-items-center w-8 h-8 max-md:w-10 max-md:h-10 rounded-full text-text-secondary enabled:hover:text-accent enabled:hover:bg-surface-hover disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default";
+// On a phone a thumb's 44 px, as every other control there: px, not rem, so a larger text size leaves them that size
+// (at 2.75rem, four of them took 352 px of a 375 px phone at 32 px text, and the field kept 55 px).
+const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-[44px] max-md:h-[44px] rounded-full text-text-secondary enabled:hover:text-accent enabled:hover:bg-surface-hover disabled:opacity-40 transition-colors cursor-pointer disabled:cursor-default";
 
 /**
  * The bar under a chat's header while its search is open (useChatSearch): the words, how many messages hold them and
  * which one is shown, ↑ for an older match and ↓ for a newer one (Enter and Shift+Enter), ✕ or Escape to close (the focus
- * goes back to what had it before).
+ * goes back to what had it before). A screen reader hears the count with the match: who wrote it and the start of what
+ * it says, as the chat reads out a message that comes in (`nameOf`, `appCards`, `noteLine`: MessageAnnouncer's).
  */
-export function ChatSearchBar({ search }: { search: ChatSearch }) {
+export function ChatSearchBar({ search, nameOf, appCards = false, noteLine }: {
+  search: ChatSearch;
+  nameOf(message: ChatMessage): string;
+  appCards?: boolean;
+  noteLine?(note: GroupPayNote): string | null;
+}) {
   const { t } = useI18n();
   const [info, setInfo] = useState(false);
   const infoId = useId();
@@ -51,17 +63,26 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
   if (!search.open) return null;
   const total = search.results.length;
   const searched = !!search.term.trim() && search.term === search.query;
+  const count = searched ? (total ? t("chat.search.count", { current: String(Math.max(search.place, 0) + 1), total: String(total) }) : t("chat.search.none")) : "";
+  // Before, only "2 of 5" was said, nothing of the message found. Once it is gone (deleted, edited away): the count alone.
+  const said = count && search.match ? t("chat.search.found", { position: count, name: nameOf(search.match), text: spokenShort(search.match, t, appCards, noteLine) }) : count;
   const more = t("common.moreInfo");
   return (
-    <div data-testid="chat-search" className="shrink-0 border-b border-border bg-panel-header px-3 py-1.5 max-md:px-2">
-      <div role="search" className="flex items-center gap-1">
-        <SearchIcon className="shrink-0 text-text-muted" />
+    <div data-testid="chat-search" className="chat-search-bar @container shrink-0 border-b border-border bg-panel-header px-3 py-1.5 max-md:px-2">
+      {/* On a phone the buttons' own 44 px keep them apart: the gaps go to the words, on the narrowest phone too. There
+          (under md, where they are 44 px) and under 28rem (a phone held upright) the count takes its own line under the
+          field, which keeps the field's width for the words in every language ("Nenhum resultado" left it 12 px at
+          320 px); under 20rem the magnifier gives its room too. Two panes keep one line: their 32 px buttons leave the
+          words room, and a phone on its side has 162 px above the keyboard, where a taller bar hid the message found. */}
+      <div role="search" className="flex items-center gap-1 max-md:gap-0 max-md:@max-[28rem]:flex-wrap">
+        <SearchIcon className="shrink-0 text-text-muted max-md:@max-[20rem]:hidden" />
         <input
           ref={search.inputRef}
           autoFocus
           type="search"
           data-testid="chat-search-input"
           value={search.query}
+          dir={draftDirection(search.query)}
           onChange={(e) => search.setQuery(e.target.value)}
           {...composition.inputProps}
           onKeyDown={(e) => {
@@ -73,9 +94,11 @@ export function ChatSearchBar({ search }: { search: ChatSearch }) {
           aria-label={t("chat.search.placeholder")}
           className="min-w-0 flex-1 rounded-md bg-transparent px-1.5 py-1 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring [&::-webkit-search-cancel-button]:hidden"
         />
-        <span data-testid="chat-search-count" role="status" aria-live="polite" className="shrink-0 px-1 text-xs tabular-nums text-text-muted">
-          {searched ? (total ? t("chat.search.count", { current: String(Math.max(search.index, 0) + 1), total: String(total) }) : t("chat.search.none")) : ""}
+        {/* The count as it is seen; a screen reader reads the line under it, the same count with the match. */}
+        <span data-testid="chat-search-count" aria-hidden="true" className="shrink-0 px-1 text-xs tabular-nums text-text-muted max-md:@max-[28rem]:order-last max-md:@max-[28rem]:basis-full max-md:@max-[28rem]:ps-5.5 max-md:@max-[20rem]:ps-1.5">
+          {count}
         </span>
+        <span data-testid="chat-search-said" role="status" aria-live="polite" className="sr-only">{said}</span>
         <button type="button" data-testid="chat-search-info" aria-expanded={info} aria-controls={infoId} aria-label={more} title={more} onClick={() => setInfo(!info)}
           className={`${button} aria-expanded:text-accent`}>
           <svg {...icon} width={15} height={15}><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>

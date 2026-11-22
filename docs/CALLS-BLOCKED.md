@@ -26,11 +26,19 @@ Ghostly doesn't run a TURN server for you yet. You can run your own, or use one 
 
 In **Settings, Network, TURN server**, enter:
 
-- **Address**: one or more addresses, separated by commas. For a network that only lets port 443 out, use TURN over TLS on 443:
+- **TURN server** (the field that starts with `turn:`): one or more addresses, separated by commas. For a network that only lets port 443 out, use TURN over TLS on 443:
   `turns:turn.example.org:443?transport=tcp, turn:turn.example.org:3478`
-- **Username** and **credential**: the ones your TURN server gives you.
+- **Username** and **Credential**: the ones your TURN server gives you.
 
 Then tap **Save** and call again. The person on the blocked network is the one who needs it; when both networks block UDP, both do.
+
+## When a TURN server is already set
+
+If the call still can't connect, it didn't get through your TURN server either. Check, in **Settings, Network, TURN server**:
+
+- **The address.** A `turn:` address on port 3478 doesn't get out of a network that only lets port 443 out. Add TURN over TLS on 443 (`turns:turn.example.org:443?transport=tcp`), and make sure the server listens there.
+- **The credential.** A wrong username or credential fails the same way as a blocked network. A restored backup leaves the credential out: the page then says **"Enter the credential again"**.
+- **Your contact's side.** When their network blocks UDP too, they may need a TURN server of their own.
 
 ## Running your own TURN server
 

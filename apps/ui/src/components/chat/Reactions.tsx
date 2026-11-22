@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { Fragment, useEffect, useRef, useState, type RefObject } from "react";
 import { QUICK_REACTIONS, reactionEmoji } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { Menu } from "../Menu";
@@ -6,7 +6,7 @@ import { EmojiTab } from "../composer/EmojiTab";
 import { SmileIcon } from "../composer/icons";
 import type { ReactionChip } from "../../lib/reactions";
 import { touchOnly } from "../../lib/touchOnly";
-import { listText } from "../../lib/listText";
+import { listParts, listText } from "../../lib/listText";
 
 /*
  * Reactions to a message (WISP 400 § Reactions), as the chat shows them: a quick bar of six and "+" for any emoji,
@@ -32,8 +32,7 @@ export function ReactionChips({ chips, onReact, align }: { chips: ReactionChip[]
   return (
     <div data-testid="reaction-chips" className={`relative flex flex-wrap gap-1 mt-[-6px] mb-1 z-[1] ${align === "end" ? "justify-end" : "justify-start"}`}>
       {chips.map(chip => {
-        const names = listText(chip.who, t);
-        const label = t("chat.reactions.chipLabel", { emoji: chip.emoji, names });
+        const label = t("chat.reactions.chipLabel", { emoji: chip.emoji, names: listText(chip.who, t) });
         return (
           <span key={chip.emoji} className="relative">
             <button type="button" data-testid="reaction-chip" data-emoji={chip.emoji} data-mine={chip.mine || undefined} aria-pressed={chip.mine} aria-label={label}
@@ -54,11 +53,13 @@ export function ReactionChips({ chips, onReact, align }: { chips: ReactionChip[]
               className={`inline-flex items-center gap-1 h-6 px-1.5 rounded-full border text-[13px] leading-none shadow-sm transition-colors cursor-pointer disabled:cursor-default ${
                 chip.mine ? "border-accent bg-accent/20 text-text-primary" : "border-border bg-surface-alt text-text-secondary hover:bg-surface-hover"}`}>
               <span aria-hidden="true">{chip.emoji}</span>
-              {chip.count > 1 && <span data-testid="reaction-count" aria-hidden="true" className="text-[11px] tabular-nums">{chip.count}</span>}
+              {chip.count > 1 && <span data-testid="reaction-count" aria-hidden="true" className="chat-text-tag tabular-nums">{chip.count}</span>}
             </button>
             {who === chip.emoji && (
               <span role="tooltip" data-testid="reaction-who" className={`absolute bottom-full mb-1 z-20 w-max max-w-[14rem] rounded-md border border-border bg-surface-alt px-2 py-1 text-xs text-text-primary shadow-lg whitespace-normal ${align === "end" ? "end-0" : "start-0"}`}>
-                <span aria-hidden="true" className="me-1">{chip.emoji}</span>{names}
+                <span aria-hidden="true" className="me-1">{chip.emoji}</span>
+                {/* Each name in its own direction: "Bob!" in an Arabic list is not "!Bob". */}
+                {listParts(chip.who, t).map((part, i) => part.item ? <bdi key={i}>{part.text}</bdi> : <Fragment key={i}>{part.text}</Fragment>)}
               </span>
             )}
           </span>
@@ -140,12 +141,12 @@ function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, on
         {QUICK_REACTIONS.map((emoji, i) => (
           <button key={emoji} type="button" data-testid="reaction-quick" data-emoji={emoji} aria-pressed={current === emoji} aria-label={emoji} title={emoji}
             {...roving(i)} onClick={() => choose(emoji)}
-            className={`w-9 h-9 max-md:w-11 max-md:h-11 rounded-full text-[22px] leading-none flex items-center justify-center transition-transform hover:scale-125 hover:bg-surface-hover cursor-pointer ${current === emoji ? "bg-accent/25" : ""}`}>
+            className={`w-9 h-9 max-md:w-[44px] max-md:h-[44px] rounded-full text-[22px] leading-none flex items-center justify-center transition-transform hover:scale-125 hover:bg-surface-hover cursor-pointer ${current === emoji ? "bg-accent/25" : ""}`}>
             {emoji}
           </button>
         ))}
         <button type="button" data-testid="reaction-more" aria-label={t("chat.reactions.more")} title={t("chat.reactions.more")} {...roving(QUICK_REACTIONS.length)} onClick={() => setMore(true)}
-          className="w-9 h-9 max-md:w-11 max-md:h-11 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-hover cursor-pointer">
+          className="w-9 h-9 max-md:w-[44px] max-md:h-[44px] rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-hover cursor-pointer">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
         </button>
       </div>

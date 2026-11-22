@@ -174,6 +174,23 @@ describe("picking", () => {
     expect((await host.pick("other/app", "Other", { folder: true, accept: [] })).map((e) => e.path)).toEqual(["Films/Up.mp4", "Films/Up.SRT", "Films/notes.txt"]);
   });
 
+  it("a picked folder whose own name starts with a dot links its files, as the Desktop's walk: hidden is what is under it", async () => {
+    const picked: PickedFile[] = [".Films/Up.mp4", ".Films/.DS_Store", ".Films/.trash/old.mp4", ".Films/S1/E01.mp4"].map((path) => ({ path, file: file("x") }));
+    const host = webLinkedFiles({ text: () => text, ask: async () => ({ files: picked }) });
+    expect((await host.pick(REF, "Cinema", { folder: true, accept: [] })).map((e) => e.path)).toEqual([".Films/Up.mp4", ".Films/S1/E01.mp4"]);
+    // Through the handle picker's walk too.
+    vi.stubGlobal("showDirectoryPicker", async () => fakeDir(".Films", { "Up.mp4": "a", ".hidden.mp4": "b", S1: { "E01.mp4": "c" } }, { permission: "granted", asked: 0 }));
+    try {
+      const walked = webLinkedFiles({ text: () => text, ask: (_app, folder, accept) => handlePicker(folder, accept) });
+      expect((await walked.pick(REF, "Cinema", { folder: true, accept: [] })).map((e) => e.path)).toEqual([".Films/Up.mp4", ".Films/S1/E01.mp4"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // A file picked on its own is still hidden by its own name, as the Desktop's `picked_files`.
+    const files = webLinkedFiles({ text: () => text, ask: async () => ({ files: [".bashrc", "Up.mp4"].map((path) => ({ path, file: file("x") })) }) });
+    expect((await files.pick(REF, "Cinema", { folder: false, accept: [] })).map((e) => e.path)).toEqual(["Up.mp4"]);
+  });
+
   it("keeps links per app, and never more than the limit", async () => {
     const host = webLinkedFiles({ text: () => text, ask: async () => ({ files: [{ path: "a.mp4", file: file("a") }] }) });
     await host.pick(REF, "Cinema", { folder: false, accept: [] });
@@ -240,15 +257,38 @@ describe("reading and forgetting", () => {
 });
 
 describe("the sheet's words", () => {
+  /** The app's or the folder's own words, isolated in the sentence. */
+  const own = (text: string) => `\u2068${text}\u2069`;
   it("are the person's language", () => {
     const pt = pickSheetText(translatorFor("pt"));
-    expect(pt.ask("Cinema", true)).toBe("Cinema pede para ler uma pasta");
+    expect(pt.ask("Cinema", true)).toBe(`${own("Cinema")} pede para ler uma pasta`);
     expect(pt.choose(false)).toBe("Escolher arquivos");
     expect(pt.cancel).toBe("Cancelar");
-    expect(pickSheetText(translatorFor("en")).note("Cinema")).toBe("Nothing is copied: Cinema reads what you pick, on this device.");
-    expect(pt.askAgain("Cinema", "Filmes", 0)).toBe("Cinema pede para ler “Filmes” de novo");
-    expect(pt.askAgain("Cinema", "Filmes", 23)).toBe("Cinema pede para ler “Filmes” e mais 23 de novo");
-    expect(pickSheetText(translatorFor("en")).askAgain("Cinema", "Films", 1)).toBe("Cinema asks to read “Films” and 1 more again");
+    expect(pickSheetText(translatorFor("en")).note("Cinema")).toBe(`Nothing is copied: ${own("Cinema")} reads what you pick, on this device.`);
+    expect(pt.askAgain("Cinema", "Filmes", 0)).toBe(`${own("Cinema")} pede para ler “${own("Filmes")}” de novo`);
+    expect(pt.askAgain("Cinema", "Filmes", 23)).toBe(`${own("Cinema")} pede para ler “${own("Filmes")}” e mais 23 de novo`);
+    expect(pickSheetText(translatorFor("en")).askAgain("Cinema", "Films", 1)).toBe(`${own("Cinema")} asks to read “${own("Films")}” and 1 more again`);
+  });
+
+  it("keep the page's direction whatever the app is called: a Hebrew title starts an English sheet, an English one an Arabic sheet", async () => {
+    for (const [language, app, folder] of [["en", "שחמט", "סרטים"], ["ar", "Cinema", "Films"]] as const) {
+      document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
+      const words = pickSheetText(translatorFor(language));
+      const host = webLinkedFiles({ text: () => words, picker: async () => null });
+      const pick = host.pick(REF, app, { folder: true, accept: [] });
+      const sheet = await shown("[data-testid=app-files-sheet]");
+      const [title, note] = [sheet.querySelector("h2")!, sheet.querySelector("p")!];
+      // Laid out by the page (its `dir`), never by the first letters, the app's: `dir="auto"` drew "asks to read a
+      // folder" right to left after a Hebrew title.
+      for (const line of [title, note]) expect(line.closest("[dir]")).toBe(document.documentElement);
+      expect(title.textContent).toBe(words.ask(app, true));
+      expect(title.textContent).toContain(own(app));
+      expect(note.textContent).toContain(own(app));
+      expect(words.askAgain(app, folder, 0)).toContain(own(folder));
+      (document.querySelector("[data-testid=app-files-cancel]") as HTMLButtonElement).click();
+      await expect(pick).rejects.toThrow(/^cancelled: /);
+    }
+    document.documentElement.removeAttribute("dir");
   });
 });
 

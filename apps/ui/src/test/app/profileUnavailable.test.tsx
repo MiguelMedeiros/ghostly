@@ -19,7 +19,7 @@ import { renderApp } from "../render";
 
 const NEWER: ProfileOpenFailure = { reason: "newer", supportedVersion: 11, storedVersion: 12, detail: "VersionError: The requested version (11) is less than the existing version (12)." };
 
-function renderGate(language?: "pt") {
+function renderGate(language?: "pt" | "ar") {
   return renderApp(
     <UpdateProvider>
       <ProfileGate>
@@ -41,8 +41,7 @@ describe("a profile that cannot be opened", () => {
     expect(screen.queryByTestId("profile-unavailable")).toBeNull();
 
     fail(NEWER);
-    const notice = screen.getByRole("alert");
-    expect(notice).toHaveAttribute("data-testid", "profile-unavailable");
+    const notice = screen.getByTestId("profile-unavailable");
     expect(notice).toHaveTextContent("This profile was last used by a newer version of Ghostly.");
     expect(notice).toHaveTextContent("Update the app to open it.");
     // The app is not there at all: no list to open, no composer whose message would go nowhere.
@@ -79,6 +78,46 @@ describe("a profile that cannot be opened", () => {
     await waitFor(() => expect(install).toHaveBeenCalledTimes(1));
   });
 
+  it("to a screen reader: its title is a heading, the alert says only why, and Check / Update are told in a short polite line", async () => {
+    let step: (progress: number) => void = () => {};
+    let found: (update: { version: string; apply: "restart" }) => void = () => {};
+    (fakeEngine as BrowserHost).updates = {
+      downloadUrl: "https://example.test/releases",
+      check: () => new Promise((resolve) => { found = resolve; }),
+      install: (_update, onProgress) => { step = onProgress ?? step; return new Promise(() => {}); },
+    };
+    saveSettings({ ...loadSettings(), checkForUpdates: false });
+    const view = renderGate();
+    fail(NEWER);
+    expect(screen.getByRole("heading", { level: 1, name: "This profile was last used by a newer version of Ghostly." })).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("This profile was last used by a newer version of Ghostly.");
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/^$/);
+    // Every change inside an assertive (and atomic) alert has the whole of it read again, cutting in.
+    let changes = 0;
+    new MutationObserver(() => { changes++; }).observe(alert, { subtree: true, childList: true, characterData: true, attributes: true });
+
+    await view.user.click(screen.getByRole("button", { name: "More info" }));
+    await view.user.click(screen.getByTestId("profile-unavailable-check"));
+    await waitFor(() => expect(status).toHaveTextContent("Checking"));
+    await act(async () => { found({ version: "9.9.9", apply: "restart" }); });
+    await view.user.click(await screen.findByTestId("profile-unavailable-update"));
+    await waitFor(() => expect(status).toHaveTextContent("Updating"));
+    // The button shows each percent; the line says them in tens (the desktop reports every chunk of the download).
+    const said: string[] = [];
+    new MutationObserver(() => { said.push(status.textContent ?? ""); }).observe(status, { subtree: true, childList: true, characterData: true });
+    for (const [progress, tens] of [[0.1, 10], [0.12, 10], [0.18, 10], [0.2, 20], [0.35, 30], [0.5, 50], [0.7, 70], [0.85, 80], [0.95, 90]] as const) {
+      await act(async () => step(progress));
+      expect(screen.getByTestId("profile-unavailable-update")).toHaveTextContent(`Downloading... ${Math.round(progress * 100)}%`);
+      expect(status).toHaveTextContent(`Downloading... ${tens}%`);
+    }
+    expect(said).toEqual(["10", "20", "30", "50", "70", "80", "90"].map((tens) => `Downloading... ${tens}%`));
+    await act(async () => {});
+    expect(changes).toBe(0);
+    expect(alert).not.toHaveTextContent(/Checking|Updating|Downloading|Nothing was opened/);
+  });
+
   it("says a stored version it could not read as above this app's", async () => {
     saveSettings({ ...loadSettings(), checkForUpdates: false });
     const view = renderGate();
@@ -113,6 +152,32 @@ describe("a profile that cannot be opened", () => {
     expect(story).toHaveTextContent("What the system said: UnknownError: Internal error opening backing store");
   });
 
+  // A part of the app that loads on demand whose file did not come while the peer started (offline at a reload): that
+  // read as a damaged profile ("Ghostly could not open this profile's data … Restart the app or the device").
+  it("a part of the app that did not download as it started: the app's words for that and a reload, not the profile's data", async () => {
+    const reload = vi.fn();
+    vi.stubGlobal("location", { ...location, reload });
+    try {
+      const view = renderGate();
+      fail({ reason: "failed", supportedVersion: 11, detail: "Failed to fetch dynamically imported module: https://app.example/assets/wallet-1a2b3c.js" });
+      const notice = screen.getByTestId("profile-unavailable");
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("This page did not load.");
+      expect(notice).toHaveTextContent("Check your connection, then try again. If it still fails, reload Ghostly.");
+      expect(notice).not.toHaveTextContent(/profile's data|Restart the app or the device|did not open/);
+      expect(screen.queryByTestId("profile-unavailable-reason")).toBeNull();
+      await view.user.click(screen.getByRole("button", { name: "More info" }));
+      const story = screen.getByTestId("profile-unavailable-text");
+      expect(story).toHaveTextContent("What the system said: Failed to fetch dynamically imported module: https://app.example/assets/wallet-1a2b3c.js");
+      expect(story).not.toHaveTextContent("profile data");
+      const retry = screen.getByTestId("profile-unavailable-retry");
+      expect(retry).toHaveTextContent("Try again");
+      await view.user.click(retry);
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("is said in the app's language", () => {
     renderGate("pt");
     fail(NEWER);
@@ -125,6 +190,15 @@ describe("a profile that cannot be opened", () => {
     renderGate();
     fail(NEWER);
     expect(screen.getByTestId("profile-unavailable-switch")).toHaveTextContent(`Switch to ${other.name}`);
+  });
+
+  // In a language of the other direction, a name's ending punctuation was drawn on its other side ("!Club").
+  it("names another profile in its own direction", () => {
+    createProfile("Club!");
+    renderGate("ar");
+    fail(NEWER);
+    const bdi = screen.getByTestId("profile-unavailable-switch").querySelector("bdi");
+    expect(bdi?.textContent).toBe("Club!");
   });
 
   it("goes when a peer that runs sends its state (the extension's, started again)", () => {

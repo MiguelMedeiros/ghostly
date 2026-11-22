@@ -6,6 +6,8 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const url = process.env.WEBSITE_URL;
 const port = 4401;
+// Chromium with its sandbox on (Playwright turns it off otherwise); E2E_CHROMIUM_SANDBOX=0 where the machine has none.
+const launchOptions = { chromiumSandbox: process.env.E2E_CHROMIUM_SANDBOX !== "0" };
 
 export default defineConfig({
   testDir: ".",
@@ -18,7 +20,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   // A failure leaves its page as it was (error-context.md beside it), which CI keeps: one seen once is still readable.
   // Not a trace: recording one for every test made the scene specs about a fifth slower.
-  use: { baseURL: url ?? `http://localhost:${port}`, screenshot: "only-on-failure" },
+  use: { baseURL: url ?? `http://localhost:${port}`, screenshot: "only-on-failure", launchOptions },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } }, testIgnore: /phone/ },
     { name: "phone", use: { ...devices["Pixel 7"] }, testMatch: /phone.*\.spec\.ts$/ },

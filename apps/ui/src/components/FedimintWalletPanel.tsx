@@ -7,9 +7,11 @@ import { useRun, downloadJson } from "./wallet/run";
 import { Select } from "./ui/Select";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { useI18n, type Translate } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
 import { satsIn, unitFor } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
 import { fillNodes } from "../lib/fillNodes";
+import { listText } from "../lib/listText";
 import { problemText } from "../lib/problemText";
 import { focusLost } from "../lib/focus";
 import { exactText } from "../lib/exactText";
@@ -52,7 +54,7 @@ function FederationFacts({ info, testId }: { info: Pick<FederationInfo, "federat
     <dt className="text-text-muted">{t("wallet.fedimint.facts.name")}</dt><dd className="text-text-primary" data-testid={`${testId}-name`}>{info.name ?? t("wallet.fedimint.facts.noName")}</dd>
     <dt className="text-text-muted">{t("wallet.fedimint.facts.id")}</dt><dd className="font-mono text-text-secondary break-all">{info.federationId}</dd>
     <dt className="text-text-muted">{t("wallet.panel.network")}</dt><dd className="text-text-secondary" data-testid={`${testId}-network`}>{info.network ?? t("wallet.fedimint.facts.unknown")}</dd>
-    <dt className="text-text-muted">{t("wallet.fedimint.facts.guardians")}</dt><dd className="text-text-secondary" data-testid={`${testId}-guardians`}>{t("wallet.fedimint.facts.guardianList", { count: info.guardians.length, names: info.guardians.map((g) => g.name).join(", ") })}</dd>
+    <dt className="text-text-muted">{t("wallet.fedimint.facts.guardians")}</dt><dd className="text-text-secondary" data-testid={`${testId}-guardians`}>{t("wallet.fedimint.facts.guardianList", { count: info.guardians.length, names: listText(info.guardians.map((g) => g.name), t) })}</dd>
     <dt className="text-text-muted">{t("wallet.fedimint.facts.consensus")}</dt><dd className="text-text-secondary">{t("wallet.fedimint.facts.consensusValue", { version: info.consensusVersion, modules: info.modules.join(", ") })}</dd>
     {info.welcome && <><dt className="text-text-muted">{t("wallet.fedimint.facts.says")}</dt><dd className="text-text-secondary">{info.welcome}</dd></>}
   </dl>;
@@ -126,7 +128,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
           <FederationFacts info={preview} testId="fedimint-preview-facts" />
           {!preview.modules.includes("ln") && <Notice tone="warning">{t("wallet.fedimint.noLightning")}</Notice>}
           <div className="flex gap-2">
-            <Button ref={joinButton} variant="primary" data-testid="fedimint-join" disabled={busy} loading={running === "join"} onClick={() => void run(async () => { const joined = await wallet.fedimintJoin(invite); setSelected(joined.id); setInvite(""); setPreview(null); }, "join")}>{running === "join" ? t("wallet.fedimint.joining") : preview.name ? t("wallet.fedimint.joinName", { name: preview.name }) : t("wallet.fedimint.joinThis")}</Button>
+            <Button ref={joinButton} variant="primary" data-testid="fedimint-join" disabled={busy} loading={running === "join"} onClick={() => void run(async () => { const joined = await wallet.fedimintJoin(invite); setSelected(joined.id); setInvite(""); setPreview(null); }, "join")}>{running === "join" ? t("wallet.fedimint.joining") : preview.name ? withName(t("wallet.fedimint.joinName", { name: NAME }), preview.name) : t("wallet.fedimint.joinThis")}</Button>
             <Button onClick={() => setPreview(null)}>{t("common.cancel")}</Button>
           </div>
         </div>}

@@ -70,6 +70,29 @@ describe("the app on a device that is not the active one", () => {
     expect(fakeEngine.calls.filter((call) => !String(call.method).startsWith("device"))).toEqual([]);
   });
 
+  it("drops an invite's keys and a group's link from the address and the history, opened before or after", async () => {
+    page.gate = standbyPage({ state: "standby" });
+    window.location.hash = `#/chat/${encodeInviteCode(createLink().invite)}`;
+    const depth = window.history.length;
+    render(<Root />);
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+    expect(window.history.length).toBe(depth);
+    // One opened while the standby screen is up: its own entry is replaced too, so Back never comes to it.
+    act(() => { window.location.hash = "#/join/group2/abc"; });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+    act(() => { window.location.hash = "#web%2Bghostly%3Aghostly1abc"; });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+    // With a doubled `#` before it (a `#` typed after the app's own `#/`) too.
+    for (const doubled of ["##/join/group2/abc", "#/#/join/group2/abc", `#/#/chat/${encodeInviteCode(createLink().invite)}`]) {
+      act(() => { window.location.hash = doubled; });
+      await waitFor(() => expect(window.location.hash).toBe("#/"));
+    }
+    // An ordinary page's address is left as it is.
+    act(() => { window.location.hash = "#/settings"; });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(window.location.hash).toBe("#/settings");
+  });
+
   it("the same link on a device that runs the profile is taken in (what the standby must not do)", async () => {
     window.location.hash = `#/chat/${encodeInviteCode(createLink().invite)}`;
     const before = Object.keys(localStorage).length;
@@ -142,6 +165,24 @@ describe("the standby screen", () => {
     renderApp(<DeviceStandby gate={{ state: "unreadable" }} />);
     await user.click(screen.getAllByTestId("device-standby-retry").slice(-1)[0]);
     await waitFor(() => expect(order).toEqual(["reload"]));
+  });
+
+  it("keeps what it said until the reload a move asks for: the device taking the profile never says it is on standby", async () => {
+    const reload = vi.fn();
+    vi.spyOn(window, "location", "get").mockReturnValue({ ...window.location, reload } as Location);
+    const view = renderApp(<DeviceStandby gate={{ state: "taking" }} />);
+    expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Finishing");
+    // The move is done (or its copy is installed): the engine asks for the reload with a bare standby view.
+    view.rerender(<DeviceStandby gate={{ state: "standby", reload: true }} />);
+    await waitFor(() => expect(reload).toHaveBeenCalled());
+    expect(screen.getByTestId("device-standby")).toHaveAttribute("data-state", "taking");
+    expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Finishing");
+    expect(screen.getByTestId("device-standby")).not.toHaveTextContent("This device is on standby for this profile.");
+    expect(screen.queryByRole("button", { name: "Use here" })).toBeNull();
+    view.unmount();
+    // A page whose first word is a reload (the active device giving the profile away) says that one.
+    renderApp(<DeviceStandby gate={{ state: "releasing", reload: true }} />);
+    expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Moving to another device");
   });
 
   it("leaves the person's other profiles one click away", () => {
@@ -239,6 +280,79 @@ describe("a device whose enrollment did not finish", () => {
     await user.click(screen.getByTestId("device-standby-finish"));
     await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     expect(screen.queryByTestId("device-standby-unfinished-notice")).toBeNull();
+  });
+});
+
+describe("the keyboard focus on the new device list and on Not finished", () => {
+  // A press waits on the engine: a disabled button there drops the focus to the page in a browser, so they stay focusable.
+  const held = <T,>() => { let release!: (value: T) => void; const promise = new Promise<T>((resolve) => { release = resolve; }); return { promise, release }; };
+
+  it("This is right keeps the focus on itself while it runs, takes no second press, and gives it to Use here when the list goes", async () => {
+    const seen = held<undefined>();
+    fakeEngine.on("deviceSetNoticeSeen", () => seen.promise);
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const noticed: DeviceGateView = { state: "standby", activeDevice: "MacBook", notice: ["MacBook", "iPhone"] };
+    const { user, rerender } = renderApp(<DeviceStandby gate={noticed} />);
+    const ok = screen.getByTestId("device-set-notice-ok");
+    ok.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(ok).toHaveAttribute("aria-busy", "true"));
+    expect(ok).not.toBeDisabled();
+    expect(ok).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByTestId("device-set-notice-wrong")).toHaveAttribute("aria-disabled", "true");
+    expect(document.activeElement).toBe(ok);
+    await user.keyboard("{Enter}");
+    expect(fakeEngine.callsTo("deviceSetNoticeSeen")).toEqual([{ wrong: false }]);
+    await act(async () => { seen.release(undefined); });
+    rerender(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    expect(screen.queryByTestId("device-set-notice")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("handoff-use-here"));
+  });
+
+  it("with no Use here to go to, the list that goes leaves the focus on the screen's title", async () => {
+    fakeEngine.on("deviceSetNoticeSeen", () => undefined);
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const { user, rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook", notice: ["MacBook"] }} />);
+    screen.getByTestId("device-set-notice-ok").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(fakeEngine.callsTo("deviceSetNoticeSeen")).toHaveLength(1));
+    // The screen moved on to a state with no Use here (a move under way on the other side).
+    rerender(<DeviceStandby gate={{ state: "taking", activeDevice: "MacBook" }} />);
+    expect(document.activeElement).toBe(screen.getByTestId("device-standby-title"));
+  });
+
+  it("This is wrong leaves the focus on Add this device when the list goes", async () => {
+    fakeEngine.on("deviceSetNoticeSeen", () => undefined);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const { user, rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook", notice: ["MacBook"] }} />);
+    screen.getByTestId("device-set-notice-wrong").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(fakeEngine.callsTo("deviceSetNoticeSeen")).toEqual([{ wrong: true }]));
+    rerender(<DeviceStandby gate={{ state: "removed", activeDevice: "MacBook", reenroll: true }} />);
+    expect(document.activeElement).toBe(screen.getByTestId("device-standby-reenroll"));
+  });
+
+  it("Try again keeps the focus on itself while it runs, takes no second press, and still has it when the other device has not listed this one", async () => {
+    const finish = held<{ finished: boolean }>();
+    fakeEngine.on("deviceEnrollFinish", () => finish.promise);
+    const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook", unfinished: true }} />);
+    const retry = screen.getByTestId("device-standby-finish");
+    retry.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(retry).toHaveAttribute("aria-busy", "true"));
+    expect(retry).not.toBeDisabled();
+    expect(screen.getByTestId("device-standby-remove")).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByTestId("device-standby-remove")).not.toBeDisabled();
+    await user.keyboard("{Enter}");
+    act(() => screen.getByTestId("device-standby-remove").click());
+    expect(fakeEngine.callsTo("deviceEnrollFinish")).toHaveLength(1);
+    expect(fakeEngine.callsTo("deviceEnrollRemove")).toEqual([]);
+    await act(async () => { finish.release({ finished: false }); });
+    expect(await screen.findByTestId("device-standby-unfinished-notice")).toHaveTextContent("has not listed this one yet");
+    expect(retry).not.toHaveAttribute("aria-busy");
+    expect(document.activeElement).toBe(retry);
   });
 });
 

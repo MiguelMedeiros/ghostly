@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { withoutQuarantine } from "./support/quarantine";
 
 // The end-to-end environment's variables (npm run e2e:infra:up writes them; see e2e/infra/env.mjs). Loaded
 // before anything reads the environment; a variable the shell already set wins.
@@ -9,6 +10,7 @@ if (existsSync(infraEnv)) process.loadEnvFile(infraEnv);
 
 const { OIDC_TEST_ISSUER } = await import("./support/oidcIssuer");
 const { ATPROTO_TEST_PLC } = await import("./support/atproto");
+const { CHROMIUM_SANDBOX } = await import("./support/chromiumSandbox");
 
 /**
  * End-to-end tests for Ghostly: real browsers, the shipped build, no servers.
@@ -17,16 +19,16 @@ const { ATPROTO_TEST_PLC } = await import("./support/atproto");
  * set (support/mint.ts), so nothing here needs the network except the tests
  * tagged @network (public chain servers, Breez's regtest; see README.md).
  *
- *   npm run e2e                       # everything, against a fresh build of the web app
- *   npm run e2e -- --grep-invert @network
- *   E2E_WEB_URL=https://app.ghostly.tools npm run e2e -- --project web   # a deployed app
- *   npm run e2e:ui                    # watch and debug
+ *   npm run test:e2e                  # everything, against a fresh build of the web app
+ *   npm run test:e2e:offline          # without the @network tests
+ *   E2E_WEB_URL=https://app.ghostly.tools npm run test:e2e -- --project web   # a deployed app
+ *   npm run test:e2e:ui               # watch and debug
  *   npm run e2e:full                  # every gated suite too, against e2e/infra (see e2e/README.md)
  */
 const deployed = process.env.E2E_WEB_URL;
 const port = Number(process.env.E2E_WEB_PORT || 4173);
 
-export default defineConfig({
+export default withoutQuarantine(defineConfig({
   testDir: ".",
   outputDir: "../test-results/e2e",
   // The headless CLI, built once before the workers start: a build in a worker empties its dist/ under the others' bots.
@@ -39,6 +41,9 @@ export default defineConfig({
   // Two peers find each other by polling every few seconds: messages take seconds, not milliseconds.
   timeout: 3 * 60_000,
   expect: { timeout: 60_000 },
+  // Time budgets (@perf, support/perfBudget.ts) fail at random on a shared runner: only the nightly E2E (perf) job runs
+  // them, with E2E_PERF=1. A --grep-invert given on the command line applies on top of this one.
+  grepInvert: process.env.E2E_PERF ? undefined : /@perf\b/,
   // On CI also a blob report: e2e.yml runs the suite in shards and merges their blobs into one HTML report.
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }], ["github"], ["blob", { outputDir: "../blob-report" }]]
@@ -49,6 +54,8 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
     actionTimeout: 30_000,
+    // The extension project's own launches inherit these; the web project's launchOptions replace them, so carry it too.
+    launchOptions: { chromiumSandbox: CHROMIUM_SANDBOX },
   },
   projects: [
     {
@@ -60,6 +67,7 @@ export default defineConfig({
         // routes: blocked here, allowed by the specs about it (web/pwa.spec.ts, `serviceWorkers` in openPeer).
         serviceWorkers: "block",
         launchOptions: {
+          chromiumSandbox: CHROMIUM_SANDBOX,
           args: [
             // Every peer is on this machine: let ICE use plain host addresses.
             "--disable-features=WebRtcHideLocalIpsWithMdns",
@@ -93,4 +101,4 @@ export default defineConfig({
         env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1",
           VITE_SERVICES_HOST: `http://*.localhost:${port}`, VITE_SERVICES_APP_ORIGIN: `http://localhost:${port}` },
       },
-});
+}));

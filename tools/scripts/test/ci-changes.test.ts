@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, supersededBy, testedAs } from "../ci-changes.mjs";
+import { DRAFT_GATE, HOLD, PACKAGES_READ_FROM_SITE, QUEUE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, queuedBehind, supersededBy, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -41,6 +41,62 @@ describe("the website gate", () => {
     expect(folders).toContain("docs/wisps");
     for (const file of files) expect(covers(WEBSITE_INPUTS, file), file).toBe(true);
     for (const folder of folders) expect(covers(WEBSITE_INPUTS, `${folder}/any.md`), `${folder}/`).toBe(true);
+  });
+
+  it("covers every repository file and folder the site's code opens from a folder: its tests, browser checks and build", () => {
+    // `resolve(__dirname, "../../../docs/…")` in a browser check, `join(root, "package.json")` in a test: a path joined
+    // to the file's own folder, or to a folder the file declares from it (`const root = fileURLToPath(new URL("../../../",
+    // import.meta.url))`, `const root = join(website, "../..")`). Its leading literals name the file or folder.
+    const site = "apps/website";
+    const code: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
+        const path = `${dir}/${entry.name}`;
+        if (["node_modules", ".next", "public", "test-results"].includes(entry.name) || path === `${site}/scripts/capture`) continue;
+        if (entry.isDirectory()) walk(path);
+        else if (/\.(ts|tsx|mts|js|mjs)$/.test(entry.name)) code.push(path);
+      }
+    };
+    walk(site);
+    const named: { file: string; path: string }[] = [];
+    const here = "dirname(fileURLToPath(import.meta.url))";
+    for (const file of code) {
+      const source = readFileSync(join(root, file), "utf8");
+      const folders = new Map([["__dirname", posix.dirname(file)], ["import.meta.dirname", posix.dirname(file)], [here, posix.dirname(file)]]);
+      /** The repository path an expression names, when it is a declared folder or one joined from it by literals. */
+      const at = (expr: string): string | undefined => {
+        const url = /^fileURLToPath\(new URL\("([^"]*)", import\.meta\.url\)\)$/.exec(expr);
+        if (url) return posix.join(posix.dirname(file), url[1]);
+        const joined = /^(?:join|resolve)\((.+?)((?:,\s*["'`][^"'`$]*["'`])+)\)$/.exec(expr);
+        const from = joined ? folders.get(joined[1].trim()) : folders.get(expr);
+        return joined && from !== undefined ? posix.join(from, ...[...joined[2].matchAll(/["'`]([^"'`]*)["'`]/g)].map((m) => m[1])) : from;
+      };
+      for (const m of source.matchAll(/^(?:export )?const (\w+) = (.+);$/gm)) {
+        const path = at(m[2]);
+        if (path !== undefined) folders.set(m[1], path);
+      }
+      for (const m of source.matchAll(/\b(?:join|resolve)\(\s*([\w.]+|dirname\(fileURLToPath\(import\.meta\.url\)\))((?:\s*,\s*["'`][^"'`$]*["'`])+)/g)) {
+        const from = folders.get(m[1]);
+        if (from !== undefined) named.push({ file, path: posix.join(from, ...[...m[2].matchAll(/["'`]([^"'`]*)["'`]/g)].map((l) => l[1])).replace(/\/$/, "") });
+      }
+    }
+    // Not the site itself, nor the root or apps/ it starts from. The deck's and the store readers' folders are read file
+    // by file (above).
+    const byFile = ["apps/ui/src/components", "packages/core/src"];
+    const outside = named.filter(({ path }) => path !== "." && !path.startsWith("../") && !`${site}/`.startsWith(`${path}/`) && !path.startsWith(`${site}/`) && !byFile.includes(path));
+    expect(outside).toEqual(
+      expect.arrayContaining([
+        { file: `${site}/e2e/launch-checklist.spec.ts`, path: "docs/assets/social-preview.png" },
+        { file: `${site}/e2e/agents-page.spec.ts`, path: "docs/AI-AGENTS.md" },
+        { file: `${site}/e2e/single-source.spec.ts`, path: "docs/wisps" },
+        { file: `${site}/scripts/shots-version.test.mjs`, path: "package.json" },
+      ]),
+    );
+    const uncovered = outside.filter(({ path }) => {
+      const kind = (() => { try { return statSync(join(root, path)).isDirectory() ? "folder" : "file"; } catch { return null; } })();
+      return !covers(WEBSITE_INPUTS, kind === "file" ? path : `${path}/any`);
+    });
+    expect(uncovered).toEqual([]);
   });
 });
 
@@ -130,6 +186,12 @@ describe("plan", () => {
     expect(plan(["docs/wisps/101-webrtc.md"], ready)).toMatchObject({ website: true, app: false });
   });
 
+  it("a file outside the site that its checks read runs them: the social preview, the root version", () => {
+    // launch-checklist.spec.ts checks the preview's size; shots-version.test.mjs the root package.json's version.
+    expect(plan(["docs/assets/social-preview.png"], ready)).toMatchObject({ website: true, website_e2e: true });
+    expect(plan(["package.json"], ready)).toMatchObject({ website: true, website_e2e: true, app: true, packages: true });
+  });
+
   it("a document the site does not publish runs neither", () => {
     expect(plan(["docs/TESTING.md"], ready)).toMatchObject({ website: false, app: false });
   });
@@ -151,12 +213,28 @@ describe("plan", () => {
     expect(plan(["apps/ui/src/App.tsx"], draft)).toMatchObject({ ...fast, rust: false, website: false });
   });
 
+  it("a draft's notice names the jobs its fast tier runs: Website and Tauri Backend when their gates are on", () => {
+    const notice = (files: string[] | null) => plan(files, draft).why.find((w) => w.startsWith("Draft:"));
+    expect(notice(["apps/ui/src/App.tsx"])).toBe("Draft: the fast tier only (lint and types, the affected unit tests). Leaving draft runs everything");
+    expect(notice(["apps/website/app/page.tsx"])).toBe("Draft: the fast tier only (lint and types, the affected unit tests, Website). Leaving draft runs everything");
+    expect(notice(["apps/desktop/src/lib.rs"])).toBe("Draft: the fast tier only (lint and types, the affected unit tests, Tauri Backend). Leaving draft runs everything");
+    expect(notice(["apps/website/app/page.tsx", "apps/desktop/src/lib.rs"])).toBe(
+      "Draft: the fast tier only (lint and types, the affected unit tests, Website, Tauri Backend). Leaving draft runs everything",
+    );
+    expect(notice(null)).toBe("Draft: the fast tier only (lint and types, the affected unit tests, Website). Leaving draft runs everything");
+  });
+
   it("draft or ready, the Rust jobs run only when Rust changed", () => {
     expect(plan(["apps/ui/src/App.tsx"], draft).rust).toBe(false);
     expect(plan(["apps/ui/src/App.tsx"], ready).rust).toBe(false);
     expect(plan(["apps/desktop/src/lib.rs"], ready).rust).toBe(true);
     expect(plan(["apps/desktop/src/lib.rs"], draft).rust).toBe(true);
     expect(plan(["Cargo.lock"], draft).rust).toBe(true);
+  });
+
+  it("a Rust toolchain bump alone runs the Rust jobs, so the new clippy and rustfmt are met before it merges", () => {
+    expect(plan(["rust-toolchain.toml"], ready).rust).toBe(true);
+    expect(plan(["rust-toolchain.toml"], draft).rust).toBe(true);
   });
 
   it("no file list (a push, too many files) turns every path gate on, and the tier still applies", () => {
@@ -199,7 +277,7 @@ describe("a push to dev whose tree a pull request already tested", () => {
     expect(job("changes")).toContain("lint: ${{ steps.plan.outputs.lint }}");
     expect(job("frontend-checks")).toMatch(/^ {4}needs: changes\n {4}if: needs\.changes\.outputs\.lint == 'true'$/m);
     expect(job("ci-success")).toContain("LINT: ${{ needs.changes.outputs.lint }}");
-    expect(job("ci-success")).toContain('! ok "$FRONTEND_CHECKS" "$LINT"');
+    expect(job("ci-success")).toContain('check "Frontend lint and types" "$FRONTEND_CHECKS" "$LINT"');
 
     const steps = job("tauri").split(/^(?= {6}- name: )/m).slice(1);
     const named = (name: string) => steps.findIndex((s) => s.startsWith(`      - name: ${name}\n`));
@@ -518,6 +596,138 @@ describe("a draft run whose pull request left draft after its event", () => {
   });
 });
 
+// A ready pull request that already has `queue` boards the merge train on its fast tier, and the batch's full run on the
+// base's tip is its gate: its own full run would only be cancelled by the train. One at the base's tip keeps the full
+// tier, since the train lands a lone pull request on its own run there.
+describe("a ready pull request labelled queue", () => {
+  const sha = "6".repeat(40);
+  const fake = (labels: string[], behind: number | undefined, base = "dev") => {
+    const asked: string[] = [];
+    const api = async (path: string) => {
+      asked.push(path);
+      if (path === "pulls/7") return { labels: labels.map((name) => ({ name })), base: { ref: base } };
+      if (path === `compare/${base}...${sha}`) return { behind_by: behind };
+      throw new Error(path);
+    };
+    return { api, asked };
+  };
+
+  it("plans the fast tier when its head is behind its base", async () => {
+    const { api, asked } = fake(["kind:fix", "queue"], 3);
+    expect(await queuedBehind({ pull: 7, sha, api })).toBe(3);
+    expect(asked).toEqual(["pulls/7", `compare/dev...${sha}`]);
+    expect(await queuedBehind({ pull: 7, sha, api: fake(["queue"], 1, "epic/calls").api })).toBe(1);
+  });
+
+  it("keeps the full tier without `queue`, so the merge train never sees a ready one it did not queue on the fast tier", async () => {
+    for (const labels of [[], ["queue:priority"], ["queue:hold"], ["queue:failed"]]) {
+      const { api, asked } = fake(labels, 3);
+      expect(await queuedBehind({ pull: 7, sha, api })).toBe(0);
+      expect(asked).toEqual(["pulls/7"]);
+    }
+  });
+
+  it("keeps the full tier at the base's tip: a lone pull request, rebased there by the train, lands on its own run", async () => {
+    expect(await queuedBehind({ pull: 7, sha, api: fake(["queue"], 0).api })).toBe(0);
+    expect(await queuedBehind({ pull: 7, sha, api: fake(["queue"], undefined).api })).toBe(0);
+  });
+
+  // Leaving draft once its fast tier passed: the feeder adds `queue` on its next pass, and the train would cancel a full
+  // run planned before that.
+  describe("without `queue` yet, its fast tier green on this head", () => {
+    const repo = "o/r";
+    const own = 900;
+    const runsPath = `actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sha}&per_page=100`;
+    const draftRun = (over: object = {}) => ({
+      id: 899,
+      head_sha: sha,
+      status: "completed",
+      conclusion: "success",
+      path: ".github/workflows/ci.yml",
+      head_repository: { full_name: repo },
+      pull_requests: [{ number: 7 }],
+      html_url: "https://github.com/o/r/actions/runs/899",
+      ...over,
+    });
+    /** `reads`: the pull request as each read of it finds it. */
+    const waiting = (reads: { labels?: string[]; draft?: boolean; head?: string }[], { behind = 3, runs = [draftRun()], gate = "CI Success (draft)" } = {}) => {
+      const asked: string[] = [];
+      let settled = 0;
+      let read = 0;
+      const api = async (path: string) => {
+        asked.push(path);
+        if (path === "pulls/7") {
+          const pr = reads[Math.min(read++, reads.length - 1)];
+          return { labels: (pr.labels ?? []).map((name) => ({ name })), draft: pr.draft ?? false, head: { sha: pr.head ?? sha }, base: { ref: "dev" } };
+        }
+        if (path === `compare/dev...${sha}`) return { behind_by: behind };
+        if (path === runsPath) return { workflow_runs: runs };
+        const job = path.match(/^actions\/runs\/(\d+)\/jobs\?per_page=100$/);
+        if (job) return { jobs: [{ name: gate, conclusion: "success" }] };
+        throw new Error(path);
+      };
+      const settle = async () => {
+        settled++;
+      };
+      return { asked, settled: () => settled, ask: () => queuedBehind({ pull: 7, sha, api, run: own, repo, settle, polls: 4 }) };
+    };
+
+    it("names the labels and the gate as the merge train does", async () => {
+      const train = await import("../merge-train.mjs");
+      expect([QUEUE, HOLD, DRAFT_GATE]).toEqual([train.LABEL.queue, train.HOLD, train.DRAFT_GATE]);
+    });
+
+    it("plans the fast tier when the feeder adds `queue` while it waits", async () => {
+      const { ask, asked, settled } = waiting([{}, {}, { labels: ["queue"] }]);
+      expect(await ask()).toBe(3);
+      expect(settled()).toBe(2);
+      expect(asked.slice(0, 4)).toEqual(["pulls/7", `compare/dev...${sha}`, runsPath, "actions/runs/899/jobs?per_page=100"]);
+    });
+
+    it("runs everything when `queue` does not come in time", async () => {
+      const { ask, settled } = waiting([{}]);
+      expect(await ask()).toBe(0);
+      expect(settled()).toBe(4);
+    });
+
+    it("stops waiting, and runs everything, on `queue:hold`, a draft again or another head", async () => {
+      for (const then of [{ labels: ["queue:hold"] }, { draft: true }, { head: "7".repeat(40) }]) {
+        const { ask, settled } = waiting([{}, then, { labels: ["queue"] }]);
+        expect(await ask()).toBe(0);
+        expect(settled()).toBe(1);
+      }
+    });
+
+    it("does not wait at the base's tip, held, or without a green fast tier of this pull request on this head", async () => {
+      for (const [reads, opts] of [
+        [[{}], { behind: 0 }],
+        [[{ labels: ["queue:hold"] }], {}],
+        [[{ labels: ["queue:priority", "queue:hold"] }], {}],
+        [[{}], { runs: [] }],
+        [[{}], { gate: "CI Success" }],
+        [[{}], { runs: [draftRun({ conclusion: "failure" })] }],
+        [[{}], { runs: [draftRun({ status: "in_progress", conclusion: null })] }],
+        [[{}], { runs: [draftRun({ id: own })] }],
+        [[{}], { runs: [draftRun({ pull_requests: [{ number: 8 }] })] }],
+        [[{}], { runs: [draftRun({ head_repository: { full_name: "fork/r" } })] }],
+        [[{}], { runs: [draftRun({ path: ".github/workflows/other.yml" })] }],
+      ] as const) {
+        const { ask, settled } = waiting([...reads, { labels: ["queue"] }], opts);
+        expect(await ask(), JSON.stringify([reads, opts])).toBe(0);
+        expect(settled()).toBe(0);
+      }
+    });
+  });
+
+  it("names the queue and the batch in its notice, not leaving draft", () => {
+    const notice = plan(["apps/website/app/page.tsx"], { draft: true, queued: true }).why.find((w) => w.startsWith("Queued"));
+    expect(notice).toBe(
+      "Queued and behind its base: the fast tier only (lint and types, the affected unit tests, Website). The merge train boards it on this run, and its batch's full run is the gate",
+    );
+    expect(plan(["apps/ui/src/App.tsx"], { draft: true, queued: true })).toMatchObject({ full: false, affected: true, packages: false, app: false });
+  });
+});
+
 // A green "CI Success (draft)" lets a ready pull request board the merge train, which then cancels its full run: the
 // notice must not send a ready one to `gh pr ready`, nor name that full run as where the required check comes from.
 describe("the notice of a green fast tier", () => {
@@ -531,11 +741,14 @@ describe("the notice of a green fast tier", () => {
   const bash = (text: string, env: Record<string, string>, path?: string) =>
     spawnSync("bash", ["-c", text], { encoding: "utf8", env: { PATH: path ?? process.env.PATH ?? "", ...env } });
 
-  /** `changes`' outputs when the API says the pull request is ready, with leaving draft's run behind or not. */
-  const planned = (payloadDraft: string, apiDraft: string, behind: boolean) => {
+  /**
+   * `changes`' outputs when the API says the pull request is ready, with leaving draft's run behind or not, and queued
+   * behind its base or not.
+   */
+  const planned = (payloadDraft: string, apiDraft: string, behind: boolean, queued = false) => {
     const dir = mkdtempSync(join(tmpdir(), "ci-notice-"));
     writeFileSync(join(dir, "gh"), `#!/bin/sh\necho ${apiDraft}\n`, { mode: 0o755 });
-    writeFileSync(join(dir, "node"), `#!/bin/sh\ncase "$*" in *--draft-behind*) exit ${behind ? 0 : 1};; esac\n`, { mode: 0o755 });
+    writeFileSync(join(dir, "node"), `#!/bin/sh\ncase "$*" in *--draft-behind*) exit ${behind ? 0 : 1};; *--queued-behind*) exit ${queued ? 0 : 1};; esac\n`, { mode: 0o755 });
     const output = join(dir, "output");
     writeFileSync(output, "");
     const run = bash(script("changes", "Which jobs this change needs"), { EVENT: "pull_request", PAYLOAD_DRAFT: payloadDraft, CHANGED: "0", GITHUB_OUTPUT: output }, `${dir}:${process.env.PATH}`);
@@ -543,12 +756,12 @@ describe("the notice of a green fast tier", () => {
     return Object.fromEntries(readFileSync(output, "utf8").trim().split("\n").map((l) => l.split("=")));
   };
 
-  const gate = (draft: string, leftDraft: string) => {
+  const gate = (draft: string, leftDraft: string, queued = "") => {
     // The fast tier: lint and the affected tests passed, every other job skipped as its gate said.
-    const skipped = ["FRONTEND_TESTS", "FRONTEND_BUILD", "PACKAGES_TESTS", "CLI_ARM64", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"].map((j) => [j, "skipped"]);
+    const skipped = ["FRONTEND_TESTS", "FRONTEND_BUILD", "PACKAGES_TESTS", "INTEGRATION_TESTS", "CLI_ARM64", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"].map((j) => [j, "skipped"]);
     const off = ["RUST", "WEBSITE_GATE", "WEBSITE_E2E_GATE", "APP", "PACKAGES"].map((g) => [g, "false"]);
     const ok = { ...Object.fromEntries([...skipped, ...off]), CHANGES: "success", FRONTEND_CHECKS: "success", AFFECTED: "success", LINT: "true", AFFECTED_GATE: "true" };
-    const run = bash(script("ci-success", "Check all jobs passed"), { ...ok, DRAFT: draft, LEFT_DRAFT: leftDraft, FULL: "false", TESTED: "false" });
+    const run = bash(script("ci-success", "Check all jobs passed"), { ...ok, DRAFT: draft, LEFT_DRAFT: leftDraft, QUEUED: queued, FULL: "false", TESTED: "false" });
     expect(run.status, run.stdout).toBe(0);
     return run.stdout.split("\n").filter((l) => l.startsWith("::notice::"));
   };
@@ -570,5 +783,57 @@ describe("the notice of a green fast tier", () => {
       "::notice::Left draft after this run started: the fast tier passed, and the full run waits behind this one. The merge train may board it on this run and cancel that full run; the batch's run is the check that counts.",
     ]);
     expect(notices.join()).not.toContain("gh pr ready");
+  });
+
+  it("gives a ready one with `queue` behind its base the fast tier and the draft's gate, and one without the full tier", () => {
+    expect(planned("false", "false", false, true)).toEqual({ draft: "true", queued: "true" });
+    expect(planned("false", "false", false, false)).toEqual({ draft: "false" });
+    // A draft, or one that left draft with leaving draft's run behind, is the fast tier already: the queue is not asked.
+    expect(planned("true", "true", false, true)).toEqual({ draft: "true" });
+    expect(planned("true", "false", true, true)).toEqual({ draft: "true", left_draft: "true" });
+    expect(job("changes")).toContain("queued: ${{ steps.plan.outputs.queued }}");
+    expect(job("ci-success")).toContain("QUEUED: ${{ needs.changes.outputs.queued }}");
+    const notices = gate("true", "", "true");
+    expect(notices).toEqual([
+      "::notice::Queued and behind its base: the fast tier passed. The merge train boards it on this run, and its batch's full run is the check that counts (alone, the train rebases it onto the tip, where it gets the full tier).",
+    ]);
+    expect(notices.join()).not.toContain("gh pr ready");
+  });
+});
+
+// The run page shows the gate's ::error:: lines and "exit code 1": a plain echo of every job's result was not among them.
+describe("the errors of a red CI Success", () => {
+  const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+  const job = (id: string) => ci.match(new RegExp(`^  ${id}:\n[\\s\\S]*?(?=^  [\\w-]+:\n|(?![\\s\\S]))`, "m"))?.[0] ?? "";
+  const body = job("ci-success").split("      - name: Check all jobs passed\n")[1]?.split(/^ {8}run: \|\n/m)[1] ?? "";
+  const script = body.split(/\n(?! {10}| *\n)/)[0].replace(/^ {10}/gm, "");
+  /** The full tier on a ready pull request with app changes: every job ran and passed, but for `results`. */
+  const gate = (results: Record<string, string>) => {
+    const jobs = ["FRONTEND_CHECKS", "FRONTEND_TESTS", "PACKAGES_TESTS", "INTEGRATION_TESTS", "CLI_ARM64", "FRONTEND_BUILD", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"];
+    const plan = { CHANGES: "success", DRAFT: "false", TESTED: "false", FULL: "true", AFFECTED_GATE: "false", AFFECTED: "skipped", LINT: "true", PACKAGES: "true", RUST: "true", WEBSITE_GATE: "true", WEBSITE_E2E_GATE: "true", APP: "true" };
+    const run = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", ...plan, ...Object.fromEntries(jobs.map((j) => [j, "success"])), ...results } });
+    return { status: run.status, errors: run.stdout.split("\n").filter((l) => l.startsWith("::error::")) };
+  };
+
+  it("names each job that failed, or was skipped while the change needs it", () => {
+    expect(gate({})).toEqual({ status: 0, errors: [] });
+    expect(gate({ TAURI: "failure", WEBSITE_E2E: "skipped" })).toEqual({
+      status: 1,
+      errors: ["::error::Tauri Backend ended failure", "::error::Website browser checks was skipped, but this change needs it"],
+    });
+    // The package tests that start real peers run in their own job: a run that skipped it did not test the packages.
+    expect(gate({ INTEGRATION_TESTS: "skipped" })).toEqual({ status: 1, errors: ["::error::Integration tests was skipped, but this change needs it"] });
+  });
+
+  it("names the range of the draft's unit test groups, since their one result does not say which failed", () => {
+    const draft = { DRAFT: "true", FULL: "false", AFFECTED_GATE: "true", FRONTEND_TESTS: "skipped", FRONTEND_BUILD: "skipped" };
+    expect(gate({ ...draft, AFFECTED: "failure" })).toEqual({ status: 1, errors: ["::error::Affected unit tests (draft 1/4 to 4/4): one or more groups ended failure"] });
+    expect(gate({ ...draft, AFFECTED: "skipped" })).toEqual({ status: 1, errors: ["::error::Affected unit tests (draft 1/4 to 4/4) was skipped, but this change needs it"] });
+  });
+
+  it("blames Changed paths, not the plan, when that job did not pass", () => {
+    // Every output of `changes` is empty then.
+    const empty = { DRAFT: "", FULL: "", AFFECTED_GATE: "", LINT: "", PACKAGES: "", RUST: "", WEBSITE_GATE: "", WEBSITE_E2E_GATE: "", APP: "", TESTED: "" };
+    expect(gate({ ...empty, CHANGES: "failure" })).toEqual({ status: 1, errors: ["::error::Changed paths ended failure, so this run has no plan: see that job"] });
   });
 });

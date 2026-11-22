@@ -30,7 +30,15 @@ export function formatAmount(amount: number, language: Language = "en"): string 
  * "1.234,5" in Portuguese. The whole part goes through Intl as a bigint, the fraction digits are kept as written.
  */
 export function formatTokenAmount(value: number | string, decimals: number | undefined, language: Language = "en"): string {
-  const [whole, fraction] = formatPaymentAmount(value, decimals).split(".");
+  return formatDecimal(formatPaymentAmount(value, decimals), language);
+}
+
+/**
+ * A plain decimal as the engine writes it ("1234.50": a point, no grouping) in `language`, every digit kept: "1,234.50"
+ * in English, "1.234,50" in Portuguese. Never through a Number, so 18 decimals or a huge whole part lose nothing.
+ */
+export function formatDecimal(text: string, language: Language = "en"): string {
+  const [whole, fraction] = text.split(".");
   const format = numberFormat(language);
   const wholeText = format.format(BigInt(whole));
   if (!fraction) return wholeText;
@@ -45,10 +53,18 @@ export function decimalPoint(language: Language = "en"): "." | "," {
 
 /**
  * What an amount field keeps of what was typed: digits, points, commas and spaces, as typed. The field shows the
- * person's own writing ("1.000,5" in Portuguese); `readAmount` says what it means.
+ * person's own writing ("1.000,5" in Portuguese); `readAmount` says what it means. Arabic-Indic and full-width digits
+ * (an Arabic keyboard, a Japanese or Chinese IME left on) become Latin ones, as `formatAmount` writes them; the Arabic
+ * decimal point (\u066b) becomes `language`'s and the Arabic grouping mark (\u066c) the other mark; full-width "\uff0e" and "\uff0c" the
+ * ASCII ones.
  */
-export function amountInput(text: string): string {
-  return text.replace(/[^0-9.,\s\u00a0\u202f]/g, "");
+export function amountInput(text: string, language: Language = "en"): string {
+  const point = decimalPoint(language);
+  return text
+    .replace(/[\u0660-\u0669\u06f0-\u06f9\uff10-\uff19]/g, (d) => String(d.charCodeAt(0) % 16)) // each run starts at a multiple of 16
+    .replace(/\u066b/g, point).replace(/\u066c/g, point === "," ? "." : ",")
+    .replace(/\uff0e/g, ".").replace(/\uff0c/g, ",")
+    .replace(/[^0-9.,\s\u00a0\u202f]/g, "");
 }
 
 /** What an amount typed means, as "1000.5" (a point, no grouping; "" for nothing typed), or why it cannot be read. */

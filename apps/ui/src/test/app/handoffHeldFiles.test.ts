@@ -87,7 +87,8 @@ describe("a taker copies the files its frozen copy holds into its staging", () =
     await staging.copyHeld([{ fromId: "chat1-out-photo", file }]);
 
     expect(await staging.held()).toEqual([file]);
-    expect(storage.files.get(`${staging.database}/chat1-out-photo`)).toEqual(bytes);
+    // Left on its record: `restore` puts that Blob on the staged one, nothing of it is written to file storage.
+    expect(storage.files.has(`${staging.database}/chat1-out-photo`)).toBe(false);
   });
 
   it("a large file in file storage", async () => {
@@ -149,13 +150,15 @@ describe("a taker copies the files its frozen copy holds into its staging", () =
     try {
       await staging.copyHeld(files.map((file) => ({ fromId: file.id, file })));
 
-      expect(opened.mock.calls.map(([name]) => name)).toEqual(["ghostly"]);
+      // The frozen copy once, and the staging's notes once.
+      expect(opened.mock.calls.map(([name]) => name)).toEqual(["ghostly", "ghostly-staging"]);
       expect(listed).toHaveBeenCalledTimes(1);
       // The twenty in file storage, one read each: the digest is of the bytes as they are copied.
       expect(storage.calls).toEqual({ read: 20, digest: 0 });
     } finally { opened.mockRestore(); listed.mockRestore(); }
-    expect(await staging.held()).toEqual(files);
-    for (const file of held) expect(storage.files.get(`${staging.database}/${file.id}`)).toEqual(file.bytes);
+    expect(await staging.held()).toEqual(expect.arrayContaining(files));
+    expect(await staging.held()).toHaveLength(files.length);
+    for (const file of held) expect(storage.files.get(`${staging.database}/${file.id}`)).toEqual(file.blob ? undefined : file.bytes);
   });
 });
 

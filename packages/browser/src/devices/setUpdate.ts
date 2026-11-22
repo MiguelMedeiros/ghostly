@@ -1,4 +1,4 @@
-import { fromBase64Url, readSetUpdate, readTurnPacket, toBase64Url, turnKeys, verifySetUpdate, type DeviceFrame, type TurnKeys, type TurnRecord } from "@ghostly/core";
+import { fromBase64Url, readSetUpdate, readTurnPacket, toBase64Url, turnKeys, verifySetUpdate, type DeviceFrame, type TurnRecord } from "@ghostly/core";
 import { MAX_DEVICES, MAX_EARLIER_SETS, type DevicePatch, type DeviceRecord, type DeviceSlot, type SetNotice } from "./state";
 
 /*
@@ -13,15 +13,17 @@ import { MAX_DEVICES, MAX_EARLIER_SETS, type DevicePatch, type DeviceRecord, typ
  *
  * - signed by another key (the removed device, any holder of the old `D`), or by the stored active device when the
  *   tombstone no longer lists it: refused. A `moving` device then shows "Your devices changed while this one was off.
- *   Add this device again" and is enrolled anew; it still takes a valid `set-update` that comes later;
- * - a valid tombstone that no longer lists this device: it is `removed`, whoever wrote it, as a tombstone read from the
- *   network says;
+ *   Add this device again" and is enrolled anew; it still takes a valid `set-update` that comes later. A device that
+ *   was the active one is not: it believes no other device, and a set of its own is its way out;
+ * - a valid tombstone that no longer lists this device: it is `removed` when the device it believes signed the frame,
+ *   as a tombstone read from the network says. From any other key it is refused, and ends nothing;
  * - a `moving` device kept the tombstone it read from the network: the device it believes must be listed there too, not
  *   only in the tombstone the frame carries, which any holder of the old `D` (the removed device included) can write;
- * - the device it believes is its stored active device, or the one a record the frame carries (`rec`, the remover's
- *   last record at the old address) shows took the turn from it by a release that device signed. A tombstone hides
- *   every record, so a device that stays and did not look while the turn was handed over can read that record nowhere
- *   else. A forced takeover carries no release, and is not believed this way: such a device was off across a takeover;
+ * - the device it believes is its stored active device, and no other. A record the frame carries (`rec`, which older
+ *   builds send) moves nothing: a release its stored active device once signed stays valid after that device took the
+ *   turn back and removed its taker, and a tombstone hides every later record, so such a record cannot tell the
+ *   remover from a device removed since. A device that did not read a handoff before the tombstone is treated as one
+ *   off across a takeover: "Add this device again";
  * - accepted: the device is `standby` under the new `D` with the set the frame names, holds no turn packet of the new
  *   set until it reads the remover's record there, and shows the new device list once (`setNotice`). It keeps the
  *   frame beside the old `D`, to forward unchanged to a device that stays and was off (other holders of `D'` sign
@@ -44,7 +46,7 @@ export type SetUpdateRefusal =
   | "unlisted"
   /** The set it names is not the devices the tombstone keeps, or does not keep this device in its slot. */
   | "set"
-  /** The tombstone does not list this device: it was removed. */
+  /** The tombstone does not list this device, and the device it believes signed the frame: it was removed. */
   | "removed";
 
 export type SetUpdateCheck =
@@ -70,28 +72,9 @@ export function storedActiveListed(record: DeviceRecord, tombstone: TurnRecord):
 
 const listedIn = (record: TurnRecord, key: string): boolean => record.slots.some((slot) => !!slot && toBase64Url(slot.key) === key);
 
-/**
- * The device this device believes for a `set-update` signed by `by`: its stored active device; or `by`, when `rec` is a
- * valid ordinary record at the old address, newer than the one stored here, written by `by` as the active device, with
- * a release that the stored active device signed (WISP 06 § Record: a release names its taker). Null when it has none.
- */
-function believed(record: DeviceRecord, oldKeys: TurnKeys, by: string, rec: Uint8Array | undefined): string | null {
-  const stored = record.activeSlot === undefined || record.activeSlot === record.ownSlot ? undefined : record.deviceSet[record.activeSlot]?.key;
-  if (!stored) return null;
-  if (by === stored || !rec) return stored;
-  const carried = readTurnPacket(oldKeys, rec);
-  if (carried.kind !== "valid" || carried.record.tombstone) return stored;
-  const r = carried.record;
-  const author = r.slots[r.author], release = r.release;
-  if (!author || toBase64Url(author.key) !== by || !release || release.from === release.to) return stored;
-  // `readTurnPacket` checked the release's signature against the key in slot `from`: that key must be the one believed.
-  if (toBase64Url(r.slots[release.from]!.key) !== stored) return stored;
-  const held = record.turnPacket ? readTurnPacket(oldKeys, fromBase64Url(record.turnPacket)) : null;
-  if (held?.kind === "valid" && carried.sequence <= held.sequence) return stored;
-  // With no packet stored (a device that never read one, or whose packet is not a record here), the stored turn is the
-  // floor: a real release from an earlier turn, replayed, says nothing about who holds the turn now.
-  if (held?.kind !== "valid" && r.turn <= record.turn) return stored;
-  return by;
+/** The device this device believes for a `set-update`: its stored active device. Null when it has none, or is it. */
+function believed(record: DeviceRecord): string | null {
+  return record.activeSlot === undefined || record.activeSlot === record.ownSlot ? null : record.deviceSet[record.activeSlot]?.key ?? null;
 }
 
 /** The rule above, for `frame` reaching a device whose record is `record`. `now`: when, for the notice. */
@@ -109,12 +92,14 @@ export function checkSetUpdate(record: DeviceRecord | null, frame: DeviceFrame, 
   // A tombstone for another address (a frame of an earlier set, forwarded late) says nothing about this one.
   if (read.kind !== "valid" || !read.record.tombstone) return refuse("tombstone");
   const tomb = read.record;
-  if (!tomb.slots.some((slot) => !!slot && toBase64Url(slot.key) === own)) return refuse("removed");
   // A signature that does not verify says nothing about who is believed: refused, and no more than that.
   if (!verifySetUpdate(update, oldKeys.address)) return refuse("signature");
   const by = toBase64Url(update.by);
-  const active = believed(record, oldKeys, by, update.rec);
-  if (!active || by !== active) return refuse("signer", true);
+  const active = believed(record);
+  // A tombstone that does not list this device ends it only from the device it believes; any slot can sign one.
+  if (!listedIn(tomb, own)) return active && by === active ? refuse("removed") : refuse("signer");
+  // A device that was the active one believes no other: it waits for nothing, and its way out is a set of its own.
+  if (!active || by !== active) return refuse("signer", record.activeSlot !== record.ownSlot);
   if (!listedIn(tomb, active)) return refuse("unlisted", true);
   // The tombstone this device read from the network decides too: the frame's own may be one the removed device wrote.
   if (record.tombstone) {

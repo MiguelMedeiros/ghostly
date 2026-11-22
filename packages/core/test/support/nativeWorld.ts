@@ -20,7 +20,7 @@ interface End extends FrameChannel {
   hear(): void;
 }
 
-interface Entry { name: string; endpoint: NativeEndpoint; identity: string; closed: boolean; ends: End[] }
+interface Entry { name: string; endpoint: NativeEndpoint; identity: string; closed: boolean; ends: End[]; quietSince: number }
 
 const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), b => b.toString(16).padStart(2, "0")).join("");
 
@@ -41,6 +41,14 @@ export class NativeWorld {
   /** Apps asleep (a phone that put a backgrounded app to sleep): dials to them do not reach them, and fail after `dialFailMs`. */
   asleep = new Set<string>();
   idleMs = 30_000;
+  /**
+   * HyperDHT announces an endpoint only while none of its channels is live (endpoint.mjs), and again once the last one
+   * closed: a dial to one that holds a channel, or whose last one closed less than `announceMs` ago, finds no announce
+   * and fails after `notFoundMs` with hyperdht's PEER_NOT_FOUND. Off, every running endpoint is found.
+   */
+  unannouncedWhileLive = false;
+  announceMs = 300;
+  notFoundMs = 100;
   /**
    * Apps whose next dial connects and then carries nothing: the handshake went through, and no frame or close crosses
    * after it, either way; each end closes when its idle timeout (`idleMs`) runs out (the Linux Desktop dialling the web
@@ -73,7 +81,7 @@ export class NativeWorld {
   endpoint(transport: NativeTransport, name: string): NativeEndpoint {
     const id = `${name}:${transport}`;
     const identity = this.key(transport, name);
-    const entry: Entry = { name, identity, closed: false, ends: [], endpoint: null as unknown as NativeEndpoint };
+    const entry: Entry = { name, identity, closed: false, ends: [], quietSince: 0, endpoint: null as unknown as NativeEndpoint };
     const key = this.hexIds ? identity : id;
     const descriptor = transport === "hyperdht/1" ? { publicKey: key } : { id: key, relay: "https://relay.test./", addresses: [] };
     entry.endpoint = {
@@ -86,6 +94,11 @@ export class NativeWorld {
           this.dialFailures++;
           await after(this.dialFailMs);
           throw new Error(`${transport}: the contact's endpoint did not answer`);
+        }
+        if (this.unannouncedWhileLive && transport === "hyperdht/1" && (remote.ends.length || Date.now() - remote.quietSince < this.announceMs)) {
+          this.dialFailures++;
+          await after(this.notFoundMs);
+          throw new Error("PEER_NOT_FOUND: Peer not found");
         }
         await after(this.dialMs);
         if (remote.closed || entry.closed || this.find(d.id ?? d.publicKey ?? "") !== remote) { this.dialFailures++; throw new Error(`${transport}: the contact's endpoint went away`); }
@@ -153,6 +166,7 @@ export class NativeWorld {
           if (end.closed) return;
           end.closed = true;
           owner.ends = owner.ends.filter(e => e !== end);
+          if (!owner.ends.length) owner.quietSince = Date.now();
           end.onClose?.();
           // The close reaches the other end a moment later, unless this app is gone (its end is dead).
           if (!end.dead) setTimeout(() => end.peer.hear(), this.latencyMs);
@@ -162,6 +176,7 @@ export class NativeWorld {
           if (end.closed) return;
           end.closed = true;
           owner.ends = owner.ends.filter(e => e !== end);
+          if (!owner.ends.length) owner.quietSince = Date.now();
           end.onClose?.();
         },
       };

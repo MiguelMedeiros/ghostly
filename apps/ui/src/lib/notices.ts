@@ -11,6 +11,7 @@ const NEXT: Partial<Record<TranslationKey, TranslationKey>> = {
   "devices.fail.inUse": "devices.fail.inUseNext",
   "devices.fail.unreached": "devices.fail.unreachedNext",
   "devices.handoff.fail.mainnet": "devices.handoff.fail.mainnetNext",
+  "devices.handoff.fail.refused": "devices.handoff.fail.refusedNext",
   "devices.handoff.fail.stalled": "devices.handoff.fail.stalledNext",
   "devices.takeover.fail.noCopy": "devices.takeover.fail.noCopyNext",
   "devices.takeover.fail.changed": "devices.takeover.fail.changedNext",

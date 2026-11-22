@@ -72,13 +72,13 @@ describe("reclaim", () => {
     expect(state("p1")?.token).toBeUndefined();
   });
 
-  it("calls a spent token settled only while the payment is still pending", async () => {
+  it("calls a spent token settled while the payment still waits on the contact, or was refused and kept its token", async () => {
     const { desk, wallet, state } = await setup([sentPayment, { ...sentPayment, id: "p2", state: "failed" }]);
     wallet.receiveToken.mockRejectedValue(new Error("Token already spent"));
     await desk.reclaim("p1");
     await desk.reclaim("p2");
     expect(state("p1")).toMatchObject({ state: "settled" });
-    expect(state("p2")).toMatchObject({ state: "failed" });
+    expect(state("p2")).toMatchObject({ state: "settled", token: undefined });
   });
 });
 
@@ -350,6 +350,21 @@ describe("paying on Ark or USDT without a request", () => {
         expect(fresh.sent, JSON.stringify(bad)).toEqual([]);
       }
       expect(other.sent).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("after the device clock goes back an hour, the contact's next ask is answered, not an hour later", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: 10 * 3_600_000 });
+    try {
+      const { d, sent } = desk();
+      await d.start();
+      const ask = (n: number) => d.onPaymentAsk("l1", { id: `ask_00000${n}`, timestamp: n, amount: { value: "10", asset: "sat" }, method: "arkade" });
+      await ask(1);
+      vi.setSystemTime(9 * 3_600_000 + 60_000);
+      await ask(2);
+      expect(sent.map((s) => s.frame.ask)).toEqual(["ask_000001", "ask_000002"]);
+      await ask(3);
+      expect(sent, "the pace holds from the new now").toHaveLength(2);
     } finally { vi.useRealTimers(); }
   });
 

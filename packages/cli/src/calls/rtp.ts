@@ -59,6 +59,11 @@ export class RtpWriter {
     this.timestamp = (this.timestamp + TICKS_PER_FRAME) >>> 0;
     return Buffer.concat([header, payload]);
   }
+
+  /** Moves the timestamp on by frames that were never sent (their time went by), the sequence as it is. */
+  skip(frames: number): void {
+    this.timestamp = (this.timestamp + frames * TICKS_PER_FRAME) >>> 0;
+  }
 }
 
 /** What the reorder buffer gives out: a packet's payload to decode, or a frame that never came. */

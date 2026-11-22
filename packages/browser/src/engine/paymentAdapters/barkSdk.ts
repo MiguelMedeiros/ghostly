@@ -35,7 +35,8 @@ export interface BarkWalletHandle {
   newAddressWithIndex(): Promise<{ address: string; index: number }>;
   validateArkoorAddress(address: string): Promise<boolean>;
   estimateArkoorPaymentFee(amountSats: number): Promise<{ feeSats: number }>;
-  sendArkoorPayment(address: string, amountSats: number): Promise<void>;
+  /** The id of the movement that records the payment (SDK 0.26 on). */
+  sendArkoorPayment(address: string, amountSats: number): Promise<number>;
   history(): Promise<BarkMovement[]>;
   sync(): Promise<void>;
   maintenance(): Promise<void>;

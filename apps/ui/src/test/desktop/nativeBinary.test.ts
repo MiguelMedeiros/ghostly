@@ -86,9 +86,34 @@ describe("the Desktop's native channels and binary messages", () => {
     expect(channel.bufferedAmount).toBe(0);
   });
 
-  it("Iroh's carries text only: nothing binary is offered on it, and none is sent", async () => {
-    const { channel } = await incoming(createIrohEndpoint);
-    expect(channel.binary).toBeFalsy();
-    expect(() => channel.send(new Uint8Array([0x04, 1]))).toThrow();
+  it("Iroh's carries them too: a file between two Desktops goes as its bytes, not as base64 text a third larger", async () => {
+    const { channel, heard } = await incoming(createIrohEndpoint);
+    expect(channel.binary).toBe(true);
+    channel.send(new Uint8Array([0x04, 0, 255, 10]));
+    channel.send("{\"t\":\"ping\"}");
+    await vi.waitFor(() => expect(tauri.invoke.mock.calls.filter(([command]) => command === "paired_native_send").map(([, args]) => args)).toEqual([
+      { endpointId: 1, connectionId: 7, bytes: "BAD/Cg==" },
+      { endpointId: 1, connectionId: 7, text: "{\"t\":\"ping\"}" },
+    ]));
+    tauri.channels[0].onmessage!({ type: "frame", id: 7, bytes: "BAD/Cg==" });
+    tauri.channels[0].onmessage!({ type: "frame", id: 7, text: "hello" });
+    expect(heard).toEqual([new Uint8Array([0x04, 0, 255, 10]), "hello"]);
+  });
+
+  it("tells Rust the frames it took, every few or soon after the last, so Rust reads no further than the page takes", async () => {
+    for (const [create, command] of [[createIrohEndpoint, "paired_native_took"], [createHyperEndpoint, "paired_hyperdht_took"]] as const) {
+      // What an earlier connection took is told first, out of this count.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      tauri.channels.length = 0;
+      tauri.invoke.mockClear();
+      const { heard } = await incoming(create);
+      const told = () => tauri.invoke.mock.calls.filter(([name]) => name === command).map(([, args]) => args);
+      const event = tauri.channels[0].onmessage!;
+      for (let i = 0; i < 5; i++) event({ type: "frame", id: 7, text: `m${i}` });
+      expect(heard).toHaveLength(5);
+      expect(told()).toEqual([{ endpointId: 1, connectionId: 7, frames: 4 }]);
+      // The one after the last four is told once no more come.
+      await vi.waitFor(() => expect(told()).toEqual([{ endpointId: 1, connectionId: 7, frames: 4 }, { endpointId: 1, connectionId: 7, frames: 1 }]));
+    }
   });
 });

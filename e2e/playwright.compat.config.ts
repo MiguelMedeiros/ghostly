@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { defineConfig, devices } from "@playwright/test";
+import { CHROMIUM_SANDBOX } from "./support/chromiumSandbox";
 
 /**
  * The current web app against real older releases (e2e/compat/): v0.4.0 (WISP 402), v1.1.4, the last release
@@ -43,7 +44,7 @@ export default defineConfig({
     video: "retain-on-failure",
     actionTimeout: 30_000,
     ...devices["Desktop Chrome"],
-    launchOptions: { args: ["--disable-features=WebRtcHideLocalIpsWithMdns"] },
+    launchOptions: { chromiumSandbox: CHROMIUM_SANDBOX, args: ["--disable-features=WebRtcHideLocalIpsWithMdns"] },
   },
   // e2e/compat/release.ts opens a peer from `releases`.
   metadata: {

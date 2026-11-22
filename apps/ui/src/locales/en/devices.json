@@ -2,6 +2,7 @@
   "add": {
     "adding": "Adding {{device}}…",
     "button": "Add a device",
+    "codeQr": "Device code QR code",
     "connecting": "A device is connecting…",
     "copy": "Copy link",
     "done": "{{device}} added. It is on standby.",
@@ -98,7 +99,8 @@
       "older": "Update Ghostly on this device first.",
       "password": "Wrong password.",
       "payment": "A payment is still going through. Try again in a moment.",
-      "refused": "{{device}} does not let this device take the profile.",
+      "refused": "{{device}} did not let this device take the profile.",
+      "refusedNext": "If wrong passwords were typed here, unlock {{device}} and let this device try again.",
       "room": "Not enough space on this device.",
       "settle": "Can't check which device is active. Check your connection, then try again.",
       "stalled": "The move stopped",
@@ -252,10 +254,19 @@
     "doneInfo": "It can no longer take this profile. Your other devices get the change the next time they open Ghostly.",
     "fail": {
       "busy": "Something else is changing your devices. Try again in a moment.",
-      "failed": "Something went wrong. Nothing was changed.",
-      "offline": "Go online to change your devices."
+      "failed": "Something went wrong. Nothing was changed."
     },
+    "fetch": "Get them now",
+    "fetching": "Getting them. Keep Ghostly open on both devices.",
     "go": "Remove",
+    "home": {
+      "bark": "An exit or a send still open there can't be finished here.",
+      "fedimint": "Here it is recovered from its federation; that recovery is still untested.",
+      "line": "{{wallet}} lives on {{device}}. After removal it opens here instead.",
+      "usdt": "Sending stays off here until you confirm its last transaction on chain."
+    },
+    "later": "{{size}} of large files are still only on {{device}}.",
+    "laterNext": "They come over when both devices are on. If you remove it first, they're lost.",
     "lost": "Lost or stolen",
     "removing": "Removing…",
     "text": "It can no longer take this profile.",
@@ -268,6 +279,7 @@
     },
     "label": "Device name",
     "save": "Save",
+    "saving": "Saving…",
     "title": "Rename {{device}}"
   },
   "restore": {
@@ -334,7 +346,6 @@
       "unreadable": "Nothing was started."
     },
     "info": "Only one device sends, receives and pays at a time, so your messages and money are never in two places.",
-    "link": "{{device}}: {{status}}",
     "links": "Your devices",
     "notice": {
       "hint": "If this list looks wrong, do not use this device.",
@@ -346,6 +357,21 @@
     "reenroll": {
       "hint": "Add this device again from the device you use now.",
       "title": "Your devices changed while this one was off"
+    },
+    "removeHere": {
+      "button": "Remove this profile here",
+      "confirm": "Type {{name}} to confirm",
+      "first": "An empty profile takes its place here.",
+      "go": "Remove",
+      "hint": "Its chats, keys and wallets go from this device. Your other devices keep the profile.",
+      "home": {
+        "bark": "An exit or a send still open here can't be finished without it.",
+        "fedimint": "Your other devices recover it from its federation; that recovery is still untested.",
+        "line": "{{wallet}} lives on this device. What it keeps here is not on your other devices.",
+        "usdt": "Your other devices can't send from it until you confirm its last transaction on chain."
+      },
+      "removing": "Removing…",
+      "title": "Remove {{name}} from this device?"
     },
     "title": {
       "moving": "Almost there",
@@ -387,6 +413,7 @@
     "hintRestored": "This will make your other device stop. This device has your profile as it was in the backup.",
     "info": "Messages and money that reached {{device}} after that are not here. If {{device}} comes back, it stops, without a word to your contacts.",
     "lost": "My other device is lost or broken",
+    "lostFirst": "Answer “Lost or stolen?” first.",
     "lostNo": "Just broken or wiped",
     "lostNoHint": "It stops if it ever comes back.",
     "lostQuestion": "Lost or stolen?",

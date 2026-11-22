@@ -36,12 +36,12 @@ export const Waveform = forwardRef<HTMLDivElement, { peaks: number[]; knob?: boo
   },
 );
 
-/** The last moments of a recording as it happens, newest on the right. */
+/** The last moments of a recording as it happens, newest on the right in every language, like `Waveform`. */
 export function LiveWaveform({ levels, bars = 40, className = "" }: { levels: number[]; bars?: number; className?: string }) {
   const shown = levels.slice(-bars);
   const padded = [...new Array<number>(Math.max(0, bars - shown.length)).fill(0), ...shown];
   return (
-    <div className={`voice-live flex-1 min-w-0 ${className}`} aria-hidden="true" data-testid="voice-live">
+    <div dir="ltr" className={`voice-live flex-1 min-w-0 ${className}`} aria-hidden="true" data-testid="voice-live">
       {padded.map((level, i) => (
         <span key={i} style={{ transform: `scaleY(${Math.max(0.08, Math.min(1, level))})` }} />
       ))}
