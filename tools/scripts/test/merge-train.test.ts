@@ -4035,6 +4035,28 @@ describe("a cancelled CI run newer than one that ended on the same head", () => 
     expect(draftState(await gh.draftJobs("c"))).toBe("failure");
     expect(draftState(await gh.draftJobs("d"))).toBe("none");
   });
+
+  it("reads a finished fast-tier run as the newest word on its head: an older full run's red does not decide", async () => {
+    // A ready pull request with `queue` behind its base runs the fast tier (ci-changes.mjs's queuedBehind): its run has
+    // no "CI Success" job, only the draft gate. Closed and reopened after a red full run on the same head, that newer
+    // run is what CI says now, and the train boards it on it.
+    const fast = [
+      job(601, "Changed paths", "completed", "success"),
+      job(602, "Frontend lint and types", "completed", "success"),
+      job(603, "Affected unit tests (draft) (1/4)", "completed", "success"),
+      ...["Frontend tests (app)", "Frontend tests (packages 1/4)", "Frontend builds", "Desktop on macOS"].map((name, i) => job(610 + i, name, "completed", "skipped")),
+      job(620, "CI Success (draft)", "completed", "success"),
+    ];
+    const repo = fakeRepo();
+    repo.add(21, { behind: true });
+    const rest = layer({ h21: [wf(52, "h21", { created_at: "2026-11-06T01:00:00Z" }), wf(51, "h21", { conclusion: "failure" })] }, { 51: failed, 52: fast });
+    Object.assign(repo.gh, { ciJobs: rest.ciJobs, draftJobs: rest.draftJobs });
+    const r = await repo.run();
+    expect(repo.comments.get(21)?.map((c) => c.body).join("\n") ?? "").not.toMatch(/CI Success is red/);
+    expect(r.log.join("\n")).toMatch(/ALONE #21: rebased onto/);
+    expect(ciState(await rest.ciJobs("h21"))).toBe("none");
+    expect(draftState(await rest.draftJobs("h21"))).toBe("success");
+  });
 });
 
 describe("the bases with a train", () => {
