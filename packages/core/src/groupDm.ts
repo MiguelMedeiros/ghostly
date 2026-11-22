@@ -12,6 +12,7 @@ import { hasVisible, stripHidden } from "./text";
  * alone: in a community as a pair payload `{ "dm": … }`, in a private group as a `group-pair` frame, on their edge or
  * handed on once by a hub. Nobody else, hubs included, reads the invite. The receiver answers `got` when it shows the
  * request and `no` when its person declines; accepting is joining the invite, which pins the key the request names.
+ * Only tests import it yet: parts 2 to 4 of the private-message series (part 1 was #4943) wire it into the apps.
  */
 
 /** The `paired-groups` version an app announces when it takes `group-pair` frames (7 is the file-session request's). */
@@ -171,6 +172,9 @@ export class GroupPairInbox {
     const f = readGroupPair(raw);
     if (!f || f.g !== source.group || f.to !== this.me.pubKeyZ32 || !fresh(f.ts, this.now())) return null;
     if (f.h ? !source.member(f.from) : f.from !== source.edge) return null;
+    // A replay, or a frame with no room, is refused before the open costs an X25519: `n` and `from` are in the clear,
+    // and only a frame that opens takes its nonce, so a forged box carrying another's nonce blocks nothing.
+    if (this.seen.has(f.n) || !this.seen.fits(f.from)) return null;
     const plain = openPair(this.me.seed, this.me.pubKeyZ32, f.from, f, pairAad(f.g, f.from, f.to, f.ts));
     if (!plain || !this.seen.add(f.n, f.from)) return null;
     try {

@@ -1,5 +1,4 @@
 {
-  "createChat": "Criar nova conversa",
   "description": "Mensagens privadas, ponto a ponto.",
   "features": {
     "decentralized": "Sem servidor central",
@@ -7,6 +6,5 @@
     "onDevice": "Suas mensagens ficam nos seus dispositivos"
   },
   "unpublishedVersion": "Versão local — ver versões publicadas",
-  "viewRelease": "Ver esta versão publicada",
-  "welcome": "Bem-vindo ao Ghostly"
+  "viewRelease": "Ver esta versão publicada"
 }

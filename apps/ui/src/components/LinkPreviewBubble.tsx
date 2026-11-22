@@ -53,10 +53,14 @@ export function LinkPreviewCard({ preview }: { preview: LinkPreview }) {
         </span>
       )}
       <span className="block px-2.5 py-2">
-        {site ? <span className="block chat-text-preview-site text-text-secondary truncate" data-testid="link-preview-site">{site}</span>
+        {/* The page's words read in their own direction, as the message's text does (the card keeps the app's): in Arabic
+            an English title was drawn "!Hello world", and in English an Arabic one had its "!" at the far end. Lined up
+            with the app instead (`match-parent`), a cut Arabic title in English lost its "…" past the card's edge. */}
+        {site ? <span dir="auto" className="block chat-text-preview-site text-text-secondary truncate" data-testid="link-preview-site">{site}</span>
           : <HostLine host={hostOf(preview.u)} testId="link-preview-site" className="block chat-text-preview-site text-text-secondary" />}
-        {preview.t && <span className="block chat-text-preview-title font-semibold leading-snug line-clamp-2" data-testid="link-preview-title">{preview.t}</span>}
-        {preview.d && <span className="block chat-text-preview-description text-text-secondary leading-snug line-clamp-2 mt-0.5" data-testid="link-preview-description">{preview.d}</span>}
+        {/* Two lines at most, a long word broken inside the card: `line-clamp` makes them boxes, so no `block` (built after it, it won). */}
+        {preview.t && <span dir="auto" className="chat-text-preview-title font-semibold leading-snug line-clamp-2 [overflow-wrap:anywhere]" data-testid="link-preview-title">{preview.t}</span>}
+        {preview.d && <span dir="auto" className="chat-text-preview-description text-text-secondary leading-snug line-clamp-2 [overflow-wrap:anywhere] mt-0.5" data-testid="link-preview-description">{preview.d}</span>}
         <HostLine host={hostOf(preview.u)} testId="link-preview-url" className="block text-[11px] text-link mt-1" />
       </span>
     </a>
@@ -162,7 +166,8 @@ export function MessageLinkCards({ text, preview: sent }: { text: string; previe
   return (
     <div data-testid="message-link-cards">
       {preview && <LinkPreviewCard preview={preview} />}
-      {place && <LocationCard place={place} />}
+      {/* By its point: Show map (and a map that failed) was for that place, and a contact's edit to another one asks again. */}
+      {place && <LocationCard key={`${place.lat},${place.lon}`} place={place} />}
     </div>
   );
 }

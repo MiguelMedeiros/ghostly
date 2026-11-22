@@ -1,19 +1,21 @@
 import { useId, useState } from "react";
-import { transportEventText, transportLineDetails, transportLineText, type TransportEntry, type TransportEvent } from "../lib/transportEvents";
+import { CONTACT, transportEventText, transportLineDetails, transportLineText, type TransportEntry, type TransportEvent } from "../lib/transportEvents";
 import { focus } from "../lib/connection";
 import { clockTime, formatAt } from "../lib/time";
 import { useI18n } from "../contexts/I18nContext";
+import { fillNames } from "../lib/fillNodes";
 
 
 /**
  * One change of the chat's live transport: a small centred line, not a bubble. Tapping it shows the details.
  * Local only: it is not a message, never counted as unread, never sent. `earlier`: the rows it stands for, with no
- * message between them (see `mergeTimeline`); its details list them.
+ * message between them (see `mergeTimeline`); its details list them. The contact's name is its own <bdi> in each line.
  */
 export function TransportLine({ entry, contact, earlier = [] }: { entry: TransportEntry; contact: string; earlier?: readonly TransportEntry[] }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   const { t, language } = useI18n();
+  const named = (text: string) => fillNames(text, { contact });
   const warn = entry.kind === "failed" || entry.kind === "lost" || (entry.kind === "flapping" && !entry.live);
   return (
     // Not part of the conversation: a run of voice messages goes on past it (lib/voicePlayback.ts).
@@ -21,7 +23,7 @@ export function TransportLine({ entry, contact, earlier = [] }: { entry: Transpo
       <button type="button" aria-expanded={open} aria-controls={`${id}-details`} onClick={() => setOpen(!open)}
         className={`tap-target inline-flex max-w-full items-center gap-1.5 rounded-lg px-3 py-1.5 text-start chat-text-system transition-colors ${warn ? "bg-surface-alt/80 text-text-muted" : "bg-surface-alt/80 text-text-secondary"} hover:bg-surface-hover ${focus}`}>
         <TransportLineIcon entry={entry} />
-        <span className="min-w-0 break-words" data-testid="transport-line-text">{transportLineText(entry, contact, t)}</span>
+        <span className="min-w-0 break-words" data-testid="transport-line-text">{named(transportLineText(entry, CONTACT, t))}</span>
         {earlier.length > 0 && <span className="shrink-0 text-[10px] text-text-muted" data-testid="transport-line-earlier-count"
           aria-label={earlier.length === 1 ? t("connection.history.earlierOne") : t("connection.history.earlierMany", { count: earlier.length })}>+{earlier.length}</span>}
         <time dateTime={new Date(entry.at).toISOString()} className="shrink-0 text-[10px] text-text-muted">{clockTime(entry.at, language)}</time>
@@ -29,10 +31,10 @@ export function TransportLine({ entry, contact, earlier = [] }: { entry: Transpo
       {open && (
         <dl id={`${id}-details`} data-testid="transport-line-details"
           className="mt-1 grid w-full max-w-sm grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg border border-border bg-surface-alt/90 px-3 py-2 text-[11px] text-text-secondary">
-          {transportLineDetails(entry, contact, (at) => formatAt(at, { dateStyle: "medium", timeStyle: "medium" }, language), t).map(row => (
+          {transportLineDetails(entry, CONTACT, (at) => formatAt(at, { dateStyle: "medium", timeStyle: "medium" }, language), t).map(row => (
             <div key={row.label} className="contents">
               <dt className="text-text-muted">{row.label}</dt>
-              <dd className="min-w-0 break-words text-text-primary">{row.value}</dd>
+              <dd className="min-w-0 break-words text-text-primary">{named(row.value)}</dd>
             </div>
           ))}
           {earlier.length > 0 && <div className="contents">
@@ -41,7 +43,7 @@ export function TransportLine({ entry, contact, earlier = [] }: { entry: Transpo
               <span>{earlier.length === 1 ? t("connection.history.moreOne") : t("connection.history.moreMany", { count: earlier.length })}</span>
               <ul className="mt-0.5 space-y-0.5 text-text-secondary" data-testid="transport-line-earlier">
                 {[...earlier].reverse().map(e => <li key={e.id} className="break-words">
-                  <time dateTime={new Date(e.at).toISOString()} className="text-text-muted">{clockTime(e.at, language)}</time> <span>{transportLineText(e, contact, t)}</span>
+                  <time dateTime={new Date(e.at).toISOString()} className="text-text-muted">{clockTime(e.at, language)}</time> <span>{named(transportLineText(e, CONTACT, t))}</span>
                 </li>)}
               </ul>
             </dd>
@@ -57,7 +59,8 @@ const HISTORY_SHOWN = 20;
 
 /**
  * The connection panel's "Connection history": every event of the chat's connection, newest first, including
- * what the timeline leaves out (drops it came back from, restarts, failed attempts, round trips).
+ * what the timeline leaves out (drops it came back from, restarts, failed attempts, round trips). The contact's name
+ * is its own <bdi> in each line.
  */
 export function ConnectionHistory({ events, contact }: { events: readonly TransportEvent[]; contact: string | undefined }) {
   const [all, setAll] = useState(false);
@@ -74,7 +77,7 @@ export function ConnectionHistory({ events, contact }: { events: readonly Transp
         {shown.map((e, i) => (
           <li key={`${e.at}-${i}`} className="grid grid-cols-[auto_1fr] gap-x-2" data-testid="connection-history-event" data-kind={e.kind}>
             <time dateTime={new Date(e.at).toISOString()} className="tabular-nums text-text-muted">{stamp(e.at)}</time>
-            <span className="min-w-0 break-words text-text-primary">{transportEventText(e, contact, t)}</span>
+            <span className="min-w-0 break-words text-text-primary">{fillNames(transportEventText(e, contact && CONTACT, t), { contact: contact ?? "" })}</span>
           </li>
         ))}
       </ol>

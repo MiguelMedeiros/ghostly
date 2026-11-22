@@ -16,8 +16,8 @@
   "deleteChatCallOn": "A call is on in this chat. End it first, then delete the chat.",
   "deleteChatLocal": "This deletes the chat and its history from this device. Your contact’s copy is not deleted.",
   "deleteChatTitle": "Delete chat?",
-  "error": "Error",
   "goHome": "Go home",
+  "labelValue": "{{label}}: {{value}}",
   "loading": "Loading...",
   "moreInfo": "More info",
   "needsYou": {
@@ -28,6 +28,7 @@
   "notCopied": "Not copied",
   "quotedName": "“{{name}}”",
   "save": "Save",
+  "sentences": "{{first}}. {{second}}",
   "size": {
     "b": "{{n}} B",
     "gb": "{{n}} GB",
@@ -35,7 +36,6 @@
     "mb": "{{n}} MB",
     "tb": "{{n}} TB"
   },
-  "success": "Success",
   "unnamedContact": "Contact · {{key}}",
   "unnamedContactShort": "Contact",
   "viewPhoto": "View photo of {{name}}"

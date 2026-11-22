@@ -2,13 +2,14 @@ import Link from "next/link";
 import { Shell } from "@/components/site/Shell";
 import { APP_URL, NO_INTERNET, PERMISSIONS, VIEWS, apps, clientLabel } from "@/content/apps";
 import { ICON_DRAWN } from "@/lib/appIcon";
+import { linkText } from "@/lib/linkText";
 import type { StoreApp } from "@/lib/storeRead";
 import { AppIcon } from "./AppIcon";
 import "@/app/apps.css";
 
 const ExternalLink = ({ href }: { href: string }) => (
   <a className="link-arrow ap-url" href={href} rel="noopener noreferrer nofollow">
-    {href.replace(/^https:\/\//, "")} ↗
+    {linkText(href)} ↗
   </a>
 );
 
@@ -51,14 +52,6 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
 
       <div className="wrap ap-body">
         <div className="ap-main">
-          {app.description && (
-            <section className="ap-block ap-description">
-              {app.description.split(/\n+/).map((line, i) => (
-                <p key={i}>{line}</p>
-              ))}
-            </section>
-          )}
-
           <section className="ap-block" aria-labelledby="ap-can">
             <h2 id="ap-can" className="h-card">
               {t.can}
@@ -98,11 +91,32 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
                 {t.install.open}
               </a>
             </p>
-            <p className="note">{t.install.link}</p>
-            <pre className="ap-code" tabIndex={0}>
-              <code>{app.url}</code>
-            </pre>
+            {/* Only a link Apps, Add reads as pasted (lib/storeRead.ts `link`); with none, the button above is the way in. */}
+            {app.link && (
+              <>
+                <p className="note">{t.install.link}</p>
+                <pre className="ap-code" tabIndex={0}>
+                  <code>{app.link}</code>
+                </pre>
+              </>
+            )}
           </section>
+
+          {/* The publisher's own words, after Ghostly's (what it can do, the key to check), under a heading that says whose
+              they are: first, a line like "✓ Verified by Ghostly, no internet" read as the site's, and 2000 characters of
+              lines pushed the permissions far down. As the install screen draws it (apps/ui AppDescription). */}
+          {app.description && (
+            <section className="ap-block ap-description" aria-labelledby="ap-from">
+              <h2 id="ap-from" className="h-card">
+                {t.fromPublisher}
+              </h2>
+              {app.description.split(/\n+/).map((line, i) => (
+                <p key={i} dir="auto">
+                  {line}
+                </p>
+              ))}
+            </section>
+          )}
         </div>
 
         <aside className="ap-side">

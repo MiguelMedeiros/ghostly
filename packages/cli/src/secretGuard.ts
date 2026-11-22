@@ -11,6 +11,7 @@ export { findSecret };
 /** What a refusal says the text looks like. */
 export function secretWords(secret: SecretFinding): string {
   if (secret.kind === "cashu") return "a Cashu token (money anyone who reads it can take)";
+  if (secret.kind === "signer-link") return "a secret (a signer connection link with its secret)";
   return secret.kind === "node-login" ? "a secret (a login to a node: a macaroon, a rune, an RPC password or cookie)" : "a secret (a seed or a private key)";
 }
 

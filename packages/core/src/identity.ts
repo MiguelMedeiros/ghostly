@@ -30,6 +30,30 @@ export const IDENTITY_MEMO_MAX = 16_384;
  */
 const publicKeys = new Map<string, { key: Uint8Array; at: number }>();
 
+/**
+ * A faster derivation of a seed's Ed25519 public key a host may give (the CLI gives node:crypto's, ~4x noble's): each
+ * process starts with an empty memo, so a one-shot command derives every chat's keys again. A throw, or an answer that
+ * is not 32 bytes, leaves the key to noble.
+ */
+export type PublicKeyFastPath = (seed: Uint8Array) => Uint8Array;
+
+let publicKeyFastPath: PublicKeyFastPath | null = null;
+
+/** Gives (or, with `null`, takes back) the faster derivation of every public key `identityFromSeed` derives. */
+export function setPublicKeyFastPath(derive: PublicKeyFastPath | null): void {
+  publicKeyFastPath = derive;
+}
+
+function derivePublicKey(seed: Uint8Array): Uint8Array {
+  if (publicKeyFastPath) {
+    try {
+      const key = publicKeyFastPath(seed);
+      if (key.length === 32) return Uint8Array.from(key);
+    } catch { /* noble's below */ }
+  }
+  return ed25519.getPublicKey(seed);
+}
+
 function publicKeyOf(seed: Uint8Array): Uint8Array {
   const id = toBase64Url(sha256(seed));
   const now = Date.now();
@@ -38,7 +62,7 @@ function publicKeyOf(seed: Uint8Array): Uint8Array {
     publicKeys.delete(id);
     entry.at = now;
   } else {
-    entry = { key: ed25519.getPublicKey(seed), at: now };
+    entry = { key: derivePublicKey(seed), at: now };
     for (const [oldest, { at }] of publicKeys) {
       if (publicKeys.size < IDENTITY_MEMO_SIZE) break;
       if (publicKeys.size < IDENTITY_MEMO_MAX && now - at < IDENTITY_MEMO_IDLE_MS) break;

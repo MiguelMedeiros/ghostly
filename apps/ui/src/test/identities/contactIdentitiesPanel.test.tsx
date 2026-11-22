@@ -72,7 +72,7 @@ describe("ContactIdentitiesPanel", () => {
         receivedView({ id: "r6", status: "previous-key" }),
         receivedView({ id: "r7", provider: "domain", subject: "example.org" }),
       ]));
-      expect(screen.getByRole("radiogroup", { name: "Identities shared by Alice" })).toBeInTheDocument();
+      expect(screen.getByRole("radiogroup", { name: "Identities shared by \u2068Alice\u2069" })).toBeInTheDocument();
       const faces = theirs().map(card => card.querySelector<HTMLElement>("[data-deck=face]")!);
       expect(faces.map(f => [f.dataset.status, f.querySelector(".id-card-status")!.textContent])).toEqual([
         ["verified", "Verified"],
@@ -235,6 +235,17 @@ describe("ContactIdentitiesPanel", () => {
         expect(nameLine(card)).toHaveTextContent("Nome: assinado por GitLab");
       });
 
+      it("a name the account set for itself, in Portuguese", async () => {
+        const card = await backIn("pt", google("Signed by Microsoft; name set on the account, not checked by Microsoft"));
+        expect(nameLine(card)).toHaveTextContent("Nome: assinado por Microsoft; nome definido na conta, não verificado por Microsoft");
+        expect(nameLine(card)).not.toHaveTextContent(/Signed|checked/);
+      });
+
+      it("a name the account set for itself, beside an email the provider checked, in Arabic", async () => {
+        const card = await backIn("ar", google("Signed by Google; email verified by Google; name set on the account, not checked by Google"));
+        expect(nameLine(card)).toHaveTextContent("الاسم: موقَّع من Google؛ تحققت Google من البريد الإلكتروني؛ الاسم مضبوط في الحساب، لم تتحقق منه Google");
+      });
+
       it("any other source as written", async () => {
         const card = await backIn("pt", google("Signed by Google; email verified by Microsoft"));
         expect(nameLine(card)).toHaveTextContent("Nome: Signed by Google; email verified by Microsoft");
@@ -296,6 +307,24 @@ describe("ContactIdentitiesPanel", () => {
       for (const id of ["nostr-load-profile", "nostr-load-follows", "nostr-load-notes"]) expect(within(card).getByTestId(id)).toBeInTheDocument();
       expect(within(card).getByTestId("nostr-contact-note")).toHaveTextContent(/^Loading asks your relays \(.*\), which learn your IP address and this key\./);
     });
+
+    it("draws what the Nostr key published in its own direction: its name, @handle, NIP-05, about and posts", async () => {
+      const npub = "npub1example";
+      const fetched = { fetchedAt: now(), relays: ["wss://relay.one.example"], stale: false };
+      const nostr = { subject: npub, npub,
+        profile: { ...fetched, found: true, profile: { name: "محمد", handle: "alice", nip05: "_@example.com", about: "مرحبا بكم!", hasPicture: false, eventAt: now(), eventId: "e" } },
+        notes: { ...fetched, count: 1, more: false, hidden: 0, authorMuted: false } } as NonNullable<LinkView["nostr"]>[number];
+      const { user, engine } = open({ links: [paired({ identities: identitiesView({ received: [receivedView({ provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature" } })] }), nostr: [nostr] })] });
+      engine.on("nostrContactNotes", () => [{ id: "n1", createdAt: now(), content: "Hello (all)", reply: false }]);
+      const card = await turnOver(user, 0);
+      // In an Arabic app "@alice" after an Arabic name was drawn "alice@", and "_@example.com" as "example.com …@_"
+      // (measured in Chromium): each is a run of its own.
+      const name = within(card).getByTestId("nostr-profile-name");
+      expect([...name.querySelectorAll("bdi")].map(b => b.textContent)).toEqual(["محمد", "@alice"]);
+      expect(within(card).getByText("_@example.com")).toHaveAttribute("dir", "ltr");
+      expect(within(card).getByTestId("nostr-profile-about")).toHaveAttribute("dir", "auto");
+      expect((await within(card).findByText("Hello (all)"))).toHaveAttribute("dir", "auto");
+    });
   });
 
   describe("the chosen card's public data", () => {
@@ -322,9 +351,12 @@ describe("ContactIdentitiesPanel", () => {
       expect(engine.callsTo("loadPublicGraph")).toEqual([]);
     });
 
-    it("the panel closed asks nothing", () => {
-      renderApp(<p>no panel</p>).engine.update(withReceived([pubky()]));
-      expect(screen.queryByTestId("contact-activity")).not.toBeInTheDocument();
+    it("the panel closed asks nothing", async () => {
+      const { engine } = renderApp(<p>no panel</p>);
+      act(() => engine.update(withReceived([pubky()])));
+      await act(async () => {});
+      expect(engine.callsTo("loadPublicPosts")).toEqual([]);
+      expect(engine.callsTo("loadPublicGraph")).toEqual([]);
     });
 
     it("shows the engine's error for the chat", () => {

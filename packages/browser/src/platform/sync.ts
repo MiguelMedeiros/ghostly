@@ -1,6 +1,6 @@
 import {
   addMessages,
-  deleteMessage,
+  deleteMessages,
   saveSession,
   setEngineMessages,
   STORED_MESSAGES,
@@ -9,11 +9,14 @@ import {
   forgetInviteCode,
   forgetShownSession,
   getInviteCode,
+  getPrefix,
   getUnreadCount,
+  holdsUnsaved,
   isSessionKey,
   listShownSessions,
   loadSession,
   loadShownSession,
+  onUnsavedChange,
   peerDisplayName,
   sessionIdForPeer,
   sessionLinkParams,
@@ -23,13 +26,16 @@ import {
   wasDeleted,
 } from "../../../../apps/ui/src/lib/storage";
 import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications";
+import { stopAppsIn } from "../../../../apps/ui/src/lib/apps/open";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
+import type { AttachMark } from "../shared/rpc";
 import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
 import { forgetServicesOf } from "../host";
 import { viewerTag } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
 import { isRefusalId, paymentRefusal } from "../shared/refusals";
+import { isJoinLine } from "../shared/systemLines";
 
 /**
  * The Desktop UI keeps its sessions in localStorage and that stays the list
@@ -44,13 +50,6 @@ import { isRefusalId, paymentRefusal } from "../shared/refusals";
 const MIGRATED_KEY = "gb-sessions-imported";
 const OLD_MIGRATED_KEY = "ghostly_browser_sessions_imported";
 const FORGET_AFTER_MS = 15_000;
-const JOIN_PATTERN = /^👋 (?:.+ )?joined$/;
-
-/**
- * Whether a row is the chat's joined line, drawn as the app's own line: the contact's only when the engine took it as
- * one (`joinLine`, their first row of the chat), any other row of theirs in those words being a message; mine by its words.
- */
-const isJoinLine = (message: StoredMessage) => JOIN_PATTERN.test(message.text) && (message.sender === "me" || !!message.joinLine);
 
 export function notifySessionsChanged(): void {
   window.dispatchEvent(new Event("session-updated"));
@@ -87,6 +86,7 @@ export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
   return (id && loadShownSession(id)) || undefined;
 }
 
+/** A row of the engine's as the pages hold it. The rows it draws as the app's own lines are `isSystemLine`'s (shared/systemLines.ts). */
 export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
   const isJoin = isJoinLine(message);
   // A payment of the contact's this app refused: the app's own line, not the contact's (stored as theirs for the CLI).
@@ -196,11 +196,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   const here = named.length ? new Set(shown.messages.map((m) => m.id)) : undefined;
   const gone = named.filter((id) => here!.has(id));
   if (gone.length) {
-    for (const id of gone) deleteMessage(shown.id, id);
+    // Out of the session held here, not one read again (a parse and a merge of a chat of thousands), and as the list
+    // last mirrored left it but for these rows: what changes next is still all the mirror below looks at.
+    const kept = untouched(linkId, shown.id);
+    shown = deleteMessages(shown.id, gone, shown) ?? shown;
     forget(shown.id);
+    if (kept) mirrored.set(linkId, { ...mirrored.get(linkId)!, stored: storedSession(shown.id) });
     notifySessionsChanged();
-    shown = sessionForPeer(link.peerPubKeyZ32);
-    if (!shown) return;
     // Nothing unread left: the chat's notification goes, as reading the chat takes it (the Android and Linux apps keep one).
     if (!getUnreadCount(shown)) clearChatNotification(shown.id);
   }
@@ -238,6 +240,9 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
     // Reactions change rows of any kind, mine included (WISP 400 § Reactions).
     const reacted = !!previous && (!!previous.reactions || !!message.reactions) && JSON.stringify(previous.reactions ?? null) !== JSON.stringify(message.reactions ?? null);
     if (reacted) change().reactions = message.reactions;
+    // A reply's quote as the engine holds it now: one whose original was deleted for everyone keeps its id and loses its
+    // words (WISP 400 § Delete for everyone), and the stored copy here must not keep them.
+    if (previous && message.replyTo && JSON.stringify(previous.replyTo ?? null) !== JSON.stringify(message.replyTo)) change().replyTo = message.replyTo;
     const mapped = () => toChatMessage(message, link.peerPubKeyZ32, link.myPubKeyZ32, !!link.profile);
     // A received row the engine gave a place to after this chat had it (one stored, before places were kept, under a
     // time that had not come yet: engine/arrival.ts): its place here follows, with the time its sender said.
@@ -246,6 +251,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
       row.timestamp = message.timestamp;
       if (message.sentAt !== undefined) row.sentAt = message.sentAt;
       moved = true;
+    }
+    // A file that waited for the contact and went live: the engine's row has no delivery since, the row here loses its
+    // waiting state with it (only the engine sets it; a text of mine keeps the status the chat gave it).
+    if (previous?.delivery === "waiting" && message.sender === "me" && !message.delivery) {
+      const row = change();
+      delete row.delivery;
+      delete row.deliveryError;
     }
     if (previous && mirrorable(message)) {
       if (message.delivery && (previous.delivery !== message.delivery || previous.deliveryError !== message.deliveryError)) {
@@ -481,10 +493,44 @@ async function reconcile(): Promise<void> {
     // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
     if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
-    // What the contact's apps opened from this chat kept on this device goes with it (the web app's origins).
+    // An app still running in it (a Desktop app window) stops: the engine answers nothing more for this chat.
+    stopAppsIn(link.id);
+    // What the contact's apps opened from this chat kept on this device goes with it (their origins).
     void forgetServicesOf({ tag: viewerTag(link.myPubKeyZ32) });
   }
   if (!later && !renamed) settled = { state, sessions };
+}
+
+/**
+ * The peer's mark the stored chats were last mirrored to (the extension's pages share them): a page that connects with it
+ * is sent only the chats that changed since, not each chat's newest 400 rows again at every tab opened or reloaded.
+ */
+const markKey = () => `${getPrefix()}engine_mark`;
+
+function readMark(): AttachMark | undefined {
+  try {
+    const mark = JSON.parse(localStorage.getItem(markKey()) ?? "null") as Partial<AttachMark> | null;
+    return typeof mark?.epoch === "string" && typeof mark.mark === "number" ? { epoch: mark.epoch, mark: mark.mark } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Kept only while every write of the mirror went in: one localStorage refused (full) is in this page alone, and the next
+ * page must be sent those chats again to have it.
+ */
+function keepMark(mark: AttachMark): void {
+  if (holdsUnsaved()) return forgetMark();
+  try {
+    localStorage.setItem(markKey(), JSON.stringify(mark));
+  } catch {
+    forgetMark();
+  }
+}
+
+function forgetMark(): void {
+  localStorage.removeItem(markKey());
 }
 
 let started = false;
@@ -492,6 +538,8 @@ let started = false;
 export function startSessionSync(): void {
   if (started) return;
   started = true;
+  engine.keepMarks({ read: readMark, keep: keepMark });
+  onUnsavedChange(() => { if (holdsUnsaved()) forgetMark(); });
   engine.start();
   engine.onMessages(mirrorNew);
   engine.subscribe(() => {
