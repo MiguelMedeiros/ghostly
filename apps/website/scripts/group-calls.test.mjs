@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { headerRows } from "./wisp-header.mjs";
+import { roadmapTracks } from "./roadmap-tracks.mjs";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const file = (path) => readFileSync(resolve(root, path), "utf8");
@@ -27,6 +28,13 @@ test("while a group's header has Join call, no page says groups have no calls", 
     [...read(file).matchAll(/[^."|]*\b(?:no (?:group )?calls|not in groups)\b[^."|]*/gi)].map((m) => `${file}: ${m[0].trim()}`),
   );
   assert.deepEqual(stale, []);
+});
+
+test("/roadmap shows calls in communities as available and plans only calls in private groups", () => {
+  const items = roadmapTracks(file("docs/wisps/ADAPTER-ROADMAP.md")).flatMap((t) => [...t.now, ...t.next]);
+  const calls = items.filter((i) => /\bcalls?\b/i.test(i.text) && /\b(?:groups?|communit(?:y|ies))\b/i.test(i.text));
+  assert.ok(calls.some((i) => i.level === "available" && /\bcommunities\b/i.test(i.text) && /\b1\.12\b/.test(i.text)), "no Available item for calls in communities since 1.12");
+  for (const i of calls.filter((i) => i.level !== "available")) assert.match(i.text, /\bprivate groups?\b/i, `${i.level}: ${i.text}`);
 });
 
 test("WISP 602's header says group calls are built and available", () => {
