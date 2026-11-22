@@ -54,7 +54,7 @@ export const commands: Record<string, Command> = {
   "lightning default": { method: "lightning.default", usage: "lightning default <card> [--network testnet]", summary: "The Lightning card that receives by default", args: ["card"], options: { network: net }, params: ({ options }, { card: c }) => ({ card: c, network: options.network }) },
   "lightning rename": { method: "lightning.rename", usage: "lightning rename <card> <name...> [--network testnet]", summary: "Name a Lightning card", args: ["card", "name..."], options: { network: net }, params: ({ options }, a) => ({ card: a.card, name: a.name, network: options.network }) },
   "pay": {
-    method: "pay", usage: "pay <invoice|lightning-address|lnurl> [--amount sats] [--network n] [--max-fee sats] [--card <id>] [--comment t] [--chat <chat>] [--confirm-real] [--force]", summary: "Pay over Lightning from Testnet, or --network mainnet with --confirm-real. paid false: not settled yet (pending at the mint or the card's source, or its answer lost); it settles by itself, is never paid twice, and its note says what is set aside and where to look",
+    method: "pay", usage: "pay <invoice|lightning-address|lnurl> [--amount sats] [--network n] [--max-fee sats] [--card <id>] [--comment t] [--chat <chat>] [--confirm-real] [--force]", summary: "Pay over Lightning from Testnet, or --network mainnet with --confirm-real. paid false: not settled yet (pending at the mint or the card's source, or its answer lost); it settles by itself, is never paid twice, and it answers pending, its paymentHash, the sats set aside (setAside) and a note saying where to look",
     args: ["target"], options: { amount: { type: "number", description: "Sats, for an address or LNURL; with an invoice, refuse it unless it asks exactly this" }, network: net, "max-fee": { type: "number", description: "Refuse a fee above this" }, card, comment: { type: "string", description: "For the address's owner" }, chat: { type: "string", description: "The chat the invoice came from: on Testnet its contact is told it was paid" }, "confirm-real": confirmReal, force },
     params: ({ options }, { target }) => ({ target, amount: options.amount, network: options.network, maxFee: options["max-fee"], card: options.card, comment: options.comment, chat: options.chat, confirmReal: options["confirm-real"] === true, force: options.force === true }),
   },
@@ -87,11 +87,11 @@ export const commands: Record<string, Command> = {
     args: ["type"], words: { type: WALLET_TYPES }, options: { card }, params: ({ options }, { type }) => ({ type, network: "testnet", card: options.card }),
   },
   "wallet history": {
-    method: "wallet.history", usage: "wallet history [--network testnet] [--limit n]", summary: "A network's wallet history, newest first",
+    method: "wallet.history", usage: "wallet history [--network testnet] [--limit n]", summary: "A network's wallet history, newest first; recent: its Lightning cards' latest payments by paymentHash, pending until they settle, then paid or failed",
     options: { network: net, limit: { type: "number", description: "Entries (default 50)" } }, params: ({ options }) => ({ network: options.network, limit: pageLimit(options) }),
   },
   "wallet list": {
-    method: "wallet.list", usage: "wallet list [--network mainnet|testnet]", summary: "Wallets with their balances, and what New can make",
+    method: "wallet.list", usage: "wallet list [--network mainnet|testnet]", summary: "Wallets with their balances (Cashu's setAside: sats held for a payment the mint has not settled), and what New can make",
     options: { network: net }, params: ({ options }) => ({ network: options.network }),
   },
   "wallet receive": {

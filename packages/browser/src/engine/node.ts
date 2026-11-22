@@ -7287,6 +7287,10 @@ export class GhostlyNode implements EngineImplementation {
     assertConfirmedReal(network ?? mintNetwork(mint), confirmedReal);
     const paid = lightning ? await lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note);
     if (linkId && invoice && (network ?? mintNetwork(mint)) === "testnet") this.desk.sayInvoicePaid(linkId, invoice, { pending: !paid });
+    // Answered with the wallets' view made after the payment: a view started while the mints split the coins for it
+    // could read their inputs as set aside, and the card's recent list as it is now. A caller that reads the view next
+    // (the CLI's `pay` and `wallet list`) reads what the payment left.
+    await this.refreshWallet().catch(() => {});
     return { paid };
   }
 

@@ -414,7 +414,7 @@ describe("wallets", () => {
   it("history takes a whole number of entries", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "wallet.history", { limit: 1.5 })).rejects.toMatchObject({ code: "bad_request", message: "limit must be a whole number from 1 to 10000" });
-    expect(await callApi(ctx, "wallet.history", { limit: 1 })).toEqual({ network: "testnet", history: [{ id: "h" }] });
+    expect(await callApi(ctx, "wallet.history", { limit: 1 })).toEqual({ network: "testnet", history: [{ id: "h" }], recent: [] });
   });
 
   it("history answers as many entries as --limit asks, past the wallet view's newest 100", async () => {
