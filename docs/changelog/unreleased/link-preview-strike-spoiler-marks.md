@@ -1,4 +1,4 @@
 ---
 section: Fixed / Chat
 ---
-- A link written inside a strike (`~~`) or a spoiler (`||`) gets a preview of the page it links to: the preview no longer read the closing marks as part of the address and opened another page.
+- A struck-through link (`~~https://…~~`) gets a preview of the page it links to, and a preview card no longer opens the link with a closing `~~` or `||` on its end, another page than the one the message links to.
