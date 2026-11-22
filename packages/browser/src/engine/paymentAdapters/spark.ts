@@ -64,7 +64,7 @@ export class SparkAdapter implements PaymentAdapter<SparkPrepared> {
    */
   async invoice(amount: number, memo: string | undefined, expiresAt: number): Promise<string> {
     assertWholeSats(amount);
-    const { paymentRequest } = await this.wallet.receivePayment({ paymentMethod: { type: "sparkInvoice", amount: String(amount), description: memo?.slice(0, 140) || undefined, expiryTime: Math.floor(expiresAt / 1000) } });
+    const { paymentRequest } = await this.wallet.receivePayment({ paymentMethod: { type: "sparkInvoice", amount: BigInt(amount), description: memo?.slice(0, 140) || undefined, expiryTime: Math.floor(expiresAt / 1000) } });
     if (sparkAddressKind(paymentRequest, this.network) !== "invoice") throw new Error("Spark returned an invoice of another network");
     return paymentRequest;
   }

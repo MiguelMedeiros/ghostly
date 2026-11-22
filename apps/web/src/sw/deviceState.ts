@@ -37,7 +37,7 @@ export function pushDeviceView(record: StoredRecord | undefined | null): PushDev
   const nameOf = (key: string) => { const slot = slots.find((s) => s?.key === key); return typeof slot?.name === "string" ? slot.name : ""; };
   const activeSlot = typeof record.activeSlot === "number" ? slots[record.activeSlot] : undefined;
   const active = record.activeSlot !== record.ownSlot && typeof activeSlot?.name === "string" && activeSlot.name ? activeSlot.name : undefined;
-  const tokens: Record<string, string> = {};
+  const tokens: Record<string, string> = Object.create(null);
   const given = record.push?.own?.tokens;
   if (given && typeof given === "object") {
     for (const [key, token] of Object.entries(given as Record<string, unknown>)) {

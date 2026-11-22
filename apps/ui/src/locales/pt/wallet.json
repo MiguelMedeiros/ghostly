@@ -178,7 +178,6 @@
   "cashu": {
     "add": "Adicionar",
     "addMintPlaceholder": "Adicionar um mint: https://…",
-    "amountSats": "{{amount}} sats",
     "askingMint": "Pedindo ao mint…",
     "backupCopied": "Backup copiado. Quem tiver esses tokens tem os sats.",
     "contactHint": "Pagando um contato? Use ⚡ no chat.",
@@ -192,7 +191,7 @@
       "perProofTest": "{{fee}} sat de teste por prova (cerca de 1 sat de teste por pagamento)"
     },
     "history": {
-      "fee": "taxa {{amount}}",
+      "fee": "taxa {{amount}} {{unit}}",
       "feesPaid": "Taxas pagas: {{amount}} {{unit}}",
       "movements": "{{count}} movimentações",
       "movementsOne": "1 movimentação",
@@ -214,8 +213,12 @@
     "paid": "Pago.",
     "pastePlaceholder": "Cole uma fatura Lightning, um endereço Lightning ou um token ecash",
     "payAmount": "Pagar {{amount}} {{unit}}",
+    "payFailed": "O pagamento falhou: o destinatário não foi pago.",
+    "payFailedBack": "O que estava reservado para ele voltou ao seu saldo.",
+    "payFailedFee": "O que estava reservado para ele voltou ao seu saldo, menos {{amount}} {{unit}} que o mint ficou como taxa (no histórico).",
     "payLine": "Pagar {{amount}}{{fees}}",
     "pendingMint": "O pagamento ainda está pendente no mint.",
+    "pendingMintNext": "Ele se resolve sozinho; nada é pago de novo. Até o mint responder, o valor aparece como reservado abaixo do saldo.",
     "primary": "Principal",
     "received": "⚡ {{amount}} {{unit}} recebidos",
     "redeem": "Resgatar token ecash",
@@ -384,7 +387,7 @@
     "cashuMints": "os mints Cashu",
     "cashuSettings": "Ajustes do Cashu",
     "commentFor": "Um comentário para {{to}} (opcional)",
-    "confirmWhat": "{{amount}} sats (mais uma taxa de até {{fee}})",
+    "confirmWhat": "{{amount}} {{unit}} (mais uma taxa de até {{fee}} {{feeUnit}})",
     "connecting": "Conectando à fonte…",
     "domainLine": "{{answered}} {{limits}}",
     "done": "Pronto",

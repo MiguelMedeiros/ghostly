@@ -8,6 +8,7 @@ import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
 
 /**
  * Rename (WISP 06 § User experience, the row menu), on the active device: one field with the name the set holds now,
@@ -50,10 +51,11 @@ export function RenameDeviceDialog({ device, deviceKey, onClose, onRenamed }: { 
           <span className="text-text-secondary">{t("devices.rename.label")}</span>
           <input data-testid="device-rename-name" autoFocus {...nameField} value={name} disabled={busy} onFocus={(event) => event.currentTarget.select()} className={field} />
         </label>
-        {busy && <p role="status" data-testid="device-rename-busy" className="text-text-secondary">{t("devices.rename.saving")}</p>}
+        {/* Said from a line there from the start, as Take over's: one that comes with its text is often not read. */}
+        <div role="status">{busy && <p data-testid="device-rename-busy" className="text-text-secondary">{t("devices.rename.saving")}</p>}</div>
         {error && <Notice problem={error} testId="device-rename-error" className="" />}
-        <button type="submit" data-testid="device-rename-save" disabled={!typed || busy} className={primaryButton}>{t("devices.rename.save")}</button>
-        <button type="button" data-testid="device-rename-cancel" disabled={busy} onClick={onClose} className={quietButton}>{t("common.cancel")}</button>
+        <FocusSafeButton type="submit" data-testid="device-rename-save" disabled={!typed || busy} className={primaryButton}>{t("devices.rename.save")}</FocusSafeButton>
+        <FocusSafeButton type="button" data-testid="device-rename-cancel" disabled={busy} onClick={onClose} className={quietButton}>{t("common.cancel")}</FocusSafeButton>
       </form>
     </DeviceDialog>
   );

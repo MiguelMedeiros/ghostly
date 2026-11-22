@@ -23,6 +23,7 @@ import {
   viewerResponseHeaders,
   VIEWER_DROPPED_DIRECTIVES,
   VIEWER_DROPPED_HEADERS,
+  VIEWER_PERMISSIONS_POLICY,
   VIEWER_SERVICE_CSP,
   VIEWER_SERVICE_CSP_RELAY_ONLY,
   viewerServicePolicy,
@@ -156,6 +157,35 @@ describe("header hygiene", () => {
     ]);
   });
 
+  it("takes a shared sub-path's prefix off a cookie's Path, as off its requests and redirects", () => {
+    // The viewer sees an app shared at `http://127.0.0.1:8888/notes` at `/`: a cookie kept on `/notes` was never sent
+    // back to `/home`, so a login there did not stick.
+    const target = parseLocalTarget("http://127.0.0.1:8888/notes");
+    const cookies = (values: string[]) =>
+      sanitizeResponseHeaders(values.map((value) => ["set-cookie", value]), target, "http://127.0.0.1:8888/notes/login").map(([, value]) => value);
+    expect(cookies([
+      "sid=abc; Path=/notes; HttpOnly",
+      "a=1; path = /notes/; SameSite=Lax",
+      "b=2; Path=/notes/api",
+      "c=3; Path=/; Domain=localhost",
+      "d=4; Path=/other",
+      "e=5; Path=/notesX",
+      "f=6",
+      "g=7; Path=notes",
+    ])).toEqual([
+      "sid=abc; Path=/; HttpOnly",
+      "a=1; Path=/; SameSite=Lax",
+      "b=2; Path=/api",
+      "c=3; Path=/",
+      "d=4; Path=/",
+      "e=5; Path=/",
+      "f=6",
+      "g=7; Path=notes",
+    ]);
+    // At the root nothing is taken off.
+    expect(sanitizeResponseHeaders([["set-cookie", "sid=abc; Path=/notes"]], parseLocalTarget("localhost:3400"))).toEqual([["set-cookie", "sid=abc; Path=/notes"]]);
+  });
+
   it("serves a contact's response headers to a viewer only when they are headers: no CR, LF or NUL, a token name", () => {
     expect(
       viewerResponseHeaders([
@@ -223,6 +253,7 @@ describe("header hygiene", () => {
     expect(withViewerPolicy([["Content-Type", "text/html"]])).toEqual([
       ["Content-Type", "text/html"],
       ["content-security-policy", VIEWER_SERVICE_CSP],
+      ["permissions-policy", VIEWER_PERMISSIONS_POLICY],
     ]);
     expect(
       withViewerPolicy([
@@ -233,7 +264,26 @@ describe("header hygiene", () => {
     ).toEqual([
       ["X-Kept", "1"],
       ["content-security-policy", `default-src *, img-src *, ${VIEWER_SERVICE_CSP}`],
+      ["permissions-policy", VIEWER_PERMISSIONS_POLICY],
     ]);
+  });
+
+  it("lets a contact's app ask for no camera, microphone, location or device, whatever its own headers say", () => {
+    // A grant would be a browser site setting of the app's origin, which no Delete chat, Clear all data or Delete profile clears.
+    const served = withViewerPolicy([
+      ["Permissions-Policy", "camera=*, geolocation=*"],
+      ["Feature-Policy", "camera *; microphone *"],
+      ["permissions-policy", "usb=("],
+    ]);
+    const features = served.filter(([name]) => /^(permissions|feature)-policy$/i.test(name));
+    expect(features).toHaveLength(1);
+    const [[name, value]] = features;
+    expect(name).toBe("permissions-policy");
+    const denied = new Map(value.split(",").map((entry) => entry.trim().split("=") as [string, string]));
+    for (const feature of ["camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read", "clipboard-write", "storage-access"]) {
+      expect(denied.get(feature), feature).toBe("()");
+    }
+    expect([...denied.values()].every((allow) => allow === "()")).toBe(true);
   });
 
   it("keeps a viewer's page off plain http and so off this machine's and the local network's services", () => {
@@ -257,8 +307,8 @@ describe("header hygiene", () => {
     // covers: settings.network.relay-only
     expect(viewerServicePolicy(false)).toBe(VIEWER_SERVICE_CSP);
     expect(viewerServicePolicy(true)).toBe(VIEWER_SERVICE_CSP_RELAY_ONLY);
-    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], true)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP_RELAY_ONLY}`]]);
-    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], false)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP}`]]);
+    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], true)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP_RELAY_ONLY}`], ["permissions-policy", VIEWER_PERMISSIONS_POLICY]]);
+    expect(withViewerPolicy([["Content-Security-Policy", "img-src *"]], false)).toEqual([["content-security-policy", `img-src *, ${VIEWER_SERVICE_CSP}`], ["permissions-policy", VIEWER_PERMISSIONS_POLICY]]);
     // No https: (a picture, script, font or frame from a server the contact names would show it this device's address);
     // its own origin, inline, data: and blob: content as before, and requests and forms on its own origin.
     const policy = new Map(VIEWER_SERVICE_CSP_RELAY_ONLY.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...sources]) => [name, sources]));
@@ -335,7 +385,10 @@ describe("rtc signal", () => {
 describe("http over the data link", () => {
   function setup(localFetch: LocalFetch) {
     const [clientSide, hostSide] = createChannelPair();
-    const services = new Map([["atlas", { id: "atlas", target: parseLocalTarget("localhost:3400") }]]);
+    const services = new Map([
+      ["atlas", { id: "atlas", target: parseLocalTarget("localhost:3400") }],
+      ["wiki", { id: "wiki", target: parseLocalTarget("localhost:3400/app") }],
+    ]);
     const host = new HttpHost(hostSide, (id) => services.get(id), localFetch);
     const client = new HttpClient(clientSide);
     wire(hostSide, { req: (f) => host.handleRequest(f), rst: (f) => host.handleReset(f), chunk: (c) => host.handleChunk(c) });
@@ -433,6 +486,29 @@ describe("http over the data link", () => {
       expect(blocked.headers).toContainEqual(["x-ghostly-error", "redirect-blocked"]);
       expect(utf8Decode(await blocked.bytes())).not.toContain("localhost");
     }
+  });
+
+  it("reads a relative redirect against the page that asked, as a browser does", async () => {
+    const locations: Record<string, string> = {
+      "/admin/users/7": "edit",
+      "/search": "?page=2",
+      "/app/x/y": "../other",
+      "/app/x/z": "../../escape",
+    };
+    const { client } = setup(async (request) => ({
+      status: 302,
+      headers: [["location", locations[new URL(request.url).pathname]]],
+      body: null,
+    }));
+    expect((await client.request("atlas", { method: "GET", path: "/admin/users/7" })).headers).toEqual([["location", "/admin/users/edit"]]);
+    expect((await client.request("atlas", { method: "GET", path: "/search?q=x" })).headers).toEqual([["location", "/search?page=2"]]);
+    const inside = await client.request("wiki", { method: "GET", path: "/x/y" });
+    expect(inside.status).toBe(302);
+    expect(inside.headers).toEqual([["location", "/other"]]);
+    // Past the base path it is still refused.
+    const outside = await client.request("wiki", { method: "GET", path: "/x/z" });
+    expect(outside.status).toBe(502);
+    expect(outside.headers).toContainEqual(["x-ghostly-error", "redirect-blocked"]);
   });
 
   it("hands a redirect a browser followed back to the client, never off the target", async () => {

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SPECIAL } from "../src/main";
+import { APP_WORDS, SPECIAL } from "../src/main";
 import { error, ghostly, home, ok } from "./support/cli";
 // covers: headless.cli
 
@@ -46,6 +46,11 @@ describe("help", () => {
     expect(send.stdout).toContain("everything after it is the text, options included");
     expect((await ghostly(["help", "group", "send"])).stdout).toContain("Put options before --.");
     expect(daemon.stdout).not.toContain("Put options before --.");
+    // A refusal and a default the README gave and the help did not.
+    expect((await ghostly(["help", "file", "accept"])).stdout).toContain("refused when it does not fit in the room left on this device, and it keeps waiting");
+    // What `paid: false` means: before, neither the help nor the README said.
+    expect((await ghostly(["help", "pay"])).stdout.replace(/\s+/g, " ")).toContain("paid false: not settled yet (pending at the mint or the card's source, or its answer lost); it settles by itself, is never paid twice");
+    expect((await ghostly(["help", "identity", "add"])).stdout).toMatch(/--timeout <n>\s+Seconds to wait for an approval \(default 300, 5 to 3600; Pubky at most 300\)/);
   });
 
   it("an unknown command is a usage error; plain help is the whole list", async () => {
@@ -142,6 +147,38 @@ describe("help", () => {
       expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message } });
     }
     expect(existsSync(join(dir, "profiles"))).toBe(false);
+  });
+
+  it("the app's word for a message action names the command that does it here", async () => {
+    // Before: "Unknown command: unpin (ghostly help)", and `unreact` "did you mean react?", which adds a reaction.
+    const dir = home("app-words");
+    for (const [args, message] of [
+      [["reply", "bob", "m1", "hi"], "Unknown command: reply (ghostly send <chat> --reply <message>; ghostly help send)"],
+      [["unpin", "bob"], "Unknown command: unpin (ghostly pin <chat> --remove; ghostly help pin)"],
+      [["unreact", "bob", "m1"], "Unknown command: unreact (ghostly react <chat> <message> --remove; ghostly help react)"],
+      [["delete", "bob", "m1"], "Unknown command: delete (ghostly message delete <chat> <message>; ghostly help message delete)"],
+      [["history", "bob"], "Unknown command: history (ghostly chat history <chat>; ghostly help chat history)"],
+      [["message", "edit", "bob", "m1", "x"], "Unknown command: message edit (ghostly edit <chat> <message>; ghostly help edit)"],
+      [["message", "react", "bob", "m1", "👍"], "Unknown command: message react (ghostly react <chat> <message> <emoji>; ghostly help react)"],
+      [["message", "pin", "bob", "m1"], "Unknown command: message pin (ghostly pin <chat> <message>; ghostly help pin)"],
+      [["message", "forward", "bob", "m1"], "Unknown command: message forward (ghostly forward <chat> <message> --to <chat>; ghostly help forward)"],
+      [["help", "unpin"], "Unknown command: unpin (ghostly pin <chat> --remove; ghostly help pin)"],
+      [["search", "hi"], "Unknown command: search (the CLI has no search yet: ghostly chat history <chat> --limit n | jq …; ghostly help chat history)"],
+      [["chat", "search", "bob", "hi"], "Unknown command: chat search (the CLI has no search yet: ghostly chat history <chat> --limit n | jq …; ghostly help chat history)"],
+    ] as const) {
+      const result = await ghostly(["--home", dir, ...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message } });
+    }
+    expect(existsSync(join(dir, "profiles"))).toBe(false);
+    // Each pointer follows a rename: the command it names has help, and every option it names is one of that command's.
+    for (const pointer of Object.values(APP_WORDS)) {
+      const words = pointer.split(" ").filter((word) => /^[a-z]/.test(word));
+      const { code, stdout } = await ghostly(["help", ...words]);
+      expect(code, pointer).toBe(0);
+      expect(stdout, pointer).toContain(`Usage: ghostly ${words.join(" ")} `);
+      for (const option of pointer.match(/--[a-z-]+/g) ?? []) expect(stdout, `${pointer}: ${option}`).toMatch(new RegExp(`\\n\\s+${option}\\b`));
+    }
   });
 
   it("a mistyped global option before the command is an unknown option, as after it, not a command", async () => {
@@ -290,12 +327,28 @@ describe("help", () => {
     expect(piped).toMatch(/^ {2}identity add <provider> \[subject\] .* \[--timeout s\]$/m);
   });
 
+  // `group join`'s help said nothing of its one-shot wait: a script or a piped run waited a silent minute.
+  it("a join that waits without a daemon says so in its help, as long as it waits", async () => {
+    for (const [words, wait] of [[["invite", "join"], "without a daemon it waits up to 60 s for the inviter"], [["group", "join"], "without a daemon it waits up to 60 s to be let in"]] as const) {
+      const { code, stdout } = await ghostly(["help", ...words], { env: { COLUMNS: "" } });
+      expect(code, words.join(" ")).toBe(0);
+      expect(stdout, words.join(" ")).toContain(wait);
+    }
+  });
+
   it("bare ghostly in a new Ghostly folder starts with the first steps", async () => {
     const dir = home("first-steps");
     const first = await ghostly(["--home", dir]);
     expect(first.code).toBe(0);
     expect(first.stdout).toMatch(/^First steps:\n {2}\$ ghostly invite create/m);
     expect(first.stdout).toContain("$ ghostly daemon --detach");
+    // The join pipes the invite in: `invite join -` typed at a terminal is refused, the secret kept off a TTY.
+    expect(first.stdout).toContain(`$ printf '%s' "$INVITE" | ghostly invite join `);
+    expect(first.stdout).not.toContain("invite join -");
+    // Each step's words start in one column, as the list's do.
+    const steps = first.stdout.split("\n").filter((line) => line.startsWith("  $ "));
+    expect(steps).toHaveLength(4);
+    expect(new Set(steps.map((line) => /^.*? {3,}(?=\S)/.exec(line)?.[0].length))).toEqual(new Set([steps[0].length - "make an invite for a contact".length]));
     expect(first.stdout).toContain("Usage: ghostly <command>");
     expect((await ghostly(["help", "--home", dir])).stdout).not.toContain("First steps");
     expect((await ghostly(["--home", dir, "profile", "create", "bot"])).code).toBe(0);
