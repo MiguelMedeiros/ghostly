@@ -26,7 +26,7 @@ import { useDeviceGate } from "./hooks/useDeviceGate";
 import { useViewportHeight } from "./hooks/useViewportHeight";
 import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
-import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite, undoubledRoute } from "./lib/url";
+import { INVITE_REFUSAL_MESSAGE, chatPath, chatRouteSession, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite, undoubledRoute } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
 import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "./lib/groups";
@@ -149,8 +149,9 @@ function ChatLinkIntake() {
       else open(reading.keys);
       return;
     }
-    const session = decodePart(rest);
-    const chatAddress = protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && session !== null;
+    // Read as the router reads it (a trailing slash too): one address, one answer.
+    const session = chatRouteSession(pathname);
+    const chatAddress = session !== null;
     if (chatAddress && loadSession(session)) return; // an ordinary chat address
     // Whatever it was, it leaves the address bar and the history: it may hold a key. The address of a chat no longer
     // on this device (a bookmark, a link kept from before it was deleted) says so, as a group's does, not "not an invite".
@@ -336,9 +337,9 @@ function isIntake(pathname: string): boolean {
   if (/^\/join\/./.test(pathname) || /^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null) return true;
   // The app icon's shortcuts: the sidebar acts on them and takes them out of the history.
   if (pathname === "/new" || pathname === "/scan") return true;
-  const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
-  const session = rest === undefined ? null : decodePart(rest);
-  return !!rest && (rest.includes("/") || session === null || !loadSession(session));
+  if (!/^\/chat\/./.test(pathname)) return false;
+  const session = chatRouteSession(pathname);
+  return session === null || !loadSession(session);
 }
 
 /**
