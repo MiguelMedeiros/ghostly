@@ -34,6 +34,8 @@ describe("linkInAddress", () => {
     expect(linkInAddress(`#/chat/${CODE}`)).toBe(`/chat/${CODE}`);
     expect(linkInAddress("#/chat/c2VlZA/pubkeyz32/ZW5j")).toBe("/chat/c2VlZA/pubkeyz32/ZW5j");
     expect(linkInAddress("#/chat/a1b2c3d4-e5f6")).toBeNull();
+    // A chat's address with a `/` after it is still that chat's (`chatRouteSession`), not an older invite.
+    expect(linkInAddress("#/chat/a1b2c3d4-e5f6/")).toBeNull();
   });
 });
 
