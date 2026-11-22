@@ -235,6 +235,13 @@ function saidUrl(url: string): string {
 }
 
 /**
+ * The first link a client fetches with a query or fragment: a private repository's raw link carries its read token
+ * there, and a bundle or a store index is public, so signed in, the token is published with it (as `app serve --url`
+ * refuses on a card).
+ */
+const tokenLink = (urls: readonly string[]) => urls.find((url) => /[?#]/.test(url));
+
+/**
  * A bundle at an https URL, as a client fetches one: `https:` only, no user or password, jsDelivr only at a full
  * commit (WISP 1200 · Manifest, "Every URL"); every redirect is held to the same rule, and the download stops past
  * 16 MiB. A redirect stays on the URL's own host and port or goes to a host a client reads from (isAppFetchUrl): never
@@ -585,6 +592,10 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     const said = checked.reason === "missing-key" ? { ...checked, detail: `${checked.detail} in ${APP_SOURCE}` } : checked;
     throw refused(`${sourcePath} and the folder's files make no valid manifest`, said, checked.detail ? { detail: checked.detail } : {});
   }
+  const source = tokenLink(checked.manifest.sources ?? []);
+  if (source) {
+    throw refused(`${sourcePath} lists the source ${saidUrl(source)}, whose query or fragment is where a private repository's token rides, and a bundle is public: list the app's link in a public repository, with no query`, { reason: "private-link", detail: "sources" });
+  }
 
   const { bytes: manifestBytes, signature } = await signAppObject(APP_PREFIXES.app, checked.manifest, key.signer);
   const bundle = assembleAppBundle(manifestBytes, canonicalJsonBytes(signature), contents.map((f) => f.bytes));
@@ -771,6 +782,10 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
 
   const valid = checkAppStoreIndex(index, { strict: true }, checked);
   if (!valid.ok) throw refused(`${indexPath} is not a valid store index`, valid);
+  for (const listing of (index as unknown as AppStoreIndex).apps) {
+    const url = tokenLink(listing.urls);
+    if (url) throw refused(`${indexPath} lists ${saidUrl(url)} for ${listing.ref}, whose query or fragment is where a private repository's token rides, and a store index is public: list the app's link in a public repository, with no query`, { reason: "private-link", detail: "apps: urls" });
+  }
   const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer, checked);
   const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
