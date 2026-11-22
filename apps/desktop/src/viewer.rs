@@ -64,8 +64,12 @@ const SERVICE_CSP_RELAY_ONLY: &str = "default-src 'self' data: blob: 'unsafe-inl
 /// windows with `noopener`, and guards a frame's window before the page holds it (what a frame element
 /// hands out, the frames of a document as one loads or the page changes, each `srcdoc`), for a frame the
 /// WebView did not run it in, and starts a worker made from a `blob:` URL of the page's from a script that makes a
-/// pass-through Trusted Types `default` policy in it first. The same text as `VIEWER_GUARD_SCRIPT` in
-/// `packages/core/src/viewerGuard.ts`, which says what a script in the page cannot do.
+/// pass-through Trusted Types `default` policy in it first. It takes out each `<script type="speculationrules">`
+/// as it is put in the page: Chromium (WebView2) would prefetch or prerender the pages it lists on a server the
+/// contact names, outside the policy, and `'unsafe-inline'` lets it in. Its Trusted Types default policy refuses
+/// `javascript:` URLs; an app that makes its own `default` policy gets the guard's back, with the app's rules in it.
+/// The same text as `VIEWER_GUARD_SCRIPT` in `packages/core/src/viewerGuard.ts`, which says what a script in the
+/// page cannot do.
 const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
   "use strict";
   try {
@@ -74,13 +78,33 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     for (const name of Object.getOwnPropertyNames(w)) {
       if (/^(webkit)?RTC/.test(name)) { try { delete w[name]; } catch (e) {} }
     }
-    if (w.trustedTypes && !w.trustedTypes.defaultPolicy) {
+    const types = w.trustedTypes;
+    let passing = false;
+    if (types && !types.defaultPolicy) {
       try {
-        w.trustedTypes.createPolicy("default", {
-          createHTML: (input) => input,
-          createScript: (input, type, sink) => (sink === "Location href" ? null : input),
-          createScriptURL: (input) => input,
-        });
+        let rules = null;
+        const rule = (kind) => (input, type, sink) => {
+          if (kind === "createScript" && sink === "Location href") return null;
+          if (passing || rules === null) return input;
+          return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+        };
+        const members = ["createHTML", "createScript", "createScriptURL"];
+        const create = types.createPolicy;
+        const policy = apply(create, types, ["default", { createHTML: rule(members[0]), createScript: rule(members[1]), createScriptURL: rule(members[2]) }]);
+        const named = String;
+        const Mistyped = w.TypeError;
+        Object.getPrototypeOf(types).createPolicy = function createPolicy(name, options) {
+          if (this !== types || rules !== null || named(name) !== "default") return apply(create, this, arguments);
+          const given = { createHTML: null, createScript: null, createScriptURL: null };
+          for (let i = 0; i < members.length; i++) {
+            const found = options ? options[members[i]] : undefined;
+            if (found === undefined || found === null) continue;
+            if (typeof found !== "function") throw new Mistyped("The policy's " + members[i] + " is not a function");
+            given[members[i]] = found;
+          }
+          rules = given;
+          return policy;
+        };
       } catch (e) {}
     }
     const open = w.open;
@@ -156,7 +180,15 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     const first = (frame) => {
       const doc = apply(getAttribute, frame, ["srcdoc"]);
       if (doc === null || apply(slice, doc, [0, own.length]) === own) return;
+      passing = true;
       try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
+      passing = false;
+    };
+    const trim = String.prototype.trim;
+    const drop = w.Element.prototype.remove;
+    const unruled = (script) => {
+      const type = apply(getAttribute, script, ["type"]);
+      if (type !== null && apply(lower, apply(trim, type, []), []) === "speculationrules") apply(drop, script, []);
     };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
@@ -165,6 +197,10 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
         try {
           const frames = apply(all, root, ["iframe[srcdoc]"]);
           for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+        } catch (e) {}
+        try {
+          const scripts = apply(all, root, ["script"]);
+          for (let i = apply(size, scripts, []); i-- > 0;) unruled(scripts[i]);
         } catch (e) {}
         sweep();
       };
@@ -562,14 +598,16 @@ const WORKER_DESTINATIONS: [&str; 3] = ["worker", "sharedworker", "serviceworker
 /// The contact's headers that are not passed on: each makes the WebView send
 /// something to a place it names, outside `connect-src` (violation and
 /// network-error reports, and the endpoints they go to; `Link` preloads,
-/// prefetches and early connections). The same list as
-/// `OPENED_SERVICE_DROPPED_HEADERS` in `packages/cli/src/services.ts`.
-const DROPPED_HEADERS: [&str; 5] = [
+/// prefetches and early connections; `Speculation-Rules` prefetches and
+/// prerenders). The same list as `OPENED_SERVICE_DROPPED_HEADERS` in
+/// `packages/cli/src/services.ts`.
+const DROPPED_HEADERS: [&str; 6] = [
     "content-security-policy-report-only",
     "reporting-endpoints",
     "report-to",
     "nel",
     "link",
+    "speculation-rules",
 ];
 
 /// The page's features, Ghostly's alone: the contact's `Permissions-Policy` (or the older `Feature-Policy`) could
@@ -1880,6 +1918,7 @@ mod routing_tests {
                 "Link",
                 "<https://nas.local/>; rel=preconnect, </s.css>; rel=\"dns-prefetch prefetch\"",
             ),
+            ("Speculation-Rules", "\"http://127.0.0.1:9/rules.json\""),
             ("x-served-by", "atlas"),
         ];
         respond(
@@ -1902,6 +1941,7 @@ mod routing_tests {
             "report-to",
             "nel",
             "link",
+            "speculation-rules",
         ] {
             assert!(response.headers().get(name).is_none(), "{name}");
         }

@@ -1432,6 +1432,42 @@ describe("a restored profile (installed list, no bundle)", () => {
     expect(await bundleIds()).toEqual([]);
   });
 
+  it("a restored record granting more than its bundle's manifest asks never runs", async () => {
+    const { v1, store } = await restored();
+    const [row] = await appRows() as { permissions: AppPermission[] }[];
+    row!.permissions = ["chat", "files", "internet", "name"];
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put(row));
+    // Its files missing: the bundle fetched by digest is not taken for it.
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
+    expect(await bundleIds()).toEqual([]);
+    // Its files here: the bundle read back refuses the record.
+    await (await fileBytes()).append(`app-${v1.digest}`, 0, v1.bytes);
+    await (await fileBytes()).close(`app-${v1.digest}`);
+    await expect(apps(net).entry({ ref: v1.ref })).rejects.toThrow(/^damaged/);
+  });
+
+  it("a restored record naming one app with another publisher's bundle never runs that bundle under its ref", async () => {
+    const other = await bundle({ by: signer("someone else"), permissions: [] });
+    const elsewhere = "https://raw.githubusercontent.com/eve/chess/HEAD/app.ghostlyapp";
+    net.put(elsewhere, other.bytes);
+    const first = apps(net);
+    await first.preview({ url: elsewhere });
+    await first.install({ digest: other.digest, grant: [] });
+    const [installed] = await appRows() as { ref: string; publisher: string; name: string }[];
+    const named = { ...installed!, ref: `${keyOf(PUBLISHER)}/chess`, publisher: keyOf(PUBLISHER), permissions: [] };
+    const db = await openDb();
+    const tx = db.transaction(STORES.apps, "readwrite");
+    tx.objectStore(STORES.apps).delete(installed!.ref);
+    tx.objectStore(STORES.apps).put(named);
+    await wrap(tx.objectStore(STORES.apps).count());
+    // Its files kept: read back, they are another app's.
+    await expect(apps(net).entry({ ref: named.ref })).rejects.toThrow(/^damaged/);
+    // Its files missing (a restored profile): the bundle fetched is not taken for it.
+    await (await fileBytes()).remove(`app-${other.digest}`);
+    await expect(apps(net).entry({ ref: named.ref })).rejects.toThrow(/^needs-files/);
+    expect(await bundleIds()).toEqual([]);
+  });
+
   it("a URL its publisher moved on from costs a peek, never the whole bundle, at each open and each check", async () => {
     const mirror = "https://raw.githubusercontent.com/ana/chess-mirror/HEAD/app.ghostlyapp";
     const sources = [BUNDLE_URL, mirror];
@@ -1878,5 +1914,37 @@ describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
     await store.install({ digest: v1.digest, grant: ["chat"] });
     await store.checkUpdates();
     expect(checked).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the record keeps the hash of each bundle's whole file, as written (a device move hands the file over by it)", () => {
+  const hashOf = (bytes: Uint8Array) => toBase64Url(sha256(bytes));
+  type Row = { sha256?: string; pending?: { sha256?: string } };
+  const row = async () => (await appRows())[0] as Row;
+
+  it("at install, for an update waiting and once accepted, and when a restored app's files are fetched again", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    expect((await row()).sha256).toBe(hashOf(v1.bytes));
+
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    expect(await row()).toMatchObject({ sha256: hashOf(v1.bytes), pending: { sha256: hashOf(v2.bytes) } });
+
+    await store.acceptUpdate({ ref: v1.ref });
+    expect((await row()).sha256).toBe(hashOf(v2.bytes));
+
+    // A record from before the hash was kept, its files gone (a restored profile): fetched again, it keeps it.
+    const { sha256: _kept, ...older } = await row();
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put(older));
+    await (await fileBytes()).remove(`app-${v2.digest}`);
+    expect(await apps(net).fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect((await row()).sha256).toBe(hashOf(v2.bytes));
   });
 });

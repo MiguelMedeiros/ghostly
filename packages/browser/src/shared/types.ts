@@ -812,7 +812,10 @@ export interface WalletTx {
   amount: number;
   fee: number;
   note?: string;
-  /** `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. Absent on older records. */
+  /**
+   * `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. `lightning-out`, and
+   * the `fee` of a failed one: its melt quote, so a payment left pending on screen knows how it ended. Absent on older records.
+   */
   quote?: string;
 }
 
@@ -891,9 +894,10 @@ export interface WalletInstanceView {
   receive?: boolean;
   /**
    * At home on another device (WISP 06 § Wallets that stay home): that device's name ("" when this device does not know
-   * it), and when its coins expire (Ark, Bark). It is never opened here, and takes no payment here.
+   * it), its signing key (what Remove <device> matches it by), and when its coins expire (Ark, Bark). It is never
+   * opened here, and takes no payment here.
    */
-  home?: { device: string; expiresAt?: number };
+  home?: { device: string; key?: string; expiresAt?: number };
 }
 
 /**

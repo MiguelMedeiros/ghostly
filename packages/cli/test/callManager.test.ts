@@ -524,6 +524,21 @@ describe("a call to a contact who is away", () => {
     }
   });
 
+  // Found in a bug hunt: a chat on DHT only (either side's choice) said the contact's app was not connected, with a
+  // `chat wait --until live` that waited 60 s and failed, where `chat connect` names whose choice it is.
+  it("on a chat on DHT only, says whose choice it is instead of a wait that never ends", async () => {
+    const dht = (fields: Partial<LinkView>) => ({ id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Calls need a live connection", ...fields }) as unknown as LinkView;
+    const start = (link: LinkView) => new CallManager({ engine: engineOf(() => ({ links: [link] }) as unknown as EngineState), emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {});
+    await expect(start(dht({ deliveryMode: "dht" }))).rejects.toMatchObject({
+      code: "unavailable", details: { chat: "chat-ab", reason: "dht-only" },
+      message: "Calls need a live connection. This chat is on DHT only on this side: choose a live method first (chat transport auto)",
+    });
+    await expect(start(dht({ dhtDelivery: { peerMode: "dht" } } as Partial<LinkView>))).rejects.toMatchObject({
+      code: "unavailable", details: { chat: "chat-ab", reason: "peer-dht-only" },
+      message: "Calls need a live connection. Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT",
+    });
+  });
+
   it("keeps the engine's own words for a chat that cannot call for another reason", async () => {
     const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Your contact's app cannot take calls" } as unknown as LinkView;
     const engine: CallEngine = engineOf(() => ({ links: [link] }) as unknown as EngineState);
@@ -1776,6 +1791,13 @@ describe("auto-answer from the chats named", () => {
     calls.forgetChat("chat-real-alice");
     expect(calls.getAuto()).toEqual({ on: false, from: [], rate: 48000 });
     expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: false, from: [], rate: 48000 } });
+  });
+
+  it("answers at 48000 when turned on again without --rate, whatever rate it had before", () => {
+    const calls = manager();
+    calls.setAuto({ on: true, rate: 16000 });
+    expect(calls.setAuto({ on: true, from: ["alice"] })).toEqual({ on: true, from: ["chat-real-alice"], rate: 48000 });
+    expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: true, from: ["chat-real-alice"], rate: 48000 } });
   });
 
   it("leaves auto-answer from anyone on when a chat is removed", () => {

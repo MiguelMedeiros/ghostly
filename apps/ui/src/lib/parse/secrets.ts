@@ -3,6 +3,7 @@ import { sha256, sha512 } from "@noble/hashes/sha2.js";
 import { createBase58check } from "@scure/base";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { MONERO_WORDS } from "./monero-words";
+import { SLIP39_WORDS } from "./slip39-words";
 
 /**
  * What the composer asks about before a message goes: text that looks like a secret someone could take funds or an
@@ -51,6 +52,8 @@ function lazyIndex(list: readonly string[], spell: (word: string) => string): ()
 }
 
 const MNEMONIC_LENGTHS = [12, 15, 18, 21, 24];
+/** BIP39's checksum, or LND's aezeed's (24 words of the same list with a CRC of their own). */
+const englishChecksumHolds = (indices: number[]) => bip39ChecksumHolds(indices) || aezeedChecksumHolds(indices);
 const BIP39: SeedWords = {
   index: lazyIndex(wordlist, (word) => word),
   words: englishWords,
@@ -60,7 +63,7 @@ const BIP39: SeedWords = {
    * checksum of its own, which BIP39's caught only by chance, about 3 in 10).
    */
   wholeMessage: [...MNEMONIC_LENGTHS, 16],
-  checksumHolds: bip39ChecksumHolds,
+  checksumHolds: englishChecksumHolds,
   /** Electrum's: its seeds are 12 words of the same list with a version where BIP39's checksum is. */
   slowChecksum: { length: 12, holds: electrumVersionHolds },
 };
@@ -77,7 +80,15 @@ const MONERO: SeedWords = {
   wholeMessage: [25, 13],
   checksumHolds: moneroChecksum(MONERO_WORDS, 3),
 };
-let seeds = [BIP39, BIP39_SHORT, MONERO];
+/** A SLIP39 share (Trezor's Shamir backup, or its single-share one): 20 words for a 128-bit secret, 33 for 256. */
+const SLIP39: SeedWords = {
+  index: lazyIndex(SLIP39_WORDS, (word) => word),
+  words: englishWords,
+  lengths: [20, 33],
+  wholeMessage: [20, 33],
+  checksumHolds: slip39ChecksumHolds,
+};
+let seeds = [BIP39, BIP39_SHORT, MONERO, SLIP39];
 
 /**
  * BIP39's own lists in the app's other languages, which a wallet set to one of them shows its seed in: the same
@@ -86,7 +97,7 @@ let seeds = [BIP39, BIP39_SHORT, MONERO];
  * first download) and the CLI with the guard.
  */
 export function addSeedLists(lists: readonly (readonly string[])[], moneroLists: readonly [list: readonly string[], prefix: number][] = []): void {
-  seeds = [BIP39, BIP39_SHORT, MONERO, ...lists.map((list): SeedWords => ({
+  seeds = [BIP39, BIP39_SHORT, MONERO, SLIP39, ...lists.map((list): SeedWords => ({
     index: lazyIndex(list, fold),
     words: foldedWords,
     lengths: MNEMONIC_LENGTHS,
@@ -186,7 +197,8 @@ const sameWords = (a: string[] | null, b: string[] | null) => a === b || (a !== 
 /**
  * 12 to 24 words in a row from the English BIP39 list whose checksum holds, anywhere in the text; or a message that
  * is nothing but 12, 15, 16, 18, 21 or 24 of those words (a seed with one word mistyped is still most of a seed). The
- * same for Monero's English list, 25 or 13 words, and for BIP39's and Monero's lists in the app's other languages.
+ * same for Monero's English list, 25 or 13 words, SLIP39's, 20 or 33, and for BIP39's and Monero's lists in the app's
+ * other languages.
  * Prose breaks a run at once: "the", "a", "is", "to", "and", "of" and "I" are on neither English list, nor "de",
  * "la", "a", "e" on the others.
  *
@@ -207,12 +219,16 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
    */
   const inner: number[][] = [];
   const seedLike = (start: number, length: number) => {
-    const window = run.slice(start, start + length);
-    const counts = new Map<number, number>();
-    for (const word of window) counts.set(word, (counts.get(word) ?? 0) + 1);
-    if (counts.size === 1) return false;
-    const [most, times] = [...counts].reduce((a, b) => (b[1] > a[1] ? b : a));
+    // The one word said in more than half the window, if there is one (Boyer and Moore's vote), and how often it is.
+    let most = -1, votes = 0, times = 0;
+    for (let i = start; i < start + length; i++) {
+      if (votes === 0) most = run[i];
+      votes += run[i] === most ? 1 : -1;
+    }
+    for (let i = start; i < start + length; i++) if (run[i] === most) times++;
+    if (times === length) return false;
     if (times > length / 2 && (run[start - 1] === most || run[start + length] === most)) return false;
+    const window = run.slice(start, start + length);
     if (seed.checksumHolds(window)) return true;
     if (slow === undefined || length !== slow.length) return false;
     if (start > 0 && start + length < run.length) {
@@ -247,12 +263,29 @@ function hasMnemonic(tokens: string[] | null, seed: SeedWords): boolean {
  * word "word" in its labels and a list in two columns ("1. … 13. …") still make one run. The spaces on each side of a
  * mark are one run when the mark is not there: two that could split it tried every split, and a draft of a number, a
  * word and long runs of spaces took the reader minutes.
+ *
+ * As people write such a list too: "1 – word" (a phone's smart dash), markdown ("**1.** word", "| 1 | word |"), the
+ * word in quotes or with a period, a bullet or a "|" between the columns, the number after the word ("word (1)"), and
+ * any script's digits, and the fullwidth "１．word" a Japanese or Chinese keyboard writes.
  */
-const NUMBERED = /(?<![\p{L}\p{N}.,])(?:word\s*)?#?(\d{1,2})\s*(?:[.:)-]\s*)?(\p{L}+)(?=[^\S\r\n]*(?:[,;][^\S\r\n]*)?(?:$|\r?\n|(?:word\s*)?#?\d))/gimu;
+const BETWEEN = String.raw`[^\S\r\n]*(?:[,;.|*_"'“”‘’«»」』•·\-–—，；．｜、。][^\S\r\n]*){0,6}`;
+const NUMBERED = new RegExp(String.raw`(?<![\p{L}\p{N}.,])(?:word\s*)?[#＃]?(\p{Nd}{1,2})\s*(?:[*_]{0,2}[.:)|\-–—．：）｜][*_]{0,2}\s*|[*_]{1,2}\s*)?["'“‘«「『*_]{0,2}(\p{L}+)(?=${BETWEEN}(?:$|\r?\n|(?:word\s*)?[#＃]?\p{Nd}))`, "gimu");
+const NUMBER_AFTER = new RegExp(String.raw`(?<![\p{L}\p{N}])(\p{L}+)[^\S\r\n]*[(\[（](\p{Nd}{1,2})[)\]）](?=${BETWEEN}(?:$|\r?\n|\p{L}+[^\S\r\n]*[(\[（]\p{Nd}))`, "gmu");
 
 function numbered(text: string): { numbers: number[]; words: string[] } | null {
-  const pairs = [...text.matchAll(NUMBERED)];
-  return pairs.length < 12 ? null : { numbers: pairs.map((pair) => Number(pair[1])), words: pairs.map((pair) => pair[2]) };
+  let pairs = [...text.matchAll(NUMBERED)].map(([, number, word]) => [number, word]);
+  if (pairs.length < 12) pairs = [...text.matchAll(NUMBER_AFTER)].map(([, word, number]) => [number, word]);
+  return pairs.length < 12 ? null : { numbers: pairs.map(([number]) => digits(number)), words: pairs.map(([, word]) => word) };
+}
+
+/** A number in any script's digits: each block of them runs 0 to 9 in order. */
+function digits(number: string): number {
+  return Array.from(number).reduce((value, digit) => {
+    const at = digit.codePointAt(0)!;
+    let zero = at;
+    while (/\p{Nd}/u.test(String.fromCodePoint(zero - 1))) zero--;
+    return value * 10 + ((at - zero) % 10);
+  }, 0);
 }
 
 /**
@@ -282,16 +315,55 @@ function electrumVersionHolds(indices: number[]): boolean {
   return mac[0] === 0x01 || (mac[0] === 0x10 && mac[1] >> 4 <= 2);
 }
 
-/** BIP39: the words' 11-bit indices are the entropy followed by the first bits of its SHA-256. */
-function bip39ChecksumHolds(indices: number[]): boolean {
-  const bits = indices.length * 11, checksumBits = bits / 33, entropyBytes = (bits - checksumBits) / 8;
-  const bytes = new Uint8Array(Math.ceil(bits / 8));
+/** The words' 11-bit indices one after the other, first bit first, as BIP39 and aezeed read them. */
+function elevenBits(indices: number[]): Uint8Array {
+  const bytes = new Uint8Array(Math.ceil((indices.length * 11) / 8));
   indices.forEach((index, i) => {
     for (let b = 0; b < 11; b++) if (index & (1 << (10 - b))) { const at = i * 11 + b; bytes[at >> 3] |= 0x80 >> (at & 7); }
   });
+  return bytes;
+}
+
+/** BIP39: the words' 11-bit indices are the entropy followed by the first bits of its SHA-256. */
+function bip39ChecksumHolds(indices: number[]): boolean {
+  const bits = indices.length * 11, checksumBits = bits / 33, entropyBytes = (bits - checksumBits) / 8;
+  const bytes = elevenBits(indices);
   const expected = sha256(bytes.subarray(0, entropyBytes))[0] >> (8 - checksumBits);
   const got = bytes[entropyBytes] >> (8 - checksumBits);
   return expected === got;
+}
+
+/**
+ * LND's aezeed (lnd/aezeed/cipherseed.go): 24 words are 33 bytes, the version, the enciphered seed and its salt, then
+ * a big-endian CRC-32C of those 29. It holds without the passphrase; a random 24 words pass one time in 4 billion.
+ */
+function aezeedChecksumHolds(indices: number[]): boolean {
+  if (indices.length !== 24) return false;
+  const bytes = elevenBits(indices);
+  return crc(CRC32C_TABLE, bytes.subarray(0, 29)) === new DataView(bytes.buffer).getUint32(29);
+}
+
+/** SLIP-0039's RS1024 generator, by the bit of the checksum's top word that adds each one. */
+const RS1024 = [0xe0e040, 0x1c1c080, 0x3838100, 0x7070200, 0xe0e0009, 0x1c0c2412, 0x38086c24, 0x3090fc48, 0x21b1f890, 0x3f3f120];
+const SHAMIR = Array.from("shamir", (c) => c.charCodeAt(0));
+const SHAMIR_EXTENDABLE = Array.from("shamir_extendable", (c) => c.charCodeAt(0));
+
+/**
+ * SLIP-0039: RS1024 over the customization string and the words' 10-bit indices comes out at 1. The string is
+ * "shamir_extendable" when the share says it is extendable (the bit after the 15-bit identifier), "shamir" if not.
+ * The last three words are the checksum: a random run passes one time in a billion.
+ */
+function slip39ChecksumHolds(indices: number[]): boolean {
+  return rs1024(rs1024(1, (indices[1] >> 4) & 1 ? SHAMIR_EXTENDABLE : SHAMIR), indices) === 1;
+}
+
+function rs1024(checksum: number, values: number[]): number {
+  for (const value of values) {
+    const top = checksum >>> 20;
+    checksum = ((checksum & 0xfffff) << 10) ^ value;
+    for (let i = 0; i < 10; i++) if ((top >>> i) & 1) checksum ^= RS1024[i];
+  }
+  return checksum;
 }
 
 /**
@@ -308,20 +380,25 @@ function moneroChecksum(list: readonly string[], prefix: number): (indices: numb
   };
 }
 
-const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, n) => {
+const crcTable = (polynomial: number) => Uint32Array.from({ length: 256 }, (_, n) => {
   let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  for (let k = 0; k < 8; k++) c = c & 1 ? polynomial ^ (c >>> 1) : c >>> 1;
   return c;
 });
+/** CRC-32 (the zlib one) and CRC-32C (Castagnoli's), bit-reversed. */
+const CRC32_TABLE = crcTable(0xedb88320);
+const CRC32C_TABLE = crcTable(0x82f63b78);
 
 const utf8 = new TextEncoder();
 
-/** CRC-32 (the zlib one) of text in UTF-8. */
-function crc32(text: string): number {
-  let crc = 0xffffffff;
-  for (const byte of utf8.encode(text)) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
+function crc(table: Uint32Array, bytes: Uint8Array): number {
+  let value = 0xffffffff;
+  for (const byte of bytes) value = table[(value ^ byte) & 0xff] ^ (value >>> 8);
+  return (value ^ 0xffffffff) >>> 0;
 }
+
+/** CRC-32 (the zlib one) of text in UTF-8. */
+const crc32 = (text: string) => crc(CRC32_TABLE, utf8.encode(text));
 
 /** A WIF private key: base58check with version 0x80 (mainnet) or 0xef (testnet), 32 bytes and an optional 0x01. */
 function hasWif(text: string): boolean {

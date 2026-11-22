@@ -154,7 +154,7 @@ describe("Add → DID says the refusal in the language", () => {
   afterEach(() => { vi.unstubAllGlobals(); setPkarrRelaySource(() => undefined); clearDidCache(); });
 
   it("in Arabic, a did:dht one relay has no document for and the other does not answer", async () => {
-    vi.stubGlobal("fetch", vi.fn((url: string) => String(url).startsWith("https://relay-a.test")
+    vi.stubGlobal("fetch", vi.fn((url: string) => new URL(String(url)).host === "relay-a.test"
       ? Promise.resolve(new Response("", { status: 404 }))
       : Promise.reject(new TypeError("Failed to fetch"))));
     setPkarrRelaySource(() => ["https://relay-a.test", "https://relay-b.test"]);

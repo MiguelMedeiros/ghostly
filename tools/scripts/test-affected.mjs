@@ -21,7 +21,7 @@ import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HARNESS_PORTS, REMOTE, VARIABLES } from "../../e2e/infra/env.mjs";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "./affected/files.mjs";
-import { plan as makePlan, parseUnitGroup, unitPartsOf } from "./affected/select.mjs";
+import { draftUnitJob, plan as makePlan, parseUnitGroup, unitPartsOf } from "./affected/select.mjs";
 import { COMMANDS, SHARED, blanked, envTarget, gatedTests, stackDecision, statusWhy } from "./affected/stack.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
@@ -267,8 +267,11 @@ for (const u of p.unit) {
   const { shard } = partHere(u);
   const common = [...u.args, `--maxWorkers=${JOBS}`, "--passWithNoTests", ...(shard ? [`--shard=${shard}`] : [])];
   const half = shard ? `, half ${shard}` : "";
-  if (u.mode === "whole") await run(`unit ${u.name} (whole: ${u.reason}${half})`, "npx", ["vitest", "run", ...common], { cwd });
-  else await run(`unit ${u.name} (related${half})`, "npx", ["vitest", "related", ...u.files.map((f) => join(ROOT, f)), "--run", ...common], { cwd });
+  const ok = u.mode === "whole"
+    ? await run(`unit ${u.name} (whole: ${u.reason}${half})`, "npx", ["vitest", "run", ...common], { cwd })
+    : await run(`unit ${u.name} (related${half})`, "npx", ["vitest", "related", ...u.files.map((f) => join(ROOT, f)), "--run", ...common], { cwd });
+  // CI Success can only say that one of the groups failed: the group's job says which project.
+  if (!ok && unitGroup && process.env.GITHUB_ACTIONS === "true") console.log(`::error::${draftUnitJob(unitGroup)}: unit ${u.name}${shard ? ` (half ${shard})` : ""} failed`);
 }
 
 // lint
@@ -319,9 +322,11 @@ async function runE2e() {
   const needsExt = e2eSelected.some((s) => s.startsWith("e2e/extension/"));
   let url = webUrl;
   let preview = null;
-  // The suite's build: the local OIDC issuer and the SDK example's adapters (see e2e/playwright.config.ts).
+  // The suite's build: the local OIDC issuer, the SDK example's adapters and a services host on this port, so a
+  // contact's shared app opens on `<label>.localhost` (see e2e/playwright.config.ts).
   const issuer = /OIDC_TEST_ISSUER\s*=.*?"([^"]+)"/.exec(readFileSync(join(ROOT, "e2e/support/oidcIssuer.ts"), "utf8"))?.[1];
-  const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, VITE_ATPROTO_TEST_PLC: "https://plc.ghostly.test", GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1" };
+  const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, VITE_ATPROTO_TEST_PLC: "https://plc.ghostly.test", GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1",
+    VITE_SERVICES_HOST: `http://*.localhost:${port}`, VITE_SERVICES_APP_ORIGIN: `http://localhost:${port}` };
   // Extension specs pair with the web app too (interop), so a build is served whatever was picked.
   if (!url) {
     // Something already answering there is another session's build: testing it would test the wrong app.

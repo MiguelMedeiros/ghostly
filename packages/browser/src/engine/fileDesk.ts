@@ -60,6 +60,11 @@ export interface FileDeskDeps {
   /** A transfer ended, either way: its local file id and how (for the message's details). */
   /** `seen`: this desk saw the transfer under way before it ended (not a finished one shown again on a restart). */
   settled?(linkId: string, fileId: string, record: FileTransferRecord, seen: boolean): void;
+  /**
+   * Bytes still to come of the group files this device fetches (`GroupFileDesk.stillComing`): an offer is taken
+   * without asking only where it fits beside them too. Absent: none.
+   */
+  groupsComing?(): number;
 }
 
 interface Chat {
@@ -140,6 +145,8 @@ export class FileDesk {
   private readonly deciding = new Set<{ linkId: string; id: string; size: number; again: boolean }>();
   /** Received files whose offer waits for the person, by local id: the room they show is read again (`rooms`). */
   private readonly asking = new Set<string>();
+  /** Ends what was said on the floor and never offered (`sweepAnnounced`), from the first one said. */
+  private announcedSweeper?: ReturnType<typeof setInterval>;
 
   constructor(private readonly deps: FileDeskDeps) {}
 
@@ -260,6 +267,10 @@ export class FileDesk {
     chat.announced.set(wireId, { local: localId, at });
     // No direction: nothing to pause or cancel here before its offer comes.
     this.deps.transfers.set(localId, { state: "transferring", stage: "waiting", transferred: 0, size });
+    if (this.announcedSweeper) return;
+    this.announcedSweeper = setInterval(() => this.sweepAnnounced(), FILE_LIMITS.sweepEveryMs);
+    // A headless app (the CLI) is not kept running for it.
+    (this.announcedSweeper as { unref?: () => void }).unref?.();
   }
 
   /** This device refuses the offer of a file said on the floor: its bubble ends, saying why (`floorRefusal`). */
@@ -415,12 +426,19 @@ export class FileDesk {
     this.unwatch(fileId);
   }
 
-  /** Offers nobody answered in a week end; the peer calls this now and then. */
+  /** Offers nobody answered in a week end (each chat's own sweep does it while its session is open), and so do files said on the floor. */
   sweep(): void {
+    for (const chat of this.chats.values()) chat.files.sweep();
+    this.sweepAnnounced();
+  }
+
+  /**
+   * Said on the floor and never offered live within the week an offer waits: it is not coming. Run every
+   * `FILE_LIMITS.sweepEveryMs` from the first one said (`announcedHere`): nothing called `sweep`, so its bubble waited for good.
+   */
+  private sweepAnnounced(): void {
     const now = Date.now();
     for (const chat of this.chats.values()) {
-      chat.files.sweep();
-      // Said on the floor and never offered live within the week an offer waits: it is not coming.
       for (const [wireId, said] of [...chat.announced]) if (now - said.at > ANNOUNCED_FOR_MS) this.withdrawn(chat, wireId, "It did not come within a week");
     }
   }
@@ -444,9 +462,11 @@ export class FileDesk {
     return said;
   }
 
-  /** The app stops: no chat's files are swept any more (`ChatFiles.stop`). */
+  /** The app stops: no chat's files are swept any more (`ChatFiles.stop`), nor what was said on the floor. */
   stop(): void {
     for (const chat of this.chats.values()) chat.files.stop();
+    clearInterval(this.announcedSweeper);
+    this.announcedSweeper = undefined;
   }
 
   /** Stops tracking whether a transfer is stuck, and the room an offer of it shows. */
@@ -505,9 +525,10 @@ export class FileDesk {
    * counts only the ones before it, so of several that fit only one at a time the first is taken and the rest asked.
    * Of those, only what each will take without asking, once per file: one above 25 MiB, or past `room` beside the
    * ones before it, is asked about or refused, and held back a smaller offer that fits.
+   * The group files this device fetches count first (`groups`, `FileDeskDeps.groupsComing`): they were asked for already.
    */
-  private stillComing(own: object, room: number): number {
-    let due = 0;
+  private stillComing(own: object, room: number, groups = this.deps.groupsComing?.() ?? 0): number {
+    let due = groups;
     for (const chat of this.chats.values()) due += chat.files.stillToCome();
     const seen = new Set<string>();
     for (const held of this.deciding) {
@@ -522,6 +543,23 @@ export class FileDesk {
       }
     }
     return due;
+  }
+
+  /**
+   * Bytes still to come of the files the chats took here, and of the offers being taken (`stillComing`, every one, with
+   * `room` left): what a group file is fetched beside (`GroupFileDesk`). The group files' own are not in it.
+   */
+  chatsComing(room: number): number {
+    return this.stillComing({}, room, 0);
+  }
+
+  /**
+   * The group files still coming changed (`FileDeskDeps.groupsComing`): one started or ended. The offers waiting show the
+   * room left beside them again (`rooms`). Before, they were read again only for a 1:1 file, and an offer kept showing
+   * the room a group file had taken since (or had given back).
+   */
+  comingChanged(): void {
+    void this.rooms();
   }
 
   /** A taken offer's record is kept, under way: it counts itself from now (`stillComing`), even if forgotten later. */
@@ -595,6 +633,8 @@ export class FileDesk {
           metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: file.timestamp, voice: file.voice, video: file.video, image: file.image }, wire3: record });
         await this.deps.patchMessage?.(linkId, `peer_${record.id}`, (current) => current.sender !== "peer" || current.file?.id !== id ? null
           : { file: message, text: fileMessageText(message), via: "datalink", details: { ...current.details, wire: fileWire("files/3", file.size) } });
+        // Deleted for everyone by its sender meanwhile: the removal took the bubble before this record was written.
+        if (this.deps.deleted(linkId, `peer_${record.id}`)) this.deletedMeanwhile(linkId, id);
       }).catch((error) => this.unkept(linkId, chat, record.id, id, error, said));
     }
     if (record.direction === "in" && !chat.local.has(record.id)) {
@@ -669,7 +709,7 @@ export class FileDesk {
     this.deps.changed();
   }
 
-  /** A new offer whose message was deleted before its row was kept: forgotten as a deleted message's file is. */
+  /** An offer whose message was deleted before its row was kept: forgotten as a deleted message's file is. */
   private deletedMeanwhile(linkId: string, id: string): void {
     this.forget(linkId, id);
     this.deps.transfers.delete(id);
@@ -823,7 +863,8 @@ export class FileDesk {
   /**
    * The room the offers waiting for the person are decided against, shown with them: the free space (`known` when an
    * Accept read it) less what the files taken here still need (`stillComing`), as Accept counts it. Read again when one
-   * is shown, when one is taken, when another received file ends, and when an Accept found less; once for all of them.
+   * is shown, when one is taken, when another received file ends, when a group file starts or ends (`comingChanged`),
+   * and when an Accept found less; once for all of them.
    * Before, the free space alone: an offer that fit it read as fitting, and Accept refused it for the file still coming.
    */
   private async rooms(known?: number | null): Promise<void> {

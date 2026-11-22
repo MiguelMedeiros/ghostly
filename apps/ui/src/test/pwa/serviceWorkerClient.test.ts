@@ -350,11 +350,11 @@ describe("another tab took a new version", () => {
 });
 
 describe("a share, on the page's side", () => {
-  it("the page opened for it asks the worker for it", async () => {
+  it("the page opened for it asks the worker for it, as its profile", async () => {
     window.location.hash = "#/shared";
     expect(openedForShare()).toBe(true);
     askForShare();
-    await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-ready" }]));
+    await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-ready", profile: activeProfileId() }]));
   });
 
   it("the page opened for it asks for it once it is the app, even after a link took its address while it waited", async () => {
@@ -363,7 +363,7 @@ describe("a share, on the page's side", () => {
     // The tab that was the app closed before the wait was over, with an invite in this tab's address by then.
     window.location.hash = "#/invite/abc";
     askForShare(opened);
-    await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-ready" }]));
+    await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-ready", profile: activeProfileId() }]));
   });
 
   it("a page that waits for another tab has it forwarded there", async () => {
