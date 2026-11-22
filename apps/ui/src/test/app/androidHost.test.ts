@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RTC_CONFIG } from "@ghostly/core";
 import { cssColorHex, followAppVisibility, followSystemBars, leaveOutPublicStun, takeIncomingShares, withoutPublicStun } from "../../desktop/android";
-import { incomingShare, resetIncomingShare, sendShareTo, shareFiles, takeShareFor } from "../../lib/incomingShare";
+import { carryIncomingShare, incomingShare, resetIncomingShare, sendShareTo, shareFiles, takeShareFor } from "../../lib/incomingShare";
 import { PLATFORM_PASTE_MAX } from "../../lib/pastedFiles";
 import { androidApp, touchOnly } from "../../lib/touchOnly";
 
@@ -396,6 +396,24 @@ describe("a share from another app", () => {
     expect([...host.copies.keys()]).toEqual(["paste-2", "paste-3"]);
     dispatchEvent(new Event("pagehide"));
     await vi.waitFor(() => expect([...host.copies.keys()]).toEqual([]));
+  });
+
+  it("kept for the next page with one sent to a chat, keeps the picker's alone and lets the other's copies go", async () => {
+    const host = androidHost();
+    host.share([{ name: "IMG_A.jpg", size: 3, mime: "image/jpeg" }]);
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_A.jpg"]));
+    sendShareTo("chat-x");
+    host.share([{ name: "IMG_B.jpg", size: 2, mime: "image/jpeg" }]);
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["IMG_B.jpg"]));
+
+    // A profile switch: the next page's picker shows one share, the later one, as a later share wins there.
+    expect(carryIncomingShare()).toBe(true);
+    dispatchEvent(new Event("pagehide"));
+    const kept = JSON.parse(sessionStorage.getItem("ghostly_carried_share")!) as { files: { name: string }[] };
+    sessionStorage.removeItem("ghostly_carried_share");
+    expect(kept.files.map((file) => file.name)).toEqual(["IMG_B.jpg"]);
+    // The other one is in no page any more: its copies go now, not when the process ends.
+    await vi.waitFor(() => expect([...host.copies.keys()]).toEqual(["paste-2"]));
   });
 
   it("is nothing when none waits", async () => {

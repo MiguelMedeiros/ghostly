@@ -80,7 +80,9 @@ pub fn default_relays() -> RelayMap {
     relays
 }
 
-/// `dns`, when given, is what the endpoint resolves names with (relays among them) instead of the system's.
+/// `dns`, when given, is what the endpoint resolves names with (relays among them) instead of the system's. No address
+/// lookup of n0's (`presets::N0`): a contact is dialled through what its descriptor says and the checks it passed, never
+/// a relay or an address its own record elsewhere names.
 pub async fn endpoint(
     seed: [u8; 32],
     local_only: bool,
@@ -92,7 +94,7 @@ pub async fn endpoint(
             .bind_addr("127.0.0.1:0")
             .map_err(|e| e.to_string())?
     } else {
-        Endpoint::builder(presets::N0).relay_mode(RelayMode::Custom(default_relays()))
+        Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Custom(default_relays()))
     };
     let builder = match dns {
         Some(dns) => builder.dns_resolver(dns),

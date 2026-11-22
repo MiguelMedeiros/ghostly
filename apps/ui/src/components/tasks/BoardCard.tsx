@@ -1,7 +1,8 @@
-import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { cardLinkHost, taskProgress } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import { externalLinkProps } from "../../lib/externalLink";
+import { listParts, listText } from "../../lib/listText";
 import { agoIn } from "../../lib/relativeTime";
 import { formatAt } from "../../lib/time";
 import { STATUS_TONE, isFinished } from "../../lib/statusCards";
@@ -23,6 +24,12 @@ const CHECKS_MARK: Record<PrChecks, { mark: string; tone: string }> = {
   failing: { mark: "✕", tone: "text-danger-ink" },
   pending: { mark: "●", tone: "text-warn-ink" },
 };
+
+/** Chats' names or tags, each in its own direction, listed the way the app's language lists them ("a وb", "a、b"). */
+function Listed({ items }: { items: readonly string[] }) {
+  const { t } = useI18n();
+  return listParts(items, t).map((part, i) => part.item ? <bdi key={i}>{part.text}</bdi> : <Fragment key={i}>{part.text}</Fragment>);
+}
 
 const chip = "inline-flex min-w-0 items-center gap-1 rounded-full bg-text-primary/[0.07] px-1.5 py-px text-[11px] leading-4 text-text-secondary";
 /** A chip that takes a tap: on a phone a clear 3 px border above and below makes its box 24 px tall; the pill keeps its look. */
@@ -74,7 +81,7 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
         <bdi className="min-w-0 truncate">{task.bot}</bdi>
       </span>] : []),
     ...(chats.length ? [
-      <span key="chat" data-testid="board-card-chat" title={chats.join(", ")} className={chip}>
+      <span key="chat" data-testid="board-card-chat" title={listText(chats, t)} className={chip}>
         <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
         <bdi className="min-w-0 truncate">{chats[0]}</bdi>
         {chats.length > 1 && <span data-testid="board-card-chats-more" className="shrink-0 tabular-nums">+{chats.length - 1}</span>}
@@ -137,13 +144,13 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
             <dt className="font-semibold">{t("cards.board.card.botLabel")}</dt>
             <dd className="m-0 min-w-0 [overflow-wrap:anywhere]"><bdi>{task.bot}</bdi></dd>
             <dt className="font-semibold">{t("cards.board.card.chatLabel")}</dt>
-            <dd data-testid="board-card-chats" className="m-0 min-w-0 [overflow-wrap:anywhere]"><bdi>{everywhere.join(", ")}</bdi></dd>
+            <dd data-testid="board-card-chats" className="m-0 min-w-0 [overflow-wrap:anywhere]"><Listed items={everywhere} /></dd>
             {card.branch && <><dt className="font-semibold">{t("cards.task.branch")}</dt><dd className="m-0 min-w-0 font-mono [overflow-wrap:anywhere]"><bdi>{card.branch}</bdi></dd></>}
             {card.pr && <><dt className="font-semibold">{t("cards.board.card.prLabel")}</dt>
               <dd data-testid="board-card-pr-standing" className="m-0 min-w-0 [overflow-wrap:anywhere]">
                 <bdi dir="ltr">{prHost}</bdi>{prStanding.filter(Boolean).map((words) => ` · ${words}`).join("")}</dd></>}
             {card.pr?.files !== undefined && <><dt className="font-semibold">{t("cards.board.card.filesLabel")}</dt><dd className="m-0 tabular-nums">{card.pr.files}</dd></>}
-            {card.tags && <><dt className="font-semibold">{t("cards.board.card.tagsLabel")}</dt><dd data-testid="board-card-tags" className="m-0 min-w-0 [overflow-wrap:anywhere]"><bdi>{card.tags.join(", ")}</bdi></dd></>}
+            {card.tags && <><dt className="font-semibold">{t("cards.board.card.tagsLabel")}</dt><dd data-testid="board-card-tags" className="m-0 min-w-0 [overflow-wrap:anywhere]"><Listed items={card.tags} /></dd></>}
             <dt className="font-semibold">{t("cards.board.card.updatedLabel")}</dt>
             <dd className="m-0">{formatAt(task.at, { dateStyle: "medium", timeStyle: "short" }, language)}</dd>
           </dl>

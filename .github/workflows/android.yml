@@ -103,13 +103,15 @@ jobs:
       # The version is the Desktop app's (tauri.conf.json, the repository's); Tauri makes the version code
       # major * 1000000 + minor * 1000 + patch, so each release installs over the last.
       # A release build is signed by Gradle (gen/android/app/build.gradle.kts) when ANDROID_KEYSTORE names a keystore.
+      # A pull request's build runs its own Gradle files and dependencies: it gets none of the upload key's secrets
+      # (empty, not only overridden), and the keystore's base64 leaves the environment before any build runs.
       - name: Build
         id: build
         env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEYSTORE_B64: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_B64 || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          ANDROID_KEY_ALIAS: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEY_ALIAS || '' }}
+          ANDROID_KEY_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.ANDROID_KEY_PASSWORD || '' }}
           THROWAWAY_KEY: ${{ github.event_name == 'pull_request' }}
           VITE_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
@@ -130,6 +132,7 @@ jobs:
             unset ANDROID_KEYSTORE
             kind=debug; signed=false; name="ghostly-${version}-android-arm64-debug.apk"
           fi
+          unset KEYSTORE_B64
           if [ "$kind" = release ]; then
             npm run tauri -- android build --apk --split-per-abi --target aarch64
           else

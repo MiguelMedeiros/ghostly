@@ -113,6 +113,30 @@ describe("SSH identity proofs", () => {
     expect(await verify(ssh, s, await paste(messy))).toMatchObject({ subject: fingerprint });
   });
 
+  it("takes the signature copied from the terminal with what ssh-keygen printed around it", async () => {
+    const s = statementFor(ssh, fingerprint), signature = mine.sign(s.text);
+    // In a terminal, ssh-keygen's own lines (stderr) come before the armor (stdout); a security key adds two more.
+    for (const around of [
+      `Signing data on standard input\n${signature}`,
+      `$ printf '%s' '…' | ssh-keygen -Y sign -n ghostly -f ~/.ssh/id_ed25519\nSigning data on standard input\n${signature}$ `,
+      `Confirm user presence for key ED25519-SK ${fingerprint}\r\nUser presence confirmed\r\n${signature.replace(/\n/g, "\r\n")}`,
+    ]) {
+      const evidence = await signer(ssh).parse(around, s);
+      expect(evidence.signature).toBe((await signer(ssh).parse(signature, s)).signature);
+      expect(await verify(ssh, s, evidence)).toMatchObject({ subject: fingerprint });
+    }
+    await expect(Promise.resolve().then(() => signer(ssh).parse(`Signing data on standard input\n${signature.split("\n").slice(0, -2).join("\n")}`, s))).rejects.toThrow(/whole signature/);
+  });
+
+  it("takes the newest signature when the terminal copy holds an earlier run too", async () => {
+    // Add started over (a new statement), or the first run lacked -n ghostly: the command ran again in the same terminal.
+    const s = statementFor(ssh, fingerprint), signature = mine.sign(s.text);
+    for (const before of [mine.sign(statementFor(ssh, fingerprint).text), mine.sign(s.text, "file")]) {
+      const evidence = await signer(ssh).parse(`Signing data on standard input\n${before}$ ssh-keygen …\nSigning data on standard input\n${signature}$ `, s);
+      expect(await verify(ssh, s, evidence)).toMatchObject({ subject: fingerprint });
+    }
+  });
+
   it("links a GitHub account only while it publishes the signing key, asking api.github.com alone", async () => {
     const net = forges({ "github:octo-cat": [mine.publicKey] });
     const s = statementFor(sshGithub, "octo-cat"), evidence = await proveWith(sshGithub)(s);

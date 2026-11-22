@@ -172,6 +172,38 @@ it("carries a burst of small frames read at once without stopping the endpoint",
   expect(runtime.events.some(e => e.type === "stopped" || e.type === "closed")).toBe(false);
 }, 10_000);
 
+it("hands the host a connection's frames within a credit, and goes on as the page says it took them", async () => {
+  const runtime = sidecar();
+  runtime.send({ type: "start", endpoint: 1, seedB64: seed(1) });
+  runtime.send({ type: "start", endpoint: 2, seedB64: seed(2) });
+  const b = await runtime.next({ type: "started", endpoint: 2 });
+  await runtime.next({ type: "started", endpoint: 1 });
+  runtime.send({ type: "connect", endpoint: 1, descriptor: b.descriptor });
+  const result = await runtime.next({ type: "result", endpoint: 1 });
+  const incoming = await runtime.next({ type: "open", endpoint: 2, incoming: true });
+
+  // A contact writing faster than the page takes its frames: 2.4 MiB, and the page takes none yet.
+  const frames = 40;
+  for (let seq = 1; seq <= frames; seq++) runtime.send({ type: "send", endpoint: 1, id: result.id, seq, text: `${seq}:`.padEnd(60 * 1024, "x") });
+  const handed = () => runtime.events.filter(e => e.type === "frame" && e.endpoint === 2);
+  await runtime.next({ type: "frame", endpoint: 2 });
+  await new Promise(resolve => setTimeout(resolve, 500));
+  const before = handed().length;
+  expect(handed().reduce((bytes, e) => bytes + JSON.stringify(e).length, 0)).toBeLessThanOrEqual(512 * 1024 + 61 * 1024);
+  expect(before).toBeLessThan(frames);
+
+  // The page takes them, a few at a time: the rest comes, in order.
+  let told = 0;
+  await vi.waitFor(() => {
+    const taken = handed().length;
+    if (taken > told) runtime.send({ type: "took", endpoint: 2, id: incoming.id, frames: taken - told });
+    told = taken;
+    expect(taken).toBe(frames);
+  }, { timeout: 5000, interval: 50 });
+  expect(handed().map(e => String(e.text).split(":")[0])).toEqual(Array.from({ length: frames }, (_, n) => String(n + 1)));
+  expect(runtime.events.some(e => e.type === "closed" || e.type === "stopped")).toBe(false);
+}, 15_000);
+
 it("refuses a ninth endpoint and an invalid seed without stopping the others", async () => {
   const runtime = sidecar();
   for (let n = 1; n <= 8; n++) runtime.send({ type: "start", endpoint: n, seedB64: seed(n) });

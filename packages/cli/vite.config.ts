@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join, posix } from "node:path";
 import { defineConfig, type Plugin } from "vite";
+import { appsTestGuard } from "../../apps/web/appsTestFlag";
 
 // OpenPGP.js publishes its lightweight build under a "browser" condition only; it runs on Node too
 // (as in packages/browser's tests), so the CLI ships the very code the apps do.
@@ -27,6 +28,14 @@ const BESIDE_CHUNKS = [
   // Iroh's wasm build, which the runtime loads itself (src/runtime/engine.ts).
   { entry: "@ghostly/iroh-web", file: "ghostly_iroh_web_bg.wasm" },
 ];
+
+/**
+ * A `<package>/<file>.wasm?url` import of a package npm installs with the CLI (Bark, BDK, Fedimint) is that package's
+ * own file, found at run time as its JavaScript is: a copy beside the chunks would ship the same bytes twice (~21 MB).
+ */
+const INSTALLED = new Set(Object.keys((JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { dependencies: Record<string, string> }).dependencies));
+const INSTALLED_WASM = /^((?:@[^/]+\/)?[^/@.][^/]*)\/(.+\.wasm)\?url$/;
+const INSTALLED_WASM_ID = "\0ghostly-installed-wasm:";
 
 /** The folder Node finds package `name` in when it looks from `dir` (each `node_modules` up the tree), or null. */
 function packageDir(dir: string, name: string): string | null {
@@ -133,6 +142,18 @@ function walletSdksOnNode(): Plugin {
       // The Fedimint client's worker thread, plain JavaScript that runs as written (src/runtime/fedimint.ts finds it).
       this.emitFile({ type: "asset", fileName: "assets/fedimintWorker.mjs", source: readFileSync(new URL("./src/runtime/fedimintWorker.mjs", import.meta.url)) });
     },
+    resolveId(source) {
+      const match = INSTALLED_WASM.exec(source);
+      if (!match || !INSTALLED.has(match[1]!)) return;
+      // Here first: a file the package does not export fails the build, not a wallet at run time.
+      require.resolve(`${match[1]}/${match[2]}`);
+      return `${INSTALLED_WASM_ID}${match[1]}/${match[2]}`;
+    },
+    load(id) {
+      if (!id.startsWith(INSTALLED_WASM_ID)) return;
+      const file = JSON.stringify(id.slice(INSTALLED_WASM_ID.length));
+      return `import { createRequire } from "node:module";\nimport { pathToFileURL } from "node:url";\nexport default pathToFileURL(createRequire(import.meta.url).resolve(${file})).href;\n`;
+    },
     transform(code, id) {
       const rule = ON_NODE.find((r) => r.file.test(id));
       if (!rule) return;
@@ -159,7 +180,8 @@ export default defineConfig({
       { find: /^hyperdht\/(.*)$/, replacement: `${HYPERDHT}/$1` },
     ],
   },
-  plugins: [walletSdksOnNode(), hyperdhtPatched()],
+  // The e2e suite's switch (VITE_APPS_TEST) never goes into the CLI: npm gets what this builds.
+  plugins: [appsTestGuard("cli"), walletSdksOnNode(), hyperdhtPatched()],
   build: {
     ssr: "src/bin.ts",
     target: "node22",
