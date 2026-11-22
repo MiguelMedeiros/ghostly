@@ -1,5 +1,5 @@
 /** Settings that are on or off. */
-const SWITCHES = ["online", "mintsInitialized", "shareProfile", "publicProfiles", "sendTyping", "sharePresence", "autoDownloads", "serveFiles"] as const;
+const SWITCHES = ["online", "mintsInitialized", "shareProfile", "publicProfiles", "sendTyping", "sharePresence", "daemonPresence", "autoDownloads", "serveFiles"] as const;
 /** Settings that are lists of addresses. */
 const LISTS = ["relays", "irohRelays", "mints"] as const;
 

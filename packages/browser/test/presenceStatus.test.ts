@@ -187,6 +187,31 @@ describe("the RPCs", () => {
     expect(await db.getSettings()).not.toHaveProperty("sharePresence");
   });
 
+  it("presence taken back (null): said at once with no p, and no idle after it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const node = engine();
+    const chat = stubLink();
+    await addChat(node, chat);
+    node.setPresence({ presence: null });
+    expect(chat.setStatus).not.toHaveBeenCalled();
+    node.setPresence({ presence: "active" });
+    expect(chat.setStatus).toHaveBeenLastCalledWith({ presence: "active" });
+    node.setPresence({ presence: null });
+    expect(chat.setStatus).toHaveBeenLastCalledWith({});
+    expect(node.getOwnStatus()).toEqual({ sharePresence: true });
+    vi.advanceTimersByTime(STATUS_IDLE_AFTER_MS);
+    expect(chat.setStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("daemonPresence (a headless daemon's opt-in): kept only while on, and only as true or false", async () => {
+    const node = engine();
+    await node.updateSettings({ settings: { daemonPresence: true } });
+    expect((await db.getSettings()).daemonPresence).toBe(true);
+    await node.updateSettings({ settings: { daemonPresence: false } });
+    expect(await db.getSettings()).not.toHaveProperty("daemonPresence");
+    await expect(node.updateSettings({ settings: { daemonPresence: "yes" } as never })).rejects.toThrow("daemonPresence is on or off (true or false)");
+  });
+
   it("a status that ends is cleared by itself, and Do not disturb ends with it", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const node = engine();

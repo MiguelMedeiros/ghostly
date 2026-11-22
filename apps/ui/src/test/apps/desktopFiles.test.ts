@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { MiniAppLinkedFile } from "@ghostly/core/miniApp";
 import { PICK_AFTER_CANCEL_MS } from "../../lib/apps/broker";
 import { desktopLinkedFiles } from "../../lib/apps/desktopFiles";
-import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener } from "../../lib/apps/desktopOpener";
+import { APP_CLOSED_EVENT, APP_REQUEST_EVENT, desktopOpener, type DesktopOpenerOptions } from "../../lib/apps/desktopOpener";
 import { memoryHost } from "../../lib/apps/memoryHost";
 import type { PickSheetText } from "../../lib/apps/webFiles";
 
@@ -171,7 +171,7 @@ function desktop() {
     }
     if (command === "linked_files_list") return kept;
     return undefined;
-  }) as <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+  }) as DesktopOpenerOptions["invoke"];
   const listen = async <T,>(event: string, handler: (event: { payload: T }) => void) => { handlers.set(event, handler as (event: { payload: unknown }) => void); return () => {}; };
   const linkedFiles = desktopLinkedFiles(invoke, () => "ghostly_ab", () => text, { now: () => clock, ...clicks });
   const open = desktopOpener({ apps: () => host, invoke, listen, nameIn: () => undefined, view: { theme: () => "dark", locale: () => "en" }, startTimeoutMs: 60_000, linkedFiles });

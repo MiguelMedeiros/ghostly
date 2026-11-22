@@ -346,14 +346,22 @@ export class LightningService {
       if (result.state === "paid") this.sources.balanceChanged(quote.provider); else this.sources.answered(quote.provider);
       op = result.state === "paid" ? { ...op, state: "paid", fee: result.fee, ref: result.ref ?? op.ref, settledAt: Date.now() } : { ...op, state: "pending", ref: result.ref ?? op.ref };
     } catch (error) {
-      if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); throw error; }
+      if (isNothingSpentError(error)) { await this.put({ ...op, state: "failed", error: redact(error) }); await this.showRecent(); throw error; }
       // A source that cannot look payments up never settles this by itself: say so rather than "being checked".
       op = { ...op, state: "unknown", error: quote.provider.capabilities.lookup ? "No answer from the source. It is being checked; nothing is paid again." : "No answer from the source, and it cannot be asked: check this payment in the wallet itself. It is never paid again." };
     } finally { paying -= 1; }
     await this.put(op);
+    await this.showRecent();
     if (op.state !== "paid") this.schedule(OUT_POLL_MS);
     return op.state === "paid";
   }
+
+  /**
+   * A payment ended (paid, refused, or left to be checked): the recent list says so now. It was read again only by a
+   * later pass, which a balance that changed brought: one refused right after a paid one kept the paid one first. A
+   * read that fails leaves it to the next pass: the payment's own outcome is what the caller hears.
+   */
+  private async showRecent() { if (await this.loadRecent().catch(() => false)) this.events.changed(); }
 
   /** The Cashu wallet settled a melt it had left pending. */
   async reportPaymentResolved(invoice: string, paid: boolean, context: { paymentId?: string; mint?: string } = {}) {

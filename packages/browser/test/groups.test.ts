@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FAREWELL_KEPT_MS, FAREWELL_OPEN_MS, Groups, type GroupStore, type GroupsHost } from "../src/engine/groups";
-import { createIdentity, encodeGroupEntryLink, decodeGroupEntryLink, knockIdentity, knockRecords, readKnocks, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
+import { GROUP_LIMITS, SESSION_RECEIVE_PENDING, createIdentity, encodeGroupEntryLink, decodeGroupEntryLink, knockIdentity, knockRecords, readKnocks, identityFromSeedB64, randomBytes, toBase64Url, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { GroupLive, StoredGroup, StoredMessage } from "../src/shared/types";
 // covers: groups.picture.set, groups.rename, groups.create, groups.invite, groups.send, groups.leave, groups.forget, groups.link.enable, groups.link.join, groups.link.replace, groups.protocol.entry, groups.protocol.mentions
 
@@ -813,6 +813,96 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(sent.every(f => (f as { t: string }).t === "group-commit" && !("secret" in (f as object)))).toBe(true);
       });
 
+      it("that was far behind on the chain (70 changes while away) gets every commit between, and is told", async () => {
+        const { world, alice, bob, groupId, key, edge } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        for (let i = 0; i < 70; i++) { await alice.rotate(groupId); await world.settle(); }
+        await alice.remove(groupId, bobKey); await world.settle();
+        // Bob is back: the edge opens once, and he says where he is once.
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed", epoch: alice.views()[0].epoch });
+      });
+
+      /**
+       * Far behind: 80 changes, more than an app held waiting before 2026-10-07 (64). The admin's answer is 81 commits,
+       * six slices: all at once they would be a turn of 81 with 81 or more waiting, past both bounds below, and the slices
+       * after the first two each wait for Bob's app. Several hundred checked no more and took seconds of real crypto.
+       */
+      it("that was far behind gets them a slice at a time, never more than its app holds waiting, and is told", async () => {
+        const { world, alice, bob, groupId, key, edge } = await trio();
+        const aliceKey = key(alice), bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        const behind = 5 * GROUP_LIMITS.catchUpSlice;
+        for (let i = 0; i < behind; i++) { await alice.rotate(groupId); await world.settle(); }
+        await alice.remove(groupId, bobKey); await world.settle();
+        const removal = alice.views()[0].epoch!;
+        // Bob's app: what came on his edges and is not handled yet waits there; past `SESSION_RECEIVE_PENDING` its
+        // session would end ("overloaded").
+        let waiting = 0, most = 0, overloaded = false;
+        const take = bob.handleEdgeFrame.bind(bob);
+        bob.handleEdgeFrame = async (g, from, frame) => {
+          if (++waiting > SESSION_RECEIVE_PENDING.frames) overloaded = true;
+          most = Math.max(most, waiting);
+          try { await take(g, from, frame); } finally { waiting--; }
+        };
+        // What the admin sends Bob per turn: a turn starts with Bob's sync, and with each ask whether his app handled
+        // what came (a ping, answered once it has).
+        const turns: number[] = [], epochs: number[] = [];
+        let told = false;
+        const aliceHost = (alice as unknown as { host: GroupsHost }).host, aliceSend = aliceHost.sendOnLink.bind(aliceHost);
+        aliceHost.sendOnLink = (linkId, frame) => {
+          if (linkId.includes(bobKey.slice(0, 6))) {
+            if (turns.length) turns[turns.length - 1]++;
+            epochs.push((frame as { commit: { e: number } }).commit.e);
+            // Told, his app let the group go: the edge still takes what comes, and nothing reads it.
+            if (told) return;
+          }
+          aliceSend(linkId, frame);
+        };
+        aliceHost.linkHandled = async linkId => {
+          if (!linkId.includes(bobKey.slice(0, 6))) return true;
+          turns.push(0);
+          while (waiting) await new Promise(resolve => setTimeout(resolve, 1));
+          return true;
+        };
+        const bobHost = (bob as unknown as { host: GroupsHost }).host, bobSend = bobHost.sendOnLink.bind(bobHost);
+        let syncs = 0;
+        bobHost.sendOnLink = (linkId, frame) => {
+          if (linkId.includes(aliceKey.slice(0, 6)) && (frame as { t: string }).t === "group-sync") { syncs++; turns.push(0); }
+          bobSend(linkId, frame);
+        };
+        // Bob is back: the edge opens once; he says where he is, and again while the commits come with no secret.
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        for (let i = 0; i < 400 && bob.views()[0].status !== "removed"; i++) { await new Promise(resolve => setTimeout(resolve, 5)); await world.settle(); }
+        expect(bob.views()[0]).toMatchObject({ status: "removed", epoch: removal });
+        // At most a slice at a time, and two not handled yet besides the commit that removed him (said as the edge opened).
+        expect(Math.max(...turns)).toBeLessThanOrEqual(GROUP_LIMITS.catchUpSlice);
+        expect(most).toBeLessThanOrEqual(2 * GROUP_LIMITS.catchUpSlice + 1);
+        expect(overloaded).toBe(false);
+        // One try of the few an admin answers, however many slices it went in and however often he asked meanwhile.
+        expect(syncs).toBeGreaterThan(0);
+        expect((await world.peers.get("alice")!.store.getGroups())[0].farewells?.[bobKey]).toMatchObject({ answered: 1 });
+        // The commit that removed him as the edge opened, then every one from where he was up to it, each once.
+        const from = epochs[1] - 1;
+        expect(from).toBeLessThan(removal - behind);
+        expect(epochs).toEqual([removal, ...Array.from({ length: removal - from }, (_, i) => from + 1 + i)]);
+        // Asked again once that answer is through: a try each, up to the few an admin answers, then no more.
+        const before = epochs.length;
+        told = true;
+        for (let i = 0; i < 4; i++) {
+          while (waiting) await new Promise(resolve => setTimeout(resolve, 1));
+          await new Promise(resolve => setTimeout(resolve, 10));
+          await alice.handleEdgeFrame(groupId, bobKey, { t: "group-sync", g: groupId, e: removal - 3 }); await world.settle();
+        }
+        expect(epochs.slice(before)).toEqual([removal - 2, removal - 1, removal, removal - 2, removal - 1, removal]);
+        expect((await world.peers.get("alice")!.store.getGroups())[0].farewells?.[bobKey]).toMatchObject({ answered: 3 });
+      });
+
       it("that missed a member's leave reads that the member left, not that the admin removed them", async () => {
         const { world, alice, bob, carol, groupId, key, edge } = await trio();
         const bobKey = key(bob);
@@ -952,6 +1042,37 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(alice.edgeAllows(groupId, bobKey, { t: "group-sync", g: groupId, e: 4 })).toBe(false);
         expect(alice.edgeAllows(groupId, createIdentity().pubKeyZ32, { t: "group-commit", g: groupId, commit: chain[0] })).toBe(false);
         expect(alice.edgeAllows(groupId, key(carol), { t: "group-sync", g: groupId, e: 4 })).toBe(true);
+      });
+
+      it("is still told by the admin that removed it after that admin left the group, and the tombstone goes once it is", async () => {
+        const { world, alice, bob, carol, groupId, key, edge, known } = await trio();
+        const bobKey = key(bob);
+        edge("alice", bob, false); edge("carol", bob, false);
+        world.chats.delete("chat-ab");
+        await alice.remove(groupId, bobKey); await world.settle();
+        // The admin leaves before Bob is back: the role goes to Carol, who heard the leave. Nobody else keeps an edge to him.
+        await alice.leave(groupId); await world.settle();
+        expect(carol.views()[0]).toMatchObject({ isAdmin: true });
+        expect(alice.views()).toEqual([]);
+        expect(edgesOf(world, "carol")).not.toContain(bobKey);
+        expect(edgesOf(world, "alice")).toEqual([bobKey]);
+        // Her app restarts meanwhile: the tombstone still waits for him.
+        const again = new Groups({ ...(alice as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("alice")!.store);
+        await again.load(); await world.settle();
+        world.peers.get("alice")!.groups = again;
+        known.set(again, key(alice));
+        await again.tick(Date.now() + 60_000); await world.settle();
+        expect(edgesOf(world, "alice")).toEqual([bobKey]);
+        // Bob is back: the commit that removed him comes over that edge.
+        edge("alice", bob, true);
+        await world.meet(); await world.settle();
+        expect(bob.views()[0]).toMatchObject({ status: "removed", canSend: false });
+        expect(await bob.send(groupId, "anyone?")).toMatchObject({ error: "You were removed from this group" });
+        // A moment later the edge goes, and so does the tombstone: nothing is kept of the group.
+        await again.tick(Date.now() + 60_000 + 16_000); await world.settle();
+        expect(edgesOf(world, "alice")).toEqual([]);
+        expect(await world.peers.get("alice")!.store.getGroups()).toEqual([]);
+        expect(again.views()).toEqual([]);
       });
 
       it("invited again before it is back takes the invitation only once it knows, and ends as a member", async () => {

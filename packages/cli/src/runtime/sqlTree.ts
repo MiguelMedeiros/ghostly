@@ -1,4 +1,4 @@
-import { closeSync, openSync } from "node:fs";
+import { closeSync, fsyncSync, openSync } from "node:fs";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { deserialize, serialize } from "node:v8";
 import { AFTER, keyBytes } from "./keyBytes";
@@ -109,17 +109,28 @@ export class TreeFile {
     for (const tree of this.live) tree.abort(owner);
   }
 
-  /** The layers of the journal's entries up to `upTo` into SQLite, in one transaction that says so (`applied`). */
-  apply(upTo: number): void {
+  /** The name of the snapshot that the last fold's `apply` went with (`storage.ts`). */
+  snapshot(): string | undefined {
+    const row = this.db.prepare("SELECT value FROM meta WHERE name = 'snapshot'").get() as { value: string } | undefined;
+    return row ? String(row.value) : undefined;
+  }
+
+  /**
+   * The layers of the journal's entries up to `upTo` into SQLite, in one transaction that says so (`applied`). `snapshot`:
+   * the fold's, written whole before this and put in place after; recorded with them, so a process killed between the
+   * two comes back to it, not to the snapshot before it with these transactions half there.
+   */
+  apply(upTo: number, snapshot?: string): void {
     // An entry that wrote no tree (settings, the event set's notes) has nothing to take: no SQLite write for it.
     const due = [...this.live].filter((tree) => tree.due(upTo));
-    if (!due.length) return;
+    if (!due.length && snapshot === undefined) return;
     this.db.exec("BEGIN");
     try {
       // The number of the last entry that wrote here: a replay skips what wrote trees up to it.
       let top = 0;
       for (const tree of due) top = Math.max(top, tree.write(upTo));
       this.db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('applied', max(?, coalesce((SELECT value FROM meta WHERE name = 'applied'), 0)))").run(top);
+      if (snapshot !== undefined) this.db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('snapshot', ?)").run(snapshot);
       this.db.exec("COMMIT");
     } catch (error) { rollback(this.db); throw error; }
     // Only once SQLite has them: a write that failed leaves the layers where reads still find them, for the next try.
@@ -133,7 +144,23 @@ export class TreeFile {
 
   /** Everything SQLite holds is on disk: before a snapshot takes the place of the journal that had it. */
   sync(): void {
-    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    const { busy } = this.db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as { busy: number };
+    if (!busy) return;
+    // A reader (a backup's export, `openTreeReader`) holds rows.db as it was: the checkpoint stopped at it, and what it
+    // left in the WAL goes to the disk there.
+    const { file } = this.db.prepare("PRAGMA database_list").get() as { file: string };
+    const fd = openSync(`${file}-wal`, "r");
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+  }
+
+  /**
+   * rows.db written again whole (VACUUM), with nothing but its rows: `secure_delete` zeroes the cell a delete frees, not
+   * the copies a page's rebalancing left in its unused space, where a text gone from every row was still found after a
+   * few thousand writes. A second or two for a profile of 100,000 messages, the thread held: only when asked
+   * (`message delete --purge`).
+   */
+  scrub(): void {
+    this.db.exec("VACUUM");
   }
 
   /** Trees whose store or index is gone from the schema (deleted, a database removed) go, with their entries. */
@@ -379,6 +406,16 @@ export class SqlTree {
     return out;
   }
 
+  /**
+   * This tree as it is now, its rows read from `file` (rows.db as it was at this turn, `openTreeReader`) under the
+   * layers of the transactions finished so far: not the ones after, nor one still running.
+   */
+  at(file: TreeFile): SqlTree {
+    const tree = new SqlTree(file, this.id, this._keysAreUnique, this.index);
+    tree.pending = [...this.pending];
+    return tree;
+  }
+
   /** @internal */
   complete(owner: object | null, seq: number): void {
     if (!this.active || (this.active.owner !== owner && this.active.owner !== null)) return;
@@ -417,13 +454,29 @@ export class SqlTree {
 /**
  * rows.db, owner-only (SQLite makes its WAL files with the database's mode), in WAL with NORMAL: the journal makes a
  * transaction durable, and `sync` runs before a snapshot takes the journal's place. With `secure_delete` SQLite zeroes
- * what a delete frees: a message or chat deleted is not left readable in the file's free pages after the fold.
+ * what a delete frees: a message or chat deleted is not left readable in the file's free pages after the fold (but for
+ * a copy a page's rebalancing left behind, now and then: `TreeFile.scrub`).
  */
 export function openTreeFile(sqlite: typeof import("node:sqlite"), path: string, constraintError: new () => Error): TreeFile {
   closeSync(openSync(path, "a", 0o600));
   const db = new sqlite.DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA secure_delete = ON");
   return new TreeFile(db, constraintError);
+}
+
+/**
+ * rows.db as it is at this call, for a long read that leaves the event loop turns between its pages (a backup's
+ * export): a second connection, read-only, in one read transaction, which the writes after it do not change (WAL).
+ * Closing its `db` ends it.
+ */
+export function openTreeReader(sqlite: typeof import("node:sqlite"), path: string, constraintError: new () => Error): TreeFile {
+  const db = new sqlite.DatabaseSync(path, { readOnly: true });
+  try {
+    db.exec("BEGIN");
+    // The read transaction holds rows.db from its first read, not from BEGIN.
+    db.prepare("SELECT 1 FROM entries LIMIT 1").get();
+    return new TreeFile(db, constraintError);
+  } catch (error) { db.close(); throw error; }
 }
 
 /** A range's keys as bytes: from the first (in) up to the second (out), undefined where it is open. */
