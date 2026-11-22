@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+// guards: #8394
+
 /**
  * The long pull request lanes outside CI (an Android build and its emulator, the Desktop video check on Linux and
  * Windows) run on a ready pull request, not on a draft, which gets CI's fast tier only, and not on a merge train batch
