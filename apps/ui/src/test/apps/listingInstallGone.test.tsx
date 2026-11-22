@@ -2,6 +2,7 @@ import { act, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { Apps } from "../../pages/Apps";
+import { setAppOpener } from "../../lib/apps/open";
 import { forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetInstalledApps, refreshInstalledApps } from "../../lib/apps/installed";
 import { fakeEngine } from "../fakeEngine";
@@ -40,6 +41,7 @@ beforeEach(() => {
   forgetInstalledApps();
   vi.stubEnv("VITE_APPS_TEST", "1");
   fakeEngine.appRunner = "/app-frame.html";
+  setAppOpener(async () => {});
   takenDown = false;
   installedHere = false;
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36");
@@ -49,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+  setAppOpener(null);
   forgetAppsAvailable();
   forgetInstalledApps();
 });
