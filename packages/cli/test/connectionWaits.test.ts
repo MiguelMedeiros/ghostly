@@ -3,9 +3,9 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { inCall, type ApiContext } from "../src/apiKit";
+import { inCall, waitForState, type ApiContext } from "../src/apiKit";
 import { serve, type Host } from "../src/host";
-import { waitForGroupFrame } from "../src/waits";
+import { waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "../src/waits";
 // covers: headless.daemon
 
 const root = mkdtempSync(join(tmpdir(), "gh-waits-"));
@@ -52,21 +52,53 @@ describe.skipIf(process.platform === "win32")("a wait on the socket", () => {
   });
 });
 
-describe("a group wait", () => {
-  it("stops reading the group once its client's connection closed", async () => {
-    let reads = 0;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A daemon where nothing is ever confirmed: every wait kind waits, by its hub listener or its 250 ms reads. */
+function nothingConfirmed() {
+  const states = new Set<unknown>(), events = new Set<unknown>();
+  let reads = 0;
+  const message = { id: "m1", delivery: "sending", edit: { pending: true, seq: 1 } };
+  const hub = {
+    onState: (l: unknown) => { states.add(l); return () => states.delete(l); },
+    onEvent: (l: unknown) => { events.add(l); return () => events.delete(l); },
+  };
+  const engine = {
+    getState: () => ({ links: [{ id: "c1", peerParticipationKey: "k" }], groups: [], transfers: {} }),
+    chatView: () => ({ id: "c1", peerParticipationKey: "k" }),
+    getMessage: async () => { reads++; return message; },
+    removalPending: () => { reads++; return true; },
+    groupTaken: () => { reads++; return 0; },
+    groupView: () => ({ id: "g1", profile: "community", members: [], status: "active" }),
+    chatUnconfirmed: () => { reads++; return { reactions: [1], pin: null }; },
+  };
+  const ctx = { mode: "daemon", hub, runtime: { server: { node: engine } } } as unknown as ApiContext;
+  return { ctx, reads: () => reads, held: () => states.size + events.size };
+}
+
+const DAY = 86_400_000;
+const kinds: [string, (ctx: ApiContext) => Promise<unknown>][] = [
+  ["chat wait", (ctx) => waitForState(ctx, () => undefined, DAY, "x")],
+  ["send --wait delivered", (ctx) => waitForMessage(ctx, "c1", "m1", "delivered", DAY)],
+  ["send --wait sent", (ctx) => waitForMessage(ctx, "c1", "m1", "sent", DAY)],
+  ["edit --wait confirmed", (ctx) => waitForEdit(ctx, "c1", "m1", DAY)],
+  ["delete --everyone --wait confirmed", (ctx) => waitForRemoval(ctx, "c1", "m1", DAY)],
+  ["group pin --wait sent", (ctx) => waitForGroupFrame(ctx, "g1", "m1", { pin: 1 }, DAY)],
+  ["react --wait confirmed", (ctx) => waitForConfirmed(ctx, "c1", "reaction", (l) => l.reactions.length > 0, DAY)],
+];
+
+describe("a wait whose client's connection closed", () => {
+  for (const [name, start] of kinds) it(`${name} ends, and reads nothing more`, async () => {
+    const f = nothingConfirmed();
     const gone = new AbortController();
-    const ctx = {
-      mode: "daemon",
-      runtime: { server: { node: { groupTaken: () => { reads++; return 0; }, groupView: () => ({ id: "g1", profile: "community", members: [], status: "active" }) } } },
-    } as unknown as ApiContext;
     // As `callApi` runs a call that came on a connection: `gone` aborts when the connection closes.
-    const waiting = inCall({ gone: gone.signal }, () => waitForGroupFrame(ctx, "g1", "m1", undefined, 86_400_000));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    const waits = Array.from({ length: 5 }, () => inCall({ gone: gone.signal }, () => start(f.ctx)).then(() => "resolved", (e: { code?: string }) => e.code));
+    await sleep(300);
     gone.abort();
-    await expect(waiting).rejects.toMatchObject({ code: "interrupted" });
-    const after = reads;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(reads).toBe(after);
+    expect(await Promise.race([Promise.all(waits), sleep(1500).then(() => ["still waiting"])])).toEqual(Array(5).fill("interrupted"));
+    const reads = f.reads();
+    await sleep(600);
+    expect(f.reads()).toBe(reads);
+    expect(f.held()).toBe(0);
   });
 });
