@@ -35,7 +35,12 @@
  *   puts in a `srcdoc` frame skips them. The guard cannot tell an app's own `require-trusted-types-for` from its own, so
  *   it keeps none: an app that enforces Trusted Types itself has every string its rules leave out passed on);
  * - starts a worker made from a `blob:` URL of the page's own from a script that makes a pass-through Trusted Types
- *   `default` policy in it first, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`, whichever of the two runs first).
+ *   `default` policy in it first, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`, whichever of the two runs first);
+ * - keeps each cookie the page's script sets to the page's own host: a `Domain` attribute is left out of a
+ *   `document.cookie` write, and a `domain` out of `cookieStore.set` and `cookieStore.delete` (each of the other
+ *   members read once). The apps' origins under a services host share its site: one an app set for the whole host
+ *   would be read by every other contact's app open at once. The bridge drops those left from before as it starts
+ *   (apps/web/src/svc/clearSite.ts, with the setter it kept before this ran). Both fixed in place, once per window.
  * A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
  * bridge's guard reaches the app's frame then): there this script only watches the new document. Each document it
  * watches is marked (`ghostlyClipboardGuard`, fixed in place): the bridge reads that to know the guard ran in the page
@@ -188,6 +193,47 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         try { return apply(run, this, args); } finally { sweep(); }
       };
       define(proto, "execCommand", { value: guarded, writable: false, enumerable: exec.enumerable, configurable: false });
+      const trim = text.prototype.trim;
+      const jar = describe(proto, "cookie");
+      if (jar && jar.configurable === true && typeof jar.set === "function") {
+        const put = jar.set;
+        const hostOnly = function cookie(value) {
+          const line = text(value);
+          let at = apply(index, line, [";"]);
+          let kept = at < 0 ? line : apply(slice, line, [0, at]);
+          while (at >= 0) {
+            const next = apply(index, line, [";", at + 1]);
+            const part = next < 0 ? apply(slice, line, [at + 1]) : apply(slice, line, [at + 1, next]);
+            const named = apply(index, part, ["="]);
+            if (apply(lower, apply(trim, named < 0 ? part : apply(slice, part, [0, named]), []), []) !== "domain") kept += ";" + part;
+            at = next;
+          }
+          return apply(put, this, [kept]);
+        };
+        define(proto, "cookie", { get: jar.get, set: hostOnly, enumerable: jar.enumerable, configurable: false });
+      }
+      const store = w.CookieStore && w.CookieStore.prototype;
+      const fields = ["name", "value", "expires", "path", "sameSite", "partitioned", "maxAge"];
+      const changes = ["set", "delete"];
+      for (let i = 0; store && i < changes.length; i++) {
+        const real = store[changes[i]];
+        if (typeof real !== "function") continue;
+        const ownHost = function (options) {
+          const args = [];
+          for (let j = 0; j < arguments.length; j++) args[j] = arguments[j];
+          if (options !== null && (typeof options === "object" || typeof options === "function")) {
+            const given = { __proto__: null };
+            for (let f = 0; f < fields.length; f++) {
+              const found = options[fields[f]];
+              if (found !== undefined) given[fields[f]] = found;
+            }
+            args[0] = given;
+          }
+          return apply(real, this, args);
+        };
+        define(ownHost, "name", { value: changes[i] });
+        define(store, changes[i], { value: ownHost, writable: false, enumerable: true, configurable: false });
+      }
       const types = w.trustedTypes;
       if (types && !types.defaultPolicy) {
         try {
@@ -366,4 +412,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-otlgKHUvFu/SctDIUGBYsgiP2XeWMyAeQI0guhG/Wr4='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-fUB6roSomw2nFm3l8BJTg9A9LswF+7PzLHyU0ot0T48='";
