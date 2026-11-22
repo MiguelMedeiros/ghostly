@@ -61,6 +61,20 @@ export function takeLinks(lock: string, open: (route: string) => void): () => vo
 }
 
 /**
+ * Links this tab opens itself, one after the other, through `open` as `takeLinks` does: each once the address carries
+ * no link any more (the intake took the one before), every `everyMs`, so none replaces another before it was taken.
+ */
+export function openInTurn(routes: readonly string[], open: (route: string) => void, everyMs = 50): void {
+  const left = [...routes];
+  const next = () => {
+    if (!left.length) return;
+    if (linkInAddress(window.location.hash) === null) open(left.shift()!);
+    if (left.length) setTimeout(next, everyMs);
+  };
+  next();
+}
+
+/**
  * This tab holds `lock` on a device on standby (WISP 06 § The gate): it opens no link, and a link another tab hands
  * over is refused at once, so that tab drops it from its address rather than keeping it there for a tab that never will.
  */

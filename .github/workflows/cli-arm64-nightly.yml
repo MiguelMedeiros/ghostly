@@ -1,0 +1,76 @@
+name: CLI on Linux ARM64 (nightly)
+
+# The CLI's whole test suite on an arm64 runner: the two-peer story included (pairing, messages, files and a voice call
+# over libdatachannel). On pull requests CI's "CLI on Linux ARM64" job only packs and installs the CLI and starts its
+# daemon with WebRTC and calls; the suite itself runs there on x64 (the packages shards). Nightly on dev and by hand.
+# A red scheduled night opens an issue, or comments on the one still open, so an arm64-only failure or flake is seen.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cli-arm64-nightly
+  cancel-in-progress: false
+
+jobs:
+  cli-tests:
+    name: CLI tests on Linux ARM64
+    runs-on: ubuntu-24.04-arm
+    # A daemon that never exits would otherwise hold the runner for 6 hours.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A scheduled run tests dev, the default branch; a manual one, the branch it was started on.
+          ref: ${{ github.event_name == 'schedule' && 'dev' || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The CLI's own suite, as the packages shards run it on x64 (its Vitest builds dist/ first). Skipped here as on
+      # x64: fedimint (a regtest federation) and payments (a test mint), which need the Docker e2e services, the long
+      # chat bench, and the ffmpeg comparisons in voicePeaks when ffmpeg is missing.
+      - name: jq for the Claude Code agent example
+        run: command -v jq || { sudo apt-get update && sudo apt-get install -y jq; }
+
+      - name: CLI tests
+        run: npm run test -w @ghostlytools/cli
+
+  # One open issue per red streak: the first red night opens it, the next ones comment on it with their run. Closing it
+  # (the fix landed) lets the next red night open a new one. Not for a manual run, which someone is already watching.
+  flake-issue:
+    name: File the red night
+    needs: cli-tests
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: "Flaky or red: CLI tests on Linux ARM64 (nightly)"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          number=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number,title \
+            --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')
+          if [[ -n "$number" ]]; then
+            gh issue comment "$number" --body "Red again on \`dev\`: $RUN_URL"
+            echo "Commented on #$number"
+          else
+            gh issue create --title "$TITLE" --body "The nightly CLI suite on Linux ARM64 failed on \`dev\`: $RUN_URL. Each red night comments here. If the failing test passes on x64 (CI's packages shards), it is arm64-only or a flake. Close this once it is fixed."
+          fi
