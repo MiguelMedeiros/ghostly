@@ -368,7 +368,7 @@ async function session(g: Globals, options: RuntimeOptions, again = true, first?
   const host = await openOneShot(g, options);
   if (host instanceof DaemonClient) return throughDaemon(host, anew);
   const call = async (m: string, p?: unknown) => {
-    if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, p as Record<string, unknown>);
+    if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, m, p as Record<string, unknown>, READS.has(m));
     return callApi(host.ctx, m, p ?? {});
   };
   return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };
@@ -936,9 +936,12 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const resolved = here(out) as string, path = (out.endsWith("/") || out.endsWith(sep)) && !resolved.endsWith(sep) ? `${resolved}${sep}` : resolved;
       // The folder it goes in, as the backup checks it (backup.ts): a missing one, or a file in its place, is named before the profile opens.
       if (!path.endsWith(sep) && !localStat(dirname(path)).isDirectory()) throw new CliError("not_found", `${dirname(path)} is a file, not a folder`);
-      const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: cleanEnds(await backupPassphrase(parsed.options["passphrase-file"]), parsed.options["passphrase-file"]), ...light };
+      const passphrase = unsealed ? undefined : cleanEnds(await backupPassphrase(parsed.options["passphrase-file"]), parsed.options["passphrase-file"]);
+      const params = passphrase === undefined ? { path, noPassphrase: true, ...light } : { path, passphrase, ...light };
       const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("ghostly: Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
+      const lines = passphrase === undefined ? undefined : passphraseLines(passphrase, parsed.options["passphrase-file"]);
+      if (lines) process.stderr.write(`ghostly: ${lines}\n`);
       print(made);
       return;
     }
@@ -1051,6 +1054,20 @@ function cleanEnds(passphrase: string, file: unknown): string {
   const char = at === "ends" ? passphrase.at(-1)! : passphrase[0]!;
   const fileRule = typeof file === "string" ? " (one line break at its end is left out already)" : "";
   throw new CliError("bad_request", `The passphrase in ${source} ${at} with ${endName(char)}${fileRule}: the same passphrase typed or pasted would not open the backup. Take it out`);
+}
+
+/**
+ * A new backup's passphrase with a line break inside (`pass show x | ...`: the password, then notes on the next lines):
+ * every line seals the backup, so the first alone would not open it ("Wrong passphrase"). Said on stderr, the backup
+ * still made.
+ */
+function passphraseLines(passphrase: string, file: unknown): string | undefined {
+  const lines = passphrase.split(/\r\n|\r|\n/).length;
+  if (lines < 2) return undefined;
+  const [source, fix] = typeof file !== "string" ? ["GHOSTLY_BACKUP_PASSPHRASE", "Set it to one line."]
+    : file === "-" ? ["the passphrase on stdin", "Pipe in one line (e.g. pass show x | head -1)."]
+    : [`the passphrase file ${file}`, "Use a one-line file (e.g. pass show x | head -1)."];
+  return `${source} has ${lines} lines; all ${lines} are the passphrase. A restore needs all of them. ${fix}`;
 }
 
 /** Set on `startDetached`'s child: its parent waits for the profile and starts it again, so the child does not wait too. */
