@@ -45,13 +45,18 @@ it("builds the chat again when a contact's proof expires: it reads expired then,
   engine.forget("chat");
 });
 
-it("builds the chat again when its re-check falls due, then again at the proof's end", async () => {
-  const { engine, view } = await chat(7_200, 600);
+it("builds the chat again when its re-check falls due (a day at least, as the app re-checks it), then again at the proof's end", async () => {
+  const { engine, view } = await chat(2 * 86_400, 600);
   expect(view().recheckDue).toBe(false);
+  // The provider's 10 minutes: the app does not check it again yet, so nothing is due.
   await vi.advanceTimersByTimeAsync(600_000);
+  expect(view()).toMatchObject({ status: "verified", recheckDue: false });
+  await vi.advanceTimersByTimeAsync(86_400_000 - 600_000 - 1_000);
+  expect(view().recheckDue).toBe(false);
+  await vi.advanceTimersByTimeAsync(1_000);
   expect(view()).toMatchObject({ status: "verified", recheckDue: true });
-  await vi.advanceTimersByTimeAsync(6_600_000);
-  expect(view().status).toBe("expired");
+  await vi.advanceTimersByTimeAsync(86_400_000);
+  expect(view()).toMatchObject({ status: "expired", recheckDue: false });
   engine.forget("chat");
 });
 
