@@ -1314,6 +1314,8 @@ export class CashuWallet {
       unit = metadata.unit;
       // In this wallet's spelling of its mints. The library redeems the token at the same mint in any spelling.
       mint = mintUrlSpelling(metadata.mint);
+      // A mint is an http(s) server: a token that names anything else (`file:`, `data:`, no URL at all) names no mint.
+      if (!/^https?:$/.test(new URL(mint).protocol)) throw new Error("no http(s) mint");
       faceValue = metadata.amount.toNumber();
     } catch {
       throw new Error("That is not a valid ecash token");
