@@ -1860,8 +1860,11 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.done(bob, id, messageId)).toBe(false);
   });
 
-  it("a member whose holder never offers asks the next one after `wantWaitMs` though its device's clock was set back", async () => {
-    const t = new FilesWorld();
+  /**
+   * Alice wrote a file that Carol holds too; Bob asks for it. The first holder to answer is held up on its way to Bob
+   * (none of its files/3 frames reach him) until `release`, so Bob's want waits for that holder's offer.
+   */
+  const silentFirst = async (t: FilesWorld) => {
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
     for (const p of [bob, carol]) t.files.get(p)!.settings.autoDownloads = false;
     const { messageId } = await t.send(alice, id, pattern(256 * 1024, 15));
@@ -1871,7 +1874,6 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     await t.world.run(15_000);
     t.say(carol, bob, id, { t: "group-have", g: id, ids: [messageId] });
     await t.world.run(1_000);
-    // The first holder to answer goes silent: none of its files/3 frames reach Bob.
     let first: string | undefined;
     t.hold = (from, to, frame) => {
       if (!first && to === bob && frame.t === "pf-offer") first = from.name;
@@ -1880,15 +1882,35 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     const mark = t.seen.length;
     const offers = () => new Set(t.seen.slice(mark).filter(s => s.to === "bob" && s.frame.t === "pf-offer").map(s => s.from));
     await bob.groups.downloadFile(t.got(bob, id, messageId).message!.file!.id);
+    return { bob, id, messageId, offers };
+  };
+
+  it.each([["an hour", 60 * 60_000], ["ten minutes", 10 * 60_000]])("a member whose holder never offers asks the next one after `wantWaitMs` though its device's clock was set back %s", async (_, back) => {
+    const t = new FilesWorld();
+    const { bob, id, messageId, offers } = await silentFirst(t);
     for (let i = 0; i < 10 && !offers().size; i++) await t.world.run(1_000);
     expect(offers().size).toBe(1);
-    bob.clock = -60 * 60_000;
+    bob.clock = -back;
     const set = t.world.now;
     for (let i = 0; i < 120 && offers().size < 2; i++) await t.world.run(5_000);
-    // Within `wantWaitMs` and a step, not an hour: the other holder offers it.
+    // Within `wantWaitMs` and a step, not the length of the jump: the other holder offers it.
     expect(offers().size).toBe(2);
     expect(t.world.now - set).toBeLessThan(GROUP_FILE_LIMITS.wantWaitMs + 5_000);
     await t.world.until(() => t.done(bob, id, messageId), 5 * 60_000);
+  });
+
+  it("a member whose device's clock is set ahead just after it asks waits for the offer of the holder it asked", async () => {
+    const t = new FilesWorld();
+    const { bob, id, messageId, offers } = await silentFirst(t);
+    bob.clock = 60 * 60_000;
+    for (let i = 0; i < 10 && !offers().size; i++) await t.world.run(1_000);
+    expect(offers().size).toBe(1);
+    // The holder's offer is on its way a few seconds more, well within `wantWaitMs`: Bob does not ask the next one.
+    await t.world.run(5_000);
+    expect(offers().size).toBe(1);
+    t.release(id);
+    await t.world.until(() => t.done(bob, id, messageId), 5 * 60_000);
+    expect(offers().size).toBe(1);
   });
 
   it("a holder that serves the rest of a file counts that rest toward its day, not the whole file", async () => {
