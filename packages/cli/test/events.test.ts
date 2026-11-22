@@ -53,6 +53,15 @@ describe("the event stream", () => {
     expect(events.map((e) => e.id)).toEqual(["chat.renamed:c2:1000"]);
   });
 
+  it("remembers the chats a live session carried in this run, after they go down (chat connect's resuming)", async () => {
+    const { h } = await hub("was-live.jsonl");
+    const live = { textDelivery: "stream", dataLink: "open", pairing: { status: "ready", transport: "hyperdht/1" } } as Partial<LinkView>;
+    h.baseline(state([link("c1", live), link("c2")]), new Map());
+    h.sink.post({ kind: "state", state: state([link("c1"), link("c2"), link("c3", live)]) });
+    h.sink.post({ kind: "state", state: state([link("c1"), link("c2"), link("c3")]) });
+    expect(["c1", "c2", "c3"].map((id) => h.wasLive(id))).toEqual([true, false, true]);
+  });
+
   it("reads no payment while the payments are the same object as in the last state", async () => {
     const { h, events } = await hub("same-payments.jsonl");
     let reads = 0;

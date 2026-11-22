@@ -1,4 +1,4 @@
-import { CliError } from "../errors";
+import { CliError, shownValue } from "../errors";
 import { commands as apps } from "./apps";
 import { commands as calls } from "./calls";
 import { commands as chats } from "./chats";
@@ -145,7 +145,7 @@ export function positionals(command: { usage: string; args?: string[]; words?: R
     if (words && !words.includes(values[i])) {
       // A usage that spells the words out (`<auto|dht|...>`) names the argument by its own name.
       const placeholder = shown[i + skip] && !shown[i + skip]!.includes("|") ? shown[i + skip] : name;
-      throw new CliError("usage", `<${placeholder}> takes ${listed(words)}, not ${JSON.stringify(values[i])}`);
+      throw new CliError("usage", `<${placeholder}> takes ${listed(words)}, not ${shownValue(values[i])}`);
     }
     out[name] = values[i];
   }

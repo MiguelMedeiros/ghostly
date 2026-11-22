@@ -13,6 +13,7 @@ import { ago } from "./contactBadges";
 import { contactFace, faceChoice, shownContactName } from "./contactFace";
 import { hostList, profileCounts } from "./profileWords";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
+import { ownDirection } from "../../lib/ownDirection";
 import { problemLine } from "../../lib/problemText";
 import type { Language } from "../../lib/settings";
 import { formatAt } from "../../lib/time";
@@ -151,7 +152,7 @@ function PostImage({ image, index, postId, provider, subject }: { image: { host?
         {busy ? t("identities.activity.loading") : t("identities.activity.showPicture")}<span className="identity-activity-image-host">{from}</span>
       </button>
       {image.alt && <span className="identity-activity-image-alt">{image.alt}</span>}
-      {error && <span className="identity-activity-note" role="alert" data-testid="contact-activity-post-image-error">{error}</span>}
+      {error && <span className="identity-activity-note" role="alert" dir={ownDirection(error)} data-testid="contact-activity-post-image-error">{error}</span>}
     </span>
   );
 }

@@ -18,6 +18,14 @@ describe("the services worker", () => {
   let clients: Client[];
   let onFetch: FetchListener;
   let bridge: Client;
+  let scope: { location: URL };
+
+  /** The worker run again, as registered from `script` (whose query says whether Hide my IP from contacts is on). */
+  async function restart(script: string): Promise<void> {
+    vi.resetModules();
+    scope.location = new URL(`${ORIGIN}${script}`);
+    await import("../../../../web/src/svc/worker");
+  }
 
   beforeEach(async () => {
     vi.resetModules();
@@ -29,12 +37,12 @@ describe("the services worker", () => {
     };
     bridge = { id: "bridge", url: `${ORIGIN}${BRIDGE_PAGE}`, frameType: "nested", postMessage: vi.fn(answer) };
     clients = [bridge, { id: "app", url: `${ORIGIN}/`, frameType: "nested", postMessage: vi.fn() }];
-    const scope = {
+    scope = {
       location: new URL(`${ORIGIN}/ghostly-services-sw.js`),
       skipWaiting: async () => {},
       clients: { claim: async () => {}, matchAll: async () => clients, get: async (id: string) => clients.find((client) => client.id === id) },
       addEventListener: (type: string, listener: FetchListener) => { if (type === "fetch") onFetch = listener; },
-    };
+    } as { location: URL };
     vi.stubGlobal("self", scope);
     vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
     vi.stubGlobal("__SERVICES_APP_ORIGIN__", "https://app.ghostly.example");
@@ -128,10 +136,11 @@ describe("the services worker", () => {
       const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "", owner: "", openLink: () => "", hostError: () => null };
       for (const own of [null, "connect-src *"]) {
         for (const relayOnly of [false, true]) {
+          await restart(`/ghostly-services-sw.js?relay-only=${relayOnly ? 1 : 0}`);
           // The bridge hands the request to the real `serve`, and the contact answers with or without a policy of its own.
           bridge.postMessage.mockImplementation((message: unknown, transfer: Transferable[]) => {
             const headers: [string, string][] = [["content-type", "text/html"], ...(own ? [["content-security-policy", own] as [string, string]] : [])];
-            void serve(transfer[0] as MessagePort, message, async () => ({ status: 200, headers, body: (async function* () {})(), bytes: async () => new Uint8Array() }), new CookieJar(), words, undefined, relayOnly);
+            void serve(transfer[0] as MessagePort, message, async () => ({ status: 200, headers, body: (async function* () {})(), bytes: async () => new Uint8Array() }), new CookieJar(), words);
           });
           const response = await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
           // The guards' policy comes with the guards (`guardViewerAnswer`: the clipboard guard always, the WebRTC guard with
@@ -139,6 +148,55 @@ describe("the services worker", () => {
           const policy = [VIEWER_GUARD_CSP, relayOnly ? VIEWER_SERVICE_CSP_RELAY_ONLY : VIEWER_SERVICE_CSP];
           expect(response.headers.get("content-security-policy"), `${own} ${relayOnly}`).toBe([own, ...policy, "frame-ancestors 'self' https://app.ghostly.example"].filter(Boolean).join(", "));
         }
+      }
+    });
+
+    it("puts the clipboard guard first in each page of an app, and the WebRTC guard after it while Hide my IP from contacts is on", async () => {
+      const { CookieJar, serve } = await import("../../../../web/src/svc/opener");
+      const { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT } = await import("@ghostly/core");
+      const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "", owner: "", openLink: () => "", hostError: () => null };
+      const page = "<!doctype html><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>";
+      const served = async (destination: string, relayOnly: boolean, type = "text/html") => {
+        await restart(`/ghostly-services-sw.js?relay-only=${relayOnly ? 1 : 0}`);
+        bridge.postMessage.mockImplementation((message: unknown, transfer: Transferable[]) => {
+          void serve(transfer[0] as MessagePort, message, async () => ({ status: 200, headers: [["content-type", type], ["content-length", String(page.length)], ["content-security-policy", "script-src 'nonce-a'"]], body: (async function* () { yield new TextEncoder().encode(page.slice(0, 7)); yield new TextEncoder().encode(page.slice(7)); })(), bytes: async () => new Uint8Array() }), new CookieJar(), words);
+        });
+        const response = await fetchThrough({ mode: destination === "iframe" ? "navigate" : "no-cors", destination, referrer: `${ORIGIN}/` }, "app")!;
+        return { policy: response.headers.get("content-security-policy")!, length: response.headers.get("content-length"), text: await response.text() };
+      };
+      const guarded = await served("iframe", true);
+      expect(guarded.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><script>${VIEWER_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+      // The contact's policy lets them run; its length is not the page's any more.
+      expect(guarded.policy.startsWith(`script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH}, `)).toBe(true);
+      expect(guarded.length).toBeNull();
+      // A page the guard cannot go into runs no script.
+      expect((await served("iframe", true, "image/svg+xml")).policy).toContain("script-src 'none'; frame-src 'none'; object-src 'none'");
+      // What is not a page (a fetch, a script) is the contact's as it was; with it off, a page has the clipboard guard alone.
+      expect((await served("", true)).text).toBe(page);
+      expect((await served("script", true, "text/javascript")).text).toBe(page);
+      const off = await served("iframe", false);
+      expect(off.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+      expect(off.policy.startsWith(`script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH}, `)).toBe(true);
+    });
+
+    it("is guarded and given Ghostly's policy by the worker itself, whoever answered on the port: a page of the app's own origin can reach the bridge", async () => {
+      const { CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_CSP, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY } = await import("@ghostly/core");
+      // Hide my IP from contacts as the bridge registered the worker: on, off, and a script address that says neither
+      // (the app's own registration), which gets the stricter one.
+      for (const [query, relayOnly] of [["?relay-only=1", true], ["?relay-only=0", false], ["", true], ["?relay-only=no", true]] as const) {
+        await restart(`/ghostly-services-sw.js${query}`);
+        // The app's page took the request's port at the bridge and answers it with a page and headers of its own.
+        bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+          const port = transfer[0] as MessagePort;
+          port.postMessage({ type: "head", status: 200, headers: [["content-type", "text/html"], ["link", "<https://elsewhere.example/>; rel=preconnect"], ["content-security-policy", "default-src * 'unsafe-inline'; report-uri https://elsewhere.example/r"]] });
+          port.postMessage({ type: "chunk", bytes: new TextEncoder().encode("<!doctype html><script>new RTCPeerConnection()</script>") });
+          port.postMessage({ type: "end" });
+        });
+        const response = await fetchThrough({ path: "/evil", mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        expect(response.headers.get("content-security-policy"), query).toBe(["default-src * 'unsafe-inline'", VIEWER_GUARD_CSP, relayOnly ? VIEWER_SERVICE_CSP_RELAY_ONLY : VIEWER_SERVICE_CSP, "frame-ancestors 'self' https://app.ghostly.example"].join(", "));
+        expect(response.headers.get("link"), query).toBeNull();
+        const guards = `<script>${CLIPBOARD_GUARD_SCRIPT}</script>${relayOnly ? `<script>${VIEWER_GUARD_SCRIPT}</script>` : ""}`;
+        expect(await response.text(), query).toBe(`<!doctype html>${guards}<script>new RTCPeerConnection()</script>`);
       }
     });
   });

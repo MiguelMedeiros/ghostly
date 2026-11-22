@@ -5,7 +5,7 @@ import { SignerTimeout, type IdentityProofProvider, type IdentitySigner, type Si
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
 import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 
 /**
  * Identity proofs (WISP 300, WISP 1100 phase 3b), as the Identities page makes them: the engine draws the proof key
@@ -50,7 +50,8 @@ function remoteSignerError(error: unknown, relays: string[]): CliError | undefin
   return new CliError("refused", "The remote signer refused the request: approve Ghostly in your signer, or make a new link there", { rawError: error.message });
 }
 
-function provider(id: string): IdentityProofProvider {
+/** The provider `id` names; a one-shot `identity add` asks before the profile opens (main.ts `identityAddCommand`). */
+export function identityProvider(id: string): IdentityProofProvider {
   const found = IDENTITY_PROVIDERS.find((p) => p.id === id);
   if (!found) throw new CliError("not_found", `No identity provider ${id} (ghostly identity providers)`);
   return found;
@@ -118,12 +119,32 @@ function pruneDrafts(now = Date.now()) {
   for (const [id, done] of finished) if (now - done.at > IDENTITY_DRAFT_TTL_MS) finished.delete(id);
 }
 
-async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
+function canonical(p: IdentityProofProvider, subject: string): string {
   let normalized: string;
   try { normalized = p.subject?.normalize ? p.subject.normalize(subject) : subject; } catch (error) {
     throw new CliError("bad_request", error instanceof Error ? error.message : String(error));
   }
   if (!normalized) throw new CliError("bad_request", `Not a ${p.subject?.label ?? "subject"} ${p.label} takes`);
+  return normalized;
+}
+
+/**
+ * An in-app signer's fields with the subject given where the usage line puts it: in the signer's field that is the
+ * subject (NIP-05's domain), or, for a signer that brings its own key, the subject that key must be. It was dropped.
+ */
+function withSubject(p: IdentityProofProvider, signer: IdentitySigner<unknown>, values: Record<string, string>, subject: string | undefined) {
+  if (!subject) return { values };
+  const field = signer.kind === "in-app" ? signer.fields?.find((f) => f.kind !== "secret" && f.label === p.subject?.label) : undefined;
+  if (!field) return { values, expected: canonical(p, subject) };
+  // Compared as the provider reads them (a domain in capitals is the same one); one that is no subject of it is refused
+  // in its words, and either is quoted as a refusal quotes a value: a link or key typed in its place is not printed back.
+  const given = canonical(p, subject), other = values[field.name];
+  if (other && canonical(p, other) !== given) throw new CliError("usage", `Two ${field.label.toLowerCase()}s: ${shownValue(subject)} as <subject>, ${shownValue(other)} as --field ${field.name}; give one`);
+  return { values: { ...values, [field.name]: subject } };
+}
+
+async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
+  const normalized = canonical(p, subject);
   const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays, whole: true });
   return node(ctx).beginIdentityProof({ provider: p.id, subject: normalized, ...(days ? { validityDays: days } : {}) });
 }
@@ -146,11 +167,12 @@ export const IDENTITY_METHODS: Record<string, Method> = {
   /** Starts a proof. In-app signers finish it here; the others return the statement and what to do with it. */
   async "identity.add"(ctx, params) {
     pruneDrafts();
-    const p = provider(str(params, "provider", true));
+    const p = identityProvider(str(params, "provider", true));
     const signer = signerOf(p, str(params, "signer"));
     if (signer.kind === "in-app") {
-      const values = (params.fields ?? {}) as Record<string, string>;
-      if (typeof values !== "object" || Array.isArray(values) || Object.values(values).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
+      const fields = (params.fields ?? {}) as Record<string, string>;
+      if (typeof fields !== "object" || Array.isArray(fields) || Object.values(fields).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
+      const { values, expected } = withSubject(p, signer, fields, str(params, "subject"));
       for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("usage", `${signer.label} needs ${field.name} (${field.label}): ${howToGive(field)}`);
       // A NIP-46 link read as the signer will read it: one it refuses is the user's input, not an engine failure.
       const bunker = signer.fields?.find((f) => f.name === "bunker");
@@ -175,16 +197,24 @@ export const IDENTITY_METHODS: Record<string, Method> = {
         asking = true;
         try { return await step(); } finally { asking = false; }
       };
+      // The caller's own id for this call, in each of its events: two proofs waiting on one daemon are told apart by it.
+      const request = str(params, "request");
+      const tag = { provider: p.id, ...(request ?{ request } : {}) };
       const proof = await signer.run({
         values, signal, waitMs: seconds * 1000,
         // A link or code to approve with holds the request's secret (contract.ts): to the listeners live, never the journal.
-        onAuthUrl: (url) => { ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, url }); },
-        onProgress: (message) => { ctx.hub.emit("identity.progress", `identity.progress:${Date.now()}`, { provider: p.id, message }); },
+        onAuthUrl: (url) => { ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { ...tag, url }); },
+        onProgress: (message) => { ctx.hub.emit("identity.progress", `identity.progress:${Date.now()}`, { ...tag, message }); },
         onApproval: (request) => {
-          if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
+          if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { ...tag, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
         },
       }, async (session) => {
-        const subject = await ask(() => session.subject());
+        // In the form `expected` is in: a signer may answer its key another way (a Pubky key in capitals).
+        const subject = canonical(p, await ask(() => session.subject()));
+        if (expected !== undefined && subject !== expected) {
+          const shown = (key: string) => p.publicUri?.(key) ?? key;
+          throw new CliError("bad_request", `${signer.label} holds ${shown(subject)}, not ${shown(expected)}: nothing was signed`);
+        }
         const { draftId, binding } = await begin(ctx, p, subject, params);
         try {
           const evidence = await ask(() => session.sign(identityStatement(binding)));
@@ -225,7 +255,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     const draftId = str(params, "draft", true);
     const draft = drafts.get(draftId);
     if (!draft) throw noDraft(draftId);
-    const p = provider(draft.provider);
+    const p = identityProvider(draft.provider);
     const signer = signerOf(p, draft.signer);
     const statement: IdentityStatement = identityStatement(draft.binding);
     let evidence: unknown;

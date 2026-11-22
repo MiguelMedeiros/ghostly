@@ -350,7 +350,9 @@ describe("a private network's relays (GHOSTLY_PKARR_RELAYS)", { timeout: 60_000 
 
   it("are refused when two are split by ';' or a space, as one URL they reached nobody", () => {
     for (const relays of ["http://10.9.9.9:8080;http://10.9.9.8:8080", "http://10.9.9.9:8080 http://10.9.9.8:8080", "http://[fd00::1"]) {
-      expect(() => pkarrRelays({ GHOSTLY_PKARR_RELAYS: relays }), relays).toThrow(expect.objectContaining({ code: "usage", message: expect.stringContaining(JSON.stringify(relays)) }));
+      // A value over 40 characters is described, not printed (shownValue).
+      const shown = relays.length > 40 ? `(a ${relays.length}-character word)` : JSON.stringify(relays);
+      expect(() => pkarrRelays({ GHOSTLY_PKARR_RELAYS: relays }), relays).toThrow(expect.objectContaining({ code: "usage", message: expect.stringContaining(shown) }));
     }
   });
 

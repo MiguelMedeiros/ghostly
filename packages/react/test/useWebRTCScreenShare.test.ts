@@ -134,6 +134,25 @@ describe("sharing the screen in a voice call", () => {
     expect(call.result.current.screenShareError).toBeNull();
   });
 
+  // The Linux Desktop swaps the track in Rust, so the hang-up can come while it opens the device.
+  it.each([["screen", "displayMedia"], ["camera", "userMedia"]] as const)("hanging up while the %s is swapped in lets it go, and says nothing", async (_, requests) => {
+    const { call, sender } = await connectedCall();
+    let swapped!: () => void;
+    sender.replaceTrack.mockImplementationOnce((track) => new Promise<void>((resolve) => { swapped = () => { sender.track = track; resolve(); }; }));
+    act(() => { void (requests === "displayMedia" ? call.result.current.toggleScreenShare() : call.result.current.toggleVideo()); });
+    const picture = devices[requests][devices[requests].length - 1].grant().getVideoTracks()[0];
+    await settle();
+
+    act(() => call.result.current.hangUp());
+    swapped();
+    await settle();
+
+    expect(picture.readyState).toBe("ended");
+    expect(devices.liveTracks()).toEqual([]);
+    expect(pictures(call)).toEqual([]);
+    expect(call.onError).not.toHaveBeenCalled();
+  });
+
   it("a second press while the picker is open asks once", async () => {
     const { call } = await connectedCall();
     act(() => {
