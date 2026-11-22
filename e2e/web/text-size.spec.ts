@@ -209,6 +209,15 @@ function cutNames(rows: ReturnType<Page["locator"]>, name: string): Promise<stri
     .map((label) => `${label.textContent}: ${label.scrollWidth}/${label.clientWidth}`), name);
 }
 
+/** The rows' hints (the line under a name) cut short, theirs or any part's inside, as "words: scrollWidth/clientWidth". */
+function cutHints(rows: Locator): Promise<string[]> {
+  return rows.evaluateAll((rows) => rows.flatMap((row) => {
+    const hint = row.querySelector<HTMLElement>(":scope > span.flex-1 > span:nth-child(2)");
+    return hint ? [hint, ...hint.querySelectorAll<HTMLElement>("*")] : [];
+  }).filter((part) => part.scrollWidth > part.clientWidth)
+    .map((part) => `${part.textContent}: ${part.scrollWidth}/${part.clientWidth}`));
+}
+
 /** The dialog's buttons whose words run past their edges, or past the dialog's, as "words: scrollWidth/clientWidth". */
 function cutButtons(dialog: Locator): Promise<string[]> {
   return dialog.evaluate((dialog) => {
@@ -256,7 +265,7 @@ test("a phone at 150% and 200% text size: adding a device, the new device's firs
   }
 });
 
-test("a phone at a larger text size: Settings' sections, its search results and the identity kinds wrap their names instead of cutting them", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
+test("a phone at a larger text size: Settings' sections (their names and what they hold), its search results and the identity kinds wrap their words instead of cutting them", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
   const { page } = await peer("text-size-names", { mobile: true, viewport: PHONE });
   await textSize(page, 24);
   for (const language of ["fr", "ja", "ar"]) {
@@ -265,6 +274,8 @@ test("a phone at a larger text size: Settings' sections, its search results and 
     const sections = page.locator('[data-testid^="settings-open-"]');
     await expect(sections.first()).toBeVisible();
     expect(await cutNames(sections, ":scope > span.flex-1 > span:first-child"), `${language}: Settings' sections`).toEqual([]);
+    // What each section holds, under its name: wrapped too (Media's, Privacy's and Network's are the long ones).
+    expect(await cutHints(sections), `${language}: Settings' section descriptions`).toEqual([]);
     await page.getByTestId("settings-search").fill(language === "ja" ? "プ" : language === "ar" ? "ال" : "e");
     const results = page.getByTestId("settings-search-result");
     await expect(results.first()).toBeVisible();

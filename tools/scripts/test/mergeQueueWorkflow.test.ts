@@ -123,10 +123,15 @@ describe("merge-queue.yml waits in line", () => {
   });
 });
 
-// GitHub runs the `*/5` schedule only every 10 to 30 minutes: a batch held for company, with no other event, left up to
-// ~45 minutes after the oldest could board instead of 15.
+// GitHub runs a schedule only loosely (its `*/5` 10 to 30 minutes apart): a batch held for company, with no other event,
+// left up to ~45 minutes after the oldest could board instead of 15.
 describe("merge-queue.yml wakes the train when a held batch leaves", () => {
   const job = (name: string) => text.match(new RegExp(`^ {2}${name}:\n((?: {4}.*\n|\n)+)`, "m"))?.[1] ?? "";
+
+  // The schedule is only a backstop: events move the train, and the `wake` job serves a held batch's deadline.
+  it("and otherwise every 15 minutes, as a backstop", () => {
+    expect(text).toMatch(/^ {2}schedule:\n(?: {4}#.*\n)* {4}- cron: "\*\/15 \* \* \* \*"$/m);
+  });
 
   it("from the train job's wake time, in a group of its own where the newest wake replaces the one sleeping", () => {
     expect(job("train")).toMatch(/^ {4}outputs:\n {6}wake_in: \$\{\{ steps\.train\.outputs\.wake_in \}\}$/m);

@@ -1,5 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { oneChatOnly, oneGroupOnly, readsNoHistory } from "../src/main";
 import { ghostly, home, hyperdhtTestnet, ok, Running } from "./support/cli";
@@ -124,6 +126,9 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     // app), and `call answer` and `call flush`, which a one-shot refuses whatever the chats say.
     for (const method of ["status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add",
       "identity.cancel", "app.serve", "app.unserve", "call.answer", "call.flush"]) expect(readsNoHistory(method), method).toBe(true);
+    // The wallet's own stores: an address, a Lightning card's name or default, a wallet removed. Each started every
+    // chat and read its history: with 10 chats and 30,000 messages, 20 relay requests and 0.35 s more, a refusal too.
+    for (const method of ["wallet.address", "lightning.rename", "lightning.default", "wallet.remove"]) expect(readsNoHistory(method), method).toBe(true);
     // A change about a message reads the chat it names (`startNamedChats`).
     for (const method of ["saved.add", "saved.remove", "chat.rename"]) expect(readsNoHistory(method), method).toBe(false);
   });
@@ -141,6 +146,9 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
  * it, her seven edges to Dave all watched him once his daemon stopped, their reads shared the watch share (2 in 10 s,
  * the key read longest ago first), and the edge the send's goodbye had just read read Dave's next offer last: the
  * `group react` waited 28 to 52 s for an edge on one busy core, and past its 60 s on CI (exit 4).
+ *
+ * Each side keeps a link trace (`GHOSTLY_LINK_TRACE`): a one-shot that fails prints both sides' steps since it started.
+ * With Erin unbudgeted the react still timed out once on CI (Linux ARM64), and its log said only that no edge took it.
  */
 describe("a one-shot about one group", { timeout: 300_000 }, () => {
   let daveRelay: Awaited<ReturnType<typeof relays>>[number], erinRelay: typeof daveRelay;
@@ -153,8 +161,9 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
   beforeAll(async () => {
     [daveRelay, erinRelay] = await relays(2);
     dht = await hyperdhtTestnet();
-    daveEnv = { GHOSTLY_PKARR_RELAYS: daveRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap };
-    erinEnv = { GHOSTLY_PKARR_RELAYS: erinRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE: "Infinity" };
+    daveEnv = { GHOSTLY_PKARR_RELAYS: daveRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_LINK_TRACE: join(dave, "link-trace.jsonl") };
+    erinEnv = { GHOSTLY_PKARR_RELAYS: erinRelay.url, GHOSTLY_HYPERDHT_BOOTSTRAP: dht.bootstrap, GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE: "Infinity",
+      GHOSTLY_LINK_TRACE: join(erin, "link-trace.jsonl") };
     const erinDaemon = new Running(["--home", erin, "daemon"], erinEnv);
     // Dave's daemon makes the setup only, with no relay budget: under it, the seven joins waited on its relay minute,
     // about 20 s each. His one-shots below, which are measured, keep theirs.
@@ -189,9 +198,29 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
     daveRelay?.close(); erinRelay?.close();
   }, 30_000);
 
+  /** Both sides' link steps since `since`, polls aside: what kept the group's edge down. */
+  function steps(since: number): string {
+    const lines: string[] = [];
+    for (const [dir, name] of [[dave, "dave"], [erin, "erin"]]) {
+      const file = join(dir, "link-trace.jsonl");
+      if (!existsSync(file)) continue;
+      for (const line of readFileSync(file, "utf8").split("\n")) {
+        try {
+          // Link steps name the link's key (`me`); join steps, the group (`g`).
+          const { t, me, g, step, ...rest } = JSON.parse(line) as { t: number; me?: string; g?: string; step: string };
+          if (t >= since && step !== "poll") lines.push(`${((t - since) / 1000).toFixed(1).padStart(6)} ${name} ${me ?? `group ${g?.slice(0, 6)}`} ${step} ${JSON.stringify(rest)}`);
+        } catch { /* a partial line */ }
+      }
+    }
+    return lines.sort((a, b) => parseFloat(a) - parseFloat(b)).join("\n");
+  }
+
   const counted = async (args: string[]) => {
     daveRelay.requests.length = 0;
+    const since = Date.now();
     const result = await ghostly(["--home", dave, ...args], { env: daveEnv });
+    // `ok` prints stderr: a one-shot that failed says each side's steps with it.
+    if (result.code !== 0) result.stderr += `\nlink steps since the one-shot started:\n${steps(since)}`;
     return { result, requests: daveRelay.requests.length };
   };
 

@@ -1,5 +1,6 @@
 {
   "attach": "添付",
+  "bytesLeft": "残りバイト数: {{count}}",
   "camera": "カメラ",
   "cameraBlocked": "カメラがブロックされています。Android の設定で Ghostly にカメラを許可してください。",
   "cameraFailed": "カメラを起動できませんでした。",
@@ -17,6 +18,7 @@
     "recent": "最近使用",
     "symbols": "記号"
   },
+  "charactersLeft": "残り文字数: {{count}}",
   "chooseFiles": "ファイルを選ぶ",
   "closeCamera": "カメラを閉じる",
   "dhtTooLong": "DHT には長すぎます（{{bytes}} / {{max}} バイト）。短くするかライブ接続にしてください。下書きは残ります。",
@@ -54,6 +56,7 @@
   "identity": "ID",
   "identityShared": "このチャットで {{count}} 件共有中",
   "media": "写真と動画",
+  "nearSoft": "封をすると DHT に入るのは約 {{bytes}} バイトです。DHT で送るには短くしてください",
   "noEmoji": "絵文字が見つかりません",
   "noGifs": "GIF が見つかりません",
   "overSoft": "DHT で送れる {{bytes}} バイトを超えています。直接接続されると送信されます",

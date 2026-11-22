@@ -157,6 +157,16 @@ describe("ecash in", () => {
     expect(mint.receive).not.toHaveBeenCalled();
   });
 
+  it("names a token's unit only when it looks like one: the unit is its sender's free text", async () => {
+    const { wallet } = setup();
+    await expect(wallet.receiveToken(tokenFrom(MINT, [8], "USD"))).rejects.toThrow("This ecash is in USD: only sat ecash can be redeemed here");
+    const unnamed = "This ecash is in another unit: only sat ecash can be redeemed here";
+    for (const unit of ["usd\u202eereh tuo kcehc", "sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example/now", "u".repeat(600), "usd\u200b"]) {
+      await expect(wallet.receiveToken(tokenFrom(MINT, [8], unit)), JSON.stringify(unit)).rejects.toThrow(unnamed);
+    }
+    expect(mint.receive).not.toHaveBeenCalled();
+  });
+
   it("refuses ecash from a mint the user did not choose, and never adds that mint", async () => {
     const { wallet, events } = setup();
     await expect(wallet.receiveToken(tokenFrom("https://evil.example", [8]))).rejects.toThrow("Ecash from evil.example is not accepted");
@@ -446,7 +456,8 @@ describe("Lightning out", () => {
 
     expect(ensure).toHaveBeenCalledWith(["00newkeyset00001"]);
     expect(secrets()).toEqual(["c", "change"]);
-    expect(rows<WalletTx>("walletTx")).toMatchObject([{ fee: 6 }]);
+    // Its melt quote: the screen that left it pending reads from it that the payment went through.
+    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "lightning-out", fee: 6, quote: "m1" }]);
     expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), true);
   });
 

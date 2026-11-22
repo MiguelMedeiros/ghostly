@@ -89,6 +89,12 @@ export const SAVE_REFUSED = /^(?:The file could not be saved there|Unreadable fi
  */
 export const DESKTOP_SAVE_REFUSED = /^(?:.+ \(os error \d+\)|The chosen place has no file name)$/;
 
+/**
+ * A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
+ * worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
+ */
+export const PART_NOT_LOADED = /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/;
+
 /** No room left in the storage that holds items for an away contact (WISP 404, engine/hold.ts): it sends once some are picked up. */
 const HOLD_FULL_ITEMS = /^At most (?<max>\d+) items can wait for this contact\. Wait until some are picked up\.$/;
 const HOLD_FULL_BYTES = /^Items waiting for this contact would exceed (?<max>\d+) MB\. Wait until some are picked up\.$/;
@@ -121,10 +127,10 @@ const RULES: readonly Rule[] = [
   // The page's way to the peer and its services (packages/browser/src/platform).
   exact("Ghostly is starting…", "errors.app.starting"),
   exact("Ghostly is still starting. Try again in a moment.", "errors.app.stillStarting"),
-  exact("Lost the Ghostly peer", "errors.app.lostPeer"),
-  // A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
-  // worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
-  { match: /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
+  // A call the peer was answering when it went away (an extension's offscreen restart, Clear all data or a profile
+  // switch in another tab): the old peer may have done it before it went, so it says to look before trying again.
+  exact("Lost the Ghostly peer", "errors.app.lostPeer", "errors.app.lostPeerNext"),
+  { match: PART_NOT_LOADED, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
   // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent. A
   // forward's copy that found no room (engine/forwards.ts forwardError) says Desktop's io error the same way.
   { match: /^Not enough space on this device \((?:QuotaExceededError(?:: [\s\S]*)?|No space left on device[\s\S]*)\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
@@ -132,7 +138,8 @@ const RULES: readonly Rule[] = [
   exact("This device has no room left to save this", "errors.app.noRoomToSave", "errors.app.noRoomToSaveNext"),
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
-  exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
+  // A no in the host's question (Chrome's prompt, Desktop's dialog), from Share or a card's Allow: it can be asked again.
+  exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress", "errors.app.localAddressNext"),
   // The Share form's address checks (packages/core http.ts parseLocalTarget; the CLI matches the English) and its name
   // check (engine/node.ts addService): what is wrong, then what to type.
   exact("Not a valid URL", "errors.services.badAddress", "errors.services.addressNext"),
@@ -651,6 +658,7 @@ const RULES: readonly Rule[] = [
   // the ⓘ. "Made by another key" stays in the line: it is why the proof is refused.
   { match: /^This signature was made by another key(?: \([0-9A-F]+\))?, not the public key given\.$/, key: "errors.proof.otherKey", next: "errors.proof.otherKeyPgpNext", detail: true },
   { match: /^That signature was made by \S+, not the key you entered \([^)]*\)$/, key: "errors.proof.otherKey", next: "errors.proof.otherKeySshNext", detail: true },
+  exact("The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again", "errors.proof.fileEncoding", "errors.proof.fileEncodingNext"),
   { match: /^No Ghostly TXT record at \S+(?: \(DNS changes can take a few minutes\))?$/, key: "errors.proof.noDnsRecord", next: "errors.proof.noDnsRecordNext", detail: true },
   { match: /^https:\/\/\S+ was not found$/, key: "errors.proof.fileNotFound", detail: true },
   { match: /^https:\/\/\S+ was not found: it was deleted, or not uploaded yet$/, key: "errors.proof.fileNotFound", next: "errors.proof.fileNotFoundNext", detail: true },
@@ -862,6 +870,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   ecashFeeTakesAll: "errors.engine.ecashFeeTakesAll",
   lightningRefused: "errors.engine.lightningRefused",
   ecashOtherUnit: "errors.engine.ecashOtherUnit",
+  ecashUnnamedUnit: "errors.engine.ecashUnnamedUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
   lnurlRange: "errors.engine.lnurlRange",

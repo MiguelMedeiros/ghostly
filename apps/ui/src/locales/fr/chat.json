@@ -61,15 +61,19 @@
       "sent": "Envoyé. Pas encore d'accusé.",
       "sentGroup": "Envoyé au groupe. Les groupes n'ont pas d'accusé.",
       "waiting": "Part tout seul quand votre contact est en ligne.",
+      "waitingBehind": "Part tout seul après les messages précédents.",
       "waitingLiveContact": "Les fichiers ont besoin d'une liaison directe. La discussion de votre contact est en DHT seule : il part quand il l'autorise à nouveau.",
-      "waitingLiveYou": "Les fichiers ont besoin d'une liaison directe. Cette discussion est en DHT seule : changez-le depuis l'icône de connexion."
+      "waitingLiveYou": "Les fichiers ont besoin d'une liaison directe. Cette discussion est en DHT seule : changez-le depuis l'icône de connexion.",
+      "waitingPaced": "Votre contact reçoit un nombre limité de messages à la fois. Part tout seul dès qu'il peut en recevoir plus."
     },
     "offline": "Vous êtes hors ligne",
     "retry": "Non envoyé. Renvoyer",
     "sending": "Envoi en cours",
     "sent": "Envoyé",
     "waiting": "En attente que votre contact soit en ligne",
-    "waitingLive": "En attente d'une liaison directe"
+    "waitingBehind": "En attente des messages précédents",
+    "waitingLive": "En attente d'une liaison directe",
+    "waitingPaced": "En attente que votre contact puisse recevoir plus de messages"
   },
   "disabledPlaceholder": "Message…",
   "edit": {
@@ -154,6 +158,11 @@
     "busyDone": "Occupé, nouvel essai bientôt · {{done}} fait",
     "busySize": "Occupé, nouvel essai bientôt · {{size}}",
     "cancelled": "Annulé",
+    "comingCancel": "Annuler {{file}}",
+    "comingList": "Fichiers encore en route ({{count}})",
+    "comingRow": "{{file}} de {{chat}} : encore {{left}} à recevoir",
+    "comingTitle": "Ces fichiers que vous avez acceptés sont encore en route et occupent la place. Annulez-en un pour faire de la place :",
+    "comingUnnamed": "Un fichier",
     "damaged": "Arrivé abîmé · {{size}}",
     "daySpent": "Tout partagé pour aujourd’hui, viendra d’un autre membre ou demain · {{size}}",
     "decline": "Refuser",
@@ -163,7 +172,7 @@
     "leftHoursMinutes": "{{hours}} h {{minutes}} min restantes",
     "leftMinutes": "{{minutes}} min restantes",
     "leftUnderMinute": "moins d'une minute restante",
-    "noRoomDevice": "Espace insuffisant : {{size}} libres sur cet appareil",
+    "noRoomDevice": "Espace insuffisant : il reste {{size}} sur cet appareil",
     "nobodyHas": "Personne à qui vous êtes connecté n'a encore ce fichier",
     "nobodyHasHint": "Il arrive tout seul quand un membre qui l'a est en ligne.",
     "notDownloaded": "{{size}} · non téléchargé",
@@ -179,7 +188,7 @@
     "resendHint": "Le propose à nouveau. Reprend à partir de ce que votre contact a déjà.",
     "restoring": "Chargement… · {{size}}",
     "resume": "Reprendre",
-    "roomDevice": "{{size}} libres sur cet appareil",
+    "roomDevice": "Il reste {{size}} sur cet appareil",
     "senderOnly": "Pas encore chez vos connexions",
     "senderOnlyHint": "Dans un groupe aussi grand, votre app se connecte via quelques membres, pas à l'expéditeur. Il arrive tout seul dès que l'un d'eux l'a téléchargé, ou demandez à l'expéditeur de vous l'envoyer dans une discussion.",
     "stalled": "Bloqué · {{progress}}",
@@ -261,11 +270,11 @@
   },
   "media": {
     "downloadSize": "Télécharger {{size}}",
-    "noRoom": "Espace insuffisant : {{size}} libres",
+    "noRoom": "Espace insuffisant : il reste {{size}}",
     "noRoomToPlay": "Pas assez d'espace disque libre pour le lire ici. Téléchargez-le.",
     "notYet": "La lecture est possible une fois l'envoi terminé.",
     "positionOf": "{{position}} sur {{duration}}",
-    "wantsToSend": "{{name}} veut l'envoyer · {{size}} libres"
+    "wantsToSend": "{{name}} veut l'envoyer · il reste {{size}}"
   },
   "menu": {
     "continueNew": "Continuer dans une nouvelle discussion",
@@ -408,6 +417,7 @@
   "search": {
     "close": "Fermer la recherche",
     "count": "{{current}} sur {{total}}",
+    "found": "{{position}} : {{name}}, {{text}}",
     "info": "Cherche dans les messages et les noms de fichiers gardés sur cet appareil. Rien n'en sort.",
     "newer": "Résultat plus récent (Maj+Entrée)",
     "none": "Aucun résultat",

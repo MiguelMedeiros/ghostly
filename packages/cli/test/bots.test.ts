@@ -447,7 +447,8 @@ describe("chat disconnect --hold", () => {
     await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 30 });
     const held = await failure("Alice");
     expect(held).toMatchObject({ code: "timeout" });
-    expect(held?.message).toMatch(/^Timed out after 1 s waiting for chat Alice to be live\. This chat is held on the DHT only until \d\d:\d\d: it goes live then, or now with ghostly chat connect Alice$/);
+    // The hold's end carries its day when it is not today: a run from 23:30 crosses midnight.
+    expect(held?.message).toMatch(/^Timed out after 1 s waiting for chat Alice to be live\. This chat is held on the DHT only until (\d{4}-\d\d-\d\d )?\d\d:\d\d: it goes live then, or now with ghostly chat connect Alice$/);
     expect(held?.details).toBeUndefined();
     // Off DHT only: the usual words, the chat as given.
     setLink("chat-two", { dhtDelivery: { mode: "stream", peerMode: "stream", authenticated: true, maxTextBytes: 256 } });
@@ -478,6 +479,19 @@ describe("chat disconnect --hold", () => {
     await new Promise((r) => setTimeout(r, 20));
     linkChanged("chat-one", { deliveryMode: "stream", textDelivery: "stream", pairing: { status: "ready", transport: "iroh/1" } as LinkView["pairing"] });
     expect(await live).toMatchObject({ id: "chat-one", live: true });
+  });
+
+  // A hold is no choice of this side's: it said "on DHT only on this side: choose a live method first (chat transport
+  // auto)", and that only lifted the hold while the contact's choice kept the chat off its live link. The hold does
+  // not end that choice: refused at once, as `chat connect` refuses it.
+  it("chat wait --until live on a held chat the contact keeps on DHT only is refused at once, naming the contact's choice", async () => {
+    const { ctx, setLink } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 30 });
+    setLink("chat-two", { dhtDelivery: { mode: "dht", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
+    const from = Date.now();
+    const failed = await callApi(ctx, "chat.wait", { chat: "Bob", timeout: 30 }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(failed).toMatchObject({ code: "refused", message: "Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT", details: { reason: "peer-dht-only" } });
+    expect(Date.now() - from).toBeLessThan(1000);
   });
 
   // A `chat transport dht` chosen during a hold was taken back when the hold's time was up, and one that left DHT

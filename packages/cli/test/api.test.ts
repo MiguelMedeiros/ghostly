@@ -388,6 +388,24 @@ describe("chats", () => {
     expect(await list.allows(event(mallory.id))).toBe(false);
   });
 
+  it("listen --group takes a group only by its id: its name (its admin's) and a prefix of its id (its creator's) are refused", async () => {
+    // Team is still only an invitation; Mallory, admin of a group this profile is in, renamed hers "Team".
+    const team = { ...group, id: "Tm4q9ZkLx2PdR7sVw0Yb3A", name: "Team", status: undefined, invitation: { linkId: "chatOwner" } } as unknown as GroupView;
+    const theirs = { ...group, id: "Qz8uE1hJc5NnFo6Gk2Mt7B", name: "Team", status: "active" } as unknown as GroupView;
+    const ctx = { runtime: { server: { node: { chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [], groups: [team, theirs] }) } } } } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    const refused = (id: string, name: string) => ({ code: "bad_request", message: expect.stringContaining(`use its id: ghostly listen --group ${id}`), details: { group: id, name } });
+    for (const ref of ["Team", "team", "group:Team"]) await expect(allowlist([], [ref], call, async () => null)).rejects.toMatchObject(refused(theirs.id, "Team"));
+    for (const ref of ["Qz8u", "group:Qz8u"]) await expect(allowlist([], [ref], call, async () => null)).rejects.toMatchObject(refused(theirs.id, "Team"));
+    // Its id, as is or after group:, still names it (an invitation too).
+    const event = (id: string) => ({ seq: 1, id: "g", type: "group.message", at: 1, group: id } as GhostlyEvent);
+    for (const ref of [team.id, `group:${team.id}`]) {
+      const list = await allowlist([], [ref], call, async () => null);
+      expect(await list.allows(event(team.id))).toBe(true);
+      expect(await list.allows(event(theirs.id))).toBe(false);
+    }
+  });
+
   it("listen --from takes a label given here in every form send and call auto on --from take it (a tab, a trailing space, decomposed accents)", async () => {
     // Stored as `chat rename` stores them: a tab as a space, in NFC. The contact chose no name; Mallory calls herself "owner".
     const ops = link("chatOpsxxxxxxxxx", { label: "ops bot" }), cafe = link("chatCafexxxxxxxx", { label: "Café" }), mallory = link("chatMalloryxxxxx", { peerNick: "owner" });
@@ -1398,6 +1416,42 @@ describe("the engine passthrough", () => {
     expect(engine.editMessage).toHaveBeenCalledOnce();
     expect(engine.forwardMessages).toHaveBeenCalledTimes(2);
   });
+
+  it("reads a link preview's title, description and site as the contact's card shows them, sent, edited or forwarded", async () => {
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const text = "see https://example.com/page";
+    const shown = { u: "https://example.com/page", t: "Example page", d: seed };
+    const { ctx, node } = fake([msg("m_card", 5, { text, preview: shown }), msg("m_plain", 6, { text, preview: { ...shown, d: "A page" } })]);
+    Object.assign(node, { editMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })), forwardMessages: vi.fn(async () => ({ results: [{ messageIds: ["me:1:0"], sent: [], error: null }] })),
+      sendFile: vi.fn(async () => ({ error: null })) });
+    const engine = node as unknown as Record<"sendMessage" | "editMessage" | "forwardMessages" | "sendFile", ReturnType<typeof vi.fn>>;
+    const preview = (fields: Record<string, unknown>) => ({ u: "https://example.com/page", ...fields });
+    const calls: [keyof typeof engine, Record<string, unknown>][] = [
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ t: "Example page", d: seed }) }],
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ t: seed }) }],
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ t: "x", s: "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ" }) }],
+      // As the engine carries it: a control character between two words is a space on the card.
+      ["sendMessage", { linkId: "chat-one", text, preview: preview({ d: seed.replaceAll(" ", "\u0001") }) }],
+      ["editMessage", { linkId: "chat-one", messageId: "me_1", text, preview: preview({ d: seed }) }],
+      ["forwardMessages", { linkId: "chat-one", messageIds: ["m_card"], to: ["chat-two"] }],
+      // A file's type, which the contact's app shows too.
+      ["sendFile", { linkId: "chat-one", file: { name: "a.bin", mime: "application/cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ", size: 1 }, timestamp: 1 }],
+    ];
+    for (const [method, params] of calls) {
+      await expect(callApi(ctx, "engine.call", { method, params }), method).rejects.toMatchObject({ code: "confirm" });
+    }
+    await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_card"], to: ["Bob"] })).rejects.toMatchObject({ code: "confirm", details: { messageId: "m_card" } });
+    for (const call of ["sendMessage", "editMessage", "forwardMessages", "sendFile"] as const) expect(engine[call]).not.toHaveBeenCalled();
+    // A plain preview goes as it did; with force, the secret goes too.
+    await callApi(ctx, "engine.call", { method: "sendMessage", params: { linkId: "chat-one", text, preview: preview({ t: "Example page", d: "A page" }) } });
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_plain"], to: ["Bob"] });
+    for (const [method, params] of calls) await callApi(ctx, "engine.call", { method, params, force: true });
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_card"], to: ["Bob"], force: true });
+    expect(engine.sendMessage).toHaveBeenCalledTimes(5);
+    expect(engine.editMessage).toHaveBeenCalledOnce();
+    expect(engine.forwardMessages).toHaveBeenCalledTimes(3);
+    expect(engine.sendFile).toHaveBeenCalledOnce();
+  });
 });
 
 describe("groups", () => {
@@ -1634,11 +1688,30 @@ describe("chat transport", () => {
     expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "hyperdht/1" });
   });
 
-  it("refuses one this app lacks, with why it is not running", async () => {
-    const { ctx, node } = withChat({ availableTransports: ["hyperdht/1"], peerTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], transportErrors: { "iroh/1": "Iroh relay unreachable" } });
-    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "webrtc" })).rejects.toMatchObject({ code: "refused", message: "This app has no WebRTC running", details: { reason: "app-lacks" } });
-    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({ code: "refused", message: "This app has no Iroh running: Iroh relay unreachable", details: { reason: "app-lacks" } });
-    expect(node.setChatTransport).not.toHaveBeenCalled();
+  it("refuses one this app lacks, with why it is not running and the way out", async () => {
+    // It read "This app has no Iroh running", with no next step, where the contact's lack said "choose another, or auto".
+    vi.stubEnv("GHOSTLY_IROH_RELAYS", "");
+    try {
+      const { ctx, node } = withChat({ availableTransports: ["hyperdht/1"], peerTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], transportErrors: { "iroh/1": "Iroh relay unreachable" } });
+      await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "webrtc" })).rejects.toMatchObject({
+        code: "refused", message: "This app has no WebRTC running: choose another (hyperdht), or auto", details: { reason: "app-lacks", transport: "webrtc/1" },
+      });
+      await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({
+        code: "refused", message: "This app has no Iroh running (Iroh relay unreachable): check its relays (irohRelays in ghostly settings get), or choose another (hyperdht), or auto",
+        details: { reason: "app-lacks", transport: "iroh/1" },
+      });
+      expect(node.setChatTransport).not.toHaveBeenCalled();
+      // Relays this process was started on: the setting is not read, the variable is named.
+      vi.stubEnv("GHOSTLY_IROH_RELAYS", "http://127.0.0.1:9");
+      await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({
+        message: "This app has no Iroh running (Iroh relay unreachable): check its relays (GHOSTLY_IROH_RELAYS), or choose another (hyperdht), or auto",
+      });
+    } finally { vi.unstubAllEnvs(); }
+    // Only the transports the contact's app has too are offered; with none, auto.
+    const mine = withChat({ availableTransports: ["webrtc/1", "hyperdht/1"], peerTransports: ["webrtc/1", "iroh/1"] });
+    await expect(callApi(mine.ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({ code: "refused", message: "This app has no Iroh running: choose another (webrtc), or auto" });
+    const none = withChat({ availableTransports: ["hyperdht/1"], peerTransports: ["webrtc/1", "iroh/1"] });
+    await expect(callApi(none.ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({ code: "refused", message: "This app has no Iroh running: choose auto" });
   });
 
   it("takes any on DHT only that this app can start, auto and dht always, and any while the contact's are not known", async () => {

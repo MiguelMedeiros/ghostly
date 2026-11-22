@@ -306,11 +306,14 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
         listen.child.stdout!.destroy();
         const poke = await ghostly(["--home", piped, "invite", "create", "--label", "poke"], { env: slowEnv });
         // Through a daemon the poke is answered, whoever stopped reading. With none, the listen is the profile's daemon:
-        // the poke's own event stops it, and with it the connection the poke still waits on. Or an event `--since 0` replays
-        // from the pass before stopped it already: its socket is gone and its profile not freed yet, so the poke finds the
-        // profile in use by the listen.
+        // the poke's own event stops it, and with it the connection the poke still waits on: after it read the poke's call,
+        // which may be done, so a timeout told to check (`daemon-stopped`, exit 4), or before, "The daemon went away". Or an
+        // event `--since 0` replays from the pass before stopped it already: its socket is gone and its profile not freed
+        // yet, so the poke finds the profile in use by the listen.
+        const failed = (poke.json.error as { code?: string } | undefined)?.code;
         if (withDaemon || poke.code === 0) ok(poke);
-        else if ((poke.json.error as { code?: string } | undefined)?.code === "busy") expect(error(poke, "busy", 1).message).toContain(`in use by process ${listen.child.pid}`);
+        else if (failed === "busy") expect(error(poke, "busy", 1).message).toContain(`in use by process ${listen.child.pid}`);
+        else if (failed === "timeout") expect((error(poke, "timeout", 4) as { details?: unknown }).details).toEqual({ method: "invite.create", reason: "daemon-stopped" });
         else expect(error(poke, "unavailable", 1).message).toBe("The daemon went away");
         expect(await listen.exited(20_000), `${withDaemon ? "through a daemon" : "no daemon"}: ${listen.stderr}`).toBe(0);
         expect(listen.stderr).not.toContain("EPIPE");

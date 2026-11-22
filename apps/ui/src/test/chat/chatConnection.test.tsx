@@ -1,9 +1,11 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import { ChatConnection, MOVE_QUIET_MS } from "../../components/ChatConnection";
+import { ChatConnection } from "../../components/ChatConnection";
+import { SAID_QUIET_MS } from "../../hooks/useSaidSettled";
 import { connectionSummary, liveAttemptText, transportLineDetails, transportLineText, transportOptions, type TransportEntry, transportEventText, transportWaitText, type TransportEvent } from "../../lib/transportEvents";
 import { linkView, type StatePatch } from "../fakeEngine";
+import { plainSpaces } from "../timeSpaces";
 import { renderApp } from "../render";
 import { clockOffAmount } from "../../lib/clockOff";
 import { NetworkSettings } from "../../components/NetworkSettings";
@@ -804,8 +806,8 @@ describe("ChatConnection: how contacts are found", () => {
     const block = screen.getByTestId("connection-discovery");
     expect(screen.getByTestId("connection-details")).toContainElement(block);
     expect(screen.getByTestId("connection-discovery-path")).toHaveTextContent("DHT direct");
-    const time = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    expect(within(block).getAllByTestId("connection-relay").map(r => [r.dataset.state, r.textContent, r.title])).toEqual([
+    const time = plainSpaces(new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+    expect(within(block).getAllByTestId("connection-relay").map(r => [r.dataset.state, plainSpaces(r.textContent!), r.title])).toEqual([
       ["ok", "pkarr.pubky.org ok", ""],
       ["throttled", `pkarr.pubky.app throttled until ${time}`, "rate limited (429)"],
       ["failing", `relay.pkarr.org failing until ${time}`, "no answer"],
@@ -1307,7 +1309,7 @@ describe("a chat back on Automatic over Iroh's relay, on its way to WebRTC", () 
     act(() => engine.update({ links: [onIroh] }));
     await act(async () => { vi.advanceTimersByTime(250); await flush(); });
     act(() => engine.update({ links: [onWebrtc] }));
-    await act(async () => { vi.advanceTimersByTime(MOVE_QUIET_MS); await flush(); });
+    await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
     ear.stop();
     expect(ear.said).toEqual(["Connected · WebRTC"]);
   });
@@ -1318,27 +1320,32 @@ describe("a chat back on Automatic over Iroh's relay, on its way to WebRTC", () 
     act(() => engine.update({ links: [onDht] }));
     const ear = listen();
     act(() => engine.update({ links: [onIroh] }));
-    await act(async () => { vi.advanceTimersByTime(MOVE_QUIET_MS); await flush(); });
+    await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
     ear.stop();
     expect(ear.said).toEqual(["Connected · Iroh (relayed)"]);
   });
 
-  it("says it at once where no move is due: Iroh chosen, or no direct transport both apps run", () => {
-    for (const link of [linkView({ ...onIroh, transportAutomatic: false, preferredTransport: "iroh/1" }), linkView({ ...onIroh, availableTransports: ["iroh/1"] })]) {
+  // No move due (Iroh chosen, no direct transport both apps run, a network that blocks direct connections): the relay
+  // is where it lands, said once it held, as any change is (hooks/useSaidSettled).
+  it("says it once it held where no move is due: Iroh chosen, no direct transport both apps run, direct connections blocked", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: ["https://pkarr.pubky.org"], directBlocked: true as const };
+    const cases: [LinkView, StatePatch][] = [
+      [linkView({ ...onIroh, transportAutomatic: false, preferredTransport: "iroh/1" }), {}],
+      [linkView({ ...onIroh, availableTransports: ["iroh/1"] }), {}],
+      [onIroh, { transport }],
+    ];
+    for (const [link, state] of cases) {
       const { engine, unmount } = renderApp(<ChatConnection peerKey="peer" />);
-      act(() => engine.update({ links: [onDht] }));
-      act(() => engine.update({ links: [link] }));
-      expect(document.querySelector(".sr-only[aria-live=polite]")).toHaveTextContent("Connected · Iroh (relayed)");
+      act(() => engine.update({ ...state, links: [onDht] }));
+      await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
+      const ear = listen();
+      act(() => engine.update({ ...state, links: [link] }));
+      await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
+      ear.stop();
+      expect(ear.said).toEqual(["Connected · Iroh (relayed)"]);
       unmount();
     }
-  });
-
-  it("says it at once on a network that blocks direct connections: no move to WebRTC comes there", () => {
-    const { engine } = renderApp(<ChatConnection peerKey="peer" />);
-    const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: ["https://pkarr.pubky.org"], directBlocked: true as const };
-    act(() => engine.update({ transport, links: [onDht] }));
-    act(() => engine.update({ transport, links: [onIroh] }));
-    expect(document.querySelector(".sr-only[aria-live=polite]")).toHaveTextContent("Connected · Iroh (relayed)");
   });
 });
 

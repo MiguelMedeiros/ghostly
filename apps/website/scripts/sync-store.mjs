@@ -2,13 +2,13 @@
 // predev and prebuild too): the signed index `ghostly-store.json`, its `ghostly-store.sig`, and each listing's bundle
 // from each of its URLs (at most 4, as core's index reader allows) on a host the app reads from, so a URL that holds
 // another version than the listed one leaves the next to show it (every listing's first URLs before any listing's
-// mirrors, bundleOrder, so all of them share one byte budget). Then each publisher's own `ghostly-revoke.json`, beside
-// each of those URLs and beside each `sources` URL its bundles' manifests name, as the app reads them before Install
-// (packages/browser/src/engine/apps.ts, readRevocations): a version its publisher revoked is left out before the store
-// copies the revocation into its index. Nothing is checked here: lib/storeRead.ts verifies all
-// of it with the app's own readers (lib/store-core) when a page renders, and shows only what passes. The index is read
-// unchecked only to know which URLs to read, within the app's bounds. Readers never call GitHub: the site serves what
-// it read, icons included.
+// mirrors, bundleOrder, so all of them share one byte budget; another version's bytes are not kept, and take none of
+// it). Then each publisher's own `ghostly-revoke.json`, beside each of those URLs and beside each `sources` URL its
+// bundles' manifests name, as the app reads them before Install (packages/browser/src/engine/apps.ts, readRevocations):
+// a version its publisher revoked is left out before the store copies the revocation into its index. Nothing is
+// checked here: lib/storeRead.ts verifies all of it with the app's own readers (lib/store-core) when a page renders,
+// and shows only what passes. The index is read unchecked only to know which URLs to read, within the app's bounds.
+// Readers never call GitHub: the site serves what it read, icons included.
 //
 // Writes lib/store-snapshot.json (not committed): `revocations` holds each revocation file read, by its own URL (an
 // older snapshot has none, which revokes nothing). A bundle whose bytes another URL already holds is kept once: `sameAs`
@@ -138,6 +138,18 @@ export function manifestSources(bytes) {
   }
 }
 
+/**
+ * The digest of a bundle's version, as core's appDigest names it (SHA-256 of the manifest's bytes, base64url), read
+ * unchecked; null when the bundle has no manifest to hash.
+ */
+export function manifestDigest(bytes) {
+  if (bytes.length < MAGIC.length + 4 || Buffer.from(bytes.subarray(0, MAGIC.length)).toString("latin1") !== MAGIC) return null;
+  const length = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(MAGIC.length);
+  const start = MAGIC.length + 4;
+  if (start + length > bytes.length) return null;
+  return createHash("sha256").update(bytes.subarray(start, start + length)).digest("base64url");
+}
+
 /** Where the app reads a listing's revocations: beside each of its URLs and each source its bundles name, on the app's hosts. */
 export function revocationUrls(listing, bundles) {
   const urls = listing.urls.filter((u) => typeof u === "string" && isFetchUrl(u));
@@ -184,6 +196,13 @@ export async function fromStore(fetcher = fetch) {
   const readBundles = new Map();
   // The URL that holds each kept bundle's bytes first, by their hash: a mirror of them is kept as that URL, for nothing.
   const kept = new Map();
+  // The digests the listings that name each URL list: bytes of no such version lib/storeRead.ts refuses (`digest`), so
+  // the build does not keep them, and they take nothing from the budget a later listing's URL may need.
+  const listed = new Map();
+  for (const listing of listings) {
+    if (typeof listing.digest !== "string") continue;
+    for (const url of listing.urls) listed.set(url, (listed.get(url) ?? new Set()).add(listing.digest));
+  }
   let total = index.length + sig.length;
   await readInOrder(bundleOrder(listings), LIMITS.bundleBytes, fetcher, (url, bytes, error) => {
     try {
@@ -195,6 +214,8 @@ export async function fromStore(fetcher = fetch) {
         readBundles.set(url, readBundles.get(first));
         return;
       }
+      const digests = listed.get(url);
+      if (digests && !digests.has(manifestDigest(bytes))) throw new Error(`${url}: not the version its listing names`);
       if (total + bytes.length > LIMITS.totalBytes) throw new Error(`${url}: over the ${LIMITS.totalBytes} bytes all bundles may take`);
       total += bytes.length;
       bundles[url] = b64(bytes);
