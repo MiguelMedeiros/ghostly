@@ -482,17 +482,18 @@ describe("real money", () => {
     const received = { id: "p", linkId: "l", kind: "payment", direction: "in", amount: 1_200, unit: "sat", state: "settled", createdAt: 1, federation: "f" } as const;
     expect(paymentJson({ ...received, network: "testnet" })).toMatchObject({ network: "testnet", method: "fedimint" });
     expect(paymentJson({ ...received, network: "mainnet" })).toMatchObject({ network: "mainnet", method: "fedimint" });
-    expect(paymentJson({ id: "r", linkId: "l", kind: "request", direction: "out", amount: 5, unit: "sat", state: "pending", createdAt: 1, federations: ["f"], invoice: "lntbs1x", network: "testnet" }).method).toBe("fedimint");
+    expect(paymentJson({ id: "r", linkId: "l", kind: "request", direction: "out", amount: 5, unit: "sat", state: "pending", createdAt: 1, federations: ["f"], network: "testnet" }).method).toBe("fedimint");
   });
 
   // Found in a bug hunt: a request with no --rail, which carries mints and an invoice and is paid in ecash by a plain
   // `chat pay-request`, was listed as `lightning`, even once paid in ecash.
-  it("a request names every way it can be paid, ecash first as chat pay-request pays it", () => {
+  it("a request names every way it can be paid, first the one chat pay-request uses", () => {
     const request = { id: "r", linkId: "l", kind: "request", direction: "in", amount: 50, unit: "sat", state: "settled", createdAt: 1, network: "testnet" } as const;
     expect(paymentJson({ ...request, mints: ["https://mint.test"], invoice: "lntbs1x" })).toMatchObject({ method: "cashu", methods: ["cashu", "lightning"] });
     expect(paymentJson({ ...request, mints: ["https://mint.test"] })).toMatchObject({ method: "cashu", methods: ["cashu"] });
     expect(paymentJson({ ...request, invoice: "lntbs1x" })).toMatchObject({ method: "lightning", methods: ["lightning"] });
-    expect(paymentJson({ ...request, federations: ["f"], invoice: "lntbs1x" })).toMatchObject({ method: "fedimint", methods: ["fedimint", "lightning"] });
+    // A Fedimint request names no mint: a plain `chat pay-request` pays its invoice, its federation's ecash only through a review.
+    expect(paymentJson({ ...request, federations: ["f"], invoice: "lntbs1x" })).toMatchObject({ method: "lightning", methods: ["lightning", "fedimint"] });
     // A payment row is paid one way: it has no list.
     expect(paymentJson({ ...request, kind: "payment", mint: "https://mint.test" })).not.toHaveProperty("methods");
   });
