@@ -267,8 +267,10 @@ export function ciState(runs) {
 }
 
 /**
- * The jobs that turned CI Success red, from the jobs of its run: each one that failed or timed out, but the gate itself,
- * with its page. A rerun adds a job with the same name, so the newest of each name counts.
+ * The jobs that turned CI Success red, from the jobs of its run: each one that failed, timed out or was cancelled, but
+ * the gate itself, with its page. A job past its `timeout-minutes` ends cancelled, and the gate never runs in a run that
+ * was cancelled (ci.yml's matrices never fail fast either), so next to a red gate a cancelled job is one that ran out of
+ * time. A rerun adds a job with the same name, so the newest of each name counts.
  */
 export function failedJobs(jobs) {
   const newest = new Map();
@@ -276,7 +278,7 @@ export function failedJobs(jobs) {
     const had = newest.get(j.name);
     if (j.name !== "CI Success" && (!had || (j.id ?? 0) >= (had.id ?? 0))) newest.set(j.name, j);
   }
-  return [...newest.values()].filter((j) => j.conclusion === "failure" || j.conclusion === "timed_out").map((j) => ({ name: j.name, url: j.html_url ?? null }));
+  return [...newest.values()].filter((j) => ["failure", "timed_out", "cancelled"].includes(j.conclusion)).map((j) => ({ name: j.name, url: j.html_url ?? null }));
 }
 
 /**

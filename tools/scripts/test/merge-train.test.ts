@@ -3389,7 +3389,7 @@ describe("CI on a commit", () => {
     expect(ciState([forged, run("CI Success", "completed", "failure", "2026-10-07T12:00:00Z", 6)])).toBe("failure");
   });
 
-  it("names the jobs that turned CI Success red: failed or timed out, the newest of each name, never the gate", () => {
+  it("names the jobs that turned CI Success red: failed, timed out or cancelled, the newest of each name, never the gate", () => {
     const failed = failedJobs([
       run("Frontend lint and types", "completed", "failure"),
       { ...run("CLI on Linux ARM64", "completed", "failure", "2026-10-07T10:00:00Z", 2), html_url: "https://example.test/job/2" },
@@ -3399,8 +3399,19 @@ describe("CI on a commit", () => {
       run("Web unit tests", "completed", "cancelled"),
       run("CI Success", "completed", "failure", "2026-10-07T10:00:00Z", 9),
     ]);
-    expect(failed).toEqual([{ name: "Frontend lint and types", url: null }, { name: "E2E", url: null }]);
+    expect(failed).toEqual([{ name: "Frontend lint and types", url: null }, { name: "E2E", url: null }, { name: "Web unit tests", url: null }]);
     expect(failedJobs([run("CI Success", "completed", "failure")])).toEqual([]);
+  });
+
+  it("names a job past its timeout-minutes: GitHub ends it cancelled, and CI Success says it ended cancelled", () => {
+    // ci.yml's matrices never fail fast, and its gate does not run in a cancelled run: next to a red gate, a cancelled
+    // job is one GitHub stopped at its time limit (e.g. Tauri Backend's 60 minutes).
+    const failed = failedJobs([
+      { ...run("Tauri Backend (apps/desktop)", "completed", "cancelled", "2026-10-07T10:00:00Z", 2), html_url: "https://example.test/job/2" },
+      run("Frontend lint and types", "completed", "failure", "2026-10-07T10:00:00Z", 3),
+      run("CI Success", "completed", "failure", "2026-10-07T11:00:00Z", 9),
+    ]);
+    expect(failed).toEqual([{ name: "Tauri Backend (apps/desktop)", url: "https://example.test/job/2" }, { name: "Frontend lint and types", url: null }]);
   });
 
   it("is CI's own run: the newest run of this repository's ci.yml on exactly that commit", () => {
