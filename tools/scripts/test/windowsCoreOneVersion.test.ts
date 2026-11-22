@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
+// covers: transport.iroh, desktop.boot
 
 /**
  * A crate that implements a COM interface of the `windows` crate (wmi's event sink, under iroh's netwatch) needs the
