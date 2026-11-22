@@ -45,6 +45,19 @@ describe("Add, a store's link", () => {
     await screen.findByTestId("apps-add-store");
     expect(screen.getByTestId("apps-add-url")).toHaveFocus();
   });
+
+  it("says the store found to a screen reader, its name and how many apps it lists", async () => {
+    fakeEngine.on("appStorePreview", preview);
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    expect(screen.getByTestId("apps-add-store-said")).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("apps-add-store-said")).toBeEmptyDOMElement();
+    await user.type(screen.getByTestId("apps-add-url"), `${STORE}{Enter}`);
+    await screen.findByTestId("apps-add-store");
+    expect(screen.getByTestId("apps-add-store-said")).toHaveTextContent("Ghostly. 1 app");
+    // An edit drops the store's question, and what was said with it.
+    await user.type(screen.getByTestId("apps-add-url"), "x");
+    expect(screen.getByTestId("apps-add-store-said")).toBeEmptyDOMElement();
+  });
 });
 
 describe("Add, the link of a store the person has already", () => {
@@ -67,6 +80,8 @@ describe("Add, the link of a store the person has already", () => {
     expect(within(card).queryByTestId("apps-add-store-confirm")).not.toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: "Add store" })).not.toBeInTheDocument();
     expect(within(card).getByRole("button", { name: "Close" })).toHaveFocus();
+    // The focus on Close says nothing of why: the screen reader hears it with the store.
+    expect(screen.getByTestId("apps-add-store-said")).toHaveTextContent("Ghostly. 1 app. You have this store already: it is on your Apps page.");
   });
 
   it("another index under the held sequence: says the store signed two lists, not that it is the one held, and offers nothing to add", async () => {
@@ -94,6 +109,19 @@ describe("Add, the link of a store the person has already", () => {
     await user.click(within(card).getByTestId("apps-add-store-confirm"));
     expect(added).toEqual([{ url: STORE, key: "s" }]);
     expect(onStoreAdded).toHaveBeenCalled();
+  });
+
+  it("a newer index at a copy elsewhere: names the copy's host, which the store is read from at each refresh while its own link is behind", async () => {
+    const copy = "https://cdn.jsdelivr.net/gh/g/s@0123456789abcdef0123456789abcdef01234567/ghostly-store.json";
+    const { card, unmount: done } = await check(() => ({ ...held(6, 5)(), url: copy }));
+    expect(card).toHaveTextContent("Ghostly reads it from cdn.jsdelivr.net, which learns your IP address.");
+    done();
+    // An index that is not taken is read from nowhere: no such line.
+    for (const answer of [held(5, 5), held(4, 5)]) {
+      const { card: other, unmount } = await check(answer);
+      expect(other).not.toHaveTextContent("Ghostly reads it from");
+      unmount();
+    }
   });
 
   it("an older copy of a store the person removed (or another under the number last taken): says so, and offers nothing to add", async () => {

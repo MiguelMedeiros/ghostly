@@ -2,6 +2,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { ListNotices } from "./components/ListNotices";
+import { OfflineBanner } from "./components/OfflineBanner";
+import { ReconnectingBanner } from "./components/ReconnectingBanner";
 import { MobileTabBar } from "./components/MobileTabBar";
 import { InstallSteps } from "./components/InstallApp";
 import { TranslateDownloadFailure } from "./components/TranslateDownloadFailure";
@@ -41,22 +43,8 @@ import { useServiceWindowsHideIp } from "./hooks/useServiceWindowsHideIp";
 import { usePresence } from "./hooks/useOwnStatus";
 import { useIsLocked } from "./contexts/LockScreenContext";
 import { StatusPickerHost } from "./components/StatusPicker";
-
-/** The browser's status bar follows the header of whichever theme is active. */
-function useThemeColor() {
-  useEffect(() => {
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (!meta) return;
-    const sync = () => {
-      const color = getComputedStyle(document.documentElement).getPropertyValue("--theme-panel-header").trim();
-      if (color) meta.setAttribute("content", color);
-    };
-    sync();
-    const observer = new MutationObserver(sync);
-    observer.observe(document.documentElement, { attributes: true });
-    return () => observer.disconnect();
-  }, []);
-}
+import { ReconnectedSaid } from "./components/ReconnectedSaid";
+import { focusLost } from "./lib/focus";
 
 /**
  * Which chats stay loaded: the one the address points at, and the one on a
@@ -208,7 +196,6 @@ export function App() {
   const { settings } = useSettings();
   const { pathname } = useLocation();
   useViewportHeight();
-  useThemeColor();
   // A file dropped outside a chat never opens in place of the app; a chat takes its own drops.
   useEffect(() => guardFileDrops(), []);
   useWakeOnReturn();
@@ -235,6 +222,16 @@ export function App() {
   // The chat on screen that is not live keeps dialling by itself: nobody has to press Reconnect for it.
   useChatRedial(onScreen?.startsWith("group:") ? null : onScreen);
   const mainRef = useRef<HTMLElement>(null);
+  // A page's own control that opened another page (Back, a Profile tile) went with its page, and the focus fell to the
+  // document: the next Tab would start again at the top. The open page takes it, as the skip link gives it. After the
+  // pages' own effects (children first), so a page that puts the focus somewhere keeps it there. Not at the start: the
+  // first Tab goes to the skip link.
+  const shownPath = useRef(pathname);
+  useEffect(() => {
+    if (shownPath.current === pathname) return;
+    shownPath.current = pathname;
+    if (!isMobile && focusLost()) mainRef.current?.focus({ preventScroll: true });
+  }, [pathname, isMobile]);
   // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
   // profile closing): after the bubbles' layout cleanups have handed it over.
   useEffect(() => () => stopHeld(), []);
@@ -268,6 +265,10 @@ export function App() {
           <Fragment key="chats">{chats("row-start-3 col-start-1 flex flex-col min-w-0 min-h-0")}</Fragment>
           {!inChat && (
             <div key="page" className="row-start-3 col-start-1 flex flex-col min-w-0 min-h-0">
+              {/* Shows on a phone only (the list beside the page says it here), but stays in the tree as there: a turn
+                  to two panes (or back) keeps the open page mounted. */}
+              {!inGroup && <OfflineBanner onPage />}
+              {!inGroup && <ReconnectingBanner onPage />}
               <Outlet />
             </div>
           )}
@@ -275,6 +276,7 @@ export function App() {
         <InstallSteps />
         <TranslateDownloadFailure />
         <StatusPickerHost />
+        <ReconnectedSaid />
       </div>
     );
   }
@@ -296,6 +298,9 @@ export function App() {
         <Fragment key="chats">{chats("flex-1 flex flex-col min-h-0 min-w-0")}</Fragment>
         {!onChatList && !inChat && (
           <div key="page" className="flex-1 flex flex-col min-h-0 min-w-0">
+            {/* The list's "Offline" and "Reconnecting…" are hidden with it: a group says them under its own header. */}
+            {!inGroup && <OfflineBanner onPage />}
+            {!inGroup && <ReconnectingBanner onPage />}
             <Outlet />
           </div>
         )}
@@ -305,6 +310,7 @@ export function App() {
       <InstallSteps />
       <TranslateDownloadFailure />
       <StatusPickerHost />
+      <ReconnectedSaid />
     </div>
   );
 }

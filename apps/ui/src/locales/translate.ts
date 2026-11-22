@@ -23,9 +23,6 @@ function getNestedValue(obj: unknown, path: string): string {
   return typeof current === "string" ? current : path;
 }
 
-/** The plural categories a language's dictionary may give a counted string under, as `<key>_<category>`. */
-export const PLURAL_CATEGORIES = ["zero", "one", "two", "few", "many", "other"] as const;
-
 const points = new Map<string, string>();
 /** The decimal point `language` writes ("," in Portuguese, "." in English), worked out once per language. */
 function decimalPoint(language: Language | undefined): string {

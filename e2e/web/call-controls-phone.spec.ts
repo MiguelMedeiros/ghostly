@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { connect, expect, link, test, type Peer } from "../support/fixtures";
 import { smallTargets } from "../support/touchTargets";
 
@@ -68,6 +68,30 @@ for (const width of [320, 375]) {
     await bob.page.getByTitle("Decline").click();
   });
 }
+
+test("a video call ringing on a 320 px phone: a long name with no space in it wraps inside the screen", { tag: ["@feature:calls.video", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const alice = await peer("alice");
+  const bob = await peer("bob", { mobile: true, viewport: { width: 320, height: 640 } });
+  await link(alice, bob);
+  await connect(alice, bob);
+  // The longest name a contact can be given, one word: it was drawn in one line past both of the screen's edges, the
+  // ringing card's text widened with it.
+  const name = "W".repeat(30);
+  await bob.page.getByTitle("Click to set a name").click();
+  await bob.page.getByPlaceholder("Set a name...").fill(name);
+  await bob.page.getByPlaceholder("Set a name...").press("Enter");
+  await expect(bob.page.getByTestId("chat-name")).toHaveText(name);
+  await alice.page.getByTestId("call-video").click();
+  const ringing = bob.page.getByTestId("incoming-call");
+  await expect(ringing.getByText(name, { exact: true })).toBeVisible();
+  const outside = () => ringing.evaluate((card) => {
+    const width = document.documentElement.clientWidth;
+    return [...card.querySelectorAll("p")].map((p) => p.getBoundingClientRect())
+      .filter((r) => r.left < 0 || r.right > width).map((r) => `${Math.round(r.left)}..${Math.round(r.right)} of ${width}`);
+  });
+  await expect.poll(outside).toEqual([]);
+  await bob.page.getByTitle("Decline").click();
+});
 
 /** Plays an iPhone 17's safe area (Chromium's DevTools protocol): the status bar and Dynamic Island, the home indicator. */
 async function safeArea(page: Page, insets: { top: number; right: number; bottom: number; left: number }) {
@@ -311,12 +335,30 @@ const wholeText = (notice: Locator) => notice.evaluate((el) => {
 });
 
 /**
+ * Both pages' link traces (packages/core/src/linkTrace.ts), from their start and across a reload: with them, why each
+ * side's call ended (`call-end`). Kept with the report of a test that fails: a run found the connected call gone before
+ * the notice, and its Playwright trace, wiped by a later run, said nothing of why.
+ */
+const linkLines: string[] = [];
+const traced = { beforeOpen: async (context: BrowserContext) => { await context.addInitScript(() => { (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace = true; }); } };
+const keepLinkTrace = (peer: Peer) => peer.page.on("console", (message) => {
+  const text = message.text();
+  if (text.startsWith("[ghostly:link] ")) linkLines.push(`${peer.name} ${text.slice(15)}`);
+});
+test.afterEach(async ({}, testInfo) => {
+  if (linkLines.length && testInfo.status !== testInfo.expectedStatus) await testInfo.attach("link trace", { body: linkLines.join("\n"), contentType: "text/plain" });
+  linkLines.length = 0;
+});
+
+/**
  * On a 320 px phone a call's notices were cut to one line: "Fake Audio Input 1 desconectado. Usand…" lost what the call
  * uses now (98 px of it), and "Contacto · … está compartiendo su p…" what is shared. They wrap onto another line now.
  */
 test("on a 320 px phone a call's device and screen-share notices show their whole sentence", { tag: ["@feature:calls.devices", "@feature:calls.screen-share", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
-  const alice = await peer("alice");
-  const bob = await peer("bob", { mobile: true, viewport: { width: 320, height: 568 } });
+  const alice = await peer("alice", traced);
+  keepLinkTrace(alice);
+  const bob = await peer("bob", { mobile: true, viewport: { width: 320, height: 568 }, ...traced });
+  keepLinkTrace(bob);
   await link(alice, bob);
   await connect(alice, bob);
   await bob.page.evaluate(() => {

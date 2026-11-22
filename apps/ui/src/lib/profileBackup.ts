@@ -13,12 +13,13 @@ import { RESTORED_WALLET_STORES, restoredWalletRow } from "@ghostly/browser/shar
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, checkFileId, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { restoreArkDatabase, snapshotArkDatabase, type ArkDatabaseSnapshot } from "@ghostly/browser/engine/paymentAdapters/backup";
 import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from "@ghostly/browser/backup/light";
-import { getPrefix, getStorageProfile, ownsKey } from "./storage";
+import { getPrefix, getStorageProfile, keyOwner } from "./storage";
 import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileData";
 import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
 import { builtInNameBefore, currentProfile, hasBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 import { NAME_STEP_SUFFIX } from "./nameStep";
 import { SENT_ORIGINALS_SUFFIX } from "./sentOriginals";
+import { MEDIA_DEVICES_SUFFIX } from "./mediaDevices";
 
 /** What a bundle says about the profile it holds, and the profile's local keys without its prefix. */
 interface ProfileHead {
@@ -247,7 +248,7 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
   const writer = await BackupWriter.start(sink, passphrase, signal, devices ? DEVICE_SET_BACKUP_VERSION : 2);
 
   const prefix = active ? getPrefix() : `ghostly_${ns}_`;
-  const owns = (key: string) => (active ? ownsKey(key) : key.startsWith(prefix));
+  const owns = active ? keyOwner() : (key: string) => key.startsWith(prefix);
   const storage: Record<string, string> = {};
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
@@ -257,6 +258,8 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
     const suffix = key.slice(prefix.length);
     // A handoff leaves the lock's count of wrong attempts behind, and what a staging namespace notes for itself.
     if (handoff && (suffix === "lock_attempts" || suffix.startsWith("handoff_"))) continue;
+    // The microphone, camera and speaker chosen here are this device's (their ids are this browser's): a move leaves them.
+    if (handoff && suffix === MEDIA_DEVICES_SUFFIX) continue;
     // A new profile's question for a name (NameStep) stays with it: a restored or added copy is not a new profile.
     if (suffix === NAME_STEP_SUFFIX) continue;
     // The originals of what I sent translated never leave this device, not even to my other devices (lib/sentOriginals.ts).
@@ -606,7 +609,21 @@ function register(id: string, ns: string, { profile, storage }: ProfileHead): Pr
 }
 
 /** `restoreProfileBackup` of a bundle already opened (after `sameIdentityProfiles` was asked, say). */
-export async function restoreOpenedBackup(opened: OpenedProfileBackup, run: BackupRun = {}, beforeRegister?: (database: string) => Promise<void>): Promise<ProfileEntry> {
+export function restoreOpenedBackup(opened: OpenedProfileBackup, run: BackupRun = {}, beforeRegister?: (database: string) => Promise<void>): Promise<ProfileEntry> {
+  const restore = restoreInto(opened, run, beforeRegister);
+  const held: Promise<void> = restore.then(() => {}, () => {}).then(() => { if (restoring === held) restoring = null; });
+  restoring = held;
+  return restore;
+}
+
+/**
+ * The restore this page runs, if one does: a page that starts again for a switch in another tab waits for it. Cut by
+ * that reload, the restore was gone with nothing said, the copy taken back at the next start.
+ */
+export const restoreInProgress = (): Promise<void> | null => restoring;
+let restoring: Promise<void> | null = null;
+
+async function restoreInto(opened: OpenedProfileBackup, run: BackupRun, beforeRegister?: (database: string) => Promise<void>): Promise<ProfileEntry> {
   // What an earlier restore left when its tab was closed half way goes first.
   await sweepInterruptedRestores();
   const id = newProfileId(), ns = namespaceOf(id);

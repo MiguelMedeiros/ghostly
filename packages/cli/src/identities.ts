@@ -1,10 +1,11 @@
 import { identityStatement, type IdentityBinding, type IdentityStatement } from "@ghostly/core";
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
-import type { IdentityProofProvider, IdentitySigner, SignerField, SignerInstructions } from "@ghostly/browser/proofs/contract";
+import { parseProofBunker } from "@ghostly/browser/proofs/nostr";
+import { SignerTimeout, type IdentityProofProvider, type IdentitySigner, type SignerField, type SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
-import { chatOf, findOwnNamedChat, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError } from "./errors";
+import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { CliError, shownValue } from "./errors";
 
 /**
  * Identity proofs (WISP 300, WISP 1100 phase 3b), as the Identities page makes them: the engine draws the proof key
@@ -29,7 +30,8 @@ interface Draft { draftId: string; provider: string; signer: string; binding: Id
 const drafts = new Map<string, Draft>();
 const NO_DRAFT = `No such draft here: it is kept by the daemon that made it, for ${IDENTITY_DRAFT_TTL_MS / 60_000} minutes and while fewer than ${IDENTITY_MAX_DRAFTS} newer ones wait`;
 
-function provider(id: string): IdentityProofProvider {
+/** The provider `id` names; a one-shot `identity add` asks before the profile opens (main.ts `identityAddCommand`). */
+export function identityProvider(id: string): IdentityProofProvider {
   const found = IDENTITY_PROVIDERS.find((p) => p.id === id);
   if (!found) throw new CliError("not_found", `No identity provider ${id} (ghostly identity providers)`);
   return found;
@@ -47,7 +49,7 @@ function headless(s: IdentitySigner<unknown>): boolean {
 function signerOf(p: IdentityProofProvider, id?: string): IdentitySigner<unknown> {
   const usable = p.signers.filter(headless);
   const found = id ? p.signers.find((s) => s.id === id) : usable[0];
-  if (!found) throw new CliError(id ? "not_found" : "unavailable", id ? `${p.label} has no signer ${id}` : `${p.label} proofs need a browser window: make them in the app`);
+  if (!found) throw new CliError(id ? "not_found" : "unavailable", id ? `${p.label} has no signer ${id}` : `${p.label}: this kind of proof needs a browser window, make it in the app`);
   if (!headless(found)) {
     const instead = usable.length ? ` (here: --signer ${usable.map((s) => s.id).join(" or ")})` : "";
     throw new CliError("unavailable", `${found.label} needs a browser window: make this proof in the app${instead}`);
@@ -96,12 +98,32 @@ function pruneDrafts(now = Date.now()) {
   for (const [id, draft] of drafts) if (now - draft.createdAt > IDENTITY_DRAFT_TTL_MS) drafts.delete(id);
 }
 
-async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
+function canonical(p: IdentityProofProvider, subject: string): string {
   let normalized: string;
   try { normalized = p.subject?.normalize ? p.subject.normalize(subject) : subject; } catch (error) {
     throw new CliError("bad_request", error instanceof Error ? error.message : String(error));
   }
   if (!normalized) throw new CliError("bad_request", `Not a ${p.subject?.label ?? "subject"} ${p.label} takes`);
+  return normalized;
+}
+
+/**
+ * An in-app signer's fields with the subject given where the usage line puts it: in the signer's field that is the
+ * subject (NIP-05's domain), or, for a signer that brings its own key, the subject that key must be. It was dropped.
+ */
+function withSubject(p: IdentityProofProvider, signer: IdentitySigner<unknown>, values: Record<string, string>, subject: string | undefined) {
+  if (!subject) return { values };
+  const field = signer.kind === "in-app" ? signer.fields?.find((f) => f.kind !== "secret" && f.label === p.subject?.label) : undefined;
+  if (!field) return { values, expected: canonical(p, subject) };
+  // Compared as the provider reads them (a domain in capitals is the same one); one that is no subject of it is refused
+  // in its words, and either is quoted as a refusal quotes a value: a link or key typed in its place is not printed back.
+  const given = canonical(p, subject), other = values[field.name];
+  if (other && canonical(p, other) !== given) throw new CliError("usage", `Two ${field.label.toLowerCase()}s: ${shownValue(subject)} as <subject>, ${shownValue(other)} as --field ${field.name}; give one`);
+  return { values: { ...values, [field.name]: subject } };
+}
+
+async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
+  const normalized = canonical(p, subject);
   const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays, whole: true });
   return node(ctx).beginIdentityProof({ provider: p.id, subject: normalized, ...(days ? { validityDays: days } : {}) });
 }
@@ -124,33 +146,59 @@ export const IDENTITY_METHODS: Record<string, Method> = {
   /** Starts a proof. In-app signers finish it here; the others return the statement and what to do with it. */
   async "identity.add"(ctx, params) {
     pruneDrafts();
-    const p = provider(str(params, "provider", true));
+    const p = identityProvider(str(params, "provider", true));
     const signer = signerOf(p, str(params, "signer"));
     if (signer.kind === "in-app") {
-      const values = (params.fields ?? {}) as Record<string, string>;
-      if (typeof values !== "object" || Array.isArray(values) || Object.values(values).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
+      const fields = (params.fields ?? {}) as Record<string, string>;
+      if (typeof fields !== "object" || Array.isArray(fields) || Object.values(fields).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
+      const { values, expected } = withSubject(p, signer, fields, str(params, "subject"));
       for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("usage", `${signer.label} needs ${field.name} (${field.label}): ${howToGive(field)}`);
-      const seconds = num(params, "timeout", 300, { min: 5, max: 3600 });
+      // A NIP-46 link read as the signer will read it: one it refuses is the user's input, not an engine failure.
+      const bunker = signer.fields?.find((f) => f.name === "bunker");
+      if (bunker && values.bunker) {
+        try { parseProofBunker(values.bunker); } catch (error) {
+          throw new CliError("bad_request", `${bunker.name} (${bunker.label}): ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      // The signer waits as long (a NIP-46 signer's own 2 minutes are the app's), or at most what it can (Pubky's relay).
+      const most = signer.maxWaitMs ? Math.floor(signer.maxWaitMs / 1000) : 3600;
+      if (typeof params.timeout === "number" && params.timeout > most) throw new CliError("bad_request", `timeout must be a number from 5 to ${most}: ${signer.label} waits at most ${most} s for an approval`);
+      const seconds = num(params, "timeout", Math.min(300, most), { min: 5, max: most });
       const signal = AbortSignal.timeout(seconds * 1000);
+      // Once the signer's last step answered, nothing waits on the person any more: what fails after it (the engine's
+      // check, which runs to its end past the deadline) is said as it is, never as a wait that ran out.
+      let signed = false;
+      // The caller's own id for this call, in each of its events: two proofs waiting on one daemon are told apart by it.
+      const request = str(params, "request");
+      const tag = { provider: p.id, ...(request ?{ request } : {}) };
       const proof = await signer.run({
-        values, signal,
+        values, signal, waitMs: seconds * 1000,
         // A link or code to approve with holds the request's secret (contract.ts): to the listeners live, never the journal.
-        onAuthUrl: (url) => { ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, url }); },
-        onProgress: (message) => { ctx.hub.emit("identity.progress", `identity.progress:${Date.now()}`, { provider: p.id, message }); },
+        onAuthUrl: (url) => { ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { ...tag, url }); },
+        onProgress: (message) => { ctx.hub.emit("identity.progress", `identity.progress:${Date.now()}`, { ...tag, message }); },
         onApproval: (request) => {
-          if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
+          if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { ...tag, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
         },
       }, async (session) => {
-        const { draftId, binding } = await begin(ctx, p, await session.subject(), params);
+        // In the form `expected` is in: a signer may answer its key another way (a Pubky key in capitals).
+        const subject = canonical(p, await session.subject());
+        if (expected !== undefined && subject !== expected) {
+          const shown = (key: string) => p.publicUri?.(key) ?? key;
+          throw new CliError("bad_request", `${signer.label} holds ${shown(subject)}, not ${shown(expected)}: nothing was signed`);
+        }
+        const { draftId, binding } = await begin(ctx, p, subject, params);
         try {
-          return await node(ctx).completeIdentityProof({ draftId, evidence: await session.sign(identityStatement(binding)) });
+          const evidence = await session.sign(identityStatement(binding));
+          signed = true;
+          return await node(ctx).completeIdentityProof({ draftId, evidence });
         } catch (error) {
           try { await node(ctx).cancelIdentityProof({ draftId }); } catch { /* already gone */ }
           throw error;
         }
       }).catch((error: unknown) => {
-        // The signer gives up with the signal's own words ("The operation was aborted due to timeout"), an engine failure to a bot.
-        if (!signal.aborted || error instanceof CliError) throw error;
+        // The signer gives up with the signal's own words ("The operation was aborted due to timeout"), or its own wait's
+        // at the same time ("Signer timed out"): an engine failure to a bot. Only while it was still waited on.
+        if (signed || !(signal.aborted || error instanceof SignerTimeout) || error instanceof CliError) throw error;
         throw new CliError("timeout", `Timed out after ${seconds} s waiting for ${signer.label} to approve the ${p.label} proof: --timeout <seconds> waits longer`);
       });
       return { done: true, proof: proofJson(proof) };
@@ -174,7 +222,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     pruneDrafts();
     const draft = drafts.get(str(params, "draft", true));
     if (!draft) throw new CliError("not_found", NO_DRAFT);
-    const p = provider(draft.provider);
+    const p = identityProvider(draft.provider);
     const signer = signerOf(p, draft.signer);
     const statement: IdentityStatement = identityStatement(draft.binding);
     let evidence: unknown;
@@ -213,16 +261,17 @@ export const IDENTITY_METHODS: Record<string, Method> = {
 
   async "identity.share"(ctx, params) {
     // The contact keeps the proof: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const s = state(ctx);
+    const link = ownChatOf(ctx, params, s);
     const id = str(params, "id", true);
-    if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
+    if (!s.identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
     await node(ctx).shareIdentityProof({ linkId: link.id, id });
     return { chat: link.id, shared: id };
   },
 
   async "identity.withdraw"(ctx, params) {
     // As `identity.share`: a contact's own name or a prefix of its id never names the chat.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
+    const link = ownChatOf(ctx, params);
     const id = str(params, "id", true);
     if (!link.identities?.shared.some((s) => s.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} shared in this chat (ghostly identity contact ${link.id})`);
     await node(ctx).withdrawIdentityProof({ linkId: link.id, id });

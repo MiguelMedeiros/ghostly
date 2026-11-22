@@ -4,6 +4,7 @@ import type { TaskStatus } from "@ghostly/core";
 import { PageHeader } from "../components/layout";
 import { MemberFace } from "../components/chat/SenderAvatar";
 import { BoardCard } from "../components/tasks/BoardCard";
+import { chosenInForcedColors } from "../components/wallet/ui";
 import { useI18n } from "../contexts/I18nContext";
 import { draftDirection } from "../lib/documentLanguage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
@@ -11,6 +12,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import { JUMP_TO } from "../hooks/useJumpTo";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { useTaskBoard, type TaskBoardData } from "../hooks/useTaskBoard";
+import { reducedMotion } from "../lib/motion";
 import { radioGroupKeys } from "../lib/radioGroup";
 import { RESULT_TONE, sortRoutines, untilIn } from "../lib/statusCards";
 import { getPrefix } from "../lib/storage";
@@ -171,7 +173,7 @@ export function Tasks() {
   };
 
   // A phone: the column on screen is the chosen tab's; a swipe to another column chooses its tab.
-  const motion = (smooth = true): ScrollBehavior => smooth && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "smooth" : "auto";
+  const motion = (smooth = true): ScrollBehavior => smooth && !reducedMotion() ? "smooth" : "auto";
   // The column a tab's slide is on its way to: the columns it passes on the way are not chosen (each would be, for a
   // frame, and the chosen one stay inert until the slide was half way). For a second at most, and a touch on the board
   // ends it: the board's place then chooses again.
@@ -237,7 +239,7 @@ export function Tasks() {
     model.active ? t("cards.panel.activeCount", { count: model.active }) : t("cards.panel.idle"),
     model.total === 1 ? t("cards.board.tasksOne") : t("cards.board.tasksMany", { count: model.total }),
   ].join(" · ");
-  const pill = (on: boolean) => `cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-9 ${on ? "bg-accent text-on-accent" : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"}`;
+  const pill = (on: boolean) => `cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-9 ${on ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"}`;
 
   return (
     <div ref={pageRef} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-chat-bg" data-testid="tasks-page">
@@ -314,7 +316,7 @@ export function Tasks() {
                     {model.groups.map((group, i) => (
                       <button key={group.id} type="button" role="tab" id={`${tabsId}-${i}`} aria-selected={i === at} aria-controls={`${tabsId}-${i}-panel`} tabIndex={i === at ? 0 : -1}
                         data-testid="tasks-tab" data-column={group.id} onClick={() => toTab(i)}
-                        className={`flex min-h-9 max-w-44 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent ${i === at ? "bg-accent text-on-accent" : "text-text-secondary"}`}>
+                        className={`flex min-h-9 max-w-44 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent ${i === at ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary"}`}>
                         <bdi className="min-w-0 truncate">{nameOf(group)}</bdi>
                         <span data-testid="tasks-tab-count" className="tabular-nums opacity-80">{group.tasks.length}</span>
                       </button>

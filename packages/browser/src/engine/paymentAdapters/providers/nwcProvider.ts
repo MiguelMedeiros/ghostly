@@ -68,6 +68,8 @@ export const nwc: LightningProviderDescriptor = {
     help: "From your wallet's app connections. Allow making, paying and looking up invoices, and reading the balance.",
   }],
   validate({ secrets }) { parseNwcUri(secrets.uri ?? ""); },
+  // The wallet's key: the same URI spelled another way, or another app connection to that wallet, reads the same balance.
+  wallet({ secrets }) { return parseNwcUri(secrets.uri ?? "").walletPubkey; },
   async create({ secrets }, host) {
     const { NwcLightning } = await import("./nwc");
     return NwcLightning.connect(secrets.uri, { signal: host.signal });

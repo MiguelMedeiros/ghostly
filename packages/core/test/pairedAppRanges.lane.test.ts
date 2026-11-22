@@ -106,6 +106,27 @@ describe("the read lane of one chat", () => {
     expect(ana.servesOf(CHESS)).toEqual([chess]);
   });
 
+  // Each serve walked every serve held to find the file's: an app serving 50,000 files one by one took seconds.
+  it("serves, serves again and ends 50,000 files of one app without walking the others", () => {
+    const ana = new AppRanges(() => {});
+    const files = Array.from({ length: 50_000 }, (_, i) => `file-${i}`);
+    const started = performance.now();
+    const serves = files.map(file => ana.serve(CINEMA, file));
+    expect(files.map(file => ana.serve(CINEMA, file))).toEqual(serves);
+    const chess = ana.serve(CHESS, files[0]!);
+    expect(ana.servesOf(CINEMA)).toEqual(serves);
+    for (const serve of serves.slice(0, 25_000)) expect(ana.unserve(serve)).toBe(true);
+    expect(ana.servesOf(CINEMA)).toEqual(serves.slice(25_000));
+    // Ended, a file served again is a new id, last among the app's.
+    const again = ana.serve(CINEMA, files[0]!);
+    expect(serves).not.toContain(again);
+    expect(ana.servesOf(CINEMA).at(-1)).toBe(again);
+    ana.closeApp(CINEMA);
+    expect(ana.servesOf(CINEMA)).toEqual([]);
+    expect(ana.servesOf(CHESS)).toEqual([chess]);
+    expect(performance.now() - started).toBeLessThan(3_000);
+  });
+
   it("says changed or gone as the file under a serve does", async () => {
     const { ana, bob, flush } = pair({ serveFile: file => file === "moved" ? "gone" : "changed" });
     const moved = bob.read(CINEMA, ana.serve(CINEMA, "moved"), 0, 1), edited = bob.read(CINEMA, ana.serve(CINEMA, "edited"), 0, 1);
@@ -249,6 +270,26 @@ describe("the read lane of one chat", () => {
     // Once the second has gone, asks are taken again.
     clock.t += 1_000;
     expect(get(CINEMA, again, 1)).not.toBeNull();
+  });
+
+  // An ask past the end of the file was refunded to 0 bytes, and one of 1 byte cost 1, so the budget never
+  // answered `busy` and only 4 in flight bounded the reads a contact made this device do (100,000 in one instant).
+  it("each ask counts at least 64 KiB, answered past the end of the file or of 1 byte: 512 a second, then busy", () => {
+    const sent: AppRangeFrame[] = [];
+    const clock = { t: 1_000 };
+    const server = new AppRanges(frame => sent.push(frame), undefined, () => clock.t);
+    const serve = server.serve(CINEMA, "film-id");
+    const floor = APP_RANGE_LIMITS.askFloorBytes, asks = APP_RANGE_LIMITS.bytesPerSecond / floor;
+    const get = (r: number, o: number, n: number) => server.receiveGet(appRangeGetFrame(CINEMA, serve, r, o, n) as Extract<AppRangeFrame, { t: "ar-get" }>);
+    let handed = 0;
+    for (let r = 0; r < 2_000; r++) {
+      const task = r % 2 ? get(r, 10_000_000, APP_RANGE_LIMITS.requestBytes) : get(r, 0, 1);
+      if (task) { handed++; server.finish(task, 100); }
+    }
+    expect(handed).toBe(asks);
+    expect(sent.filter(frame => frame.t === "ar-err" && frame.e === "busy")).toHaveLength(2_000 - asks);
+    clock.t += 1_000;
+    expect(get(2_000, 0, 1)).not.toBeNull();
   });
 
   it("chunks out of order, or past what was asked, fail the read and cancel it", async () => {

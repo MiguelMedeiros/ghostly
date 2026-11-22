@@ -130,12 +130,13 @@ function segments(list: Segment[], sentAt: number | undefined, budget: Budget, k
         if (segment.style === "bold") out.push(<strong key={k} className="font-semibold">{inner}</strong>);
         else if (segment.style === "italic") out.push(<em key={k}>{inner}</em>);
         else if (segment.style === "strike") out.push(<s key={k}>{inner}</s>);
-        else out.push(<Spoiler key={k}>{inner}</Spoiler>);
+        // Keyed on its words too: a contact's edit that puts new words under one tapped open covers them again.
+        else out.push(<Spoiler key={`${k}:${shown(segment)}`}>{inner}</Spoiler>);
         break;
       }
       case "atom": {
         // A link marks the words it shows; a name or a time draws its own words, none of them marked.
-        const atomMarks = marks && MARKS_ITSELF.has(segment.kind) ? { term: marks.term, ranges: marks.ranges, start: marks.at } : undefined;
+        const atomMarks = marks && MARKS_ITSELF.has(segment.kind) ? { term: marks.term, ranges: marks.ranges, start: marks.at, spend: (ranges: [number, number][]) => spendMarks(ranges, budget) } : undefined;
         if (marks) marks.at += shown(segment).length;
         // Each atom is isolated from the text around it: a direction control in the message cannot reorder a link,
         // a name or a time, and one inside an atom stops at its edge. A view that isolates its own parts is left bare.

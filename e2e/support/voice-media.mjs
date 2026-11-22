@@ -22,6 +22,24 @@ export function loadFixtures() {
 }
 
 /**
+ * Outside the page: whether a `playInPage` result earns another try with a fresh element and object URL, after
+ * `tries` tries. Only once, and only for a play stalled with its clock at 0 and no media error: on a busy macOS
+ * runner WKWebView now and then leaves an AAC recording at 0.00 s for the whole window while the one beside it
+ * plays. A recording the engine cannot demux or decode, or that the policy refuses, ends with a media error or a
+ * refused `play()` on every try, so that fails at once.
+ */
+export function shouldRetry(result, tries) {
+  return tries < 2 && !result?.played && result?.stalled === true && result.state?.error == null && result.state?.currentTime < 0.005;
+}
+
+/** Outside the page: a `playInPage` result's `state` in one line, for the log. */
+export function describeState(state) {
+  if (!state) return "no state";
+  const buffered = state.buffered?.length ? state.buffered.map(([from, to]) => `${from.toFixed(2)}-${to.toFixed(2)}`).join(",") : "none";
+  return `readyState ${state.readyState}, networkState ${state.networkState}, error ${state.error ?? "none"}, buffered ${buffered}, at ${state.currentTime?.toFixed(2)} s, ${state.paused ? "paused" : "not paused"}`;
+}
+
+/**
  * In the page: records `ms` of a tone that rises and falls like speech, from an oscillator (no microphone),
  * in each of `types` this engine can record, as the app does it (32 kbit/s, a chunk a second).
  * Resolves `{ [type]: base64 | null }`.
@@ -60,8 +78,11 @@ export async function recordInPage(types, ms) {
 
 /**
  * In the page: plays each fixture muted from a `blob:` URL, as the voice bubble does, and reports what
- * happened: `{ [name]: { canPlay, played, error? } }`. `played` means the clock moved past 0.3 s (or the
- * recording ended), which only happens when the engine really demuxed and decoded it.
+ * happened: `{ [name]: { canPlay, played, stalled?, error?, state? } }`. `played` means the clock moved past 0.3 s
+ * (or the recording ended), which only happens when the engine really demuxed and decoded it. A play that is not
+ * over in 8 s with no media error is `stalled`; every play that did not succeed carries the element's `state` as
+ * it ended (`readyState`, `networkState`, the media error's code, the `buffered` ranges, `currentTime`, `paused`),
+ * which tells a recording that never loaded from one that loaded and did not start.
  */
 export async function playInPage(fixtures) {
   const out = {};
@@ -72,10 +93,18 @@ export async function playInPage(fixtures) {
     audio.muted = true;
     const canPlay = audio.canPlayType(mime);
     audio.src = url;
+    const state = () => {
+      const ranges = [];
+      for (let i = 0; i < (audio.buffered?.length ?? 0); i++) ranges.push([audio.buffered.start(i), audio.buffered.end(i)]);
+      return { readyState: audio.readyState, networkState: audio.networkState, error: audio.error?.code ?? null, buffered: ranges, currentTime: audio.currentTime, paused: audio.paused };
+    };
+    const mediaError = () => `MediaError ${audio.error?.code} ${audio.error?.message ?? ""}`.trim();
     const result = await new Promise((resolve) => {
-      const timer = setTimeout(() => resolve({ played: false, error: `stuck at ${audio.currentTime.toFixed(2)} s` }), 8_000);
-      const finish = (value) => { clearTimeout(timer); resolve(value); };
-      audio.addEventListener("error", () => finish({ played: false, error: `MediaError ${audio.error?.code} ${audio.error?.message ?? ""}`.trim() }));
+      const timer = setTimeout(() => resolve(audio.error
+        ? { played: false, error: mediaError(), state: state() }
+        : { played: false, stalled: true, error: `stuck at ${audio.currentTime.toFixed(2)} s`, state: state() }), 8_000);
+      const finish = (value) => { clearTimeout(timer); resolve(value.played ? value : { ...value, state: state() }); };
+      audio.addEventListener("error", () => finish({ played: false, error: mediaError() }));
       audio.addEventListener("timeupdate", () => { if (audio.currentTime > 0.3) finish({ played: true }); });
       audio.addEventListener("ended", () => finish({ played: true }));
       audio.play().catch((error) => finish({ played: false, error: `play() ${error?.name}: ${error?.message}` }));

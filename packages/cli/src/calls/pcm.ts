@@ -32,12 +32,17 @@ export const PARTIAL_WAIT_MS = 60;
  */
 export const monotonic = (): number => performance.now();
 
+/** What a used-up chunk's slot holds until the slots are dropped (`PlaybackQueue.take`): the audio itself goes at once. */
+const USED = Buffer.alloc(0);
+
 /**
  * What the program wrote, waiting to be sent: taken one 20 ms frame per tick, silence when there is nothing, and
  * dropped whole by a flush (barge-in). The program may write any amount at any time, faster than real time too.
  */
 export class PlaybackQueue {
   private chunks: Buffer[] = [];
+  /** The chunk being read: the ones before it are used up. */
+  private first = 0;
   private head = 0;
   private length = 0;
   private lastPush = 0;
@@ -97,6 +102,7 @@ export class PlaybackQueue {
     // Half a sample queued: its other half is the program's next byte.
     if (this.length % 2) this.owed = true;
     this.chunks = [];
+    this.first = 0;
     this.head = 0;
     this.length = 0;
     return ms;
@@ -109,16 +115,38 @@ export class PlaybackQueue {
     return Math.max(0, frames) * FRAME_MS;
   }
 
+  /**
+   * Another program writes from now on (it replaced the last one on the call's socket): what the last one left is
+   * dropped, half a sample included, so the new one starts on a whole sample and is heard at once. Returns how much
+   * was dropped, in milliseconds.
+   */
+  newWriter(): number {
+    const ms = this.queuedMs;
+    this.chunks = [];
+    this.first = 0;
+    this.head = 0;
+    this.length = 0;
+    // A flush that cut the last program's half sample owes nothing to the next program: it starts on a whole sample.
+    this.owed = false;
+    return ms;
+  }
+
   private take(bytes: number): Buffer {
     const out = Buffer.allocUnsafe(bytes);
     let filled = 0;
     while (filled < bytes) {
-      const chunk = this.chunks[0];
+      const chunk = this.chunks[this.first];
       const n = Math.min(bytes - filled, chunk.length - this.head);
       chunk.copy(out, filled, this.head, this.head + n);
       filled += n;
       this.head += n;
-      if (this.head === chunk.length) { this.chunks.shift(); this.head = 0; }
+      if (this.head === chunk.length) { this.chunks[this.first++] = USED; this.head = 0; }
+    }
+    // Used-up chunks are dropped now and then, not one shift() each: a program writing a sample per write queues
+    // hundreds of thousands of chunks, and a shift per chunk made one frame cost more than its 20 ms.
+    if (this.first >= 1024 && this.first * 2 >= this.chunks.length) {
+      this.chunks = this.chunks.slice(this.first);
+      this.first = 0;
     }
     this.length -= bytes;
     return out;

@@ -49,6 +49,9 @@ pub mod hyperdht {
 
     #[tauri::command]
     pub fn paired_hyperdht_stop() {}
+
+    #[tauri::command]
+    pub fn paired_hyperdht_took() {}
 }
 
 pub mod keep_awake {
@@ -199,6 +202,11 @@ pub mod app_sandbox {
 
     #[tauri::command]
     pub fn app_post() -> Result<(), String> {
+        Err(NOT_HERE.into())
+    }
+
+    #[tauri::command]
+    pub fn app_post_bytes() -> Result<(), String> {
         Err(NOT_HERE.into())
     }
 

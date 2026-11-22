@@ -113,7 +113,9 @@ export class FakeBreezWallet implements BreezWallet {
     const method = request.paymentMethod;
     if (method.type === "sparkAddress") return { paymentRequest: this.sparkAddress, fee: 0n };
     if (method.type === "sparkInvoice") {
-      const details = { amount: method.amount ? Number(method.amount) : undefined, memo: method.description, expiry: method.expiryTime };
+      // The SDK (0.28) types an invoice's amount as a bigint: the fake takes nothing else, so the adapter keeps to it.
+      if (method.amount !== undefined && typeof method.amount !== "bigint") throw new Error("invalid amount");
+      const details = { amount: method.amount !== undefined ? Number(method.amount) : undefined, memo: method.description, expiry: method.expiryTime };
       const invoice = sparkString(this.identity, details);
       this.network.sparkInvoices.set(invoice, { wallet: this, ...details });
       return { paymentRequest: invoice, fee: 0n };
@@ -134,11 +136,11 @@ export class FakeBreezWallet implements BreezWallet {
       if (invoice) {
         if (request.amount !== undefined && invoice.amount !== undefined) throw new Error("amount given for an invoice that has one");
         const amount = invoice.amount ?? Number(request.amount);
-        return { paymentMethod: { type: "sparkInvoice", fee: String(this.sparkFee), sparkInvoiceDetails: { invoice: input, identityPublicKey: hex(invoice.wallet.identity), network: "regtest", amount: invoice.amount === undefined ? undefined : String(invoice.amount), expiryTime: invoice.expiry, description: invoice.memo } },
+        return { paymentMethod: { type: "sparkInvoice", fee: BigInt(this.sparkFee), sparkInvoiceDetails: { invoice: input, identityPublicKey: hex(invoice.wallet.identity), network: "regtest", amount: invoice.amount === undefined ? undefined : BigInt(invoice.amount), expiryTime: invoice.expiry, description: invoice.memo } },
           amount: BigInt(amount), feePolicy: "feesExcluded" } as PrepareSendPaymentResponse;
       }
       if (request.amount === undefined) throw new Error("an amount is needed for a Spark address");
-      return { paymentMethod: { type: "sparkAddress", address: input, fee: String(this.sparkFee) }, amount: request.amount, feePolicy: "feesExcluded" } as PrepareSendPaymentResponse;
+      return { paymentMethod: { type: "sparkAddress", address: input, fee: BigInt(this.sparkFee) }, amount: request.amount, feePolicy: "feesExcluded" } as PrepareSendPaymentResponse;
     }
     const decoded = decodeBolt11(input);
     if (!decoded?.paymentHash || decoded.amountSat === null) throw new Error("invalid input");

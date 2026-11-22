@@ -94,9 +94,16 @@ describe("Remove this profile here", () => {
     expect((await readDeviceRecord(`ghostly_${other.id}`))?.state).toBe("active");
   });
 
-  it("the first profile, running on a namespace a handoff installed: that namespace goes, and the profile points at its own again", async () => {
+  it("the first profile, running on a namespace a handoff installed: that namespace goes, its own namespace's keys too, and the profile points at its own again, empty", async () => {
+    const other = registerProfile("otherprof1", "Work");
     await makeCopy("ghostly_installed1", "the installed copy");
     localStorage.setItem("ghostly_installed1_sess1", "the installed copy's chat");
+    // What a take of an earlier build left under the first profile's own namespace: a chat with its keys, a draft, an invite.
+    localStorage.setItem("ghostly_sess1", JSON.stringify({ id: "sess1", mySeedB64: "seed", encKeyB64: "key", messages: [{ text: "a line of the old copy" }] }));
+    localStorage.setItem("ghostly_draft_sess1", "a draft of the old copy");
+    localStorage.setItem("ghostly_invite_sess1", "an invite of the old copy");
+    localStorage.setItem(`ghostly_${other.id}_sess1`, "the other profile's chat");
+    localStorage.setItem("ghostly_keep_awake", "1");
     pointProfile("ghostly", "ghostly_installed1");
     await putDeviceRecord(record("ghostly_installed1", "moving", { reenroll: true, home: "ghostly" }));
     runAs("");
@@ -107,6 +114,46 @@ describe("Remove this profile here", () => {
     expect(localStorage.getItem("ghostly_installed1_sess1")).toBeNull();
     expect(namespaceOf("")).toBe("");
     expect(await readDeviceRecord("ghostly_installed1")).toBeNull();
+    expect(localStorage.getItem("ghostly_sess1"), "the old copy's chat and its keys").toBeNull();
+    expect(localStorage.getItem("ghostly_draft_sess1")).toBeNull();
+    expect(localStorage.getItem("ghostly_invite_sess1")).toBeNull();
+    expect(localStorage.getItem(registryKey())).not.toBeNull();
+    expect(localStorage.getItem(`ghostly_${other.id}_sess1`)).toBe("the other profile's chat");
+    expect(localStorage.getItem("ghostly_keep_awake"), "this device's switch, never a profile's").toBe("1");
+  });
+
+  it("a take of the first profile drops its old namespace's keys, never the registry, another profile's or the installed namespace's", async () => {
+    const other = registerProfile("otherprof1", "Work");
+    await makeCopy("ghostly", "the old copy");
+    localStorage.setItem("ghostly_sess1", JSON.stringify({ id: "sess1", mySeedB64: "seed", encKeyB64: "key" }));
+    localStorage.setItem("ghostly_draft_sess1", "a draft of the old copy");
+    localStorage.setItem("ghostly_invite_sess1", "an invite of the old copy");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ language: "en" }));
+    localStorage.setItem("ghostly_installed1_sess1", "the installed copy's chat");
+    localStorage.setItem(`ghostly_${other.id}_sess1`, "the other profile's chat");
+    localStorage.setItem("ghostly_stay_connected", "0");
+
+    // The install points the profile at the new namespace; then the take drops the old one.
+    pointProfile("ghostly", "ghostly_installed1");
+    await handoffProfileHost("test", "web").staging.drop("ghostly");
+
+    expect(await databases()).not.toContain("ghostly");
+    for (const key of ["ghostly_sess1", "ghostly_draft_sess1", "ghostly_invite_sess1", "ghostly_app_settings"]) expect(localStorage.getItem(key), key).toBeNull();
+    expect(localStorage.getItem(registryKey())).not.toBeNull();
+    expect(namespaceOf("")).toBe("installed1");
+    expect(localStorage.getItem("ghostly_installed1_sess1")).toBe("the installed copy's chat");
+    expect(localStorage.getItem(`ghostly_${other.id}_sess1`)).toBe("the other profile's chat");
+    expect(localStorage.getItem("ghostly_stay_connected")).toBe("0");
+  });
+
+  it("drops none of the first profile's keys with a namespace it still runs on", async () => {
+    await makeCopy("ghostly", "the live copy");
+    localStorage.setItem("ghostly_sess1", "the live copy's chat");
+    registerProfile("otherprof1", "Work");
+
+    await handoffProfileHost("test", "web").staging.drop("ghostly");
+
+    expect(localStorage.getItem("ghostly_sess1")).toBe("the live copy's chat");
   });
 
   it("another profile, removed: it goes from the list and from this device, and the next page starts as the first profile", async () => {

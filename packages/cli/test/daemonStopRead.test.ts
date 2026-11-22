@@ -140,6 +140,14 @@ describe.skipIf(process.platform === "win32")("a read the daemon left unanswered
     expect(methods.filter((method) => method === "settings.set")).toHaveLength(1);
   });
 
+  it("a change whose connection ended before it was written is sent once more, to the daemon that answers now", async () => {
+    const { dir, methods } = await fakeDaemon("write-unsent", (method, connection) => method === HELLO && connection === 1);
+    // Nothing reached the first connection. Before: unavailable (exit 1) "The daemon went away", as a bot's `typing`
+    // or `send` failed in a `daemon restart` while a command started a moment later answered.
+    ok(await ghostly(["--home", dir, "settings", "set", "nick", "bob"]));
+    expect(methods.filter((method) => method === "settings.set")).toHaveLength(1);
+  });
+
   describe("with a real daemon", () => {
     let relay: { url: string; server: HttpServer };
     let dht: { bootstrap: string; destroy(): Promise<void> };

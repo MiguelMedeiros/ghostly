@@ -380,6 +380,13 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
 .fin-dl[aria-current="true"] .fin-dl-ext {
   color: var(--cyan);
 }
+/* Forced colors replace the tint and the cyan that mark the installer guessed for this machine: it keeps an underline. */
+@media (forced-colors: active) {
+  .fin-dl[aria-current="true"] {
+    text-decoration: underline 2px;
+    text-underline-offset: 4px;
+  }
+}
 /* Every file of the release, small, at the end of the panel's head. */
 .fin-all {
   text-transform: none;
