@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import { replyRef } from "@ghostly/browser/shared/replies";
@@ -30,11 +31,6 @@ export interface ApiContext {
    * timeout with `details.reason: "daemon-stopped"`, before the connections end.
    */
   stopping?: AbortSignal;
-  /**
-   * Aborted when the connection a call came on closes (a daemon's, `host.ts`): a wait still open for it ends at once
-   * (`connectionClosed`), where it kept its listener or its reads to its own timeout, up to a day, with nobody to answer.
-   */
-  closed?: AbortSignal;
   /** The daemon is a `listen` that found none and runs the profile itself: a stop ends that listen too. */
   listen?: true;
 }
@@ -50,6 +46,17 @@ export interface CallScope {
 }
 
 export type Method = (ctx: ApiContext, params: Params, call?: CallScope) => Promise<unknown>;
+
+/**
+ * The scope of the call running now (`callApi`), however deep: a wait still open when its client's connection closes
+ * ends at once (`waits.ts`, `waitForState`), where it kept its listener or its reads to its own timeout, up to a day,
+ * with nobody to answer. Not a context per connection: the CLI keeps state per daemon keyed by its one `ApiContext`
+ * (card pacing, the invite's mark, holds), which one per connection split.
+ */
+const calls = new AsyncLocalStorage<CallScope>();
+export const inCall = <T>(call: CallScope | undefined, run: () => T): T => (call ? calls.run(call, run) : run());
+/** The connection of the call running now went away (`CallScope.gone`): its wait only stops. */
+export const callGone = (): AbortSignal | undefined => calls.getStore()?.gone;
 
 export const node = (ctx: ApiContext): GhostlyNode => ctx.runtime.server.node;
 export const state = (ctx: ApiContext): EngineState => node(ctx).getState();
@@ -627,9 +634,10 @@ export async function messageOf(ctx: ApiContext, linkId: string, ref: string, ke
 export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string, stopping?: AbortSignal): Promise<T> {
   const now = check(state(ctx));
   if (now !== undefined) return Promise.resolve(now);
+  const closed = callGone();
   return new Promise<T>((resolve, reject) => {
     const end = (error: unknown) => {
-      clearTimeout(timer); off(); stopping?.removeEventListener("abort", stopped); ctx.closed?.removeEventListener("abort", gone);
+      clearTimeout(timer); off(); stopping?.removeEventListener("abort", stopped); closed?.removeEventListener("abort", gone);
       if (error) reject(error);
     };
     const stopped = () => end(new CliError("timeout", `The daemon stopped before the wait ended, waiting for ${what}`, { reason: "daemon-stopped" }));
@@ -642,15 +650,15 @@ export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => 
       end(null);
       resolve(value);
     });
-    if (ctx.closed?.aborted) gone();
+    if (closed?.aborted) gone();
     else if (stopping?.aborted) stopped();
     else {
       stopping?.addEventListener("abort", stopped, { once: true });
-      ctx.closed?.addEventListener("abort", gone, { once: true });
+      closed?.addEventListener("abort", gone, { once: true });
     }
   });
 }
 
-/** How a wait ends whose client's connection closed (`ApiContext.closed`): nobody reads it, the wait only stops. */
+/** How a wait ends whose client's connection closed (`callGone`): nobody reads it, the wait only stops. */
 export const connectionClosed = () => new CliError("interrupted", "The connection closed before the wait ended");
 

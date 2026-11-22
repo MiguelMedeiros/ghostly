@@ -293,18 +293,14 @@ function ownerOnlyUmask(): (() => void) | null {
 const NONCE = /^(?:[0-9a-f]{2}){16,64}$/;
 
 /** `answering`: the calls of every connection still open, which a stopping daemon answers before it ends them. */
-function connection(daemon: ApiContext, socket: Socket, secret: Buffer, answering: Set<Promise<void>>): void {
-  // The client that asked the calls still open went away (Ctrl-C on the command): `CallScope.gone`, and the waits of
-  // this connection end with it (`ApiContext.closed`). Made from the daemon's context, not copied: what the daemon
-  // sets on it after `serve` (`stop`, `listen`) is read through.
-  const gone = new AbortController();
-  socket.on("close", () => gone.abort());
-  const ctx: ApiContext = Object.create(daemon) as ApiContext;
-  ctx.closed = gone.signal;
+function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: Set<Promise<void>>): void {
   const unsubscribes: (() => void)[] = [];
   // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
   let limit = MAX_UNREAD;
   const unsubscribe = () => { for (const off of unsubscribes.splice(0)) off(); };
+  // The client that asked the calls still open went away (Ctrl-C on the command): `CallScope.gone`.
+  const gone = new AbortController();
+  socket.on("close", () => gone.abort());
   // Ended, not destroyed: the client still reads whole lines up to the last one written, then the end.
   const write = (value: unknown, replayed = false) => {
     if (socket.destroyed || socket.writableEnded) return;

@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import type { ApiContext } from "../src/apiKit";
+import { inCall, type ApiContext } from "../src/apiKit";
 import { serve, type Host } from "../src/host";
 import { waitForGroupFrame } from "../src/waits";
 // covers: headless.daemon
@@ -55,15 +55,15 @@ describe.skipIf(process.platform === "win32")("a wait on the socket", () => {
 describe("a group wait", () => {
   it("stops reading the group once its client's connection closed", async () => {
     let reads = 0;
-    const closed = new AbortController();
+    const gone = new AbortController();
     const ctx = {
       mode: "daemon",
-      closed: closed.signal,
       runtime: { server: { node: { groupTaken: () => { reads++; return 0; }, groupView: () => ({ id: "g1", profile: "community", members: [], status: "active" }) } } },
     } as unknown as ApiContext;
-    const waiting = waitForGroupFrame(ctx, "g1", "m1", undefined, 86_400_000);
+    // As `callApi` runs a call that came on a connection: `gone` aborts when the connection closes.
+    const waiting = inCall({ gone: gone.signal }, () => waitForGroupFrame(ctx, "g1", "m1", undefined, 86_400_000));
     await new Promise((resolve) => setTimeout(resolve, 300));
-    closed.abort();
+    gone.abort();
     await expect(waiting).rejects.toMatchObject({ code: "interrupted" });
     const after = reads;
     await new Promise((resolve) => setTimeout(resolve, 600));
