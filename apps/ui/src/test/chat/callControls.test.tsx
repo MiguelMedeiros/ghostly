@@ -6,6 +6,7 @@ import { CallOverlay } from "../../components/CallOverlay";
 import { IncomingCallNotification } from "../../components/IncomingCallNotification";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 import { renderApp } from "../render";
+import { windowIs } from "../viewport";
 
 // covers: calls.screen-share, calls.audio, calls.video, calls.mini-window, calls.end-and-answer, calls.reconnect
 
@@ -187,9 +188,7 @@ describe("sharing the screen from inside a call", () => {
   // agents#1630: a phone's camera held upright gives a 3:4 picture, 160 px high from 64 px down: the notice at a fixed
   // 10.5rem landed 48 px into it.
   it("on a phone, sits below your own picture whatever its shape: a camera held sideways or upright", () => {
-    const width = window.innerWidth;
-    Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
-    onTestFinished(() => { Object.defineProperty(window, "innerWidth", { configurable: true, value: width }); });
+    windowIs(true);
     overlay({ remoteHasVideo: true, remoteIsScreenSharing: true, isVideoOff: false, localStream: new FakeMediaStream([new FakeTrack("video")]) as unknown as MediaStream });
     const notice = screen.getByTestId("call-sharing");
     const video = screen.getByTestId("call-self-view").querySelector("video")!;

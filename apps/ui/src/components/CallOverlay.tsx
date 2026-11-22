@@ -7,6 +7,7 @@ import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
 import { useI18n } from "../contexts/I18nContext";
 import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { useFocusKept } from "../hooks/useFocusKept";
+import { MOBILE_QUERY } from "../hooks/useIsMobile";
 import { useVoiceRing } from "../hooks/useVoiceRing";
 import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
@@ -135,7 +136,8 @@ export function CallOverlay({
       // only a preference
     }
   };
-  const phone = window.innerWidth < 768;
+  // The layout's own query: `innerWidth` is whole, and a 767.5 px window (a zoom, a display scale) rounds to 768.
+  const phone = window.matchMedia(MOBILE_QUERY).matches;
   // On a touch screen the small window's buttons take a thumb on 44 px (index.css): five of them, Hang up apart, and
   // the row clear of the corner grips below it need 264 × 168. At 190 × 136 they were 32 px, 5 px apart.
   const touch = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;

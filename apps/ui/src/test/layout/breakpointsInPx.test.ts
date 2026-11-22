@@ -48,17 +48,20 @@ describe("the layout's breakpoints", () => {
       if (file.endsWith(".css") && !file.includes("node_modules")) css.push(readFileSync(join(SRC, file), "utf8"));
     }
     const queries = [MOBILE_QUERY, ...css.flatMap((text) => [...text.matchAll(/@media ([^{]*)\{/g)].map((m) => m[1]))];
-    /** Each width condition at the phone/desktop edge, with whether it holds at `width`. */
-    const at = (width: number) => queries.flatMap((query) =>
-      [...query.matchAll(/\((max-width|min-width|width)\s*(:|<=|>=|<|>)\s*(76[78])px\)/g)].map(([condition, feature, op, px]) => {
-        const edge = Number(px);
-        const holds = feature === "max-width" ? width <= edge : feature === "min-width" ? width >= edge
-          : op === "<" ? width < edge : op === "<=" ? width <= edge : op === ">" ? width > edge : width >= edge;
-        return { condition, phone: feature === "max-width" || op.startsWith("<"), holds };
-      }));
-    for (const width of [767, 767.2, 767.33, 767.5, 767.9]) {
-      expect(at(width).filter((query) => query.holds !== query.phone), `at ${width}px`).toEqual([]);
-    }
-    expect(at(768).filter((query) => query.holds === query.phone), "at 768px").toEqual([]);
+    // Every width condition from 767 to 768.x px, whichever way it is written (`max-width: 767.5px`, `767px >= width`).
+    const edge = /\(\s*(?:(?:max-|min-)?width\s*(?::|<=?|>=?)\s*76[78](?:\.\d+)?px|76[78](?:\.\d+)?px\s*(?:<=?|>=?)\s*width)\s*\)/g;
+    const bare = (condition: string) => condition.replace(/\s+/g, "");
+    const conditions = queries.flatMap((query) => [...query.matchAll(edge)].map((m) => bare(m[0])));
+    expect(conditions).toContain(bare(MOBILE_QUERY));
+    const allowed = ["(width < 768px)", "(width >= 768px)", "(min-width: 768px)"].map(bare);
+    expect(conditions.filter((condition) => !allowed.includes(condition))).toEqual([]);
+  });
+
+  // The call's small window picks its phone or desktop size in JS: `innerWidth` is whole, so 767.5 px rounds to 768.
+  it("are asked in JS by MOBILE_QUERY, not by innerWidth", () => {
+    const sizedByWidth = readdirSync(SRC, { recursive: true, encoding: "utf8" })
+      .filter((file) => /\.tsx?$/.test(file) && !file.includes("node_modules") && !file.startsWith("test"))
+      .filter((file) => /innerWidth\s*[<>]=?\s*76[78]/.test(readFileSync(join(SRC, file), "utf8")));
+    expect(sizedByWidth).toEqual([]);
   });
 });
