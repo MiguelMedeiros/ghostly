@@ -552,7 +552,7 @@ answering), so the folder may hold other files, and several profiles' daemons ma
 |---|---|
 | `hangup` | This side hung up, or declined a call that rang |
 | `remote-hangup` | The contact hung up a connected call |
-| `missed` | An incoming call stopped ringing unanswered (the contact gave up, or its offer went stale after 120 s) |
+| `missed` | An incoming call stopped ringing unanswered (the contact gave up, or its offer went stale after 120 s), or the contact called again while it rang (their app closed or reloaded as it rang out): the new call rings instead (`call.incoming` follows) and `call answer` answers it |
 | `rejected` | The contact declined this side's call |
 | `unanswered` | This side's call rang 60 s with no answer |
 | `crossed` | Both sides called at once and the contact's call came first: it rings here instead (`call.incoming` follows) |
