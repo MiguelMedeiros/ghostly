@@ -101,12 +101,17 @@ updates:
         applies-to: security-updates
         patterns: ["*"]
   # The e2e suite's group-call token mock (never shipped): livekit-client for its smoke page, as above.
+  # livekit-client itself moves with the app's (sfuToken.test.ts holds them equal): only what it pulls in is bumped
+  # here. Listing the update types keeps its security updates coming.
   - package-ecosystem: npm
     directory: /e2e/infra/sfu-token
     schedule: { interval: weekly, day: monday }
     target-branch: dev
     allow:
       - dependency-type: all
+    ignore:
+      - dependency-name: livekit-client
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
     groups:
       e2e-sfu-token:
         patterns: ["*"]
