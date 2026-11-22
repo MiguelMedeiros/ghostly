@@ -9,6 +9,7 @@ import {
 } from "@ghostly/core";
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap, committed } from "../shared/idb";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf, fileSpace, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
+import { bundleLength } from "../shared/appBundleLength";
 import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
 import { BUILT_IN_APPS, DEFAULT_APP_STORES, type BuiltInApp } from "./appDefaults";
 
@@ -115,16 +116,6 @@ const PEEK_FIRST_BYTES = 4 * 1024;
 
 const bundleId = (digest: string) => `app-${digest}`;
 
-/** A bundle's signature statement: `{alg, key, sig}` with its 52-character key and 86-character signature, canonical. */
-const STATEMENT_BYTES = canonicalJsonBytes({ alg: "ed25519", key: "y".repeat(52), sig: "A".repeat(86) }).length;
-
-/**
- * The length of the whole bundle of a manifest (core's `assembleAppBundle` layout: magic, u32, the canonical manifest,
- * u32, the statement, the files): what its stored file holds once written. A shorter or longer one is not that bundle.
- */
-function bundleLength(manifest: AppManifest): number {
-  return utf8Encode(APP_BUNDLE_MAGIC).length + 8 + canonicalJsonBytes(manifest).length + STATEMENT_BYTES + manifest.files.reduce((sum, f) => sum + f.size, 0);
-}
 
 /** A bundle's file as written: where it is kept, and its whole file's SHA-256 (`InstalledApp.sha256`). */
 type BundleFile = { bytes: FileBytesKind; sha256: string };

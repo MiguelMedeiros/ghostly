@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { digestText, registerFileBytes, resetFileBytes, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
+import { bundleLength } from "@ghostly/browser/shared/appBundleLength";
+import type { AppManifest } from "@ghostly/core";
 import { databaseOfSpace } from "../../lib/profiles";
 import { handoffProfileHost } from "../../lib/handoffProfile";
 // covers: devices.handoff
@@ -86,10 +88,11 @@ const dropAll = async () => {
   for (const { name } of await indexedDB.databases()) if (name && name !== GIVER) await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
 };
 
-/** A bundle's bytes and its app digest (of its manifest, not of these bytes). */
+/** A bundle's bytes, as long as its manifest says a whole one is, and its app digest (of its manifest, not of these bytes). */
 const bundle = (n: number) => {
-  const bytes = Uint8Array.from({ length: 2_000 + n }, (_, i) => (i * 7 + n) % 251);
-  return { bytes, digest: digestText(sha256(Uint8Array.of(n))), sha256: digestText(sha256(bytes)) };
+  const manifest = { name: `app ${n}`, files: [{ path: "index.html", size: 2_000 + n }] };
+  const bytes = Uint8Array.from({ length: bundleLength(manifest as unknown as AppManifest) }, (_, i) => (i * 7 + n) % 251);
+  return { bytes, manifest, digest: digestText(sha256(Uint8Array.of(n))), sha256: digestText(sha256(bytes)) };
 };
 const app = (ref: string, digest: string, bytes: FileBytesKind, pending?: { digest: string; bytes: FileBytesKind }) =>
   ({ ref, publisher: "p", name: ref, sequence: 1, digest, permissions: [], manifest: {}, bytes, from: "https://example.test/app.ghostly", installedAt: 1, updatedAt: 1, ...(pending && { pending: { ...pending, sequence: 2, manifest: {}, added: [], from: "https://example.test/app2.ghostly", at: 1 } }) });
@@ -147,7 +150,7 @@ describe("a move hands over the installed apps' bundles", () => {
     for (const held of [installed, waiting, older]) await space.append(`app-${held.digest}`, 0, held.bytes);
     const chess = app("chess", installed.digest, "opfs", { digest: waiting.digest, bytes: "opfs" });
     await profileDatabase(giver, [], [
-      { ...chess, sha256: installed.sha256, pending: { ...chess.pending, sha256: waiting.sha256 } },
+      { ...chess, sha256: installed.sha256, manifest: installed.manifest, pending: { ...chess.pending, sha256: waiting.sha256, manifest: waiting.manifest } },
       // A record from before the hash was kept: its file is read and hashed, as before.
       app("notes", older.digest, "opfs"),
     ]);
@@ -164,6 +167,20 @@ describe("a move hands over the installed apps' bundles", () => {
       { id: `app-${older.digest}`, size: older.bytes.length, sha256: older.sha256 },
     ]));
     expect(hashed).toEqual([`app-${older.digest}`]);
+  });
+
+  it("the giver hashes a bundle whose file is shorter than its record's whole bundle, not offering the kept hash", async () => {
+    // A rewrite of the file cut short (the tab closed mid-write) leaves part of it under a record that kept the whole
+    // file's hash: offered under it, the taker found it damaged and cancelled the move at every Move.
+    const whole = bundle(14), cut = whole.bytes.subarray(0, 7);
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    await space.remove(`app-${whole.digest}`);
+    await space.append(`app-${whole.digest}`, 0, cut);
+    await profileDatabase(giver, [], [{ ...app("todo", whole.digest, "opfs"), sha256: whole.sha256, manifest: whole.manifest }]);
+
+    const files = await handoffProfileHost("1.10.2", "web").source(giver).files();
+
+    expect(files).toContainEqual({ id: `app-${whole.digest}`, size: 7, sha256: digestText(sha256(cut)) });
   });
 
   it("a taker whose frozen copy holds a bundle copies it from its file storage", async () => {

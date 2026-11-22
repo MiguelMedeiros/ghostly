@@ -1,10 +1,11 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import type { DeviceKind } from "@ghostly/core";
+import type { AppManifest, DeviceKind } from "@ghostly/core";
 import type { HandoffFile, HandoffSource, HandoffStaging, HandoffStagingHost } from "@ghostly/browser/devices/handoff";
 import type { HandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { memorySink } from "@ghostly/browser/backup/stream";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
+import { bundleLength } from "@ghostly/browser/shared/appBundleLength";
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource } from "./profileBackup";
 import { listDeviceRecords } from "@ghostly/browser/devices/store";
@@ -35,14 +36,24 @@ const DIGEST = /^[A-Za-z0-9_-]{43}$/;
  * the chat files (WISP 1200 § Where installed apps live): left behind, every app on the new device needed its files and
  * fetched them again, and one whose source no longer served that version did not open there at all (bug hunt, 2026-11-06).
  */
-type AppVersion = { digest?: unknown; bytes?: unknown; sha256?: unknown };
+type AppVersion = { digest?: unknown; bytes?: unknown; sha256?: unknown; manifest?: unknown };
 type AppRecord = AppVersion & { ref: string; pending?: AppVersion };
 const bundleId = (digest: string) => `app-${digest}`;
 const BUNDLE_ID = /^app-[A-Za-z0-9_-]{43}$/;
-/** Each bundle a record names, with its whole file's hash where the record kept it when the file was written. */
-const bundlesOf = (app: AppRecord): { id: string; kind: unknown; sha256?: string }[] => [app, ...(app.pending ? [app.pending] : [])]
+/** The whole bundle's length by its record's manifest, or none when the manifest cannot say. */
+const lengthOf = (manifest: unknown): number | undefined => {
+  try { return bundleLength(manifest as AppManifest); } catch { return undefined; }
+};
+/**
+ * Each bundle a record names, with its whole file's hash and length where the record kept the hash when the file was
+ * written: the hash is the file's only while the file has that length (a rewrite cut short leaves a shorter one).
+ */
+const bundlesOf = (app: AppRecord): { id: string; kind: unknown; sha256?: string; length?: number }[] => [app, ...(app.pending ? [app.pending] : [])]
   .filter((version): version is AppVersion & { digest: string } => typeof version.digest === "string" && DIGEST.test(version.digest))
-  .map((version) => ({ id: bundleId(version.digest), kind: version.bytes, ...(typeof version.sha256 === "string" && DIGEST.test(version.sha256) && { sha256: version.sha256 }) }));
+  .map((version) => {
+    const length = typeof version.sha256 === "string" && DIGEST.test(version.sha256) ? lengthOf(version.manifest) : undefined;
+    return { id: bundleId(version.digest), kind: version.bytes, ...(length !== undefined && { sha256: version.sha256 as string, length }) };
+  });
 const FILE_KINDS: readonly FileBytesKind[] = ["opfs", "native", "idb"];
 
 /** The installed apps' records of a profile's database, none where it has no store for them yet. */
@@ -172,11 +183,12 @@ function profileSource(database: string): HandoffSource {
     // The apps' bundles, where their records say they are: one not here (it needs its files on this device too) is not.
     // Its hash is the one its record kept when the engine wrote and checked it (else read and hashed once): read whole
     // here, 20 bundles of 16 MiB held the offer back 1.8 s, at every Move and again after a reload (bug hunt, 2026-11-14).
-    for (const { id, kind, sha256: kept } of (await appRecords(peer)).flatMap(bundlesOf)) {
+    for (const { id, kind, sha256, length } of (await appRecords(peer)).flatMap(bundlesOf)) {
       if (found.has(id) || !FILE_KINDS.includes(kind as FileBytesKind)) continue;
       const store = (await fileBytesOf(kind as FileBytesKind).catch(() => null))?.forSpace?.(database);
       const size = store ? await store.size(id).catch(() => null) : null;
       if (!store || !size) continue;
+      const kept = size === length ? sha256 : undefined;
       const sha = digests.get(id) ?? kept ?? await store.digest(id).catch(() => undefined);
       if (!sha) continue;
       digests.set(id, sha);
