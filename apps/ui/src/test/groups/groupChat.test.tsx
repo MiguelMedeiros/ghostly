@@ -823,14 +823,32 @@ describe("GroupChat: the options menu", () => {
     it("says it is rotating, on the busy row and in a live line, then that it is done", async () => {
       const { user, engine } = openGroup(active({ isAdmin: true }));
       const calls = pending(engine);
+      // There before the press, and silent, so its words are read when they come.
+      expect(screen.getByTestId("group-rotate-live")).toBeEmptyDOMElement();
       await user.click(await rotateRow(user));
       expect(screen.getByTestId("group-rotate-live")).toHaveAttribute("role", "status");
       expect(screen.getByTestId("group-rotate-live")).toHaveTextContent("Rotating keys…");
+      // Seen while it goes: the row saying so is in a closed menu.
+      expect(screen.getByTestId("group-rotate-live")).not.toHaveClass("sr-only");
       expect(await rotateRow(user)).toHaveTextContent("Rotating keys…");
       await user.keyboard("{Escape}");
       await act(async () => calls[0]!.resolve());
       expect(screen.getByTestId("group-rotate-live")).toHaveTextContent("Keys rotated: members get the new keys");
+      // Once done, the timeline's event line shows it.
+      expect(screen.getByTestId("group-rotate-live")).toHaveClass("sr-only");
       expect(await rotateRow(user)).toHaveTextContent(/^Rotate keys$/);
+    });
+
+    it("a refused second rotation does not leave the first one's done line", async () => {
+      const { user, engine } = openGroup(active({ isAdmin: true }));
+      const calls = pending(engine);
+      await user.click(await rotateRow(user));
+      await act(async () => calls[0]!.resolve());
+      expect(screen.getByTestId("group-rotate-live")).toHaveTextContent("Keys rotated: members get the new keys");
+      await user.click(await rotateRow(user));
+      await act(async () => calls[1]!.reject(new Error("Bob is not reachable")));
+      expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+      expect(screen.getByTestId("group-rotate-live")).toBeEmptyDOMElement();
     });
 
     it("a refused rotation says why and lets it be pressed again", async () => {
@@ -903,6 +921,18 @@ describe("GroupChat: the options menu", () => {
       await act(async () => refuse(new Error("Bob is not reachable")));
       expect(screen.getByTestId("group-name")).toHaveTextContent("Others");
       expect(screen.queryByTestId("group-notice")).not.toBeInTheDocument();
+    });
+
+    it("a rotation done while another group was open is not said on coming back", async () => {
+      const { user, engine } = open(other());
+      let done = () => {};
+      engine.on("rotateGroup", () => new Promise<void>(resolve => { done = resolve; }));
+      await rotate(user);
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      await act(async () => done());
+      expect(screen.getByTestId("group-rotate-live")).toBeEmptyDOMElement();
+      await act(async () => screen.getByRole("button", { name: "one" }).click());
+      expect(screen.getByTestId("group-rotate-live")).toBeEmptyDOMElement();
     });
 
     it("a rotation still going in one group leaves Rotate keys free in the next", async () => {
