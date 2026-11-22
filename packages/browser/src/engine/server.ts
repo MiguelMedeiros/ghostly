@@ -1,4 +1,4 @@
-import { parseCallSignal } from "@ghostly/core";
+import { BURST_RING_MS, parseCallSignal, QUICK_REDIAL_MS } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
 import type { AttachMark, AttentionEvent, EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { MessagePage, StoredMessage } from "../shared/types";
@@ -62,6 +62,19 @@ export class EngineServer implements PeerServer {
    * runs with no tab open, and a message that came then showed nothing until Ghostly was opened.
    */
   unheardAttention?: (event: AttentionEvent) => void;
+  /**
+   * A contact's call that rings while no client is attached (`signal`, its offer), and the end of one told so (`null`:
+   * the contact hung up, or a page that opened since answered or declined it): the host tells the person itself, as it
+   * does a message (`unheardAttention`). A ring nobody answers sends nothing more: the host ends it after the app's ring.
+   */
+  unheardCall?: (linkId: string, signal: string | null) => void;
+  /** The chats whose ringing call the host was told of (`unheardCall`) and not yet of its end, and when it began to ring. */
+  private readonly unheardRings = new Map<string, number>();
+  /**
+   * Per chat, when the contact's last call told to the host was missed after it barely rang, or held back since
+   * (`QUICK_REDIAL_MS`, on the monotonic clock): the next one that comes this soon is not told, as a page does not ring it.
+   */
+  private readonly unheardMissedAt = new Map<string, number>();
 
   /**
    * `keepNewest`: the start keeps each chat's and group's newest rows that many, from the whole histories it reads anyway,
@@ -76,9 +89,13 @@ export class EngineServer implements PeerServer {
         onMessages: (linkId, messages) => { this.changed(linkId); void this.inOrder(linkId, () => this.sendHistory(linkId, messages)).catch(() => {}); },
         onMessageChanges: (linkId, changes) => { this.changed(linkId); void this.inOrder(linkId, () => this.sendChanges(linkId, changes)).catch(() => {}); },
         onCallSignal: (linkId, signal) => {
-          if (signalKind(signal) === "o") this.offers.set(linkId, signal);
+          const kind = signalKind(signal);
+          if (kind === "o") this.offers.set(linkId, signal);
           else this.offers.delete(linkId);
           this.broadcast({ kind: "call-signal", linkId, signal });
+          // With no page to ring, the host does (the extension's peer runs with no tab open); and stops once it ends.
+          if (kind === "o" && !this.clients.size && parseCallSignal(signal)?.t === "o") this.ringUnheard(linkId, signal);
+          else if (kind === "h") this.unheardRingEnded(linkId, true);
         },
         // A contact's mini-app frame (WISP 1200 § In a chat): to the pages, where the app runs. Never stored.
         onAppFrame: (linkId, event) => this.broadcast({ kind: "app-frame", linkId, event }),
@@ -371,7 +388,37 @@ export class EngineServer implements PeerServer {
     if (typeof linkId !== "string" || !this.offers.delete(linkId)) return;
     const kind = typeof signal === "string" ? signalKind(signal) : undefined;
     if (kind !== "a" && kind !== "h") return;
+    this.unheardRingEnded(linkId);
     for (const client of [...this.clients]) if (client !== from) this.post(client, { kind: "call-handled", linkId });
+  }
+
+  /**
+   * The contact's offer with no page to ring it: the host is told, unless it came right after a call that barely rang
+   * (`QUICK_REDIAL_MS`), which a bot looping call and hang-up places and a page keeps as missed with no ring or
+   * notification (useWebRTC). Held back, it starts the wait over, so a burst rings once.
+   */
+  private ringUnheard(linkId: string, signal: string): void {
+    const now = performance.now(), missedAt = this.unheardMissedAt.get(linkId);
+    if (!this.unheardRings.has(linkId) && missedAt !== undefined && now - missedAt >= 0 && now - missedAt < QUICK_REDIAL_MS) {
+      this.unheardMissedAt.set(linkId, now);
+      return;
+    }
+    this.unheardRings.set(linkId, now);
+    this.unheardCall?.(linkId, signal);
+  }
+
+  /**
+   * A ring the host was told of (`unheardCall`) is over: it is told so, once. `byContact`: the contact hung up, which
+   * holds their next call back when it barely rang (`BURST_RING_MS`), and nothing when it rang a while.
+   */
+  private unheardRingEnded(linkId: string, byContact = false): void {
+    const since = this.unheardRings.get(linkId);
+    if (since === undefined) return;
+    this.unheardRings.delete(linkId);
+    const now = performance.now();
+    if (byContact && now - since < BURST_RING_MS) this.unheardMissedAt.set(linkId, now);
+    else this.unheardMissedAt.delete(linkId);
+    this.unheardCall?.(linkId, null);
   }
 }
 

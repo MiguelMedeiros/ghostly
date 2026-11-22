@@ -1,9 +1,10 @@
 # The WISP 602 group-token mock for the e2e suite (server.mjs): node:crypto only. livekit-client is here for the
-# smoke page (/smoke) alone, which serves its browser bundle; nothing of it runs in Node.
+# smoke page (/smoke) alone, which serves its browser bundle; nothing of it runs in Node. Its version is the app's
+# (the root package-lock.json), and it installs from its own lockfile, which Dependabot keeps current.
 FROM node:22-bookworm-slim
 WORKDIR /sfu-token
-COPY package.json ./
-RUN npm install --omit=dev --no-audit --no-fund --no-package-lock && npm cache clean --force
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY server.mjs ./
 USER node
 ENV SFU_TOKEN_PORT=7890

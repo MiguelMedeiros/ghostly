@@ -102,7 +102,7 @@ describe("a built-in's id always wins", () => {
 });
 
 describe("malformed plugins", () => {
-  // Shapes that are not lists at all: pluginRules.bug.test.ts.
+  // Shapes that are not lists at all: pluginShapes.test.ts.
   it("refuses an overlong or non-text version, a missing id, and a descriptor of the other kind", () => {
     const cases: [unknown, RegExp][] = [
       [{ sdk: SDK_API, lightning: [lightning("x")] }, /plugin id must match/],

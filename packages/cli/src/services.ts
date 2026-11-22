@@ -126,9 +126,9 @@ export const OPENED_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'un
 /**
  * The contact's headers that are not passed on: each makes the browser send something to a place it names, outside
  * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
- * early connections). Only the contact's server is reached.
+ * early connections; `Speculation-Rules` prefetches and prerenders). Only the contact's server is reached.
  */
-export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link", "speculation-rules"];
 
 /**
  * A contact's headers that would set the page's browser features (camera, microphone, location, a device): the
@@ -244,13 +244,17 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
 
 /**
  * The service a command names, by its id: one of this profile's. The engine changes nothing for an id it does not
- * know and says nothing, so a mistyped id read as done ("shared": true, with a contact).
+ * know and says nothing, so a mistyped id read as done ("shared": true, with a contact). Or by its name, when no other
+ * service has that name (`service add "My App"` makes `my-app`): before, the name was refused as "No service" while
+ * `service list` showed it. An id comes first; a name several services share is refused with their ids.
  */
 function serviceOf(ctx: ApiContext, params: Params): string {
-  const serviceId = str(params, "service", true);
+  const given = str(params, "service", true);
   const { services } = state(ctx);
-  if (!services.some((s) => s.id === serviceId)) throw noService(serviceId, servicesNamed(services, serviceId));
-  return serviceId;
+  if (services.some((s) => s.id === given)) return given;
+  const named = servicesNamed(services, given);
+  if (named.length === 1) return named[0];
+  throw noService(given, named);
 }
 
 /** The ids of the services `given` names by their name, compared as a chat's label is (`nameKey`: one case, one form). */
@@ -259,14 +263,11 @@ function servicesNamed(services: readonly { id: string; name: string }[], given:
   return key ? services.filter((s) => nameKey(s.name) === key).map((s) => s.id) : [];
 }
 
-/**
- * No service of that id. A service's name given instead (`service add "My App"` makes `my-app`) is told which id to
- * use: before, it read "No service" of a service `service list` shows by that very name. Same code and exit either way.
- */
+/** No service of that id or name, or a name several services share: which ids it names. Same code and exit either way. */
 function noService(given: string, named: readonly string[]): CliError {
   const quoted = JSON.stringify(given);
   if (!named.length) return new CliError("not_found", `No service ${quoted} (ghostly service list)`);
-  const which = named.length === 1 ? `${named[0]}: use its id` : `${named.length} services, ${named.slice(0, -1).join(", ")} and ${named.at(-1)}: use one of their ids`;
+  const which = `${named.length} services, ${named.slice(0, -1).join(", ")} and ${named.at(-1)}: use one of their ids`;
   return new CliError("not_found", `No service with id ${quoted}. ${quoted} is the name of ${which} (ghostly service list)`);
 }
 
@@ -315,14 +316,15 @@ export function serviceShape(params: Params): { name: string; target: string } {
   try { parseLocalTarget(target); } catch (error) {
     const said = error instanceof Error ? error.message : String(error);
     // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
-    // parts refused here can hold a secret (a token). One that is no URL at all is named as given.
+    // parts refused here can hold a secret (a token). One that is no URL at all (a mistyped port) is not repeated: it
+    // has no parts to tell apart, and a token or password in it would be said whole.
     const text = target.trim();
-    let shown = text;
+    let shown = "";
     try {
       const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
-      shown = `${url.protocol}//${url.host}${url.pathname}`;
-    } catch { /* Not a URL: named as given. */ }
-    throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
+      shown = `: ${url.protocol}//${url.host}${url.pathname}`;
+    } catch { /* Not a URL: not repeated. */ }
+    throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}${shown}`);
   }
   return { name, target };
 }

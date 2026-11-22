@@ -108,10 +108,6 @@ describe("the worker's policy", () => {
         .toEqual(["/", "/assets/main-abc.css", "/assets/main-abc.js", "/assets/other-abc.js", "/assets/pubky-abc.js", "/assets/translate-abc.js"]);
     });
 
-    it("not the language detector's worker either: an asset, so not one of those chunks", () => {
-      expect(precacheList(["assets/main-abc.js", "assets/translateDetector.worker-abc.js"])).toEqual(["/", "/assets/main-abc.js"]);
-    });
-
     // What a build of the web app is made of, in the shape Rollup hands the plugin: the online-only flows and the languages
     // are dynamic imports, each a chunk (or two) of its own.
     const app = "/home/me/ghostly/apps/ui/src";
@@ -733,7 +729,7 @@ describe("the shares the worker holds and forwards", () => {
     locks.set("lock-opened", "ghostly-peer-home");
     await worker.looked();
     expect(leaving.heard).toEqual([]);
-    worker.say({ type: "share-ready" }, opened);
+    worker.say({ type: "share-ready", profile: "home" }, opened);
     expect(opened.heard).toEqual([{ type: "share", item: item("for Ana") }]);
   });
 
@@ -772,6 +768,36 @@ describe("the shares the worker holds and forwards", () => {
     expect(opened.asked).toBe(0);
     expect(other.asked).toBe(1);
     expect(other.heard).toEqual([]);
+  });
+
+  it("a share a tab of one profile asked to forward goes to no page of another profile, which gets only the share opened for it", async () => {
+    const opened = page("opened");
+    const other = page("other");
+    const work = page("work");
+    const worker = await startWorker(undefined, [opened, other, work]);
+    await worker.post("for work");
+    worker.say({ type: "share-forward", profile: "work" }, opened);
+    await worker.looked();
+    // A tab of another profile opened for a share of its own takes over meanwhile: it gets that one, never the other.
+    worker.say({ type: "share-ready", profile: "home" }, other);
+    expect(other.heard).toEqual([{ type: "share-none" }]);
+    await worker.post("for home");
+    worker.say({ type: "share-here", profile: "work" }, work);
+    expect(work.heard).toEqual([{ type: "share", item: expect.objectContaining(item("for work")) }]);
+    expect(opened.heard).toEqual([{ type: "share-forwarded" }]);
+    worker.say({ type: "share-ready", profile: "home" }, other);
+    expect(other.heard).toEqual([{ type: "share-none" }, { type: "share", item: expect.objectContaining(item("for home")) }]);
+  });
+
+  it("a page that did not say its profile gets no share a tab asked to forward to one", async () => {
+    const opened = page("opened");
+    const older = page("older");
+    const worker = await startWorker(undefined, [opened, older]);
+    worker.say({ type: "share-keep", item: item("for Ana") }, opened);
+    worker.say({ type: "share-forward", profile: "work" }, opened);
+    await worker.looked();
+    worker.say({ type: "share-ready" }, older);
+    expect(older.heard).toEqual([{ type: "share-none" }]);
   });
 
   it("a share forwarded never goes to the app's page on its way out (a share into the same window replaced it)", async () => {

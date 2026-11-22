@@ -12,7 +12,7 @@ import {
 } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { HandoffPasswordError, startPakeGiver, startPakeTaker, type HandoffVerifier, type PakeGiver, type PakeTaker } from "./handoffPake";
-import { MAX_EARLIER_SETS, forkTimes, isEarlierSet, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
+import { MAX_EARLIER_SETS, MAX_FETCH_FILES, forkTimes, isEarlierSet, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type FetchFile, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
 import type { TurnOutcome } from "./turn";
 import type { HandoffTakerFacts } from "./handoffWallets";
 
@@ -142,8 +142,8 @@ export interface HandoffStaging {
   readonly database: string;
   /** The files this staging holds whole and checked. */
   held(): Promise<HandoffFile[]>;
-  /** A file is about to be written from its start. */
-  begin(id: string): Promise<void>;
+  /** Files about to be written from their start: all of a pass's at once, not one round trip each. */
+  begin(ids: readonly string[]): Promise<void>;
   append(id: string, offset: number, bytes: Uint8Array): Promise<void>;
   /** A file is whole and its digest checked: kept, and listed by `held`. */
   finish(file: HandoffFile): Promise<void>;
@@ -357,13 +357,13 @@ const isLater = (file: { size: number }, later: number | undefined): boolean => 
 
 // -- sending and receiving parts ------------------------------------------------------------------------------------
 
-interface OutPart { name: string; size: number; read(offset: number, length: number): Promise<Uint8Array> }
+export interface OutPart { name: string; size: number; read(offset: number, length: number): Promise<Uint8Array> }
 
 /**
  * Sends parts in sealed pieces, at most `HANDOFF_WINDOW` unconfirmed. `stop()` ends a run (the link dropped, a new
  * plan came): it returns `stopped`, and a new run starts from what the taker said it holds.
  */
-class PartSender {
+export class PartSender {
   private run = 0;
   private outstanding: { part: string; end: number }[] = [];
   private wake: (() => void)[] = [];
@@ -701,13 +701,15 @@ export class HandoffGiver {
   }
 
   /**
-   * A turn read on this standby found the record of `key` at `turn`: the device it released to took the turn, which is
+   * A turn read on this standby found a record at `turn`: the device it released to took the turn, which is
    * what the `handoff-done` would have said. That frame goes once, as the taker reloads, and can be lost; without this
-   * the screen said "Moving to …" for good, with no Use here, until that device offered the profile back.
+   * the screen said "Moving to …" for good, with no Use here, until that device offered the profile back. Another
+   * device's record at the release's turn or above (a forced takeover that won) ends the release too: the taker steps
+   * back from it, and the screen and a Take over follow the record's active device, not the one released to.
    */
-  turnTaken(key: string, turn: number): Promise<void> {
+  turnTaken(turn: number): Promise<void> {
     return this.exclusive(async () => {
-      if (this.stopped || this.phase !== "released" || key !== this.peer || turn <= this.turn) return;
+      if (this.stopped || this.phase !== "released" || turn <= this.turn) return;
       await this.taken();
     }).catch(() => {});
   }
@@ -1260,6 +1262,19 @@ export class HandoffTaker {
   }
 
   /**
+   * A forced takeover here (`takeover.ts`), before it writes: a pull with no release ends, verified or not, and its
+   * staging goes whole. The takeover runs the copy this device holds, and its note takes the place of the pull's, so
+   * nothing would name that staging for the drop at start or a later pull. One that holds a release is not touched.
+   */
+  abandon(): Promise<void> {
+    return this.exclusive(async () => {
+      if (this.phase === "installing" || this.phase === "settling" || this.phase === "unsettled" || this.phase === "done") return;
+      if (this.phase !== "idle" && this.phase !== "failed" && this.peer && this.ports.links.live(this.peer)) this.out(handoffCancelFrame("cancelled"));
+      await this.giveUp("cancelled");
+    });
+  }
+
+  /**
    * After a reload: what the device record says. A standby that was receiving goes on when the giver is back (its
    * staged files are kept; the parts of pass 2 are not, and come again). A `taking` device installs, or takes the turn.
    */
@@ -1577,6 +1592,7 @@ export class HandoffTaker {
     }
     // This device said it held part of a bundle, and the giver made another: it is sending that one from the wrong byte.
     let saidOtherBundle = false;
+    const fresh: InPart[] = [];
     for (const [partName, size, digest] of parts) {
       const known = this.incoming.get(partName);
       if (known && known.size === size && known.sha256 === digest && !known.done) continue;
@@ -1584,10 +1600,14 @@ export class HandoffTaker {
       const fileDigest = filePartDigest(partName);
       const id = fileDigest ? ids[fileDigest]?.[0] : undefined;
       if (fileDigest && !id) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
-      const part: InPart = { name: partName, size, sha256: digest, got: 0, hash: sha256.create(), ...(id ? { id } : { chunks: [] }) };
-      if (id) await this.staging!.begin(id);
-      this.incoming.set(partName, part);
-      if (size === 0) await this.partDone(part);
+      fresh.push({ name: partName, size, sha256: digest, got: 0, hash: sha256.create(), ...(id ? { id } : { chunks: [] }) });
+    }
+    // Every file of the pass begins at once: one at a time, 3,000 small files waited 1.6 to 2.6 s here (bug hunt, 2026-11-13).
+    const begun = fresh.flatMap((part) => (part.id ? [part.id] : []));
+    if (begun.length) await this.staging!.begin(begun);
+    for (const part of fresh) {
+      this.incoming.set(part.name, part);
+      if (part.size === 0) await this.partDone(part);
     }
     this.totals = { bytes: 0, total };
     this.changed();
@@ -1678,7 +1698,7 @@ export class HandoffTaker {
     if (part.retried) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
     if (part.id) await this.staging!.discard(part.id).catch(() => {});
     this.incoming.set(part.name, { ...part, got: 0, hash: sha256.create(), retried: true, done: false, ...(part.id ? {} : { chunks: [] }) });
-    if (part.id) await this.staging!.begin(part.id);
+    if (part.id) await this.staging!.begin([part.id]);
     this.totals.bytes -= part.got;
     await this.sendHave();
   }
@@ -1707,9 +1727,12 @@ export class HandoffTaker {
     const earlierSets = devices ? withEarlierSets(record!.earlierSets, devices.bytes) : undefined;
     if (earlierSets === null) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
     this.h = h;
+    // The files left for later go with the install too: the profile this device runs fetches them from the giver
+    // (`handoffFiles.ts`), and Remove of that device says they are still there.
+    const fetchFiles: FetchFile[] = [...this.behind.values()].flatMap(([, size, digest]) => (this.ids[digest]?.length ? [{ sha256: digest, size, ids: this.ids[digest]!.slice(0, 64), on: this.peer! }] : [])).slice(0, MAX_FETCH_FILES);
     // The earlier sets go into this device's record with the same write, so the install carries them under the staged
     // name; kept should the handoff stop, as a staying device keeps its own (it delivers their frames all the same).
-    await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", h: toBase64Url(h), at: this.now() }, ...(earlierSets ? { earlierSets } : {}) });
+    await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", h: toBase64Url(h), at: this.now() }, ...(earlierSets ? { earlierSets } : {}), fetchFiles: fetchFiles.length ? fetchFiles : undefined });
     this.phase = "verified";
     this.out(await handoffVerifiedFrame(this.ports.turnAddress, this.turn + 1, h, { publicKey: this.ports.ownKey, sign: (bytes) => this.ports.sign(bytes) }));
     this.arm(HANDOFF_TIMINGS.releaseMs, () => this.askAgain());
@@ -1886,7 +1909,7 @@ export class HandoffTaker {
     this.pake = null; this.bundle = null; this.devices = null; this.incoming.clear(); this.manifestBuffer = { parts: [], later: [], ids: {} };
     await this.staging?.dropRest().catch(() => {});
     const record = await this.ports.records.read().catch(() => null);
-    if (record?.handoff?.role === "taking" && takes(record.state)) await this.ports.records.amend({ handoff: { ...record.handoff, step: "stopped", secret: undefined } }).catch(() => {});
+    if (record?.handoff?.role === "taking" && takes(record.state)) await this.ports.records.amend({ handoff: { ...record.handoff, step: "stopped", secret: undefined }, fetchFiles: undefined }).catch(() => {});
   }
 
   private arm(ms: number, then: () => void | Promise<void>): void {

@@ -38,6 +38,19 @@ describe("the address of a chat no longer on this device", () => {
     await waitFor(() => expect(window.location.hash).toBe("#/"));
   });
 
+  it("a stored chat's address with a trailing slash opens the chat, as the address without it does", async () => {
+    const reading = readInvite(createChatInvite().inviteCode);
+    if (!reading.ok) throw new Error("a fresh invite reads");
+    const id = ensureSession(reading.keys);
+
+    render(<Root />);
+    go(`#/chat/${id}/`);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+    expect(window.location.hash).toBe(`#/chat/${id}/`);
+    deleteSession(id);
+  });
+
   it("a code that looks like an invite keeps its refusal", async () => {
     render(<Root />);
     go("#/chat/ghostly1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq");
@@ -102,6 +115,39 @@ describe("a link with a doubled `#` before it", () => {
     fakeEngine.on("joinGroupByLink", () => ({ groupId: "g1" }));
     window.history.replaceState(null, "", form);
     render(<Root />);
+    await waitFor(() => expect(window.location.hash).toBe("#/group/g1"));
+  }, 60_000);
+
+  /*
+   * A link after a page other than home (`#/chat/<id>#ghostly1…`, `#/settings#ghostly1…`: pasted after the address the
+   * app was on) is the same link too: no intake reads a page's hash, so it stayed in the address and the history.
+   */
+  it.each(["#/settings#{code}", "#/chat/{id}#{code}", "#/settings##{code}"])("an invite given to the open app as %s joins, and leaves the address", async (form) => {
+    const first = readInvite(createChatInvite().inviteCode);
+    if (!first.ok) throw new Error("a fresh invite reads");
+    const id = ensureSession(first.keys);
+    render(<Root />);
+    const code = createChatInvite().inviteCode;
+    window.location.hash = form.replace("{id}", id).replace("{code}", code);
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(listSessions()).toHaveLength(2));
+    const made = listSessions().find((session) => session.id !== id)!;
+    await waitFor(() => expect(window.location.hash).toBe(`#/chat/${made.id}`));
+  }, 60_000);
+
+  it("a bad invite after a page is refused, and leaves the address", async () => {
+    render(<Root />);
+    window.location.hash = "#/settings#ghostly1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    expect(await screen.findByTestId("invite-link-invalid")).toBeInTheDocument();
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }, 60_000);
+
+  it("a group's link after a page joins, and leaves the address", async () => {
+    fakeEngine.on("joinGroupByLink", () => ({ groupId: "g1" }));
+    render(<Root />);
+    window.location.hash = "#/settings#/join/group2/abc";
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
     await waitFor(() => expect(window.location.hash).toBe("#/group/g1"));
   }, 60_000);
 });
@@ -245,6 +291,29 @@ describe("a link whose code ends in a `/`", () => {
     expect(window.location.hash).toBe("#/");
     expect(takeDeviceLink()?.code).toBe(code);
   });
+});
+
+// covers: invite.link
+describe("a device code's link whose name is a group's link", () => {
+  /*
+   * A device code's link names the profile before the code (`#<profile>#ghostly1z…`), and the name may read as a group's
+   * link (`#/join/group2/…#ghostly1z…`, made by hand). A fresh page takes it as the device code alone. Given to the open
+   * app it was taken twice: the group was joined and opened, and the device-join dialog came over it.
+   */
+
+  afterEach(() => { window.location.hash = ""; takeDeviceLink(); });
+
+  it("given to the open app, it goes to the join host only: no group is joined", async () => {
+    fakeEngine.on("joinGroupByLink", () => ({ groupId: "g1" }));
+    render(<Root />);
+    await screen.findByTestId("sidebar");
+    const code = createDeviceInvite(new Uint8Array(32).fill(7)).code;
+    window.location.hash = `#/join/group2/abc/def#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    expect(await screen.findByTestId("device-join-confirm")).toBeInTheDocument();
+    expect(window.location.hash).toBe("#/");
+    expect(fakeEngine.callsTo("joinGroupByLink")).toHaveLength(0);
+  }, 60_000);
 });
 
 // covers: invite.invalid, invite.link, groups.link.join

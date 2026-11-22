@@ -53,7 +53,7 @@ describe("the deck primitive", () => {
 
   it("gives its Previous and Next arrows a finger's 44 px on a phone (deck.css keeps them 30 px elsewhere)", () => {
     show();
-    for (const id of ["plain-deck-prev", "plain-deck-next"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:min-h-11", "max-md:min-w-11");
+    for (const id of ["plain-deck-prev", "plain-deck-next"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:min-h-[44px]", "max-md:min-w-[44px]");
   });
 
   it("gives each face its place: the chosen one active, the ones after it marked as after", () => {

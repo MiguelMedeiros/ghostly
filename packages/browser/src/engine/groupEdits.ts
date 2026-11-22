@@ -138,7 +138,9 @@ export class GroupEdits {
     const chat = chatOf(groupId);
     const message = await this.find(chat, messageId);
     looked.missing = !message;
-    if (!message || !canEditInGroup(message) || underOldKey(message, membership)) return refuse("Only your own text messages can be edited");
+    if (!message || !canEditInGroup(message)) return refuse("Only your own text messages can be edited");
+    // Mine, but under the key I had before: said as such, not as someone else's (a reply was offered for it).
+    if (underOldKey(message, membership)) return refuse("This message is from before you were removed and invited back, and can't be edited now");
     const text = raw.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
     if (isJoinNotice(text)) return refuse("An edit cannot read as a join notice.");
@@ -173,7 +175,8 @@ export class GroupEdits {
     if (!membership) return refuse(this.notMember(groupId));
     const chat = chatOf(groupId);
     const message = typeof messageId === "string" ? await this.find(chat, messageId) : undefined;
-    if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id) || underOldKey(message, membership)) return refuse("Only your own messages can be deleted for everyone");
+    if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id)) return refuse("Only your own messages can be deleted for everyone");
+    if (underOldKey(message, membership)) return refuse("This message is from before you were removed and invited back, and can't be deleted for everyone now");
     if (!canRemove(message)) return refuse("A payment, a request or a notice cannot be deleted for everyone");
     const e = removalNumber(message.edit?.seq);
     await this.host.removeMine(chat, message, { id: message.id, e, at: this.now(), pending: true });

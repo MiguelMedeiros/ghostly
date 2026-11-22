@@ -263,6 +263,45 @@ describe("offline", () => {
     });
   });
 
+  describe("offline, on a menu page", () => {
+    // The list, which says it, is hidden on a phone's tab pages: Wallet's Pay and Receive, Services' Share and the
+    // Identities checks all need the network, and nothing there said it was gone.
+    const PAGE_SENTENCE = "Offline · What needs the network here won't work until you're back online.";
+
+    it.each(["/wallet", "/settings", "/services", "/identities"])("on a phone, %s says it over the page, and it goes once back online", async (page) => {
+      windowIs(true);
+      window.location.hash = `#${page}`;
+      const spy = offline();
+      render(<Root />);
+      await screen.findByTestId("mobile-tabs");
+      const banner = await screen.findByTestId("page-offline-banner");
+      expect(banner).toBeVisible();
+      expect(banner).toHaveAttribute("role", "status");
+      expect(banner).toHaveTextContent(PAGE_SENTENCE);
+      spy.mockReturnValue(true);
+      act(() => { window.dispatchEvent(new Event("online")); });
+      await waitFor(() => expect(screen.queryByTestId("page-offline-banner")).toBeNull());
+    });
+
+    it("on a phone's chat list, only the list says it", async () => {
+      windowIs(true);
+      window.location.hash = "#/";
+      offline();
+      render(<Root />);
+      expect(await screen.findByTestId("offline-banner")).toBeVisible();
+      expect(screen.queryByTestId("page-offline-banner")).toBeNull();
+    });
+
+    it("wider than a phone, leaves it to the chat list beside the page", async () => {
+      windowIs(false);
+      window.location.hash = "#/wallet";
+      offline();
+      render(<Root />);
+      expect(await screen.findByTestId("offline-banner")).toBeVisible();
+      expect(screen.queryByTestId("page-offline-banner")).toBeNull();
+    });
+  });
+
   describe("the chat list's offline notice", () => {
     // At 1280 px the 420 px list cut it to "… Nothing goes out until you're bac…", with no way to read the rest.
     it("wraps its sentence rather than cutting it", () => {

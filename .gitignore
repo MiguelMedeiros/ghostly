@@ -53,3 +53,6 @@ apps/ui/src/assets/apps/*.part
 
 # Throwaway bug-hunt probes stay out of the repo
 .hunt/
+
+# A worktree of dev nested inside a session worktree (its gitlink got committed once)
+/.wt/
