@@ -255,6 +255,16 @@ describe("a chat as the contact drives it", () => {
     expect(node.getState().links[0].pairing).toEqual({ status: "connecting" });
   });
 
+  it("texts the contact had no room for go once the link says there is room, not at their backoff check", async () => {
+    // Written while the contact was away, their checks were minutes apart: back, the ones past the contact's burst
+    // waited that long again, though the contact took more 10 s later.
+    const chat = row();
+    const { linkOf, node } = await started(chat);
+    const flush = vi.spyOn(node["outboxFor"](chat.id), "flush");
+    linkOf(chat.id).options.events.onTextRoom();
+    expect(flush).toHaveBeenCalledOnce();
+  });
+
   it("a removed chat's link closing as it stops makes none of its outbox or files again", async () => {
     // A bot that paired with new contacts and removed their chats kept both for every chat it ever removed.
     const chat = row();
@@ -288,6 +298,19 @@ describe("a chat as the contact drives it", () => {
     await node.shutdown();
     const again = await started(chat);
     expect(again.node.getState().services.find((s) => s.id === serviceId)?.sharedWith).toEqual([other.peerPubKeyZ32]);
+  });
+
+  it("a service still shared with a contact whose chat is gone (deleted by an older release) is no longer shared with it at start", async () => {
+    const gone = row(), other = row();
+    onTestFinished(async () => { for (const s of await db.getServices()) await db.deleteService(s.id); });
+    await db.putService({ id: "web", name: "web", target: "http://127.0.0.1:3400", enabled: true, createdAt: 1,
+      sharedWith: [gone.peerPubKeyZ32, other.peerPubKeyZ32] });
+    const { node } = await started(other);
+    const service = () => node.getState().services.find((s) => s.id === "web")!;
+    expect(service().sharedWith).toEqual([other.peerPubKeyZ32]);
+    // The same invite joined again (the same contact key) is not served.
+    expect(mayReach(service(), gone.peerPubKeyZ32)).toBe(false);
+    await vi.waitFor(async () => expect((await db.getServices()).find((s) => s.id === "web")?.sharedWith).toEqual([other.peerPubKeyZ32]));
   });
 
   it("a ready session remembers which ways of paying the contact chose, wallets aside, for requests held while it is away", async () => {

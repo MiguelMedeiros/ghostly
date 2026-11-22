@@ -394,6 +394,13 @@ describe("a page that follows a switch starts again where the profile in use was
     expect(overlays).toEqual([{ name, reloadsBefore: 0 }]);
     expect(JSON.parse(session.get("ghostly_switching")!)).toMatchObject({ id: WORK, name });
   });
+
+  // Its overlay says the switch was made in another tab: nothing else here tells the person why their profile changed.
+  it("as a switch another tab made, for its overlay's words", async () => {
+    useProfile(world, WORK);
+    await startAgain();
+    expect(JSON.parse(session.get("ghostly_switching")!)).toMatchObject({ id: WORK, elsewhere: true });
+  });
 });
 
 describe("pages follow a peer started again in another tab", () => {
@@ -453,6 +460,27 @@ describe("a contact's app open as the profile before", () => {
     await expectClosed(tabId);
     // Only the viewer: no other tab is touched.
     expect(world.tabs.has(other.id!)).toBe(true);
+  });
+
+  it("closes when another profile is the one in use as the peer comes back, its notices going with it", async () => {
+    const tabId = await openViewer(world);
+    world.session.set("notice:n1", "chatOfPersonal");
+    world.session.set("notice:n2", `profile:${HOME}`);
+    // Its document went away (a crash, the task manager), and a switch came before anything made it again.
+    world.endOffscreen();
+    useProfile(world, WORK, [HOME]);
+    expect(await ensure()).toEqual({ ok: true });
+    expect(servers().at(-1)!.database).toBe(`ghostly_${WORK}`);
+    await expectClosed(tabId);
+    expect([...world.session.keys()].filter((key) => key.startsWith("notice:"))).toEqual(["notice:n2"]);
+  });
+
+  it("stays open when the peer comes back as the same profile", async () => {
+    const tabId = await openViewer(world);
+    world.endOffscreen();
+    expect(await ensure()).toEqual({ ok: true });
+    expect(world.tabs.has(tabId)).toBe(true);
+    expect(world.session.has(`viewer:${tabId}`)).toBe(true);
   });
 
   it("closes when the peer starts again (Clear all data)", async () => {

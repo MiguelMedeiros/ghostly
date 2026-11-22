@@ -522,6 +522,19 @@ describe("shared services", () => {
     expect([a.aborted, b.aborted]).toEqual([true, true]);
   });
 
+  it("a removed app's request count goes with it: one added again under the same name starts at none", () => {
+    const { node } = engine();
+    const alice = createIdentity().pubKeyZ32;
+    const { serviceId } = node.addService({ name: "Blog", target: "localhost:3000" });
+    node.setServiceShared({ serviceId, peerPubKeyZ32: alice, shared: true });
+    for (let i = 0; i < 5; i++) node["hostedService"](serviceId, alice);
+    expect(node.getState().services[0]).toMatchObject({ id: serviceId, requests: 5 });
+    node.removeService({ serviceId });
+    const again = node.addService({ name: "Blog", target: "localhost:3000" });
+    expect(again.serviceId, "the same name gives the same id").toBe(serviceId);
+    expect(node.getState().services[0]).toMatchObject({ id: serviceId, requests: 0 });
+  });
+
   it("a contact is granted no more apps than it can see; a grant past them is refused, not shared on paper", () => {
     const { node } = engine();
     const alice = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32;

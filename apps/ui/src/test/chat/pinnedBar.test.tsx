@@ -73,7 +73,7 @@ describe("the pinned message's bar, Unpin and a phone", () => {
   describe("the pinned message's bar on a phone", () => {
     it("has a 44 px ⓘ and ✕, and the desktop keeps its 32 px", () => {
       renderApp(<Chat />);
-      for (const id of ["pinned-info", "pinned-unpin"]) expect(screen.getByTestId(id)).toHaveClass("w-8", "h-8", "max-md:w-11", "max-md:h-11");
+      for (const id of ["pinned-info", "pinned-unpin"]) expect(screen.getByTestId(id)).toHaveClass("w-8", "h-8", "max-md:w-[44px]", "max-md:h-[44px]");
     });
   });
 });
@@ -146,8 +146,8 @@ describe("a spoiler where its message is quoted or pinned", () => {
     expect(sentReply(message)?.snippet).toBe("Spoiler: ▒▒▒");
   });
 
-  it("other formatting in the line stays as it was", () => {
-    expect(messageSnippet({ text: "**bold** and ~~gone~~" })).toBe("**bold** and ~~gone~~");
+  it("other formatting in the line reads without its markers, as the chat list does", () => {
+    expect(messageSnippet({ text: "**bold** and ~~gone~~" })).toBe("bold and gone");
   });
 });
 

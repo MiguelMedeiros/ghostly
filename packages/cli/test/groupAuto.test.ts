@@ -344,6 +344,24 @@ describe("group auto", () => {
     await expect(callApi(ctx, "group.auto", { on: "false", from: ["Miguel"] })).rejects.toMatchObject({ code: "bad_request", message: "on must be true or false" });
   });
 
+  it("over the API: a key the method does not take is refused, never read as left out (call.auto on for every contact)", async () => {
+    const w = world();
+    const calls = new CallManager({ engine: { chatView: chatViewOf, getState: w.state, setCallSignal: async () => {} } as unknown as CallEngine, emit: () => {}, profileDir: w.dir });
+    const ctx = { runtime: { server: { node: w.engine }, paths: { name: "default" } }, calls, groupAuto: w.auto, mode: "daemon", version: "test" } as unknown as ApiContext;
+    for (const key of ["From", "chats", "form"]) {
+      await expect(callApi(ctx, "call.auto", { on: true, [key]: ["Miguel"] }), key).rejects.toMatchObject({
+        code: "bad_request", message: `call.auto takes no "${key}": it takes on, from, rate`, details: { unknown: [key], takes: ["on", "from", "rate"] },
+      });
+      await expect(callApi(ctx, "group.auto", { on: true, [key]: ["Miguel"] }), key).rejects.toMatchObject({ code: "bad_request", message: `group.auto takes no "${key}": it takes on, from` });
+    }
+    expect(calls.getAuto()).toEqual({ on: false, from: [], rate: 48000 });
+    expect(await callApi(ctx, "call.auto", { on: true, from: ["Miguel"], rate: 16000 })).toEqual({ autoAnswer: { on: true, from: ["chat-owner"], rate: 16000 } });
+    // Deleted here only, the contact keeping it, when everyone was meant.
+    await expect(callApi(ctx, "chat.delete", { chat: "Miguel", message: "me_1", Everyone: true })).rejects.toMatchObject({
+      code: "bad_request", message: 'chat.delete takes no "Everyone": it takes chat, message, everyone, wait, timeout, purge',
+    });
+  });
+
   it("the command: on needs --from, --from goes with on only", () => {
     const params = (argv: string[]) => {
       const command = COMMANDS["group auto"];

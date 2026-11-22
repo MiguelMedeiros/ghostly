@@ -3,7 +3,7 @@ import { replyRef, replyTo, type ReplyTarget } from "@ghostly/browser/shared/rep
 import type { MessageReply } from "@ghostly/browser/shared/types";
 import { revealMessage } from "../hooks/useRowWindow";
 import { reducedMotion } from "./motion";
-import { filePreview } from "./chatList";
+import { filePreview, previewText } from "./chatList";
 import { appCardLine, cardLine, showsCard } from "./statusCards";
 import type { ChatFile, ChatMessage } from "./types";
 import { englishT, type Translate } from "../locales/translate";
@@ -46,8 +46,21 @@ export type Quotable = ReplyTarget & { sender: string; text: string; member?: st
  */
 export function messageSnippet(message: { text: string; card?: StatusCard; file?: ChatFile }, t: Translate = englishT, appCards = false): string {
   if (showsCard(message.card)) return replySnippet(cardLine(message.card));
-  return replySnippet(appCardLine(message.card, appCards, t) ?? filePreview(message.file, t) ?? message.text);
+  return replySnippet(appCardLine(message.card, appCards, t) ?? filePreview(message.file, t) ?? plainLine(message.text, t));
 }
+
+/** A picture sent inline: `replySnippet` names it, its data is no line to read. */
+const INLINE_PICTURE = /^data:image\//i;
+
+/**
+ * A text as the chat list reads it (`previewText`): markdown markers and a link's address gone, spoilers covered, a link
+ * whose words look like another address shown by where it goes. Only what this side draws: the line a reply sends
+ * (`replyTo` in shared/replies) is the core's `replySnippet` of the text, as before.
+ */
+const plainLine = (text: string, t: Translate): string => INLINE_PICTURE.test(text.trimStart()) ? text : previewText(text, t);
+
+/** A line a reply carried (`r.s`, from any app's version) as this side draws it: plain, as an original here reads. */
+const wireLine = (snippet: string, t: Translate): string => snippet && replySnippet(plainLine(snippet, t));
 
 /**
  * A chat's messages by their id here and by the id a reply names (`replyRef`). `partial`: its older messages are not
@@ -137,7 +150,7 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf,
     // A button press quotes the question as the presser answered it, even if its bot changed it after (WISP 406 · Message Buttons):
     // only when the engine found the question as the press came (`messageId`), so that line is its own. One that came
     // before its original kept the wire's line, which is only what the replier said: the original here wins.
-    const snippet = reply.button && reply.messageId && reply.snippet ? reply.snippet : messageSnippet(original, t, appCards);
+    const snippet = reply.button && reply.messageId && reply.snippet ? wireLine(reply.snippet, t) : messageSnippet(original, t, appCards);
     return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet, mine: from === "me", targetId: original.id, ...(member && { member }) };
   }
   const name = reply.from ? nameOf(reply.from, reply.member) : undefined;
@@ -146,7 +159,7 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf,
   // the replier's word and says so at once, older messages here or not.
   const state: QuoteState = reply.messageId ? index.partial ? "loading" : "deleted" : reply.snippet ? "unverified" : "missing";
   const member = reply.from === "peer" ? reply.member : undefined;
-  return { state, name, snippet: state === "unverified" || state === "loading" ? reply.snippet : "", mine: reply.from === "me", ...(member && { member }) };
+  return { state, name, snippet: state === "unverified" || state === "loading" ? wireLine(reply.snippet, t) : "", mine: reply.from === "me", ...(member && { member }) };
 }
 
 /** How long a message a quote jumped to stays marked. */

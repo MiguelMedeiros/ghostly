@@ -151,6 +151,11 @@ const TOAST_DURATION = 5_000;
 const PROGRESS_EVERY_MS = 250;
 /** The pause in the typing after which the draft is written (and the secret guard reads it). */
 const DRAFT_SAVE_PAUSE = 400;
+/**
+ * What a text's envelope takes of the DHT's bytes once sealed: about 248 of the 256 fit (the CLI's `DHT_TEXT_FITS`). The
+ * edge moves by a byte or two with the chat's sequence, so the composer's count says "about".
+ */
+const DHT_SEAL_BYTES = 8;
 
 /** The same file on disk, picked again: a picker gives a new File each time. */
 
@@ -392,6 +397,12 @@ export function MessageInput({
     toastHeld.current = { pointer: false, focus: false };
     setToast(null);
     setToastAction(null);
+  }, []);
+
+  // The composer goes (the chat closed): its card's wait goes with it, never to run on a page that is gone.
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = null;
   }, []);
 
   /** The card's time runs again, in full, unless it is pointed at or has the focus: it stays until it has been read. */
@@ -1013,8 +1024,26 @@ export function MessageInput({
   const bytes = maxBytes || softBytes || textBytes ? new TextEncoder().encode(text.trim()).length : 0;
   const remaining = maxBytes ? maxBytes - bytes : textBytes ? textBytes - bytes : maxLength - text.length;
   const overSoft = !!softBytes && bytes > softBytes;
+  // Within the DHT's 256 bytes, but past what its packet carries once sealed (about 248, core dhtDelivery.ts
+  // `DHT_PACKET_BUDGET`): it does not go there either, so it reads amber as one past 256 does.
+  const nearSoft = !!softBytes && !overSoft && bytes > softBytes - DHT_SEAL_BYTES;
   // Near the limit that refuses, its count wins over the DHT's (past 16 KiB is past 256 B too).
   const nearHard = remaining < 100 && (!softBytes || !!maxBytes || !!textBytes);
+  const dhtCounted = !!softBytes && !maxBytes && !nearHard && bytes > softBytes - 60;
+  // What the count's colour says, in words the field carries (its description) and a screen reader hears once as it
+  // changes: a `title` on the count reaches only a mouse.
+  const countState = dhtCounted ? (overSoft ? "overSoft" : nearSoft ? "nearSoft" : null)
+    : nearHard && remaining < 50 ? (remaining < 0 ? "over" : "left") : null;
+  const countNote = countState === "overSoft" ? t("composer.overSoft", { bytes: softBytes! })
+    : countState === "nearSoft" ? t("composer.nearSoft", { bytes: softBytes! - DHT_SEAL_BYTES })
+    : countState === "left" ? t(maxBytes || textBytes ? "composer.bytesLeft" : "composer.charactersLeft", { count: remaining })
+    : countState !== "over" ? undefined
+    : maxBytes ? t("composer.dhtTooLong", { bytes, max: maxBytes })
+    : textBytes ? t("composer.tooLongBytes", { bytes: formatAmount(bytes, t.language), max: formatAmount(textBytes, t.language) })
+    : t("composer.tooLong", { count: formatAmount(text.length, t.language), max: formatAmount(maxLength, t.language) });
+  const countNoteId = useId();
+  const [countSaid, setCountSaid] = useState<{ state: typeof countState; text: string }>({ state: null, text: "" });
+  if (countSaid.state !== countState) setCountSaid({ state: countState, text: countNote ?? "" });
 
   // With the sheet open the composer is behind its veil, outside the dialog: what it has to say is said on the sheet.
   const sheetOpen = !!attached && !locked;
@@ -1047,7 +1076,7 @@ export function MessageInput({
       </span>
       {toastAction && (
         <button type="button" data-testid="composer-toast-action" onClick={() => { toastAction.run(); hideToast(); }}
-          className="-my-1.5 min-h-8 max-md:min-h-11 shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
+          className="-my-1.5 min-h-8 max-md:min-h-[44px] shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
           {toastAction.label}
         </button>
       )}
@@ -1091,7 +1120,7 @@ export function MessageInput({
       )}
       {shownConverting && (
         <button ref={cancelRef} type="button" data-testid="video-convert-cancel" onClick={() => cancelConverting(filesId, shown)}
-          className="min-h-6 max-md:min-h-11 shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
+          className="min-h-6 max-md:min-h-[44px] shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
           {t("common.cancel")}
         </button>
       )}
@@ -1156,11 +1185,13 @@ export function MessageInput({
               disabled={disabled}
               rows={1}
               dir={draftDirection(text)}
+              aria-describedby={countNote ? countNoteId : undefined}
               className="composer-textarea"
             />
-            {softBytes && !maxBytes && !nearHard && bytes > softBytes - 60 && (
-              <span data-testid="dht-byte-count" title={overSoft ? t("composer.overSoft", { bytes: softBytes }) : undefined}
-                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-warn-ink" : "text-text-muted"}`}>
+            {countNote && <span id={countNoteId} className="sr-only">{countNote}</span>}
+            {dhtCounted && (
+              <span data-testid="dht-byte-count" title={countNote}
+                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft || nearSoft ? "text-warn-ink" : "text-text-muted"}`}>
                 {bytes} / {softBytes} B
               </span>
             )}
@@ -1285,6 +1316,8 @@ export function MessageInput({
           void onSendFile(file).then((err) => { if (err) showToast(err); });
         }} />
       )}
+      {/* Said once as the count's state changes (muted, near, over), not on each key. */}
+      <span data-testid="composer-count-said" className="sr-only" aria-live="polite">{countSaid.text}</span>
     </div>
   );
 }

@@ -64,6 +64,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const [removing, setRemoving] = useState<GroupMemberView | null>(null);
   /** The member whose Hand over admin was pressed: the one admin role leaves me for them, so it is asked first too. */
   const [promoting, setPromoting] = useState<GroupMemberView | null>(null);
+  /** What the dialog's live line says: whom the admin role went to. */
+  const [said, setSaid] = useState("");
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal();
@@ -155,6 +157,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   // The link turned off or on elsewhere (the admin, another of my devices) swaps the link panel, or takes it away from a
   // community's member, with what had the focus: the list, next in the dialog, has it rather than the page.
   const linkOn = !!live.entryLink, wasOn = useRef(linkOn);
+  // A group whose name has not arrived yet (or that the admin cleared) is "A group", as the page header calls it.
+  const title = live.name || t("group.chat.unnamed");
   useEffect(() => {
     if (wasOn.current === linkOn) return;
     wasOn.current = linkOn;
@@ -164,16 +168,16 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-center gap-3">
-        <AvatarOpener src={live.picture} name={live.name} testId="group-members-avatar-open" className="shrink-0 rounded-full">
+        <AvatarOpener src={live.picture} name={title} testId="group-members-avatar-open" className="shrink-0 rounded-full">
           <GroupAvatar picture={live.picture} size={56} testId="group-members-avatar" className="bg-accent/15" />
         </AvatarOpener>
         <div className="min-w-0">
           {/* The group's and each person's name read in their own direction: a Latin name in Arabic is cut at its end. As
               wide as the name, the title stays beside the picture whichever way the name runs. A long name wraps rather
               than ends in "…": on a phone this panel is the group's only info screen, and a member has no Rename field. */}
-          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full break-words text-base font-semibold">{live.name}</h2>
+          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full break-words text-base font-semibold">{title}</h2>
             : <form className="flex items-center gap-2 max-md:gap-3" onSubmit={e => { e.preventDefault(); void rename(); }}>
-              <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
+              <h2 id={`${id}-title`} className="sr-only">{title}</h2>
               {/* While the engine renames, the field is read-only and Save does nothing: disabled, they would drop the focus to the page. */}
               <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} aria-describedby={`${id}-rename-hint`} ref={namingField.ref} value={naming} dir={namingField.dir} readOnly={busy !== null}
                 onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={e => { namingField.onCompositionEnd(e); namingKeys.inputProps.onCompositionEnd(e); }} onKeyDown={e => { if (namingKeys.composing(e)) return; if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
@@ -200,7 +204,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
           </div>}
         </div>
       </div>
-      <button onClick={onClose} aria-label={t("common.close")} className="grid shrink-0 place-items-center rounded-full p-1.5 text-text-muted max-md:h-11 max-md:w-11 hover:bg-surface-hover hover:text-text-primary">
+      <button onClick={onClose} aria-label={t("common.close")} className="grid shrink-0 place-items-center rounded-full p-1.5 text-text-muted max-md:h-[44px] max-md:w-[44px] hover:bg-surface-hover hover:text-text-primary">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </button>
     </div>
@@ -239,7 +243,13 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     {removing && <RemoveMemberDialog name={memberName(removing, t, sameNamed(live.members))} linkOn={!!live.entryLink} returnFocus={list} onClose={() => setRemoving(null)}
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
     {promoting && <MakeAdminDialog name={memberName(promoting, t, sameNamed(live.members))} linkEnds={!!live.entryLink && live.profile !== "community"} returnFocus={list} onClose={() => setPromoting(null)}
-      onConfirm={() => { const key = promoting.key; setPromoting(null); void run(key, () => engine.call("makeGroupAdmin", { groupId: live.id, key })); }} />}
+      onConfirm={() => {
+        const key = promoting.key, name = memberName(promoting, t, sameNamed(live.members));
+        setPromoting(null); setSaid("");
+        void run(key, async () => { await engine.call("makeGroupAdmin", { groupId: live.id, key }); setSaid(t("group.event.admin", { name: isolate(name) })); });
+      }} />}
+    {/* The role handed over, said once: the focus goes to the list and the row's buttons go with the role, silently. */}
+    <p role="status" data-testid="group-members-live" className="sr-only">{said}</p>
     {secret && <SecretGuardDialog finding={secret} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void rename(true); }} />}
     {/* A community whose link is off says so here too: "anyone with the link can join" no longer holds, and a member has no link panel. */}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t(live.status === "active" && !live.entryLink ? "group.readNoteCommunityOff" : "group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>

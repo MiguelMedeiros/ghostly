@@ -77,6 +77,9 @@ describe("a 1:1 chat", () => {
     const sent = await t.node.sendMessage({ linkId: t.id, text: "hi" });
     expect(sent.error).toBeNull();
     await vi.waitFor(() => expect(t.contactGot.map(m => m.text)).toEqual(["hi"]));
+    // The contact's receipt comes after it got "hi": the rows are read once it marked the row delivered, so the
+    // comparison below sees only what the refused sends would change.
+    await vi.waitFor(async () => expect((await db.getMessages(t.id)).find(m => m.id === sent.messageId)?.delivery).toBe("delivered"));
     const rows = await db.getMessages(t.id);
     const exceeds = { refused: true, error: `Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.` };
     for (const text of OVER) {

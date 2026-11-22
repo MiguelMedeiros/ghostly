@@ -59,7 +59,7 @@ export class GroupAutoJoin {
       // Never a chat found only by a name its contact chose (`findOwnNamedChat`), as `call auto on --from`; a group's
       // name or id is refused as one ("is a group, not a chat", with its id), as there.
       const { links, groups } = this.host.engine.getState();
-      this.grants = findOwnNamedChats(links, next.from, groups).map((link) => ({ chat: link.id, contact: link.peerPubKeyZ32 }));
+      this.grants = findOwnNamedChats(links, next.from, groups, "--from takes the chats whose invitations it accepts").map((link) => ({ chat: link.id, contact: link.peerPubKeyZ32 }));
     }
     this.save();
     if (this.host.joins) this.check(this.host.engine.getState());
