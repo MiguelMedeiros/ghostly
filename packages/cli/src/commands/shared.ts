@@ -501,8 +501,10 @@ function writtenDay(text: string): [number, number, number] | undefined {
   return year && word ? [Number(year[1]), MONTHS.indexOf(word.toLowerCase()) + 1, Number(day)] : undefined;
 }
 
-/** A time of day, with the zone offset after it if there is one: `10:00`, `01:00:00.5`, `10:00 GMT+0200`, `01:00+02:00`. */
-const TIME_OF_DAY = /\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:gmt|utc|ut|z)?\s*[+-]\d{2}(?::?\d{2})?)?/gi;
+/** A time of day, with the zone offset after it if there is one: `10:00`, `01:00:00.5`, `10:00 GMT+0200`, `10:00 +2`, `01:00+02:00`. */
+const TIME_OF_DAY = /\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:gmt|utc|ut|z)?\s*[+-]\d{1,2}(?::?\d{2})?)?/gi;
+/** A named zone's offset with no time before it (`UTC+3`, `GMT+0300`), and a comment in parentheses, which `Date.parse` skips (`(UTC-3)`). */
+const ZONE = /\([^)]*\)|\b(?:gmt|utc|ut)\s*[+-]\d{1,2}(?::?\d{2})?/gi;
 const MONTH_NAME = new RegExp(`\\b(?:${MONTHS.join("|")})`, "i");
 
 /**
@@ -510,7 +512,7 @@ const MONTH_NAME = new RegExp(`\\b(?:${MONTHS.join("|")})`, "i");
  * (`11/8/26`, `2026-11-08`). `Date.parse` makes a year left out 2001 (`Dec 25 10:00`, `11/20`, `-5`).
  */
 function hasYear(text: string): boolean {
-  const date = text.replace(TIME_OF_DAY, " ");
+  const date = text.replace(TIME_OF_DAY, " ").replace(ZONE, " ");
   return (date.match(/\d+/g)?.length ?? 0) >= (MONTH_NAME.test(date) ? 2 : 3);
 }
 
