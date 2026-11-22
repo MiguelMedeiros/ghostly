@@ -1,0 +1,1 @@
+Framing and Errors: a connection has at most 1,024 calls open at once (unanswered, a wait among them). The next one is refused `busy` until one answers, and other connections are not held to it. There was no limit, and each open wait held memory in the daemon. No wire identifier, field or exit code changed: `busy` is an existing code with its existing exit code.
