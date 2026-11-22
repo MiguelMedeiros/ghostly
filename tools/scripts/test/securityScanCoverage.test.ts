@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { LOCKFILES, NOT_SHIPPED } from "../security-scan.mjs";
@@ -24,6 +24,14 @@ function lockfiles(dir = root, folder = ""): string[] {
   });
 }
 
+/** Every Dockerfile of the tree, as a path from the root. */
+function dockerfiles(dir = root, folder = ""): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory()) return MADE.has(entry.name) || entry.name.startsWith(".") ? [] : dockerfiles(join(dir, entry.name), `${folder}${entry.name}/`);
+    return entry.name === "Dockerfile" ? [`${folder}${entry.name}`] : [];
+  });
+}
+
 describe("The dependency scan's lockfiles", () => {
   const scanned: string[] = LOCKFILES.map((l: { ecosystem: string; file: string }) => `${l.ecosystem} ${l.file}`);
   const left: string[] = Object.keys(NOT_SHIPPED);
@@ -39,12 +47,20 @@ describe("The dependency scan's lockfiles", () => {
   });
 
   it("leaves out only test infrastructure, each with why", () => {
-    expect(left).toEqual(["e2e/infra/atproto/package-lock.json"]);
+    expect(left).toEqual(["e2e/infra/atproto/package-lock.json", "e2e/infra/sfu-token/package-lock.json"]);
     for (const why of Object.values(NOT_SHIPPED)) expect(why).toMatch(/\S/);
     expect(left.filter((file) => scanned.some((s) => s.endsWith(` ${file}`)))).toEqual([]);
   });
 
   it("lists only lockfiles the repository has", () => {
     expect([...LOCKFILES.map((l: { file: string }) => l.file), ...left].filter((file) => !existsSync(join(root, file)))).toEqual([]);
+  });
+
+  // An image that runs `npm install` with no lockfile resolves its packages afresh at every build, with no integrity
+  // pinned: neither this scan nor Dependabot ever sees them. npm ci refuses to run without one.
+  it("has every image install its npm packages from a lockfile, with npm ci", () => {
+    const images = dockerfiles().map((file) => ({ file, text: readFileSync(join(root, file), "utf8") }));
+    expect(images.filter(({ text }) => /\bnpm ci\b/.test(text)).length).toBeGreaterThan(3);
+    expect(images.filter(({ text }) => /\bnpm (install|i|add)\b/.test(text)).map(({ file }) => file)).toEqual([]);
   });
 });

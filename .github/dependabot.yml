@@ -100,6 +100,19 @@ updates:
       e2e-atproto-security:
         applies-to: security-updates
         patterns: ["*"]
+  # The e2e suite's group-call token mock (never shipped): livekit-client for its smoke page, as above.
+  - package-ecosystem: npm
+    directory: /e2e/infra/sfu-token
+    schedule: { interval: weekly, day: monday }
+    target-branch: dev
+    allow:
+      - dependency-type: all
+    groups:
+      e2e-sfu-token:
+        patterns: ["*"]
+      e2e-sfu-token-security:
+        applies-to: security-updates
+        patterns: ["*"]
   - package-ecosystem: cargo
     directory: /
     schedule: { interval: weekly, day: monday }
