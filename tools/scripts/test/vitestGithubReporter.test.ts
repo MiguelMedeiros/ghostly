@@ -5,6 +5,8 @@ import { expect, it } from "vitest";
 import type { Vitest } from "vitest/node";
 import { RUNNER_MESSAGE_LIMIT, WholeCharsGithubReporter } from "../../vitest.shared.ts";
 
+// guards: #6822
+
 const ROOT = join(import.meta.dirname, "../../..");
 
 /** The ::error lines a reporter writes for one failure whose message is `output`. */
