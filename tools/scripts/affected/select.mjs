@@ -109,6 +109,7 @@ export const UNIT_PROJECTS = [
       "docs/RELEASING.md": ["chromeWebStore", "npmPublish", "webLatest"],
       "{CHANGELOG.md,apps/desktop/Cargo.toml,apps/website/lib/release.ts,apps/extension/public/manifest.json,packages/browser/src/shared/features.ts}": ["bumpVersion"],
       "packages/cli/package.json": ["npmPublish", "cliShrinkwrap"],
+      "apps/website/package.json": ["websiteSteps"],
       ".gitignore": ["cliShrinkwrap"],
       "apps/desktop/src/{translate,translate_models}.rs": ["translationRuntimes"],
       "e2e/playwright.config.ts": ["e2eWorkflow"],
