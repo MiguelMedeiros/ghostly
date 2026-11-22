@@ -22,7 +22,8 @@ describe("an install screen opened again", () => {
     const a = apps(net);
     await a.addStore({ url: STORE_URL });
     for (let i = 0; i < 3; i++) expect((await a.preview({ store: keyOf(STORE_KEY), ref: app.ref })).digest).toBe(app.digest);
-    expect(reads(net, BUNDLE_URL)).toBe(1);
+    // Peeked first (a raw HEAD may have moved on), then read whole, once.
+    expect(reads(net, BUNDLE_URL)).toBe(2);
     expect(reads(net, `${REPO}/ghostly-revoke.json`)).toBe(3);
     // The bundle taken again installs as the one read.
     expect(await a.install({ digest: app.digest, grant: ["chat"] })).toMatchObject({ ref: app.ref, digest: app.digest });

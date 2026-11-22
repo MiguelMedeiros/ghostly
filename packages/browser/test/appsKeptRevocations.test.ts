@@ -304,6 +304,40 @@ describe("how many are kept", () => {
     const kept = await wrap((await dbStore(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY)) as [string, unknown[]][];
     expect(kept.reduce((n, [, list]) => n + list.length, 0)).toBeLessThanOrEqual(1024);
   });
+
+  it.each([1, 3])("install screens of many other publishers, one revocation each, push out none of the %i of this publisher", async (count) => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes(await Promise.all(Array.from({ length: count }, (_, n) => revocation(v1.ref, [v1.digest], `Leaked key ${n}`)))));
+    const store = apps(net);
+    expect((await store.preview({ url: BUNDLE_URL })).run).toEqual({ status: "revoked", reason: expect.stringMatching(/^Leaked key/) });
+
+    // Up to the cap with one revocation each of other keys (as many install screens would have kept), then two more shown.
+    const one = async (i: number) => {
+      const by = signer(`publisher ${i}`);
+      const app = await bundle({ by, name: `app${i}` });
+      return { app, revoked: await signAppRevocation({ ghostlyRevoke: 1, app: app.ref, digests: [app.digest], reason: "Gone" }, by) };
+    };
+    const before = await wrap((await dbStore(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY)) as [string, unknown[]][];
+    const others = await Promise.all(Array.from({ length: 1024 - count }, (_, i) => one(i)));
+    await wrap((await dbStore(STORES.settings, "readwrite")).put([...before, ...others.map(({ app, revoked }) => [app.ref, [revoked]])], APP_REVOCATIONS_KEY));
+    for (const i of [5000, 5001]) {
+      const { app, revoked } = await one(i);
+      const dir = `https://raw.githubusercontent.com/other/app${i}/HEAD`;
+      net.put(`${dir}/app.ghostlyapp`, app.bytes);
+      net.put(`${dir}/ghostly-revoke.json`, canonicalJsonBytes([revoked]));
+      expect((await store.preview({ url: `${dir}/app.ghostlyapp` })).run).toEqual({ status: "revoked", reason: "Gone" });
+    }
+
+    net.put(MIRROR_URL, v1.bytes);
+    const copy = await store.preview({ url: MIRROR_URL });
+    expect(copy.run).toEqual({ status: "revoked", reason: expect.stringMatching(/^Leaked key/) });
+    await expect(store.install({ stage: copy.stage, digest: v1.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    expect(await appRows()).toEqual([]);
+    const kept = await wrap((await dbStore(STORES.settings, "readonly")).get(APP_REVOCATIONS_KEY)) as [string, unknown[]][];
+    expect(kept.find(([ref]) => ref === v1.ref)?.[1]).toHaveLength(count);
+    expect(kept.reduce((n, [, list]) => n + list.length, 0)).toBeLessThanOrEqual(1024);
+  }, 60_000);
 });
 
 describe("what reading them costs", () => {

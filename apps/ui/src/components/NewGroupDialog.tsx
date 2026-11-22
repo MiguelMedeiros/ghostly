@@ -87,8 +87,9 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
       {error && <Notice problem={error} className="mt-2 text-sm" />}
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
-        <button type="submit" disabled={!named || busy || noLinks} data-testid="new-group-create"
-          className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent">{t("group.create.create")}</button>
+        {/* While it works, a press does nothing; not disabled, which would drop the focus to the page (and keep it there if refused). */}
+        <button type="submit" disabled={!named || noLinks} aria-disabled={busy || undefined} aria-busy={busy || undefined} data-testid="new-group-create"
+          className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent">{t("group.create.create")}</button>
       </div>
     </form>
     {secret && <SecretGuardDialog finding={secret} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void submit(true); }} />}

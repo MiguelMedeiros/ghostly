@@ -28,7 +28,7 @@ function fakeMint() {
   const quotes = new Map<string, { amount: number; state: string }>();
   const melts = new Map<string, Melt>();
   /** `pay`: paid at once; `pending`: the mint holds it; `lost`: the melt request gets no answer. */
-  const cfg = { melt: "pay" as "pay" | "pending" | "lost" };
+  const cfg = { melt: "pay" as "pay" | "pending" | "lost", feeReserve: 2 };
   const sign = (outputs: Output[]) => outputs.map((o) => ({ id: o.id, amount: Number(o.amount), C_: createBlindSignature(pointFromHex(o.B_), privKeys[String(o.amount)] as Uint8Array, o.id).C_.toHex(true) }));
   const meltAnswer = (q: string) => {
     const m = melts.get(q)!;
@@ -59,7 +59,7 @@ function fakeMint() {
     }
     if (path === "/v1/melt/quote/bolt11") {
       const request = String(body.request), q = `mq${melts.size + 1}`;
-      melts.set(q, { request, amount: Number(request.match(/^lnbcrt(\d+)n/)![1]) / 10, fee_reserve: 2, state: "UNPAID", expiry: Math.floor(Date.now() / 1000) + 600 });
+      melts.set(q, { request, amount: Number(request.match(/^lnbcrt(\d+)n/)![1]) / 10, fee_reserve: cfg.feeReserve, state: "UNPAID", expiry: Math.floor(Date.now() / 1000) + 600 });
       return meltAnswer(q);
     }
     if (path.startsWith("/v1/melt/quote/bolt11/")) return meltAnswer(path.slice("/v1/melt/quote/bolt11/".length));
@@ -127,5 +127,15 @@ describe("pay that the mint has not settled", { timeout: 60_000 }, () => {
     expect(lost).toMatchObject({ amount: 20, paid: false });
     expect(lost.note).toMatch(/^Not paid yet: the mint has not settled this payment \(it is pending, or its answer was lost\)/);
     expect(lost.note).toContain("22 test sats are set aside for it");
+  });
+
+  it("one sat set aside is said in the singular", async () => {
+    mint.cfg.melt = "pending";
+    mint.cfg.feeReserve = 0;
+    try {
+      const one = await callApi(ctx, "pay", { target: invoice(1, 5) }) as Record<string, unknown>;
+      expect(one).toMatchObject({ amount: 1, feeReserve: 0, paid: false });
+      expect(one.note).toContain("1 test sat is set aside for it, out of the balance: it leaves with the payment, or comes back to the balance");
+    } finally { mint.cfg.feeReserve = 2; }
   });
 });

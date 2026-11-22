@@ -462,7 +462,7 @@ it("frees the slot of a client that neither listens nor dials, one that stops an
   await vi.waitFor(() => expect(own.stats().accepted).toBe(3));
   await Promise.all([deafClosed, silentClosed, halfClosed]);
   expect(answer).toMatch(/^HTTP\/1\.1 408/);
-  expect(reasons).toEqual(expect.arrayContaining(["dropped no pong", "dropped idle"]));
+  expect(reasons).toEqual(expect.arrayContaining(["dropped no pong: no answer to the last ping by the next, 300 ms later (GHOSTLY_RELAY_PING_MS)", "dropped idle: no listen and no dial for 1500 ms (GHOSTLY_RELAY_IDLE_MS)"]));
   expect(own.stats().clients).toBe(1);
   // The browser listens, answers pings, and stays.
   await new Promise(resolve => setTimeout(resolve, 2000));
@@ -641,7 +641,7 @@ it("holds at most `streams` HyperDHT streams for a client while it stays: a dial
   expect(own.stats().dropped).toBe(0);
   dial(4);
   await dialer.closed;
-  expect(reasons).toContain("dropped stream limit");
+  expect(reasons).toContain("dropped stream limit: 3 streams open at once (GHOSTLY_RELAY_STREAMS)");
   expect(own.stats().dropped).toBe(1);
   await vi.waitFor(() => expect(open(accepted)).toBe(0), { timeout: 15_000 });
   // The listener was never dropped and still holds its three.
@@ -724,7 +724,7 @@ it("holds at most `queuedBytes` that a client has not read: one that reads gets 
     const stalled = await client();
     stalled.link.up.pause();
     go[stalled.at]();
-    await vi.waitFor(() => expect(reasons).toContain("dropped queue"), { timeout: 10_000 });
+    await vi.waitFor(() => expect(reasons).toContain("dropped queue: 4 MiB waiting for the client and its far peers (GHOSTLY_RELAY_QUEUED_BYTES)"), { timeout: 10_000 });
     expect(own.stats().dropped).toBe(1);
     expect(written[stalled.at]).toBeLessThan(total / 2);
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -803,8 +803,10 @@ it("holds at most `queuedTotalBytes` unread over all clients: past it the one ho
     for (const one of stalled) { one.link.up.pause(); go[one.at](); }
     // The reader gets a whole fast transfer meanwhile.
     go[reader.at]();
-    await vi.waitFor(() => expect(reasons.filter(reason => reason === "dropped queue total")).toHaveLength(3), { timeout: 60_000 });
-    expect(reasons).not.toContain("dropped queue");
+    // The first line of a kind names its limit: counted by kind.
+    const kind = (reason: string) => reason.split(":")[0];
+    await vi.waitFor(() => expect(reasons.filter(reason => kind(reason) === "dropped queue total")).toHaveLength(3), { timeout: 60_000 });
+    expect(reasons.filter(reason => kind(reason) === "dropped queue")).toEqual([]);
     for (const one of stalled) expect(written[one.at]).toBeLessThan(perClient / 2);
     await vi.waitFor(() => expect(reader.got.bytes).toBe(total), { timeout: 60_000 });
     expect(own.stats().dropped).toBe(3);
@@ -980,7 +982,7 @@ it("keeps a client's other chats reachable, both ways, while one chat's contact 
     const into = await dials(contact, chat2);
     expect({ out, into }).toEqual({ out: Array(6).fill("ok"), into: Array(6).fill("ok") });
     // The flood is refused past chat 1's share, and the operator sees it; nobody is dropped.
-    expect(reasons).toContain("refused handshake listen share");
+    expect(reasons).toContain("refused handshake listen share: 16 incoming handshakes waiting on one key, a quarter of GHOSTLY_RELAY_HANDSHAKES");
     expect(own.stats().dropped).toBe(0);
   } finally {
     flooding = false;

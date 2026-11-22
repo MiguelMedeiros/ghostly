@@ -103,3 +103,36 @@ it("Accept counts what the files already taken still need: one that fits only wi
   t.files.drop("chat-a");
   t.files.drop("chat-b");
 });
+
+/**
+ * Files taken from one contact that stopped arriving held their room for good: three 24 MiB offers taken without asking
+ * went under way and no byte of them ever came, and a week later Accept on another contact's 30 MiB file was still
+ * refused for the 72 MiB they would bring. Sweeping while the session is open, a file under way with no byte for a week
+ * of it ends (`expired`), and its room goes back to the others.
+ */
+it("files under way that get no byte for a week of open session give their room back: another chat's Accept goes", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  try {
+    const t = desk(() => 100 * MiB);
+    const stuck = ["wIdleRoom01", "wIdleRoom02", "wIdleRoom03"];
+    for (const id of stuck) await t.files.handle("chat-a", { t: "pf-offer", id, name: `${id}.mp4`, mime: "video/mp4", size: 24 * MiB, ts: 1_700_000_000_000 });
+    await vi.waitFor(() => expect(t.accepted().sort()).toEqual(stuck));
+    // Six days of the session open, no byte: still coming, still holding the room another contact's file then needs.
+    await vi.advanceTimersByTimeAsync(6 * 24 * 60 * 60 * 1000);
+    expect(t.sent.filter(({ frame }) => frame.t === "pf-refuse")).toEqual([]);
+    const other = await t.offered("chat-b", "wIdleRoom04", 30 * MiB);
+    await expect(t.files.accept("chat-b", other)).rejects.toMatchObject({
+      message: "No room on this device for this file beside the files still coming (28.0 MB left of 100.0 MB free)", coming: 72 * MiB,
+    });
+    // The week is up within the next sweep.
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000 + 60 * 60 * 1000);
+    expect(t.sent.filter(({ frame }) => frame.t === "pf-refuse").map(({ link, frame }) => [link, frame.id, frame.why]))
+      .toEqual(stuck.map((id) => ["chat-a", id, "expired"]));
+    await t.files.accept("chat-b", other);
+    await vi.waitFor(() => expect(t.accepted()).toContain("wIdleRoom04"));
+    t.files.drop("chat-a");
+    t.files.drop("chat-b");
+  } finally {
+    vi.useRealTimers();
+  }
+});

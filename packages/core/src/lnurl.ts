@@ -2,6 +2,8 @@ import { engineError } from "./engineErrors";
 import { bech32 } from "@scure/base";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { decodeBolt11, type Bolt11Invoice } from "./bolt11";
+import { linkEnd, linkTail } from "./linkPreview";
+import { underLocalSuffix } from "./localNames";
 import { stripHidden } from "./text";
 
 /**
@@ -78,14 +80,14 @@ export const LIGHTNING_DESTINATION_PATTERN = /(?:lightning:|lnurlp:\/\/|lnurl1|[
 const REDIRECTS = [301, 302, 303, 307, 308];
 
 /**
- * A host that is not on the public internet, as far as its name tells: this machine, a single label, `.local` and its
- * kin, private and reserved IP addresses. (What a public name resolves to is checked where the client resolves names
- * itself, as Ghostly Desktop and the CLI do.)
+ * A host that is not on the public internet, as far as its name tells: this machine, a single label, a name under a
+ * local suffix (`localNames.ts`), private and reserved IP addresses. (What a public name resolves to is checked where
+ * the client resolves names itself, as Ghostly Desktop and the CLI do, for every request.)
  */
 function isLocalHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.+$/, "").replace(/^\[|\]$/g, "");
   if (!host.includes(".") && !host.includes(":")) return true;
-  if (/(^|\.)(localhost|local|internal|lan|home\.arpa)$/.test(host)) return true;
+  if (underLocalSuffix(host)) return true;
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (v4) {
     const [a, b] = [Number(v4[1]), Number(v4[2])];
@@ -114,9 +116,19 @@ function acceptUrl(text: string): URL {
   return url;
 }
 
+/**
+ * Text without what a link leaves out at its end (`linkTail`): a direction mark a right-to-left sentence puts after it,
+ * another character that draws as nothing, an emoji. Taken off one by one: linear however many there are.
+ */
+function withoutTail(text: string): string {
+  let end = text.length;
+  for (let tail = linkTail(text, end); tail; tail = linkTail(text, end)) end -= tail;
+  return text.slice(0, end);
+}
+
 /** Reads what was pasted as a Lightning address or an LNURL; null when it is neither. Throws when it is one, but a bad one. */
 export function parseLightningDestination(input: string): LightningDestination | null {
-  const text = input.trim().replace(/^(lightning:|⚡\s*)/i, "").trim();
+  const text = withoutTail(input.trim()).replace(/^(lightning:|⚡\s*)/i, "").trim();
   if (!text) return null;
   if (LNURL_BECH32.test(text)) {
     let decoded: { prefix: string; words: number[] };
@@ -148,11 +160,9 @@ export function findLightningDestination(text: string): { destination: Lightning
   if (!match) return null;
   // Take the whole token the match starts in: an lnurl runs to the next space, an address stops at its domain.
   const start = match.index, end = text.slice(start).search(/\s|$/);
-  // The sentence's closing punctuation stays out, taken off one by one: `/[…]+$/` retries from every character of a
-  // long run that does not reach the end, which is quadratic.
-  let stop = start + end;
-  while (stop > start && "),.;:!?".includes(text[stop - 1])) stop--;
-  const token = text.slice(start, stop);
+  // It ends where a link would (`linkEnd`, in linear time): at the first Chinese, Japanese or Arabic stop ("。", "،"),
+  // and before the sentence's closing punctuation, a bracket it did not open, an emoji or a direction mark.
+  const token = linkEnd(text.slice(start, start + end));
   let destination: LightningDestination | null;
   try { destination = parseLightningDestination(token); } catch { return null; }
   if (!destination) return null;
@@ -189,6 +199,8 @@ async function readBounded(response: Response, maxBytes: number): Promise<string
 /** One GET to an LNURL service (and to each checked redirect of it): bounded in time and size, no credentials, no referrer, and the answer must be JSON. */
 export async function fetchLnurlJson(url: string, options: LnurlFetchOptions = {}): Promise<unknown> {
   const target = acceptUrl(url);
+  // The rule a redirect has: this machine or the local network is never asked, but for a test server on this machine.
+  if (!isLoopback(target.hostname) && isLocalHost(target.hostname)) throw new Error(`${target.host} is a local address`);
   const doFetch = options.fetch ?? globalThis.fetch;
   if (!doFetch) throw new Error("No way to reach the network here");
   const controller = new AbortController();

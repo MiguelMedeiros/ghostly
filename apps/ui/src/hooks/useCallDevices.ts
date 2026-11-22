@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEVICES_EVENT,
   EMPTY_DEVICES,
@@ -14,11 +14,13 @@ import {
   type DeviceKind,
   type DeviceList,
 } from "../lib/mediaDevices";
+import type { GroupCall } from "./useGroupCall";
 
-/** What the call hook (`useWebRTC`) gives this one. */
+/** What the call hook (`useWebRTC`, or a group call's `useGroupCall`) gives this one. */
 interface CallMediaControls {
   callState: string;
-  localStream: MediaStream | null;
+  /** What the call captures now: only its tracks are read. */
+  localStream: { getAudioTracks(): MediaStreamTrack[]; getVideoTracks(): MediaStreamTrack[] } | null;
   isVideoOff: boolean;
   isScreenSharing: boolean;
   canSwitchDevices: boolean;
@@ -337,4 +339,24 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
     switchBack,
     hold,
   };
+}
+
+/**
+ * A group call's devices, as a 1:1 call's (`useGroupCall` while `on`): its speaker, the Devices menu, a choice made in
+ * Settings during the call, and the default taking over from an unplugged device. The microphone and camera switch in
+ * the call's own LiveKit tracks; a shared screen is a track of its own there, so the camera is read beside it.
+ */
+export function useGroupCallDevices(call: GroupCall, on: boolean): CallDevices | null {
+  const mic = call.micTrack;
+  const camera = call.local.tracks.camera ?? null;
+  const localStream = useMemo(() => ({ getAudioTracks: () => (mic ? [mic] : []), getVideoTracks: () => (camera ? [camera] : []) }), [mic, camera]);
+  return useCallDevices({
+    callState: on ? call.status : "idle",
+    localStream,
+    isVideoOff: !call.local.camera,
+    isScreenSharing: false,
+    canSwitchDevices: true,
+    switchMicrophone: call.switchMicrophone,
+    switchCamera: call.switchCamera,
+  });
 }

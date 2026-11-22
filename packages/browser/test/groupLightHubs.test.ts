@@ -32,7 +32,7 @@ function memory() {
 /** A row's `of` as the builds wrote it: the record's `GroupLight` fields, hashed (`markOf`). */
 const markOf = (light: object) => bytesToHex(sha256(utf8ToBytes(JSON.stringify(light)))).slice(0, 32);
 
-const state = () => ({ seq: 3, seqEpoch: 1, seen: {}, sent: {}, nicks: {}, chain: [{ sig: "top" }], secrets: {} }) as unknown as GroupState;
+const state = () => ({ seq: 3, seqEpoch: 1, seen: {}, sent: [], nicks: {}, chain: [{ sig: "top" }], secrets: {} }) as unknown as GroupState;
 const group = (): StoredGroup => ({ id: "g", name: "Hubs", state: state(), hubs: ["h1", "h2"], large: ["a", "b"] } as unknown as StoredGroup);
 
 /** A record written whole, then the group as loaded from it by a new engine. */

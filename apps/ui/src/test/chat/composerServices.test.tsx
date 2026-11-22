@@ -118,7 +118,7 @@ describe("the composer's Shared services row", () => {
     act(() => view.engine.update({ links: [live({ sessionOffers: { mine: both.mine, peer: null }, capabilities: { files: true, payments: false, services: false } })] }));
     row = await openPlus(view.user);
     expect(row).toBeEnabled();
-    expect(row).toHaveAttribute("title", "Ana needs an updated Ghostly to open shared services.");
+    expect(row).toHaveAttribute("title", "⁨Ana⁩ needs an updated Ghostly to open shared services.");
   });
 
   it("is greyed with the reason where nothing in it can be chosen: the contact's app cannot open apps", async () => {
@@ -127,7 +127,7 @@ describe("the composer's Shared services row", () => {
     act(() => view.engine.update({ links: [live({ sessionOffers: { mine: both.mine, peer: ["calls/1"] }, capabilities: { files: true, payments: false, services: false } })] }));
     const row = await openPlus(view.user);
     expect(row).toBeDisabled();
-    expect(row).toHaveAttribute("title", "Ana's app cannot open or share apps (the web app cannot reach local apps).");
+    expect(row).toHaveAttribute("title", "⁨Ana⁩'s app cannot open or share apps (the web app cannot reach local apps).");
     expect(row).toHaveTextContent(/^Shared services$/);
     await view.user.click(row);
     expect(screen.queryByTestId("chat-services")).not.toBeInTheDocument();
