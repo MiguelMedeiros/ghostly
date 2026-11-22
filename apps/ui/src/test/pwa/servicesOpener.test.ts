@@ -33,11 +33,11 @@ describe("opening a contact's app", () => {
 
     it("names the contact as this side calls them, else their nickname, else by their key", () => {
       expect(serviceFraming("Demo", { label: "Ana (work)", nick: "Ghostly" }, PEER, t)).toEqual({
-        label: "Demo, shared by \u2068Ana (work)\u2069",
+        label: "\u2068Demo\u2069, shared by \u2068Ana (work)\u2069",
         owner: "\u2068Ana (work)\u2069's app, running on their machine. Not Ghostly: never type your recovery words or passwords here.",
       });
-      expect(serviceFraming("Demo", { label: " ", nick: "Demo bot" }, PEER, t).label).toBe("Demo, shared by \u2068Demo bot\u2069");
-      expect(serviceFraming("Demo", undefined, PEER, t).label).toBe(`Demo, shared by \u2068${t("common.unnamedContact", { key: PEER.slice(0, 6) })}\u2069`);
+      expect(serviceFraming("Demo", { label: " ", nick: "Demo bot" }, PEER, t).label).toBe("\u2068Demo\u2069, shared by \u2068Demo bot\u2069");
+      expect(serviceFraming("Demo", undefined, PEER, t).label).toBe(`\u2068Demo\u2069, shared by \u2068${t("common.unnamedContact", { key: PEER.slice(0, 6) })}\u2069`);
     });
 
     it("is said in every language, with the contact in each", async () => {
@@ -220,7 +220,7 @@ describe("opening a contact's app", () => {
         const { port, replies } = recorder();
         await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
           async () => answer(status, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", code]], [`${english}\n`]), new CookieJar(), said);
-        expect(replies).toEqual([{ type: "error", status, text: t(key, { app: "Demo" }) }]);
+        expect(replies).toEqual([{ type: "error", status, text: t(key, { app: "⁨Demo⁩" }) }]);
         expect(replies[0]!.type === "error" && replies[0]!.text).not.toContain(english);
       }
     });
