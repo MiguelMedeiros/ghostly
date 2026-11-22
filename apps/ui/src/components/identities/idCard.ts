@@ -97,7 +97,7 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
   return {
     id: p.id,
     provider: p.provider,
-    label: providerLabel(p.provider),
+    label: providerLabel(p.provider, t),
     subject: p.verified.subject,
     short: shortSubject(p.provider, p.verified.subject),
     bound: p.subject,
@@ -137,7 +137,7 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000,
   return {
     id: r.id,
     provider: r.provider,
-    label: providerLabel(r.provider),
+    label: providerLabel(r.provider, t),
     subject: r.verified.subject,
     short: shortSubject(r.provider, r.verified.subject),
     bound: r.subject,
@@ -179,7 +179,7 @@ export function shareIdCard(entry: IdentityTimelineEntry, state: ShareState, { p
   const own = received ? receivedIdCard(received, now, t, language) : proof ? idCard(proof, { now, t }) : undefined;
   const subject = own?.subject ?? entry.subject ?? "";
   const base: IdCardContent = own ?? {
-    id: entry.proof, provider: entry.provider, label: providerLabel(entry.provider), subject, short: subject ? shortSubject(entry.provider, subject) : "…", bound: subject,
+    id: entry.proof, provider: entry.provider, label: providerLabel(entry.provider, t), subject, short: subject ? shortSubject(entry.provider, subject) : "…", bound: subject,
     category: "", attested: providerOf(entry.provider)?.category === "provider-attested", status: "checking", statusLabel: "", validity: "", issued: "", shared: "", refusedBy: [],
   };
   // One of mine says, as in the picker, whether this contact sees it.

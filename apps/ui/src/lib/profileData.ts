@@ -1,4 +1,4 @@
-import { identityFromSeedB64 } from "@ghostly/core";
+import { WALLET_NETWORKS, identityFromSeedB64, type WalletNetwork } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { forgetServicesOf, releaseUnusedLocalAccessOf } from "@ghostly/browser/host";
 import { runsEngine } from "@ghostly/browser/devices/state";
@@ -13,6 +13,7 @@ import { lockRetryAt, tryLockPassword, waitMessage } from "./lockAttempts";
 import { pushPlatform } from "./wakePush";
 import { linkedFilesDatabase } from "./apps/webFiles";
 import { resetIncomingShare } from "./incomingShare";
+import { forgetGifSearchesOf } from "./gifSearch";
 
 /**
  * What deleting a profile would take away, read from its own storage without starting it. `wallets`: the kinds of
@@ -57,7 +58,9 @@ export async function profileSummary(id: string): Promise<ProfileSummary> {
   if (!db) return summary;
   try {
     const has = (name: string) => db.objectStoreNames.contains(name);
-    const tx = db.transaction(["proofs", "settings", "services"].filter(has), "readonly");
+    const tx = db.transaction(["proofs", "settings", "services", "groups"].filter(has), "readonly");
+    // Its groups are chats too, as the chat list shows them, and go with it.
+    if (has("groups")) summary.chats += await request(tx.objectStore("groups").count());
     if (has("proofs")) summary.cashuSats = (await request(tx.objectStore("proofs").getAll()) as { amount: number; reserved?: boolean }[]).reduce((sum, p) => sum + (p.reserved ? 0 : p.amount), 0);
     if (has("settings")) summary.wallets = walletsIn(await request(tx.objectStore("settings").getAllKeys()));
     if (has("services")) summary.services = (await request(tx.objectStore("services").count()));
@@ -166,6 +169,63 @@ async function walletStorage(dbName: string): Promise<WalletStorage> {
       }
     });
     return found;
+  } finally { db.close(); }
+}
+
+/** A wallet at home on this device (WISP 06 § Wallets that stay home): its kind and its network. */
+export interface HomeWallet { type: "arkade" | "bark" | "spark" | "usdt" | "fedimint" | "bitcoin" | "lightning"; network: WalletNetwork }
+
+/** Where each wallet's record is (`walletHomes.ts` `homeRow`): the settings key of each kind, by network. */
+const HOME_ROWS: [RegExp, HomeWallet["type"]][] = [
+  [/^arkWallet-mode-(\w+)$/, "arkade"], [/^barkWallet-mode-(\w+)$/, "bark"], [/^sparkWallet-mode-(\w+)$/, "spark"], [/^usdtWallet-mode-(\w+)$/, "usdt"],
+  [/^fedimintWallet-(\w+)$/, "fedimint"], [/^onchainSource-(\w+)$/, "bitcoin"],
+];
+const homeKey = (value: unknown): string | undefined => {
+  const key = (value as { home?: { key?: unknown } } | null)?.home?.key;
+  return typeof key === "string" ? key : undefined;
+};
+
+/**
+ * The wallets whose home mark names the device `own` (its signing key), read from a profile's settings rows: each
+ * record's mark, and each Lightning card's in its network's list.
+ */
+export function walletsAtHome(own: string, rows: readonly (readonly [IDBValidKey, unknown])[]): HomeWallet[] {
+  const found: HomeWallet[] = [];
+  for (const [key, value] of rows) {
+    if (typeof key !== "string") continue;
+    const cards = /^lightningCards-(\w+)$/.exec(key);
+    if (cards && (WALLET_NETWORKS as readonly string[]).includes(cards[1])) {
+      const list = (value as { cards?: unknown } | null)?.cards;
+      for (const card of Array.isArray(list) ? list as unknown[] : []) {
+        if (homeKey(card) === own) found.push({ type: "lightning", network: cards[1] as WalletNetwork });
+      }
+      continue;
+    }
+    for (const [pattern, type] of HOME_ROWS) {
+      const network = pattern.exec(key)?.[1];
+      if (network && (WALLET_NETWORKS as readonly string[]).includes(network) && homeKey(value) === own) found.push({ type, network: network as WalletNetwork });
+    }
+  }
+  return found;
+}
+
+/**
+ * The wallets of profile `id` whose home is this device, as its frozen copy names them: their own storage (a Bark
+ * database, a Fedimint client file) is only here, and Remove this profile here deletes it. None when the profile's
+ * device record names no slot of this device's own, or the copy is not here.
+ */
+export async function walletsAtHomeHere(id: string): Promise<HomeWallet[]> {
+  const dbName = databaseOf(id);
+  const record = await readDeviceRecord(dbName).catch(() => null);
+  const own = record?.ownSlot !== undefined ? record.deviceSet[record.ownSlot]?.key : undefined;
+  if (!own) return [];
+  const db = await openExisting(dbName);
+  if (!db) return [];
+  try {
+    if (!db.objectStoreNames.contains("settings")) return [];
+    const store = db.transaction("settings", "readonly").objectStore("settings");
+    const [keys, values] = await Promise.all([request(store.getAllKeys()), request(store.getAll())]);
+    return walletsAtHome(own, keys.map((key, i) => [key, values[i]] as const));
   } finally { db.close(); }
 }
 
@@ -353,19 +413,17 @@ async function dropProfile(id: string, owned: (key: string) => boolean): Promise
   retryUnsaved();
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
   await pushPlatform()?.unsubscribe(id).catch(() => {});
-  // What the contacts' apps it opened kept on their own origins (the web app's).
+  // What the contacts' apps it opened kept on their own origins.
   await forgetServicesOf({ profile: id });
   // Each fork of it goes as "Discard this copy" takes it, with its linked files: no screen lists it once the record
   // is gone. Never a database a profile on the list runs on.
   const listed = new Set(listProfiles().map((p) => databaseOf(p.id)));
-  for (const fork of forks) {
-    if (listed.has(fork)) continue;
-    await handoffProfileHost()?.staging.drop(fork).catch(() => {});
-    if (await databaseExists(linkedFilesDatabase(fork))) await drop(linkedFilesDatabase(fork)).catch(() => {});
-  }
+  for (const fork of forks) if (!listed.has(fork)) await handoffProfileHost()?.staging.drop(fork).catch(() => {});
   if (staged && staged !== dbName && !listed.has(staged)) await handoffProfileHost()?.staging.drop(staged).catch(() => {});
   // Its device state goes with it (WISP 06): a profile made later under the same name must not inherit it.
   await forgetDevice(dbName).catch(() => {});
   // What another profile's peek saw of it (its contacts' keys, link and message ids), and its notice.
   clearPeek(id);
+  // Its GIF searches, which the tab's session keeps across a profile switch.
+  forgetGifSearchesOf(prefixOf(id));
 }

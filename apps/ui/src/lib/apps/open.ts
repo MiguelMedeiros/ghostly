@@ -16,8 +16,10 @@ export interface OpenAppOptions { runAnyway?: boolean; again?: unknown }
 /**
  * Opens `ref` in the 1:1 chat `linkId`, or alone when it is null. Rejects when it cannot start (revoked, removed, no runner…).
  * Resolves "shown" when it already ran there and was shown again: nothing new started, so the contact is not told again.
+ * Resolves "superseded" when a newer open in that chat overtook it (the web): it starts nothing, the newer one stays,
+ * and the contact is told nothing of it.
  */
-export type AppOpener = (ref: string, linkId: string | null, options?: OpenAppOptions) => Promise<"shown" | void>;
+export type AppOpener = (ref: string, linkId: string | null, options?: OpenAppOptions) => Promise<"shown" | "superseded" | void>;
 
 let opener: AppOpener | null = null;
 const listeners = new Set<() => void>();
@@ -27,7 +29,7 @@ export function setAppOpener(next: AppOpener | null): void {
   for (const listener of [...listeners]) listener();
 }
 
-export function openApp(ref: string, linkId: string | null = null, options: OpenAppOptions = {}): Promise<"shown" | void> {
+export function openApp(ref: string, linkId: string | null = null, options: OpenAppOptions = {}): Promise<"shown" | "superseded" | void> {
   return opener ? opener(ref, linkId, options) : Promise.reject(new Error("Apps cannot run in this app"));
 }
 
@@ -45,13 +47,17 @@ export function useAppOpener(): AppOpener | null {
  */
 export type AppTakedown = { why: "revoked" } | { why: "removed"; store: string } | { why: "failed" } | { why: "unresponsive" } | { why: "offline" } | { why: "focus" };
 
-/** "Chess was stopped: its maker revoked this version", where the app ran. */
-export function takedownText(title: string, takedown: AppTakedown, t: Translate): string {
+/**
+ * "Chess was stopped: its maker revoked this version", where the app ran. The line takes the page's direction, so the
+ * app's title and the store's name are isolated in their own (as `removedLine` does).
+ */
+export function takedownText(name: string, takedown: AppTakedown, t: Translate): string {
+  const title = `\u2068${name}\u2069`;
   if (takedown.why === "failed") return t("apps.view.stoppedFailed", { title });
   if (takedown.why === "offline") return t("apps.view.stoppedOffline", { title });
   if (takedown.why === "unresponsive") return t("apps.view.stoppedUnresponsive", { title });
   if (takedown.why === "focus") return t("apps.view.stoppedFocus", { title });
-  return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: takedown.store });
+  return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: `\u2068${takedown.store}\u2069` });
 }
 
 /** An app running now, as its opener registered it: its ref, the version it runs, whether the person chose Run anyway, and how to stop it. */
@@ -201,7 +207,8 @@ export function takenDownSince(): (ref: string, digest: string, runAnyway: boole
 
 /**
  * The files people picked for apps on this client (WISP 1200 · Linked files), as its opener keeps them: set once by
- * the client that runs apps. An app uninstalled drops its links (`forgetLinkedFiles`); the files are never touched.
+ * the client that runs apps. An app uninstalled drops its links (`forgetLinkedFiles`), and so does a new grant of
+ * `files` (`forgetLinkedFilesOnGrant`); the files are never touched.
  */
 let linkedFiles: LinkedFilesHost | null = null;
 
@@ -212,4 +219,13 @@ export function setLinkedFiles(host: LinkedFilesHost | null): void {
 /** Drops every link of an app: it was uninstalled. Never fails the uninstall. */
 export async function forgetLinkedFiles(ref: string): Promise<void> {
   await linkedFiles?.forget(ref, "all").catch(() => {});
+}
+
+/**
+ * The person granted `granted` to an app (an install, or an update that adds them). A grant of `files` reads "the files
+ * and folders you pick": it starts with no links, so what was picked under an earlier grant (one a later version dropped,
+ * or one before a reinstall) does not come back with it.
+ */
+export async function forgetLinkedFilesOnGrant(ref: string, granted: readonly string[]): Promise<void> {
+  if (granted.includes("files")) await forgetLinkedFiles(ref);
 }

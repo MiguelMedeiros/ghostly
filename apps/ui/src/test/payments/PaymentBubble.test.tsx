@@ -1,12 +1,15 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { decodeBolt11 } from "@ghostly/core";
+import { decodeBolt11, type PaymentReview as Review } from "@ghostly/core";
 import type { LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/types";
+import { PayExternally } from "../../components/PayExternally";
 import { PaymentBubble } from "../../components/PaymentBubble";
+import { PaymentReview } from "../../components/PaymentReview";
+import { Address } from "../../components/wallet/ui";
 import { paymentLine, storedPaymentLine } from "../../components/paymentWords";
 import { loadLocale, translatorFor } from "../../locales";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
-import { servicesPlatform } from "../../lib/platform";
+import { servicesPlatform, type WalletPlatform } from "../../lib/platform";
 import { renderApp } from "../render";
 import { lightningSource, liveMainnetInvoice, liveRegtestInvoice, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
 import { choose, listOf, readOption } from "../select";
@@ -296,6 +299,7 @@ describe("a request with a payment already on its way", () => {
   it("an approved payment of it stays, with Check, even once the request reads as paid", () => {
     show(incomingRequest({ mints: [REAL_MINT], state: "settled" }), { wallet: { mints: [mint(REAL_MINT, 900)], intents: [unfinished("submitted")] } });
     expect(screen.getByRole("region", { name: "Payment review" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check existing payment" })).toBeInTheDocument();
   });
 
   it("a payment of it that failed leaves the request payable again", () => {
@@ -749,5 +753,61 @@ describe("an expired request", () => {
     fakeEngine.setState({ links: [linkView()], wallet: { mints: [] }, payments: { "pay-1": paymentView(expiredInvoice({ direction: "out" })) } });
     renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language: "pt" });
     expect(status()).toHaveTextContent("Expirado · peça de novo com um novo pedido");
+  });
+});
+
+// covers: payments.chat.review, payments.cashu.request, payments.cashu.reclaim, payments.external
+describe("a money card in a chat on a phone", () => {
+  /**
+   * A money card in a chat and its review, on a phone: what can be pressed is 44 px tall (`max-md:min-h-11`), as the
+   * app's other buttons are there. They were 28 px (Review payment, Pay with another wallet, Take it back, the fee
+   * field) and 32 px (Approve, Cancel), and Payment details 16 px. The desktop keeps its sizes.
+   */
+  const show = (payment: Partial<PaymentView>) => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(REAL_MINT, 5_000), mint(TEST_MINT, 0)] }, payments: { "pay-1": paymentView(payment) } });
+    return renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />);
+  };
+
+  it("a request's Review payment, Pay with another wallet and fee field are thumb-sized", () => {
+    show({ kind: "request", direction: "in", amount: 2_100, invoice: liveMainnetInvoice(2_100) });
+    expect(screen.getByRole("button", { name: "Review payment" })).toHaveClass("max-md:min-h-11");
+    expect(screen.getByRole("button", { name: "Pay with another wallet" })).toHaveClass("max-md:min-h-11");
+    expect(screen.getByRole("textbox", { name: /Maximum fee/ })).toHaveClass("max-md:min-h-11");
+  });
+
+  it("ecash sent has a thumb-sized Take it back", () => {
+    show({ kind: "payment", direction: "out", state: "pending" });
+    expect(screen.getByRole("button", { name: "Take it back" })).toHaveClass("max-md:min-h-11");
+  });
+
+  it("its review's Approve, Cancel and Payment details are thumb-sized", () => {
+    const review = { method: "cashu", network: "cashu-test", provider: TEST_MINT, asset: "BTC", unit: "sat", address: "pay-1", expiresAt: Date.now() + 60_000,
+      id: "review-1", payee: "peer", amount: 30, fee: 2, feeCap: 10, createdAt: 0, state: "pending" } as Review;
+    renderApp(<PaymentReview review={review} wallet={Object.create(servicesPlatform!.wallet) as WalletPlatform} onClose={() => {}} />);
+    expect(screen.getByTestId("review-approve")).toHaveClass("max-md:min-h-11");
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass("max-md:min-h-11");
+    expect(screen.getByText("Payment details")).toHaveClass("max-md:min-h-11");
+  });
+});
+
+// covers: payments.external, wallet.ark.boarding
+describe("the QR code's name for a screen reader", () => {
+  const address = "bc1pe4cr9ugwk8p252z4vetllpzmvkyu4durcua2utepf0svhyz2kepqyryua8";
+
+  it("a wallet's own address is a receiving address", () => {
+    renderApp(<Address value={address} uri={`bitcoin:${address}`} testId="ark-boarding-address" />);
+    expect(screen.getByRole("img", { name: "Receiving address" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Payment QR code" })).toBeNull();
+  });
+
+  it("someone else's invoice, paid with another wallet, is a payment", () => {
+    renderApp(<PayExternally uri={`bitcoin:${address}`} value={address} testId="payment-external" onPaid={async () => undefined} />);
+    expect(screen.getByRole("img", { name: "Payment QR code" })).toBeInTheDocument();
+  });
+
+  it("no QR code before there is an address", () => {
+    renderApp(<Address value={undefined} testId="ark-boarding-address" />);
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByTestId("ark-boarding-address-pending")).toBeInTheDocument();
   });
 });

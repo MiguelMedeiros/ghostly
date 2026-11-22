@@ -3,8 +3,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { GhostlyHttpError, LIMITS, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, findOwnNamedChat, node, num, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { GhostlyHttpError, LIMITS, parseLocalTarget, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
+import { bool, chatOf, nameKey, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
 
@@ -126,9 +126,15 @@ export const OPENED_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'un
 /**
  * The contact's headers that are not passed on: each makes the browser send something to a place it names, outside
  * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
- * early connections). Only the contact's server is reached.
+ * early connections; `Speculation-Rules` prefetches and prerenders). Only the contact's server is reached.
  */
-export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link", "speculation-rules"];
+
+/**
+ * A contact's headers that would set the page's browser features (camera, microphone, location, a device): the
+ * viewer's own `VIEWER_PERMISSIONS_POLICY` takes their place, as in the extension's viewer (core `withViewerPolicy`).
+ */
+const OPENED_SERVICE_FEATURE_HEADERS = ["permissions-policy", "feature-policy"];
 
 /** The directives of a contact's policy that send reports to a URL it names, dropped from it. */
 export const OPENED_SERVICE_DROPPED_DIRECTIVES = ["report-uri", "report-to"];
@@ -143,6 +149,9 @@ export function withoutReports(value: string): string {
 
 /** `service open` while Hide my IP from contacts is on (as the browser extension refuses to open one). */
 export const SERVICE_OPEN_OFF_RELAY_ONLY = "A contact's app does not open here while Hide my IP from contacts is on: a browser tab cannot keep its page off WebRTC";
+
+/** `service open` or `service close` in a one-shot: only the daemon keeps a contact's app open on a port. */
+export const SERVICE_NEEDS_DAEMON = "An opened service lives in the daemon: start `ghostly daemon --detach` first";
 
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
   response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
@@ -209,7 +218,7 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
     const out: Record<string, string | string[]> = {};
     for (const [name, value] of answer.headers) {
       const lower = name.toLowerCase();
-      if (lower === "transfer-encoding" || lower === "connection" || OPENED_SERVICE_DROPPED_HEADERS.includes(lower)) continue;
+      if (lower === "transfer-encoding" || lower === "connection" || OPENED_SERVICE_DROPPED_HEADERS.includes(lower) || OPENED_SERVICE_FEATURE_HEADERS.includes(lower)) continue;
       if (lower === "set-cookie") {
         const cookie = hostOnlyCookie(value);
         if (!cookie) continue;
@@ -221,6 +230,7 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
       } else out[lower] = value;
     }
     out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), policy];
+    out["permissions-policy"] = VIEWER_PERMISSIONS_POLICY;
     response.writeHead(answer.status, out);
     // Streamed, not gathered: past the cap (or when the contact drops it) the body stops and the connection closes.
     await pipeline(Readable.from(answer.body, { objectMode: false }), response);
@@ -234,12 +244,44 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
 
 /**
  * The service a command names, by its id: one of this profile's. The engine changes nothing for an id it does not
- * know and says nothing, so a mistyped id read as done ("shared": true, with a contact).
+ * know and says nothing, so a mistyped id read as done ("shared": true, with a contact). Or by its name, when no other
+ * service has that name (`service add "My App"` makes `my-app`): before, the name was refused as "No service" while
+ * `service list` showed it. An id comes first; a name several services share is refused with their ids.
  */
 function serviceOf(ctx: ApiContext, params: Params): string {
-  const serviceId = str(params, "service", true);
-  if (!state(ctx).services.some((s) => s.id === serviceId)) throw new CliError("not_found", `No service ${JSON.stringify(serviceId)} (ghostly service list)`);
-  return serviceId;
+  const given = str(params, "service", true);
+  const { services } = state(ctx);
+  if (services.some((s) => s.id === given)) return given;
+  const named = servicesNamed(services, given);
+  if (named.length === 1) return named[0];
+  throw noService(given, named);
+}
+
+/** The ids of the services `given` names by their name, compared as a chat's label is (`nameKey`: one case, one form). */
+function servicesNamed(services: readonly { id: string; name: string }[], given: string): string[] {
+  const key = nameKey(given);
+  return key ? services.filter((s) => nameKey(s.name) === key).map((s) => s.id) : [];
+}
+
+/** No service of that id or name, or a name several services share: which ids it names. Same code and exit either way. */
+function noService(given: string, named: readonly string[]): CliError {
+  const quoted = JSON.stringify(given);
+  if (!named.length) return new CliError("not_found", `No service ${quoted} (ghostly service list)`);
+  const which = `${named.length} services, ${named.slice(0, -1).join(", ")} and ${named.at(-1)}: use one of their ids`;
+  return new CliError("not_found", `No service with id ${quoted}. ${quoted} is the name of ${which} (ghostly service list)`);
+}
+
+/**
+ * On, unless `off`; or as the answer's own key (`shared`, `enabled`) says, when a socket client sends it back. Before,
+ * only `off` was read, so `{"shared": false}` shared the service with the contact and `{"enabled": false}` turned it on.
+ * Both, saying the opposite, are refused: neither is guessed.
+ */
+function onUnlessOff(params: Params, key: string): boolean {
+  const on = !bool(params, "off");
+  if (params[key] === undefined || params[key] === null) return on;
+  const said = bool(params, key);
+  if (params.off !== undefined && params.off !== null && said !== on) throw new CliError("bad_request", `${key}: ${said} and off: ${!on} say the opposite: give one of them`);
+  return said;
 }
 
 /**
@@ -262,6 +304,31 @@ function serviceNameOf(params: Params): string {
   return name;
 }
 
+/** `service add`'s name and target, checked with no profile open (api.ts `refuseBeforeStart`). */
+export function serviceShape(params: Params): { name: string; target: string } {
+  const name = serviceNameOf(params);
+  const target = str(params, "target", true);
+  // The engine's own check of the target (core http.ts `parseLocalTarget`), the only one: a query, a fragment, a user
+  // and password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the
+  // engine, they were plain errors, `engine` (exit 1): "the engine failed" (agents#894). A check of its own here
+  // read `localhost:8080` as the scheme `localhost:`, refused `127.0.0.1:8080` as no URL, and let `127.0.0.2` through
+  // for the engine to refuse in other words.
+  try { parseLocalTarget(target); } catch (error) {
+    const said = error instanceof Error ? error.message : String(error);
+    // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
+    // parts refused here can hold a secret (a token). One that is no URL at all (a mistyped port) is not repeated: it
+    // has no parts to tell apart, and a token or password in it would be said whole.
+    const text = target.trim();
+    let shown = "";
+    try {
+      const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
+      shown = `: ${url.protocol}//${url.host}${url.pathname}`;
+    } catch { /* Not a URL: not repeated. */ }
+    throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}${shown}`);
+  }
+  return { name, target };
+}
+
 function portError(error: unknown, port: number): unknown {
   const { code } = (error ?? {}) as { code?: unknown };
   if (port && code === "EADDRINUSE") return new CliError("busy", `Port ${port} is in use on this machine: choose another, or leave out --port`);
@@ -274,25 +341,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { services: state(ctx).services.map((s) => ({ id: s.id, name: s.name, target: s.target, enabled: s.enabled, sharedWith: s.sharedWith ?? [], requests: s.requests })) };
   },
   async "service.add"(ctx, params) {
-    const name = serviceNameOf(params);
-    const target = str(params, "target", true);
-    // The engine's own check of the target (core http.ts `parseLocalTarget`), the only one: a query, a fragment, a user
-    // and password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the
-    // engine, they were plain errors, `engine` (exit 1): "the engine failed" (agents#894). A check of its own here
-    // read `localhost:8080` as the scheme `localhost:`, refused `127.0.0.1:8080` as no URL, and let `127.0.0.2` through
-    // for the engine to refuse in other words.
-    try { parseLocalTarget(target); } catch (error) {
-      const said = error instanceof Error ? error.message : String(error);
-      // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
-      // parts refused here can hold a secret (a token). One that is no URL at all is named as given.
-      const text = target.trim();
-      let shown = text;
-      try {
-        const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
-        shown = `${url.protocol}//${url.host}${url.pathname}`;
-      } catch { /* Not a URL: named as given. */ }
-      throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
-    }
+    const { name, target } = serviceShape(params);
     // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
     const { serviceId } = node(ctx).addService({ name, target });
     return { service: serviceId, serviceId };
@@ -303,14 +352,15 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { removed: serviceId };
   },
   async "service.enable"(ctx, params) {
+    const enabled = onUnlessOff(params, "enabled");
     const serviceId = serviceOf(ctx, params);
-    await node(ctx).setServiceEnabled({ serviceId, enabled: !bool(params, "off") });
-    return { service: serviceId, enabled: !bool(params, "off") };
+    await node(ctx).setServiceEnabled({ serviceId, enabled });
+    return { service: serviceId, enabled };
   },
   async "service.share"(ctx, params) {
     // A grant the contact keeps using: only what this side chose names its chat, as for `call auto --from`.
-    const link = findOwnNamedChat(state(ctx).links, str(params, "chat", true), state(ctx).groups);
-    const shared = !bool(params, "off");
+    const link = ownChatOf(ctx, params);
+    const shared = onUnlessOff(params, "shared");
     const serviceId = serviceOf(ctx, params);
     await node(ctx).setServiceShared({ serviceId, peerPubKeyZ32: link.peerPubKeyZ32, shared });
     return { service: serviceId, chat: link.id, shared };
@@ -322,10 +372,10 @@ export const SERVICE_METHODS: Record<string, Method> = {
   },
   /** A contact's shared app on a loopback port of this machine, as the Desktop opens it in a window. */
   async "service.open"(ctx, params) {
-    if (ctx.mode !== "daemon") throw new CliError("unavailable", "An opened service lives in the daemon: start `ghostly daemon --detach` first");
+    if (ctx.mode !== "daemon") throw new CliError("unavailable", SERVICE_NEEDS_DAEMON);
     // Hide my IP from contacts: the app would run in an ordinary browser tab, where nothing keeps its page off WebRTC
     // (a STUN server the contact names would see this machine's address), so none opens while it is on.
-    if (state(ctx).settings?.relayOnly === true) throw new CliError("unavailable", SERVICE_OPEN_OFF_RELAY_ONLY);
+    if (settingsOf(ctx).relayOnly === true) throw new CliError("unavailable", SERVICE_OPEN_OFF_RELAY_ONLY);
     const link = chatOf(ctx, params);
     const service = str(params, "service", true);
     const key = `${link.peerPubKeyZ32}/${service}`;
@@ -351,6 +401,8 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { chat: link.id, service, url: opened.url };
   },
   async "service.close"(ctx, params) {
+    // A one-shot has none open: it said "not open here" of one the daemon has.
+    if (ctx.mode !== "daemon") throw new CliError("unavailable", SERVICE_NEEDS_DAEMON);
     const link = chatOf(ctx, params);
     const key = `${link.peerPubKeyZ32}/${str(params, "service", true)}`;
     const pending = open.get(key);

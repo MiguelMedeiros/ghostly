@@ -128,6 +128,8 @@ it("preflights escaped packet size and tokens without creating pending intent", 
   expect(h.saved[0].pending).toBeUndefined();
   expect(await a.send("x".repeat(256), Date.now(), "abcdefghijklmnopqrstuv")).toBeNull();
   expect(a.validate("second", Date.now(), "bcdefghijklmnopqrstuvw")).toContain("One DHT text");
+  // One the packet can never carry says so while another awaits its receipt too: it would wait behind it for good.
+  expect(a.validate("\u0001".repeat(256), Date.now(), "bcdefghijklmnopqrstuvw")).toContain("packet budget");
   await vi.advanceTimersByTimeAsync(4500);
   expect(h.messages[1].get("abcdefghijklmnopqrstuv")).toBe("x".repeat(256));
   await a.stop(); await b.stop();

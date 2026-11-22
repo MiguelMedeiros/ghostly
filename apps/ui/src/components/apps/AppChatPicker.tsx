@@ -10,6 +10,7 @@ import { chatTargetKeys, findChatTargets } from "../../lib/chatTargets";
 import { ChatTargetRow, ChatTargetSearch } from "../chat/ChatTargets";
 import { SearchStatus } from "../ui/SearchStatus";
 import { Button } from "../wallet/ui";
+import { NAME, withName } from "./aroundName";
 
 /*
  * Open on the Apps page for an app that runs in a chat (its manifest's `view` is `chat`, WISP 1200 § Manifest): which
@@ -44,7 +45,7 @@ export function AppChatPicker({ app, options, onClose }: { app: InstalledAppView
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="app-chat-picker-title" data-testid="app-chat-picker"
         className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 flex flex-col gap-4 max-h-[85dvh] overflow-y-auto pb-[calc(1.25rem+env(safe-area-inset-bottom))]">
         <div>
-          <h2 id="app-chat-picker-title" className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{t("apps.pick.title", { title: app.title })}</h2>
+          <h2 id="app-chat-picker-title" className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.pick.title", { title: NAME }), app.title)}</h2>
           <p className="text-xs text-text-secondary mt-1">{t("apps.pick.hint")}</p>
         </div>
         {searchable && <ChatTargetSearch inputRef={search} list={list} testId="app-chat-picker-search" value={query} onChange={setQuery} />}
