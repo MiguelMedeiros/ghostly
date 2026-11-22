@@ -750,10 +750,11 @@ export interface RunningApp {
 
 /**
  * Whether an app's frame is on screen: in the page, in a tab that shows, and not under anything hidden (a chat kept
- * loaded behind another one, a panel Back hid).
+ * loaded behind another one, a panel Back hid), nor inert under a layer over it (an app open alone, a dialog): a frame
+ * covered that way still counts as visible to `checkVisibility`.
  */
 export function onScreen(frame: HTMLIFrameElement): boolean {
-  return frame.isConnected && document.visibilityState !== "hidden" && (frame.checkVisibility?.() ?? true);
+  return frame.isConnected && document.visibilityState !== "hidden" && !frame.closest("[inert]") && (frame.checkVisibility?.() ?? true);
 }
 
 export interface AppWatch {
