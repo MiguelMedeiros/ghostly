@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { createServer as createNetServer, type Server as NetServer } from "node:net";
-import { withViewerPolicy } from "@ghostly/core";
+import { VIEWER_GUARD_SCRIPT, viewerResponseHeaders, withViewerPolicy } from "@ghostly/core";
 import { expect, test } from "../support/fixtures";
 
 /**
@@ -50,6 +50,80 @@ test("a contact's app loads nothing from a server it names while Hide my IP from
     }
   } finally {
     await context.close();
+    page.close();
+    contact.close();
+  }
+});
+
+/**
+ * A contact's app asks Chromium to prefetch and prerender pages of a server it names, with the `Speculation-Rules`
+ * header and an inline `<script type="speculationrules">`: no policy covers either, and the fetch shows that server
+ * this device's address. Served the way Desktop's window serves one with Hide my IP from contacts on: the contact's
+ * headers as a viewer passes them on (`viewerResponseHeaders`, Desktop's `DROPPED_HEADERS` is the same list), the
+ * relay-only policy, and the WebRTC guard first in the page (`VIEWER_GUARD_SCRIPT`, Desktop's `SERVICE_GUARD`), in a
+ * top-level page as Desktop's (a frame's speculation rules do nothing). Without them, the same page reaches it.
+ */
+const RULES_PAGE_PORT = 4630;
+const RULES_CONTACT_PORT = 4631;
+
+test("a contact's app gets no prefetch or prerender of a server it names while Hide my IP from contacts is on", {
+  tag: ["@feature:settings.network.relay-only"],
+}, async ({ browser }) => {
+  const reached: string[] = [];
+  const contact = createServer((request, response) => {
+    reached.push(request.url ?? "");
+    const rules = request.url === "/rules.json";
+    response.writeHead(200, { "content-type": rules ? "application/speculationrules+json" : "text/html", "access-control-allow-origin": "*" });
+    response.end(rules ? JSON.stringify({ prefetch: [{ source: "list", urls: [`http://127.0.0.1:${RULES_CONTACT_PORT}/header-prefetch`] }] }) : "x");
+  });
+  const inline = (tag: string) => JSON.stringify({
+    prefetch: [{ source: "list", urls: [`http://127.0.0.1:${RULES_CONTACT_PORT}/${tag}-prefetch`] }],
+    prerender: [{ source: "list", urls: [`http://127.0.0.1:${RULES_CONTACT_PORT}/${tag}-prerender`] }],
+  });
+  let guarded = true;
+  const page = createServer((_request, response) => {
+    const sent: [string, string][] = [["content-type", "text/html; charset=utf-8"], ["Speculation-Rules", `"http://127.0.0.1:${RULES_CONTACT_PORT}/rules.json"`]];
+    const headers = guarded ? withViewerPolicy(viewerResponseHeaders(sent), true) : sent;
+    response.writeHead(200, Object.fromEntries(headers));
+    // In the HTML, put in by a script, and put in empty and filled after.
+    response.end(`<!doctype html><title>Atlas</title><h1>Atlas</h1>
+      <script type="speculationrules">${inline("parsed")}</script>
+      <script>
+        const made = document.createElement("script");
+        made.type = "speculationrules";
+        made.textContent = ${JSON.stringify(inline("made"))};
+        document.head.appendChild(made);
+        const late = document.createElement("script");
+        document.body.appendChild(late);
+        late.setAttribute("type", "SpeculationRules");
+        late.appendChild(document.createTextNode(${JSON.stringify(inline("late"))}));
+      </script>`);
+  });
+  await new Promise<void>((done, failed) => { contact.once("error", failed); contact.listen(RULES_CONTACT_PORT, "127.0.0.1", () => done()); });
+  await new Promise<void>((done, failed) => { page.once("error", failed); page.listen(RULES_PAGE_PORT, "localhost", () => done()); });
+  try {
+    for (const on of [false, true]) {
+      guarded = on;
+      reached.length = 0;
+      // A context of its own each time: a prefetch made once is kept for the next page.
+      const context = await browser.newContext();
+      try {
+        const tab = await context.newPage();
+        if (on) await tab.addInitScript(VIEWER_GUARD_SCRIPT);
+        await tab.goto(`http://localhost:${RULES_PAGE_PORT}/`, { waitUntil: "load" });
+        await expect(tab.locator("h1")).toHaveText("Atlas");
+        if (on) {
+          await tab.waitForTimeout(2_000);
+          expect(reached, "Hide my IP on: the contact's server is never reached").toEqual([]);
+        } else {
+          // The browser does speculate here: the same page with nothing in its way reaches the server each way.
+          await expect.poll(() => [...reached].sort()).toEqual(expect.arrayContaining(["/rules.json", "/parsed-prefetch", "/made-prefetch", "/late-prefetch"]));
+        }
+      } finally {
+        await context.close();
+      }
+    }
+  } finally {
     page.close();
     contact.close();
   }

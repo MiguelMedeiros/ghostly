@@ -15,7 +15,8 @@
 //   node e2e/infra/infra.mjs full [--keep] [--no-vitest] [-- <playwright args>]         (npm run e2e:full)
 //                                     down, up, the gated provider contracts (vitest), the web and extension
 //                                     end-to-end suites with every gated suite on, then down — even on failure
-//                                     or Ctrl-C, unless --keep.
+//                                     or Ctrl-C, unless --keep. Waits first (up to 20 min, free.mjs) while
+//                                     another checkout's stack runs or the ports are held; then "NOT RUN".
 // Only this project's containers (ghostly-e2e-*) are ever started, stopped or removed.
 //
 // Every command takes --host <ssh target> (or E2E_INFRA_HOST) to run the environment on another machine's Docker
@@ -29,6 +30,7 @@ import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMiner } from "./chain.mjs";
+import { heldPorts, otherStacks, waitForRoom } from "./free.mjs";
 import { PROJECT, SERVICE_PORTS, VARIABLES, dotenv, endpoints, hyperdhtRelayReady, localPort, read } from "./env.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -92,6 +94,8 @@ const PROBES = {
   "Fedimint guardian / gateway": async () => (await tcp(endpoints.fedimint.api.replace(/^ws/, "http"))) && tcp(endpoints.fedimint.gateway),
   S3: () => http(`${endpoints.s3.endpoint}/health`),
   "Iroh relay": () => http(endpoints.irohRelay),
+  // The mock's health asks LiveKit too, inside the stack.
+  "LiveKit / group-token mock": async () => (await http(endpoints.sfu.livekit.replace(/^ws/, "http"))) && http(`${endpoints.sfu.token}/healthz`),
   // Up once its own HyperDHT node is reachable, not when it first answers.
   "HyperDHT relay": () => hyperdhtRelayReady(),
   "AT Protocol PDS / PLC": async () => (await http(`${endpoints.atproto.pds}/xrpc/_health`)) && http(`${endpoints.atproto.plc}/_health`),
@@ -330,9 +334,10 @@ async function full(args) {
   const vitest = !args.includes("--no-vitest");
   const separator = args.indexOf("--");
   const playwrightArgs = separator >= 0 ? args.slice(separator + 1) : [];
-  let cleaned = false;
-  // A shared environment elsewhere stays: `full` joins it (or brings it up) and leaves it for the others.
-  const cleanup = () => { if (!cleaned && !keep && !remote) { cleaned = true; down(); } };
+  let cleaned = false, ours = false, notRun = null;
+  // A shared environment elsewhere stays: `full` joins it (or brings it up) and leaves it for the others. Here, only
+  // once the stack is this run's own: while it waits for room, the stack up is another checkout's.
+  const cleanup = () => { if (!cleaned && !keep && !remote && ours) { cleaned = true; down(); } };
   process.on("SIGINT", () => { cleanup(); process.exit(130); });
   process.on("SIGTERM", () => { cleanup(); process.exit(143); });
   process.on("SIGHUP", () => { cleanup(); process.exit(129); });
@@ -341,7 +346,12 @@ async function full(args) {
   const phase = async (name, work) => { const since = Date.now(); const result = await work(); phases.push(`${name} ${elapsed(since)}`); return result; };
   let code = 1;
   try {
-    if (!remote) await phase("down", async () => down());
+    // Another checkout's run (or a stack left up) holds the names and ports for a while: wait for it, bounded.
+    if (!remote) {
+      notRun = await phase("down", () => waitForRoom({ others: () => otherStacks(dirname(COMPOSE)), held: () => heldPorts(SERVICE_PORTS), down, log }));
+      if (notRun) throw new Error(`e2e:full NOT RUN: ${notRun}`);
+      ours = true;
+    }
     await phase("up", up);
     // Breez's regtest is hosted by Breez and Lightspark, and its faucet now wants a reCAPTCHA: on only with a funded
     // counterpart wallet of one's own (GHOSTLY_BREEZ_COUNTERPART), or when the shell turned it on.
@@ -363,13 +373,13 @@ async function full(args) {
     console.error(error instanceof Error ? error.message : error);
   } finally {
     // What the services said, for the report: the environment is gone once this returns.
-    if (code !== 0) {
+    if (code !== 0 && (ours || remote)) {
       mkdirSync(join(ROOT, "test-results"), { recursive: true });
       writeFileSync(join(ROOT, "test-results", "e2e-infra.log"), compose(["logs", "--no-color", "--timestamps"], { quiet: true }) ?? "");
       log("service logs: test-results/e2e-infra.log");
     }
     await phase("down", async () => cleanup());
-    log(`e2e:full ${code === 0 ? "passed" : "FAILED"} in ${elapsed()} (${phases.join(", ")})`);
+    log(`e2e:full ${code === 0 ? "passed" : notRun ? `NOT RUN (${notRun})` : "FAILED"} in ${elapsed()} (${phases.join(", ")})`);
   }
   process.exit(code);
 }

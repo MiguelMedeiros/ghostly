@@ -39,8 +39,10 @@
 .new-wallet-kind[data-state=error]{border-color:var(--color-danger)}
 
 /* What clicking does, at the card's end:a small button-like pill for what can be done, a check for what is there,
-   a grey "Not yet" for what is not. */
-.new-wallet-action{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;transition:transform .2s}
+   a grey "Not yet" for what is not. It may wrap: on a phone on its side a card is 263 px, narrower than "Rejoindre avec
+   une invitation…" beside the mark, and the card's overflow cut the pill's end. The tighter corners keep two lines
+   round at the ends; one line looks the same. */
+.new-wallet-action{flex:none;display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:26px;padding:4px 10px;border-radius:13px;font-size:12px;font-weight:600;white-space:normal;transition:transform .2s}
 .new-wallet-action[data-kind=create],.new-wallet-action[data-kind=connect],.new-wallet-action[data-kind=join],.new-wallet-action[data-kind=join-another]{background:var(--color-accent);color:var(--color-on-accent)}
 .new-wallet-action[data-kind=connect],.new-wallet-action[data-kind=join],.new-wallet-action[data-kind=join-another]{background:transparent;color:var(--color-accent);box-shadow:inset 0 0 0 1.5px var(--color-accent)}
 .new-wallet-action[data-kind=added],.new-wallet-action[data-kind=done]{color:var(--color-success,#34a853);background:color-mix(in srgb,var(--color-success,#34a853) 12%,transparent)}

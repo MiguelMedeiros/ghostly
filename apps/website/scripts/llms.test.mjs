@@ -138,7 +138,7 @@ test("every link of llms.txt to the site lands on a page, a file or a WISP, and 
     });
     assert.ok(found, `${url}: no page of apps/website/app serves it`);
   }
-  const repo = /^https:\/\/(?:github\.com\/MiguelMedeiros\/ghostly\/blob\/(?:dev|main)|raw\.githubusercontent\.com\/MiguelMedeiros\/ghostly\/dev)\/(.+)$/;
+  const repo = /^https:\/\/(?:github\.com\/MiguelMedeiros\/ghostly\/blob\/main|raw\.githubusercontent\.com\/MiguelMedeiros\/ghostly\/main)\/(.+)$/;
   const files = links.map((url) => url.match(repo)).filter(Boolean);
   assert.ok(files.length >= 8);
   for (const [url, path] of files) assert.ok(existsSync(resolve(root, path)), `${url}: no file ${path} in the repository`);

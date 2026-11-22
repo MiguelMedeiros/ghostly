@@ -70,7 +70,7 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
       .filter((x) => x.group === g.id)
       .map((x) => ({ id: x.id, slug: x.slug, number: x.number, name: x.name, child: Boolean(x.parent), assigned: x.assigned })),
   })).filter((g) => g.items.length > 0);
-  const sourceUrl = `${REPO_URL}/blob/dev/${reference.sourcePath}`;
+  const sourceUrl = `${REPO_URL}/blob/main/${reference.sourcePath}`;
 
   return (
     <Shell>
@@ -84,20 +84,8 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
         </nav>
 
         <div className="reader-layout">
-          <aside className="reader-side">
-            <IntentLink className="reader-glossary" href={`/wisps#glossary`}>
-              {t.glossary} →
-            </IntentLink>
-            {/* Without scripts the groups cannot be opened, so every one of them is shown. */}
-            <noscript>
-              <style>{".reader-group-panel{grid-template-rows:1fr!important;visibility:visible!important}.reader-all-toggle,.reader-group-chevron{display:none!important}"}</style>
-            </noscript>
-            <WispNav groups={groups} current={w?.slug} t={{ all: t.all, expandAll: t.expandAll, collapseAll: t.collapseAll }} />
-            <IntentLink className="reader-glossary reader-roadmap" href="/roadmap">
-              {t.roadmap} →
-            </IntentLink>
-          </aside>
-
+          {/* The list of WISPs comes after the article: under it on a phone, where Tab then reaches the article first.
+              On a wide screen the grid puts the list in the first column (reader.css). */}
           <article className="reader-main">
             <header className="reader-head">
               {w && (
@@ -225,12 +213,17 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
               </details>
             )}
 
-            <div className="reader-prose" lang="en">
-              {legacyHeadings.map((id) => (
+            <ReferenceMarkdown
+              className="reader-prose"
+              lang="en"
+              lead={legacyHeadings.map((id) => (
                 <span key={id} id={id} />
               ))}
-              <ReferenceMarkdown body={body} sourcePath={reference.sourcePath} repoLabel={t.repo} belowTitle />
-            </div>
+              body={body}
+              sourcePath={reference.sourcePath}
+              repoLabel={t.repo}
+              belowTitle
+            />
 
             <footer className="reader-foot">
               <div className="reader-source">
@@ -262,6 +255,20 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
               </IntentLink>
             </footer>
           </article>
+
+          <aside className="reader-side">
+            <IntentLink className="reader-glossary" href={`/wisps#glossary`}>
+              {t.glossary} →
+            </IntentLink>
+            {/* Without scripts the groups cannot be opened, so every one of them is shown. */}
+            <noscript>
+              <style>{".reader-group-panel{grid-template-rows:1fr!important;visibility:visible!important}.reader-all-toggle,.reader-group-chevron{display:none!important}"}</style>
+            </noscript>
+            <WispNav groups={groups} current={w?.slug} t={{ all: t.all, expandAll: t.expandAll, collapseAll: t.collapseAll }} />
+            <IntentLink className="reader-glossary reader-roadmap" href="/roadmap">
+              {t.roadmap} →
+            </IntentLink>
+          </aside>
         </div>
       </div>
     </Shell>

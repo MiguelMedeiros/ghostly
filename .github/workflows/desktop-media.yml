@@ -45,9 +45,12 @@ jobs:
   # (ready_for_review) and on every push after. The draft state is read from the API, not the event: a push and
   # `gh pr ready` a second apart start two runs, the later cancels the other, and the survivor may be the push's,
   # whose event still says draft (#742). If the read fails, the build runs.
+  # A merge train batch (batch/<base>-<stamp>, from this repository) builds nothing: each pull request in it ran this
+  # on its own pull request, and the train lands each of them as its own merge, never the batch. A fork's pull request
+  # builds whatever its branch is called.
   draft:
     name: Draft pull request?
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && !(startsWith(github.head_ref, 'batch/') && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     permissions:
       pull-requests: read
@@ -67,7 +70,7 @@ jobs:
   stream:
     name: Desktop video streaming (${{ matrix.name }})
     needs: draft
-    if: ${{ !cancelled() && needs.draft.outputs.draft != 'true' }}
+    if: ${{ !cancelled() && needs.draft.outputs.draft != 'true' && !(startsWith(github.head_ref, 'batch/') && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 75
     strategy:
