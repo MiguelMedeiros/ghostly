@@ -24,7 +24,8 @@ import {
   type LinkSessionEvents,
   type LinkSessionOptions,
 } from "../src/link";
-import type { GhostRecord, SignedPacket } from "../src/pkarr";
+import { PKARR_FUTURE_SKEW_MS, type GhostRecord, type SignedPacket } from "../src/pkarr";
+import { offerIsFresh } from "../src/signal";
 import { DiscoveryBudgetError, type PkarrTransport } from "../src/transport";
 
 // covers: chat.legacy.send, core.records, chat.paired.clock-skew, app.clock-off
@@ -394,6 +395,34 @@ describe("LinkSession presence and signals", () => {
     a.s.pollNow();
     await settle();
     expect(a.ev.onRtcSignal.mock.calls).toEqual([['{"t":"o"}', { since: NOW, after: NOW }]]);
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  it.each([
+    ["ten years", BigInt(NOW + 10 * 365 * 86_400_000) * 1000n], ["as far as a packet's date goes", 2n ** 64n - 1n],
+  ])("a packet under the peer's key dated %s ahead holds the peer's later offers against no later than readers take a date", async (_, timestampMicros) => {
+    // Anyone holding the invite holds the key the peer's records go under, and dates its packet as it likes.
+    const { net, params, a, b } = pair({}, { getServices: () => [] });
+    const theirs = identityFromSeedB64(params.invite.seedB64).pubKeyZ32;
+    b.s.start();
+    await settle();
+    a.s.start();
+    await settle();
+    const ahead = buildLinkRecords(theirs, { messages: [], ackTimestamp: 0, services: [] }, fromBase64Url(params.invite.encKeyB64)).records;
+    net.packets.set(theirs, { pubKeyZ32: theirs, timestampMicros, records: ahead });
+    vi.setSystemTime(NOW + 4_000);
+    a.s.pollNow();
+    await settle();
+    // The peer's own packet replaces it, its offer in it, made once that far date's bound has passed.
+    const offerAt = NOW + 4_000 + PKARR_FUTURE_SKEW_MS + 1_000, offer = JSON.stringify({ t: "o", ts: offerAt });
+    vi.setSystemTime(offerAt);
+    await b.s.setRtcSignal(offer);
+    vi.setSystemTime(offerAt + 2_000);
+    a.s.pollNow();
+    await settle();
+    expect(a.ev.onRtcSignal.mock.calls).toEqual([[offer, { since: NOW + 4_000, after: NOW + 4_000 + PKARR_FUTURE_SKEW_MS }]]);
+    expect(offerIsFresh(offerAt, a.ev.onRtcSignal.mock.calls[0][1], offerAt + 2_000)).toBe(true);
     await a.s.stop(false);
     await b.s.stop(false);
   });

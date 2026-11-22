@@ -3,11 +3,17 @@ import { mintNetwork } from '../../shared/mints';
 import type { CashuWallet, CashuPrepared } from '../wallet';
 
 /**
- * How long one request to a mint may last: cashu-ts's default `requestTimeout` (5 min), which this wallet does not
- * change. Retries of a swap (NUT-19) run inside the same approval, and reconcile waits for it (the coordinator runs one
- * operation per payment at a time).
+ * How long one request of a swap to a mint may last, and one asking where a swap stands (NUT-09 restore, NUT-07 states):
+ * its retries (NUT-19) included, under one deadline (`boundSwapRequests`). A mint that takes the connection and never
+ * answers is given up on within it, and the payment says so, instead of after cashu-ts' 5 min. Retries run inside the
+ * same approval, and reconcile waits for it (the coordinator runs one operation per payment at a time).
  */
-export const CASHU_REQUEST_TIMEOUT_MS=300_000;
+export const CASHU_REQUEST_TIMEOUT_MS=30_000;
+/**
+ * How long a melt's request may last, its retries (NUT-19) included under one deadline (`boundMintRequests`): cashu-ts's
+ * default `requestTimeout` (5 min) for one try.
+ */
+export const MELT_REQUEST_TIMEOUT_MS=300_000;
 /** The margin past that for a mint slow to act on a swap it did receive. */
 export const SWAP_SETTLED_MS=120_000;
 /**
@@ -32,6 +38,15 @@ export function mintRefused(error:unknown):boolean{
  * those outputs is ever signed; new ones on the keyset it signs with now can be. cashu-ts says it in its own English,
  * which is never shown to a person.
  */
+/**
+ * The mint failed, and said nothing of the request: a server error (5xx, "internal error"), or no answer at all (a
+ * closed connection, cashu-ts's `NetworkError`). Unlike a refusal, it may work later. By name, as `mintRefused`.
+ */
+export function mintFailed(error:unknown):boolean{
+ if(!(error instanceof Error))return false;
+ const status=(error as {status?:unknown}).status;
+ return error.name==='NetworkError' || (error.name==='HttpResponseError' && typeof status==='number' && status>=500);
+}
 export function keysetRefused(error:unknown):boolean{
  return error instanceof Error && error.name==='StaleKeysetError' && mintRefused(error);
 }

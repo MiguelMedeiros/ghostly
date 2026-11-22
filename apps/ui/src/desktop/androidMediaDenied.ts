@@ -10,3 +10,12 @@ import { androidApp } from "../lib/touchOnly";
 export function mediaDeniedOnAndroid(): boolean {
   return androidApp();
 }
+
+/**
+ * True in the Android app: Allow asks for the microphone and the camera one at a time. Android asks for each in its
+ * own dialog, and the app's WebView refuses a request for both unless both were allowed, so a microphone allowed with
+ * the camera refused would name nothing and say "Blocked".
+ */
+export function asksEachAlone(): boolean {
+  return androidApp();
+}

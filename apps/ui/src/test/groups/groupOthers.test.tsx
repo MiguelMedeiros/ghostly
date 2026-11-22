@@ -22,7 +22,7 @@ describe("another group under this group's id", () => {
     const band = screen.getByTestId("group-others");
     expect(band).toHaveTextContent("Another group has this group's id");
     const others = within(band).getAllByTestId("group-other");
-    expect(others[0]).toHaveTextContent("Alice invited you to Family (3 members)");
+    expect(others[0]).toHaveTextContent("\u2068Alice\u2069 invited you to \u2068Family\u2069 (3 members)");
     expect(others[1]).toHaveTextContent("A group link you opened");
     const keep = vi.fn();
     engine.on("keepGroup", keep);
@@ -54,7 +54,7 @@ describe("another group under this group's id", () => {
     engine.on("switchGroup", change);
     await user.click(within(screen.getAllByTestId("group-other")[0]).getByTestId("group-other-switch"));
     const ask = screen.getByRole("dialog");
-    expect(ask).toHaveAccessibleDescription(/^Alice invited you to Family \(3 members\)\. This group is left/);
+    expect(ask).toHaveAccessibleDescription(/^\u2068Alice\u2069 invited you to \u2068Family\u2069 \(3 members\)\. This group is left/);
     expect(ask).not.toHaveAccessibleDescription(/group link/);
     await user.click(within(ask).getByRole("button", { name: "Switch" }));
     expect(change).toHaveBeenCalledWith({ groupId: "group-1", to: "chat-ab" });

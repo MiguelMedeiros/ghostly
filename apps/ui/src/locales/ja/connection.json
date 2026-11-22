@@ -125,8 +125,7 @@
   "ms": "{{ms}} ms",
   "option": {
     "automatic": "自動",
-    "automaticHint": "アプリが選択（WebRTC 優先）",
-    "automaticHintNative": "アプリが選択（{{transport}} 優先）: このアプリには WebRTC がありません",
+    "automaticFirst": "アプリが選択（{{transport}} 優先）",
     "chosenNotInUse": "選択済み · 未使用",
     "chosenWaiting": "選択済み · 待機中",
     "contactLacks": "相手のアプリは {{transport}} に対応していません",
@@ -215,6 +214,7 @@
     "automatic": "自動: 両方のアプリが {{transport}} を最優先しています。",
     "automaticNoWebrtc": "自動: 両方のアプリにある {{transport}} を使っています。一方のアプリには WebRTC がありません。",
     "automaticWebrtc": "自動: 両方のアプリが WebRTC を最優先しており、最初のペアリングは常に WebRTC を使います。",
+    "automaticWebrtcIroh": "自動: アプリはすぐに戻れる Iroh を優先し、接続後により速い WebRTC に切り替えます。",
     "contactChose": "{{contact}} がこのチャットに {{transport}} を選びました。",
     "contactChoseUnnamed": "相手がこのチャットに {{transport}} を選びました。",
     "fallback": "このチャットには {{preferred}} を選びましたが、現在使えないため {{transport}} を使っています。",

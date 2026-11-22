@@ -21,11 +21,17 @@ export interface SwitchPlan {
   upgrade?: boolean;
 }
 /**
- * The contact's policies read per window. A choice, a retry or a session's start each say one, so a handful a minute;
- * every one read may plan a move this side dials. Past that only the newest waits, read once the window has room.
+ * The contact's policies read per window. A choice, a retry or a session's start each say one; every one read may plan
+ * a move this side dials. Past that only the newest waits, read once the window has room.
+ * A person moving the chat back and forth as fast as it goes says one per move, and a move back to the transport just
+ * left waits for its old session to retire (`SWITCH_RETIRE_MS`): about 20 a minute. At 10, the 11th move in a minute
+ * waited for the window: 50 s when the side that chose plans the moves (its plan, for a policy the contact had not read
+ * yet, timed out after 30 s and was tried again 20 s later), 4 of 50 back-to-back moves between two CLIs.
  */
-export const POLICY_RECEIVE_LIMIT = 10, POLICY_RECEIVE_WINDOW_MS = 60_000;
+export const POLICY_RECEIVE_LIMIT = 30, POLICY_RECEIVE_WINDOW_MS = 60_000;
 export const allowedTransports = (policy: TransportPolicy) => transportOrder(policy.available, policy.preferred, policy.fallback);
+/** The first ranked transport that is not relayed. */
+const directFirst = (ranked: readonly PairedTransport[], relayed: readonly string[]) => ranked.find(t => !relayed.includes(t));
 
 function parsePolicy(raw: unknown): TransportPolicy | null {
   if (!raw || typeof raw !== "object") return null;
@@ -114,7 +120,8 @@ export class TransportSwitch {
   wanted(): { transport: PairedTransport; by?: "you" | "contact" } | undefined {
     if (!this.context || !this.remote) return undefined;
     const local = this.local(), remote = this.remote, winner = this.winner(local, remote);
-    const transport = this.choices(local, remote)[0] ?? winner.preferred;
+    // A move off a relay (`upgrade`) is quiet: the transport the session is on is not waiting for another.
+    const transport = (this.isUpgrade(local, remote) ? this.actual : undefined) ?? this.choices(local, remote)[0] ?? winner.preferred;
     return { transport, ...(winner.intent > 0 ? { by: winner === local ? "you" as const : "contact" as const } : {}) };
   }
   private local(): TransportPolicy { return { ...this.options.policy(), revision: this.revision, intent: this.intent }; }
@@ -248,14 +255,19 @@ export class TransportSwitch {
     // dial ranks direct paths first again. Unless both sides move off a relay (`upgrade`): then a direct transport
     // ranked first is where the chat goes, once (a plan that does not connect is not made again for these policies).
     const upgrade = this.upgrading(winner, ranked, relayed);
-    const target = upgrade ? ranked[0] : winner.intent === 0 && this.actual && ranked.includes(this.actual) ? this.actual
+    const target = upgrade ? directFirst(ranked, relayed)! : winner.intent === 0 && this.actual && ranked.includes(this.actual) ? this.actual
       : ranked.includes(winner.preferred) ? winner.preferred : ranked[0];
     return [target, ...(local.fallback && remote.fallback ? ranked.filter(t => t !== target) : [])];
   }
-  /** Nobody chose, the session is on a relayed transport, a direct one ranks first, and both sides move (`upgrade/1`). */
+  /**
+   * Nobody chose, the session is on a relayed transport, a direct one is ranked, and both sides move (`upgrade/1`). The
+   * first direct one, not the first ranked: Iroh through its relay ranks first so that a chat comes back over it at once
+   * (WISP 100, revision 2026-11-08), and the session then moves to the direct path, which carries files many times faster.
+   */
   private upgrading(winner: TransportPolicy, ranked: PairedTransport[], relayed: readonly string[]): boolean {
+    const direct = directFirst(ranked, relayed);
     return winner.intent === 0 && !!this.actual && relayed.includes(this.actual) && ranked.includes(this.actual)
-      && ranked[0] !== this.actual && !relayed.includes(ranked[0]) && !!this.options.upgrade?.();
+      && !!direct && direct !== this.actual && !!this.options.upgrade?.();
   }
   private isUpgrade(local: TransportPolicy, remote: TransportPolicy): boolean {
     const relayed = relayedTransports(local.descriptors, remote.descriptors);

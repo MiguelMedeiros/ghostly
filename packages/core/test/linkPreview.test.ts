@@ -34,12 +34,32 @@ describe("linksIn", () => {
   it("finds the links of a text as the bubble ends them", () => {
     expect(linksIn("see (https://a.example/x), and https://b.example/y.")).toEqual(["https://a.example/x", "https://b.example/y"]);
     expect(linksIn("no links here")).toEqual([]);
+    // An emoji typed right after a link was previewed as part of it ("…/a%F0%9F%94%A5").
+    expect(linksIn("olha https://a.example/x🔥 e https://b.example/y!👍🏽")).toEqual(["https://a.example/x", "https://b.example/y"]);
+    // A direction mark typed after a link was previewed as part of it ("…/x%E2%80%8F").
+    expect(linksIn("\u0632\u0648\u0631\u0648\u0627 https://a.example/x\u200f. https://b.example/y\u200e")).toEqual(["https://a.example/x", "https://b.example/y"]);
   });
 
   // The preview was fetched from /a%E3%80%82, a page the person never linked.
   it("ends a link at a Chinese, Japanese or Arabic sentence's punctuation, as the bubble does", () => {
     expect(linksIn("見て https://a.example/x。看 https://b.example/y，好")).toEqual(["https://a.example/x", "https://b.example/y"]);
     expect(linksIn("هل رأيت https://a.example/x؟ «https://b.example/y»")).toEqual(["https://a.example/x", "https://b.example/y"]);
+  });
+
+  // The bubble drew both links; the second was never read, so it could get no preview.
+  it("finds a link written right after that punctuation with no space, as the bubble does", () => {
+    expect(linksIn("見て https://a.example/x。https://b.example/y")).toEqual(["https://a.example/x", "https://b.example/y"]);
+    for (const stop of ["、", "،", "؟"])
+      expect(linksIn(`https://a.example/x${stop}https://b.example/y`), stop).toEqual(["https://a.example/x", "https://b.example/y"]);
+    // A bare scheme before the stop is no link, and leaves the next one whole.
+    expect(linksIn("https://。https://b.example/y")).toEqual(["https://b.example/y"]);
+  });
+
+  it("keeps one link where the bubble does: a path in Chinese or Japanese, a full-width full stop, a space", () => {
+    expect(linksIn("見て https://ja.wikipedia.org/wiki/東京タワー")).toEqual(["https://ja.wikipedia.org/wiki/東京タワー"]);
+    // \uff0e is no stop: a host can be written with it ("a．example" opens a.example), and the bubble reads on.
+    expect(linksIn("https://a.example/x\uff0ehttps://b.example/y")).toEqual(["https://a.example/x\uff0ehttps://b.example/y"]);
+    expect(linksIn("https://a.example/x https://b.example/y")).toEqual(["https://a.example/x", "https://b.example/y"]);
   });
 });
 
@@ -75,6 +95,13 @@ describe("parseLinkPreview", () => {
   it("keeps a preview of one of the text's links, compared without tracking parameters", () => {
     expect(parseLinkPreview(preview, text)).toEqual(preview);
     expect(parseLinkPreview({ ...preview, u: "https://news.example/story?id=9&utm_campaign=z" }, text)).toEqual(preview);
+  });
+
+  it("keeps a preview of a link written right after another one's 。, with no space", () => {
+    const second = { ...preview, u: "https://b.example/y" };
+    expect(parseLinkPreview(second, "見て https://a.example/x。https://b.example/y")).toEqual(second);
+    // Still only a link the text has: the run's two links glued together are none of them.
+    expect(parseLinkPreview({ ...preview, u: "https://a.example/x。https://b.example/y" }, "見て https://a.example/x。https://b.example/y")).toBeUndefined();
   });
 
   it("drops a preview whose link is not in the text, so a card never points elsewhere", () => {

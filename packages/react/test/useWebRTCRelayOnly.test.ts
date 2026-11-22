@@ -76,7 +76,7 @@ describe("a call while Hide my IP from contacts is on", () => {
     expect(call.addCallEventMessage.mock.calls.map(([type]) => type)).toEqual(["call_started", "call_failed"]);
   });
 
-  it("call media that cannot keep to a relay (the Linux Desktop's) places no call: no microphone asked, nothing rings, it says why", async () => {
+  it("call media that cannot keep to a relay places no call: no microphone asked, nothing rings, it says why", async () => {
     const linux: CallMedia = { createPeerConnection: (config) => new FakePeerConnection(config) as never, getUserMedia: (c) => navigator.mediaDevices.getUserMedia(c) };
     const call = renderCall(linux, undefined, relayOnly);
     // Said before any call: the chat's call buttons give it as their reason.

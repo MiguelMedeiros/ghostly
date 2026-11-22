@@ -56,7 +56,7 @@ describe("a one-shot that changes only this device", { timeout: 120_000 }, () =>
     relay.holdMs = 6_000;
     const writes = [
       ["chat", "rename", bob, "Bobby"], ["settings", "set", "sendTyping", "false"], ["settings", "set", "autoDownloads", "false"],
-      ["settings", "set", "serveFiles", "false"], ["call", "auto", "on"], ["call", "auto", "off"], ["call", "auto", "on"],
+      ["settings", "set", "serveFiles", "false"], ["settings", "set", "daemonPresence", "true"], ["call", "auto", "on"], ["call", "auto", "off"], ["call", "auto", "on"],
       ["service", "add", "web", "http://127.0.0.1:46049"], ["chat", "remove", carol, "--yes"],
     ];
     for (const args of writes) {
@@ -71,10 +71,25 @@ describe("a one-shot that changes only this device", { timeout: 120_000 }, () =>
     // Kept: the process's last writes reach the store before it closes (they are not awaited where they are made).
     expect(ok(await ghostly(["--home", dir, "chat", "show", bob], { env }))).toMatchObject({ name: "Bobby" });
     expect((await ghostly(["--home", dir, "chat", "show", carol], { env })).code).not.toBe(0);
-    expect(ok(await ghostly(["--home", dir, "settings", "get"], { env }))).toMatchObject({ sendTyping: false, autoDownloads: false, serveFiles: false });
+    expect(ok(await ghostly(["--home", dir, "settings", "get"], { env }))).toMatchObject({ sendTyping: false, autoDownloads: false, serveFiles: false, daemonPresence: true });
     expect(ok(await ghostly(["--home", dir, "call", "auto"], { env }))).toMatchObject({ autoAnswer: { on: true } });
     expect(JSON.stringify(ok(await ghostly(["--home", dir, "service", "list"], { env })))).toContain("http://127.0.0.1:46049");
     expect(relay.requests).toEqual([]);
+  });
+
+  // The engine hands its state over 50 ms after a change, and the one-shot had closed by then: the rename and the
+  // removal were never said, a `listen --cursor` started later got nothing, and the next start took the chats as they were.
+  it("says its change as an event, as a daemon does: chat.renamed and chat.removed", async () => {
+    relay.holdMs = 0;
+    const dave = ok(await ghostly(["--home", dir, "invite", "create", "--label", "dave"], { env })).chat as string;
+    const eve = ok(await ghostly(["--home", dir, "invite", "create", "--label", "eve"], { env })).chat as string;
+    const since = (ok(await ghostly(["--home", dir, "events", "--since", "0"], { env })) as { lastSeq: number }).lastSeq;
+    ok(await ghostly(["--home", dir, "chat", "rename", dave, "Davy"], { env }));
+    ok(await ghostly(["--home", dir, "chat", "remove", eve, "--yes"], { env }));
+    const { events } = ok(await ghostly(["--home", dir, "events", "--since", String(since)], { env })) as { events: { type: string; chat?: string; name?: string }[] };
+    expect(events.filter((e) => e.type === "chat.renamed" || e.type === "chat.removed")).toMatchObject([
+      { type: "chat.renamed", chat: dave, name: "Davy" }, { type: "chat.removed", chat: eve },
+    ]);
   });
 
   it("still goes online for a setting the contacts or the relays see", async () => {

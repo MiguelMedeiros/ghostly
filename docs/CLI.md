@@ -81,7 +81,8 @@ tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tool
 | `--profile <name>` or `GHOSTLY_PROFILE` | Run one command on another profile |
 | `--home <dir>` or `GHOSTLY_HOME` | Move the whole `~/.ghostly` folder |
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
-| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice) |
+| `status set [text…] [--emoji <emoji>] [--availability available\|busy\|away\|dnd] [--until 2h]`, `status show`, `status clear` | The status paired contacts see: up to 60 characters, one emoji, an availability (`dnd`: Do not disturb), until a time. A daemon says it at once; without one it goes on each chat's next live session |
+| `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings and the chats' holds (`chat disconnect --hold`) travel with it |
 
 Only one process opens a profile at a time.
 
@@ -93,7 +94,9 @@ the daemon runs another version). Ctrl-C, a service manager's stop, or the termi
 it cleanly: it tells contacts it is going and removes its socket. While a daemon is starting (its engine, before its
 socket listens: seconds on a large profile), `ghostly daemon status` says `"running": false, "starting": true` with its `pid`, and `daemon stop` and `daemon restart`
 wait up to `--timeout` for its socket, then stop it. Any other command run meanwhile waits up to 30 s for that socket
-and goes through it.
+and goes through it. The same goes for a profile that `daemon restart` or `daemon --detach` keeps for the daemon it
+starts (`daemon.claim` in the profile's folder), from before the stop until the new daemon holds the profile: other
+commands do not open the profile in between, so a stream of them cannot keep the new daemon from starting.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
@@ -109,7 +112,8 @@ One JSON object per line each way:
 ```
 
 A connection takes one `events.subscribe`: a second on it is refused (`bad_request`), and a new stream is a new
-connection.
+connection. Its `since`, as `events.replay`'s, is a whole number from 0 (a number, not text: anything else is
+`bad_request`); left out or `null`, the stream starts from now.
 
 The daemon speaks first on the socket: a greeting that proves, with the secret it writes in the profile's folder
 (`daemon.secret`, 0600, new at every start), its pid and the time. A command writes nothing until that checks out,
@@ -136,27 +140,46 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - A message's `timestamp` is its place in the history: when this profile sent it, or when it arrived here. A
   received message also has `sentAt`, the time its sender's clock said. Histories are ordered by `timestamp`.
 - `--since <seq>` replays from the journal (the last 10,000 events, and no more than their last 16 MiB); `--cursor <file>` remembers the last event
-  handled, so a restarted bot resumes where it stopped.
+  handled, so a restarted bot resumes where it stopped. With both, the cursor's number wins: `--since` is where the
+  first start begins (`--since 0 --cursor f`: the whole journal once, then from where it stopped).
 - `--type message.received` keeps one type; `--type message` (or `message.`) a family. A family deeper down ends in
   "." (`group.typing.`): `group.message` is that type alone. A first word that is no family (`--type bogus`) is a usage
   error naming the families; a type no event has (`message.recieved`) is said on stderr, and the listener runs on.
+  `agent.turn` comes only with `--turns`: a `--type` that keeps it alone (`agent`) is a usage error.
   `events.gap` passes every `--type` (and `--turns`): a bot on `message.received` is told when messages were lost
   across a crash or a trim.
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
   events get through. See [Allowlist](#allowlist).
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
-- `--translate <lang>` (also on `events` and `chat history`) adds `translation: {from, text}` to a message a contact
-  or a member sent in another language, made on this machine by the translation runtime the Desktop downloads
-  (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in the data folder). Without the runtime it
-  says so once on stderr and prints messages as they are. See the CLI README's Translation section.
+- `--translate <lang>` (also on `events` and `chat history`): **not in this build yet.** The CLI has no language
+  detector yet, so it translates nothing, with or without the runtime: it says so once on stderr ("--translate cannot
+  translate in this build of the CLI") and prints messages as they are. Once it has one, the flag adds
+  `translation: {from, text}` to a message a contact or a member sent in another language, made on this machine by the
+  translation runtime the Desktop downloads (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in
+  the data folder); without the runtime it will say so once on stderr. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
-  arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
-  cursor moves past its event: it is not run again.
+  arguments, so a contact's text cannot reach the shell), and `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID` and
+  `GHOSTLY_EVENT_SEQ` in its environment. It also gets `GHOSTLY_HOME` and `GHOSTLY_PROFILE` of the folder and profile
+  the listen runs on (given with `--home`, `--profile` or the environment), so a `ghostly send` in it answers from the
+  same profile. A command that exits non-zero, or that a signal kills
+  ("--exec was killed by SIGKILL on event N"), is said on stderr and the cursor moves past its event: it is not run
+  again. With `--print`, the command's own stdout goes to listen's stderr, so stdout carries the JSON events only;
+  without `--print`, it is listen's stdout. One still running after a minute is said once on stderr (the events after
+  it wait). The command runs in a process group of its own: a stop (SIGTERM, SIGINT, Ctrl-C) gives a running command
+  5 s to end, then sends its group SIGTERM, and SIGKILL 5 s later. A command the stop ended leaves the cursor before
+  its event, so the next start runs it again, never alongside the old one. Without `--cursor` nothing keeps that place:
+  stderr says the event is not handed again and the `--since` that runs it again.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
-  followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
+  followed; no `user:password@` in the URL, so put a token in its path or query). Give a URL with a token in
+  `GHOSTLY_WEBHOOK` instead of `--webhook` (one or the other): a running `listen`'s arguments show in `ps` to every
+  account on the machine, its environment does not, and no `--exec` command or other child gets it. A `--webhook` URL
+  with a path or query is warned of on stderr, and one that is not a URL is refused without repeating it. A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
-  when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed. These lines
+  when it answers. An https:// bridge whose TLS fails (a self-signed certificate, or a plain http server) is held the
+  same way, and stderr names the failure ("failed TLS (DEPTH_ZERO_SELF_SIGNED_CERT)") and the way out: give it as
+  `http://` (it is on this machine), or restart `listen` with `NODE_EXTRA_CA_CERTS` set to the certificate that signed
+  the bridge's. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed. These lines
   name the bridge by its origin only (`http://127.0.0.1:8787`), never its path or query, so its token stays off stderr.
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
 - A `listen` started while a daemon runs follows that daemon across a `daemon restart`. When the daemon stays gone
@@ -177,15 +200,16 @@ Main types: `message.received`, `message.sent`, `message.delivery`, `message.edi
 ### Allowlist
 
 ```bash
-ghostly listen --from alice --from bob --group team --exec ./bot.sh
+ghostly listen --from alice --from bob --group k3x9q2abcdefghijklmnop --exec ./bot.sh
 ```
 
 - `--from` takes a chat (its id or a label given here) or a contact's key (`peer` in `chat show`); a key also matches a
   chat made after `listen` started, and only ever the chat of that key (a contact's own name never stands for a key).
   A prefix of a chat's id or the name its contact gave itself is refused, with the chat it found: another contact
-  could call itself that. Name the chat first (`ghostly chat rename <chat> <name>`). `--group` takes a group (id,
-  prefix or name, or `group:<id>`; one that fits more than one group is refused, with their ids). Names are turned into ids once, at the
-  start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
+  could call itself that. Name the chat first (`ghostly chat rename <chat> <name>`). `--group` takes a group by
+  its id (as `group list` gives it), or `group:<id>`. Its name or a prefix of its id is refused, with the id to use: its
+  admin chose the name and its creator the id, so another group's admin could name theirs that. Names are turned into
+  ids once, at the start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
 - With either flag, an event of any other chat or group never reaches `--exec`, `--webhook` or stdout. The message
   itself is kept in the chat as always, and the cursor moves past it. Events of the profile itself
   (`daemon.started`, `events.gap`, `identity.approval`) still pass.
@@ -198,8 +222,11 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
 ### Agent turns
 
 `--turns` is the event shape for an agent (Claude Code, a bot on a model): each `message.received`, and each
-`group.message` that mentions this profile, becomes one `agent.turn`. A mention learned later (the message first
-came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. Nothing else is one (my own messages, edits,
+`group.message` that mentions this profile or presses a button of a question it sent, becomes one `agent.turn` (a
+press on another member's question is not). A mention learned later (the message first
+came through another member without it) is a `group.mentioned`, and its turn then, with `source: "group.mentioned"`. A
+press learned later the same way is a `button.pressed` that carries the reply as `message`, and its turn then, with
+`source: "button.pressed"`. Nothing else is one (my own messages, edits,
 reactions, typing). An `events.gap` still comes through as it is: turns may have been lost there.
 
 ```json
@@ -210,14 +237,16 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
 
 - `chat` for a 1:1 chat, or `group` and `member` (the author's key) for a group. `messageId` is what
   `ghostly send <chat> --reply <messageId>` (or `group send <group> --reply`) takes to answer it, and so does every
-  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`).
+  command that takes a message (`react`, `pin`, `forward`, `message details`, `button press`, and `history --before`
+  or `--after` for the messages around it).
 - **Ids are made here.** `messageId` is `t_` and 32 hex digits, made on this device from the chat and the message, and
   `id` ends in it. A message is stored under an id its sender chose most of (`peer_…`, as history and the other events
   show it): that one is `untrusted.messageId`. An id is a name to hand back to a command, never text for the model.
 - `seq` is the source event's, so `--since` and `--cursor` work as for any event. `id` is stable for the message:
   dedupe on it.
-- `press` (`{messageId, button, label}`) when the message pressed a button of a question you sent with `--button`:
-  act on it, not on the text, which is only the label.
+- `press` (`{messageId, button, label, by}`) when the message pressed a button of a question you sent with `--button`:
+  act on it, not on the text, which is only the label. `by` is who pressed, as `button.pressed` says it: the chat, or
+  in a group the member's key, where any member can press.
 - **Untrusted data.** Everything the sender controls (the text, their name, a quoted snippet, a file's name, the id
   their message is stored under) is under `untrusted` and nowhere else. Hand it to the agent as quoted data, never merged into its instructions: nothing a
   contact writes should change what the agent does, reveal a secret or move money. A prompt cannot promise that, so
@@ -230,10 +259,10 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
 | Area | Commands |
 |---|---|
 | Invites and chats | `invite create\|join` (`join` with no invite reads it from stdin), `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `edit <chat> <message>` (a status updated in place), `message retry\|delete\|details` (`delete --everyone` takes one of yours off every member's device too), `react <chat> <message> <emoji>` (`--remove` takes yours back), `forward <chat> <message>… --to <chat\|group>…` (up to 5; files from the bytes here), `typing <chat> [--kind typing\|recording\|thinking] [--status <text>] [--for s] [--stop]` |
-| Transports | `chat transport <chat> auto\|dht\|webrtc\|iroh\|hyperdht`, `chat connect\|disconnect`, `chat disconnect <chat> --hold <minutes>` (off the direct link that long, on the DHT; `settings online false` is the whole profile); relays and ICE servers with `settings set` (the CLI reaches TURN over UDP only: a `turns:` or `?transport=tcp` server is kept for the apps, unused here, and the answer says so) |
+| Transports | `chat transport <chat> auto\|dht\|webrtc\|iroh\|hyperdht`, `chat connect\|disconnect`, `chat disconnect <chat> --hold <minutes>` (off the direct link that long, on the DHT; `settings online false` is the whole profile); relays and ICE servers with `settings set` (the CLI reaches TURN over UDP only: a `turns:` or `?transport=tcp` server is kept for the apps, unused here, and the answer says so; so is `hyperdhtRelay`: the CLI runs HyperDHT itself and dials through the relay only with Hide my IP from contacts, not settable yet) |
 | Files and voice | `file send <chat\|group> <path>` (to a group: up to 100 MiB, fetched by each member's app from a member who has it), `file send … --voice [ms]` (length and waveform measured from the file), `file send … --reply <message>` (quotes it), `file accept\|decline\|pause\|resume\|cancel\|resend\|request [<chat>] <file>` (a resent file goes on from what the receiver holds), `file wait <file>`, `file save <file> [--wait]`. Files over 25 MiB wait for `file accept`, and so does a group's file that did not come by itself (over 8 MiB). `message.received` carries the file (`id`, and a voice note's `duration` and `peaks`); `file.*` events name its `messageId` |
-| Groups | `group create <name>` (a community link) or `--mesh` (private), `group join` (with no link, from stdin), `group send … --mention <member> --reply <message>` (answers with the message id), `group history` (each message names its author), `group react`, `group edit <group> <message>` (a status updated in place), `group typing <group>` (private groups: typing, recording, thinking or a status line), `--wait sent` on both (until an edge took it); `group accept\|decline <group>`, `group auto on --from <chat>` (the daemon accepts that chat's invitations by itself); admin: `group invite\|remove\|admin\|rotate\|link\|picture\|hub\|rename` (`group rename <group> <name…>` keeps the picture) |
-| Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|fedimint\|usdt` (`fedimint --invite <code>`; Spark on Mainnet with your Breez API key; `--stdin` takes secret fields as `name=value` lines, `api-key=…` too, out of `ps` and the shell's history), `wallet add-mint`, `wallet list`, `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history` (`wallet redeem` with no token or `-` reads it from stdin), `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
+| Groups | `group create <name>` (a community: its `link`, and the `url` that opens it in the app, as `group link` answers them) or `--mesh` (private), `group join` (with no link, from stdin; a one-shot waits up to 60 s to be let in, then answers `"joined":true|false` and the `stage`, with the next step on stderr when it is not in; in a group under the link's id already, another's link is kept beside it, and it answers `"joined":false` at once with how to pick, `others` in `group show`), `group send … --mention <member> --reply <message>` (answers with the message id; up to 16 members mentioned, more is refused), `group history` (each message names its author), `group react`, `group edit <group> <message>` (a status updated in place), `group typing <group>` (private groups: typing, recording, thinking or a status line), `--wait sent` on both (until an edge took it); `group accept\|decline <group>`, `group auto on --from <chat>` (the daemon accepts that chat's invitations by itself); admin: `group invite\|remove\|admin\|rotate\|link\|picture\|call\|hub\|rename` (`group rename <group> <name…>` keeps the picture) |
+| Wallets | `wallet create cashu\|lightning\|arkade\|spark\|bitcoin\|fedimint\|usdt` (`fedimint --invite <code>`; Spark on Mainnet with your Breez API key; `--stdin` takes secret fields as `name=value` lines, `api-key=…` too, out of `ps` and the shell's history), `wallet add-mint`, `wallet list` (a balance not read yet is `null`, with `status` `locked`, `reading` or `error`, never 0), `wallet faucet` (test coins), `wallet receive\|address\|redeem\|history` (`wallet redeem` with no token or `-` reads it from stdin), `wallet remove` (refused while it holds or awaits money), several `lightning` cards |
 | Payments | `chat pay <chat> <sats>`, `chat request`, `chat pay-request`, `chat accept`, `pay <invoice\|address\|lnurl>`, `payment list\|check\|reclaim` |
 | Identities | `identity providers\|list\|add\|complete\|cancel\|remove` (`add --stdin` takes a signer's fields as `name=value` lines, a NIP-46 `bunker://` link out of `ps` and the shell's history), `identity share\|withdraw\|recheck <chat> <id>`, `identity contact <chat>` |
 | Shared services | `service add <name> http://127.0.0.1:<port>`, `service share <service> <chat>`, `service peer\|open\|close` |
@@ -241,8 +270,8 @@ reactions, typing). An `events.gap` still comes through as it is: turns may have
 
 A chat is named by its id, its contact's key, the label you gave it, or (only when no label matches) a unique prefix
 of its id or the name the contact gave itself; a group by its id, its name, or a unique
-prefix of its id, each also written `group:<ref>` (every command that takes a group, `listen --group` included, and
-every one that takes a chat or a group); a member by its key, a unique prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
+prefix of its id, each also written `group:<ref>` (every command that takes a group, and every one that takes a chat
+or a group; `listen --group` takes only its id, as is or after `group:`); a member by its key, a unique prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
 group's and a member its own, so a bot or a script addresses by id (`<chat id>`, `group:<group id>`, a member's whole
 key), which every answer and event carries. What the CLI does when names meet:
 
@@ -275,14 +304,14 @@ Safety rules the CLI enforces:
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
   `chat request`, the comment of `pay` to a Lightning address, the name of `group create` and `group rename`, the
-  name contacts see in `profile set`, `profile create --name` and `settings set nick`, the `--name` of `file send`,
+  name contacts see in `profile set`, `profile create --name` and `settings set nick`, a file's name in `file send`,
   the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
   `forwardMessages`, `sendGroupFile` caption and file name, `sendFile`'s file name, payment memos of `sendPayment`,
   `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,
-  `lnurlInvoice`'s comment, the name of `createGroup` and `renameGroup` and `updateSettings`' nick through
-  `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5) unless
+  `lnurlInvoice`'s comment, the name of `createGroup` and `renameGroup`, `updateSettings`' nick, `setOwnStatus`'
+  text and the note or profile fields of `nostrDraft` through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5) unless
   `--force`, before anything is sent or asked of a server.
-- **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
+- **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group create` and `group link`, for a group's link, and `invite create`, for the invite it makes).
 
 Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out),
 5 (needs `--force`, `--yes` or `--confirm-real`) or 130 (stopped with Ctrl-C, `interrupted`). A daemon that does not answer a read or `daemon status` within 15
@@ -292,12 +321,24 @@ within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a 
 once the daemon has answered `status`: one that has not in 15 seconds is a timeout as well, and the command was not
 sent, so the daemon does not act on it when it wakes. A read (`chat list`, `status` and the like) that a daemon
 stopping or restarting leaves unanswered is asked once more, through the daemon that runs then or on the profile
-itself; when that one goes away too it fails with `unavailable` (exit 1, `details.method`): a read changes nothing, so
-running it again is safe. Any other command it leaves unanswered may be done: it is a timeout (exit 4) with
-`details.reason: daemon-stopped`, and `ghostly chat history` shows whether a message went. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
+itself; so is a `chat wait` or `file wait`, for the time it had left. When that one goes away too it fails with
+`unavailable` (exit 1, `details.method`): a read changes nothing, so running it again is safe. Any command whose
+connection ended before it was sent to the daemon (`unavailable`, "The daemon went away") is sent once more the same
+way: the daemon never read it. A `file send --wait`
+answers before the daemon stops, as `send --wait` does: a timeout (exit 4) with `details.reason: daemon-stopped`, its
+`chat`, `messageId`, the file's id (`file`) and how far it got. Any other command it leaves unanswered may be done: it
+is a timeout (exit 4) with `details.reason: daemon-stopped`, and `ghostly chat history` shows whether a message went. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
 its `--timeout` (default 20 s) is ended with SIGTERM, and SIGKILL after as long again (on Windows the first ends it:
 there is no second). A daemon kept by a service manager (systemd, launchd) is restarted with the manager instead: it
 starts its own again, and the one `restart` started would race it for the profile.
+
+A file `file send` cannot read is refused with its path: one this user may not read is `refused` (exit 1), and one
+that changes on disk while it is copied in (a log still written to, a file being saved: it grew, shrank or was written
+again) is `unavailable` (exit 1, `details.reason: file_changed`, `details.path`), with nothing kept. Send it again once
+nothing writes to it, or send a copy. Ctrl-C on a `file send` through a daemon while the file is still being copied in
+(a large one takes seconds) stops the send there: nothing is kept and nothing goes, so send it again when you want it.
+The same goes for one that waits for the contact (`--wait sent`, and a one-shot's own wait): Ctrl-C during the copy
+stops the send, and after it only the waiting. Its line says both, and `ghostly file list <chat>` shows which it was.
 
 ## Bots
 
@@ -332,7 +373,8 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   numbers: [AI agents § Reporting usage](AI-AGENTS.md#reporting-usage).
 - Buttons: `ghostly send <chat> "Want the $30 one? Reply yes or no" --button yes:Yes --button no:No --once` puts
   buttons under the question (`group send` too). A press comes back as `button.pressed` (`messageId`, `button`,
-  `label`, `by`), then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
+  `label`, `by`); with `--turns`, a press on your question (in a chat or a group) is the `agent.turn` that carries `press` instead
+  ([Agent turns](#agent-turns)). Then `ghostly button update <chat|group> <message> --chosen yes --close` shows the answer and
   takes no more. Someone else's question is answered with `ghostly button press <chat> <message> <button>`, as a
   tap in the app. The text is what apps without buttons show, so it says how to answer in words
   ([WISP 406 · Message Buttons](wisps/406-message-buttons.md)). A typed answer is matched by label or id, ignoring
@@ -352,8 +394,8 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   that came while it was down; any other invitation waits for `group accept` as before. `group auto` alone prints the
   setting, `group list` shows it as `autoJoin`, `group auto off` turns it off. There is no "from anyone": `on` needs a
   chat, named as for `call auto on --from` (its id, its contact's key or a label given here). It is kept in the
-  profile's `groups.json` (0600) with each chat's contact key: removing the chat takes it off the list, and a chat
-  whose contact's key is no longer that one loses it. Each accept is a line in the daemon's log (the group's id and
+  profile's `groups.json` (0600) with each chat's contact key, and a `profile backup` carries it to the restored copy:
+  removing the chat takes it off the list, and a chat whose contact's key is no longer that one loses it. Each accept is a line in the daemon's log (the group's id and
   the chat). Another contact's invitation under the same group id, come first, does not keep the owner's out: the
   owner's, kept beside it (`others` in `group show`), is the one taken and the other contact is told no, as long as the
   group held is only an invitation not answered yet; beside a group joined or accepted it waits for you. A profile keeps at most 32 invitations waiting (4 per chat): when 32 wait, one over a chat on the list
@@ -381,7 +423,10 @@ costs and where the audio goes: [Talk to an AI by voice](VOICE-AGENT.md).
 The audio contract, one Unix socket per call:
 
 - **Token.** A program's first bytes are the call's `audio.token` and a line feed. Required on Windows (a named
-  pipe there): before it, a connection hears nothing and replaces no program.
+  pipe there) and in a shared folder: before it, a connection hears nothing and replaces no program.
+- **Shared folder.** `GHOSTLY_CALL_SOCKET_DIR=<folder>` on the daemon puts the sockets there, 0660, for a program of
+  another user (a Ghostly OS node's assistant). Make it first, of the daemon's user, `chmod 2750` with that user's
+  group; the daemon refuses one others may write or enter (details in the [CLI README](../packages/cli/README.md)).
 - **Format.** Raw PCM, no framing: s16le, mono, at the call's rate (48000 by default; 24000, 16000, 12000 or 8000
   with `--rate`).
 - **From the call.** The contact's voice in 20 ms frames, as they are decoded.

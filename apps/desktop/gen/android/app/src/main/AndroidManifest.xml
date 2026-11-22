@@ -19,6 +19,10 @@
          camera while the call sends the camera's picture, for as long as the call is on. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <!-- Chats and groups staying connected with the app out of sight (ConnectionService.kt), while "Stay connected in
+         the background" is on: a remote-messaging foreground service (Android 14 and up), and a partial wake lock
+         while links are up. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -44,10 +48,14 @@
         <!-- configChanges names every configuration change (font size, display size, bold text, a right-to-left
              language, Material You's colours...): one left out relaunches the activity, whose new WebView loads the
              page again while the first one's page still runs and holds the profile, so the app would stay on "Ghostly
-             is already running with this profile". The page lays itself out again on any of them. -->
+             is already running with this profile". The page lays itself out again on any of them.
+             An empty taskAffinity: the default one (the package name) is a name another app's activity can claim, to be
+             started into a task Android may bring forward as Ghostly's. singleTask still finds the one MainActivity by
+             its component. -->
         <activity
             android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|grammaticalGender|fontScale|fontWeightAdjustment|assetsPaths"
             android:launchMode="singleTask"
+            android:taskAffinity=""
             android:label="@string/main_activity_title"
             android:name=".MainActivity"
             android:exported="true">
@@ -78,6 +86,11 @@
             android:name=".TransferService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
 
         <service
             android:name=".CallService"

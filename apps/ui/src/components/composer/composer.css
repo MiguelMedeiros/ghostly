@@ -59,8 +59,9 @@
   resize: none;
   background: transparent;
   color: var(--color-text-primary);
-  font-size: 15px;
-  line-height: 22px;
+  /* 15px and 22px at the default text size, larger or smaller with Settings → Text size (index.css). */
+  font-size: calc(15rem / 16 * var(--chat-text-scale));
+  line-height: calc(22rem / 16 * var(--chat-text-scale));
   /* A message wraps: the field never scrolls sideways. Right to left, WebKitGTK kept a few pixels of sideways overflow
      in the empty field once the window narrowed with the chat open, and drew both scrollbars across it. */
   overflow-x: hidden;
@@ -73,11 +74,26 @@
 /* Recording takes the field's place, in the field's shape. */
 .composer-row > .voice-bar { border-radius: 22px; background: var(--composer-well); box-shadow: inset 0 0 0 1px var(--composer-well-edge); }
 
+/* Forced colors (Windows Contrast themes) drop the shadow and paint the well the page's colour: the field would read
+   as loose text. An outline drawn inside it instead, so nothing moves; the focused field's ring above still wins. */
+@media (forced-colors: active) {
+  .composer-field,
+  .composer-row > .voice-bar { outline: 1px solid CanvasText; outline-offset: -1px; }
+}
+
 @media (max-width: 767px) {
   .composer-field { min-height: 48px; border-radius: 24px; }
   .composer-icon-button { width: 44px; height: 44px; }
   .composer-textarea { min-height: 44px; padding: 11px 4px; }
   .composer-row > .voice-bar { border-radius: 24px; }
+}
+/* A phone's or a tablet's fields are 16px at least (index.css), or iOS zooms into one on focus: the message's field too,
+   at a Small text size, and larger with a larger one. */
+@media (max-width: 767px), (pointer: coarse) {
+  .composer-textarea {
+    font-size: max(16px, calc(15rem / 16 * var(--chat-text-scale))) !important;
+    line-height: max(22px, calc(22rem / 16 * var(--chat-text-scale)));
+  }
 }
 /* A narrow chat column (a phone held upright, or the chat list dragged wide): the message keeps the room around the
    buttons. The + and the smiley stay 44 px wide, as every control a thumb presses on a phone; on a 320 px phone the
@@ -87,7 +103,8 @@
 }
 
 /* The + menu: a coloured glyph per row, as WhatsApp's attach menu. Light themes take darker inks, so every glyph
-   keeps 3:1 on the menu. */
+   keeps 3:1 on the menu. Its floor stays inside the screen: 13rem is 416px at twice the browser's text size, and a
+   phone's sheet ran past a 375px screen's edge with its rows. */
 .composer-menu {
   --attach-payment: #ffbc38;
   --attach-identity: #21c7b0;
@@ -96,7 +113,7 @@
   --attach-document: #a28bff;
   --attach-media: #4fa3ff;
   --attach-camera: #ff5c8d;
-  min-width: 13rem;
+  min-width: min(13rem, calc(100vw - 1rem));
   padding-block: 6px;
   border-radius: 16px;
 }
@@ -109,10 +126,12 @@
   --attach-media: #005fc4;
   --attach-camera: #c8124f;
 }
+/* The label follows the text size, as the hint under it (text-xs) does: at 15px it stayed put, and a larger text size
+   drew Payment's hint larger than its label. */
 .composer-menu [data-menu-item] {
   gap: 14px;
   padding: 10px 16px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--color-text-primary);
 }
 .composer-menu [data-menu-item]:focus-visible { box-shadow: inset 0 0 0 2px var(--color-accent); }

@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { createBroker, onScreen } from "../../lib/apps/broker";
 import { memoryHost } from "../../lib/apps/memoryHost";
-import { webLinkedFiles, type PickSheetText } from "../../lib/apps/webFiles";
+import { webLinkedFiles, type PickSheetText, type PickStore, type StoredPick } from "../../lib/apps/webFiles";
 
 // covers: apps.linked-files
 
@@ -62,6 +62,45 @@ it("a hidden app's pick is refused, with no sheet, while the person types elsewh
   expect(onScreen(frame)).toBe(true);
   void ask(2);
   await vi.waitFor(() => expect(document.querySelector("[data-testid=app-files-sheet]")).not.toBeNull());
+});
+
+it("a hidden app's list asks nothing about kept picks the browser asks about again; shown again, its list asks", async () => {
+  const chatA = document.body.appendChild(document.createElement("div"));
+  chatA.style.display = "none";
+  const frame = chatA.appendChild(document.createElement("iframe"));
+  const composer = document.body.appendChild(document.createElement("textarea"));
+  composer.focus();
+
+  // A folder kept on an earlier page, which the browser (restarted since) asks about again.
+  const folder = { kind: "directory", name: "Films", queryPermission: async () => "prompt", requestPermission: async () => "granted" } as unknown as FileSystemDirectoryHandle;
+  const kept: StoredPick = { ref: "pubkeyalpha/cinema", id: "p1", keep: { dir: folder }, entries: [{ id: "e1", path: "Films/Up.mp4", size: 3, modified: 9 }] };
+  const store: PickStore = { all: async () => [kept], put: async () => {}, forget: async () => {}, remove: async () => {}, clear: async () => {} };
+  const host = { ...memoryHost(), linkedFiles: webLinkedFiles({ text: () => text, store }) };
+  const posted: Record<string, unknown>[] = [];
+  const broker = createBroker({
+    host,
+    launch: { ref: "pubkeyalpha/cinema", digest: "d", version: "1.0.0", title: "Cinema", permissions: ["files"], entry: "<p>app</p>", chat: { linkId: "link-a" } },
+    view: { theme: () => "dark", locale: () => "en" },
+    post: (message) => posted.push(message as Record<string, unknown>),
+    stopped: () => {},
+    shown: () => onScreen(frame),
+  });
+  broker.load();
+  broker.message({ id: 0, type: "writing", args: [] });
+  broker.load();
+  const list = (id: number) => broker.message({ id, type: "files.list", args: [] });
+
+  // Hidden: the links it keeps, not available, and no sheet over the other chat.
+  list(1);
+  await vi.waitFor(() => expect(posted.some((p) => p.id === 1)).toBe(true));
+  expect(posted.find((p) => p.id === 1)).toMatchObject({ ok: true, value: [{ id: "e1", available: false }] });
+  expect(document.querySelector("[data-testid=app-files-again]")).toBeNull();
+  expect(document.activeElement).toBe(composer);
+
+  // Shown again: its next list asks the person.
+  chatA.style.display = "";
+  list(2);
+  await vi.waitFor(() => expect(document.querySelector("[data-testid=app-files-again]")).not.toBeNull());
 });
 
 it("a frame is not on screen out of the page, or in a tab that does not show", () => {

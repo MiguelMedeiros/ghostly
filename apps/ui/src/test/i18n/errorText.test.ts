@@ -3,10 +3,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
-import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
+import { ERROR_RULES, errorText, knownErrorParts, knownErrorText, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
 import { failedReason, failedStatus } from "../../lib/fileStatus";
-import { problemLine, problemText } from "../../lib/problemText";
+import { problemLine, problemText, sentences } from "../../lib/problemText";
 import { liveAttemptText } from "../../lib/transportEvents";
 import type { TranslationKey } from "../../contexts/I18nContext";
 import { translateWith } from "../../locales/translate";
@@ -28,6 +28,73 @@ const CORE = "packages/core/src";
 const ANDROID_APP = "apps/desktop/gen/android/app/src/main/java/tools/ghostly/app";
 /** The engine's known errors, written once with their codes (@ghostly/core ENGINE_ERRORS) and thrown from there. */
 const CODES = "packages/core/src/engineErrors.ts";
+/**
+ * Why a contact's proof failed this app's check, as its verify path throws it (proofs/verify.ts, the providers' verify(),
+ * core identityProofs.ts onPresent), and the refusals a contact's app sends back for mine. Shown under the share in the
+ * chat and on the back of the contact's card: they were English in every language.
+ */
+/**
+ * A check that could not run (IdentityCheckUnavailable: a host, resolver or relay down or unreachable): it says nothing
+ * about the proof, so it never reads "This proof couldn't be verified" (agents#3781).
+ */
+const PROOF_UNAVAILABLE: readonly (readonly [string, string, string?])[] = [
+  ["github.com could not be reached: Failed to fetch", `${BROWSER}/proofs/sshForges.ts`, "`${host} could not be reached: ${"],
+  ["github.com answered HTTP 502", `${BROWSER}/proofs/sshForges.ts`, "`${host} answered HTTP ${response.status}`"],
+  ["Unexpected answer from github.com", `${BROWSER}/proofs/sshForges.ts`, "`Unexpected answer from ${host}`"],
+  ["The account's server (bsky.social) could not be reached", `${BROWSER}/proofs/providers/atproto.ts`, "`The account's server (${hostOf(doc.pds)}) could not be reached`"],
+  ["The account's server (bsky.social) did not send the record", `${BROWSER}/proofs/providers/atproto.ts`, "`The account's server (${hostOf(doc.pds)}) did not send the record`"],
+  ["The account's server bsky.social was not contacted: Failed to fetch", `${BROWSER}/proofs/atproto/resolve.ts`, "`The account's server ${host} was not contacted: ${"],
+  ["The homeserver homeserver.pubky.app answered 502", `${BROWSER}/proofs/pubky.ts`, "`The homeserver ${host} answered ${r.status}`"],
+  ["The homeserver homeserver.pubky.app could not be reached", `${BROWSER}/proofs/pubky.ts`, "`The homeserver ${host} could not be reached`"],
+  ["The homeserver homeserver.pubky.app was not contacted: Failed to fetch", `${BROWSER}/proofs/pubky.ts`, "`The homeserver ${host} was not contacted: ${"],
+  ["The homeserver homeserver.example answers on port 8443; only port 443 is contacted", `${BROWSER}/proofs/pubky.ts`, "`The homeserver ${host} answers on port ${port}; only port 443 is contacted`"],
+  ["example.org could not be reached. It must serve https://example.org/.well-known/did.json over HTTPS, without a redirect, with the header Access-Control-Allow-Origin: *", `${BROWSER}/proofs/did.ts`, "`${host} could not be reached. It must serve ${url} over HTTPS, without a redirect, with the header Access-Control-Allow-Origin: *`"],
+  ["example.org answered with a redirect; it must serve exactly https://example.org/.well-known/did.json", `${BROWSER}/proofs/did.ts`, "`${host} answered with a redirect; it must serve exactly ${url}`"],
+  ["example.org answered 503 for https://example.org/.well-known/did.json", `${BROWSER}/proofs/did.ts`, "`${host} answered ${response.status} for ${url}`"],
+  ["Cloudflare could not resolve _ghostly.example.org", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} could not resolve ${name}`"],
+  ["Cloudflare sent an unusable answer", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} sent an unusable answer`"],
+  ["Quad9 sent an answer that is too large", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} sent an answer that is too large`"],
+  ["No Pkarr relay answered for this did:dht", `${CORE}/didDht.ts`],
+  ["No Pkarr relay to ask", `${CORE}/didDht.ts`],
+  ["Hide my IP from contacts is on: pds.example.org, a server your contact chose, was not contacted", `${BROWSER}/engine/identities.ts`, "`Hide my IP from contacts is on: ${refused}, a server your contact chose, was not contacted`"],
+];
+const PROOF_REASONS: readonly (readonly [string, string, string?])[] = [
+  ["GitHub has no account octocat-old", `${BROWSER}/proofs/providers/ssh.ts`, "`${label} has no account ${login}`"],
+  ["GitLab has no account someone", `${BROWSER}/proofs/providers/ssh.ts`, "`${label} has no account ${login}`"],
+  ["api.github.com is limiting lookups; check again later", `${BROWSER}/proofs/sshForges.ts`, "`${host} is limiting lookups; check again later`"],
+  ["example.com answered 404", `${BROWSER}/proofs/domain.ts`, "`${domain} answered ${response.status}`"],
+  ["example.com answered with a redirect; the file must be served at exactly https://example.com/.well-known/ghostly.json", `${BROWSER}/proofs/domain.ts`, "`${domain} answered with a redirect; the file must be served at exactly ${url}`"],
+  ["The record is no longer in the account's repository", `${BROWSER}/proofs/providers/atproto.ts`],
+  ["The account is no longer on its server", `${BROWSER}/proofs/providers/atproto.ts`],
+  ["The account's DID is not registered, or was deactivated", `${BROWSER}/proofs/atproto/resolve.ts`],
+  ["The account's DID no longer resolves: example.com has no address", `${BROWSER}/proofs/atproto/resolve.ts`, "`The account's DID no longer resolves: ${e.message}`"],
+  ["The account's DID could not be resolved", `${BROWSER}/proofs/atproto/resolve.ts`],
+  ["This DID is deactivated: its owner retired it", `${BROWSER}/proofs/did.ts`],
+  ["The proof file is not on the homeserver", `${BROWSER}/proofs/providers/pubky.ts`],
+  ["The file on the homeserver is not this proof", `${BROWSER}/proofs/providers/pubky.ts`],
+  ["This Pubky key has no records on the Pkarr relays", `${BROWSER}/proofs/pubky.ts`],
+  ["The homeserver of this Pubky key has no records on the Pkarr relays", `${BROWSER}/proofs/pubky.ts`],
+  ["This Pubky key names no homeserver", `${BROWSER}/proofs/pubky.ts`],
+  ["Signed by another Nostr key", `${BROWSER}/proofs/providers/nostr.ts`],
+  ["Signed by another SSH key", `${BROWSER}/proofs/providers/ssh.ts`],
+  ["Invalid Nostr signature", `${BROWSER}/proofs/providers/nostr.ts`],
+  ["The evidence is for another identity", `${BROWSER}/proofs/verify.ts`],
+  ["This app cannot verify this kind of identity", `${BROWSER}/proofs/verify.ts`],
+  ["The proof lasts longer than this kind of identity allows", `${BROWSER}/proofs/verify.ts`],
+  ["Offline: this identity cannot be checked now", `${BROWSER}/proofs/verify.ts`],
+  ["The proof is dated in the future", `${CORE}/identityProofs.ts`],
+  ["The proof key did not sign this conversation's challenge", `${CORE}/identityProofs.ts`],
+  ["Its owner revoked this proof", `${CORE}/identityProofs.ts`],
+  ["The proof has expired", `${CORE}/identityProofs.ts`],
+  ["Your contact's app cannot verify this kind of identity yet", `${CORE}/identityProofs.ts`],
+  ["Your contact's app could not check it. Try again later.", `${CORE}/identityProofs.ts`],
+  ["Your contact keeps too many identities from you already", `${CORE}/identityProofs.ts`],
+  ["Your contact keeps a newer proof of this identity from you", `${CORE}/identityProofs.ts`],
+  ["That identity is no longer in your profile", `${CORE}/identityProofs.ts`],
+  ["Your contact could not verify it", `${CORE}/identityProofs.ts`],
+  ...PROOF_UNAVAILABLE,
+];
+
 /** [message as thrown, the file that throws it, the part of the message written there as it is]. */
 const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The Ghostly peer did not start. Reopen the extension to retry.", "apps/extension/src/background.ts"],
@@ -43,6 +110,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Message exceeds 16384 UTF-8 bytes.", "packages/browser/src/engine/node.ts", "Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes."],
   ["Message exceeds 4096 UTF-8 bytes.", "packages/browser/src/engine/groupEdits.ts", "Message exceeds ${GROUP_EDIT_TEXT_BYTES} UTF-8 bytes."],
   ["Message too long once encoded. Shorten it or send it as a file.", `${CORE}/ghostlink.ts`],
+  ["Text and authentication exceed the DHT packet budget. Shorten the message.", `${CORE}/dhtDelivery.ts`],
   ["This message was edited 100 times, the most one takes.", "packages/browser/src/engine/node.ts", "This message was edited ${most} times, the most one takes."],
   ["That message is not in this chat, or cannot be replied to", "packages/browser/src/engine/node.ts"],
   ["That message cannot be replied to", "packages/browser/src/engine/node.ts"],
@@ -84,7 +152,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Native channel did not reach the application", "apps/ui/src/desktop/nativeTransports.ts"],
   // A dial past the contact's two channels: its endpoint destroys the stream, and the dialer's stream reads a reset
   // (libudx's own words, measured on a local HyperDHT testnet).
-  ["connection reset by peer", "native/transports/hyperdht/endpoint.mjs", "if (stopped || channels.size >= 2) { socket.destroy();"],
+  ["connection reset by peer", "native/transports/hyperdht/endpoint.mjs", "if (stopped || (incoming && liveIn.size >= MAX_CHANNELS)) { socket.destroy();"],
   ["PEER_NOT_FOUND: Peer not found", "node_modules/hyperdht/lib/errors.js", "static PEER_NOT_FOUND(msg = 'Peer not found')"],
   // A contact's app that is seen but does not answer (frozen, asleep): its record is fresh, the dial fails after ~4 s.
   ["PEER_CONNECTION_FAILED: Could not connect to peer", "node_modules/hyperdht/lib/errors.js", "static PEER_CONNECTION_FAILED(msg = 'Could not connect to peer')"],
@@ -105,6 +173,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not share the screen. Try again.", "packages/react/src/useWebRTC.ts"],
   ["Your contact's app cannot show a screen in this call", "packages/react/src/useWebRTC.ts"],
   ["Screen sharing is not available on Linux yet", "apps/ui/src/desktop/nativeCalls.ts"],
+  ["Group calls aren't on Linux yet: join from app.ghostly.tools in a browser", "apps/ui/src/desktop/groupCallSupport.ts"],
   ["Your contact's app cannot take calls", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated Ghostly for calls", `${CORE}/ghostlink.ts`],
   ["Calls are not available in this app", `${CORE}/ghostlink.ts`],
@@ -161,6 +230,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
   ["This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", `${CORE}/pictureMetadata.ts`],
   ["This video cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded", `${CORE}/videoMetadata.ts`],
+  ["This audio cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded", `${CORE}/audioMetadata.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
   // A large file whose copy into this device failed before it was sent: nothing stored, the file is picked again.
@@ -191,6 +261,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["You cancelled it", `${CORE}/chatFiles.ts`],
   // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
   ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
+  ["No room on this device for this file (16.2 MB free)", `${BROWSER}/engine/fileDesk.ts`, "No room on this device for this file ("],
+  ["No room on this device for this file beside the files still coming (13.4 MB left of 38.9 MB free)", `${BROWSER}/engine/fileDesk.ts`, "No room on this device for this file beside the files still coming ("],
   ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
   ["It was refused here", `${BROWSER}/engine/fileDesk.ts`],
   ["It did not come within a week", `${BROWSER}/engine/fileDesk.ts`],
@@ -212,6 +284,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["No mint could create an invoice: mint.example did not answer", `${BROWSER}/engine/wallet.ts`, "No mint could create an invoice: "],
   ["This wallet has no test mint to ask for test coins", `${BROWSER}/engine/wallet.ts`],
   ["testnut.example has not paid its test coins yet: they show up here once it does", `${BROWSER}/engine/wallet.ts`, " has not paid its test coins yet: they show up here once it does"],
+  ["mint.example has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers.", `${BROWSER}/engine/wallet.ts`, " has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers."],
+  ["mint.example:3338 has not answered yet. The ecash is added to your wallet as soon as it does.", `${BROWSER}/engine/wallet.ts`, " has not answered yet. The ecash is added to your wallet as soon as it does."],
   ["Select a configured mint", `${BROWSER}/engine/wallet.ts`],
   ["That is not a valid ecash token", `${BROWSER}/engine/wallet.ts`],
   // Redeem of a token whose keyset its mint does not have (a crafted token, or one of a keyset the mint dropped): the library's words.
@@ -264,6 +338,18 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact does not accept Ark in this chat", `${BROWSER}/engine/payments.ts`, "Your contact does not accept "],
   ["This request cannot be paid from another wallet", `${BROWSER}/engine/payments.ts`],
   ["You are offline", `${BROWSER}/engine/payments.ts`],
+  // What a payee's app sends back for a payment it did not take, shown on the payer's bubble after its state.
+  ["Too many payments at once: send it again in a minute", `${BROWSER}/engine/payments.ts`],
+  ["This ecash does not pay the request: the amount or the mint differs", `${BROWSER}/engine/payments.ts`],
+  ["This transaction already paid another request", `${BROWSER}/engine/payments.ts`],
+  ["Too many open USDT requests of this amount: wait for one to be paid", `${BROWSER}/engine/payments.ts`],
+  ["The mint quoted another amount than this invoice's. Nothing was paid.", `${BROWSER}/engine/wallet.ts`],
+  ["That is not an invoice this wallet can pay", `${BROWSER}/engine/wallet.ts`],
+  ["That is not an invoice this wallet can pay", `${BROWSER}/engine/paymentAdapters/providers/webln.ts`],
+  // A group's pay to one member, refused when the member list was stale.
+  ["Payments are turned off in this group.", `${BROWSER}/engine/communityPay.ts`],
+  ["They are no longer in this group", `${BROWSER}/engine/communityPay.ts`],
+  ["They take no way of paying this device allows.", `${BROWSER}/engine/communityPay.ts`],
   ["This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, "payment (${"],
   ["This is a Testnet payment (test coins): a Mainnet wallet never pays it. Use a Testnet wallet.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, "wallet never pays it. Use a "],
   ["This pays with real money: confirm it with Send real money first. Nothing was sent.", CODES],
@@ -314,6 +400,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
   ["Make someone else the admin before leaving", `${CORE}/groupSession.ts`],
   ["This member has left the group. Make someone else the admin.", `${CORE}/groupCommunity.ts`],
+  ["Not a member", `${CORE}/groupCommunity.ts`, "throw new Error(\"Not a member\")"],
+  ["Not a member", `${CORE}/groupSession.ts`, "throw new Error(\"Not a member\")"],
   ["Only the admin can change the group's picture", `${CORE}/groupSession.ts`],
   ["Only the admin can rename the group", `${CORE}/groupSession.ts`],
   ["Only the admin can choose the group's hubs", `${CORE}/groupSession.ts`],
@@ -397,13 +485,15 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Unknown payment", `${BROWSER}/engine/payments.ts`],
   ["The mint did not confirm the ecash", `${BROWSER}/engine/payments.ts`],
   ["your contact closed it", `${BROWSER}/engine/payments.ts`],
-  ["your contact removed the wallet it was paid to", `${BROWSER}/engine/node.ts`],
+  ["your contact removed the wallet it was paid to", `${BROWSER}/engine/payments.ts`],
   ["Fedimint is off in this chat", `${BROWSER}/engine/payments.ts`],
   ["This app has no Fedimint wallet", `${BROWSER}/engine/payments.ts`],
   ["Unsupported amount", `${BROWSER}/engine/payments.ts`],
   ["These notes are from a federation I have not joined", `${BROWSER}/engine/payments.ts`],
   ["These notes are worth less than a sat", `${BROWSER}/engine/payments.ts`],
   ["These notes were already redeemed", `${BROWSER}/engine/payments.ts`],
+  // The same notes again under another id, while the first payment of them is still being redeemed or is in.
+  ["These notes were already received", `${BROWSER}/engine/payments.ts`],
   ["The server took too long to answer", `${CORE}/lnurl.ts`],
   ["No way to reach the network here", `${CORE}/lnurl.ts`],
   ["shop.example refused: amount too small", `${CORE}/lnurl.ts`, " refused: "],
@@ -509,6 +599,15 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["example.com has no address", `${BROWSER}/proofs/domain.ts`, "`${domain} has no address`"],
   ["example.com points to a private network address, so it was not contacted", `${BROWSER}/proofs/domain.ts`, "`${domain} points to a private network address, so it was not contacted`"],
   ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
+  // Add's refusals for an SSH key proof.
+  ["Paste your public key (the one line in ~/.ssh/id_ed25519.pub) or its SHA256: fingerprint", `${BROWSER}/proofs/providers/ssh.ts`],
+  ['Unsupported SSH key type "ssh-dss"', `${CORE}/sshsig.ts`, "Unsupported SSH key type"],
+  ["RSA keys must be 2048-16384 bits", `${CORE}/sshsig.ts`, "`RSA keys must be ${RSA_MIN_BITS}-${RSA_MAX_BITS} bits`"],
+  ["Enter a GitHub username", `${BROWSER}/proofs/providers/ssh.ts`, "`Enter a ${SSH_FORGE_LABEL[forge]} username`"],
+  ["Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----", `${CORE}/sshsig.ts`],
+  ['That signature is for "git", not "ghostly": run the command with -n ghostly', `${BROWSER}/proofs/providers/ssh.ts`, "`That signature is for \"${parsed.namespace}\", not \"${SSHSIG_NAMESPACE}\": run the command with -n ${SSHSIG_NAMESPACE}`"],
+  ["The signature is not over this statement: copy the command again and sign exactly what it shows", `${BROWSER}/proofs/providers/ssh.ts`],
+  ...PROOF_REASONS,
   // What the Add dialog's field refuses (agents#2222).
   ["Enter a domain name, like example.com", `${CORE}/domainProofs.ts`],
   ["Enter only the domain name, without a path or port", `${CORE}/domainProofs.ts`],
@@ -536,11 +635,31 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That did:jwk does not hold a JSON Web Key", `${CORE}/did.ts`],
   ["That did:jwk contains a private key. Never share it: make a new key", `${CORE}/did.ts`],
   ["That did:jwk is not an Ed25519, secp256k1 or P-256 key", `${CORE}/did.ts`],
+  // A DID's lookup that found no document it can use: a DID card in a message, the Add dialog's preview.
+  ["No DID document at https://example.org/.well-known/did.json", `${BROWSER}/proofs/did.ts`, "`No DID document at ${documentUrl}`"],
+  ["https://example.org/.well-known/did.json is not JSON", `${BROWSER}/proofs/did.ts`, "`${documentUrl} is not JSON`"],
+  ["This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign", `${BROWSER}/proofs/providers/did.ts`],
+  // What the Add dialog refuses for a Nostr, OpenPGP, DID, Pubky, AT Protocol or sign-in proof.
+  ["Enter a Nostr public key: npub1… or 64 hex characters", `${BROWSER}/proofs/providers/nostr.ts`],
+  ["That is not a signed Nostr event", `${BROWSER}/proofs/providers/nostr.ts`],
+  ["The signer did not sign the exact Ghostly statement", `${BROWSER}/proofs/providers/nostr.ts`],
+  ["Use the full fingerprint, not a key ID: gpg --fingerprint shows it.", `${BROWSER}/proofs/providers/openpgp.ts`],
+  ["Enter your key's fingerprint: 40 hex characters (gpg --fingerprint).", `${BROWSER}/proofs/providers/openpgp.ts`],
+  ["Paste your public key too: the second command prints it (-----BEGIN PGP PUBLIC KEY BLOCK-----).", `${BROWSER}/proofs/providers/openpgp.ts`],
+  ["That is this profile's own Ghostly DID: your contacts already see your Ghostly identity. Add another DID.", `${BROWSER}/proofs/providers/did.ts`],
+  ["Publishing works for did:web only: sign the statement instead", `${BROWSER}/proofs/providers/did.ts`],
+  ["The did.json has no Ghostly service for this proof: it was removed, or not added yet", `${BROWSER}/proofs/providers/did.ts`],
+  ["That is another Pubky identity: approve with the one this proof is for", `${BROWSER}/proofs/providers/pubky.ts`],
+  ["Not an AT Protocol account (did:plc or did:web)", `${BROWSER}/proofs/providers/atproto.ts`],
+  ["Your server only offers full access to your account. Try again to approve that; Ghostly only deletes this one record.", `${BROWSER}/proofs/providers/atproto.ts`],
+  ["This provider is not set up in this Ghostly build.", `${BROWSER}/proofs/providers/oidc.ts`],
   ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
   ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
   ["Add a TURN server first", `${BROWSER}/engine/node.ts`],
   ["Hide my IP from contacts needs a TURN server. Turn it off first", `${BROWSER}/engine/node.ts`],
   ["A contact's app does not open in the browser extension while Hide my IP from contacts is on", "apps/extension/src/background.ts"],
+  ["A contact's app does not open in the web app while Hide my IP from contacts is on", "apps/web/src/host.ts"],
+  ["The profile locked before the contact's app opened", "apps/ui/src/lib/serviceWindows.ts"],
   ["Use an https:// relay address: http://relay.example.org/", `${BROWSER}/platform/irohWeb.ts`, "Use an https:// relay address: ${value}"],
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
@@ -551,6 +670,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Enter a relay address (wss://…)", `${BROWSER}/shared/hyperdhtRelay.ts`],
   ["Use a wss:// relay address", `${BROWSER}/shared/hyperdhtRelay.ts`],
   ["Not a relay address: wss://relay.example.org/?key=1", `${BROWSER}/shared/hyperdhtRelay.ts`, "Not a relay address: ${url}"],
+  [`Use a shorter relay address: wss://${"a".repeat(121)}`, `${BROWSER}/shared/hyperdhtRelay.ts`, "Use a shorter relay address: ${url}"],
+  [`Use a shorter relay address: https://${"a".repeat(121)}`, `${BROWSER}/platform/irohWeb.ts`, "Use a shorter relay address: ${value}"],
   ["Enter a relay address (https://…)", `${BROWSER}/shared/pushRelay.ts`],
   ["Leave the user and password out of the address", `${BROWSER}/shared/pushRelay.ts`],
   ["Use at most five Iroh relays", `${BROWSER}/engine/node.ts`],
@@ -583,6 +704,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // An OpenPGP key of a kind or size the Add dialog refuses.
   ["This key uses RSA 16384, which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to 8192 bits.", `${BROWSER}/proofs/openpgp.ts`, ", which Ghostly does not accept. Use Ed25519, ECDSA (P-256, P-384, P-521, brainpool) or RSA with 2048 to ${RSA_MAX_BITS} bits."],
   ["This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).", `${BROWSER}/proofs/openpgp.ts`, "-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537)."],
+  ["This is an OpenPGP v5 key, which Ghostly does not accept. Use a v4 key (gpg makes Ed25519 ones) or a v6 key.", `${BROWSER}/proofs/openpgp.ts`, " key, which Ghostly does not accept. Use a v4 key (gpg makes Ed25519 ones) or a v6 key."],
+  ["This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.", `${BROWSER}/proofs/openpgp.ts`, "This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead."],
 ];
 
 const translators = Object.fromEntries(LANGUAGES.map((l) => [l, translateWith(LOCALES[l], l)]));
@@ -645,6 +768,12 @@ describe("errors in the app's language", () => {
     const raw = "Not enough space on this device (QuotaExceededError)";
     expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.app.noRoom"), next: t("errors.app.noRoomNext"), detail: raw });
     expect(problemText(new Error(raw), t).title).not.toBe(t("errors.generic"));
+  });
+
+  it.each(LANGUAGES)("an AT Protocol server that offers only full access says so in %s, not \"Something went wrong\"", (language) => {
+    const t = translators[language];
+    const raw = "Your server only offers full access to your account. Try again to approve that; Ghostly only deletes this one record.";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.proof.atprotoFullAccess"), next: t("errors.proof.atprotoFullAccessNext") });
   });
 
   it.each(LANGUAGES)("a forward's copy Desktop's disk had no room for says so in %s, the system's English behind the ⓘ", (language) => {
@@ -727,6 +856,15 @@ describe("errors in the app's language", () => {
     }
     const exponent = "This key uses RSA with a 65-bit public exponent, which Ghostly does not accept. Use a key made by GnuPG (exponent 65537).";
     expect(problemText(new Error(exponent), t)).toEqual({ tone: "error", title: t("errors.proof.pgpExponent", { bits: "65" }), next: t("errors.proof.pgpExponentNext") });
+    const v5 = "This is an OpenPGP v5 key, which Ghostly does not accept. Use a v4 key (gpg makes Ed25519 ones) or a v6 key.";
+    expect(problemText(new Error(v5), t)).toEqual({ tone: "error", title: t("errors.proof.pgpKeyVersion", { version: "5" }), next: t("errors.proof.pgpKeyVersionNext") });
+  });
+
+  it.each(LANGUAGES)("a key keys.openpgp.org serves without its user IDs says why it cannot be checked and what to do in %s", (language) => {
+    const t = translators[language];
+    const raw = "This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.proof.pgpNoUserIds"), next: t("errors.proof.pgpNoUserIdsNext") });
+    expect(problemText(new Error(raw), t, "proof").title).not.toBe(t("errors.proof.checkFailed"));
   });
 
   it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
@@ -742,6 +880,20 @@ describe("errors in the app's language", () => {
     expect(bubble("It was refused here")).toEqual({ status: t("errors.files.floor.refused"), info: { text: t("errors.files.askAgain") } });
     expect(bubble("It did not come within a week")).toEqual({ status: t("errors.files.floor.notInAWeek"), info: { text: t("errors.files.askAgain") } });
     expect(bubble("Cancelled by the sender")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.askAgain") } });
+  });
+
+  it.each(LANGUAGES)("Accept on an offer the room left no longer fits says so, and to make room and try again, in %s", (language) => {
+    const t = translators[language];
+    // As fileDesk.ts `accept` throws it: the offer keeps waiting, so the next step is to try again, not to ask for it.
+    expect(problemText(new Error("No room on this device for this file (16.2 MB free)"), t)).toEqual({ tone: "error", title: t("errors.files.noRoomHere"), next: t("errors.app.noRoomNext") });
+  });
+
+  it.each(LANGUAGES)("Accept on an offer that fits the free space but not beside the files still coming names them, the room left, and waiting or cancelling, in %s", (language) => {
+    const t = translators[language];
+    // Not "free some space": the disk has more than the file needs, the files still coming hold it.
+    expect(problemText(new Error("No room on this device for this file beside the files still coming (13.4 MB left of 38.9 MB free)"), t)).toEqual({
+      tone: "error", title: t("errors.files.noRoomBesideComing"), next: t("errors.files.noRoomBesideComingNext", { left: "13.4 MB", free: "38.9 MB" }),
+    });
   });
 
   it.each(LANGUAGES)("a 1:1 file declined or cancelled says who did it behind its ⓘ in %s, never the engine's English", (language) => {
@@ -860,6 +1012,53 @@ describe("errors in the app's language", () => {
     }
   });
 
+  it.each(["pt", "ar"] as const)("why a contact's proof failed this app's check reads in %s: every reason its verify paths throw, never the English", (language) => {
+    const t = translators[language];
+    // Every plain string thrown in the verify paths, besides the reasons above (template ones are there with values).
+    const files = ["verify.ts", "sshForges.ts", "pubky.ts", "domain.ts", "did.ts", "openpgp.ts", "atproto/resolve.ts", "oidc/verify.ts", "oidc/jwks.ts", ...["atproto", "bitcoin", "did", "domain", "nostr", "oidc", "openpgp", "pubky", "ssh"].map((p) => `providers/${p}.ts`)]
+      .map((file) => `${BROWSER}/proofs/${file}`).concat(`${CORE}/identityProofs.ts`);
+    const thrown = files.flatMap((file) => [...source(file).matchAll(/(?:throw new \w+|refuse)\((["'])((?:(?!\1)[^\\])+)\1\)/g)].map((m) => m[2]!));
+    expect(thrown.length).toBeGreaterThan(100);
+    const english = [...new Set([...PROOF_REASONS.map(([text]) => text), ...thrown])].filter((raw) => problemLine(raw, t, "proof").includes(raw));
+    expect(english).toEqual([]);
+    // A reason the rules do not know is a translated "could not verify", its English only behind the ⓘ.
+    expect(problemText("The Nostr event id does not match its content", t, "proof")).toEqual({ tone: "error", title: t("errors.proof.checkFailed"), detail: "The Nostr event id does not match its content" });
+    expect(problemLine("The Nostr event id does not match its content", t, "proof")).toBe(t("errors.proof.checkFailed"));
+  });
+
+  // A refusal written in a chat's or a group's payments reached the bubble and the composer in English in every language.
+  it.each(["pt", "ar"] as const)("every refusal a chat's or a group's payments throw, refuse or store reads in %s, not in English", (language) => {
+    const t = translators[language];
+    // Never shown to a person: a check of the engine's own state, or a line whose bubble is gone with it.
+    const INTERNAL = new Set([
+      "Cashu chat recipient missing", "Cashu outbox does not match the reviewed payment", "Fedimint ecash goes to a contact in a chat",
+      "The Fedimint payment is not in the journal", "Unsupported payment method", "Removed here", "Choose one member to pay",
+    ]);
+    // Also a ternary's other line after a first one (`error: a ? "…" : "…"`).
+    const said = ["payments.ts", "communityPay.ts"].flatMap((file) => [...source(`${BROWSER}/engine/${file}`)
+      .matchAll(/(?:throw new \w+\(|refuse\(|error: ?|reason: ?|return |const [A-Z_]+ = |["'] : )(["'])([A-Z](?:(?!\1)[^\\])* (?:(?!\1)[^\\])+)\1/g)].map((m) => m[2]!));
+    expect(said.length).toBeGreaterThan(40);
+    expect([...new Set(said)].filter((raw) => !INTERNAL.has(raw) && knownErrorText(raw, t) === null)).toEqual([]);
+  });
+
+  it("a payee's refusal on the payer's bubble says what to do next, in the language", () => {
+    const pt = translators.pt;
+    expect(problemLine("Too many payments at once: send it again in a minute", pt)).toBe("Muitos pagamentos ao mesmo tempo. Envie de novo daqui a um minuto.");
+    expect(problemLine("Too many open USDT requests of this amount: wait for one to be paid", pt)).toBe("Muitos pedidos de USDT abertos com este valor. Espere um deles ser pago.");
+    expect(problemLine("The mint quoted another amount than this invoice's. Nothing was paid.", english)).toBe("The mint quoted another amount than the invoice. Nothing was paid.");
+    expect(problemLine("They take no way of paying this device allows.", english)).toBe(english("payments.group.why.noWay"));
+  });
+
+  it.each(LANGUAGES)("a contact's proof check that could not run never reads as a bad proof in %s, and the host stays a value (agents#3781)", (language) => {
+    const t = translators[language];
+    const bad = PROOF_UNAVAILABLE.map(([raw]) => raw).filter((raw) => problemText(raw, t, "proof").title === t("errors.proof.checkFailed"));
+    expect(bad).toEqual([]);
+    expect(problemLine("github.com could not be reached: Failed to fetch", t, "proof")).toBe(sentences(t("errors.proof.hostUnreachable", { domain: "github.com" }), t("errors.proof.laterNext"), t));
+    expect(problemLine("The homeserver homeserver.pubky.app answered 502", t, "proof")).toBe(sentences(t("errors.proof.hostAnswered", { domain: "homeserver.pubky.app" }), t("errors.proof.laterNext"), t));
+    // The address the contact chose is behind the ⓘ only.
+    expect(problemLine("example.org answered 503 for https://example.org/.well-known/did.json", t, "proof")).not.toContain("https://");
+  });
+
   it("each rule has a sample, so none stops matching unseen", () => {
     const covered = new Set(SAMPLES.map(([text]) => matched(text)));
     expect(ERROR_RULES.filter((rule) => !covered.has(rule)).map((rule) => String(rule.match))).toEqual([]);
@@ -883,7 +1082,7 @@ describe("errors in the app's language", () => {
   it("the \"Error: \" String(error) adds on the way through the extension goes, and an unknown message stays as it came", () => {
     expect(rawError("Error: The Ghostly peer did not start. Reopen the extension to retry.")).toBe("The Ghostly peer did not start. Reopen the extension to retry.");
     expect(errorText(new Error("Error: Ghostly needs your permission to reach that local address"), translators.pt))
-      .toBe("O Ghostly precisa da sua permissão para acessar esse endereço local");
+      .toBe("O Ghostly precisa da sua permissão para acessar esse endereço local. Tente de novo e escolha Permitir quando for perguntado.");
     expect(errorText(new Error("Relay said: rate limited"), translators.pt)).toBe("Relay said: rate limited");
     expect(errorText("plain", translators.fr)).toBe("plain");
     expect(errorText(42, translators.fr)).toBe("42");
@@ -922,6 +1121,14 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(errorText("Could not reach mint.example.com. Check the address: it should be a Cashu mint.", english)).toBe("Can't reach mint.example.com. Check the address: it should be a Cashu mint.");
   });
 
+  it("ecash of a unit that is not one is said without it, in the language; a unit that is one is named", () => {
+    expect(problemLine("This ecash is in another unit: only sat ecash can be redeemed here", translators.pt)).toBe("Este ecash está em outra unidade: aqui só dá para resgatar ecash em sat");
+    expect(problemLine("This ecash is in usd: only sat ecash can be redeemed here", translators.pt)).toBe("Este ecash está em usd: aqui só dá para resgatar ecash em sat");
+    // Contact text in the unit's place is never put inside the app's translated line.
+    const crafted = "This ecash is in sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example: only sat ecash can be redeemed here";
+    expect(problemLine(crafted, translators.pt)).not.toContain("Este ecash está em");
+  });
+
   it("a reviewed payment's refusals and outcomes are said in the language too", () => {
     const pt = translators.pt;
     expect(errorText("Cashu fee exceeds your limit", pt)).toBe("A taxa do Cashu passa do seu limite");
@@ -935,6 +1142,36 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(problemText(new Error(raw), translators.pt)).toEqual({ tone: "error", title: "A mint recusou este pagamento Lightning", next: "Nenhum sat saiu da sua carteira. Pode tentar de novo com segurança.", detail: raw });
     expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "The mint refused this Lightning payment", next: "No sats left your wallet. It's safe to try again.", detail: raw });
     for (const language of LANGUAGES) expect(errorText(raw, translators[language]), language).not.toContain("no route");
+  });
+
+  it("a mint that failed a quote or the faucet is named with the next step, in the language; its own words go behind the ⓘ", () => {
+    const values = { host: "testnut.cashu.space", reason: "fetch failed (other side closed, UND_ERR_SOCKET) at https://testnut.cashu.space" };
+    const quote = engineText("mintFailedQuote", values), faucet = engineText("mintFailedFaucet", values);
+    expect(problemText(new Error(quote), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space não conseguiu aceitar este pagamento agora", next: "Nenhum sat saiu da sua carteira. Tente de novo mais tarde.", detail: quote });
+    expect(problemText(new Error(faucet), english)).toEqual({ tone: "error", title: "testnut.cashu.space couldn't give test coins right now", next: "Try again later.", detail: faucet });
+    for (const language of LANGUAGES) for (const raw of [quote, faucet]) expect(errorText(raw, translators[language]), language).not.toContain("UND_ERR");
+  });
+
+  it("a mint that failed Receive's invoice (a 503) is named with the next step, in the language; its own words go behind the ⓘ", () => {
+    const raw = engineText("mintFailedInvoice", { host: "127.0.0.1:4701", reason: "down" });
+    expect(problemText(new Error(raw), translators.pt)).toEqual({ tone: "error", title: "127.0.0.1:4701 não conseguiu criar uma fatura agora", next: "Tente de novo mais tarde.", detail: raw });
+    expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "127.0.0.1:4701 couldn't create an invoice right now", next: "Try again later.", detail: raw });
+    for (const language of LANGUAGES) {
+      expect(errorText(raw, translators[language]), language).toContain("127.0.0.1:4701");
+      expect(errorText(raw, translators[language]), language).not.toContain("down");
+    }
+  });
+
+  it("a mint that has not answered a payment's or a redeem's swap is named, with what comes back, in the language: not \"Something went wrong\"", () => {
+    const pay = "testnut.cashu.space has not answered yet. The payment was not made. The sats set aside for it return to your wallet a few minutes after the mint answers.";
+    const redeem = "testnut.cashu.space has not answered yet. The ecash is added to your wallet as soon as it does.";
+    expect(problemText(new Error(pay), english)).toEqual({ tone: "error", title: "testnut.cashu.space hasn't answered yet", next: "The payment wasn't made. The sats set aside for it come back to your wallet a few minutes after the mint answers." });
+    expect(problemText(new Error(redeem), translators.pt)).toEqual({ tone: "error", title: "testnut.cashu.space ainda não respondeu", next: "O ecash entra na sua carteira assim que ele responder." });
+    for (const language of LANGUAGES) for (const raw of [pay, redeem]) {
+      const { title, next } = problemText(new Error(raw), translators[language]);
+      expect(title, language).toContain("testnut.cashu.space");
+      expect(next, language).toBeTruthy();
+    }
   });
 
   it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {

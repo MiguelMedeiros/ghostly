@@ -32,6 +32,11 @@ interface UseWebRTCParams {
    */
   callHandledElsewhere?: number;
   publishCallSignal: (signal: string | null) => void;
+  /**
+   * The contact's offer of `ts` was kept as missed here, with no ring (QUICK_REDIAL_MS): told so that what waits on a call
+   * ringing (a handoff of the profile) does not wait on it.
+   */
+  offerHeld?: (ts: number) => void;
   setFastPoll: (fast: boolean) => void;
   /**
    * A line for the chat. `call`, on the lines a call has one of on this side (its ring, its miss): the time of the offer
@@ -56,6 +61,13 @@ interface UseWebRTCParams {
    * media that cannot keep to relays (`CallMedia.keepsToRelays`) places and answers no call (`relayOnly`).
    */
   relayOnly?: boolean;
+  /**
+   * Each request for the microphone or camera shows the system's own dialog for each device in it, whatever was
+   * answered before, and a request for both is refused whole when either is (the Android app's WebView). A video call
+   * then asks the microphone alone and the camera alone: one dialog each, and a refused microphone is never asked twice
+   * for one tap (Android's second "Don't allow" blocks it for good).
+   */
+  asksEachAlone?: boolean;
   /**
    * How many candidates a signal carries: `PAIRED_CALL_CANDIDATES` on a chat session, whose frames have room for
    * every path; a compatibility chat's DHT record keeps the default (one host, one server reflexive).
@@ -131,6 +143,22 @@ export const MEDIA_PROBLEM_SHOWN_MS = 8000;
  * the setting was turned on during a call whose connection had a direct path, which ended it.
  */
 export type MediaProblem = "denied" | "unavailable" | "relay" | "relayOnly" | "relayOnlyNow";
+
+/**
+ * Which of them a `MediaProblem` of the microphone or camera was about. A video call whose camera alone cannot be used
+ * goes on as a voice call (`camera`); one whose microphone cannot fails (`mic`, or `both` when the browser says the
+ * camera is refused too).
+ */
+export type MediaProblemOf = "mic" | "camera" | "both";
+
+/** Whether the browser says the camera is refused, without asking anyone (the Permissions API): false where it cannot tell. */
+async function cameraRefused(): Promise<boolean> {
+  try {
+    return (await navigator.permissions?.query({ name: "camera" as PermissionName }))?.state === "denied";
+  } catch {
+    return false;
+  }
+}
 
 /** What a failed call start means for the person, or null when the failure was not the microphone's, camera's or relay's. */
 export function mediaProblem(error: unknown): MediaProblem | null {
@@ -272,6 +300,7 @@ export function useWebRTC({
   incomingCallSignal,
   callHandledElsewhere,
   publishCallSignal,
+  offerHeld,
   setFastPoll,
   addCallEventMessage,
   removeCallEventMessage,
@@ -279,6 +308,7 @@ export function useWebRTC({
   media,
   iceServers,
   relayOnly,
+  asksEachAlone,
   maxCandidates,
   devices,
   chatId,
@@ -287,6 +317,8 @@ export function useWebRTC({
   iceServersRef.current = iceServers;
   const relayOnlyRef = useRef(relayOnly === true);
   relayOnlyRef.current = relayOnly === true;
+  const asksEachAloneRef = useRef(asksEachAlone === true);
+  asksEachAloneRef.current = asksEachAlone === true;
   const maxCandidatesRef = useRef(maxCandidates);
   maxCandidatesRef.current = maxCandidates;
   const onErrorRef = useRef(onError);
@@ -312,6 +344,8 @@ export function useWebRTC({
   const [picture, setPictureState] = useState<Picture | null>(null);
   /** What the peer says it is sending on it. */
   const [remotePicture, setRemotePicture] = useState<Picture | null>(null);
+  /** The contact's offer that rang last (`ringOffer`): what a ringing call is, whatever they send while it rings. */
+  const [rangOffer, setRangOffer] = useState<CallSignal | null>(null);
   /** Whether the call negotiated a video lane we may send on, camera or screen. */
   const [videoLaneOpen, setVideoLaneOpen] = useState(false);
   const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
@@ -327,6 +361,8 @@ export function useWebRTC({
   const [screenShareError, setScreenShareErrorState] = useState<string | null>(null);
   /** Our call rang out unanswered, for a few seconds (`NO_ANSWER_SHOWN_MS`). */
   const [noAnswer, setNoAnswer] = useState(false);
+  /** Our call's offer went out: it rings the contact (and RING_MS counts) from then, not while a permission prompt is open. */
+  const [offerOut, setOfferOut] = useState(false);
   /**
    * The microphone or camera a call asked for could not be used, and why, for a few seconds (`MEDIA_PROBLEM_SHOWN_MS`).
    * `id` is new at each time: a call refused again while the reason shows is a new notice, with its whole time.
@@ -336,6 +372,8 @@ export function useWebRTC({
   const setMediaProblemShown = useCallback((problem: MediaProblem) => {
     setMediaProblemShownState({ problem, id: ++mediaProblemIdRef.current });
   }, []);
+  /** Whether that was the microphone, the camera or both. */
+  const [mediaProblemOf, setMediaProblemOf] = useState<MediaProblemOf>("both");
   /** Tells the person why a call could not use the microphone or camera, when that is what `error` was. */
   const showMediaProblem = useCallback((error: unknown) => {
     const problem = mediaProblem(error);
@@ -359,12 +397,80 @@ export function useWebRTC({
   }, []);
   /**
    * With "Hide my IP from contacts" on, a call needs media whose connections keep to the relay: one that would gather
-   * this device's own addresses (the Linux Desktop's call engine, which has its own STUN server) makes no call at all.
+   * this device's own addresses (`CallMedia.keepsToRelays` unset) makes no call at all.
    * Asked before the microphone is.
    */
   const assertKeepsToRelays = useCallback(() => {
     if (relayOnlyRef.current && !mediaRef.current.keepsToRelays) throw new CallRelayError("relayOnly");
   }, []);
+
+  /**
+   * The microphone a video call holds while its camera is asked for alone (`asksEachAlone`): the call can end while
+   * Android's dialog is up (or the chat goes away), and the microphone goes then, not once the dialog is answered.
+   */
+  const askingCameraRef = useRef<MediaStream | null>(null);
+
+  /**
+   * The microphone, and the camera for a video call, in one request. A camera refused or missing does not keep the call
+   * from starting or being answered: the microphone is asked alone, and the call goes on as a voice call that says why
+   * the camera is off (`cameraError`); the camera can still be turned on later. A microphone refused or missing fails
+   * the call, as before, and the note names it. Where each device is asked alone (`asksEachAlone`), the microphone is
+   * asked first and the camera after it, each once.
+   */
+  const captureForCall = useCallback(
+    async (withVideo: boolean, cancelled: () => boolean): Promise<{ stream: MediaStream; cameraError?: unknown }> => {
+      const audio = captureFrom("audio");
+      if (withVideo && asksEachAloneRef.current) {
+        let stream: MediaStream;
+        try {
+          stream = await mediaRef.current.getUserMedia({ audio, video: false });
+        } catch (error) {
+          setMediaProblemOf("mic");
+          throw error;
+        }
+        if (cancelled()) return { stream };
+        askingCameraRef.current = stream;
+        try {
+          const camera = await mediaRef.current.getUserMedia({ audio: false, video: captureFrom("video") });
+          camera.getVideoTracks().forEach((track) => stream.addTrack(track));
+          return { stream };
+        } catch (error) {
+          if (!cancelled() && mediaProblem(error)) return { stream, cameraError: error };
+          stream.getTracks().forEach((track) => track.stop());
+          setMediaProblemOf("both");
+          throw error;
+        } finally {
+          if (askingCameraRef.current === stream) askingCameraRef.current = null;
+        }
+      }
+      try {
+        return { stream: await mediaRef.current.getUserMedia({ audio, video: withVideo && captureFrom("video") }) };
+      } catch (error) {
+        if (!withVideo || cancelled() || !mediaProblem(error)) {
+          setMediaProblemOf(withVideo ? "both" : "mic");
+          throw error;
+        }
+        try {
+          return { stream: await mediaRef.current.getUserMedia({ audio, video: false }), cameraError: error };
+        } catch (micError) {
+          const both = mediaProblem(micError) === "denied" && mediaRef.current === browserMedia && (await cameraRefused());
+          setMediaProblemOf(both ? "both" : "mic");
+          throw micError;
+        }
+      }
+    },
+    [captureFrom],
+  );
+
+  /** The id of the note shown last that the camera is off (`showCameraOff`): the camera coming on takes it away. */
+  const cameraOffShownRef = useRef(0);
+  /** A video call went on without the camera (`captureForCall`): the person is told why it is off. */
+  const showCameraOff = useCallback((error: unknown) => {
+    setMediaProblemOf("camera");
+    if (!mediaProblem(error)) return;
+    showMediaProblem(error);
+    cameraOffShownRef.current = mediaProblemIdRef.current;
+  }, [showMediaProblem]);
 
   /**
    * The system paused our microphone in a call (its track is muted, not by the person): an iPhone or iPad does this
@@ -391,6 +497,8 @@ export function useWebRTC({
   }, [chatId]);
   /** When the contact's call began to ring here, on the monotonic clock (BURST_RING_MS). */
   const ringingSinceRef = useRef(0);
+  /** The ringing call's "Incoming call" line: a newer offer of the contact's that takes the call's place takes it out. */
+  const receivedLineRef = useRef<string | null>(null);
   /**
    * The contact's last call held back here (QUICK_REDIAL_MS) until its hang-up: its offer, when it was heard (on the
    * monotonic clock), its missed line.
@@ -543,6 +651,8 @@ export function useWebRTC({
       });
       localStreamRef.current = null;
     }
+    askingCameraRef.current?.getTracks().forEach((t) => t.stop());
+    askingCameraRef.current = null;
 
     if (pcRef.current) {
       pcRef.current.close();
@@ -887,9 +997,14 @@ export function useWebRTC({
         track?.stop();
         throw error;
       }
+      // Hung up while the track was swapped (the Linux Desktop opens the device meanwhile): the call's tracks were stopped without this one.
+      if (attemptRef.current !== attempt || !localStreamRef.current) {
+        track?.stop();
+        return;
+      }
 
       // Read after the prompt: the picture may have changed while it was open.
-      const current = localStreamRef.current!;
+      const current = localStreamRef.current;
       if (next === "screen" && track) {
         track.contentHint = "detail";
         // The browser's (or the system's) own "Stop sharing" ends the track without telling anyone else.
@@ -909,6 +1024,8 @@ export function useWebRTC({
       setLocalStream(stream);
       setPicture(next);
       if (next) callHadVideoRef.current = true;
+      // The camera is on now: a note still up that it is off would say the opposite.
+      if (next === "camera") setMediaProblemShownState((shown) => (shown?.id === cameraOffShownRef.current ? null : shown));
       publishPicture(next);
     },
     [setPicture, publishPicture, captureFrom],
@@ -933,10 +1050,11 @@ export function useWebRTC({
   const ringOffer = useCallback((signal: CallSignal) => {
     heldOfferRef.current = null;
     pendingOfferRef.current = signal;
+    setRangOffer(signal);
     const offerHasVideo = signalHasVideo(signal);
     callHadVideoRef.current = offerHasVideo;
     callConnectedEventFiredRef.current = false;
-    addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts);
+    receivedLineRef.current = addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts) || null;
     ringingSinceRef.current = performance.now();
     updateCallState("incoming");
     setFastPoll(true);
@@ -969,6 +1087,11 @@ export function useWebRTC({
       const attempt = ++attemptRef.current;
       const cancelled = () => attemptRef.current !== attempt;
       setNoAnswer(false);
+      setOfferOut(false);
+      // A call that ended without a hang-up (one that found no path) left its offer's time behind: until this
+      // attempt's own goes out, a contact's offer is the earlier one (WISP 601, "Both call at once").
+      myOfferTimestampRef.current = 0;
+      myOfferFingerprintRef.current = "";
       try {
         setFastPoll(true);
         callHadVideoRef.current = withVideo;
@@ -977,19 +1100,29 @@ export function useWebRTC({
         startedLineRef.current = addCallEventMessage?.("call_started", withVideo) || null;
 
         // A screen is shared from inside a call (`toggleScreenShare`), never as the way one starts.
-        const stream = await mediaRef.current.getUserMedia({ audio: captureFrom("audio"), video: withVideo && captureFrom("video") });
+        const { stream, cameraError } = await captureForCall(withVideo, cancelled);
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
+        const video = withVideo && !cameraError;
+        if (cameraError) {
+          showCameraOff(cameraError);
+          // Gone on as a voice call: its lines say so from the start, as the contact's chat does (the offer says voice).
+          callHadVideoRef.current = false;
+          if (startedLineRef.current) removeCallEventMessage?.(startedLineRef.current);
+          startedLineRef.current = addCallEventMessage?.("call_started", false) || null;
+        }
         localStreamRef.current = stream;
         setLocalStream(stream);
-        setPicture(withVideo ? "camera" : null);
+        setPicture(video ? "camera" : null);
 
         const pc = await gathered(async () => {
           const pc = createPeerConnection();
-          stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
-          stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
+          // The call's stream as it is now: a microphone switched while a stalled connection gathered stopped this one's.
+          const sending = localStreamRef.current ?? stream;
+          sending.getAudioTracks().forEach((track) => pc.addTrack(track, sending));
+          sending.getVideoTracks().forEach((track) => pc.addTrack(track, sending));
           // An audio call still offers a video section, so a camera or a screen can
           // be turned on later without a second offer the peer cannot answer.
-          if (stream.getVideoTracks().length === 0) pc.addTransceiver("video", { direction: "sendrecv" });
+          if (sending.getVideoTracks().length === 0) pc.addTransceiver("video", { direction: "sendrecv" });
 
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
@@ -1008,14 +1141,15 @@ export function useWebRTC({
           t: "o",
           ts: offerTs,
           ...params,
-          v: withVideo ? 1 : 0,
+          v: video ? 1 : 0,
           // This side restarts ICE when the call's path is lost; so does the call, when the answer says it too.
           ...(mediaRef.current.restartsIce ? { x: 1 as const } : {}),
         };
-        if (withVideo) signal.k = "c";
+        if (video) signal.k = "c";
 
         const signalStr = JSON.stringify(signal);
         publishCallSignal(signalStr);
+        setOfferOut(true);
       } catch (error) {
         // A newer attempt (or none) owns the call now: its state is not ours to reset.
         if (cancelled()) return;
@@ -1024,7 +1158,7 @@ export function useWebRTC({
         showNoPath(error);
         // The call ended before it rang anyone (no microphone, or no connection found a way out): the chat says so,
         // after its "call started" line. No offer went out, so the contact has nothing to hear.
-        addCallEventMessage?.("call_failed", withVideo);
+        addCallEventMessage?.("call_failed", callHadVideoRef.current);
         cleanupConnection();
         updateCallState("idle");
         setFastPoll(false);
@@ -1033,7 +1167,8 @@ export function useWebRTC({
     [
       createPeerConnection,
       gathered,
-      captureFrom,
+      captureForCall,
+      showCameraOff,
       setPicture,
       publishCallSignal,
       setFastPoll,
@@ -1054,8 +1189,10 @@ export function useWebRTC({
     async (offer: CallSignal, stream: MediaStream, withVideo: boolean, cancelled: () => boolean): Promise<boolean> => {
       const pc = await gathered(async () => {
         const pc = createPeerConnection();
-        stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
-        stream.getVideoTracks().forEach((track) => pc.addTrack(track, stream));
+        // The call's stream as it is now: a microphone switched while a stalled connection gathered stopped this one's.
+        const sending = localStreamRef.current ?? stream;
+        sending.getAudioTracks().forEach((track) => pc.addTrack(track, sending));
+        sending.getVideoTracks().forEach((track) => pc.addTrack(track, sending));
 
         await pc.setRemoteDescription({ type: "offer", sdp: buildSdpFromSignal(offer) });
 
@@ -1139,20 +1276,32 @@ export function useWebRTC({
         callConnectedEventFiredRef.current = false;
         assertKeepsToRelays();
 
-        const stream = await mediaRef.current.getUserMedia({
-          audio: captureFrom("audio"),
-          video: withVideo && captureFrom("video"),
-        });
+        const { stream, cameraError } = await captureForCall(withVideo, cancelled);
         if (cancelled()) { stream.getTracks().forEach((track) => track.stop()); return; }
+        // The contact's newer offer, heard while the microphone or camera was asked for, is their call now (see the
+        // "answering" offer below): the answer answers it, the offer their app still has.
+        const answering = pendingOfferRef.current ?? offer;
+        if (answering !== offer) {
+          applyRemotePicture(answering);
+          callHadVideoRef.current = withVideo || signalHasVideo(answering);
+        }
+        const video = withVideo && !cameraError;
+        if (cameraError) {
+          showCameraOff(cameraError);
+          callHadVideoRef.current = signalHasVideo(answering);
+        }
         localStreamRef.current = stream;
         setLocalStream(stream);
-        setPicture(withVideo ? "camera" : null);
+        setPicture(video ? "camera" : null);
 
-        if (!(await answerOffer(offer, stream, withVideo, cancelled))) return;
-        answeredRef.current = { offer, withVideo };
+        if (!(await answerOffer(answering, stream, video, cancelled))) return;
+        answeredRef.current = { offer: answering, withVideo: video };
         // Read again (the check above narrowed it to "incoming"): ICE may have connected while our answer gathered.
         if ((callStateRef.current as CallState) === "answering") updateCallState("connecting");
+        const newer = pendingOfferRef.current;
         pendingOfferRef.current = null;
+        // One heard while our answer gathered: answered again on a new connection, as a caller's offer once answered.
+        if (newer && newer.ts > answering.ts) void restartAnswer(newer);
       } catch (error) {
         if (cancelled()) return;
         onErrorRef.current?.(error);
@@ -1165,7 +1314,8 @@ export function useWebRTC({
     },
     [
       answerOffer,
-      captureFrom,
+      captureForCall,
+      showCameraOff,
       applyRemotePicture,
       setPicture,
       updateCallState,
@@ -1174,6 +1324,7 @@ export function useWebRTC({
       showNoPath,
       assertKeepsToRelays,
       callKey,
+      restartAnswer,
     ],
   );
 
@@ -1273,9 +1424,9 @@ export function useWebRTC({
       await showPicture(pictureRef.current === "camera" ? null : "camera");
     } catch (error) {
       onErrorRef.current?.(error);
-      showMediaProblem(error);
+      showCameraOff(error);
     }
-  }, [showPicture, showMediaProblem]);
+  }, [showPicture, showCameraOff]);
 
   /** Shares the screen in place of whatever picture is on, or stops and goes back to it. */
   const toggleScreenShare = useCallback(async () => {
@@ -1395,6 +1546,18 @@ export function useWebRTC({
       return;
     }
 
+    // The contact starting over (WISP 601, "On a call already"): their app died with no hang-up and calls again, while
+    // our call is still on. Only a later offer reaches here (`lastProcessedSignalRef` passed their answer, or their
+    // offer and restarts). On a call we answered, an offer before media came up is the caller offering again (above),
+    // and once it came up the caller restarts with `r`, never `o`. Our call ends with its line and sends nothing (a
+    // hang-up would end their new call as declined), and their offer rings.
+    if (signal.t === "o" && callStateRef.current === "connected" && (!answeredRef.current || mediaUpRef.current)) {
+      lastProcessedSignalRef.current = signal.ts;
+      hangUp(false);
+      ringOffer(signal);
+      return;
+    }
+
     if (callStateRef.current === "connected") {
       if (signal.t !== "h" && signal.t !== "v") {
         return;
@@ -1426,9 +1589,26 @@ export function useWebRTC({
       lastProcessedSignalRef.current = signal.ts;
       setMissedAt(performance.now());
       heldOfferRef.current = { signal, at: performance.now(), line: addCallEventMessage?.("call_missed", signalHasVideo(signal), undefined, signal.ts) || null };
+      offerHeld?.(signal.ts);
     } else if (signal.t === "o" && (callStateRef.current === "idle" || yielded)) {
       lastProcessedSignalRef.current = signal.ts;
       ringOffer(signal);
+    } else if (signal.t === "o" && callStateRef.current === "incoming" && signal.ts > (pendingOfferRef.current?.ts ?? 0)) {
+      // The contact calls again while their call still rings here, with no hang-up between (WISP 601, "Ringing"):
+      // their app died or reloaded as it rang out, and its hang-up never came. Their newer offer is their call now and
+      // takes the ringing one's place, under one "Incoming call" line, ringing its own RING_MS (the timer below runs
+      // per offer). Answer names the offer it answers: one their app no longer has, it would ring out to "No answer"
+      // there and never connect here. An offer no newer than the ringing one never reaches here (`lastProcessedSignalRef`).
+      lastProcessedSignalRef.current = signal.ts;
+      if (receivedLineRef.current) removeCallEventMessage?.(receivedLineRef.current);
+      ringOffer(signal);
+    } else if (signal.t === "o" && callStateRef.current === "answering" && pendingOfferRef.current && signal.ts > pendingOfferRef.current.ts) {
+      // The same, once Answer was pressed and waits on the microphone or camera, or gathers: the answer answers the
+      // newer offer (`acceptCall`), under its own "Incoming call" line.
+      lastProcessedSignalRef.current = signal.ts;
+      if (receivedLineRef.current) removeCallEventMessage?.(receivedLineRef.current);
+      receivedLineRef.current = addCallEventMessage?.("call_received", signalHasVideo(signal), undefined, signal.ts) || null;
+      pendingOfferRef.current = signal;
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
       if (answersOffer(signal, myOfferTimestampRef.current)) {
         lastProcessedSignalRef.current = signal.ts;
@@ -1465,10 +1645,12 @@ export function useWebRTC({
         hangUp(false);
       }
     }
-  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection, removeCallEventMessage, answerIceRestart, applyIceRestartAnswer, ringOffer, setMissedAt]);
+  }, [incomingCallSignal, handleAnswer, hangUp, updateCallState, setFastPoll, addCallEventMessage, applyRemotePicture, restartAnswer, restartable, cleanupConnection, removeCallEventMessage, answerIceRestart, applyIceRestartAnswer, ringOffer, setMissedAt, offerHeld]);
 
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
+  // Theirs rings RING_MS from the offer that rings (`rangOffer`): a newer one that took the call's place starts it again,
+  // as the caller's ring started again with it.
   hangUpRef.current = hangUp;
 
   // "Hide my IP from contacts" turned on during a call: its connection was made with this device's own addresses
@@ -1483,9 +1665,11 @@ export function useWebRTC({
     hangUpRef.current(true, true);
     setMediaProblemShown("relayOnlyNow");
   }, [relayOnly, setMediaProblemShown]);
+  // Ours rings from its offer: `offering` starts before the microphone or camera prompt, which may stay open a minute.
+  const offerSent = callState === "offering" && offerOut;
+  const ringing = callState === "incoming" || offerSent ? callState : null;
   useEffect(() => {
-    if (callState !== "offering" && callState !== "incoming") return;
-    const ringing = callState;
+    if (!ringing) return;
     const timer = setTimeout(() => {
       if (callStateRef.current !== ringing) return;
       if (ringing === "offering") {
@@ -1500,7 +1684,7 @@ export function useWebRTC({
       }
     }, RING_MS);
     return () => clearTimeout(timer);
-  }, [callState, setMissedAt]);
+  }, [ringing, rangOffer, setMissedAt]);
 
   // Another page answered or declined the call ringing here (`callHandledElsewhere`): it stops ringing here as though it
   // never had. That page wrote the call's lines into the history both show, and sent its answer; this one sends
@@ -1615,6 +1799,7 @@ export function useWebRTC({
         });
         localStreamRef.current = null;
       }
+      askingCameraRef.current?.getTracks().forEach((t) => t.stop());
 
       if (pcRef.current) {
         pcRef.current.close();
@@ -1643,6 +1828,11 @@ export function useWebRTC({
     /** The picture the peer is sending is its screen. */
     remoteIsScreenSharing: remotePicture === "screen",
     /**
+     * The contact's offer that rings here, while it rings: what the ring shows (audio or video, its `ts`) and what an
+     * answer "as the call came" takes. Never the contact's latest signal: a picture change sent while it rings is not it.
+     */
+    ringingOffer: callState === "incoming" ? rangOffer : null,
+    /**
      * The camera button: a camera or a screen can be turned on right now, even if the call started as audio; or the
      * camera that is on can be turned off, when the answer closed the lane (a contact that takes no picture) and only
      * the self-view shows it. Turned off there, it is not turned back on: nobody would see it.
@@ -1662,9 +1852,16 @@ export function useWebRTC({
     screenShareError,
     /** Our last call rang out with no answer, for a few seconds. */
     noAnswer,
+    /**
+     * Our call rings the contact: it is `offering` and its offer went out. Not while the microphone or camera prompt is
+     * open, nor while the connection gathers: the caller's ringback plays from here, as `RING_MS` counts.
+     */
+    offerSent,
     mediaProblem: mediaProblemShown?.problem ?? null,
     /** New at each `mediaProblem` shown, the same reason again too: the notice is drawn (and said) anew. */
     mediaProblemId: mediaProblemShown?.id,
+    /** Whether `mediaProblem` was the microphone, the camera (the call goes on without it) or both. */
+    mediaProblemOf,
     /** Our last call never connected: ICE found no path to the contact (a VPN or firewall may block calls). */
     noPath,
     dismissNoPath,

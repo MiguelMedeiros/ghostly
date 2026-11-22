@@ -1,6 +1,6 @@
 import { setBrowserHost, type BrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { ClientMessage, EngineApi, EngineEvent, EngineMethod, RpcRequest, RpcResponse } from "@ghostly/browser/shared/rpc";
+import type { AttachMark, ClientMessage, EngineApi, EngineEvent, EngineMethod, RpcRequest, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, GroupView, LinkView, NetworkWalletsView, PaymentView, StoredMessage, WalletOffer, WalletView } from "@ghostly/browser/shared/types";
 import { WALLET_TYPES } from "@ghostly/browser/shared/types";
 import { walletInstances } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
@@ -151,6 +151,8 @@ export class FakeEngine implements BrowserHost {
   readonly calls: { method: EngineMethod; params: unknown }[] = [];
   /** The chats whose whole history a page asked for (`HistoryRequest`), in order. */
   readonly historyAsks: string[] = [];
+  /** The mark each connection of the page came with (`AttachMark`), in order. */
+  readonly connectedSince: (AttachMark | undefined)[] = [];
   openPaymentLink?: BrowserHost["openPaymentLink"];
   /** The desktop host's window full screen (Linux), when a test gives one. */
   fullscreenWindow?: BrowserHost["fullscreenWindow"];
@@ -175,8 +177,9 @@ export class FakeEngine implements BrowserHost {
   /** Set by a test: the page's tries to connect fail with it, as when the peer does not start again. */
   refuse: Error | null = null;
 
-  async connect(onMessage: (message: EngineEvent | RpcResponse) => void, onDisconnect?: () => void) {
+  async connect(onMessage: (message: EngineEvent | RpcResponse) => void, onDisconnect?: () => void, since?: AttachMark) {
     if (this.refuse) throw this.refuse;
+    this.connectedSince.push(since);
     this.send = onMessage;
     this.disconnect = onDisconnect ?? null;
     onMessage({ kind: "state", state: this.state });
@@ -199,7 +202,9 @@ export class FakeEngine implements BrowserHost {
     });
   }
 
-  requestLocalAccess = async () => false;
+  requestLocalAccess = async (_pattern: string, _origin: string) => false;
+  /** The extension's: whether an address was allowed in this browser. Left out as on the web app and Desktop. */
+  localAccessAllowed?: (origin: string) => Promise<boolean>;
   openService = async () => {};
 
   /** Answers `method` from now on. */
@@ -250,6 +255,7 @@ export class FakeEngine implements BrowserHost {
     engine.forgetHistories();
     this.calls.length = 0;
     this.historyAsks.length = 0;
+    this.connectedSince.length = 0;
     this.handlers.clear();
     this.openPaymentLink = undefined;
     this.fullscreenWindow = undefined;

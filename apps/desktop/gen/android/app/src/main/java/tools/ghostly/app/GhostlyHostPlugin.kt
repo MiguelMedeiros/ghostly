@@ -28,7 +28,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.view.WindowCompat
 import app.tauri.PermissionState
-import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.Permission
@@ -80,6 +79,12 @@ class KeepArgs {
 @InvokeArg
 class AwakeArgs {
   var on: Boolean = false
+}
+
+@InvokeArg
+class ConnectionArgs {
+  var on: Boolean = false
+  var links: Boolean = false
 }
 
 @InvokeArg
@@ -153,6 +158,14 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     /** Such photos that came before the plugin loaded: it hands them over as it loads. */
     private val photosBack = mutableListOf<File>()
 
+    // What the page asked to keep up out of sight (`keepAwake`, `connectionService`), for the process: an activity made
+    // again loads a new plugin while the services run on. On the main thread.
+    private var files = false
+    private var connectionWanted = false
+    private var linksUp = false
+    /** Whether this run already said the system ended the last one under the connection service. */
+    private var killedRead = false
+
     /**
      * A photo the composer's camera took for a page that is gone (MainActivity `cameraAnswered`): it reaches the page
      * as a share of it, now or once the plugin loads. On the main thread.
@@ -164,8 +177,6 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
 
   /** Rust (src/android.rs): `kind` is "oidc", "share", "notification", "network", "visibility", "call" or "camera". */
   private external fun received(kind: String, value: String)
-
-  private val pendingSave = SaveSlot<SaveArgs>()
 
   override fun load(webView: WebView) {
     // Copies an earlier run left (a share never read, the app stopped): only shares this run takes are kept.
@@ -628,41 +639,26 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   // ---- Saving a file ----
 
   /**
-   * Android's document picker, then a copy of the stored file to where the person chose. A save asked for while a
-   * picker is open (SaveSlot) opens none and answers as a cancelled one: the open picker's answer stays its own.
+   * Android's document picker (SavePicker), then a copy of the stored file to where the person chose. A save asked for
+   * while a picker is open opens none and answers as a cancelled one: the open picker's answer stays its own.
    */
   @Command
   fun saveFile(invoke: Invoke) {
     val args = invoke.parseArgs(SaveArgs::class.java)
-    if (!pendingSave.take(args)) {
-      invoke.resolve(JSObject().put("saved", false))
-      return
-    }
-    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
-      .addCategory(Intent.CATEGORY_OPENABLE)
-      .setType("*/*")
-      .putExtra(Intent.EXTRA_TITLE, args.name)
-    try {
-      startActivityForResult(invoke, intent, "saveChosen")
-    } catch (e: Exception) {
-      // No picker opened (none on this phone): no answer will free the slot.
-      pendingSave.answered()
-      throw e
-    }
+    val opened = SavePicker.open(SaveState.Save(args.path, args.name)) { save, result -> saveChosen(invoke, save, result) }
+    if (!opened) invoke.resolve(JSObject().put("saved", false))
   }
 
-  @ActivityCallback
-  private fun saveChosen(invoke: Invoke, result: ActivityResult) {
-    val args = pendingSave.answered()
+  private fun saveChosen(invoke: Invoke, save: SaveState.Save?, result: ActivityResult) {
     val target = result.data?.data
-    if (result.resultCode != Activity.RESULT_OK || target == null || args == null) {
+    if (result.resultCode != Activity.RESULT_OK || target == null || save == null) {
       invoke.resolve(JSObject().put("saved", false))
       return
     }
     thread(name = "ghostly-save") {
       val resolver = activity.contentResolver
       val saved = SaveCopy.copy(
-        File(args.path),
+        File(save.path),
         { resolver.openOutputStream(target, "wt") },
         { DocumentsContract.deleteDocument(resolver, target) },
       )
@@ -674,13 +670,48 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
 
   /**
    * While a file moves (`on`, Rust's `keep_awake` with files as a reason), the transfer service (TransferService.kt)
-   * keeps the app running out of sight; it stops with the last file. `held`: whether it runs now.
+   * keeps the app running out of sight, or the connection service when it runs (ConnectionHolds.kt); it stops with
+   * the last file. `held`: whether one holds the files now.
    */
   @Command
   fun keepAwake(invoke: Invoke) {
-    val on = invoke.parseArgs(AwakeArgs::class.java).on
-    val held = if (on) TransferService.start(activity) else false.also { TransferService.stop(activity) }
-    invoke.resolve(JSObject().put("held", held))
+    files = invoke.parseArgs(AwakeArgs::class.java).on
+    val held = holdOutOfSight()
+    invoke.resolve(JSObject().put("held", files && held))
+  }
+
+  // ---- Staying connected out of sight ----
+
+  /**
+   * While the page wants it (`on`, Rust's `connection_service`: "Stay connected in the background" on, the app
+   * unlocked and online, with chats or groups), the connection service (ConnectionService.kt) keeps the app and its
+   * links up out of sight; `links`: whether any link is up now, for its wake lock. Told again every few minutes while
+   * on. `held`: whether it runs now; `killed`: the system ended the app under it last time (said once per run).
+   */
+  @Command
+  fun connectionService(invoke: Invoke) {
+    val args = invoke.parseArgs(ConnectionArgs::class.java)
+    connectionWanted = args.on
+    linksUp = args.links
+    val killed = args.on && !killedRead && ConnectionService.killedLastRun(activity)
+    if (args.on) killedRead = true
+    val held = holdOutOfSight()
+    invoke.resolve(JSObject().put("held", connectionWanted && held).put("killed", killed))
+  }
+
+  /**
+   * One service at a time keeps the app up out of sight (ConnectionHolds): the connection service while wanted (or
+   * still holding files), else the transfer service while files move. The new one starts before the old one stops,
+   * so the app never leaves the foreground in between. Whether the connection service, or else the transfer service,
+   * holds now.
+   */
+  private fun holdOutOfSight(): Boolean {
+    val connection = ConnectionHolds.connectionHolds(connectionWanted, files, ConnectionService.running)
+    val connectionHeld = if (connection) ConnectionService.start(activity, files, linksUp) else false
+    val transferHeld =
+      if (ConnectionHolds.transferHolds(files, connectionHeld)) TransferService.start(activity) else false.also { TransferService.stop(activity) }
+    if (!connection) ConnectionService.stop(activity)
+    return connectionHeld || transferHeld
   }
 
   // ---- A call out of sight ----

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { BrowserHost } from "@ghostly/browser/host";
 import type { ProfileOpenFailure } from "@ghostly/browser/shared/idb";
 import { ProfileGate } from "../../components/ProfileUnavailable";
+import { UpdateBanner } from "../../components/UpdateBanner";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import type { FoundUpdate } from "../../lib/updates";
@@ -86,6 +87,44 @@ describe("Settings → Updates, from the keyboard", () => {
     browserDropsFocus();
     expect(restart).toHaveFocus();
     installed();
+  });
+});
+
+describe("the update banner above the list, from the keyboard and a screen reader", () => {
+  /** The banner over the list's search field, the app checking on its own. `before` runs while the check is out. */
+  async function renderBanner(found: FoundUpdate, before?: () => void) {
+    const { answer, installed } = host();
+    saveSettings({ ...loadSettings(), checkForUpdates: true });
+    const view = renderApp(<UpdateProvider><UpdateBanner /><input type="search" aria-label="Search" /></UpdateProvider>);
+    before?.();
+    await answer(found);
+    await screen.findByTestId("update-banner");
+    return { ...view, installed };
+  }
+
+  it("is said politely when it comes, from a line in the page before it", async () => {
+    await renderBanner(RESTART, () => expect(screen.getByRole("status")).toBeEmptyDOMElement());
+    expect(screen.getByRole("status")).toHaveTextContent("Ghostly 9.9.9 is available");
+  });
+
+  it("Update and restart keeps the focus while it installs", async () => {
+    const { user, installed } = await renderBanner(RESTART);
+    const restart = screen.getByRole("button", { name: /Update and restart/ });
+    restart.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByTestId("update-banner")).toHaveTextContent("Updating"));
+    browserDropsFocus();
+    expect(restart).toHaveFocus();
+    expect(restart).toHaveAttribute("aria-busy", "true");
+    installed();
+  });
+
+  it("Later hands the focus on to what comes next, not to the page", async () => {
+    const { user } = await renderBanner(RESTART);
+    screen.getByRole("button", { name: "Later" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("update-banner")).toBeNull();
+    expect(screen.getByRole("searchbox", { name: "Search" })).toHaveFocus();
   });
 });
 

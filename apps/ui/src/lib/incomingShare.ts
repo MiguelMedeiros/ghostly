@@ -1,4 +1,6 @@
 import { useSyncExternalStore } from "react";
+import { LINK_STOP_CHARS } from "@ghostly/core";
+import { linkEnd } from "./parse/links";
 
 /*
  * Something another app shared into Ghostly (the installed web app is a share target): text, a link, images,
@@ -42,9 +44,15 @@ export interface IncomingShare {
   read?: () => Promise<File[]>;
   /**
    * Keeps the share for the page that loads next (a profile switch restarts the app), which shows it in its picker
-   * again. False where it could not be kept. Without it, the share goes with this page.
+   * again. False where it could not be kept. Without it, the share goes with this page. Called with the share's
+   * `dropped` as it is now (those not kept counted since it came), which the next page says with it.
    */
-  carry?: () => boolean;
+  carry?: (dropped?: number) => boolean;
+  /**
+   * Told when the share is sent to a chat: it no longer waits in the picker, so a later share does not take its place
+   * (the Android app's copies stay until that chat's composer reads them, or the page goes).
+   */
+  sent?: () => void;
 }
 
 /** A share's files as Files, read now where they were not yet. */
@@ -136,7 +144,7 @@ export function dropIncomingShare(): void {
  * is redrawn: the page is going.
  */
 export function carryIncomingShare(): boolean {
-  const carry = (share: IncomingShare | null) => { try { return share?.carry?.() ?? false; } catch { return false; } };
+  const carry = (share: IncomingShare | null) => { try { return share?.carry?.(share.dropped) ?? false; } catch { return false; } };
   let sent = false;
   for (const [chat, shares] of forChat) {
     const left = shares.filter((share) => !carry(share));
@@ -152,13 +160,25 @@ export function carryIncomingShare(): boolean {
 
 /**
  * The chat picked: the share waits for its composer, and the next one waiting, if any, is shown. `chat` is the
- * composer's draft id (a session id, `group:<id>`).
+ * composer's draft id (a session id, `group:<id>`). The same share picked again for a chat where it still waits (an
+ * edit open there, which the composer says) is not kept twice: shared again as it looked lost, it would go in twice.
  */
 export function sendShareTo(chat: string): void {
   if (!pending) return;
-  forChat.set(chat, [...forChat.get(chat) ?? [], pending]);
+  const waiting = forChat.get(chat) ?? [];
+  const share = pending;
+  if (!waiting.some((kept) => sameShare(kept, share))) {
+    forChat.set(chat, [...waiting, share]);
+    share.sent?.();
+  }
   pending = behind.shift() ?? null;
   emit();
+}
+
+/** Whether two shares bring the same: the same text and the same files (by name, size and type), in their order. */
+function sameShare(a: IncomingShare, b: IncomingShare): boolean {
+  return shareText(a) === shareText(b) && a.files.length === b.files.length
+    && a.files.every((file, i) => file.name === b.files[i]!.name && file.size === b.files[i]!.size && file.type === b.files[i]!.type);
 }
 
 /** The shares sent to one chat as one: their texts one under the other, and all their files, in their order. */
@@ -187,13 +207,52 @@ export function takeShareFor(chat: string): IncomingShare | null {
 }
 
 /**
+ * A share a composer took but could not keep (its files read only once an edit had begun there): it waits for that
+ * chat's composer again, ahead of any sent there since. The composer says it waits by the edit, and looks again once
+ * it can take files (the edit ended); a share made meanwhile is still shown in the picker as usual.
+ */
+export function keepShareFor(chat: string, share: IncomingShare): void {
+  forChat.set(chat, [share, ...forChat.get(chat) ?? []]);
+}
+
+/** How many places `carriesLink` reads, and how far past the link: a sentence's punctuation and closing brackets. */
+const MAX_LINK_LOOKS = 64;
+const MAX_LINK_TAIL = 64;
+/** What may stand right before and right after a link of its own in a shared text. */
+const LINK_BEFORE = new RegExp(`[\\s\\p{Ps}\\p{Pi}"'${LINK_STOP_CHARS}]`, "u");
+const LINK_AFTER = new RegExp(`[\\s${LINK_STOP_CHARS}]`);
+
+/**
+ * Whether `text` carries `url` as a link of its own: after the text's start, a space, an opening bracket or quote or
+ * the CJK or Arabic punctuation a link stops at ("链接：https://a.example/p"), and ending where a bubble's link would
+ * (`linkEnd`: "https://a.example/p.", "(https://a.example/p)" or "https://a.example/p。見て" carry it).
+ * A longer address that starts with it ("https://a.example/p2") or holds it ("…?u=https://a.example/p") does not.
+ * Any website can post a share, of megabytes: only the first `MAX_LINK_LOOKS` places it turns up are read, each up to
+ * `MAX_LINK_TAIL` characters past it (a word longer than that is not taken for it), so the text is never read once per
+ * place. Past those, the link goes in once more, which says nothing wrong.
+ */
+function carriesLink(text: string, url: string): boolean {
+  const word = new RegExp(`[^\\s${LINK_STOP_CHARS}]{0,${url.length + MAX_LINK_TAIL}}`, "y");
+  const own = linkEnd(url);
+  let looks = 0;
+  for (let at = text.indexOf(url); at >= 0 && looks < MAX_LINK_LOOKS; at = text.indexOf(url, at + 1), looks += 1) {
+    if (at > 0 && !LINK_BEFORE.test(text[at - 1]!)) continue;
+    word.lastIndex = at;
+    const found = word.exec(text)![0];
+    if (!LINK_AFTER.test(text[at + found.length] ?? " ")) continue;
+    if (linkEnd(found) === own) return true;
+  }
+  return false;
+}
+
+/**
  * The text a share puts in the draft: its text, and its link where the text does not already carry it (apps
  * differ: some put the link in `text`, some in `url`, some in both). A title only when there is nothing else.
  */
 export function shareText(share: Pick<IncomingShare, "title" | "text" | "url">): string {
   const text = share.text.trim();
   const url = share.url.trim();
-  const parts = [text, url && !text.includes(url) ? url : ""].filter(Boolean);
+  const parts = [text, url && !carriesLink(text, url) ? url : ""].filter(Boolean);
   if (!parts.length && share.title.trim()) parts.push(share.title.trim());
   return parts.join("\n");
 }
@@ -224,7 +283,11 @@ export function onShareChange(listener: () => void): () => void {
   return subscribe(listener);
 }
 
-/** Tests only. */
+/**
+ * Every share this page holds is dropped: those in the picker and those sent to a chat whose composer has not taken
+ * them. The profile's data goes (Clear all data, Remove this profile here), and a share picked for a chat is a draft of
+ * it: none is carried to the page that loads next.
+ */
 export function resetIncomingShare(): void {
   pending = null;
   behind = [];

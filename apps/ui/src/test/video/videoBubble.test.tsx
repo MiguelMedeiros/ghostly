@@ -423,7 +423,8 @@ describe("a video in the chat", () => {
     };
     await enter();
     expect(fullscreenWindow).toHaveBeenLastCalledWith(true);
-    expect(screen.getByRole("button", { name: "Exit full screen" })).toHaveAttribute("aria-pressed", "true");
+    // Named for what it does next, never a toggle too: "Exit full screen, pressed" read as left already.
+    expect(screen.getByRole("button", { name: "Exit full screen" })).not.toHaveAttribute("aria-pressed");
     // Escape leaves it, the window with it; the video goes on. The Escape is spent (false: its default prevented), so
     // a notice at the top that also answers Escape stays.
     expect(fireEvent.keyDown(document, { key: "Escape" })).toBe(false);
@@ -487,6 +488,43 @@ describe("a video in the chat", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(frame).not.toHaveAttribute("data-theater");
     expect(z(screen.getByTestId("call-window"))).toBe(50);
+    callView.unmount();
+  });
+
+  // Hung on the page's body at the menus' usual height, the call's Devices menu opened under the video and the call:
+  // its rows out of sight, the keys in it.
+  it("filling the window (Desktop on Linux), the Devices menu of a call over it opens over it too", async () => {
+    fakeEngine.fullscreenWindow = vi.fn(async () => {});
+    const z = (element: Element) => Number(element.className.match(/\bz-\[?(\d+)\]?/)?.[1] ?? 0);
+    const devices = { list: { audioinput: [{ id: "usb", label: "USB mic" }], videoinput: [], audiooutput: [], defaults: {}, named: true },
+      current: { audioinput: "", videoinput: "", audiooutput: "" }, speaker: "", speakers: false, choose: vi.fn(), notice: null,
+      dismiss: vi.fn(), switchBack: vi.fn(), hold: vi.fn() };
+    const call = (pinned: boolean) => (
+      <CallOverlay callState="connected" pinned={pinned} localStream={null} remoteStream={null} isMuted={false} isVideoOff remoteHasVideo={false}
+        callStartedAt={Date.now()} peerName="Ana" onHangUp={vi.fn()} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} devices={devices} />
+    );
+    const callView = renderApp(call(true));
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Full screen" }));
+    const frame = screen.getByTestId("video-frame");
+    expect(frame).toHaveAttribute("data-theater", "true");
+    for (const pinned of [true, false]) {
+      callView.rerender(call(pinned));
+      fireEvent.click(screen.getByTestId("call-devices"));
+      const menu = screen.getByTestId("call-devices-menu");
+      expect(z(menu)).toBeGreaterThan(z(frame));
+      expect(z(menu)).toBeGreaterThan(z(screen.getByTestId("call-window")));
+      fireEvent.keyDown(menu, { key: "Escape" });
+      expect(screen.queryByTestId("call-devices-menu")).toBeNull();
+      expect(frame).toHaveAttribute("data-theater", "true");
+    }
+    // Out of full screen, it is a menu like the others again.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(frame).not.toHaveAttribute("data-theater");
+    fireEvent.click(screen.getByTestId("call-devices"));
+    expect(z(screen.getByTestId("call-devices-menu"))).toBe(50);
     callView.unmount();
   });
 
@@ -610,7 +648,7 @@ describe("a video not here yet", () => {
     const file = video();
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 12 * 1024 * MB });
     expect(screen.getByTestId("video-accept")).toHaveTextContent("Download 35.0 MB");
-    expect(screen.getByTestId("video-room")).toHaveTextContent("Ana wants to send it · 12.0 GB free");
+    expect(screen.getByTestId("video-room")).toHaveTextContent("Ana wants to send it · 12.0 GB left");
     expect(screen.queryByTestId("video-play")).toBeNull();
     // The poster and length are there before a byte is.
     expect(screen.getByTestId("video-poster")).toBeInTheDocument();
@@ -629,11 +667,12 @@ describe("a video not here yet", () => {
     expect(accept.className).toContain("max-w-[calc(100%-8px)]");
   });
 
-  it("an offer larger than the room here cannot be accepted", () => {
+  it("an offer larger than the room shown says so, and still takes Download: the engine reads the room again", async () => {
     const file = video();
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 10 * MB });
-    expect(screen.getByTestId("video-accept")).toBeDisabled();
-    expect(screen.getByTestId("video-room")).toHaveTextContent("Not enough space: 10.0 MB free");
+    expect(screen.getByTestId("video-room")).toHaveTextContent("Not enough space: 10.0 MB left");
+    fireEvent.click(screen.getByTestId("video-accept"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: file.id, action: "accept" }));
   });
 
   it("while it arrives: the ring with how much is here, the status, and pause/cancel", async () => {

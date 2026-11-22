@@ -819,13 +819,63 @@ describe("texts written behind one no relay took", () => {
     const attempts = send.mock.calls.length;
     reads.rows = reads.whole = 0;
     await vi.advanceTimersByTimeAsync(120_000);
-    expect(reads.rows / 2, "row reads per idle minute").toBeLessThanOrEqual(20);
-    expect(reads.whole / 2, "whole-chat reads per idle minute").toBeLessThanOrEqual(2);
+    // About one look a minute, at the waiting rows by id: never the chat's whole history, however long it is.
+    expect(reads.rows / 2, "row reads per idle minute").toBeLessThanOrEqual(rows.length + 20);
+    expect(reads.whole, "whole-chat reads while idle").toBe(0);
     // Only the first is published again, at its own checks.
     expect(send.mock.calls.slice(attempts).every(([m]) => m.text === "m0")).toBe(true);
     relays.taken = true;
     await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs.at(-1)!);
     expect(sent).toEqual(rows.map(r => r.text));
+    expect(rows.every(r => r.delivery === "delivered")).toBe(true);
+    await box.stop();
+  });
+});
+
+describe("texts the contact's windows have no room for yet", () => {
+  it("wait in their place with no attempt counted, and a text written later never passes them", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
+    const PACED = "Your contact takes a limited number of texts at a time.";
+    const rows: StoredMessage[] = [];
+    const store = {
+      read: async () => rows.map(row => ({ ...row })),
+      get: async (id: string) => { const row = rows.find(r => r.id === id); return row && { ...row }; },
+      update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        const row = rows.find(r => r.id === id);
+        if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+      },
+    };
+    // A live link whose contact takes `room` more texts, each confirmed a moment after it lands.
+    let room = 2;
+    const arrived: string[] = [];
+    const send = vi.fn(async (m: StoredMessage) => {
+      if (!room) return new NotSent(PACED, PACED);
+      room--;
+      arrived.push(m.text);
+      setTimeout(() => void box.received(m.wireId!), 1);
+      return null;
+    });
+    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => room > 0, via: () => "datalink" }, policy: { maxAttempts: 2 } });
+    const write = async (text: string) => {
+      const wireId = text.padEnd(22, "x");
+      rows.push({ linkId: "paced", id: `me_${wireId}`, wireId, text, sender: "me", timestamp: Date.now(), via: "datalink", delivery: "sending" });
+      await box.transmit(`me_${wireId}`);
+      await vi.advanceTimersByTimeAsync(5);
+    };
+    for (const text of ["a", "b", "c", "d"]) await write(text);
+    expect(arrived).toEqual(["a", "b"]);
+    expect(rows[2]).toMatchObject({ delivery: "waiting", deliveryError: PACED });
+    expect(rows[3].delivery).toBe("waiting");
+    // Many checks with no room: none of them is a send that counts, so none of them ends failed.
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect(rows.every(r => r.delivery !== "failed")).toBe(true);
+    // Room for one, and a text written now: the older one goes first, the new one waits behind it.
+    room = 1;
+    await write("e");
+    expect(arrived).toEqual(["a", "b", "c"]);
+    room = 10;
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs.at(-1)!);
+    expect(arrived).toEqual(["a", "b", "c", "d", "e"]);
     expect(rows.every(r => r.delivery === "delivered")).toBe(true);
     await box.stop();
   });

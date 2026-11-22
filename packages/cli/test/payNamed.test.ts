@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.wallets, headless.identities
 
 /**
@@ -21,7 +22,7 @@ function fake() {
     "req-mallory": { id: "req-mallory", linkId: "chat-mallory", kind: "request", network: "testnet", amount: 10, status: "pending", direction: "in", createdAt: 1 },
   };
   const node = {
-    getState: () => ({ links, groups: [], payments, settings: {}, transport: {}, identityProofs: [{ id: "proof-1" }], wallet: { wallets: [], networks: {} } }) as unknown as EngineState,
+    chatView: chatViewOf, getState: () => ({ links, groups: [], payments, settings: {}, transport: {}, identityProofs: [{ id: "proof-1" }], wallet: { wallets: [], networks: {} } }) as unknown as EngineState,
     sendPayment: vi.fn(async () => ({ paymentId: "pay-1" })),
     payRequest: vi.fn(async () => {}),
     walletQuoteInvoice: vi.fn(async () => ({ quote: "q", mint: "m", amount: 1, feeReserve: 0 })),

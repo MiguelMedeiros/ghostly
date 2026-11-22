@@ -15,6 +15,7 @@ import connection from "./connection.json";
 import devices from "./devices.json";
 import errors from "./errors.json";
 import group from "./group.json";
+import groupCallModeration from "./groupCallModeration.json";
 import home from "./home.json";
 import identities from "./identities.json";
 import invite from "./invite.json";
@@ -34,8 +35,8 @@ import saved from "./saved.json";
 import secretGuard from "./secretGuard.json";
 import services from "./services.json";
 import settings from "./settings.json";
-import share from "./share.json";
 import sidebar from "./sidebar.json";
+import status from "./status.json";
 import tabs from "./tabs.json";
 import translate from "./translate.json";
 import updates from "./updates.json";
@@ -56,6 +57,7 @@ export default {
   devices,
   errors,
   group,
+  groupCallModeration,
   home,
   identities,
   invite,
@@ -75,8 +77,8 @@ export default {
   secretGuard,
   services,
   settings,
-  share,
   sidebar,
+  status,
   tabs,
   translate,
   updates,

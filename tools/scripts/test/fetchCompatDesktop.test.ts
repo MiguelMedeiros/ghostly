@@ -1,10 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { releasesNewestFirst } from "../compat-latest-release.mjs";
-import { get, newestPublished } from "../fetch-compat-desktop.mjs";
+import { releasesNewestFirst, remoteReleases } from "../compat-latest-release.mjs";
+import { get, newestPublished, releaseFiles, tokenOf } from "../fetch-compat-desktop.mjs";
 
 /** A release's SHA256SUMS.txt with its Linux package. */
 const sums = (tag: string) => `abc123  Ghostly_${tag.slice(1)}_amd64.deb\ndef456  Ghostly_${tag.slice(1)}_aarch64.dmg\n`;
@@ -32,6 +32,40 @@ describe("the newest release the Desktop compatibility e2e fetches", () => {
 
   it("is nothing when no release publishes its package", async () => {
     expect(await newestPublished(["v1.7.3"], served({}))).toBeNull();
+  });
+
+  it("takes a tag whose package is in the cache already with no request", async () => {
+    const sums = vi.fn(served({}));
+    expect(await newestPublished(["v1.7.3", "v1.7.2"], sums, () => {}, (tag) => tag === "v1.7.3")).toEqual({ tag: "v1.7.3", sums: null });
+    expect(sums).not.toHaveBeenCalled();
+  });
+
+  it("stops a `git ls-remote` that gets no answer and asks again", async () => {
+    const lsRemote = "a\trefs/tags/v1.7.3\n";
+    const calls: { args: string[]; timeout?: number }[] = [];
+    let timedOut = false;
+    const run = (args: string[], options?: { timeout?: number }) => {
+      calls.push({ args, timeout: options?.timeout });
+      if (args[0] === "rev-parse") return "head\n";
+      if (!timedOut) { timedOut = true; throw Object.assign(new Error("spawnSync git ETIMEDOUT"), { code: "ETIMEDOUT" }); }
+      return lsRemote;
+    };
+    const log: string[] = [];
+    const waits: number[] = [];
+    expect(await remoteReleases({ run, sleep: async (ms: number) => { waits.push(ms); }, log: (line: string) => log.push(line) })).toEqual(["v1.7.3"]);
+    expect(calls.filter(({ args }) => args[0] === "ls-remote").map(({ timeout }) => timeout)).toEqual([20_000, 20_000]);
+    expect(log).toEqual(["git ls-remote origin: no answer in 20 s, trying again"]);
+    expect(waits).toEqual([2000]);
+  });
+
+  it("gives up on `git ls-remote` after 4 attempts, saying why", async () => {
+    const run = (args: string[]) => {
+      if (args[0] === "rev-parse") return "head\n";
+      throw Object.assign(new Error("spawnSync git ETIMEDOUT"), { code: "ETIMEDOUT" });
+    };
+    const waits: number[] = [];
+    await expect(remoteReleases({ run, sleep: async (ms: number) => { waits.push(ms); } })).rejects.toThrow("git ls-remote origin: no answer in 20 s (4 attempts)");
+    expect(waits).toEqual([2000, 4000, 8000]);
   });
 
   it("walks the tags newest first, leaving out the commit under test", () => {
@@ -72,11 +106,13 @@ describe("a request of the Desktop compatibility fetch", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("gives up after 3 attempts, saying which URL and why", async () => {
+  it("gives up after 4 attempts, 2, 4 then 8 seconds apart, saying which URL and why", async () => {
     const fetch = vi.fn().mockRejectedValue(connectTimeout());
     vi.stubGlobal("fetch", fetch);
-    await expect(get(url, (response) => response.text(), quick)).rejects.toThrow(`GET ${url}: UND_ERR_CONNECT_TIMEOUT (3 attempts)`);
-    expect(fetch).toHaveBeenCalledTimes(3);
+    const waits: number[] = [];
+    await expect(get(url, (response) => response.text(), { sleep: async (ms: number) => { waits.push(ms); } })).rejects.toThrow(`GET ${url}: UND_ERR_CONNECT_TIMEOUT (4 attempts)`);
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(waits).toEqual([2000, 4000, 8000]);
   });
 
   it("does not try again on a 403", async () => {
@@ -87,19 +123,132 @@ describe("a request of the Desktop compatibility fetch", () => {
   });
 
   it("the fetch script ends with status 1 and that reason in one line, not a stack, when GitHub never answers", () => {
-    const stub = `globalThis.fetch = async () => { throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("Connect Timeout Error"), { code: "UND_ERR_CONNECT_TIMEOUT" }) }); };`;
+    // No waits between the attempts here: the backoff is the test above's.
+    const stub = `globalThis.fetch = async () => { throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("Connect Timeout Error"), { code: "UND_ERR_CONNECT_TIMEOUT" }) }); };
+      const setTimeout = globalThis.setTimeout; globalThis.setTimeout = (done, ms, ...rest) => setTimeout(done, ms >= 1000 ? 0 : ms, ...rest);`;
     const cache = mkdtempSync(join(tmpdir(), "compat-fetch-"));
     try {
+      // PATH without gh: the anonymous download, whatever this machine's gh is logged in as.
       const result = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(stub)}`, resolve(import.meta.dirname, "../fetch-compat-desktop.mjs"), "--tag", "v9.9.9"], {
-        env: { ...process.env, E2E_COMPAT_CACHE: cache }, encoding: "utf8",
+        env: { ...process.env, E2E_COMPAT_CACHE: cache, GH_TOKEN: "", GITHUB_TOKEN: "", PATH: "" }, encoding: "utf8",
       });
       expect(result.status, result.stderr).toBe(1);
       expect(result.stdout).toBe("");
       const lines = result.stderr.trim().split("\n");
-      expect(lines.at(-1)).toMatch(/^fetch-compat-desktop\.mjs: GET https:\/\/github\.com\/MiguelMedeiros\/ghostly\/releases\/download\/v9\.9\.9\/\S+: UND_ERR_CONNECT_TIMEOUT \(3 attempts\)$/);
+      expect(lines.at(-1)).toMatch(/^fetch-compat-desktop\.mjs: GET https:\/\/github\.com\/MiguelMedeiros\/ghostly\/releases\/download\/v9\.9\.9\/\S+: UND_ERR_CONNECT_TIMEOUT \(4 attempts\)$/);
       expect(result.stderr).not.toMatch(/triggerUncaughtException|\n\s+at /);
     } finally {
       rmSync(cache, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("takes the newest release it fetched last time, from the cache, when origin's tags cannot be read", () => {
+    const stub = `globalThis.fetch = async () => { throw new Error("no network in this test"); };
+      const setTimeout = globalThis.setTimeout; globalThis.setTimeout = (done, ms, ...rest) => setTimeout(done, ms >= 1000 ? 0 : ms, ...rest);`;
+    const dir = mkdtempSync(join(tmpdir(), "compat-fetch-"));
+    try {
+      // A repository whose origin is not there: `git ls-remote` fails, as it does when github.com does not answer.
+      const repo = join(dir, "repo");
+      for (const args of [["init", "-q", repo], ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "t"], ["-C", repo, "remote", "add", "origin", join(dir, "gone")]]) {
+        expect(spawnSync("git", args).status).toBe(0);
+      }
+      const cache = join(dir, "cache");
+      const binary = join(cache, "desktop-v9.9.8", "usr", "bin", "ghostly");
+      mkdirSync(dirname(binary), { recursive: true });
+      writeFileSync(binary, "");
+      writeFileSync(join(cache, "desktop-v9.9.8", ".fetched"), "v9.9.8 abc123\n");
+      writeFileSync(join(cache, "newest"), "v9.9.8\n");
+      const result = spawnSync(process.execPath, ["--import", `data:text/javascript,${encodeURIComponent(stub)}`, resolve(import.meta.dirname, "../fetch-compat-desktop.mjs"), "--tag", "newest"], {
+        cwd: repo, env: { ...process.env, E2E_COMPAT_CACHE: cache, GH_TOKEN: "", GITHUB_TOKEN: "", GIT_DIR: join(repo, ".git") }, encoding: "utf8",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe(binary);
+      expect(result.stderr.match(/^git ls-remote origin: .+, trying again$/gm)).toHaveLength(3);
+      expect(result.stderr).toMatch(/origin's release tags could not be read \(git ls-remote origin: .+ \(4 attempts\)\): v9\.9\.8, the newest release fetched before, from the cache/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+describe("where the Desktop compatibility fetch downloads a release's files", () => {
+  const token = "ghp_secretTokenNeverPrinted0123456789";
+  const api = "https://api.github.com/repos/MiguelMedeiros/ghostly";
+  const asset = (id: number, name: string) => ({ id, name, url: `${api}/releases/assets/${id}` });
+  const release = { tag_name: "v1.10.3", assets: [asset(11, "SHA256SUMS.txt"), asset(12, "Ghostly_1.10.3_amd64.deb")] };
+  const quick = { sleep: async () => {} };
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** What each request asked for: its URL and its headers. */
+  const requests = (fetch: ReturnType<typeof vi.fn>) => fetch.mock.calls.map(([url, init]) => ({ url: String(url), headers: new Headers(init?.headers) }));
+
+  it("with a token, goes through the API's asset endpoint, the token in the Authorization header", async () => {
+    const fetch = vi.fn(async (url: string) => (url.endsWith("/releases/tags/v1.10.3") ? Response.json(release) : new Response("abc123  Ghostly_1.10.3_amd64.deb\n")));
+    vi.stubGlobal("fetch", fetch);
+    expect(await releaseFiles({ token, ...quick }).sums("v1.10.3")).toBe("abc123  Ghostly_1.10.3_amd64.deb\n");
+    const [byTag, file] = requests(fetch);
+    expect(byTag.url).toBe(`${api}/releases/tags/v1.10.3`);
+    expect(byTag.headers.get("authorization")).toBe(`Bearer ${token}`);
+    expect(file.url).toBe(`${api}/releases/assets/11`);
+    expect(file.headers.get("authorization")).toBe(`Bearer ${token}`);
+    expect(file.headers.get("accept")).toBe("application/octet-stream");
+  });
+
+  it("with a token, reads the release once for its SHA256SUMS.txt and its package", async () => {
+    const fetch = vi.fn(async (url: string) => (url.endsWith("/releases/tags/v1.10.3") ? Response.json(release) : new Response(url.endsWith("/12") ? "deb" : "sums")));
+    vi.stubGlobal("fetch", fetch);
+    const files = releaseFiles({ token, ...quick });
+    expect(await files.sums("v1.10.3")).toBe("sums");
+    expect(String(await files.download("v1.10.3", "Ghostly_1.10.3_amd64.deb"))).toBe("deb");
+    expect(requests(fetch).map(({ url }) => url)).toEqual([`${api}/releases/tags/v1.10.3`, `${api}/releases/assets/11`, `${api}/releases/assets/12`]);
+  });
+
+  it("with a token, a release GitHub does not show (a draft) has no SHA256SUMS.txt, as anonymously", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })));
+    expect(await releaseFiles({ token, ...quick }).sums("v1.10.4")).toBeNull();
+  });
+
+  it("with a token, a release still uploading its files has no SHA256SUMS.txt yet", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ tag_name: "v1.10.4", assets: [] })));
+    expect(await releaseFiles({ token, ...quick }).sums("v1.10.4")).toBeNull();
+  });
+
+  it("tries a 504 again and gets the file", async () => {
+    const fetch = vi.fn(async (url: string) => (url.endsWith("/releases/tags/v1.10.3") ? Response.json(release) : new Response("deb")));
+    fetch.mockResolvedValueOnce(Response.json(release)).mockResolvedValueOnce(new Response("", { status: 504 }));
+    vi.stubGlobal("fetch", fetch);
+    const log: string[] = [];
+    expect(String(await releaseFiles({ token, ...quick, log: (line) => log.push(line) }).download("v1.10.3", "Ghostly_1.10.3_amd64.deb"))).toBe("deb");
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(log).toEqual([`GET ${api}/releases/assets/12: 504, trying again`]);
+  });
+
+  it("never says the token: not in the log, not in the error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(`bad credentials for ${token}`, { status: 504 })));
+    const log: string[] = [];
+    const failed = await releaseFiles({ token, ...quick, log: (line) => log.push(line) }).sums("v1.10.3").catch((error: Error) => error);
+    expect(failed).toBeInstanceOf(Error);
+    expect((failed as Error).message).toBe(`GET ${api}/releases/tags/v1.10.3: 504 (4 attempts)`);
+    expect(log).toHaveLength(3);
+    expect([...log, (failed as Error).message, String((failed as Error).stack)].join("\n")).not.toContain(token);
+  });
+
+  it("without a token, downloads the public URL, with no Authorization header", async () => {
+    const fetch = vi.fn(async () => new Response("sums"));
+    vi.stubGlobal("fetch", fetch);
+    expect(await releaseFiles({ ...quick }).sums("v1.10.3")).toBe("sums");
+    const [only] = requests(fetch);
+    expect(only.url).toBe("https://github.com/MiguelMedeiros/ghostly/releases/download/v1.10.3/SHA256SUMS.txt");
+    expect(only.headers.has("authorization")).toBe(false);
+  });
+
+  it("takes the token from GH_TOKEN, then GITHUB_TOKEN, then `gh auth token`, else none", () => {
+    const gh = vi.fn(() => "gho_fromGh\n");
+    expect(tokenOf({ GH_TOKEN: "a", GITHUB_TOKEN: "b" }, gh)).toBe("a");
+    expect(tokenOf({ GH_TOKEN: "", GITHUB_TOKEN: "b" }, gh)).toBe("b");
+    expect(gh).not.toHaveBeenCalled();
+    expect(tokenOf({}, gh)).toBe("gho_fromGh");
+    expect(tokenOf({}, () => undefined)).toBeUndefined();
+    expect(tokenOf({}, () => "")).toBeUndefined();
+  });
 });

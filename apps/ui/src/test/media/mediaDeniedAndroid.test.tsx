@@ -69,10 +69,46 @@ describe("Settings → Audio & video with the microphone or camera refused", () 
     const { user } = renderApp(<MediaSettings />);
     await user.click(await screen.findByTestId("settings-media-allow"));
     devices.userMedia[0].deny(new DOMException("denied", "NotAllowedError"));
+    await vi.waitFor(() => expect(devices.userMedia).toHaveLength(2));
+    devices.userMedia[1].deny(new DOMException("denied", "NotAllowedError"));
 
     expect(await screen.findByTestId("settings-media-denied")).toHaveTextContent(ANDROID_DENIED);
     await user.click(within(screen.getByTestId("settings-media-names")).getByRole("button", { name: "Open settings" }));
     expect(tauri.invoke).toHaveBeenCalledWith("open_app_settings");
+  });
+
+  it("in the Android app, Allow with the camera refused and the microphone allowed names the microphones", async () => {
+    // Android asks for each in its own dialog, and the WebView refuses a request for both unless both were allowed.
+    androidApp();
+    devices.devices = [device("audioinput", "", ""), device("videoinput", "", "")];
+    const { user } = renderApp(<MediaSettings />);
+    await user.click(await screen.findByTestId("settings-media-allow"));
+    await vi.waitFor(() => expect(devices.userMedia).toHaveLength(1));
+    expect(devices.userMedia[0].constraints, "the microphone alone first").toEqual({ audio: true });
+    devices.enumerateDevices.mockImplementation(async () => [device("audioinput", "mic", "Microphone"), device("videoinput", "cam", "")]);
+    devices.userMedia[0].grant();
+    await vi.waitFor(() => expect(devices.userMedia).toHaveLength(2));
+    expect(devices.userMedia[1].constraints, "then the camera alone").toEqual({ video: true });
+    devices.userMedia[1].deny(new DOMException("denied", "NotAllowedError"));
+
+    await vi.waitFor(() => expect(screen.queryByTestId("settings-media-names")).toBeNull());
+    expect(screen.queryByTestId("settings-media-denied")).toBeNull();
+    expect(devices.liveTracks()).toEqual([]);
+  });
+
+  it("in the Android app, Allow with both refused says so once, with Open settings", async () => {
+    androidApp();
+    devices.devices = [device("audioinput", "", ""), device("videoinput", "", "")];
+    const { user } = renderApp(<MediaSettings />);
+    await user.click(await screen.findByTestId("settings-media-allow"));
+    await vi.waitFor(() => expect(devices.userMedia).toHaveLength(1));
+    devices.userMedia[0].deny(new DOMException("denied", "NotAllowedError"));
+    await vi.waitFor(() => expect(devices.userMedia).toHaveLength(2));
+    devices.userMedia[1].deny(new DOMException("denied", "NotAllowedError"));
+
+    expect(await screen.findByTestId("settings-media-denied")).toHaveTextContent(ANDROID_DENIED);
+    expect(within(screen.getByTestId("settings-media-names")).getByRole("button", { name: "Open settings" })).toBeInTheDocument();
+    expect(devices.userMedia, "each asked once").toHaveLength(2);
   });
 
   it("in a browser on Android, the line stays the browser's, with nothing to open", async () => {
