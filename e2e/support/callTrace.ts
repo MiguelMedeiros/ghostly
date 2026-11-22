@@ -35,12 +35,6 @@ export async function linkTrace(host: EngineHost): Promise<string> {
   return inEngine<string>(host, `(async () => [await (${readConnections})(), "link trace:", ...(globalThis.__linkLines ?? ["(none)"])].join("\\n"))()`);
 }
 
-/** How many connections the engine made since `watchLink`, and how many of them had no candidate in their description. */
-export async function linkConnections(host: EngineHost): Promise<{ made: number; empty: number }> {
-  return inEngine(host, `(() => { const pcs = globalThis.__callPcs ?? []; return { made: pcs.length,
-    empty: pcs.filter((r) => r.pc.localDescription && !/^a=candidate:/m.test(r.pc.localDescription.sdp)).length }; })()`);
-}
-
 async function inEngine<T>(host: EngineHost, source: string): Promise<T> {
   if (host.kind === "web") {
     if (host.page.isClosed()) throw new Error("page closed");

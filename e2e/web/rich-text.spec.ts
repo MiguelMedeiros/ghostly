@@ -37,6 +37,18 @@ test("formatted text is sent as typed and shows formatted on both sides", {
   await expect(spoiler).toHaveAttribute("role", "button");
   await expect(spoiler).toHaveAccessibleName("Hidden text. Tap to show it");
   await expect(spoiler).toHaveCSS("color", "rgba(0, 0, 0, 0)");
+  // Forced colors (Windows Contrast themes) still cover it: its words transparent on a cover unlike the bubble around it.
+  await bob.page.emulateMedia({ forcedColors: "active" });
+  const forced = await spoiler.evaluate((node) => {
+    const around = (from: Element | null) => {
+      for (let n = from; n; n = n.parentElement) { const bg = getComputedStyle(n).backgroundColor; if (!bg.endsWith(", 0)") && bg !== "transparent") return bg; }
+      return "rgb(255, 255, 255)";
+    };
+    return { color: getComputedStyle(node).color, cover: getComputedStyle(node).backgroundColor, around: around(node.parentElement) };
+  });
+  expect(forced.color, "a spoiler's words in forced colors").toBe("rgba(0, 0, 0, 0)");
+  expect(forced.cover, "a spoiler's cover in forced colors").not.toBe(forced.around);
+  await bob.page.emulateMedia({ forcedColors: "none" });
   await spoiler.click();
   await expect(spoiler).toHaveAttribute("data-shown", "");
   await expect(spoiler).toHaveText("the ghost was the narrator");

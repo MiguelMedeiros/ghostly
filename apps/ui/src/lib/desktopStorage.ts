@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fileBytesOf, type FileUsage } from "@ghostly/browser/shared/fileBytes";
 
 /**
@@ -60,14 +60,26 @@ export async function readDesktopStorage(local: number): Promise<DesktopStorage>
   return { app, local, files };
 }
 
-/** The Desktop's storage, read when Settings opens and again when `local` changes (chats deleted); null elsewhere. */
+/**
+ * When the count is read again after `local` changed (chats deleted): at once, and then for a minute more. The engine
+ * deletes a chat's files and rows after the page let the chat go, and says nothing once they are gone, so a read in the
+ * same moment still counted every one of them, and "Storage used" kept the deleted files until Settings was opened
+ * again. A chat's files go only after its messages: in the Linux WebView, 100,000 messages took 7 s to delete, and
+ * 200,000 across 50 chats 15 s.
+ */
+export const RECOUNT_AFTER_MS = [0, 1_000, 5_000, 15_000, 30_000, 60_000];
+
+/** The Desktop's storage, read when Settings opens and again when `local` changes (chats deleted, `RECOUNT_AFTER_MS`); null elsewhere. */
 export function useDesktopStorage(desktop: boolean, local: number): DesktopStorage | null {
   const [storage, setStorage] = useState<DesktopStorage | null>(null);
+  const opened = useRef(false);
   useEffect(() => {
     if (!desktop) return;
     let live = true;
-    void readDesktopStorage(local).then((read) => { if (live) setStorage(read); });
-    return () => { live = false; };
+    // Opened once a read went: Settings sets `local` from its first 0 as it opens, before any, and that is no deletion.
+    const read = () => { opened.current = true; void readDesktopStorage(local).then((read) => { if (live) setStorage(read); }); };
+    const timers = (opened.current ? RECOUNT_AFTER_MS : [0]).map((ms) => setTimeout(read, ms));
+    return () => { live = false; timers.forEach(clearTimeout); };
   }, [desktop, local]);
   return desktop ? storage : null;
 }

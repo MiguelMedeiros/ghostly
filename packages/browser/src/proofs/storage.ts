@@ -1,6 +1,7 @@
 import { validExternalKey } from '@ghostly/core';
 import type { Pubky } from '@synonymdev/pubky';
 import { boundedBytes } from '../profiles/public';
+import { loadPubky } from './pubkySdk';
 
 let publicClient: Promise<Pubky> | undefined;
 /** The retired per-chat `pubky-storage` proof, read only (nothing writes one now: Pubky is an identity provider,
@@ -8,7 +9,7 @@ let publicClient: Promise<Pubky> | undefined;
  * homeserver supplied in a proof. A separate unauthenticated client reads it. */
 export async function readPubkyProof(key: string, path: string): Promise<string> {
   if (!validExternalKey('pubky-storage', key) || !/^\/pub\/ghostly\.app\/proofs\/[a-f0-9]{64}\/[a-f0-9]{64}\.json$/.test(path)) throw new Error('Invalid Pubky proof address');
-  const pubky = await (publicClient ??= import('@synonymdev/pubky').then(({ Pubky }) => new Pubky()));
+  const pubky = await (publicClient ??= loadPubky().then(({ Pubky }) => new Pubky()));
   let timer: ReturnType<typeof setTimeout> | undefined;
   const read = async () => {
     const response = await pubky.publicStorage.get(`pubky://${key}${path as `/pub/${string}`}`);

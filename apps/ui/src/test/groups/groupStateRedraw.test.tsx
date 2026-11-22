@@ -1,5 +1,5 @@
 // The engine sends its whole state anew on every change (up to 20 a second while a file moves). An open group draws
-// again only when what it shows changes, as a 1:1 chat does (chatStateRedraw.test.tsx): a state that changes nothing of
+// again only when what it shows changes, as a 1:1 chat does (chat/chatPage.test.tsx): a state that changes nothing of
 // it draws neither its page nor its header's connection.
 import { Profiler } from "react";
 import { act, screen } from "@testing-library/react";

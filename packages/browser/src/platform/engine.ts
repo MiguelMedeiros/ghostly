@@ -1,7 +1,7 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import { STATUS_IDLE_AFTER_MS, type AppFrameEvent } from "@ghostly/core";
-import type { AppRangeAsk, AttentionEvent, EngineApi, EngineMethod, KeptPictures, KeptViews, PostedEvent, PostedState } from "../shared/rpc";
-import type { EngineState, LinkView, StoredMessage } from "../shared/types";
+import type { AppRangeAsk, AttachMark, AttentionEvent, EngineApi, EngineMethod, KeptPictures, KeptViews, PostedEvent, PostedState } from "../shared/rpc";
+import type { EngineState, GroupView, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import { identityPicture, nostrPicture, picturesBack } from "../shared/keptPictures";
 import type { ProfileOpenFailure } from "../shared/idb";
@@ -30,8 +30,74 @@ export interface ListChanges extends MessageChanges {
   from: StoredMessage[];
 }
 
-/** A listener of a chat's messages: the whole list as it is now, and what changed since the last one it heard, if known. */
+/**
+ * A listener of a chat's messages: the whole list as it is now, and what changed since the last one it heard, if known.
+ * A group this page holds no list of (`engine.messages` has none) is told only what changed, with an empty list.
+ */
 export type MessagesListener = (linkId: string, messages: StoredMessage[], changes?: ListChanges) => void;
+
+/**
+ * The page's lists, by chat: what changes in one (`change`) is held and made on its list once, when the list is next
+ * read, so a burst of K one-row changes (a delivery mark per text) costs one pass over a history of N, not K. Every
+ * read (`get`, iterating) sees each list as it is now.
+ */
+class Histories extends Map<string, StoredMessage[]> {
+  private readonly owed = new Map<string, { rows: Map<string, StoredMessage>; deleted: Set<string> }>();
+
+  /** Holds these changes for this chat's list, which is here: as `applyMessageChanges` has it, a row both given and deleted goes. */
+  change(linkId: string, changes: MessageChanges): void {
+    let owed = this.owed.get(linkId);
+    if (!owed) this.owed.set(linkId, owed = { rows: new Map(), deleted: new Set() });
+    for (const id of changes.deleted) { owed.rows.delete(id); owed.deleted.add(id); }
+    for (const row of changes.messages) {
+      if (changes.deleted.includes(row.id)) continue;
+      owed.rows.set(row.id, row);
+      owed.deleted.delete(row.id);
+    }
+  }
+
+  override get(linkId: string): StoredMessage[] | undefined {
+    const owed = this.owed.get(linkId);
+    if (!owed) return super.get(linkId);
+    this.owed.delete(linkId);
+    const made = applyMessageChanges(super.get(linkId)!, { messages: [...owed.rows.values()], deleted: [...owed.deleted] });
+    super.set(linkId, made);
+    return made;
+  }
+
+  override set(linkId: string, messages: StoredMessage[]): this {
+    this.owed.delete(linkId);
+    return super.set(linkId, messages);
+  }
+
+  override delete(linkId: string): boolean {
+    this.owed.delete(linkId);
+    return super.delete(linkId);
+  }
+
+  override clear(): void {
+    this.owed.clear();
+    super.clear();
+  }
+
+  override forEach(each: (messages: StoredMessage[], linkId: string, map: Map<string, StoredMessage[]>) => void, self?: unknown): void {
+    for (const [linkId, messages] of this.entries()) each.call(self, messages, linkId, this);
+  }
+
+  override entries(): MapIterator<[string, StoredMessage[]]> {
+    for (const linkId of [...this.owed.keys()]) this.get(linkId);
+    return super.entries();
+  }
+
+  override values(): MapIterator<StoredMessage[]> {
+    for (const linkId of [...this.owed.keys()]) this.get(linkId);
+    return super.values();
+  }
+
+  override [Symbol.iterator](): MapIterator<[string, StoredMessage[]]> {
+    return this.entries();
+  }
+}
 
 /**
  * This page's connection to the Ghostly peer, wherever the host keeps it. The
@@ -39,7 +105,8 @@ export type MessagesListener = (linkId: string, messages: StoredMessage[], chang
  */
 class EngineClient {
   state: EngineState | null = null;
-  readonly messages = new Map<string, StoredMessage[]>();
+  private readonly histories = new Histories();
+  readonly messages: Map<string, StoredMessage[]> = this.histories;
   /** Per chat, the ids the engine deleted in it, as its last whole history said (the `messages` event's `deleted`). */
   readonly deletedIds = new Map<string, readonly string[]>();
   /** The chats whose list here is only their newest page (a `messages` event with `more`): the peer has older rows. */
@@ -99,6 +166,15 @@ class EngineClient {
    * Offers expire by themselves (`parseCallSignal` refuses old ones).
    */
   private readonly offers = new Map<string, string>();
+  /**
+   * Where the page keeps the peer's marks (`mark` events): each connection attaches with the one read, so the peer sends
+   * no chat the stored chats have as it is now, and each one heard is kept once what came before it was told.
+   */
+  private marks: { read(): AttachMark | undefined; keep(mark: AttachMark): void } | null = null;
+
+  keepMarks(marks: { read(): AttachMark | undefined; keep(mark: AttachMark): void }): void {
+    this.marks = marks;
+  }
 
   subscribe(listener: () => void): () => void {
     this.stateListeners.add(listener);
@@ -179,6 +255,16 @@ class EngineClient {
   /** Whether this chat's list changed since its listeners last heard: they hear of it when the tick ends. */
   changing(linkId: string): boolean {
     return this.changed.has(linkId);
+  }
+
+  /**
+   * Ends the tick now: its listeners hear what changed at once. A call whose change the engine told before answering (a
+   * message of mine deleted for everyone) is then mirrored before its caller goes on, from what changed only.
+   */
+  tellChangesNow(): void {
+    if (!this.changesTimer) return;
+    clearTimeout(this.changesTimer);
+    this.tellChanges();
   }
 
   onAttention(listener: (event: AttentionEvent) => void): () => void {
@@ -287,6 +373,7 @@ class EngineClient {
           this.pending.clear();
           this.reconnect(500);
         },
+        this.marks?.read(),
       )
       .then((connection) => {
         this.connection = connection;
@@ -385,12 +472,20 @@ class EngineClient {
         break;
       case "message-changes": {
         // Only what changed, in a history the peer sent whole first: listeners still get the whole list, as it is now.
-        // The list here is current at once; its listeners hear once per tick, of every change in it together.
-        const history = this.messages.get(message.linkId);
-        if (!history) break;
-        this.messages.set(message.linkId, applyMessageChanges(history, message));
+        // The list here reads current at once; its listeners hear once per tick, of every change in it together.
+        if (!this.messages.has(message.linkId)) {
+          // A group this page has no list of (the peer sends a tab only its changes until it shows it): no list is made
+          // of them; its listeners hear what changed, with nothing as its list (`engine.messages` has none).
+          if (message.linkId.startsWith("group:")) {
+            const changes: ListChanges = { from: [], messages: message.messages, deleted: message.deleted };
+            for (const listener of this.messageListeners) listener(message.linkId, [], changes);
+          }
+          break;
+        }
+        // The first change in the tick reads the list its listeners last heard; the list is made once the changes are read.
         let since = this.changed.get(message.linkId);
-        if (!since) this.changed.set(message.linkId, since = { from: history, rows: new Map(), deleted: new Set() });
+        if (!since) this.changed.set(message.linkId, since = { from: this.messages.get(message.linkId)!, rows: new Map(), deleted: new Set() });
+        this.histories.change(message.linkId, message);
         // As `applyMessageChanges` has it: a row both given and deleted goes.
         for (const id of message.deleted) { since.rows.delete(id); since.deleted.add(id); }
         for (const row of message.messages) {
@@ -423,6 +518,22 @@ class EngineClient {
       case "apps-checked":
         for (const listener of this.appsCheckedListeners) listener();
         break;
+      case "mark": {
+        // A chat the peer did not send (the stored chats have it): its list here is not its whole history, which is asked
+        // for as a newest page's is. Its newest page comes with its first change.
+        for (const id of message.skipped ?? []) {
+          if (this.messages.has(id)) continue;
+          this.partial.add(id);
+          if (this.kept.has(id)) this.askWhole(id);
+        }
+        // What changed before the mark is told first: the mark is kept once the stored chats have it.
+        if (this.changesTimer) {
+          clearTimeout(this.changesTimer);
+          this.tellChanges();
+        }
+        this.marks?.keep({ epoch: message.epoch, mark: message.mark });
+        break;
+      }
       case "response": {
         const pending = this.pending.get(message.id);
         this.pending.delete(message.id);
@@ -496,14 +607,23 @@ function keptState(posted: PostedState, before: EngineState | null): EngineState
   } as EngineState;
 }
 
-/** The chats and groups a state left out (`KeptViews`), from the state before: each list whole again, in the order the ids give. */
-function keptViews<S extends Pick<EngineState, "links" | "groups">>(state: S, before: EngineState | null, views: KeptViews): S {
+/** The chats, group edges and groups a state left out (`KeptViews`), from the state before: each list whole again, in the order the ids give. */
+function keptViews<S extends Pick<EngineState, "links" | "edges" | "groups">>(state: S, before: EngineState | null, views: KeptViews): S {
   const back = <T extends { id: string }>(list: T[], ids: string[] | undefined, had: T[] | undefined): T[] => {
     if (!ids) return list;
     const sent = new Map(list.map((view) => [view.id, view])), kept = new Map(had?.map((view) => [view.id, view]));
     return ids.flatMap((id) => sent.get(id) ?? kept.get(id) ?? []);
   };
-  return { ...state, links: back(state.links, views.links, before?.links), groups: back(state.groups, views.groups, before?.groups) };
+  // The groups sent without their member list (`members`): each keeps the one it had.
+  const withMembers = (list: GroupView[]): GroupView[] => {
+    if (!views.members?.length) return list;
+    const ids = new Set(views.members), had = new Map(before?.groups.map((group) => [group.id, group.members]));
+    return list.map((group) => (ids.has(group.id) && !group.members ? { ...group, members: had.get(group.id) ?? [] } : group));
+  };
+  return {
+    ...state, links: back(state.links, views.links, before?.links), groups: withMembers(back(state.groups, views.groups, before?.groups)),
+    ...(state.edges && { edges: back(state.edges, views.edges, before?.edges) }),
+  };
 }
 
 /** The pictures a state left out (`KeptPictures`), from the state before: each the one it was sent last. */

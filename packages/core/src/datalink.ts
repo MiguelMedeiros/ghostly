@@ -185,6 +185,8 @@ export class DataLink {
   private fullGather = false;
   /** The offer or answer out has no public candidate (as it went: the connection's description gains any that come later). */
   private sentLacksPublic = false;
+  /** Connections the gathering under way replaced for finding no candidate at all (`gathered`); 0 when none is under way. */
+  private gatherStalls = 0;
   private lastSignalTs = 0;
   /** The peer's description as this connection was given it: Chrome shows it as `remoteDescription` only once applied. */
   private remoteSdp: string | null = null;
@@ -268,8 +270,10 @@ export class DataLink {
       // it offered again at once), and a signal is fed once, so a newer offer left aside here was never answered.
       this.lastSignalTs = signal.ts;
       const wasOpen = this.state === "open";
+      const unpublic = this.gatherStalled;
       this.teardown();
       if (wasOpen) { this.options.onDirect?.("closed"); this.options.onClose(); }
+      if (unpublic) this.options.onDirect?.("no-public");
       this.answered = { offer: signal, at: Date.now(), again: 0 };
       await this.answer(signal);
     } else if (this.state === "connecting" && this.myOfferTs && signal.o === this.myOfferTs && this.pc) {
@@ -340,7 +344,8 @@ export class DataLink {
   close(): void {
     // Given up for another transport that went live while this one had long had both descriptions: evidence all the same.
     const stalled = Date.now() - this.connectingSince >= STALLED_EVIDENCE_MS;
-    const evidence = stalled ? this.directEvidence() : null;
+    // Or still gathering, with nothing found on every connection but the last (`gatherStalled`).
+    const evidence = (stalled ? this.directEvidence() : null) ?? (this.gatherStalled ? "no-public" : null);
     this.noteNoPublic(stalled);
     this.answered = null;
     this.reset();
@@ -374,6 +379,15 @@ export class DataLink {
     const local = this.pc.localDescription?.sdp ?? "";
     return !PUBLIC_CANDIDATE.test(local) ? "no-public" : symmetricNat(local) ? "symmetric" : this.myOfferTs ? "no-path" : null;
   }
+
+  /**
+   * The gathering under way found no candidate on every connection but the one it waits on now (`GATHER_ATTEMPTS` - 1
+   * stalls): ended from outside now (another transport went live, the contact's offer took its place), it says what
+   * one that ran out says, `no-public`. Saying nothing held the note back on a network that blocks direct connections:
+   * a browser there gathers none, its chats went live over Iroh before the third stall, and only a later attempt, if
+   * any came, said it (direct-blocked e2e, 2026-11-13).
+   */
+  private get gatherStalled(): boolean { return this.gatherStalls >= GATHER_ATTEMPTS - 1; }
 
   /**
    * The attempt on this connection failed (it timed out, ICE failed or closed, its channel closed). An answer the
@@ -451,6 +465,7 @@ export class DataLink {
    */
   private async gathered(offer: boolean, describe: (pc: RTCPeerConnection) => Promise<void>): Promise<RTCPeerConnection | null> {
     let stalled: RTCPeerConnection | null = null;
+    this.gatherStalls = 0;
     for (let attempt = 1; ; attempt++) {
       // The new connection takes the old one's place first: closing that one then resets nothing.
       const pc = this.createConnection();
@@ -464,11 +479,13 @@ export class DataLink {
       const ms = Date.now() - gathering;
       if (sdpHasCandidates(pc.localDescription?.sdp)) {
         traceLink(this.options.myPubKeyZ32, "ice-gathered", { ms, offer, ...(attempt > 1 ? { attempt } : {}) });
+        this.gatherStalls = 0;
         return pc;
       }
       traceLink(this.options.myPubKeyZ32, "ice-stalled", { ms, offer, attempt });
       if (attempt >= GATHER_ATTEMPTS) { this.reset(); this.options.onDirect?.("no-public"); return null; }
       stalled = pc;
+      this.gatherStalls = attempt;
     }
   }
 
@@ -548,6 +565,7 @@ export class DataLink {
     this.myOfferTs = this.myOfferOutAt = 0;
     this.answerCameLate = false;
     this.remoteSdp = null;
+    this.gatherStalls = 0;
     if (!pc) return false;
     this.closeConnection(pc);
     return true;

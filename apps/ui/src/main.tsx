@@ -29,7 +29,7 @@ import { loadSettings } from "./lib/settings";
 import { loadLocale, translatorFor } from "./locales";
 import { servicesPlatform } from "./lib/platform";
 import { androidApp } from "./lib/touchOnly";
-import { followAppVisibility, followSystemBars, heedInterruptedSignIn, leaveOutPublicStun, takeIncomingShares } from "./desktop/android";
+import { followAppVisibility, followSystemBars, heedInterruptedSignIn, leaveOutPublicStun, letGoOfServices, takeIncomingShares } from "./desktop/android";
 
 async function boot() {
   // Asked first, so Rust starts GStreamer while the profile opens (see createDesktopHost below).
@@ -69,8 +69,10 @@ async function boot() {
   const host = createDesktopHost(version, calls);
   setBrowserHost(host);
   // The Android app: its system bars follow the theme, shares from other apps open the Share to… picker, the page
-  // knows when the app is in the background (its WebView never says so), and a sign-in Android cut off is said.
+  // knows when the app is in the background (its WebView never says so), and a sign-in Android cut off is said. What the
+  // page before this one held out of sight is let go first: this page's own hooks hold it again.
   if (androidApp()) {
+    letGoOfServices(invoke);
     followSystemBars(invoke);
     takeIncomingShares(invoke, listen);
     followAppVisibility(listen);
