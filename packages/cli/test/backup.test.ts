@@ -212,6 +212,30 @@ it("a path that is wrong on this machine is named as the person typed it: a fold
   const message = error(await ghostly(["--home", dir, "profile", "backup", "--out", join(missing, "x.ghostly-backup"), "--no-passphrase"], { env: NO_PASS }), "not_found", 3).message;
   expect(message).toBe(`No such file or folder: ${missing}`);
   expect(existsSync(missing)).toBe(false);
+  // A file where the folder should be is there: named as a file, as `file save` names it, not as missing.
+  const notes = join(dir, "notes.txt");
+  writeFileSync(notes, "NOTES");
+  const under = error(await ghostly(["--home", dir, "profile", "backup", "--out", join(notes, "b.bin"), "--no-passphrase"], { env: NO_PASS }), "not_found", 3).message;
+  expect(under).toBe(`${notes} is a file, not a folder`);
+  expect(readFileSync(notes, "utf8")).toBe("NOTES");
+});
+
+// The backup is written beside --out under a name of its own first: a folder it may not write named that file
+// (`x.ghostly-backup.partial-<pid>-<hex>`, never there), and a name of 227 to 255 bytes, which the file system takes,
+// was refused as too long once that name's ~28 bytes were added to it.
+it("--out that cannot be written is named as the person typed it, and a name the file system takes is written", async () => {
+  const dir = home("backup-out-names");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
+  const locked = join(dir, "ro");
+  mkdirSync(locked, { mode: 0o500 });
+  const denied = join(locked, "x.ghostly-backup");
+  expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", denied, "--no-passphrase"], { env: NO_PASS }), "refused", 1).message).toBe(`Not allowed to write or read ${denied}`);
+  expect(readdirSync(locked)).toEqual([]);
+  const long = join(dir, `${"b".repeat(255 - ".ghostly-backup".length)}.ghostly-backup`);
+  expect(ok(await ghostly(["--home", dir, "profile", "backup", "--out", long, "--no-passphrase"], { env: NO_PASS }))).toMatchObject({ path: long, protection: "none" });
+  const tooLong = join(dir, `${"c".repeat(256 - ".ghostly-backup".length)}.ghostly-backup`);
+  expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", tooLong, "--no-passphrase"], { env: NO_PASS }), "bad_request", 1).message).toBe(`A name in ${tooLong} is too long for this file system (at most 255 bytes)`);
+  expect(readdirSync(dir).filter((name) => name.includes("partial")), "no half-written file left").toEqual([]);
 });
 
 // A passphrase file that was a folder named no path, one given as "" (an unset variable) said "No such file or folder: "
@@ -279,6 +303,33 @@ it("a backup refuses a passphrase with a space, line break or byte order mark at
   writeFileSync(file, `${pass}\r\n`);
   ok(await ghostly(["--home", dir, "profile", "backup", "--out", out, "--passphrase-file", file], { env: NO_PASS }));
   expect(ok(await ghostly(["--home", dir, "profile", "restore", out, "copy", "--copy"], { env: PASS }))).toMatchObject({ restored: "copy" });
+});
+
+// A file with more than one line (`pass show x | ...`: the password, then notes) sealed the backup with every line and
+// said nothing: the first line alone, typed or set in the environment, was "Wrong passphrase".
+it("a backup from a passphrase with more than one line says on stderr that every line is the passphrase", async () => {
+  const dir = home("backup-lines");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Lines bot"]));
+  const out = join(dir, "x.ghostly-backup"), file = join(dir, "pass"), pass = PASS.GHOSTLY_BACKUP_PASSPHRASE;
+  writeFileSync(file, `${pass}\nurl: example.org\n`);
+  const made = await ghostly(["--home", dir, "profile", "backup", "--out", out, "--passphrase-file", file], { env: NO_PASS });
+  expect(ok(made)).toMatchObject({ path: out, protection: "passphrase" });
+  expect(made.stderr).toContain(`ghostly: the passphrase file ${file} has 2 lines; all 2 are the passphrase. A restore needs all of them. Use a one-line file (e.g. pass show x | head -1).\n`);
+  // Made as before: both lines open it, the first alone does not (`--copy`: the backup is of this home's own profile).
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", out, "copy", "--copy", "--passphrase-file", file], { env: NO_PASS }))).toMatchObject({ restored: "copy" });
+  expect(error(await ghostly(["--home", dir, "profile", "restore", out, "first-line", "--copy"], { env: PASS }), "refused", 1).message).toMatch(/^Wrong passphrase/);
+  // Stdin with CRLF lines, and the environment.
+  const piped = await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "piped.ghostly-backup"), "--passphrase-file", "-"], { env: NO_PASS, input: `${pass}\r\nline two\r\nline three\r\n` });
+  ok(piped);
+  expect(piped.stderr).toContain("ghostly: the passphrase on stdin has 3 lines; all 3 are the passphrase. A restore needs all of them. Pipe in one line (e.g. pass show x | head -1).\n");
+  const env = await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "env.ghostly-backup")], { env: { GHOSTLY_BACKUP_PASSPHRASE: `${pass}\nnotes` } });
+  ok(env);
+  expect(env.stderr).toContain("ghostly: GHOSTLY_BACKUP_PASSPHRASE has 2 lines; all 2 are the passphrase. A restore needs all of them. Set it to one line.\n");
+  // One line (its line break at the end left out) says nothing.
+  writeFileSync(file, `${pass}\n`);
+  const one = await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "one.ghostly-backup"), "--passphrase-file", file], { env: NO_PASS });
+  ok(one);
+  expect(one.stderr).not.toContain("lines;");
 });
 
 // The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a

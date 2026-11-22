@@ -11,6 +11,8 @@
 //   npm run test:affected -- --no-e2e --no-rust  # leave those out (also --no-lint, --no-typecheck)
 //   npm run test:affected -- --no-stack          # @gated tests: .env.e2e as it is, the shared stack not asked
 //   npm run test:affected -- --unit-group 3/4    # only CI draft runner 3's unit tests (cli half 1/2)
+//   npm run test:affected -- --integration       # also the integration tests the change reaches (real peers, daemons,
+//                                                # a DHT: tools/scripts/integration-tests.json, CI's Integration tests job)
 //
 // JOBS (default 2): vitest workers, cargo test threads. E2E_WORKERS (default 2): Playwright workers.
 // What is picked and why: tools/scripts/affected/select.mjs. The e2e mapping is e2e/features.json "paths".
@@ -21,7 +23,7 @@ import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HARNESS_PORTS, REMOTE, VARIABLES } from "../../e2e/infra/env.mjs";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "./affected/files.mjs";
-import { plan as makePlan, parseUnitGroup, unitPartsOf } from "./affected/select.mjs";
+import { draftUnitJob, integrationReached, plan as makePlan, parseUnitGroup, unitPartsOf } from "./affected/select.mjs";
 import { COMMANDS, SHARED, blanked, envTarget, gatedTests, stackDecision, statusWhy } from "./affected/stack.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
@@ -42,7 +44,7 @@ if (flag("--help") || flag("-h")) {
 }
 // An argument it does not take is refused before anything runs: a mistyped --list or --no-e2e, or a path without
 // --files, would otherwise be dropped and start the full run.
-const FLAGS = ["--list", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--no-stack"];
+const FLAGS = ["--list", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--no-stack", "--integration"];
 const OPTIONS = ["--base", "--port", "--unit-group"];
 const unknown = [];
 for (let i = 0; i < argv.length; i++) {
@@ -161,9 +163,15 @@ const e2eFiles = sources("e2e");
 // (tools/scripts/affected/files.mjs).
 const known = knownFiles(ROOT);
 const codeFiles = { ...repoCode(ROOT, known), ...e2eFiles };
-const p = makePlan({ changed, inventory, e2eFiles, codeFiles, packages: workspacePackages(ROOT, known) });
+const packages = workspacePackages(ROOT, known);
+const p = makePlan({ changed, inventory, e2eFiles, codeFiles, packages });
+// The package tests that start real peers, daemons or a DHT: named, and left to CI's Integration tests job unless
+// --integration (the unit runs below set GHOSTLY_INTEGRATION, tools/vitest.shared.ts).
+const integration = flag("--integration");
+const integrationList = JSON.parse(readFileSync(join(ROOT, "tools/scripts/integration-tests.json"), "utf8")).map((entry) => entry.file);
 
 // ---------- the plan, printed ----------
+const skipped = [];
 const short = (xs, n = 8) => (xs.length <= n ? xs.join(", ") : `${xs.slice(0, n).join(", ")} … (+${xs.length - n})`);
 console.log(`test:affected — ${changed.length} changed file(s) from ${from}`);
 for (const c of changed.slice(0, 40)) console.log(`  ${c.exists ? " " : "-"} ${c.path}`);
@@ -175,6 +183,9 @@ console.log(`unit (vitest)${unitGroup ? `: group ${unitGroup.index} of ${unitGro
 for (const u of p.unit) {
   if (otherGroup(u)) console.log(`  ${"other".padEnd(7)} ${u.name.padEnd(9)} ${runsIt(u)} (${u.mode}: ${u.reason})`);
   else console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.mode !== "skip" && partHere(u).shard ? `half ${partHere(u).shard} (vitest --shard${otherParts(u)}): ` : ""}${u.reason}`);
+  const reached = otherGroup(u) ? [] : integrationReached(u, integrationList, codeFiles, packages);
+  if (reached.length) console.log(`  ${"integ".padEnd(7)} ${u.name.padEnd(9)} ${reached.length} integration test file(s) it reaches, ${integration ? "run with it (--integration)" : "not run (CI's Integration tests job runs them; --integration runs them here)"}: ${short(reached.map((f) => f.split("/").pop()), 6)}`);
+  if (reached.length && !integration) skipped.push(`integration ${u.name}: ${reached.length} file(s) the change reaches (--integration runs them)`);
 }
 console.log("lint (eslint)");
 if (noLint && p.lint.mode !== "skip") console.log(`  ${"off".padEnd(7)} --no-lint`);
@@ -256,7 +267,6 @@ function run(label, cmd, args, opts = {}) {
     });
   });
 }
-const skipped = [];
 const started = Date.now();
 
 // unit
@@ -267,8 +277,12 @@ for (const u of p.unit) {
   const { shard } = partHere(u);
   const common = [...u.args, `--maxWorkers=${JOBS}`, "--passWithNoTests", ...(shard ? [`--shard=${shard}`] : [])];
   const half = shard ? `, half ${shard}` : "";
-  if (u.mode === "whole") await run(`unit ${u.name} (whole: ${u.reason}${half})`, "npx", ["vitest", "run", ...common], { cwd });
-  else await run(`unit ${u.name} (related${half})`, "npx", ["vitest", "related", ...u.files.map((f) => join(ROOT, f)), "--run", ...common], { cwd });
+  const env = { GHOSTLY_INTEGRATION: integration ? "1" : "0" };
+  const ok = u.mode === "whole"
+    ? await run(`unit ${u.name} (whole: ${u.reason}${half})`, "npx", ["vitest", "run", ...common], { cwd, env })
+    : await run(`unit ${u.name} (related${half})`, "npx", ["vitest", "related", ...u.files.map((f) => join(ROOT, f)), "--run", ...common], { cwd, env });
+  // CI Success can only say that one of the groups failed: the group's job says which project.
+  if (!ok && unitGroup && process.env.GITHUB_ACTIONS === "true") console.log(`::error::${draftUnitJob(unitGroup)}: unit ${u.name}${shard ? ` (half ${shard})` : ""} failed`);
 }
 
 // lint

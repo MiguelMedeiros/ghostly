@@ -134,7 +134,8 @@ import { EnrollCodeError, EnrollInviter, EnrollJoiner, EnrollRefusal, ghostLinkE
 import { DeviceLinks, deviceSetView, type DeviceSetView } from "../devices/links";
 import { amendDevice, enrollDevice, forgetDevice, moveDevice, readDeviceRecord } from "../devices/store";
 import { HandoffGiver, type BusyReport, type HandoffStay, type HandoffView, type QuiesceCancel } from "../devices/handoff";
-import { WALLET_SDK_PINS, handoffProfileHost, handoffSelf } from "../devices/handoffHost";
+import { WALLET_SDK_PINS, handoffProfileHost, handoffSelf, meteredConnection, onConnectionChange } from "../devices/handoffHost";
+import { LeftFilesFetcher, type LeftFilesStore } from "../devices/handoffFiles";
 import { handoffLinks, profileRecords } from "../devices/handoffStandby";
 import { handoffPakeReady, isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
 import { deviceIdentity, openTurnKeeper } from "../devices/setup";
@@ -152,7 +153,7 @@ import { breezDatabaseInUse } from "./paymentAdapters/providers/breezDatabases";
 import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
 import { journaledPayment, lightningPaying } from "./paymentAdapters/providers/lightningService";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
-import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
+import { FILE_BYTES_STEP, blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { isRefusalId } from "../shared/refusals";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
@@ -1200,6 +1201,8 @@ export class GhostlyNode implements EngineImplementation {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
       void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state, !seen);
     },
+    // One room for both: an offer is decided beside the group files still coming, and a group file beside a chat's.
+    groupsComing: (): number => this.groups.files?.stillComing() ?? 0,
   });
   private stateTimer: ReturnType<typeof setTimeout> | null = null;
   /** When the snapshot `stateTimer` waits for is due (`emitState`). */
@@ -1985,6 +1988,8 @@ export class GhostlyNode implements EngineImplementation {
       sendFiles: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
       sendData: (linkId, id, offset, data) => this.links.get(linkId)?.link?.sendFileData(id, offset, data) ?? false,
       writable: linkId => this.links.get(linkId)?.link?.filesWritable(),
+      chatsComing: (room: number): number => this.fileDesk.chatsComing(room),
+      comingChanged: () => this.fileDesk.comingChanged(),
     },
   });
 
@@ -2485,8 +2490,10 @@ export class GhostlyNode implements EngineImplementation {
     for (const stored of links) if (stored.group) this.links.set(stored.id, newLiveLink(stored, 0, linkFilesFrom(stored.id, [], [])));
     for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
     // Groups know their edges from the links above, and may add or drop some before anything dials. Each group's latest
-    // reaction is noted from the history its load reads (`loaded`); an offline run reads each one's newest message alone.
-    await this.groups.load(this.limitedMode, !!this.options.offline);
+    // reaction is noted from the history its load reads (`loaded`). A run whose groups take and send nothing reads each
+    // one's newest message alone: an offline one, and one that leaves their sessions unstarted (`deferGroups`), where
+    // only an admission over a contact chat touches one, from its chain and secrets.
+    await this.groups.load(this.limitedMode, !!this.options.offline || !!this.options.deferGroups);
     this.groupsLoaded = true;
     this.groupsLoadedNow();
     this.emitState();
@@ -2937,7 +2944,7 @@ export class GhostlyNode implements EngineImplementation {
   /** The home marks on this profile's wallet records, by wallet id. */
   private walletHomes: Record<string, WalletHome> = {};
   /** The wallets at home on another device: their home's name, and when their coins expire. */
-  private awayWallets = new Map<string, { device: string; expiresAt?: number }>();
+  private awayWallets = new Map<string, { device: string; key: string; expiresAt?: number }>();
 
   /**
    * Reads the home marks and says which wallets are away from this device. A profile with no device set has no other
@@ -2945,7 +2952,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async loadWalletHomes(): Promise<void> {
     this.walletHomes = await readWalletHomes().catch(() => ({}));
-    const away = new Map<string, { device: string; expiresAt?: number }>();
+    const away = new Map<string, { device: string; key: string; expiresAt?: number }>();
     if (!this.options.singleDevice) {
       const record = await readDeviceRecord(databaseName()).catch(() => null);
       const own = record?.ownSlot !== undefined ? record.deviceSet[record.ownSlot]?.key : undefined;
@@ -2957,7 +2964,7 @@ export class GhostlyNode implements EngineImplementation {
       if (record && own) for (const [id, home] of Object.entries(this.walletHomes)) {
         if (home.key === own) continue;
         const device = record.deviceSet.find((slot) => slot?.key === home.key)?.name ?? "";
-        away.set(id, { device, ...(home.expiresAt !== undefined ? { expiresAt: home.expiresAt } : {}) });
+        away.set(id, { device, key: home.key, ...(home.expiresAt !== undefined ? { expiresAt: home.expiresAt } : {}) });
       }
     }
     this.awayWallets = away;
@@ -6160,6 +6167,8 @@ export class GhostlyNode implements EngineImplementation {
     let last = 0;
     const now = () => (last = Math.max(Date.now(), last + 1));
     const results: ForwardResult[] = [];
+    // A file without its metadata is the same bytes for every chat: hashed once (`copyForForward`).
+    const digests = new Map<string, string>();
     for (const to of targets) {
       const result: ForwardResult = { to, messageIds: [], sent: [], error: null };
       results.push(result);
@@ -6191,7 +6200,7 @@ export class GhostlyNode implements EngineImplementation {
             const original = message.file!, picked: MessageFile = { id: groupFileId(groupId, "out"), name: original.name, size: original.size, mime: original.mime,
               ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
             // As it goes: a picture without its metadata, its size the copy's.
-            const file = await copyForForward(original.id, { linkId: to, wireId: picked.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file: picked }, gone);
+            const file = await copyForForward(original.id, { linkId: to, wireId: picked.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file: picked }, gone, digests);
             const sent = await this.sendGroupFile({ groupId, file, forwarded: hops });
             if (sent.error) { await removeStored(file.id).catch(() => {}); note(sent.error); continue; }
             if (sent.messageId) result.messageIds.push(sent.messageId);
@@ -6202,7 +6211,7 @@ export class GhostlyNode implements EngineImplementation {
           const original = message.file!, wireId = toBase64Url(randomBytes(12)), timestamp = now();
           const picked: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
             ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
-          const file = await copyForForward(original.id, { linkId: to, wireId, timestamp, file: picked }, gone);
+          const file = await copyForForward(original.id, { linkId: to, wireId, timestamp, file: picked }, gone, digests);
           try {
             await this.sendFile({ linkId: to, file, timestamp, forwarded: hops });
           } catch (error) {
@@ -7684,6 +7693,8 @@ export class GhostlyNode implements EngineImplementation {
 
   removeService({ serviceId }: { serviceId: string }): void {
     this.services = this.services.filter((s) => s.id !== serviceId);
+    // An app added again under the same name gets the same id: it starts with no requests of its own.
+    this.requestCounts.delete(serviceId);
     void db.deleteService(serviceId);
     this.servicesChanged();
   }
@@ -7922,7 +7933,7 @@ export class GhostlyNode implements EngineImplementation {
     if (wasOnline && !this.networkOn) await this.hold.stop();
     // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
     const gate = knownDeviceGate();
-    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay", "hyperdhtRelay"] as const).some((key) => key in settings)) {
+    if (((gate && gate.state !== "single") || this.deviceLinks) && (["online", "relays", "readRelays", "irohRelays", "iceServers", "pushRelay", "hyperdhtRelay", "relayOnly"] as const).some((key) => key in settings)) {
       await this.syncDeviceNetwork().catch(() => {});
     }
     this.emitState();
@@ -8542,9 +8553,62 @@ export class GhostlyNode implements EngineImplementation {
       quiesce: (patch, taker, cancel) => this.quiesceForHandoff(patch, taker, cancel),
     });
     this.handoffGiver = giver;
-    links.setHandoff({ receive: (from, frame) => void giver.receive(from, frame), linkChanged: (key, live) => giver.linkChanged(key, live), stop: () => giver.stop() });
+    // The files a move on mobile data left on the device it came from: fetched over its link once this device is off
+    // mobile data, or at once when the person asks (Remove offers it).
+    const fetcher = new LeftFilesFetcher({ links: handoffLinks(links), records: profileRecords(profile), store: this.leftFilesStore(), metered: meteredConnection });
+    this.leftFiles = fetcher;
+    const unwatch = onConnectionChange(() => void fetcher.kick());
+    links.setHandoff({
+      receive: (from, frame) => void (fetcher.takes(frame) ? fetcher.receive(from, frame) : giver.receive(from, frame)),
+      linkChanged: (key, live) => { giver.linkChanged(key, live); fetcher.linkChanged(key, live); },
+      stop: () => { giver.stop(); fetcher.stop(); unwatch(); },
+    });
     // Back to active after a move whose copy stopped: the Devices section says so (WISP 06 § Handoff progress, Failures).
     await giver.resume().catch(() => {});
+    void fetcher.kick();
+  }
+
+  /** Fetches the files left for later (`LeftFilesFetcher`). */
+  private leftFiles: LeftFilesFetcher | null = null;
+
+  /**
+   * "Get them now" (Remove of a device that still holds files a move left for later): they come over its link while it
+   * is on, on mobile data too. The set as it is now, with what is left to fetch.
+   */
+  async deviceFetchLeftFiles({ key }: { key: string }): Promise<DeviceSetView> {
+    if (typeof key !== "string" || !key) throw new Error("handoff-refused: Name the device to fetch from.");
+    await this.leftFiles?.fetchNow(key);
+    return this.deviceSet();
+  }
+
+  /** Where a fetched file is written: this profile's file storage, its records pointed at it once its digest holds. */
+  private leftFilesStore(): LeftFilesStore {
+    return {
+      size: async (id) => (await fileBytes()).size(id),
+      append: async (id, offset, bytes) => (await fileBytes()).append(id, offset, bytes),
+      discard: async (id) => (await fileBytes()).remove(id),
+      finish: async (file) => {
+        const storage = await fileBytes();
+        const [first, ...others] = file.ids;
+        await storage.close(first!);
+        if ((await storage.size(first!)) !== file.size || (await storage.digest(first!)) !== file.sha256) return false;
+        // A record of the file the person deleted meanwhile gets no copy.
+        const kept = (await Promise.all(file.ids.map(async (id) => ((await fileStore.get(id)) ? id : null)))).filter((id): id is string => !!id);
+        for (const id of others.filter((other) => kept.includes(other))) {
+          await storage.remove(id).catch(() => {});
+          for (let done = 0; done < file.size;) {
+            const part = await storage.read(first!, done, Math.min(FILE_BYTES_STEP, file.size - done));
+            if (!part.length) throw new Error("The file is shorter than it says");
+            await storage.append(id, done, part);
+            done += part.length;
+          }
+          await storage.close(id);
+        }
+        for (const id of kept) await fileStore.patch(id, { bytes: storage.kind, digest: file.sha256 });
+        if (!kept.includes(first!)) await storage.remove(first!).catch(() => {});
+        return true;
+      },
+    };
   }
 
   private static readonly HANDOFF_VERIFIER = "handoffVerifier";
@@ -9352,6 +9416,14 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * Reads the history of a chat this run left unstarted (`restoreDeferred`) and leaves it unstarted: what a read the
+   * one-shot makes beside its call (a pin's notice reads its chat) needs, with nothing put on the relays for it.
+   */
+  async readDeferredChat(linkId: string): Promise<void> {
+    if (this.deferredChats.has(linkId)) await this.restoreDeferred(linkId);
+  }
+
+  /**
    * Starts the edges of a group this run left unstarted (`NodeOptions.deferChats`): the one a one-shot names. Each
    * group's edges put their records and read their members' on the relays: started, six groups shared with one member
    * asked the relays about three times what the named group alone does, and a `group react` behind them waited out its
@@ -9499,6 +9571,8 @@ export class GhostlyNode implements EngineImplementation {
         },
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
+        // The contact takes texts again: those paced out wait for no backoff check (minutes after the contact was away).
+        onTextRoom: () => void this.outboxes.get(linkId)?.flush().catch(() => {}),
         onDhtDelivery: view => {
           // Every read of the mailbox says so, whatever it found: the outbox looks again only when the view changed (a
           // receipt cleared `pendingUntil`, the contact's mode, an error gone). Looked at on each read, waiting texts read

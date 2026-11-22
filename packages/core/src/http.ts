@@ -3,6 +3,7 @@ import {
   CHUNK_KIND,
   LIMITS,
   encodeControl,
+  isHeaderList,
   sendBody,
   type ChunkFrame,
   type FrameChannel,
@@ -618,12 +619,18 @@ export class HttpHost {
         return this.fail(frame.id, 502, "redirect-blocked", "The service redirected outside of the shared target.");
       }
 
+      const headers = sanitizeResponseHeaders(response.headers, service.target, stream.url);
+      // The client drops a response past the link's header limits without a word: it would wait out the timeout.
+      if (!isHeaderList(headers)) {
+        this.end(stream);
+        return this.fail(frame.id, 502, "headers-too-large", "The local service answered with more headers than the link carries.");
+      }
       const hasBody = response.body !== null && frame.m !== "HEAD";
       const res: HttpResponseFrame = {
         t: "res",
         id: frame.id,
         st: response.status,
-        h: sanitizeResponseHeaders(response.headers, service.target, stream.url),
+        h: headers,
         b: hasBody,
       };
       this.channel.send(encodeControl(res));
@@ -725,6 +732,11 @@ export interface ClientResponse {
   body: AsyncIterable<Uint8Array>;
   /** Collects the whole body, bounded by `maxResponseBytes`. */
   bytes(): Promise<Uint8Array>;
+  /**
+   * Settles with the error the body ends in (let go unread, reset, timed out, the link closed), read up to it or not:
+   * a reader that waits on someone else before reading on learns of it. Never settles for a body that arrived whole.
+   */
+  failed?: Promise<Error>;
 }
 
 export class GhostlyHttpError extends Error {
@@ -756,6 +768,9 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
   held = 0;
   /** Bytes read so far, all told. */
   taken = 0;
+  private fail!: (error: Error) => void;
+  /** `ClientResponse.failed`. */
+  readonly failed = new Promise<Error>((resolve) => (this.fail = resolve));
 
   /** `all`: what every queue of the same client holds, kept with this one's. */
   constructor(private readonly all: { held: number }) {}
@@ -771,6 +786,7 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
     if (this.done) return;
     this.done = true;
     this.error = error ?? null;
+    if (error) this.fail(error);
     this.wake?.();
   }
 
@@ -781,6 +797,7 @@ class BodyQueue implements AsyncIterable<Uint8Array> {
     this.held = 0;
     this.done = true;
     this.error = error;
+    this.fail(error);
     this.wake?.();
   }
 
@@ -815,6 +832,8 @@ export class HttpClient {
 
   async request(serviceId: string, request: ClientRequest): Promise<ClientResponse> {
     if (this.closed) throw new GhostlyHttpError("closed", "Data link is closed");
+    // The host drops a request past the link's header limits without a word: it would wait out the timeout.
+    if (!isHeaderList(request.headers ?? [])) throw new GhostlyHttpError("headers-too-large", "Request headers too large");
     if (this.inFlight >= LIMITS.maxClientInFlight) {
       const bytes = request.body?.length ?? 0;
       if (this.waiting.length >= LIMITS.maxClientWaiting || this.waitingBytes + bytes > LIMITS.maxClientWaitingBodyBytes) {
@@ -911,6 +930,7 @@ export class HttpClient {
         for await (const part of queue) parts.push(part);
         return concatBytes(...parts);
       },
+      failed: queue.failed,
     });
   }
 
