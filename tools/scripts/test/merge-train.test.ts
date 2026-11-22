@@ -1050,7 +1050,52 @@ describe("a run of the train", () => {
     expect(r.dropped).toEqual([]);
     expect(repo.members()).toEqual([11, 13]);
     expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
-    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/Waiting: it changes a workflow \(\.github\/workflows\/e2e-full\.yml\)[^.]*never boards a batch: it lands alone once CI Success has passed/);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/Waiting: it changes a workflow \(\.github\/workflows\/e2e-full\.yml\)[^.]*never boards a batch: it lands alone once CI Success has passed on its last commit\. It keeps its place\.$/);
+  });
+
+  it("tells a pull request that changes a workflow, waiting on a green full run that does not count, what starts one that does", async () => {
+    // Its only full run ran before its base was changed: nothing the train does starts another, so the comment says how.
+    const repo = fakeRepo();
+    repo.add(12, { ci: [] });
+    const before = [...green];
+    repo.meta.set(before, { event: "pull_request", head_branch: "fix-12", created_at: "2026-10-07T23:00:00Z" });
+    repo.runs.set("h12", before);
+    repo.events.get(12)!.unshift({ event: "base_ref_changed", created_at: "2026-10-07T23:30:00Z" });
+    repo.drafts.set("h12", fastGreen);
+    repo.files.set(12, [".github/workflows/e2e-full.yml"]);
+    refuseWorkflows(repo, [12]);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(r.merged).toEqual([]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(
+      /Waiting: it changes a workflow \(\.github\/workflows\/e2e-full\.yml\)[^.]*it lands alone once CI Success has passed on its last commit, and no run there counts yet: its green CI run on its last commit ran before its base was changed; close and reopen it for a run against this base/,
+    );
+  });
+
+  it("adds to a waiting workflow pull request's reason the hint each run that cannot count already gives, and only that", () => {
+    const pr = (extra = {}) => ({ number: 1, ci: "none", fast: "success", draft: false, fork: false, workflows: [".github/workflows/e2e-full.yml"], ...extra });
+    const lands = "it changes a workflow (.github/workflows/e2e-full.yml), which the queue app may not push, so it never boards a batch: it lands alone once CI Success has passed on its last commit";
+    // No run yet (or one still going): today's words, unchanged.
+    expect(waiting(pr())).toBe(lands);
+    expect(waiting(pr({ ci: "pending", shared: [] }))).toBe(lands);
+    // Each reason a run does not count, in the words the same reason gives a pull request that changes no workflow.
+    const reasons = [{ shared: [{ number: 2, base: "epic/x" }] }, { crowded: true }, { retargeted: true }, { misplanned: true }];
+    for (const extra of reasons) {
+      const plain = waiting({ ...pr(extra), workflows: undefined, fast: "none" });
+      expect(plain).not.toMatch(/workflow|has not passed/);
+      expect(waiting(pr(extra))).toBe(`${lands}, and no run there counts yet: ${plain}`);
+    }
+    expect(waiting(pr({ cancelled: true }))).toBe(`${lands}, and no run there counts yet: its full run was cancelled; re-run CI on its last commit`);
+    // A run that does not count says more than a cancelled one newer than it: a re-run would not count either.
+    expect(waiting(pr({ cancelled: true, retargeted: true }))).toMatch(/counts yet: its green CI run on its last commit ran before its base was changed/);
+    // Green on its last commit: it waits for nothing, whatever an older run said.
+    for (const extra of [{}, ...reasons, { cancelled: true }]) expect(waiting(pr({ ci: "success", ...extra }))).toBeNull();
+    // Red stays red; a pull request that changes no workflow is told nothing new about a cancelled run.
+    expect(waiting(pr({ ci: "failure", cancelled: true }))).toMatch(/^CI Success is red/);
+    expect(waiting(pr({ cancelled: true, workflows: [], fast: "none" }))).toBe("CI Success has not passed on its last commit yet");
+    // Its position comment keeps its place for a re-run, as for a reason that needs no push.
+    expect(positionText("dev", { ...pr({ cancelled: true }), sha: "h1" }, 2, null)).toMatch(/re-run CI on its last commit\. It keeps its place\.$/);
   });
 
   it("lands a hand-merge pull request alone once a coordinator updated it and added queue again, and takes queue:hand-merge off", async () => {
@@ -4324,6 +4369,31 @@ describe("a cancelled CI run newer than one that ended on the same head", () => 
     expect(repo.comments.get(23)![0].body).toMatch(/Waiting: CI Success has not passed on its last commit yet/);
     expect(repo.comments.get(24)![0].body).toMatch(/Waiting: CI Success has not passed on its last commit yet/);
     expect(repo.landed).toEqual([]);
+  });
+
+  it("tells a pull request that changes a workflow, whose only full run was cancelled, to re-run CI", async () => {
+    const repo = fakeRepo();
+    repo.add(21);
+    repo.files.set(21, [".github/workflows/e2e-full.yml"]);
+    repo.drafts.set("h21", [job(501, "CI Success (draft)", "completed", "success")]);
+    const rest = layer({ h21: [wf(35, "h21", { conclusion: "cancelled" })] }, { 35: cutShort });
+    Object.assign(repo.gh, { ciJobs: rest.ciJobs });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(repo.comments.get(21)!.at(-1)!.body).toMatch(/it lands alone once CI Success has passed on its last commit, and no run there counts yet: its full run was cancelled; re-run CI on its last commit\. It keeps its place\.$/);
+    // Only a cancelled run that is the newest and leaves nothing to count says so.
+    const gh = layer(
+      { a: [wf(2, "a", { conclusion: "cancelled" })], b: [wf(4, "b", { conclusion: "cancelled" }), wf(3, "b")], c: [], d: [wf(5, "d", { status: "in_progress", conclusion: null })], e: [wf(7, "e"), wf(6, "e", { conclusion: "cancelled" })] },
+      { 2: cutShort, 3: greenForCore, 4: cutShort, 5: going, 6: cutShort, 7: greenForCore },
+    );
+    expect((await gh.ciJobs("a")).cancelled).toBe(true);
+    expect(ciState(await gh.ciJobs("b"))).toBe("success");
+    expect((await gh.ciJobs("b")).cancelled).toBeUndefined();
+    expect((await gh.ciJobs("c")).cancelled).toBeUndefined();
+    expect((await gh.ciJobs("d")).cancelled).toBeUndefined();
+    // A newer run that ran, green but not counted (`counts`), is what to fix, not the cancelled one under it.
+    expect((await gh.ciJobs("e", () => false)).cancelled).toBeUndefined();
   });
 
   it("decides by the newest run that ended or is still going: red over green, red under a cancelled one, pending over green", async () => {
