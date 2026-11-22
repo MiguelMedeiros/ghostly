@@ -7,7 +7,13 @@
 //   latest `labeled` event, so taking the label off and on again goes to the back), then by number. A draft, a fork, or a pull request with
 //   neither CI Success nor the draft's fast tier (CI Success (draft)) green on its last commit, or with CI Success red
 //   there, waits without losing its place. So does one with `queue:hold` (HOLD), whatever else it has: it never boards
-//   or lands until the label comes off, and the train never takes the hold off itself. A green run of CI that skipped
+//   or lands until the label comes off, and the train never takes the hold off itself. So does one a reviewer asked
+//   changes on: "Review: changes needed (head <sha>)" on its head, newer than any "Review: approved" on its head, holds
+//   it with no time limit, whatever "in progress" comes after it; a later approved or a new head ends it (for every
+//   pull request, `queue:priority` too). So does one with a review running: a reviewer's newest `Review:` comment is
+//   "Review: in progress (head <sha>)" on its head, posted less than 90 minutes ago (REVIEW_HOLD, `reviewHold`); a
+//   verdict, a new head or the bound ends it (not for `queue:priority`).
+//   A green run of CI that skipped
 //   jobs the pull request's own files turn on (ci.yml planned it from other files: a run for another base) does not
 //   count; the run before it does. Nor does a
 //   green pull request run that is not its own: from another branch, from before its base was changed, or while another
@@ -35,7 +41,7 @@
 //   new commit must hold exactly the files (the same tree) of the batch's commit of that pull request: what CI tested
 //   is what landed. If it does not, the landing stops with an error, nothing is reverted, the rest go back to the line
 //   and the batch closes with a comment that says what happened. A pull request that changed or left the line (new
-//   commits, `queue` taken off, turned into a draft, given `queue:hold`) stops the landing too: the ones ahead of it
+//   commits, `queue` taken off, turned into a draft, given `queue:hold`, a review started) stops the landing too: the ones ahead of it
 //   land, it and the ones after it do not. When all landed, the batch closes with a comment that lists them.
 //   - A pull request of a batch is seldom up to date with dev by itself, which dev's ruleset asks for, so the queue
 //     app must be on that ruleset's bypass list (pull requests only). Until it is, GitHub refuses the first merge and
@@ -115,6 +121,51 @@ export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "qu
 export const HOLD = "queue:hold";
 export const onHold = (p) => !!p?.labels?.includes(HOLD);
 /**
+ * How long a review that started holds a pull request at most (`reviewHold`): under the 2 hours a reviewer has for one
+ * (review-pick's REVIEW_TTL_S), so a reviewer that crashed never holds it for good.
+ */
+export const REVIEW_HOLD = 90 * 60_000;
+// The first line of a review comment: "Review: in progress (head <sha>)" when one starts, then the verdict (markdown,
+// emoji or spaces before it are fine, as review-verdict reads it).
+const REVIEW_LINE = /^[\W_]*review:\s*(in progress|approved|changes needed)\b(?:\s*\(head ([0-9a-z]+)\))?/i;
+// Who may start one: an account that could put `queue:hold` on it as well. Anyone may comment on a public pull request.
+const REVIEWERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+/**
+ * A review holding a pull request's head `sha`, { since, until } (ms; `until` null: no time limit), or null. `Review:`
+ * comments by a reviewer say it, naming this head (all of it, or its first 7 or more digits). "Changes needed" on this
+ * head holds it with no time limit (as review-verdict reads it) while it is newer than any "approved" on this head,
+ * whatever "in progress" comes after it, so a pull request that still has `queue` before its reviewer takes the label
+ * off never boards, nor once a re-review that never ends started on it. Else the newest one, "in progress" on this
+ * head, holds it until REVIEW_HOLD after it was posted; a later verdict or the bound passing ends that. A new head ends
+ * both, with nothing to lift. `priority` (`queue:priority`: a flake, a blocker) skips only the "in progress" hold.
+ * While it holds, the pull request is held like one with `queue:hold`: it waits in line, keeps its place, and a batch
+ * it is aboard stops before landing it.
+ */
+export function reviewHold(comments, sha, now, priority = false) {
+  const onHead = (head) => !!head && !!sha && (head === sha.toLowerCase() || (head.length >= 7 && sha.toLowerCase().startsWith(head)));
+  let newest = null;
+  let asked = NaN;
+  let approved = NaN;
+  for (const c of comments ?? []) {
+    if (!REVIEWERS.has(c.author_association)) continue;
+    const m = REVIEW_LINE.exec((c.body ?? "").trimStart().split("\n", 1)[0]);
+    if (!m) continue;
+    const at = Date.parse(c.created_at);
+    const what = m[1].toLowerCase();
+    const head = m[2]?.toLowerCase();
+    if (!(at < newest?.at)) newest = { at, what, head };
+    if (!onHead(head)) continue;
+    if (what === "changes needed" && !(at < asked)) asked = at;
+    if (what === "approved" && !(at < approved)) approved = at;
+  }
+  if (!Number.isNaN(asked) && !(asked < approved)) return { since: asked, until: null };
+  if (priority || newest?.what !== "in progress" || !onHead(newest.head)) return null;
+  return now - newest.at < REVIEW_HOLD ? { since: newest.at, until: newest.at + REVIEW_HOLD } : null;
+}
+/** Held: by `queue:hold`, or by a review running on its head (`pr.review`, from `reviewHold`). */
+export const isHeld = (p) => onHold(p) || !!p?.review;
+const hhmm = (ms) => new Date(ms).toISOString().slice(11, 16);
+/**
  * GitHub's refusals of a batch's first squash merge that the batch's own rebase merge gets past: dev's rule (the queue
  * app is not a bypass actor yet) and squash merges turned off. Not "not mergeable", a draft or "Base branch was
  * modified": those say the pull request, or the moment, is the trouble, and the rebase merge would land it anyway.
@@ -127,7 +178,7 @@ export const MAX_BATCH = 12;
 // longest has waited MAX_WAIT since it could board, or at once for `queue:priority`. Pull requests come in minutes
 // apart and each batch's CI takes ~20 minutes, one at a time, so leaving with the first one ready made batches of ~2
 // (15 batches on 2026-10-15/16: 1 to 4 each): more full CI runs, and a slower line. A run that holds a batch has the
-// workflow wake the train just past the deadline (`wakeIn`): GitHub runs the 5-minute schedule only every 10 to 30.
+// workflow wake the train just past the deadline (`wakeIn`): GitHub keeps the workflow's schedule only loosely.
 export const MIN_BATCH = 3;
 export const MAX_WAIT = 15 * 60_000;
 /**
@@ -233,8 +284,10 @@ export function ciState(runs) {
 }
 
 /**
- * The jobs that turned CI Success red, from the jobs of its run: each one that failed or timed out, but the gate itself,
- * with its page. A rerun adds a job with the same name, so the newest of each name counts.
+ * The jobs that turned CI Success red, from the jobs of its run: each one that failed, timed out or was cancelled, but
+ * the gate itself, with its page. A job past its `timeout-minutes` ends cancelled, and the gate never runs in a run that
+ * was cancelled (ci.yml's matrices never fail fast either), so next to a red gate a cancelled job is one that ran out of
+ * time. A rerun adds a job with the same name, so the newest of each name counts.
  */
 export function failedJobs(jobs) {
   const newest = new Map();
@@ -242,7 +295,7 @@ export function failedJobs(jobs) {
     const had = newest.get(j.name);
     if (j.name !== "CI Success" && (!had || (j.id ?? 0) >= (had.id ?? 0))) newest.set(j.name, j);
   }
-  return [...newest.values()].filter((j) => j.conclusion === "failure" || j.conclusion === "timed_out").map((j) => ({ name: j.name, url: j.html_url ?? null }));
+  return [...newest.values()].filter((j) => ["failure", "timed_out", "cancelled"].includes(j.conclusion)).map((j) => ({ name: j.name, url: j.html_url ?? null }));
 }
 
 /**
@@ -375,6 +428,9 @@ const AT_BACK = "again at the back once it is reviewed and queued";
 /** Why a queued pull request cannot board now, or null. It keeps its place while it waits, unless the reason says otherwise. */
 export function waiting(pr) {
   if (onHold(pr)) return `it is on hold (\`${HOLD}\`): it boards once the label comes off`;
+  // Nothing starts a train run when a verdict is posted: the next scheduled one sees it.
+  if (pr.review?.until === null) return `a reviewer asked for changes on its head at ${hhmm(pr.review.since)} UTC: it waits for a later \`Review: approved\` on this head or a new head, and boards on the train's next pass after that (up to about 30 minutes later)`;
+  if (pr.review) return `a review is running on its head since ${hhmm(pr.review.since)} UTC (until ${hhmm(pr.review.until)} UTC at the latest): it boards on the train's next pass after the review's verdict is posted (up to about 30 minutes later), or after that time`;
   if (pr.draft) return "it is a draft";
   // First of the rest: GitHub runs no pull_request workflow on a pull request that conflicts with its base, so no CI
   // remedy below can work until the conflict is resolved. `tick` reads it only for one that waits anyway.
@@ -493,26 +549,36 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * it: the one in flight is no longer waiting for its own CI, and nobody behind it moves. `company` is set while the
  * next batch, this pull request in it, waits for company (`holdBatch`): how many can board, the batch size it waits
  * for, and from when it leaves anyway (a fixed time, so the comment does not change from run to run; it leaves at the
- * train's first run after it, and GitHub runs the 5-minute schedule 10 to 30 minutes apart). `stuck` is the base's
+ * train's first run after it, which the workflow starts at that time). `stuck` is the base's
  * commit once a hold for its red has lasted HOLD_HELP: the comment then says what a person can do. A lone pull request
- * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so. One with `pr.behind` ({ batch,
+ * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so; one whose has `refused`, GitHub's
+ * refusal of the push of its rebase, says that. One with that label that may not go ahead (`cannot`: `canGoAlone`
+ * refuses its branch) says why, and its help leaves that advice out. One with `pr.behind` ({ batch,
  * with }) merges cleanly onto the base but conflicts with `with`, aboard the batch in flight: it waits for the next.
  */
-export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null, stuck = null) {
+export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null, stuck = null, cannot = false) {
   const mark = `<!-- merge-train:head ${head} -->`;
+  const flake = `if that red is a flake, re-run the failed jobs of CI on \`${base}\` (${stuck?.slice(0, 12)})`;
   const help = stuck
-    ? ` It has been on hold for ${Math.round(HOLD_HELP / 60_000)} minutes or more: if that red is a flake, re-run the failed jobs of CI on \`${base}\` (${stuck.slice(0, 12)}); if \`${base}\` needs a fix, give the pull request that fixes it \`queue:priority\`, and the train lands it alone ahead of the held one.`
+    ? ` It has been on hold for ${Math.round(HOLD_HELP / 60_000)} minutes or more: ${cannot ? `${flake}.` : `${flake}; if \`${base}\` needs a fix, give the pull request that fixes it \`queue:priority\`, and the train lands it alone ahead of the held one.`}`
     : "";
-  const hold = held ? ` The train is on hold: CI Success on \`${base}\` itself is ${held}, and nobody is blamed until it is green.${help}` : "";
+  const pinned = cannot
+    ? ` It has \`${LABEL.priority}\`, but the train may not push to its branch, so it cannot go ahead of the held one alone: land it by hand, or open it again from a new branch.`
+    : "";
+  const hold = held ? ` The train is on hold: CI Success on \`${base}\` itself is ${held}, and nobody is blamed until it is green.${help}${pinned}` : "";
   // The train cancels a pull request's own full CI that it does not land on (`cancelOwnCi`), and `gh pr checks` lists
   // each cancelled job as "fail" (the gate under ci.yml's unrendered name): said here, so nobody pushes to "fix" it.
   const own = pr.ci !== "success" && pr.ci !== "failure" && !pr.draft;
   const cancelled = " Cancelled checks here are not failures; a push would take it out of the line.";
   if (alone) {
     const again = alone.retried ? " (a second run, after a red one)" : "";
-    const where = held ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
+    // A push GitHub refused (`refused`, its message): the branch never got that commit, so no CI Success is coming.
+    const where = alone.refused
+      ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}, but GitHub refused the push of that rebase to its branch: ${escapeMark(alone.refused)}. The train tries once more at its next run; refused again, it leaves the line.`
+      : held ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
     const past = alone.past ? ` It goes ahead of #${alone.past}, which the train holds while CI Success on \`${base}\` itself is red (\`${LABEL.priority}\`).` : "";
-    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone)} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${hold}`;
+    // GitHub's message may hold any text: escaped (JSON.parse reads it back) so none ends the mark.
+    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${hold}`;
   }
   if (batch) {
     const note = own ? ` Its own full CI is not needed: the batch's CI is its gate, so the train cancels that run if it is still going.${cancelled}` : "";
@@ -591,6 +657,16 @@ export const noSkip = (text) => text.replace(SKIP_CI, "($1)");
 
 /** GitHub's refusal of a push whose commits change a workflow, by a token without the `workflows` permission. */
 const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
+/**
+ * A push GitHub itself refused (a branch rule's GH013, a hook, a token without the right): not a lease lost to an
+ * author's push (`! [rejected]`), a network error or GitHub's own failure (`[remote rejected] … (Internal Server
+ * Error)`, `(failure)`, `(failed to update ref)`), which the next run gets past. Only GitHub's policy reasons count.
+ */
+const PUSH_REFUSED = /\[remote rejected\] .*\((?:push declined|protected branch hook declined|pre-receive hook declined)|returned error: 403/;
+/** A refusal's text as the comment shows it: no credentials, even if a remote's URL held them. */
+const refusalText = (message) => message.replace(/\/\/[^/@\s]+@/g, "//");
+/** Two refusals are the same one whatever commit each run pushed: git names the rebase's object id, new at every run. */
+const sameRefusal = (a, b) => typeof a === "string" && a.replace(/\b[0-9a-f]{7,64}\b/g, "") === b.replace(/\b[0-9a-f]{7,64}\b/g, "");
 
 // A file name may hold any text, the train's marks too: `<` is escaped (as for titles in `batchBody`) so none forms.
 const escapeMark = (f) => f.replaceAll("<", "&lt;");
@@ -608,6 +684,8 @@ const unlistedText = (workflow, others, after) =>
   `Merge train: GitHub lists no files for this pull request (it changes 3000 files or more, or none), and it refused the batch's push for a workflow (${workflow ? `\`${escapeMark(workflow)}\`: ` : ""}the queue app's token has no \`workflows\` permission). GitHub lists none for ${others.map((o) => `#${o.number}`).join(", ")} either, so the train cannot tell which of them changes it, and all of them left the line: the rest of the line goes on without them. They come back one at a time, in number order, so that only one of them boards at once: ${after ? `once #${after.number} has landed, left the line again or is not coming back, add \`queue\` again` : "add `queue` again now, before the others"}, and it only leaves again if it is the one that changes it (the train takes \`queue:failed\` off).`;
 const workflowText = (base, workflows) =>
   `Merge train: this pull request changes a workflow (${workflows.map(escapeMark).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission: then add \`queue\` again (the train takes \`queue:failed\` off).`;
+const pushRefusedText = (base, message) =>
+  `Merge train: GitHub refused the push of its rebase onto \`${base}\` twice (${escapeMark(message)}), so it left the line: the rest of the line goes on without it. A rule on its branch or the queue app's permissions keep the app from pushing it: once that is fixed, add \`queue\` again (the train takes \`queue:failed\` off); or land it by hand into \`${base}\`.`;
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -743,6 +821,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.failed = p.ci === "failure" ? failedJobs(jobs) : [];
     const said = await gh.comments(p.number);
     p.sticky = said.find((c) => isPosition(c, login));
+    // A fix with `queue:priority` (a flake, a blocker) does not wait for a review to end, but changes needed holds it too.
+    p.review = reviewHold(said, p.sha, now, p.priority);
     // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
     // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
     if (events.truncated) p.unread = "events";
@@ -871,7 +951,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   let tipNow;
   const cancelBehind = async (p) => {
     // A held one does not board soon: its own full run is the green it needs when the hold comes off.
-    if (!mayCancel || p.draft || onHold(p) || p.ci !== "pending" || p.fast !== "success") return;
+    if (!mayCancel || p.draft || isHeld(p) || p.ci !== "pending" || p.fast !== "success") return;
     try {
       tipNow ??= await gh.branchSha(base);
       if ((await gh.behindBy(tipNow, p.sha)) === 0) return;
@@ -1003,7 +1083,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // Whether a queued pull request that cannot board conflicts with its base (`waiting` says so first). Asked only of one
   // that waits for a reason the conflict comes before, so a green one costs no request; GitHub answers `unknown` while
   // it still works the mergeability out, so that is asked once more, a moment later.
-  await inTurns(queued.filter((p) => !gone.has(p.number) && !onHold(p) && !p.draft && waiting(p)), READS_AT_ONCE, async (p) => {
+  await inTurns(queued.filter((p) => !gone.has(p.number) && !isHeld(p) && !p.draft && waiting(p)), READS_AT_ONCE, async (p) => {
     let state = (await gh.pull(p.number)).mergeState;
     if (state === "unknown") {
       await pause(2000);
@@ -1039,7 +1119,15 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     /** Why the landing stops at the ones that changed or left the line, naming those that were put on hold. */
     const changedText = (list, read = (s) => byNumber.get(s.number)) => {
       const holds = list.filter((s) => onHold(read(s)));
-      return `${names(list)} changed or left the line${holds.length ? ` (${names(holds)} ${holds.length > 1 ? "are" : "is"} on hold, \`${HOLD}\`)` : ""}`;
+      const reviews = list.filter((s) => !onHold(read(s)) && read(s)?.review);
+      const running = reviews.filter((s) => read(s).review.until !== null);
+      const asked = reviews.filter((s) => read(s).review.until === null);
+      const why = [
+        holds.length && `${names(holds)} ${holds.length > 1 ? "are" : "is"} on hold, \`${HOLD}\``,
+        running.length && `${names(running)} ${running.length > 1 ? "have" : "has"} a review running`,
+        asked.length && `a reviewer asked for changes on ${names(asked)}`,
+      ].filter(Boolean);
+      return `${names(list)} changed or left the line${why.length ? ` (${why.join("; ")})` : ""}`;
     };
     say(`BATCH #${batch.number} [${names(state.prs)}] CI ${ci}`);
 
@@ -1066,7 +1154,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // One turned into a draft counts where each is merged by itself: GitHub merges no draft. One put on hold counts
     // everywhere: the hold says it must not land (the labels are read again at the start of every run and right before
     // each lands, and a batch never lands in the run that built it).
-    const changed = state.prs.filter((s, i) => i >= before && (!members[i] || members[i].sha !== s.sha || onHold(members[i]) || (bySquash && members[i].draft)));
+    const changed = state.prs.filter((s, i) => i >= before && (!members[i] || members[i].sha !== s.sha || isHeld(members[i]) || (bySquash && members[i].draft)));
     const stop = changed.length ? state.prs.indexOf(changed[0]) : state.prs.length;
     /**
      * The same check on a fresh read, right before it lands: a hold put on (or `queue` taken off) while this run reads
@@ -1074,7 +1162,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
      */
     const leftSince = async (s) => {
       const read = await gh.pull(s.number);
-      const out = !read.open || read.sha !== s.sha || onHold(read) || !(inLine(read.labels) || also.includes(s.number)) || (bySquash && read.draft);
+      // A review that started since the line was read: its comment, read again too.
+      if (read.open && read.sha === s.sha && !onHold(read)) read.review = reviewHold(await gh.comments(s.number), read.sha, now, read.labels.includes(LABEL.priority));
+      const out = !read.open || read.sha !== s.sha || isHeld(read) || !(inLine(read.labels) || also.includes(s.number)) || (bySquash && read.draft);
       return out ? read : null;
     };
 
@@ -1346,6 +1436,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // never got, which the next run reads as nothing in flight. A branch already on the train's own rebase keeps it
     // vouched for in `from`: else, stopped before the push, the next run read it as an author's push and dropped it.
     const from = p.sha !== (queuedHead(p.sticky) ?? p.sha) && (p.alone?.sha === p.sha || p.alone?.from === p.sha) ? p.sha : null;
+    const prev = p.alone;
     p.alone = { sha: built.sha, baseSha: built.baseSha, at: new Date(now).toISOString(), retried, ...(from ? { from } : {}), ...(past ? { past } : {}) };
     await setSticky(p, positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone));
     say(`ALONE #${p.number}: rebased onto ${built.baseSha.slice(0, 12)} as ${built.sha.slice(0, 12)}${retried ? " (second run)" : ""}`);
@@ -1362,6 +1453,18 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         done.dropped.push(p.number);
         await leave(p, LABEL.failed, workflowText(base, workflows));
         return null;
+      }
+      if (!pushed.ok && PUSH_REFUSED.test(pushed.message)) {
+        // Any other refusal by GitHub (a branch rule, a push the app's token may not do) comes back on every run too:
+        // the comment says so with GitHub's message, and the same refusal at the next run takes it out of the line.
+        const refused = refusalText(pushed.message);
+        if (sameRefusal(prev?.refused, refused)) {
+          say(`DROP #${p.number} (GitHub refused the push of its rebase twice: ${refused})`);
+          done.dropped.push(p.number);
+          await leave(p, LABEL.failed, pushRefusedText(base, refused));
+          return null;
+        }
+        p.alone.refused = refused;
       }
       if (!pushed.ok) say(`::warning::Could not push the rebase of #${p.number}: ${pushed.message}`);
     }
@@ -1381,7 +1484,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     say(`ALONE #${p.number} at ${p.sha.slice(0, 12)} CI ${p.ci}`);
     // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place. Put
     // on hold since: the same, until the label comes off.
-    if (p.draft || onHold(p)) return null;
+    if (p.draft || isHeld(p)) return null;
     // Red on an old tip says nothing about the new one, and green on an old tip must not land.
     if (tip !== mark.baseSha) return goAlone(p, { retried: mark.retried, past });
     if (p.ci === "failure") {
@@ -1444,6 +1547,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // Its mark (`past`: the held one's number) keeps it flying across runs while the hold lasts; a new one starts only
   // while the base is red, not while its CI still runs. Nothing else boards.
   let past = null;
+  /** The `queue:priority` ones in line that cannot go ahead of the held one alone: `canGoAlone` refuses their branch. */
+  const cannot = new Set();
   if (held && inFlight) {
     const parked = new Set(inFlight.members.map((p) => p?.number));
     const fits = (p) => p.priority && !parked.has(p.number) && canGoAlone(p) && !refused(p);
@@ -1457,6 +1562,13 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       }
     }
     past ||= null;
+    // A `queue:priority` one whose branch the train may not push to never goes ahead alone, whatever the hold: its
+    // comment says so, instead of the help that tells it to add the label it has.
+    for (const p of line()) {
+      if (!p.priority || p.fork || parked.has(p.number) || canGoAlone(p)) continue;
+      cannot.add(p.number);
+      say(`::warning::#${p.number} has \`${LABEL.priority}\`, but the train may not push to its branch (${p.branch}), so it cannot go ahead of the held #${inFlight.number} alone.`);
+    }
   }
   /** The next batch waiting for company (`holdBatch`), or null. */
   let holding = null;
@@ -1488,7 +1600,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
           ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held, null, stuck)
           : aboard.has(p.number)
             ? positionText(base, p, 0, inFlight.number, p.sha, null, held, null, stuck)
-            : positionText(base, p, ++place, 0, p.sha, null, held, heldBack.has(p.number) ? company : null, stuck);
+            : positionText(base, p, ++place, 0, p.sha, null, held, heldBack.has(p.number) ? company : null, stuck, cannot.has(p.number));
     if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
     if (p.unread) {
       // A comment posted now would be past what the next run reads too: one more every run.
@@ -2060,10 +2172,13 @@ export function gitLayer({ cwd = process.cwd(), remote = "origin", timeout = GIT
     /**
      * An epic's fast-forward to a pull request's head, fetched first (a Mac's clone may not have it), from its branch
      * when GitHub made no `refs/pull/<number>/head` (as `build` and `rebase` do). One git cannot fetch is refused, not
-     * thrown: the caller sends it the batch way, whose build drops it as "missing", and the line goes on.
+     * thrown: the caller sends it the batch way, whose build drops it as "missing", and the line goes on. A head that
+     * moved since it was read is refused as GitHub refuses dev's squash merge then (409): landing the old one left the
+     * author's new commits behind a pull request the train called merged.
      */
     async landPull(base, p) {
       if (fetchPulls([p]).length) return { ok: false, message: `git could not fetch the head of #${p.number}` };
+      if (git(["rev-parse", `${ns}/pr-${p.number}`], cwd) !== p.sha) return { ok: false, status: 409, message: `the head of #${p.number} moved since it was read` };
       return this.land(base, p.sha);
     },
   };

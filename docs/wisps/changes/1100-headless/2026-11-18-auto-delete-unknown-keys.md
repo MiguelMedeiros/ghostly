@@ -1,0 +1,1 @@
+`call.auto`, `group.auto` and `chat.delete` refuse a key they do not take: `bad_request` naming it, with `details.unknown` and `details.takes`, and nothing changes. Before, such a key was dropped and the call acted on the others (`call.auto` with `on: true` and a misspelt `from` turned auto-answer on for every contact).

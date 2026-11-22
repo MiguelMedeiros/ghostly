@@ -173,6 +173,11 @@
     "busyDone": "مشغول، سنحاول مجددًا قريبًا · اكتمل {{done}}",
     "busySize": "مشغول، سنحاول مجددًا قريبًا · {{size}}",
     "cancelled": "أُلغي",
+    "comingCancel": "إلغاء {{file}}",
+    "comingList": "ملفات لا تزال في الطريق ({{count}})",
+    "comingRow": "{{file}} من {{chat}}: يتبقى {{left}}",
+    "comingTitle": "هذه الملفات التي قبلتها لا تزال في الطريق وتشغل المساحة. ألغِ واحدًا منها لتوفير مساحة:",
+    "comingUnnamed": "ملف",
     "damaged": "وصل تالفًا · {{size}}",
     "daySpent": "شاركوا كل ما يمكنهم اليوم، سيصل من عضو آخر أو غدًا · {{size}}",
     "decline": "رفض",
@@ -307,11 +312,11 @@
   },
   "media": {
     "downloadSize": "تنزيل {{size}}",
-    "noRoom": "المساحة غير كافية: {{size}} متاحة",
+    "noRoom": "المساحة غير كافية: يتبقى {{size}}",
     "noRoomToPlay": "لا توجد مساحة كافية على القرص لتشغيله هنا. نزّله بدلًا من ذلك.",
     "notYet": "يُشغَّل بعد إرساله.",
     "positionOf": "{{position}} من {{duration}}",
-    "wantsToSend": "يريد {{name}} إرساله · {{size}} متاحة"
+    "wantsToSend": "يريد {{name}} إرساله · يتبقى {{size}}"
   },
   "menu": {
     "continueNew": "المتابعة في محادثة جديدة",
@@ -454,6 +459,7 @@
   "search": {
     "close": "إغلاق البحث",
     "count": "{{current}} من {{total}}",
+    "found": "{{position}}: {{name}}، {{text}}",
     "info": "يبحث في الرسائل وأسماء الملفات المحفوظة على هذا الجهاز. لا يخرج منه شيء.",
     "newer": "نتيجة أحدث (Shift+Enter)",
     "none": "لا نتائج",

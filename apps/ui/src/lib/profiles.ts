@@ -423,8 +423,11 @@ function rememberRoute(id: string): void {
   } catch { /* storage unavailable: it opens on the chat list */ }
 }
 
-/** What the switch overlay shows while the app restarts as another profile, kept across the reload. */
-export interface PendingSwitch { id: string; name: string; color: string; avatar?: string; at: number }
+/**
+ * What the switch overlay shows while the app restarts as another profile, kept across the reload. `elsewhere`: this
+ * page only follows a switch another tab of the app made (the extension's `startAsProfileInUse`), and says so.
+ */
+export interface PendingSwitch { id: string; name: string; color: string; avatar?: string; at: number; elsewhere?: boolean }
 const SWITCH_KEY = "ghostly_switching";
 /** A switch started in the last few seconds: the page that just loaded is its other half. */
 export function pendingSwitch(): PendingSwitch | null {
@@ -440,10 +443,10 @@ export function clearPendingSwitch(): void {
  * Says a switch to profile `id` is under way: the overlay (ProfileSwitchSplash) covers this page now, and the page that
  * loads next takes it over until that profile has something to show. Nothing for a profile the registry does not list.
  */
-export function announceSwitch(id: string, avatar?: string): void {
+export function announceSwitch(id: string, { avatar, elsewhere }: { avatar?: string; elsewhere?: boolean } = {}): void {
   const target = read().profiles.find((p) => p.id === id);
   if (!target) return;
-  const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar, at: Date.now() };
+  const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar, at: Date.now(), ...(elsewhere ? { elsewhere } : {}) };
   try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
   window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));
 }
@@ -483,7 +486,7 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   switching = true;
   // A profile this device is on standby for keeps its place as it was: nothing is written into its copy (WISP 06).
   if (knownDeviceGate()?.full !== false) rememberRoute(activeProfileId());
-  announceSwitch(id, options.avatar);
+  announceSwitch(id, { avatar: options.avatar });
   // A share waiting for a chat to be picked goes along: the profile opened shows it in its Share to… picker. Only that
   // page asks the web app's worker for it (`askForShare`): on any other route, a tapped notice's chat or a new
   // profile's page, it would be dropped without a word.

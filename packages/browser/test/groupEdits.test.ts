@@ -135,8 +135,9 @@ describe("GroupEdits on its own", () => {
     const old = (n: number, text = `old ${n}`): StoredMessage => ({ linkId: chat, id: `${before}:1:${n}`, text, sender: "me", member: before, timestamp: n + 1, via: "datalink" });
     const removed: string[] = [];
     const { edits, sent, messages, tick } = setup([old(0, "see you at 8"), old(1, "bring snacks"), mine(2)], [me, bob, carol], removed);
-    expect(await edits.edit("g1", old(0).id, "see you at 9")).toMatchObject({ refused: true, error: "Only your own text messages can be edited" });
-    expect(await edits.removeMine("g1", old(1).id)).toMatchObject({ refused: true, error: "Only your own messages can be deleted for everyone" });
+    // Said as mine from before, not as someone else's ("Only your own ...", and the CLI offered a reply to it).
+    expect(await edits.edit("g1", old(0).id, "see you at 9")).toEqual({ refused: true, missing: false, error: "This message is from before you were removed and invited back, and can't be edited now" });
+    expect(await edits.removeMine("g1", old(1).id)).toEqual({ refused: true, error: "This message is from before you were removed and invited back, and can't be deleted for everyone now" });
     tick(60_000); await vi.advanceTimersByTimeAsync(60_000);
     expect(messages.map(m => m.text)).toEqual(["see you at 8", "bring snacks", "text 2"]);
     expect(messages[0].edit).toBeUndefined();

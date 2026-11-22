@@ -154,6 +154,11 @@
     "busyDone": "Ocupado, se reintenta pronto · {{done}} hecho",
     "busySize": "Ocupado, se reintenta pronto · {{size}}",
     "cancelled": "Cancelado",
+    "comingCancel": "Cancelar {{file}}",
+    "comingList": "Archivos que aún están llegando ({{count}})",
+    "comingRow": "{{file}} de {{chat}}: faltan {{left}}",
+    "comingTitle": "Estos archivos que aceptaste aún están llegando y ocupan el espacio. Cancela uno para hacer espacio:",
+    "comingUnnamed": "Un archivo",
     "damaged": "Llegó dañado · {{size}}",
     "daySpent": "Ya compartieron todo lo que pueden hoy, llega de otro miembro o mañana · {{size}}",
     "decline": "Rechazar",
@@ -260,11 +265,11 @@
   },
   "media": {
     "downloadSize": "Descargar {{size}}",
-    "noRoom": "No hay espacio suficiente: {{size}} libres",
+    "noRoom": "No hay espacio suficiente: quedan {{size}}",
     "noRoomToPlay": "No hay espacio libre en disco para reproducirlo aquí. Descárgalo.",
     "notYet": "Se reproduce cuando se haya enviado.",
     "positionOf": "{{position}} de {{duration}}",
-    "wantsToSend": "{{name}} quiere enviarlo · {{size}} libres"
+    "wantsToSend": "{{name}} quiere enviarlo · quedan {{size}}"
   },
   "menu": {
     "continueNew": "Continuar en un chat nuevo",
@@ -407,6 +412,7 @@
   "search": {
     "close": "Cerrar búsqueda",
     "count": "{{current}} de {{total}}",
+    "found": "{{position}}: {{name}}, {{text}}",
     "info": "Busca en los mensajes y nombres de archivo guardados en este dispositivo. Nada sale de él.",
     "newer": "Resultado más reciente (Shift+Enter)",
     "none": "Sin resultados",

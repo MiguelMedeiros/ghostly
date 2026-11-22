@@ -736,6 +736,12 @@ describe("the errors of a red CI Success", () => {
     });
   });
 
+  it("names the range of the draft's unit test groups, since their one result does not say which failed", () => {
+    const draft = { DRAFT: "true", FULL: "false", AFFECTED_GATE: "true", FRONTEND_TESTS: "skipped", FRONTEND_BUILD: "skipped" };
+    expect(gate({ ...draft, AFFECTED: "failure" })).toEqual({ status: 1, errors: ["::error::Affected unit tests (draft 1/4 to 4/4): one or more groups ended failure"] });
+    expect(gate({ ...draft, AFFECTED: "skipped" })).toEqual({ status: 1, errors: ["::error::Affected unit tests (draft 1/4 to 4/4) was skipped, but this change needs it"] });
+  });
+
   it("blames Changed paths, not the plan, when that job did not pass", () => {
     // Every output of `changes` is empty then.
     const empty = { DRAFT: "", FULL: "", AFFECTED_GATE: "", LINT: "", PACKAGES: "", RUST: "", WEBSITE_GATE: "", WEBSITE_E2E_GATE: "", APP: "", TESTED: "" };

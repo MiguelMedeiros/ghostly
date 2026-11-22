@@ -154,6 +154,11 @@
     "busyDone": "Occupé, nouvel essai bientôt · {{done}} fait",
     "busySize": "Occupé, nouvel essai bientôt · {{size}}",
     "cancelled": "Annulé",
+    "comingCancel": "Annuler {{file}}",
+    "comingList": "Fichiers encore en route ({{count}})",
+    "comingRow": "{{file}} de {{chat}} : encore {{left}} à recevoir",
+    "comingTitle": "Ces fichiers que vous avez acceptés sont encore en route et occupent la place. Annulez-en un pour faire de la place :",
+    "comingUnnamed": "Un fichier",
     "damaged": "Arrivé abîmé · {{size}}",
     "daySpent": "Tout partagé pour aujourd’hui, viendra d’un autre membre ou demain · {{size}}",
     "decline": "Refuser",
@@ -261,11 +266,11 @@
   },
   "media": {
     "downloadSize": "Télécharger {{size}}",
-    "noRoom": "Espace insuffisant : {{size}} libres",
+    "noRoom": "Espace insuffisant : il reste {{size}}",
     "noRoomToPlay": "Pas assez d'espace disque libre pour le lire ici. Téléchargez-le.",
     "notYet": "La lecture est possible une fois l'envoi terminé.",
     "positionOf": "{{position}} sur {{duration}}",
-    "wantsToSend": "{{name}} veut l'envoyer · {{size}} libres"
+    "wantsToSend": "{{name}} veut l'envoyer · il reste {{size}}"
   },
   "menu": {
     "continueNew": "Continuer dans une nouvelle discussion",
@@ -408,6 +413,7 @@
   "search": {
     "close": "Fermer la recherche",
     "count": "{{current}} sur {{total}}",
+    "found": "{{position}} : {{name}}, {{text}}",
     "info": "Cherche dans les messages et les noms de fichiers gardés sur cet appareil. Rien n'en sort.",
     "newer": "Résultat plus récent (Maj+Entrée)",
     "none": "Aucun résultat",
