@@ -268,8 +268,10 @@ export function listProfiles(home: string): string[] {
 export const noProfile = (name: string): CliError =>
   new CliError("not_found", `No profile ${JSON.stringify(name)} (ghostly profile list, or ghostly profile create ${name})`);
 
+/** Makes `name` current; `default` is made on first use, as every command makes it, any other must exist. */
 export function selectProfile(home: string, name: string): void {
-  if (!profileExists(home, name)) throw noProfile(name);
+  if (name === DEFAULT_PROFILE) createProfile(home, name, { existing: true });
+  else if (!profileExists(home, name)) throw noProfile(name);
   ensureFolder(home);
   writeFileSync(join(home, "current"), name + "\n", { mode: 0o600 });
 }
