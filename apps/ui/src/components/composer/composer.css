@@ -81,7 +81,7 @@
   .composer-row > .voice-bar { outline: 1px solid CanvasText; outline-offset: -1px; }
 }
 
-@media (max-width: 767px) {
+@media (width < 768px) {
   .composer-field { min-height: 48px; border-radius: 24px; }
   .composer-icon-button { width: 44px; height: 44px; }
   .composer-textarea { min-height: 44px; padding: 11px 4px; }
@@ -89,7 +89,7 @@
 }
 /* A phone's or a tablet's fields are 16px at least (index.css), or iOS zooms into one on focus: the message's field too,
    at a Small text size, and larger with a larger one. */
-@media (max-width: 767px), (pointer: coarse) {
+@media (width < 768px), (pointer: coarse) {
   .composer-textarea {
     font-size: max(16px, calc(15rem / 16 * var(--chat-text-scale))) !important;
     line-height: max(22px, calc(22rem / 16 * var(--chat-text-scale)));
@@ -195,7 +195,7 @@
 /* A thumb's 44 px each way on a phone: icons that don't fit (nine with Recent at 375 px, eight at 320) scroll sideways
    rather than shrink, and the underlined one is kept in view (`CategoryBar`). The row's line is drawn inside it, so
    the scroll doesn't clip the underline that covers it. */
-@media (max-width: 767px) {
+@media (width < 768px) {
   .expression-categories {
     overflow-x: auto;
     overflow-y: hidden;

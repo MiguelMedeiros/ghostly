@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compile } from "@tailwindcss/node";
@@ -33,7 +33,32 @@ describe("the layout's breakpoints", () => {
   });
 
   it("put md where the JS phone layout ends", async () => {
-    const phoneEnds = Number(MOBILE_QUERY.match(/max-width: (\d+)px/)?.[1]) + 1;
-    expect(await mediaOf(["max-md:hidden", "md:flex"])).toEqual(expect.arrayContaining([`(width < ${phoneEnds}px)`, `(width >= ${phoneEnds}px)`]));
+    expect(await mediaOf(["max-md:hidden", "md:flex"])).toEqual(expect.arrayContaining([MOBILE_QUERY, "(width >= 768px)"]));
+  });
+
+  /*
+   * A window's width in CSS px is not whole at a zoom or a display scale that is not (a 767 px window at 150% is
+   * 767.33 px). `(max-width: 767px)` and `(min-width: 768px)` both miss it while `md`'s `(width < 768px)` takes it: the
+   * JS showed the two panes with the phone's Tailwind rules on them (the sidebar's resize handle gone) and neither side
+   * of the app's own phone/desktop rules. Every width the phone layout is asked by ends where `md` begins, no gap.
+   */
+  it("leave no width between the phone's queries and md's", async () => {
+    const css = [await mediaOf(["max-md:hidden", "md:flex"]).then((media) => media.join("\n"))];
+    for (const file of readdirSync(SRC, { recursive: true, encoding: "utf8" })) {
+      if (file.endsWith(".css") && !file.includes("node_modules")) css.push(readFileSync(join(SRC, file), "utf8"));
+    }
+    const queries = [MOBILE_QUERY, ...css.flatMap((text) => [...text.matchAll(/@media ([^{]*)\{/g)].map((m) => m[1]))];
+    /** Each width condition at the phone/desktop edge, with whether it holds at `width`. */
+    const at = (width: number) => queries.flatMap((query) =>
+      [...query.matchAll(/\((max-width|min-width|width)\s*(:|<=|>=|<|>)\s*(76[78])px\)/g)].map(([condition, feature, op, px]) => {
+        const edge = Number(px);
+        const holds = feature === "max-width" ? width <= edge : feature === "min-width" ? width >= edge
+          : op === "<" ? width < edge : op === "<=" ? width <= edge : op === ">" ? width > edge : width >= edge;
+        return { condition, phone: feature === "max-width" || op.startsWith("<"), holds };
+      }));
+    for (const width of [767, 767.2, 767.33, 767.5, 767.9]) {
+      expect(at(width).filter((query) => query.holds !== query.phone), `at ${width}px`).toEqual([]);
+    }
+    expect(at(768).filter((query) => query.holds === query.phone), "at 768px").toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { DeleteProfileDialog } from "../../components/DeleteProfileDialog";
 import { ProfileBackups } from "../../components/ProfileBackups";
+import { MOBILE_QUERY } from "../../hooks/useIsMobile";
 import { backUpToFile } from "../../lib/backupFile";
 import { openProfileBackup, profileBackupSizes, restoreOpenedBackup, type BackupOptions, type BackupProgress } from "../../lib/profileBackup";
 import { axeViolations } from "../axe";
@@ -284,7 +285,7 @@ describe("a profile backup's file", () => {
 
   it("on a phone the progress is a sheet from the bottom", async () => {
     const wide = window.matchMedia;
-    window.matchMedia = ((query: string) => ({ matches: query.includes("max-width"), media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
+    window.matchMedia = ((query: string) => ({ matches: query === MOBILE_QUERY, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
     try {
       drivenBackup();
       const { user } = renderApp(<ProfileBackups canSwitch={false} />);
