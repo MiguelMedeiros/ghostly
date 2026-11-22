@@ -12,6 +12,7 @@
   "clearAllData": "Cancella tutti i dati",
   "clearAllDataConfirm": "Questo cancella per sempre:",
   "clearAllDataDescription": "Chat, identità e impostazioni di questo profilo. I wallet restano.",
+  "clearAllDataFailed": "Non è stato possibile cancellare tutto. Alcuni dati potrebbero essere ancora su questo dispositivo: riprova.",
   "clearAllDataInfo": "Prima, Ghostly ritira ciò che può: elementi tenuti per i contatti, il tuo DID, le tue prove e il risveglio. Le prove pubblicate su altri siti restano lì.",
   "clearAllDataItems": {
     "appsData": "App installate e i loro dati",
@@ -24,6 +25,7 @@
     "storage": "Opzioni S3 e risveglio ad app chiusa"
   },
   "clearAllDataKeeps": "Restano: i tuoi wallet, i tuoi backup e gli altri profili.",
+  "clearingData": "Cancellazione…",
   "colorScheme": "Modalità",
   "colorSchemes": {
     "dark": "Scuro",

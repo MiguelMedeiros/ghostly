@@ -30,6 +30,25 @@ function CopyIcon() {
  */
 export function GroupLinkPanel({ group, large = false }: { group: GroupView; large?: boolean }) {
   const { t } = useI18n();
+  // What became of the link while the panel is open, said once: the address field took another link, or the panel
+  // swapped to its "off" line, and nothing read either. The admin hears their New link; a member, what the admin did.
+  // The admin's own Turn off and Turn on say themselves: the focus moves to the button in the pressed one's place.
+  const url = groupLinkUrl(group), urlWas = useRef(url);
+  const [changed, setChanged] = useState("");
+  useEffect(() => {
+    const was = urlWas.current;
+    urlWas.current = url;
+    if (was === url) return;
+    setChanged(group.isAdmin ? (was && url ? t("group.link.resetDone") : "") : url ? t("group.link.madeNew") : t("group.link.turnedOff"));
+  }, [url, group.isAdmin, t]);
+  return <>
+    <LinkPanel group={group} large={large} />
+    <p role="status" data-testid="group-link-live" className="sr-only">{changed}</p>
+  </>;
+}
+
+function LinkPanel({ group, large }: { group: GroupView; large: boolean }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const [said, setSaid] = useState<"" | "copied" | "shared">("");

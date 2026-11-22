@@ -44,3 +44,17 @@ export function nodePublicFetch(lookup: LookupFunction = publicOnlyLookup): type
     }
   };
 }
+
+/**
+ * How the CLI asks a Lightning address or LNURL service (WISP 205 § Transport), its redirects and its callback: as an
+ * identity's address, at a name whose every address is public when it connects. The engine follows each redirect
+ * itself (`redirect: "manual"`) and checks names only. A service the person named on this machine itself (a test
+ * server, plain HTTP allowed) is asked as named.
+ */
+export function nodeLnurlFetch(lookup: LookupFunction = publicOnlyLookup, local: typeof fetch = (...request) => globalThis.fetch(...request)): typeof fetch {
+  const publicFetch = nodePublicFetch(lookup);
+  return (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    return ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) ? local(input, init) : publicFetch(input, init);
+  };
+}

@@ -27,7 +27,8 @@ import { ColorSwatches } from "../components/ColorSwatches";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useMyAvatar } from "../hooks/useAvatars";
-import { currentProfile, listProfiles } from "../lib/profiles";
+import { activeProfileId, currentProfile, listProfiles } from "../lib/profiles";
+import { tryLockPassword, waitSeconds } from "../lib/lockAttempts";
 import { openProfileSwitcher, useProfileGlances } from "../hooks/useProfileSwitcher";
 import { NeedsYouDot, NeedsYouList } from "../components/NeedsYou";
 import type { NeedsYou } from "../lib/needsYou";
@@ -53,7 +54,6 @@ import { useEngineValue } from "../lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import {
   hashPassword,
-  verifyPassword,
   getStorageUsage,
   formatBytes,
   LANGUAGE_OPTIONS,
@@ -302,6 +302,8 @@ export function Settings() {
   const desktopUsed = desktopStorage && storageBreakdown(desktopStorage);
   const [protecting, setProtecting] = useState(false);
   const [confirmClearData, setConfirmClearData] = useState(false);
+  const [clearState, setClearState] = useState<"idle" | "clearing" | "failed" | "cleared">("idle");
+  const clearing = clearState === "clearing" || clearState === "cleared";
   // Installed mini-apps and their data go too; the line shows only where Apps does.
   const appsOn = useAppsAvailable();
   const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
@@ -314,7 +316,7 @@ export function Settings() {
   const confirmData = (which: "clear" | "deleteChats", open: boolean) => {
     // A confirm that is off cannot keep the focus: its Cancel takes it.
     focusDataButton.current = !open ? which : which === "clear" ? "clearCancel" : chatsOnCall ? "deleteChatsCancel" : null;
-    if (which === "clear") setConfirmClearData(open);
+    if (which === "clear") { setConfirmClearData(open); setClearState("idle"); }
     else setConfirmDeleteChats(open);
   };
   useLayoutEffect(() => {
@@ -404,6 +406,14 @@ export function Settings() {
     focusToRetype(passwordInputs[which].current);
   };
 
+  /** The current password typed, paced with the lock screen's own count; refused under its field when wrong or waiting. */
+  const currentPasswordAccepted = async (storedHash: string, title: string) => {
+    const tried = await tryLockPassword(activeProfileId(), currentPassword, storedHash);
+    if (tried.waited) refusePassword("current", t("lockScreen.tooManyAttempts", { seconds: waitSeconds(tried.retryAt!) }), title);
+    else if (!tried.ok) refusePassword("current", t("settings.incorrectPassword"), title);
+    return tried.ok;
+  };
+
   const handleSetPassword = async () => {
     const title = hasPassword ? t("settings.passwordNotChanged") : t("settings.passwordNotSet");
     setPasswordError(null);
@@ -413,10 +423,7 @@ export function Settings() {
       // The current one first, as stored (another tab may have set or changed it): nothing changes for someone who
       // does not know it.
       const storedHash = followStored().lockScreen.passwordHash;
-      if (storedHash && !(await verifyPassword(currentPassword, storedHash))) {
-        refusePassword("current", t("settings.incorrectPassword"), title);
-        return;
-      }
+      if (storedHash && !(await currentPasswordAccepted(storedHash, title))) return;
       if (newPassword.length < lockPasswordMin(deviceSet)) {
         refusePassword("new", deviceSet ? t("devices.password.keep") : t("settings.passwordTooShort"), title);
         return;
@@ -458,10 +465,7 @@ export function Settings() {
         return;
       }
       const storedHash = followStored().lockScreen.passwordHash;
-      if (storedHash && !(await verifyPassword(currentPassword, storedHash))) {
-        refusePassword("current", t("settings.incorrectPassword"), title);
-        return;
-      }
+      if (storedHash && !(await currentPasswordAccepted(storedHash, title))) return;
 
       updateLockScreen({
         enabled: false,
@@ -517,10 +521,17 @@ export function Settings() {
     window.dispatchEvent(new Event("session-updated"));
     notice.show(t("settings.chatsDeleted"), { tone: "success" });
   };
+  // Clear all data takes from a moment to some seconds (the peer takes back what it can first): the confirm stays open
+  // and busy until it is done, and says so only then. Refused part way: said, with the confirm there to try again.
   const clearData = async () => {
-    setConfirmClearData(false);
-    notice.show(t("settings.dataCleared"), { tone: "success" });
-    await clearAllData();
+    setClearState("clearing");
+    try {
+      await clearAllData();
+    } catch {
+      setClearState("failed");
+      return;
+    }
+    setClearState("cleared");
     setStorageInfo(getStorageUsage());
     // The running peer still holds what was just deleted; start it over.
     window.location.replace(window.location.pathname);
@@ -552,7 +563,8 @@ export function Settings() {
     const scheme = t(`settings.colorSchemes.${settings.colorScheme}` as const);
     const language = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native;
     const summary: Partial<Record<SettingsSection, ReactNode>> = {
-      profile: settings.defaultNickname || undefined,
+      // The one summary in the user's own words, which may run long without a space: cut. The app's own wrap (LinkRow).
+      profile: settings.defaultNickname ? <span className="block truncate">{settings.defaultNickname}</span> : undefined,
       appearance: listText([scheme, language].filter((item): item is string => !!item), t),
       notifications: t("settings.notificationsHint"),
       media: t("settings.mediaHint"),
@@ -847,9 +859,14 @@ export function Settings() {
                 {appsOn && <li data-item="appsData">{t("settings.clearAllDataItems.appsData")}</li>}
               </ul>
               <p className="text-xs text-text-muted">{t("settings.clearAllDataKeeps")}</p>
+              {/* There from the confirm's opening, so its words are read when they come; the result is the reload. */}
+              <p role="status" className="text-sm text-text-secondary" data-testid="clear-all-data-status">
+                {clearState === "clearing" ? t("settings.clearingData") : clearState === "cleared" ? t("settings.dataCleared") : ""}
+              </p>
+              {clearState === "failed" && <p role="alert" className="text-sm text-danger" data-testid="clear-all-data-error">{t("settings.clearAllDataFailed")}</p>}
               <ButtonGroup>
-                <Button ref={dataButtons.clearCancel} onClick={() => confirmData("clear", false)}>{t("common.cancel")}</Button>
-                <Button variant="danger" data-testid="clear-all-data-confirm" onClick={() => void clearData()}>{t("settings.clearAllData")}</Button>
+                <Button ref={dataButtons.clearCancel} disabled={clearing} onClick={() => confirmData("clear", false)}>{t("common.cancel")}</Button>
+                <Button variant="danger" data-testid="clear-all-data-confirm" loading={clearing} onClick={() => void clearData()}>{t("settings.clearAllData")}</Button>
               </ButtonGroup>
             </div>
           </Block>

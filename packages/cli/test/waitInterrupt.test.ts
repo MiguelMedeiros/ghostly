@@ -2,7 +2,7 @@ import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { profilePaths } from "../src/profiles";
-import { dhtOnlyNotice, longTextChat, waitNotice } from "../src/waitNotice";
+import { dhtOnlyChat, dhtOnlyNotice, waitNotice } from "../src/waitNotice";
 import { ghostly, home, ok, Running } from "./support/cli";
 // covers: headless.cli
 
@@ -168,21 +168,41 @@ describe("what a wait says", () => {
   it("a send of a text past the 256 bytes the DHT carries reads its chat, and on the DHT only says why it waits instead of that it goes", () => {
     // Its notice said "it still goes" and Ctrl-C that it "still goes by itself" (dhtOnlyLongText.test.ts runs it).
     const long = "x".repeat(300);
-    expect(longTextChat("chat.send", { chat: "bob", text: long, wait: "sent" })).toBe("bob");
-    expect(longTextChat("chat.send", { chat: "bob", text: ` ${"é".repeat(128)} ` })).toBeUndefined();
-    expect(longTextChat("chat.send", { chat: "group:crew", text: long })).toBeUndefined();
-    expect(longTextChat("chat.edit", { chat: "bob", text: long })).toBeUndefined();
+    expect(dhtOnlyChat("chat.send", { chat: "bob", text: long, wait: "sent" })).toBe("bob");
+    expect(dhtOnlyChat("chat.send", { chat: "bob", text: ` ${"é".repeat(128)} ` })).toBeUndefined();
+    expect(dhtOnlyChat("chat.send", { chat: "group:crew", text: long })).toBeUndefined();
+    expect(dhtOnlyChat("chat.edit", { chat: "bob", text: long })).toBeUndefined();
     const params = { chat: "Ann Lee", text: long, wait: "sent", timeout: 6 };
     const notice = waitNotice("chat.send", params, "daemon")!;
-    expect(dhtOnlyNotice(notice, params, { deliveryMode: "dht", peerDeliveryMode: null }, "daemon")).toEqual({
+    expect(dhtOnlyNotice(notice, "chat.send", params, { deliveryMode: "dht", peerDeliveryMode: null }, "daemon")).toEqual({
       waiting: "waiting for it to go out to Ann Lee (up to 6 s; Ctrl-C stops waiting). Longer than the 256 bytes the DHT carries, and this chat is on the DHT only: it goes once you choose a live transport (ghostly chat transport 'Ann Lee' auto), or shorten it",
       stopped: "it is kept here. Longer than the 256 bytes the DHT carries, and this chat is on the DHT only: it goes once you choose a live transport (ghostly chat transport 'Ann Lee' auto), or shorten it",
     });
-    expect(dhtOnlyNotice(notice, params, { deliveryMode: "auto", peerDeliveryMode: "dht" }, "daemon").stopped).toBe("it is kept here. Longer than the 256 bytes the DHT carries, and the contact keeps this chat on the DHT only: it goes once they choose a live transport, or shorten it");
+    expect(dhtOnlyNotice(notice, "chat.send", params, { deliveryMode: "auto", peerDeliveryMode: "dht" }, "daemon").stopped).toBe("it is kept here. Longer than the 256 bytes the DHT carries, and the contact keeps this chat on the DHT only: it goes once they choose a live transport, or shorten it");
     // Held (`chat disconnect --hold`): it goes by itself when the hold ends, said with when and `chat connect`.
     const until = new Date(2099, 0, 2, 9, 5).getTime();
-    expect(dhtOnlyNotice(notice, params, { deliveryMode: "dht", peerDeliveryMode: null, heldUntil: until }, "one-shot").stopped).toBe("it is kept here. Longer than the 256 bytes the DHT carries, and this chat is held on the DHT only until 2099-01-02 09:05: it goes then while this profile is online (ghostly daemon --detach), or now with ghostly chat connect 'Ann Lee'");
+    expect(dhtOnlyNotice(notice, "chat.send", params, { deliveryMode: "dht", peerDeliveryMode: null, heldUntil: until }, "one-shot").stopped).toBe("it is kept here. Longer than the 256 bytes the DHT carries, and this chat is held on the DHT only until 2099-01-02 09:05: it goes then while this profile is online (ghostly daemon --detach), or now with ghostly chat connect 'Ann Lee'");
     // A chat that can be live: the text goes once it is, as the notice says.
-    expect(dhtOnlyNotice(notice, params, { deliveryMode: "auto", peerDeliveryMode: null }, "daemon")).toBe(notice);
+    expect(dhtOnlyNotice(notice, "chat.send", params, { deliveryMode: "auto", peerDeliveryMode: null }, "daemon")).toBe(notice);
+  });
+
+  it("a pin in a 1:1 chat reads its chat, and on the DHT only says it waits for a live session instead of that it goes", () => {
+    // A pin goes on a live session only: the answer and a timeout say so (pins.test.ts), and the notice on a terminal
+    // said "it still goes", Ctrl-C that it "goes with this profile's next command", neither true on the DHT only.
+    expect(dhtOnlyChat("chat.pin", { chat: "bob", message: "m1" })).toBe("bob");
+    expect(dhtOnlyChat("chat.pin", { chat: "bob", remove: true })).toBe("bob");
+    expect(dhtOnlyChat("chat.pin", { chat: "group:crew", message: "m1" })).toBeUndefined();
+    expect(dhtOnlyChat("chat.react", { chat: "bob", message: "m1", emoji: "👍" })).toBeUndefined();
+    const params = { chat: "Ann Lee", message: "m1" };
+    const notice = waitNotice("chat.pin", params, "one-shot")!;
+    expect(dhtOnlyNotice(notice, "chat.pin", params, { deliveryMode: "dht", peerDeliveryMode: null }, "one-shot")).toEqual({
+      waiting: "waiting for Ann Lee's app to confirm it (up to 30 s; Ctrl-C stops waiting). A pin goes only on a live session, and this chat is on the DHT only: it goes once you choose a live transport (ghostly chat transport 'Ann Lee' auto)",
+      stopped: "it is kept here. A pin goes only on a live session, and this chat is on the DHT only: it goes once you choose a live transport (ghostly chat transport 'Ann Lee' auto)",
+    });
+    const unpin = { chat: "bob", remove: true, wait: "confirmed" };
+    expect(dhtOnlyNotice(waitNotice("chat.pin", unpin, "daemon")!, "chat.pin", unpin, { deliveryMode: "auto", peerDeliveryMode: "dht" }, "daemon").stopped)
+      .toBe("it is kept here. An unpin goes only on a live session, and the contact keeps this chat on the DHT only: it goes once they choose a live transport");
+    // A chat that can be live: the pin goes once it is, as the notice says.
+    expect(dhtOnlyNotice(notice, "chat.pin", params, { deliveryMode: "auto", peerDeliveryMode: null }, "one-shot")).toBe(notice);
   });
 });

@@ -306,11 +306,14 @@ export function openChat(path: string, profile: string): void {
   if (listProfiles().some((p) => p.id === profile)) switchProfile(profile, { route: path });
 }
 
-/** This page holds the peer: ask the worker for the share it is holding for it. */
-export function askForShare(): void {
+/**
+ * This page holds the peer: ask the worker for the share it is holding for it. `opened`: whether this page was opened
+ * for one, when its address may no longer say so (a link reached it while it waited behind another tab).
+ */
+export function askForShare(opened = openedForShare()): void {
   const workers = container();
-  if (!workers || !openedForShare()) return;
-  tellReady({ type: "share-ready" });
+  if (!workers || !opened) return;
+  tellReady({ type: "share-ready", profile: activeProfileId() });
 }
 
 /** How long a tab opened for a share waits for the peer's lock before it hands the share to the tab that holds it. */
@@ -343,9 +346,9 @@ export function forwardShare(answered: (forwarded: boolean) => void = () => {}, 
  * page that holds the peer's lock and still does a moment later, so never to the page on its way out; none, it keeps
  * it for the next app page. `answered`: the worker handed it over, or there was none. A link that reaches this tab
  * meanwhile takes its address (and the tab that is the app takes it out again): the share is forwarded all the same.
+ * `opened`: whether this page was opened for one, read as it opened (a link may have taken the address since).
  */
-export function handShareOver(peer: () => boolean, answered: (state: "shared" | "shareNone") => void, afterMs = SHARE_FORWARD_AFTER_MS): void {
-  const opened = openedForShare();
+export function handShareOver(peer: () => boolean, answered: (state: "shared" | "shareNone") => void, opened = openedForShare(), afterMs = SHARE_FORWARD_AFTER_MS): void {
   let asked = false;
   const forward = () => {
     if (asked || peer()) return;
