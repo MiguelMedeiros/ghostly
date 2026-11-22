@@ -12,7 +12,7 @@ import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { childEnv } from "./childEnv";
 import { bool, chatOf, findChatOrGroup, keptForJoin, list, noFile, noMessage, nobodyJoined, node, num, oneOf, oneShotWaits, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { dhtOnlyOf, groupSendRefused } from "./api";
-import { CliError } from "./errors";
+import { CliError, transferFailure } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
 import { endTyping } from "./typing";
@@ -108,9 +108,11 @@ function stageWords(transfer: FileTransferView, dhtOnly?: string): string {
 
 /**
  * A transfer that waits for a person's decision (`asking`), with whose: `me` (`file accept` takes it here) or `contact`
- * (theirs). A received file's `transferring` alone read as if it were moving.
+ * (theirs). A received file's `transferring` alone read as if it were moving. One that failed for want of room here
+ * says so in the CLI's words, with `reason: "no_space"` (`transferFailure`).
  */
-function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferView & { waitingFor?: "me" | "contact" }) | undefined {
+function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferView & { waitingFor?: "me" | "contact"; reason?: "no_space" }) | undefined {
+  if (transfer?.state === "failed") { const said = transferFailure(transfer.error); return said.reason ? { ...transfer, ...said } : transfer; }
   if (transfer?.state !== "transferring" || transfer.stage !== "asking") return transfer;
   return { ...transfer, waitingFor: transfer.direction === "in" ? "me" : "contact" };
 }
@@ -349,7 +351,8 @@ const ENDS: Record<string, { reason: "cancelled" | "declined"; by: "me" | "conta
   "Declined by your contact": { reason: "declined", by: "contact" },
   "Cancelled by the sender": { reason: "cancelled", by: "contact" },
 };
-const endOf = (transfer: Pick<FileTransferView, "error">) => ENDS[transfer.error ?? ""] ?? { reason: "failed" as const, by: null };
+/** A received file this device had no room for ends with `reason: "no_space"` (`transferFailure`), any other with `failed`. */
+const endOf = (transfer: Pick<FileTransferView, "error">) => ENDS[transfer.error ?? ""] ?? { reason: transferFailure(transfer.error).reason ?? ("failed" as const), by: null };
 
 /**
  * A transfer that ended, refused with its words and the way out: the sender still has the bytes and sends them again
@@ -359,7 +362,9 @@ function endedFile(fileId: string, where: { chat: string } | { group: string } |
   const way = where && "chat" in where
     ? outgoing ? transfer.retry ? " (file resend sends it again)" : ` (send it again: ghostly file send ${where.chat} <path>)` : " (ask the contact to send it again)"
     : "";
-  return new CliError("refused", `It ended: ${transfer.error ?? "failed"}${way}`, { file: fileId, ...where, ...endOf(transfer) });
+  // A received file this device had no room for: the CLI's no-room words, which name the way out themselves.
+  const said = transferFailure(transfer.error);
+  return new CliError("refused", `It ended: ${said.error ?? "failed"}${said.reason ? "" : way}`, { file: fileId, ...where, ...endOf(transfer) });
 }
 
 /**
@@ -386,7 +391,12 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
     if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now, note)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null, ...(error.details?.reason ? { reason: error.details.reason } : {}) });
     throw error;
   });
-  if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry, ...endOf(transfer) });
+  // A received file this device had no room for is `unavailable` with the CLI's no-room words and `reason: "no_space"`,
+  // as every other full disk; before, it was `engine` with Node's raw ENOSPC text.
+  if (transfer.state === "failed") {
+    const said = transferFailure(transfer.error);
+    throw new CliError(said.reason ? "unavailable" : "engine", said.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry, ...endOf(transfer) });
+  }
   if (transfer.state !== "done") throw waitsForYou((stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name, fileId, where, transfer.size);
   return { ...where, file: fileId, state: "done", size: transfer.size };
 }

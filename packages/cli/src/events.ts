@@ -4,6 +4,7 @@ import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import { parsePayLink } from "@ghostly/browser/shared/payLinks";
 import type { EngineState, FileTransferView, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
+import { transferFailure } from "./errors";
 import { chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, type MessageJson } from "./views";
 import { paymentJson } from "./wallets";
 
@@ -808,7 +809,9 @@ export class EventHub {
     const chat = state.links.find((l) => id.startsWith(`${l.id}-`))?.id ?? null;
     // A group's file (WISP 503) names its group.
     const group = chat ? undefined : state.groups.find((g) => id.startsWith(`group-${g.id}-`))?.id;
-    const fields = { chat, ...(group ? { group } : {}), file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(transfer.error ? { error: transfer.error } : {}) };
+    // A received file this device had no room for: the CLI's words and `reason: "no_space"` (`transferFailure`).
+    const said = transfer.state === "failed" ? transferFailure(transfer.error) : { error: transfer.error, reason: undefined };
+    const fields = { chat, ...(group ? { group } : {}), file: id, direction: transfer.direction ?? (id.includes("-in-") ? "in" : "out"), size: transfer.size, transferred: transfer.transferred, ...(said.error ? { error: said.error } : {}), ...(said.reason ? { reason: said.reason } : {}) };
     // An end told is no longer under way: its note goes as it is told (one still waiting for its message at a stop stays).
     const told = () => {
       if (!this.seen.get(UNDERWAY)?.delete(id)) return;
