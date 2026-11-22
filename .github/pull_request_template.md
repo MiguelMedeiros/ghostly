@@ -22,5 +22,5 @@
 - [ ] It goes into the area's existing test file
 - [ ] A lint rule or a type would not catch the same thing
 - [ ] No e2e spec already checks it
-- [ ] Real network, timers or two peers make it an `integration` test
-- [ ] No fixed waits or ms budgets (a timing check is `@perf`)
+- [ ] On the real Internet it is opt-in: an e2e spec tagged `@network`, or a unit test skipped without its env flag (as `dhtDelivery.network.test.ts`)
+- [ ] No fixed waits or ms budgets: a timing check goes in an e2e spec tagged `@perf`
