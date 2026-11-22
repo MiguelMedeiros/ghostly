@@ -282,7 +282,9 @@ export class CallManager {
         const failed = unreachable || (call.state !== "connected" && (call.offering || (call.direction === "out" && call.redials > 0)));
         const reason: EndReason = call.state === "ringing" && call.direction === "in" ? "missed"
           : call.state === "ringing" && !unreachable ? "rejected" : failed ? "failed" : "remote-hangup";
-        void this.end(call, reason, false);
+        // A hang-up that crossed our offer made again (`redial`) is answered with ours: that offer reaches a side with
+        // no call, which rings it as a new one, unless a hang-up comes after it.
+        void this.end(call, reason, call.offering && call.redials > 0);
       }
     }
   }
