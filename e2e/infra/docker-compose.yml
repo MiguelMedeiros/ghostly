@@ -349,6 +349,37 @@ services:
     command: ["--dev"]
     ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47085:3340"]
 
+  # ── Group calls (WISP 602): a LiveKit SFU and a mock of a node's group-token route ──────────────────────────
+  # LiveKit as ghostly-os pins it, in dev mode (key devkey, secret "secret"). Its media ports are the same inside and
+  # out: it names them in its ICE candidates, at 127.0.0.1 (UDP, and TCP when UDP does not get through).
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    container_name: ghostly-e2e-livekit
+    restart: on-failure
+    command: ["--dev", "--bind", "0.0.0.0", "--node-ip", "127.0.0.1"]
+    environment:
+      LIVEKIT_CONFIG: |
+        rtc:
+          tcp_port: 47121
+          udp_port: 47122
+          use_external_ip: false
+    ports:
+      - "${E2E_INFRA_ADDRESS:-127.0.0.1}:47120:7880"
+      - "${E2E_INFRA_ADDRESS:-127.0.0.1}:47121:47121"
+      - "${E2E_INFRA_ADDRESS:-127.0.0.1}:47122:47122/udp"
+  # Answers for GHOSTLY_SFU_ORIGIN (specs route that name here) with passes into the LiveKit above (sfu-token/server.mjs).
+  sfu-token:
+    build: ./sfu-token
+    image: ghostly-e2e-sfu-token
+    container_name: ghostly-e2e-sfu-token
+    restart: on-failure
+    environment:
+      SFU_TOKEN_ORIGIN: ${GHOSTLY_SFU_ORIGIN:-https://sfu.ghostly.test}
+      LIVEKIT_PUBLIC_URL: ${GHOSTLY_LIVEKIT_URL:-ws://127.0.0.1:47120}
+      LIVEKIT_HEALTH_URL: http://livekit:7880
+    ports: ["${E2E_INFRA_ADDRESS:-127.0.0.1}:47123:7890"]
+    depends_on: [livekit]
+
   # ── Cashu: the test mint (fake Lightning backend: its invoices pay themselves), as CI runs it ────────────
   mint:
     image: cashubtc/mintd:0.17.7

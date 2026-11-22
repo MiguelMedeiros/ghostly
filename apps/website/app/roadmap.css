@@ -286,11 +286,15 @@
 }
 .rm-cand-head {
   display: grid;
+  /* An auto track takes the title's longest unbreakable run (Voice/video/screenshare): with larger text on a phone it
+     ran past the screen's edge, over the status. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   min-width: 0;
 }
 .rm-cand-title {
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .rm-cand-note {
   font-size: 12.5px;

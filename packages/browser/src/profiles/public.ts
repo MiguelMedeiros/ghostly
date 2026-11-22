@@ -164,9 +164,6 @@ export async function decodeFitted(bytes: Uint8Array, side = POST_IMAGE_SIDE): P
     } finally { bitmap.close(); }
   } catch { return { miss: 'it could not be decoded' }; }
 }
-export async function smallAvatar(bytes: Uint8Array, side = AVATAR_SIDE): Promise<string | undefined> {
-  return (await decodeAvatar(bytes, side)).avatar;
-}
 
 /** Where a picture URL is fetched from: the rewritten short link, the hosts it may end up on, or why it is not asked. */
 export function avatarSource(url: string, hosts: ReadonlySet<string> = IMAGE_HOSTS): { url: string; host: string; finalHosts: ReadonlySet<string> } | { miss: string } {

@@ -4,7 +4,7 @@ import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
-import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, groupFileOffered, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction } from "../../lib/fileStatus";
 import { formatFileSize } from "../../lib/format";
 import type { ChatFile } from "../../lib/types";
 import {
@@ -24,7 +24,8 @@ import { forgetPosition, holdPlayback, playingFrom, rememberPosition, remembered
 import { decodeToWav } from "../../lib/voiceDecode";
 import { followSpeaker } from "../../lib/mediaDevices";
 import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
-import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
+import { FORCED_EDGE, ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
+import { NAME, withName } from "../apps/aroundName";
 import { PROGRESS_STEP_MS, Waveform } from "./Waveform";
 import "./voice.css";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
@@ -33,6 +34,8 @@ import { downloadFile, downloadName } from "../../lib/fileDownload";
 type PlayState = "idle" | "loading" | "playing" | "paused";
 
 const FORMATS: Record<string, string> = { "audio/webm": "WebM", "audio/ogg": "Ogg", "audio/mp4": "M4A", "audio/x-m4a": "M4A", "audio/mpeg": "MP3", "audio/aac": "AAC", "audio/wav": "WAV" };
+/** A file answer under the waveform (Decline, Pause, Resume, Cancel): on a phone 44 px tall, as FileBubble's. */
+const pill = `text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
 const formatOf = (mime: string) => FORMATS[mime.split(";")[0]!.trim().toLowerCase()] ?? (mime || "unknown");
 
 /** What went wrong, for whoever debugs the next failure: the console in dev builds, `data-error` always. */
@@ -434,8 +437,16 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
   // The engine's words (why it failed, why a click did not work) are behind the ⓘ, not in the bubble.
   const reason = retryError ? { text: retryError } : failedReason(transfer, t);
   const hint = reason ? null : groupFileHint(file, transfer, t);
-  // A group's voice message this device did not fetch by itself (automatic downloads off): its Download (WISP 503).
-  const offered = groupFileOffered(file, transfer) && !!platform?.fileAction;
+  // Answered as an audio file is (AudioBubble): one the engine asks about gets Download (and Decline, but a group's:
+  // WISP 503), and one on its way Pause, Resume and Cancel (not a group's).
+  const group = isGroupFile(file);
+  const controls = transfer?.state === "transferring" && !!transfer.direction && !!platform?.fileAction;
+  const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
+  const noRoom = offered && typeof transfer.room === "number" && transfer.room < file.size;
+  const pausedHere = controls && !group && transfer.stage === "paused" && transfer.pausedBy !== "peer";
+  // Sent whole: too late to pause or cancel, the contact keeps it.
+  const canPause = controls && !group && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking" && !sentWhole(transfer);
+  const canCancel = controls && !group && !offered && !sentWhole(transfer);
   const moving = transfer?.state === "transferring" && !transfer.stalled && !offered;
   const run = (action: () => Promise<unknown>) => {
     setRetryError("");
@@ -552,11 +563,26 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
         </div>
       </div>
       {offered && (
-        <div className="mt-1.5 px-1">
-          <button type="button" data-testid="voice-download" onClick={() => run(() => platform!.fileAction!(file.id, "accept"))}
-            className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer">
-            {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
-          </button>
+        <div className="mt-1.5 px-1" data-testid="voice-offer">
+          <div className="flex items-center gap-2">
+            <button type="button" data-testid="voice-download" onClick={() => run(() => platform!.fileAction!(file.id, "accept"))}
+              className={`text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer`}>
+              {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
+            </button>
+            {!group && <button type="button" data-testid="voice-decline" onClick={() => run(() => platform!.fileAction!(file.id, "decline"))} className={pill}>{t("chat.file.decline")}</button>}
+          </div>
+          {typeof transfer.room === "number" && (
+            <p className={`chat-text-media-meta m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="voice-room">
+              {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
+            </p>
+          )}
+        </div>
+      )}
+      {(canPause || pausedHere || canCancel) && (
+        <div className="flex gap-1.5 mt-1 px-1">
+          {canPause && <button type="button" className={pill} data-testid="voice-pause-transfer" onClick={() => run(() => platform!.fileAction!(file.id, "pause"))}>{t("chat.file.pause")}</button>}
+          {pausedHere && <button type="button" className={pill} data-testid="voice-resume-transfer" onClick={() => run(() => platform!.fileAction!(file.id, "resume"))}>{t("chat.file.resume")}</button>}
+          {canCancel && <button type="button" className={pill} data-testid="voice-cancel" onClick={() => run(() => platform!.fileAction!(file.id, "cancel"))}>{t("common.cancel")}</button>}
         </div>
       )}
       {problem && (
@@ -596,7 +622,7 @@ export function SpeedPill({ rate, locale, onGone }: { rate: number; locale: stri
       onClick={() => nextVoiceRate()}
       // The pill is as tall as the line it sits on; its touch area reaches a little past it. On a phone that area is
       // 44 px tall and at least 44 px wide, grown toward the time only: on the play button's side it would cut into its.
-      className="relative shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none bg-black/25 text-text-primary/85 text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums before:content-[''] before:absolute before:-start-1 before:-end-1 before:-inset-y-1 max-md:before:start-0 max-md:before:-end-3 max-md:before:-inset-y-[13px]"
+      className={`relative shrink-0 min-w-[34px] h-[18px] px-1.5 rounded-full border-none ${FORCED_EDGE} bg-black/25 text-text-primary/85 text-[11px] font-semibold leading-none cursor-pointer hover:bg-black/35 tabular-nums before:content-[''] before:absolute before:-start-1 before:-end-1 before:-inset-y-1 max-md:before:start-0 max-md:before:-end-3 max-md:before:-inset-y-[13px]`}
     >
       {label}
     </button>

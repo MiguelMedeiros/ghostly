@@ -53,9 +53,9 @@ export function Section({ id, title, children }: { id?: string; title: string; c
   );
 }
 
-/** A term in bold at the start of a list item. */
+/** A term in bold at the start of a list item. It may be a host name, which has nowhere to break with larger text. */
 export function Term({ children }: { children: React.ReactNode }) {
-  return <strong className="text-gray-200">{children}</strong>;
+  return <strong className="text-gray-200 wrap-anywhere">{children}</strong>;
 }
 
 export function Code({ children }: { children: React.ReactNode }) {
