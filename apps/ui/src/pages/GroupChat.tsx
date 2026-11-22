@@ -17,6 +17,8 @@ import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { GroupShareDialog } from "../components/GroupLinkPanel";
 import { GroupLinkAskDialog } from "../components/GroupLinkAskDialog";
 import { GroupConnection } from "../components/GroupConnection";
+import { GroupCallButton } from "../components/GroupCallButton";
+import { groupCallOf } from "../lib/groupCallPass";
 import { useNoLinksHint } from "../hooks/useNoLinksHint";
 import { TasksButton } from "../components/chat/TasksButton";
 import { useJumpTo } from "../hooks/useJumpTo";
@@ -66,6 +68,7 @@ import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType,
 import { servicesPlatform } from "../lib/platform";
 import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
 import { formatFileSize } from "../lib/format";
+import { publicKeyLabel } from "../lib/publicKeyLabel";
 import { videoMetaOf } from "../lib/videoPoster";
 import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { useKeptEdit } from "../lib/keptEdits";
@@ -84,6 +87,7 @@ import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
 import { working } from "../lib/focus";
+import { isolate } from "../lib/ownStatus";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { Spinner } from "../components/wallet/ui";
 
@@ -144,7 +148,7 @@ const replyNames = (group: GroupView, you: string, t: Translate): NameOf => (fro
 
 /** Whom "@" offers in the composer: every other member, by name and the end of their key. */
 function mentionCandidates(group: GroupView, t: Translate): MentionCandidate[] {
-  return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}` }));
+  return group.members.filter(m => !m.me).map(m => ({ key: m.key, name: memberName(m, t), tag: `…${m.key.slice(-6)}`, ...(m.nick ? {} : { label: publicKeyLabel(m.key) }) }));
 }
 
 /** The note that captions a payment bubble (`groupPayCaption`, shared with the CLI's group history). */
@@ -356,7 +360,7 @@ function joiningText(stage: GroupJoinStage, name: string, community: boolean, t:
   if (stage === "full" && full) return { title: t("group.join.full"), body: t("group.join.fullBody", { n: full.n, max: full.max }) };
   // Or that it grows only once every member's app is updated: the same, until they are.
   if (stage === "blocked") return { title: t("group.join.blocked"), body: t("group.join.blockedBody") };
-  if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
+  if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name: isolate(name) }) : t("group.join.joiningGroup"),
     body: !community ? t("group.join.admitted") : admittedLong ? t("group.join.admittedStuck") : t("group.join.admittedCommunity") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
     body: community ? t("group.join.answeredCommunity") : t("group.join.answered") };
@@ -475,6 +479,14 @@ export function GroupChat() {
   const avatarButton = useRef<HTMLButtonElement>(null);
   if (viewingPicture && !group?.picture) setViewingPicture(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The groups whose Rotate keys is still going. Each press signs a rotation of its own (a fresh epoch every member
+  // fetches), so a second press while the first goes does nothing. By group: this page stays mounted when another group
+  // is opened.
+  const rotatingRef = useRef(new Set<string>());
+  const [rotating, setRotating] = useState<ReadonlySet<string>>(() => new Set());
+  /** The group whose last Rotate keys is done, said once by its live line; another group opened forgets it. */
+  const [rotated, setRotated] = useState<string | null>(null);
+  if (rotated && rotated !== groupId) setRotated(null);
   const [showMute, setShowMute] = useState(false);
   const [showTranslate, setShowTranslate] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
@@ -494,6 +506,9 @@ export function GroupChat() {
   const [shareShown, setShareShown] = useState(false);
   if (sharing && rosterGroup?.entryLink && !shareShown) setShareShown(true);
   const closeShare = () => { setSharing(""); setShareShown(false); };
+  // Out of the group under it (removed, forked, lost): no link of mine to hand out, while the link is still on for the others.
+  // It closes, as the members panel drops its link, and the page's notice says why; not "the admin turned the link off".
+  if (sharing && rosterGroup?.status && rosterGroup.status !== "active") closeShare();
   useEffect(() => {
     if ((location.state as { share?: string } | null)?.share !== "created") return;
     setSharing("created");
@@ -509,8 +524,8 @@ export function GroupChat() {
   const setError = (problem: Problem | null) => { if (openGroupId.current === groupId) setRefused(problem && { groupId, problem }); };
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
   // Where the Share dialog gives the focus back: Share, or the ⋮ once the link went off and took Share with it (or
-  // Share is a row of ⋮, on the narrowest phone).
-  const shareBack = useMemo(() => ({ get current() { return shareRef.current ?? optionsRef.current; } }), []);
+  // Share is a row of ⋮, on the narrowest phone). Out of the group under it, the line that says why comes before the ⋮.
+  const shareBack = useMemo(() => ({ get current() { return shareRef.current ?? noticeRef.current ?? optionsRef.current; } }), []);
   // At 320px the back button, the picture, the connection, Share and ⋮ left the name about 70px ("Clube d…" for every
   // "Clube de …"): there Share is a row of ⋮, and the name has half again as much room, as a 1:1 chat's has.
   const narrow = useNarrowPhone();
@@ -551,7 +566,8 @@ export function GroupChat() {
     else if (!engine.messages.has(linkId) && !leftScrolledUp(groupId)) {
       void engine.call("messagePage", { linkId }).then(page => { if (current && !whole) setLoaded({ groupId, list: page.messages }); }).catch(() => {});
     }
-    const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) show(list); });
+    // Only a list the engine holds: a change of a group it holds none of is no list to show (the page above is read).
+    const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}` && engine.messages.has(linkId)) show(list); });
     // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
     return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);
@@ -694,8 +710,14 @@ export function GroupChat() {
   // Mine, taken off every member's device: a refusal (limited mode) rejects, and the bubble says it under the message.
   const removeRow = useHandler((m: StoredMessage) => engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id })
     .then(result => { if (result.error) throw new Error(result.error); forgetSentOriginal(groupChat(groupId), m.id); }));
+  // A reaction or a pin the group refuses ("You are not in this group", a community's admin-only pin) shows nothing
+  // on the row: why is said in the group's notice.
+  const sayRefusal = (call: Promise<{ error?: string | null }>) => {
+    setError(null);
+    void call.then(result => { if (result.error) throw new Error(result.error); }).catch(e => setError(problemText(e, t)));
+  };
   // Reactions (WISP 902 § Reactions): one per member per message, named by the roster.
-  const react = useHandler((messageId: string, emoji: string) => { void engine.call("react", { linkId: `group:${groupId}`, messageId, emoji }).catch(() => {}); });
+  const react = useHandler((messageId: string, emoji: string) => sayRefusal(engine.call("react", { linkId: `group:${groupId}`, messageId, emoji })));
   // One function while the roster's names stay (a row draws the names it answers): not one per draw of the page.
   const reactionName = useMemo(() => {
     const nameOf = group && replyNames(group, t("chat.reply.you"), t);
@@ -704,7 +726,7 @@ export function GroupChat() {
   }, [namesKey, t]);
   // The pinned message (WISP 400 § Pinned message): any member of a private group pins, only the admin of a community.
   const pinMessage = useHandler((messageId: string | undefined, remove: boolean = false) => {
-    void engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }).catch(() => {});
+    sayRefusal(engine.call("pinMessage", { linkId: `group:${groupId}`, messageId, remove }));
   });
   const pinRow = useHandler((m: StoredMessage) => pinMessage(m.id, replyTarget(rowNow(m), true) === group?.pin?.id));
   const saveRow = useHandler((messageId: string) => void setSaved(`group:${groupId}`, messageId, savedHere.has(messageId)).catch(() => {}));
@@ -728,8 +750,19 @@ export function GroupChat() {
   // its header is drawn (the engine's state, then the group).
   const headingRef = useRef<HTMLHeadingElement>(null);
   useOpenedHeading(headingRef, started && group ? groupId : null);
+  // The admin role handed to me while the group is open, said once: the timeline's "You are now the admin" is an event,
+  // which the message announcer leaves out. Not for a group opened with the role mine already, nor another one opened.
+  const known = !!group, isAdmin = !!group?.isAdmin;
+  const adminWas = useRef<{ id: string; admin: boolean } | null>(null);
+  const [roleSaid, setRoleSaid] = useState("");
+  useEffect(() => {
+    if (!known) return;
+    const was = adminWas.current;
+    adminWas.current = { id: groupId, admin: isAdmin };
+    setRoleSaid(said => was?.id !== groupId || !isAdmin ? "" : !was.admin ? t("group.event.adminYou") : said);
+  }, [known, groupId, isAdmin, t]);
   if (!started) return null;
-  const back = <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
+  const back = <button onClick={nav.up} className="md:hidden w-[44px] h-[44px] flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
   </button>;
   // Deleted on another device, or an address kept from before: the header keeps its way back (the group page hides the tabs).
@@ -835,7 +868,7 @@ export function GroupChat() {
     : community && group.status === "active" ? (others.length === 0 ? count : community.hub ? t("group.chat.communityHub", { members: count })
       : community.connected ? t("group.chat.communityConnected", { members: count }) : t("group.chat.communityConnecting", { members: count }))
     : group.invitation?.takenBack ? t("sidebar.group.takenBack")
-    : group.invitation && !knockingAgain ? (group.invitation.contact ? t("group.chat.invitation", { contact: group.invitation.contact }) : t("group.chat.invitationUnknown"))
+    : group.invitation && !knockingAgain ? (group.invitation.contact ? t("group.chat.invitation", { contact: isolate(group.invitation.contact) }) : t("group.chat.invitationUnknown"))
     // Nobody else in it (just created, or everyone left): there is no one to reach, so only the count.
     : group.status === "active" ? (others.length === 0 ? count : t("group.chat.reachable", { members: count, reachable, total: others.length }))
     : outOfIt;
@@ -853,6 +886,16 @@ export function GroupChat() {
     setMenuOpen(false); setError(null);
     try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); }
   };
+  const rotate = () => {
+    const id = groupId;
+    if (rotatingRef.current.has(id)) return;
+    const mark = (on: boolean) => { if (on) rotatingRef.current.add(id); else rotatingRef.current.delete(id); setRotating(new Set(rotatingRef.current)); };
+    mark(true); setRotated(null);
+    void act(async () => { await engine.call("rotateGroup", { groupId: id }); setRotated(id); }).finally(() => mark(false));
+  };
+  // The menu closes at the press and the timeline's event line is not read out: this one says it started and that it is
+  // done. A refusal is the notice's.
+  const rotateLine = rotating.has(groupId) ? t("group.menu.rotating") : rotated === groupId ? t("group.menu.rotated") : "";
   // Knocking again, Try again goes: the focus it had goes to Cancel joining beside it, not to the page.
   const tryAgain = (pressed: HTMLElement) => void act(async () => {
     await engine.call("acceptGroupInvitation", { groupId });
@@ -869,15 +912,20 @@ export function GroupChat() {
       {/* A member's message that comes while the group is open, read out once to a screen reader. A note shown by my own
           bubble instead is not: the bubble's payment says its step. */}
       <MessageAnnouncer chat={groupId} linkId={`group:${groupId}`} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} noteLine={note => ownNotes.has(note.id) ? null : groupPayNoteLine(note, group, t)} ready={historyIn} />
-      <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
+      <p role="status" data-testid="group-role-live" className="sr-only">{roleSaid}</p>
+      {/* On a phone its buttons are sized in px, as the name is (and as a chat's header, pages/Chat.tsx): in rem they grew
+          with the browser's text size and left the name 23px at 150%, the members line under the connection button. */}
+      {/* A size container: Share keeps its label by the header's width, not the window's. By the window, a phone on its
+          side (844x390 with an iPhone's safe areas) kept it beside the chat list and cut "Clube do livro" to 65 of 92 px. */}
+      <div className="@container/group-head h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
           {back}
           {/* With a picture, the avatar opens it large; without one, the members, as the line under the name does. A contact's
               invitation has no member yet (the engine knows only the count the card says): its avatar and line open nothing. */}
           {invited ? <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           : <button ref={avatarButton} onClick={() => (group.picture ? setViewingPicture(true) : setShowMembers(true))} data-testid="group-avatar-open"
-            className={`relative rounded-full shrink-0 max-md:p-0.5 ${group.picture ? "cursor-zoom-in" : ""}`}
-            {...(group.picture ? { "aria-label": t("common.viewPhoto", { name: group.name || t("group.chat.unnamed") }) } : { title: t("group.chat.membersButton"), "aria-label": t("group.chat.membersButton") })}>
+            className={`relative rounded-full shrink-0 max-md:p-[2px] ${group.picture ? "cursor-zoom-in" : ""}`}
+            {...(group.picture ? { "aria-label": t("common.viewPhoto", { name: isolate(group.name || t("group.chat.unnamed")) }) } : { title: t("group.chat.membersButton"), "aria-label": t("group.chat.membersButton") })}>
             <GroupAvatar picture={group.picture} size={40} glyph={20} testId="group-avatar" className="bg-accent/15" />
           </button>}
           <div className="min-w-0">
@@ -889,7 +937,7 @@ export function GroupChat() {
             {invited ? <p data-testid="group-members" className="m-0 max-w-full text-xs text-text-muted truncate">{subtitle}</p>
             // On a phone where a tap lands reaches up over the name: the line alone is 24px tall, under a thumb's 44px. The
             // cut with … is inside it, so it does not clip that taller area.
-            : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="relative block max-w-full text-start text-xs text-text-muted hover:text-accent cursor-pointer max-md:min-h-6 max-md:min-w-11 max-md:before:absolute max-md:before:inset-x-0 max-md:before:bottom-0 max-md:before:-top-5 max-md:before:content-['']">
+            : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="relative block max-w-full text-start text-xs text-text-muted hover:text-accent cursor-pointer max-md:min-h-[24px] max-md:min-w-[44px] max-md:before:absolute max-md:before:inset-x-0 max-md:before:bottom-0 max-md:before:-top-[20px] max-md:before:content-['']">
               <span className="block truncate">
               <GroupTypingLine group={group}>{subtitle}</GroupTypingLine>
               </span>
@@ -898,15 +946,17 @@ export function GroupChat() {
         </div>
         <div className="flex items-center gap-1">
           {group.status === "active" && <GroupConnection group={group} />}
+          {/* Only in a group whose admin named a call node (WISP 602); another group opened ends this one's call. */}
+          {group.status === "active" && groupCallOf(group) && <GroupCallButton key={group.id} group={group} />}
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
           {canShare && !narrow && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
-            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:min-w-11 max-md:px-2.5">
+            className="inline-flex min-h-9 items-center justify-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-[44px] max-md:min-w-[44px] max-md:px-[10px]">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
-            <span className="max-[480px]:hidden">{t("group.chat.shareLink")}</span>
+            <span className="@max-[480px]/group-head:hidden">{t("group.chat.shareLink")}</span>
           </button>}
           <div className="relative" ref={menuRef}>
-            <button ref={optionsRef} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={openOnArrow(() => setMenuOpen(true))} className="flex items-center justify-center p-2 max-md:h-11 max-md:w-11 max-md:p-0 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
+            <button ref={optionsRef} onClick={() => setMenuOpen(!menuOpen)} onKeyDown={openOnArrow(() => setMenuOpen(true))} className="flex items-center justify-center p-2 max-md:h-[44px] max-md:w-[44px] max-md:p-0 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer" title={t("chat.options")} aria-haspopup="true" aria-expanded={menuOpen} data-testid="group-options">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
             </button>
             <Menu testId="group-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
@@ -917,7 +967,7 @@ export function GroupChat() {
               {!invited && <TranslateMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowTranslate(true); }} />}
               {!invited && <FolderMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowFolders(true); }} />}
               {!noTimeline && !invited && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
-              {group.isAdmin && <MenuItem testId="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))}>{t("group.menu.rotate")}</MenuItem>}
+              {group.isAdmin && <MenuItem testId="group-rotate" busy={rotating.has(groupId)} onClick={rotate}>{rotating.has(groupId) ? t("group.menu.rotating") : t("group.menu.rotate")}</MenuItem>}
               {!invited && <MenuSeparator />}
               {group.status === "active" && <MenuItem danger testId="group-leave" onClick={() => { closeMenu(); setConfirmLeave(true); }}>{t("group.menu.leave")}</MenuItem>}
               <MenuItem danger testId="group-forget" onClick={() => { closeMenu(); setConfirmForget(true); }}>{t("group.menu.forget")}</MenuItem>
@@ -932,12 +982,16 @@ export function GroupChat() {
       {/* On a phone the chat list's notices are on another screen: what is written here waits too. */}
       <OfflineBanner inChat />
       <ReconnectingBanner inChat />
-      {!noTimeline && <ChatSearchBar search={search} />}
+      {!noTimeline && <ChatSearchBar search={search} nameOf={m => m.sender === "me" ? t("chat.reply.you") : m.nick ?? (group.name || t("group.chat.unnamed"))}
+        noteLine={note => ownNotes.has(note.id) ? null : groupPayNoteLine(note, group, t)} />}
       {!noTimeline && <PinnedBar pin={group.pin} index={quoteIndex} onUnpin={canPin ? () => pinMessage(undefined, true) : undefined} returnFocus={optionsRef} />}
 
       {connecting && !error &&<div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
       </div>}
+      {/* There from the start, so its words are read when they come. Shown while the rotation goes (the row saying so is in
+          a closed menu); once done, the timeline's event line shows it. */}
+      <p role="status" data-testid="group-rotate-live" className={rotating.has(groupId) ? "m-0 px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border" : "sr-only"}>{rotateLine}</p>
       {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
       {group.entryJammed && group.isAdmin && group.status === "active" && <LinkJammed groupId={group.id} onReplaced={() => setSharing("share")} />}
       {/* Joiners the door let in whose side never came up, many lately: real ones may not get in. A new link, asked as
@@ -953,12 +1007,16 @@ export function GroupChat() {
           void act(async () => { await engine.call("enableGroupLink", { groupId, reset: true }); setSharing("share"); }).finally(() => setResetting(false));
         }} />}
       </div>}
-      {(error || (group.status && group.status !== "active")) && <div ref={noticeRef} tabIndex={-1} role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
-        {error && <Notice problem={error} className="text-xs" />}
+      {/* Knocking again, not a live region as a whole (as the first join's card): it re-read its title, its body and
+          Cancel joining at every step. Its error, when there is one, is said by a region of its own. */}
+      {(error || (group.status && group.status !== "active")) && <div ref={noticeRef} tabIndex={-1} role={knockingAgain ? undefined : "status"} data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
+        {knockingAgain ? <div role="status">{error && <Notice problem={error} className="text-xs" />}</div> : error && <Notice problem={error} className="text-xs" />}
         {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}
         {knockingAgain ? <div className={`flex items-center justify-between gap-3${error ? " mt-2" : ""}`}>
           <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
             {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{staleText}</span>}</p>
+          {/* Said once per change, politely, as the first join's card says it: the step just reached, or the two-minute hint. */}
+          <p role="status" data-testid="group-rejoin-live" className="sr-only">{joinAnnouncement}</p>
           {linkUnanswered && <button data-testid="group-link-retry" onClick={e => tryAgain(e.currentTarget)}
             className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
           {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}
@@ -1058,17 +1116,24 @@ export function GroupChat() {
       {confirmForget && group.status === "active" ? <LeaveGroupDialog forget group={group} returnFocus={optionsRef} onClose={() => setConfirmForget(false)}
         onConfirm={async () => { await engine.call("forgetGroup", { groupId }); goneHere(); setConfirmForget(false); nav.home(); }} />
       : confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
-        title={group.name ? t("group.leave.forgetTitle", { name: group.name }) : t("group.leave.forgetTitleUnnamed")} confirm={t("group.menu.forget")}
+        // The group's and the inviter's names isolated: a title and a body are strings, with no room for a <bdi>.
+        title={group.name ? t("group.leave.forgetTitle", { name: isolate(group.name) }) : t("group.leave.forgetTitleUnnamed")} confirm={t("group.menu.forget")}
         // What goes: an invitation (declined, and its sender told; one taken back tells nobody), with the history kept
         // here from before when there is one (Decline keeps it, Delete does not), a first knock through the link, or a
         // group kept with its history.
         body={joiningByLink ? t("group.forget.joining") : group.invitation?.takenBack ? t("group.forget.takenBack") : group.invitation && !knockingAgain
           ? (messages.length > 0
-            ? (group.invitation.contact ? t("group.forget.invitationKept", { contact: group.invitation.contact }) : t("group.forget.invitationKeptUnknown"))
-            : (group.invitation.contact ? t("group.forget.invitation", { contact: group.invitation.contact }) : t("group.forget.invitationUnknown")))
+            ? (group.invitation.contact ? t("group.forget.invitationKept", { contact: isolate(group.invitation.contact) }) : t("group.forget.invitationKeptUnknown"))
+            : (group.invitation.contact ? t("group.forget.invitation", { contact: isolate(group.invitation.contact) }) : t("group.forget.invitationUnknown")))
           : t("group.forget.kept")}
-        // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes.
-        onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); goneHere(); nav.home(); }); }} />}
+        // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes. The
+        // dialog gives the focus back to ⋮, which goes with the page: it goes to the list's next row, or New, as
+        // Cancel joining's does; it was left on the page's body.
+        onConfirm={() => {
+          const next = rowAfter(groupId);
+          setConfirmForget(false);
+          void act(async () => { await engine.call("forgetGroup", { groupId }); goneHere(); nav.home(); focusPastRow(next, optionsRef.current); });
+        }} />}
     </div>
     </MemberColorsProvider>
     </NowPlayingChat.Provider>

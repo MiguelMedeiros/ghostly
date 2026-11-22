@@ -5,7 +5,7 @@
  * to the app, with the request's own port, so the answer goes straight back to the worker. Built on its own into
  * `/_ghostly-svc/bridge.js` (apps/web/svcBuild.ts).
  */
-import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, SERVICE_FRAME_ALLOW, WORKER_SCRIPT, isServiceHostname, parseServicesHost, type BridgeRefusal } from "./protocol";
+import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_OPEN_LINK, BRIDGE_PORT, BRIDGE_READY, BRIDGE_REFUSED, BRIDGE_SHOWN, SERVICE_FRAME_ALLOW, isServiceHostname, parseServicesHost, workerScript, type BridgeRefusal } from "./protocol";
 import { clearSite, dropSharedCookies } from "./clearSite";
 import { VIEWER_GUARD_SCRIPT } from "../../../../packages/core/src/viewerGuard";
 import { CLIPBOARD_GUARD_SCRIPT } from "../../../../packages/core/src/clipboardGuard";
@@ -22,10 +22,12 @@ const documentOf = describe(HTMLIFrameElement.prototype, "contentDocument")?.get
 const windowOf = describe(HTMLIFrameElement.prototype, "contentWindow")?.get;
 const typeOf = describe(Document.prototype, "contentType")?.get;
 const urlOf = describe(Document.prototype, "URL")?.get;
+const stateOf = describe(Document.prototype, "readyState")?.get;
 const ownNavigator = navigator;
 const activationOf = describe(Navigator.prototype, "userActivation")?.get;
 const activeOf = typeof UserActivation === "undefined" ? undefined : describe(UserActivation.prototype, "isActive")?.get;
 const clock = Date.now;
+const portPost = MessagePort.prototype.postMessage;
 
 /**
  * How long a tap or a key in the app's page counts as the person's (a browser's activation lasts about 5 s): a link the
@@ -74,6 +76,15 @@ export function guardedDocument(doc: Document | null): boolean {
   try {
     if (!doc || !typeOf || !urlOf) return false;
     if (apply(urlOf, doc, []) === "about:blank" || apply(typeOf, doc, []) !== "text/html") return true;
+    return guardRan(doc);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the clipboard guard ran in this document: it marked it and fixed its window's `execCommand` in place. */
+export function guardRan(doc: Document): boolean {
+  try {
     const mark = describe(doc, "ghostlyClipboardGuard");
     if (!mark || mark.value !== true || mark.configurable || mark.writable) return false;
     for (let proto = protoOf(doc) as object | null; proto; proto = protoOf(proto) as object | null) {
@@ -120,6 +131,49 @@ export function forwardLinks(win: Window, ask: (url: string) => void): void {
   };
 }
 
+/** Whether the frame still shows its first empty page (`about:blank`), or one this page cannot read: not the app. */
+export function shownBlank(frame: HTMLIFrameElement): boolean {
+  try {
+    const doc = documentOf ? apply(documentOf, frame, []) as Document | null : null;
+    return !doc || !urlOf || apply(urlOf, doc, []) === "about:blank";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Whether the frame's page of the app is parsed, and one it may show (`guardedPage`): there to be seen, though its
+ * pictures and frames may still be on their way. Its `load` waits for them, each up to the "too slow" answer.
+ */
+export function parsedPage(frame: HTMLIFrameElement): boolean {
+  try {
+    const doc = documentOf ? apply(documentOf, frame, []) as Document | null : null;
+    return !!doc && !!stateOf && !shownBlank(frame) && apply(stateOf, doc, []) !== "loading" && guardedDocument(doc);
+  } catch {
+    return false;
+  }
+}
+
+/** How often the bridge looks whether a page of the app is parsed, until it is. */
+const PARSED_LOOK_MS = 100;
+
+/** How long the bridge waits for the worker it registered to take over, and how often it looks. */
+const WORKER_WAIT_MS = 15_000;
+const WORKER_LOOK_MS = 50;
+
+/** Settles once the worker of `registration` is the one registered from `script`; refused if it is not in time. */
+export function activeIs(registration: ServiceWorkerRegistration, script: string): Promise<void> {
+  const until = clock() + WORKER_WAIT_MS;
+  return new Promise((resolve, reject) => {
+    const look = () => {
+      if (registration.active?.scriptURL === script) resolve();
+      else if (clock() > until) reject(new Error("The services worker did not take over"));
+      else setTimeout(look, WORKER_LOOK_MS);
+    };
+    look();
+  });
+}
+
 function say(text: string): void {
   document.body.textContent = text;
 }
@@ -128,6 +182,12 @@ function say(text: string): void {
 function refuse(reason: BridgeRefusal, text: string): void {
   say(text);
   window.parent.postMessage({ type: BRIDGE_REFUSED, reason }, __SERVICES_APP_ORIGIN__);
+}
+
+/** One of this page's guards did not run: what the person sees, and why for whoever runs the server. */
+function refused(guard: string): void {
+  console.error(`Ghostly: this page's Content-Security-Policy refused ${guard}; its script-src must carry the hashes of this build (nginx-services.conf).`);
+  say("This app cannot be opened here: this server's policy is out of date.");
 }
 
 /** This page's own copy of the clipboard guard, inline (its policy allows it by its hash, `bridgeHtml`). */
@@ -145,22 +205,45 @@ function start(): void {
     return;
   }
   let app: HTMLIFrameElement | null = null;
+  // The pages whose links are handed on already: each one from when it is shown parsed (`look`), before its `load`.
+  const linked = new WeakSet<Document>();
+  // A page that may be shown has the links it opens in a new window handed to the app's page, once.
+  const handLinks = (frame: HTMLIFrameElement) => {
+    try {
+      const doc = documentOf ? apply(documentOf, frame, []) as Document | null : null;
+      const win = windowOf ? apply(windowOf, frame, []) as Window | null : null;
+      if (!doc || !win || linked.has(doc)) return;
+      linked.add(doc);
+      // Only one the person opens in the app (`watchUse`): the app's page checks its own activation too, which a tap
+      // on Ghostly's Open, or one in Ghostly's page, gives it for seconds while the app's page loads or runs.
+      const using = watchUse(win);
+      forwardLinks(win, (url) => { if (using()) window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__); });
+      // The app loads another page in its frame: looked at again until that one is parsed.
+      win.addEventListener("pagehide", () => look(frame, doc), { once: true });
+    } catch { /* a page that is not HTML: nothing to hand on */ }
+  };
+  // Looks whether a page of the app other than `left` is parsed, until one is, and hands its links on then: shown, it
+  // can be tapped while its pictures and frames are still on their way. The first is said shown then too, not only at
+  // its `load`: the app's page says the app is opening until then, over the frame. Only the first: the app's page needs
+  // no more.
+  const look = (frame: HTMLIFrameElement, left: Document | null) => {
+    const parsed = setInterval(() => {
+      if (app !== frame) { clearInterval(parsed); return; }
+      if (!parsedPage(frame) || (documentOf && apply(documentOf, frame, []) === left)) return;
+      clearInterval(parsed);
+      handLinks(frame);
+      if (!left) window.parent.postMessage({ type: BRIDGE_SHOWN }, __SERVICES_APP_ORIGIN__);
+    }, PARSED_LOOK_MS);
+  };
   // Each page the app's frame loads is looked at before this page's guard goes over the frame (both listen on the
   // document, as no `load` reaches the window; this one, put there first, runs first): one without the guard of its
   // own is taken away.
-  // A page that may be shown has the links it opens in a new window handed to the app's page.
   document.addEventListener("load", (event) => {
     if (!app || event.target !== app) return;
     if (guardedPage(app)) {
-      const win = windowOf ? apply(windowOf, app, []) as Window | null : null;
-      try {
-        // Only one the person opens in the app (`watchUse`): the app's page checks its own activation too, which a tap
-        // on Ghostly's Open, or one in Ghostly's page, gives it for seconds while the app's page loads or runs.
-        if (win) {
-          const using = watchUse(win);
-          forwardLinks(win, (url) => { if (using()) window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__); });
-        }
-      } catch { /* a page that is not HTML: nothing to hand on */ }
+      handLinks(app);
+      // Not the frame's first empty page: the contact's own, or what Ghostly says in its place (too slow, unreachable).
+      if (!shownBlank(app)) window.parent.postMessage({ type: BRIDGE_SHOWN }, __SERVICES_APP_ORIGIN__);
       return;
     }
     app = null;
@@ -168,6 +251,11 @@ function start(): void {
   }, true);
   // The app's page reaches this window (same origin): its `execCommand`, and a frame it would put here, are guarded too.
   guardHere(CLIPBOARD_GUARD_SCRIPT);
+  // A policy that does not allow it (a server's stale hash for it) refuses it without a word: no app is shown then.
+  if (!guardRan(document)) {
+    refused("the clipboard guard");
+    return;
+  }
   let appPort: MessagePort | null = null;
   const workers = navigator.serviceWorker;
   workers.addEventListener("message", (event) => {
@@ -176,7 +264,7 @@ function start(): void {
     const reply = event.ports[0];
     if (!reply) return;
     const body = (event.data as { body?: unknown } | null)?.body;
-    appPort.postMessage(event.data, body instanceof ArrayBuffer ? [reply, body] : [reply]);
+    apply(portPost, appPort, [event.data, body instanceof ArrayBuffer ? [reply, body] : [reply]]);
   });
   workers.startMessages();
 
@@ -190,22 +278,36 @@ function start(): void {
     }
     if (type !== BRIDGE_PORT || !event.ports[0]) return;
     appPort = event.ports[0];
+    // The view's label in the profile's language ("Demo, shared by Ana"), never this page's English "Ghostly": the
+    // app in it is the contact's, not Ghostly, as the view's bar says.
+    const title = (event.data as { title?: unknown }).title;
     // Hide my IP from contacts: the app's frame is on this origin and reaches this window, so the WebRTC guard runs here
     // too, before the frame is made. Inline, as this page's policy allows it by its hash (`bridgeHtml`).
-    if ((event.data as { relayOnly?: unknown }).relayOnly === true) guardHere(VIEWER_GUARD_SCRIPT);
+    const relayOnly = (event.data as { relayOnly?: unknown }).relayOnly === true;
+    if (relayOnly) {
+      guardHere(VIEWER_GUARD_SCRIPT);
+      if ("RTCPeerConnection" in window || "webkitRTCPeerConnection" in window) {
+        refused("the WebRTC guard");
+        return;
+      }
+    }
+    const script = new URL(workerScript(relayOnly), location.href).href;
     // One left by another contact's app (any chat, any profile) is not this one's to read: not framed while it stays.
     void dropSharedCookies(host.suffix)
-      .then(() => workers.register(WORKER_SCRIPT, { scope: "/", updateViaCache: "none" }))
-      .then(() => workers.ready)
+      .then(() => workers.register(script, { scope: "/", updateViaCache: "none" }))
+      // Framed only once this worker answers: the one before it (another build's, or Hide my IP the other way) still
+      // would until then, and it is what guards the app's pages.
+      .then((registration) => activeIs(registration, script))
       .then(() => {
         const frame = document.createElement("iframe");
-        frame.title = document.title;
+        if (typeof title === "string") frame.title = title;
         frame.setAttribute("allow", SERVICE_FRAME_ALLOW);
         // This page sends no referrer (its server says so); the worker forwards a navigation only with this origin's.
         frame.setAttribute("referrerpolicy", "same-origin");
         frame.src = "/";
         app = frame;
         document.body.replaceChildren(frame);
+        look(frame, null);
       }, () => refuse("blocked", "This browser cannot open the app here."));
   });
   window.parent.postMessage({ type: BRIDGE_READY }, __SERVICES_APP_ORIGIN__);

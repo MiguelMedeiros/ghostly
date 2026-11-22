@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-// @ts-expect-error: a plain script, no types
-import { formatLocale } from "../../../../../tools/scripts/locales-sort.mjs";
 import english from "../../locales/en";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES, appSources, flatten, literalKeys, lookup } from "./locales";
@@ -38,16 +36,7 @@ describe("the locale files", () => {
   it.each(LANGUAGES)("%s has the same area files as English", (language) => {
     expect(areaFiles(language)).toEqual(areaFiles("en"));
   });
-
-  it.each(LANGUAGES)("%s: every file's keys are sorted (npm run locales:sort)", (language) => {
-    // Sorted keys spread the keys pull requests add over the file: two of them adding keys to one area at the
-    // same time touch different lines, where appending made both touch the last one.
-    const unsorted = areaFiles(language).filter((file) => {
-      const text = readFileSync(join(LOCALE_DIR, language, file), "utf8");
-      return formatLocale(text) !== text;
-    });
-    expect(unsorted).toEqual([]);
-  });
+  // Their keys' order is CI's lint job's (npm run locales:sort -- --check).
 });
 
 describe("every locale has the same keys as English", () => {
@@ -103,12 +92,12 @@ describe("every locale has the same keys as English", () => {
 const ARABIC_COUNT_ALONE = new Set([
   "apps.files.askAgainMore", "apps.store.showMore", "calls.timeline.audioMissedMany", "calls.timeline.videoMissedMany",
   "cards.board.showMore", "cards.board.showOlder", "cards.panel.activeCount", "cards.panel.buttonCount", "cards.panel.failedCount",
-  "cards.panel.finishedCount", "chat.announce.rowMoved", "chat.forward.partial", "chat.forward.pick", "chat.forward.selected",
+  "cards.panel.finishedCount", "chat.announce.rowMoved", "chat.file.comingList", "chat.forward.partial", "chat.forward.pick", "chat.forward.selected",
   "chat.hold.quota", "chat.jump.count", "chat.listTime.days", "chat.listTime.hours", "chat.listTime.minutes",
-  "composer.identityShared", "composer.sendCount", "composer.servicesShared", "connection.history.showAll",
-  "connection.history.title", "errors.group.growMore", "group.create.communityHint", "group.link.full", "group.link.note",
+  "composer.bytesLeft", "composer.charactersLeft", "composer.identityShared", "composer.sendCount", "composer.servicesShared", "connection.history.showAll",
+  "connection.history.title", "errors.files.pastLimit", "errors.group.growMore", "group.create.communityHint", "group.link.full", "group.link.note",
   "group.link.noteCommunity", "group.members.missing", "group.members.missingOne", "group.readNote", "group.readNoteCommunity",
-  "group.readNoteCommunityOff",
+  "group.readNoteCommunityOff", "groupCallModeration.removed",
   "messageDetails.value.edits", "profileSwitcher.unread", "pwa.sharePastLimit", "saved.rowLabel", "secretGuard.sat",
   "secretGuard.sats", "settings.storageParts.files", "sidebar.folder.unreadCount",
   "sidebar.rail.unreadCount", "wallet.fedimint.facts.guardianList", "wallet.fedimint.restoreFailed", "wallet.remove.pending",

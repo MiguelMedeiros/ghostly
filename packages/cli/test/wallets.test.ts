@@ -169,6 +169,20 @@ describe("wallets", () => {
     expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true }, networks: { cashu: ["testnet"] } });
   });
 
+  it("chat.accept with a method and no on turns it on, as `chat accept <chat> <method>` does; only on: false turns it off", async () => {
+    // Found in a bug hunt: over the socket a missing `on` read as false and the chat silently stopped taking the method.
+    const { ctx, node } = fake();
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu" });
+    expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true } });
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", networks: ["testnet"] });
+    expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true }, networks: { cashu: ["testnet"] } });
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: false });
+    expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: false } });
+    // An `on` that is no boolean is refused, never read as on.
+    await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: "false" })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.setChatPaymentMethods).toHaveBeenCalledTimes(3);
+  });
+
   it("chat.accept with no method answers what the chat takes now and changes nothing", async () => {
     // Found in a bug hunt: no command showed which ways of paying a chat takes; `chat accept bob` was a usage error.
     const { ctx, node } = fake();

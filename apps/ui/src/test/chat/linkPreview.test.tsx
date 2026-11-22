@@ -1,11 +1,15 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkPreview } from "@ghostly/core";
+import { engine } from "@ghostly/browser/platform/engine";
 import { MessageInput } from "../../components/MessageInput";
 import { MessageBubble } from "../../components/MessageBubble";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { forgetLinkPreviews } from "../../lib/linkPreviewFetch";
+import { PREVIEW_DEBOUNCE_MS } from "../../hooks/useLinkPreviewDraft";
+import { setSessionDraft } from "../../lib/storage";
 import { renderApp } from "../render";
+import { fakeEngine } from "../fakeEngine";
 
 // covers: chat.link-preview.compose, chat.link-preview.render, chat.location.card
 
@@ -37,10 +41,17 @@ beforeEach(() => { onSend.mockReset().mockResolvedValue(null); forgetLinkPreview
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("a link preview in the composer", () => {
+  // The text's rest (PREVIEW_DEBOUNCE_MS) runs on a fake clock that also keeps real time: `rest()` passes it at once.
+  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] }); });
+  afterEach(() => { vi.useRealTimers(); });
+  /** Past the time the text rests before its link is read, and a little more: what would be asked has been by now. */
+  const rest = () => act(() => vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS + 100));
+
   it("is read from the page once the text rests, shown, and sent with the message", async () => {
     const fetch = sites();
     composer();
     type("look https://news.example/story?utm_source=feed&id=9");
+    await rest();
     const card = await screen.findByTestId("composer-link-preview");
     await waitFor(() => expect(card).toHaveAttribute("data-status", "ready"));
     expect(within(card).getByTestId("composer-link-preview-title")).toHaveTextContent("Ghosts are real");
@@ -56,15 +67,34 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(screen.queryByTestId("composer-link-preview")).toBeNull());
   });
 
+  it("draws the page's title and description in their own direction", async () => {
+    sites();
+    composer();
+    type("look https://news.example/story");
+    await rest();
+    const card = await screen.findByTestId("composer-link-preview");
+    await waitFor(() => expect(card).toHaveAttribute("data-status", "ready"));
+    for (const id of ["composer-link-preview-title", "composer-link-preview-description"]) {
+      expect(within(card).getByTestId(id), id).toHaveAttribute("dir", "auto");
+    }
+    // The site's name and the host share a line: each keeps its own direction there, the host left to right. Without it,
+    // an Arabic site name in English was drawn with its "!" before its first word, and in Arabic the host came first.
+    const line = within(card).getByTestId("composer-link-preview-site");
+    expect(line).toHaveTextContent("Example News · news.example");
+    expect([...line.querySelectorAll("bdi")].map(bdi => [bdi.textContent, bdi.getAttribute("dir")]))
+      .toEqual([["Example News", null], ["news.example", "ltr"]]);
+  });
+
   it("can be removed: the link then goes as plain text, and is not read again in that draft", async () => {
     const fetch = sites();
     composer();
     type("https://news.example/a");
+    await rest();
     await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
     fireEvent.click(screen.getByTestId("link-preview-remove"));
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     type("https://news.example/a and more");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://news.example/a and more"));
@@ -75,22 +105,52 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     const view = composer(false);
     type("https://news.example/a");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     view.unmount();
 
     composer();
     type("my router http://192.168.0.1/ and http://printer.local/");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(fetch).not.toHaveBeenCalled();
     // CORS refused: the fetch fails as a network error does, and there is simply no card.
     fetch.mockRejectedValue(new TypeError("Failed to fetch"));
     type("https://closed.example/page");
+    await rest();
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByTestId("composer-link-preview")).toBeNull());
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://closed.example/page"));
+  });
+
+  // Hide my IP from contacts: the site a link names learns this device's address when it is read, as a picture link
+  // someone sent would (MessageBubble). A pasted link may be a contact's, so with it on nothing is read; it goes as text.
+  it("asks nothing with Hide my IP on: the link goes as plain text", async () => {
+    fakeEngine.update({ settings: { relayOnly: true } });
+    const fetch = sites();
+    composer();
+    type("look https://their-server.example/page");
+    await rest();
+    expect(screen.queryByTestId("composer-link-preview")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+    send();
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("look https://their-server.example/page"));
+  });
+
+  it("asks nothing for a kept draft's link before the engine says whether Hide my IP is on", async () => {
+    engine.state = null;
+    setSessionDraft("chat-kept", "look https://their-server.example/page");
+    const fetch = sites();
+    renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews draftId="chat-kept" /></LockScreenProvider>);
+    expect(field().value).toBe("look https://their-server.example/page");
+    await rest();
+    expect(fetch).not.toHaveBeenCalled();
+    // Once the engine says it is off, the preview is made.
+    act(() => fakeEngine.update({ settings: { relayOnly: false } }));
+    await rest();
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(String(fetch.mock.calls[0][0])).toBe("https://their-server.example/page");
   });
 
   it("of a message being edited goes with the edit while its link stays: saved at once, or the site failing now", async () => {
@@ -114,6 +174,7 @@ describe("a link preview in the composer", () => {
     view = editing("look https://news.example/story");
     await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
     type("Look https://news.example/story");
+    await rest();
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
@@ -137,15 +198,55 @@ describe("a link preview in the composer", () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://other.example/page", undefined));
   });
 
+  it("of a message being edited still goes with the edit when no new one may be made: Hide my IP on, or previews off", async () => {
+    const fetch = sites();
+    const kept: LinkPreview = { u: "https://news.example/story", t: "Ghosts are real", s: "Example News" };
+    const onSave = vi.fn<(text: string, extra?: { preview?: LinkPreview }) => Promise<string | null>>().mockResolvedValue(null);
+    const editing = (text: string, linkPreviews: boolean) => renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews={linkPreviews}
+      edit={{ key: "me_1", text, snippet: text, preview: kept, onSave, onClose: () => {} }} /></LockScreenProvider>);
+    const save = () => fireEvent.keyDown(field(), { key: "Enter" });
+
+    for (const [hideIp, linkPreviews] of [[true, true], [false, false]] as const) {
+      fakeEngine.update({ settings: { relayOnly: hideIp } });
+      onSave.mockClear();
+      let view = editing("look https://news.example/story", linkPreviews);
+      await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+      type("Look https://news.example/story");
+      await rest();
+      expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
+      save();
+      await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
+      view.unmount();
+
+      // Removed with ×, it does not go; nor with its link gone.
+      onSave.mockClear();
+      view = editing("look https://news.example/story", linkPreviews);
+      await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
+      fireEvent.click(screen.getByTestId("link-preview-remove"));
+      save();
+      await waitFor(() => expect(onSave).toHaveBeenCalledWith("look https://news.example/story", undefined));
+      view.unmount();
+      onSave.mockClear();
+      view = editing("look https://news.example/story", linkPreviews);
+      await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
+      type("look, no link");
+      save();
+      await waitFor(() => expect(onSave).toHaveBeenCalledWith("look, no link", undefined));
+      view.unmount();
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("is not made for a link inside a spoiler: its card would tell what the spoiler hides", async () => {
     const fetch = sites();
     composer();
     type("guess the ending: ||https://news.example/ending||");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     // The same link outside the spoiler too: it shows, so its card tells nothing hidden.
     type("read https://news.example/ending, or guess: ||https://news.example/ending||");
+    await rest();
     await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
     expect(fetch).toHaveBeenCalledOnce();
   });
@@ -221,11 +322,30 @@ describe("a link preview in a message", () => {
     expect(screen.queryByTestId("link-preview-card")).toBeNull();
   });
 
+  // An older app's card for a struck-through link opened /a~~: another page than the bubble's link above it.
+  it("opens a struck-through link as the bubble does, and is not drawn for the address with its closing ~~", () => {
+    const text = "~~https://news.example/a~~";
+    const older = renderApp(<MessageBubble message={{ id: "m13", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/a~~", t: "Old news" } }} />);
+    expect(screen.queryByTestId("link-preview-card")).toBeNull();
+    older.unmount();
+    renderApp(<MessageBubble message={{ id: "m14", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/a", t: "Old news" } }} />);
+    expect(screen.getByTestId("link-preview-card")).toHaveAttribute("href", "https://news.example/a");
+  });
+
   it("is drawn for a link outside a spoiler, even when the spoiler holds it too", () => {
-    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "`https://news.example/story`"]) {
+    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "`see https://news.example/story here`"]) {
       const view = renderApp(<MessageBubble message={{ id: "m12", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/story", t: "Ghosts are real" } }} />);
       expect(screen.getByTestId("link-preview-card"), text).toHaveTextContent("Ghosts are real");
       view.unmount();
+    }
+  });
+
+  it("draws the page's words in their own direction", () => {
+    renderApp(<MessageBubble message={{ id: "m13", text: "https://news.example/story", sender: "peer", timestamp: 1_700_000_000_000,
+      preview: { u: "https://news.example/story", t: "مرحبا بكم!", d: "Hello world!", s: "أخبار" } }} />);
+    // In the app's direction, an English title in Arabic was drawn "!Hello world", an Arabic one in English with its "!" at its end's far side.
+    for (const id of ["link-preview-title", "link-preview-description", "link-preview-site"]) {
+      expect(screen.getByTestId(id), id).toHaveAttribute("dir", "auto");
     }
   });
 

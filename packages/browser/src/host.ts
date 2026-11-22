@@ -109,8 +109,8 @@ export interface BrowserHost {
   /**
    * Erases what the contacts' apps opened from one chat (`tag`, as `openService` was given it) or by one profile
    * (`profile`, its id) kept on this device: their origins' storage, caches and worker. The web app clears its own
-   * origins, Desktop has Rust clear its viewers' (`forget_service_origins`); left out by the extension, which names
-   * theirs apart.
+   * origins, Desktop has Rust clear its viewers' (`forget_service_origins`), the extension has Chrome clear its viewer
+   * tabs' (`chrome.browsingData`).
    */
   forgetServices?(which: { tag: string } | { profile: string }): Promise<void>;
   /**
@@ -140,7 +140,7 @@ export interface BrowserHost {
    * carried neither files nor text (a webview that hides them from the page). Left out where the page
    * sees them in the paste event (a browser, WebKit on macOS).
    */
-  readClipboardFiles?(): Promise<ClipboardFile[]>;
+  readClipboardFiles?(): Promise<ClipboardFiles>;
   /**
    * Copies a secret (an invite, a device's link, a group's link, ecash) marked as sensitive: the Android app, whose
    * system shows every copy in a preview and whose keyboards keep a history of them, but neither for a sensitive one.
@@ -246,3 +246,9 @@ export interface ClipboardFile {
   read(offset: number, length: number): Promise<Uint8Array>;
   done?(): void;
 }
+
+/**
+ * What a paste or a drop the platform read brought, and the names of the files it left out: past the most one brings
+ * (`pastLimit`), and not files or not seen (`leftOut`: a folder, one gone meanwhile).
+ */
+export type ClipboardFiles = ClipboardFile[] & { pastLimit?: string[]; leftOut?: string[] };

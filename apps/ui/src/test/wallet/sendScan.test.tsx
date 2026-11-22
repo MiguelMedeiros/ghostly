@@ -1,15 +1,22 @@
 import { act, createEvent, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bech32 } from "@scure/base";
+import { bech32, bech32m } from "@scure/base";
 import type { ClipboardFile } from "@ghostly/browser/host";
 import { TEST_MINTS } from "@ghostly/browser/shared/mints";
 import { fakeInvoice } from "@ghostly/browser/engine/paymentAdapters/providers/testing";
+import { ETHEREUM_USDT, SEPOLIA_TEST_USDT } from "@ghostly/core";
+import { ArkWalletPanel } from "../../components/ArkWalletPanel";
+import { BarkWalletPanel } from "../../components/BarkWalletPanel";
+import { BitcoinWalletPanel } from "../../components/BitcoinWalletPanel";
+import { SparkWalletPanel } from "../../components/SparkWalletPanel";
+import { UsdtWalletPanel } from "../../components/UsdtWalletPanel";
 import { CashuWallet } from "../../components/wallet/CashuWallet";
 import { networkState } from "../../components/walletCardData";
 import { followPlatformDrags, guardFileDrops, resetPlatformDrags } from "../../lib/pastedFiles";
 import { servicesPlatform, type LightningAddressInfo, type WalletPlatform, type WalletState } from "../../lib/platform";
+import { routeArkSend, routeBitcoinSend, routeSend, routeUsdtSend } from "../../lib/sendRoute";
 import { fakeEngine, walletView } from "../fakeEngine";
-import { liveMainnetInvoice, mint, REAL_MINT } from "../payments/fixtures";
+import { liveMainnetInvoice, mint, REAL_MINT, REGTEST_INVOICE } from "../payments/fixtures";
 import { renderApp } from "../render";
 
 // covers: wallet.cashu.send-scan, wallet.cashu.pay-invoice, wallet.lnurl.address, payments.mainnet-confirm
@@ -106,7 +113,7 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     await user.click(screen.getByRole("tab", { name: "Send" }));
     await user.upload(screen.getByLabelText("Choose image"), picture());
     await user.click(await screen.findByTestId("wallet-pay-confirm"));
-    expect(await screen.findByTestId("wallet-error")).toBeInTheDocument();
+    expect(await screen.findByTestId("wallet-error")).toHaveTextContent("Route not found");
     expect(screen.getByTestId("wallet-pay-review")).toBeInTheDocument();
     expect(screen.queryByTestId("wallet-send-result")).not.toBeInTheDocument();
   });
@@ -665,5 +672,464 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
       await user.click(screen.getByRole("tab", { name: "Receive" }));
       expect(track.stop).toHaveBeenCalled();
     });
+  });
+});
+
+// covers: wallet.ark.send-scan
+describe("the Ark and Bark cards' Send", () => {
+  /** Arkade: version byte 0 and two 32-byte keys. */
+  const arkade = (prefix: "ark" | "tark") => bech32m.encode(prefix, bech32m.toWords(new Uint8Array(65).fill(7, 1)), 1023);
+  /** Bark: version 1 as its first character, then a 4-byte Ark ID and a policy with its length. */
+  const bark = (prefix: "ark" | "tark") => bech32m.encode(prefix, [1, ...bech32m.toWords(Uint8Array.from([1, 2, 3, 4, 33, ...new Array<number>(33).fill(9)]))], 1023);
+  const REGTEST_BTC = "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080";
+  const picture = () => new File([new Uint8Array([137, 80, 78, 71])], "qr.png", { type: "image/png" });
+
+  describe("what an Ark card's Send was given", () => {
+    it("an address of its kind and network, or a link's address and amount", () => {
+      expect(routeArkSend(` ${arkade("tark")} `, "arkade", "testnet")).toEqual({ kind: "address", address: arkade("tark") });
+      expect(routeArkSend(arkade("tark").toUpperCase(), "arkade", "testnet")).toEqual({ kind: "address", address: arkade("tark") });
+      expect(routeArkSend(`bitcoin:?ark=${bark("tark")}&amount=0.00001`, "bark", "testnet")).toEqual({ kind: "address", address: bark("tark"), amountSat: 1_000 });
+    });
+
+    it("the other Ark, or the other network, is not this card's: they never pay each other", () => {
+      expect(routeArkSend(bark("tark"), "arkade", "testnet")).toEqual({ kind: "unknown" });
+      expect(routeArkSend(arkade("tark"), "bark", "testnet")).toEqual({ kind: "unknown" });
+      expect(routeArkSend(arkade("ark"), "arkade", "testnet")).toEqual({ kind: "unknown" });
+      expect(routeArkSend(`bitcoin:${REGTEST_BTC}`, "arkade", "testnet")).toEqual({ kind: "unknown" });
+      expect(routeArkSend("https://example.com/menu", "arkade", "testnet")).toEqual({ kind: "unknown" });
+      expect(routeArkSend(`see ${arkade("tark")} please`, "arkade", "testnet")).toEqual({ kind: "unknown" });
+    });
+
+    it("a link that must not be paid is refused", () => {
+      expect(routeArkSend(`bitcoin:?ark=${arkade("tark")}&req-pop=x`, "arkade", "testnet")).toEqual({ kind: "refused" });
+      expect(routeArkSend(`bitcoin:?ark=${arkade("tark")}&amount=lots`, "arkade", "testnet")).toEqual({ kind: "refused" });
+    });
+  });
+
+  describe("Send on the Ark and Bark cards: scan, paste or picture", () => {
+    beforeEach(() => { qr.text = null; qr.clipboard = null; });
+    const ready = { configured: true, locked: false, network: "regtest" as const, provider: "http://127.0.0.1:1", balance: 5_000 };
+    const panels = [
+      ["Ark", () => <ArkWalletPanel wallet={servicesPlatform!.wallet} state={walletView({ mode: "testnet", ark: { ...ready, address: arkade("tark") } }) as WalletState} />, arkade("tark"), bark("tark")],
+      ["Bark", () => <BarkWalletPanel wallet={servicesPlatform!.wallet} state={walletView({ mode: "testnet", bark: { ...ready, address: bark("tark") } }) as WalletState} />, bark("tark"), arkade("tark")],
+    ] as const;
+
+    describe.each(panels)("%s", (name, panel, mine, other) => {
+      const show = async () => {
+        const rendered = renderApp(panel());
+        await rendered.user.click(screen.getByRole("tab", { name: "Send" }));
+        return rendered;
+      };
+      const field = () => screen.getByLabelText(`${name} recipient address`);
+
+      it("a phone's keyboard is told not to change a typed address", async () => {
+        await show();
+        expect(field()).toHaveAttribute("autocapitalize", "none");
+        expect(field()).toHaveAttribute("autocorrect", "off");
+        expect(field()).toHaveAttribute("spellcheck", "false");
+      });
+
+      it("a picture of a link fills the address and the amount, and nothing is reviewed until the person asks", async () => {
+        qr.text = `bitcoin:?ark=${mine}&amount=0.00001`;
+        const { user, engine } = await show();
+        await user.upload(screen.getByLabelText("Choose image"), picture());
+        expect(await screen.findByDisplayValue(mine)).toBe(field());
+        expect(screen.getByDisplayValue("1000")).toBeInTheDocument();
+        expect(engine.callsTo("preparePayment")).toEqual([]);
+      });
+
+      it("Paste of a bare address fills it, and the amount meant for the last one goes", async () => {
+        const { user } = await show();
+        await user.type(screen.getByLabelText(/^Amount/), "700");
+        qr.clipboard = mine.toUpperCase();
+        await user.click(screen.getByTestId("wallet-send-paste"));
+        expect(await screen.findByDisplayValue(mine)).toBe(field());
+        expect(screen.queryByDisplayValue("700")).not.toBeInTheDocument();
+      });
+
+      it("the other Ark's address fills nothing, and says so; a link that must not be paid is refused", async () => {
+        qr.text = other;
+        const { user } = await show();
+        await user.upload(screen.getByLabelText("Choose image"), picture());
+        expect(await screen.findByTestId("wallet-send-unknown")).toHaveTextContent(`That is not a ${name} address for this wallet.`);
+        expect(field()).toHaveValue("");
+        qr.text = `bitcoin:?ark=${mine}&req-pop=x`;
+        await user.upload(screen.getByLabelText("Choose image"), picture());
+        expect(await screen.findByTestId("wallet-send-refused")).toHaveTextContent("This link asks for something this app does not understand");
+        expect(field()).toHaveValue("");
+      });
+    });
+  });
+});
+
+// covers: wallet.onchain.send-scan
+describe("the Bitcoin card's Send", () => {
+  const REGTEST = "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080";
+  const MAINNET = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+  const picture = () => new File([new Uint8Array([137, 80, 78, 71])], "qr.png", { type: "image/png" });
+
+  describe("what the Bitcoin card's Send was given", () => {
+    it("an address, or a link's address and amount, for the card's chain", () => {
+      expect(routeBitcoinSend(`  ${REGTEST} `, "regtest")).toEqual({ kind: "address", address: REGTEST });
+      expect(routeBitcoinSend(`bitcoin:${REGTEST}?amount=0.00001`, "regtest")).toEqual({ kind: "address", address: REGTEST, amountSat: 1_000 });
+      expect(routeBitcoinSend(`BITCOIN:${REGTEST}`, "regtest")).toEqual({ kind: "address", address: REGTEST });
+    });
+
+    it("a link that must not be paid is refused, its Lightning leg included", () => {
+      expect(routeBitcoinSend(`bitcoin:${REGTEST}?req-pop=x`, "regtest")).toEqual({ kind: "refused" });
+      expect(routeBitcoinSend(`bitcoin:${REGTEST}?amount=lots`, "regtest")).toEqual({ kind: "refused" });
+      expect(routeBitcoinSend("bitcoin:notanaddress", "regtest")).toEqual({ kind: "refused" });
+    });
+
+    it("another chain's address, and anything else, is not this card's", () => {
+      expect(routeBitcoinSend(MAINNET, "regtest")).toEqual({ kind: "unknown" });
+      expect(routeBitcoinSend(`bitcoin:${MAINNET}?amount=0.1`, "regtest")).toEqual({ kind: "unknown" });
+      expect(routeBitcoinSend(REGTEST, "bitcoin")).toEqual({ kind: "unknown" });
+      expect(routeBitcoinSend("https://example.com/menu", "regtest")).toEqual({ kind: "unknown" });
+    });
+  });
+
+  describe("Send on the Bitcoin card: scan, paste or picture", () => {
+    beforeEach(() => { qr.text = null; qr.clipboard = null; qr.camera = null; });
+    const show = async () => {
+      const state = walletView({ mode: "testnet", bitcoin: { mode: "testnet", status: "ready", network: "regtest", balance: 50_000, history: [], offered: [] } }) as WalletState;
+      const rendered = renderApp(<BitcoinWalletPanel wallet={servicesPlatform!.wallet as WalletPlatform} state={state} />);
+      await rendered.user.click(screen.getByRole("tab", { name: "Send" }));
+      return rendered;
+    };
+
+    it("a phone's keyboard is told not to change a typed address: with a capital first letter it is no address", async () => {
+      await show();
+      const field = screen.getByLabelText("Bitcoin recipient address");
+      expect(field).toHaveAttribute("autocapitalize", "none");
+      expect(field).toHaveAttribute("autocorrect", "off");
+      expect(field).toHaveAttribute("spellcheck", "false");
+      expect(routeBitcoinSend(`B${REGTEST.slice(1)}`, "regtest")).toEqual({ kind: "unknown" });
+    });
+
+    it("a picture of a link fills the address and the amount, and nothing is reviewed until the person asks", async () => {
+      qr.text = `bitcoin:${REGTEST}?amount=0.00001`;
+      const { user, engine } = await show();
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      expect(await screen.findByDisplayValue(REGTEST)).toBeInTheDocument();
+      expect(screen.getByTestId("bitcoin-amount")).toHaveValue("1000");
+      expect(engine.callsTo("preparePayment")).toEqual([]);
+    });
+
+    it("Paste of a bare address fills it, and takes away the amount meant for the last one", async () => {
+      qr.text = `bitcoin:${REGTEST}?amount=0.00001`;
+      const { user } = await show();
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      await screen.findByDisplayValue(REGTEST);
+      qr.clipboard = "bcrt1q6rhpng9evdsfnn833a4f4vej0asu6dk5srld6x";
+      await user.click(screen.getByTestId("wallet-send-paste"));
+      expect(await screen.findByDisplayValue("bcrt1q6rhpng9evdsfnn833a4f4vej0asu6dk5srld6x")).toBeInTheDocument();
+      expect(screen.getByTestId("bitcoin-amount")).toHaveValue("");
+    });
+
+    it("on a phone the camera runs as Send opens", async () => {
+      const track = { stop: vi.fn() };
+      qr.camera = { getTracks: () => [track] } as unknown as MediaStream;
+      vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ media: query, matches: query === "(any-pointer: coarse)", onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }));
+      vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation(() => {});
+      vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+      await show();
+      expect(await screen.findByTestId("wallet-send-scan-stop")).toBeInTheDocument();
+      vi.restoreAllMocks();
+    });
+
+    it("a link typed or pasted in the field is read the same way", async () => {
+      const { user } = await show();
+      await user.click(screen.getByLabelText("Bitcoin recipient address"));
+      await user.paste(`bitcoin:${REGTEST}?amount=0.00001`);
+      expect(await screen.findByDisplayValue(REGTEST)).toBeInTheDocument();
+      expect(screen.getByTestId("bitcoin-amount")).toHaveValue("1000");
+    });
+
+    it("a link typed a key at a time stays in the field as it is typed, and is read once the field is left", async () => {
+      const { user } = await show();
+      const field = screen.getByLabelText("Bitcoin recipient address");
+      await user.type(field, `bitcoin:${REGTEST}?amount=0.00001`);
+      expect(field).toHaveValue(`bitcoin:${REGTEST}?amount=0.00001`);
+      expect(screen.queryByTestId("bitcoin-send-unknown")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("bitcoin-send-refused")).not.toBeInTheDocument();
+      await user.tab();
+      expect(field).toHaveValue(REGTEST);
+      expect(screen.getByTestId("bitcoin-amount")).toHaveValue("1000");
+    });
+
+    it("a typed link that fills nothing stays to be put right, and says so once the field is left", async () => {
+      const { user } = await show();
+      const field = screen.getByLabelText("Bitcoin recipient address");
+      await user.type(field, "bitcoin:");
+      expect(field).toHaveValue("bitcoin:");
+      expect(screen.queryByTestId("bitcoin-send-unknown")).not.toBeInTheDocument();
+      await user.type(screen.getByTestId("bitcoin-amount"), "1000");
+      expect(field).toHaveValue("bitcoin:");
+      expect(screen.getByTestId("bitcoin-send-unknown")).toHaveTextContent("That is not a Bitcoin address for this wallet.");
+      expect(screen.getByRole("button", { name: "Review payment" })).toBeDisabled();
+    });
+
+    it("another chain's address fills nothing, and says so; a link that must not be paid is refused", async () => {
+      qr.text = MAINNET;
+      const { user } = await show();
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      expect(await screen.findByTestId("bitcoin-send-unknown")).toHaveTextContent("That is not a Bitcoin address for this wallet.");
+      expect(screen.queryByDisplayValue(MAINNET)).not.toBeInTheDocument();
+      qr.text = `bitcoin:${REGTEST}?req-pop=x`;
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      expect(await screen.findByTestId("bitcoin-send-refused")).toHaveTextContent("This link asks for something this app does not understand");
+      expect(screen.queryByDisplayValue(REGTEST)).not.toBeInTheDocument();
+    });
+  });
+});
+
+// covers: wallet.spark.send
+describe("Send on the Spark card: scan, paste or picture", () => {
+  /** Made by the Breez SDK on Breez's regtest (walletPanels.test.tsx): a wallet's address, and an invoice of 1234 sats ("probe"). */
+  const ADDRESS = "sparkrt1pgss87y4e569hncpt9649q5s6x7c3vv9lqwrjlucxfl3a3kk355a3pfkwf2mtr";
+  const INVOICE = "sparkrt1pgss87y4e569hncpt9649q5s6x7c3vv9lqwrjlucxfl3a3kk355a3pfkzg5qsqgjzqq6p4sscrm8avymnelqhzrus7wz5ptswfhkyef6qcydm9xh65rzyqcg6gy35sxa3w5e20exjmr8xhyl96u3cxqk9ttgwes2xkfepzpp5nmw3zu5aczluq5t2fly3venjcv3cn9fvmtjgwcaae4fw2rqw4fy0nwd082rg0zclp2";
+  const picture = () => new File([new Uint8Array([137, 80, 78, 71])], "qr.png", { type: "image/png" });
+
+  beforeEach(() => { qr.text = null; qr.clipboard = null; qr.camera = null; });
+  const show = async () => {
+    const state = walletView({ mode: "testnet", spark: { configured: true, locked: false, network: "regtest", address: ADDRESS, balance: 5_000, history: [] } }) as WalletState;
+    const rendered = renderApp(<SparkWalletPanel wallet={servicesPlatform!.wallet} state={state} />);
+    await rendered.user.click(screen.getByTestId("wallet-send"));
+    return rendered;
+  };
+
+  it("a phone's keyboard is told not to change a typed address", async () => {
+    await show();
+    const field = screen.getByLabelText("Spark address or invoice");
+    expect(field).toHaveAttribute("autocapitalize", "none");
+    expect(field).toHaveAttribute("autocorrect", "off");
+    expect(field).toHaveAttribute("spellcheck", "false");
+  });
+
+  it("a picture of an address fills it, and asks the amount; nothing is reviewed until the person asks", async () => {
+    qr.text = ADDRESS;
+    const { user, engine } = await show();
+    await user.upload(screen.getByLabelText("Choose image"), picture());
+    expect(await screen.findByDisplayValue(ADDRESS)).toBeInTheDocument();
+    expect(screen.getByTestId("spark-amount")).toHaveValue("");
+    expect(engine.callsTo("preparePayment")).toEqual([]);
+  });
+
+  it("a QR's upper case reads as Spark's own lower case", async () => {
+    qr.text = ADDRESS.toUpperCase();
+    const { user } = await show();
+    await user.upload(screen.getByLabelText("Choose image"), picture());
+    expect(await screen.findByDisplayValue(ADDRESS)).toBeInTheDocument();
+    expect(screen.queryByTestId("spark-address-invalid")).not.toBeInTheDocument();
+  });
+
+  it("Paste of an invoice shows its amount, and the amount typed for the last address goes", async () => {
+    const { user } = await show();
+    await user.type(screen.getByTestId("spark-amount"), "700");
+    qr.clipboard = INVOICE;
+    await user.click(screen.getByTestId("wallet-send-paste"));
+    expect(await screen.findByTestId("spark-invoice-summary")).toHaveTextContent("1,234");
+    qr.clipboard = ADDRESS;
+    await user.click(screen.getByTestId("wallet-send-paste"));
+    expect(await screen.findByTestId("spark-amount")).toHaveValue("");
+  });
+
+  it("on a phone the camera runs as Send opens", async () => {
+    const track = { stop: vi.fn() };
+    qr.camera = { getTracks: () => [track] } as unknown as MediaStream;
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ media: query, matches: query === "(any-pointer: coarse)", onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }));
+    vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    await show();
+    expect(await screen.findByTestId("wallet-send-scan-stop")).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("what is no Spark address is said, and cannot be reviewed", async () => {
+    qr.text = "https://example.com/menu";
+    const { user } = await show();
+    await user.upload(screen.getByLabelText("Choose image"), picture());
+    expect(await screen.findByTestId("spark-address-invalid")).toBeInTheDocument();
+    expect(screen.getByTestId("spark-review")).toBeDisabled();
+  });
+});
+
+// covers: wallet.usdt.send-scan
+describe("the USDT card's Send", () => {
+  /** EIP-55's own example, checksum and all. */
+  const TO = "0x52908400098527886E0F7030069857D2E4169EE7";
+  const SEPOLIA = { chainId: 11155111, token: SEPOLIA_TEST_USDT };
+  const picture = () => new File([new Uint8Array([137, 80, 78, 71])], "qr.png", { type: "image/png" });
+
+  describe("what the USDT card's Send was given", () => {
+    it("an address, or a link to one on the card's chain", () => {
+      expect(routeUsdtSend(` ${TO} `, SEPOLIA)).toEqual({ kind: "address", address: TO });
+      expect(routeUsdtSend(`ethereum:${TO}@11155111`, SEPOLIA)).toEqual({ kind: "address", address: TO });
+      expect(routeUsdtSend(`ethereum:${TO}`, SEPOLIA)).toEqual({ kind: "address", address: TO });
+    });
+
+    it("a transfer of the card's token names the recipient and the amount, in base units", () => {
+      expect(routeUsdtSend(`ethereum:${SEPOLIA_TEST_USDT}@11155111/transfer?address=${TO}&uint256=1500000`, SEPOLIA)).toEqual({ kind: "address", address: TO, amount: 1_500_000n });
+    });
+
+    it("never reads the token's own contract as the recipient, nor ether's value as USDT", () => {
+      expect(routeUsdtSend(`ethereum:${TO}@11155111?value=5000000000000000000`, SEPOLIA)).toEqual({ kind: "address", address: TO });
+      // Another token, on a chain whose USDT is known: not this card's.
+      expect(routeUsdtSend(`ethereum:${ETHEREUM_USDT}@11155111/transfer?address=${TO}&uint256=1`, SEPOLIA)).toEqual({ kind: "unknown" });
+      expect(routeUsdtSend(`ethereum:${SEPOLIA_TEST_USDT}@11155111/approve?address=${TO}&uint256=1`, SEPOLIA)).toEqual({ kind: "unknown" });
+    });
+
+    it("another chain, a bad checksum, the zero address or anything else is not this card's", () => {
+      expect(routeUsdtSend(`ethereum:${TO}@1`, SEPOLIA)).toEqual({ kind: "unknown" });
+      expect(routeUsdtSend(`ethereum:${ETHEREUM_USDT}@1/transfer?address=${TO}&uint256=1`, SEPOLIA)).toEqual({ kind: "unknown" });
+      expect(routeUsdtSend(TO.replace("E7", "e7"), SEPOLIA)).toEqual({ kind: "unknown" });
+      expect(routeUsdtSend(`0x${"0".repeat(40)}`, SEPOLIA)).toEqual({ kind: "unknown" });
+      expect(routeUsdtSend(`pay ${TO} please`, SEPOLIA)).toEqual({ kind: "unknown" });
+      expect(routeUsdtSend(`ethereum:${TO}@11155111 extra`, SEPOLIA)).toEqual({ kind: "unknown" });
+      expect(routeUsdtSend("https://example.com/menu", SEPOLIA)).toEqual({ kind: "unknown" });
+    });
+  });
+
+  describe("Send on the USDT card: scan, paste or picture", () => {
+    beforeEach(() => { qr.text = null; qr.clipboard = null; });
+    const show = async () => {
+      const state = walletView({ mode: "testnet", usdt: { configured: true, locked: false, network: "sepolia", provider: "http://127.0.0.1:1", chainId: 11155111, token: SEPOLIA_TEST_USDT, decimals: 6, address: "0xde709f2102306220921060314715629080e2fb77", balance: "5000000", gasBalance: "1000000000000000" } }) as WalletState;
+      const rendered = renderApp(<UsdtWalletPanel wallet={servicesPlatform!.wallet} state={state} />);
+      await rendered.user.click(screen.getByRole("tab", { name: "Send" }));
+      return rendered;
+    };
+    const field = () => screen.getByLabelText("USDT recipient address");
+
+    it("a phone's keyboard is told not to change a typed address", async () => {
+      await show();
+      expect(field()).toHaveAttribute("autocapitalize", "none");
+      expect(field()).toHaveAttribute("autocorrect", "off");
+      expect(field()).toHaveAttribute("spellcheck", "false");
+    });
+
+    it("a picture of a transfer link fills the recipient and the amount in USDT, and nothing is reviewed until the person asks", async () => {
+      qr.text = `ethereum:${SEPOLIA_TEST_USDT}@11155111/transfer?address=${TO}&uint256=1500000`;
+      const { user, engine } = await show();
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      expect(await screen.findByDisplayValue(TO)).toBe(field());
+      expect(screen.getByDisplayValue("1.5")).toBeInTheDocument();
+      expect(engine.callsTo("preparePayment")).toEqual([]);
+    });
+
+    it("Paste of a bare address fills it, and the amount meant for the last one goes", async () => {
+      const { user } = await show();
+      await user.type(screen.getByLabelText(/^Amount/), "7");
+      qr.clipboard = TO;
+      await user.click(screen.getByTestId("wallet-send-paste"));
+      expect(await screen.findByDisplayValue(TO)).toBe(field());
+      expect(screen.queryByDisplayValue("7")).not.toBeInTheDocument();
+    });
+
+    it("a link typed a key at a time stays in the field as it is typed, and is read once the field is left", async () => {
+      const { user } = await show();
+      await user.type(field(), `ethereum:${TO}@11155111`);
+      expect(field()).toHaveValue(`ethereum:${TO}@11155111`);
+      expect(screen.queryByTestId("wallet-send-unknown")).not.toBeInTheDocument();
+      await user.tab();
+      expect(field()).toHaveValue(TO);
+    });
+
+    it("a typed link that fills nothing stays to be put right, and says so once the field is left", async () => {
+      const { user } = await show();
+      await user.type(field(), "ethereum:");
+      expect(field()).toHaveValue("ethereum:");
+      expect(screen.queryByTestId("wallet-send-unknown")).not.toBeInTheDocument();
+      await user.tab();
+      expect(field()).toHaveValue("ethereum:");
+      expect(screen.getByTestId("wallet-send-unknown")).toBeInTheDocument();
+    });
+
+    it("another chain's link fills nothing, and says so", async () => {
+      qr.text = `ethereum:${TO}@1`;
+      const { user } = await show();
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      expect(await screen.findByTestId("wallet-send-unknown")).toHaveTextContent("That is not a USDT address for this wallet.");
+      expect(field()).toHaveValue("");
+    });
+  });
+});
+
+// covers: wallet.cashu.pay-invoice, wallet.cashu.send-scan
+describe("Send sorts what it was given", () => {
+  /** An invoice that lets the payer choose the amount: the fake regtest one with no amount in its prefix. */
+  const anyAmount = () => {
+    const { words } = bech32.decode(fakeInvoice(1, new Uint8Array(32).fill(7)) as `${string}1${string}`, false);
+    return bech32.encode("lnbcrt", words, false);
+  };
+
+  it("an invoice, as typed, scanned in upper case or behind lightning:", () => {
+    for (const text of [REGTEST_INVOICE, REGTEST_INVOICE.toUpperCase(), `lightning:${REGTEST_INVOICE}`, `LIGHTNING:${REGTEST_INVOICE.toUpperCase()}`, `  ${REGTEST_INVOICE}\n`]) {
+      const route = routeSend(text);
+      expect(route.kind).toBe("invoice");
+      if (route.kind === "invoice") {
+        expect(route.text).toBe(REGTEST_INVOICE);
+        expect(route.invoice.amountSat).toBe(250_000);
+      }
+    }
+  });
+
+  it("a BIP 21 link pays by its lightning= leg, and without one it is not this card's", () => {
+    const route = routeSend(`bitcoin:bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080?amount=0.0025&lightning=${REGTEST_INVOICE}`);
+    expect(route).toMatchObject({ kind: "invoice", text: REGTEST_INVOICE });
+    expect(routeSend(`BITCOIN:?LIGHTNING=${REGTEST_INVOICE.toUpperCase()}`)).toMatchObject({ kind: "invoice", text: REGTEST_INVOICE });
+    expect(routeSend("bitcoin:bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080?amount=0.001").kind).toBe("unknown");
+    expect(routeSend("bitcoin:bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080?lightning=nonsense").kind).toBe("unknown");
+  });
+
+  it("a BIP 21 link's lightning= leg only as the chat reads the same link: the same payment, and a link that may be paid", () => {
+    const address = "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080";
+    // The fallback asks 25 times the link's amount: not the same payment, so it is not paid from here.
+    expect(routeSend(`bitcoin:${address}?amount=0.0001&lightning=${REGTEST_INVOICE}`).kind).toBe("unknown");
+    // A req- parameter this app does not understand (BIP 21), or an amount it cannot read: the link is not paid at all.
+    expect(routeSend(`bitcoin:${address}?amount=0.0025&req-pop=x&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    expect(routeSend(`bitcoin:?req-pop=x&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    expect(routeSend(`bitcoin:?amount=abc&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    // A link with no address whose invoice asks another amount than the link: not the same payment.
+    expect(routeSend(`bitcoin:?amount=0.00001&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    expect(routeSend(`bitcoin:?amount=0.0025&lightning=${REGTEST_INVOICE}`).kind).toBe("invoice");
+    // A req- parameter it does understand is no reason to refuse.
+    expect(routeSend(`bitcoin:${address}?amount=0.0025&req-lightning=${REGTEST_INVOICE}&lightning=${REGTEST_INVOICE}`).kind).toBe("invoice");
+  });
+
+  it("an invoice with no amount is told apart", () => {
+    const route = routeSend(anyAmount());
+    expect(route.kind).toBe("no-amount");
+  });
+
+  it("a Lightning address and an LNURL-pay", () => {
+    expect(routeSend("Satoshi@Example.com")).toEqual({ kind: "destination", text: "satoshi@example.com" });
+    expect(routeSend("lightning:satoshi@example.com")).toEqual({ kind: "destination", text: "satoshi@example.com" });
+    const lnurl = bech32.encode("lnurl", bech32.toWords(new TextEncoder().encode("https://example.com/lnurlp/satoshi")), 2000);
+    expect(routeSend(lnurl.toUpperCase())).toEqual({ kind: "destination", text: lnurl });
+    expect(routeSend("lnurlp://example.com/pay")).toEqual({ kind: "destination", text: "lnurlp://example.com/pay" });
+  });
+
+  it("an LNURL that must not be asked says why", () => {
+    const lnurl = bech32.encode("lnurl", bech32.toWords(new TextEncoder().encode("http://example.com/pay")), 2000);
+    const route = routeSend(lnurl);
+    expect(route.kind).toBe("bad-destination");
+    if (route.kind === "bad-destination") expect(String(route.error)).toMatch(/HTTPS/);
+  });
+
+  it("an ecash token, nothing, and anything else", () => {
+    expect(routeSend("cashuBo2F0gaJhaUgA")).toEqual({ kind: "token", text: "cashuBo2F0gaJhaUgA" });
+    expect(routeSend("   ").kind).toBe("empty");
+    expect(routeSend("hello there").kind).toBe("unknown");
+    expect(routeSend("lnbc-this-is-not-an-invoice").kind).toBe("unknown");
+    expect(routeSend("https://example.com").kind).toBe("unknown");
+  });
+
+  it("a token behind the cashu: URI scheme (cashu:, cashu://, web+cashu://) is the token, given on bare", () => {
+    for (const scheme of ["cashu:", "cashu://", "web+cashu://"]) {
+      expect(routeSend(` ${scheme}cashuBo2F0gaJhaUgA\n`)).toEqual({ kind: "token", text: "cashuBo2F0gaJhaUgA" });
+    }
+    expect(routeSend("cashu:").kind).toBe("unknown");
+    expect(routeSend("cashu:hello").kind).toBe("unknown");
   });
 });

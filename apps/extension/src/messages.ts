@@ -28,6 +28,8 @@ export type RuntimeMessage =
    * page's profile (`EngineStatus.profile`); the tab opens only while the peer runs that one.
    */
   | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string; tag: string; profile: string; page?: ViewerPage; relayOnly?: boolean }
+  /** What a contact's app kept on its viewer origin goes (`forgetServices`): its tabs close, and Chrome clears the origin. */
+  | { target: "background"; type: "forget-service"; peerPubKeyZ32: string; serviceId: string; tag: string }
   /** The profile locked: every tab showing a contact's app closes (`closeServiceWindows`). */
   | { target: "background"; type: "close-services" }
   /** A `lightning:` or `bitcoin:` link, for a wallet on this device: the app page cannot open one itself. */
@@ -36,9 +38,12 @@ export type RuntimeMessage =
   | { target: "background"; type: "local-access-allowed"; profile: string; origin: string }
   /**
    * The peer heard a message while no tab was open: the worker shows a notification with `body`, which opens `chat`
-   * when clicked (apps/extension/src/attentionNotices.ts).
+   * when clicked (apps/extension/src/attentionNotices.ts). `id`: the notification's own (a call's, a random UUID), which
+   * it is taken back by; without one, a chat's next one takes the place of the one before.
    */
-  | { target: "background"; type: "notify"; body: string; chat?: string }
+  | { target: "background"; type: "notify"; body: string; chat?: string; id?: string }
+  /** The notification the peer showed as `id` (a call's, attentionNotices.ts) is over: it leaves the system's list. */
+  | { target: "background"; type: "unnotify"; id: string }
   /**
    * A notification was clicked: the app page that showed it opens its chat and answers `true`; no answer, and the
    * worker shows the app itself (apps/ui/src/lib/notifications.ts).
@@ -67,6 +72,15 @@ export interface ViewerAsk {
 export interface ViewerReply {
   id: number;
   reply: HttpRequestReply | null;
+}
+
+/**
+ * Sent before the reply, as the document hands ask `id` to its peer: from here on the request may have reached the
+ * contact. A port that closes after this and before the reply lost a request that was taken, not one nobody took.
+ */
+export interface ViewerTaken {
+  id: number;
+  taken: true;
 }
 
 export interface HttpRequest {

@@ -6,6 +6,7 @@ import { memberName, sameNamed } from "../lib/groups";
 import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { NAME, withName } from "./apps/aroundName";
 import { focusPastRow, rowAfter } from "./GroupInvitation";
 
 /**
@@ -62,16 +63,17 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
   };
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); close(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-leave-dialog" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
+    {/* The group's and the next admin's names keep their own direction in a line in the page's (`withName`). */}
     <h2 id={`${id}-title`} className="break-words text-base font-semibold">{forget
-      ? group.name ? t("group.leave.forgetTitle", { name: group.name }) : t("group.leave.forgetTitleUnnamed")
-      : group.name ? t("group.leave.title", { name: group.name }) : t("group.leave.titleUnnamed")}</h2>
+      ? group.name ? withName(t("group.leave.forgetTitle", { name: NAME }), group.name) : t("group.leave.forgetTitleUnnamed")
+      : group.name ? withName(t("group.leave.title", { name: NAME }), group.name) : t("group.leave.titleUnnamed")}</h2>
     <div id={`${id}-body`} className="mt-2 space-y-2 text-sm text-text-muted">
       {forget && <p>{t("group.leave.forgetBody")}</p>}
       {/* The last one in has no way back: nobody is left to answer the link or let anyone in. */}
       <p>{t(others.length === 0 ? "group.leave.bodyLast" : community ? "group.leave.bodyCommunity" : "group.leave.body")}</p>
-      {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t, sameNamed(group.members)) })}
+      {successor && others.length > 0 && <p data-testid="group-leave-successor">{withName(t("group.leave.successor", { name: NAME }), memberName(successor, t, sameNamed(group.members)))}
         {/* A private group's link works from the admin's app: the one shared so far stops working with the role. */}
-        {group.entryLink && !community && <> {t("group.link.endsOnHandover", { name: memberName(successor, t, sameNamed(group.members)) })}</>}</p>}
+        {group.entryLink && !community && <> {withName(t("group.link.endsOnHandover", { name: NAME }), memberName(successor, t, sameNamed(group.members)))}</>}</p>}
       {unsaid && <Notice tone="warning" className="text-sm" testId="leave-unsaid" title={t("group.leave.blockedCommunity")} next={t("group.leave.unsaidNext")} />}
       {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={t(blockedNext)} />}
     </div>
@@ -80,7 +82,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
       <button ref={cancel} onClick={close} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       {/* While it leaves, a press does nothing; not disabled, which would drop the focus to the page (and keep it there if refused). */}
       <button disabled={blocked} aria-disabled={busy || undefined} onClick={() => void leave()} data-testid="group-leave-confirm"
-        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-40 aria-disabled:opacity-40">{forget ? t("group.menu.forget") : t("group.menu.leave")}</button>
+        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-40 aria-disabled:opacity-40">{forget ? t("group.menu.forget") : t("group.menu.leave")}</button>
     </div>
   </dialog>, document.body);
 }

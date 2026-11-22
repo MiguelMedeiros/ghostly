@@ -14,6 +14,10 @@
 // when the site changed, and the Rust job when Rust changed. Everything else waits for the pull request to leave
 // draft, whose run (ready_for_review) plans everything again. Drafts are pushed often, by many sessions at once: the
 // full run is about 14 jobs, 2 of them on macOS, and the free plan runs about 20 jobs at a time, 5 on macOS.
+//
+// A ready pull request that already has `queue` and is behind its base gets the fast tier too (queuedBehind, ci.yml
+// passes --draft=true --queued=true): the merge train's batch, built on the base's tip, runs everything for it. One whose
+// fast tier already passed on its head waits a few minutes for `queue` first.
 
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -41,6 +45,11 @@ export const RUST_INPUTS = [
   "packages/cli/src/services.ts",
   // viewer.rs: a test keeps its WebRTC guard the same as the web runner's.
   "packages/core/src/viewerGuard.ts",
+  // viewer.rs: tests keep its permissions policy and clipboard guard the same as core's.
+  "packages/core/src/http.ts",
+  "packages/core/src/clipboardGuard.ts",
+  // dropped_files.rs: tests keep the drop input and the read-by-token answer the same as the page's.
+  "apps/ui/src/lib/pastedFiles.ts",
 ];
 
 /**
@@ -273,6 +282,76 @@ export async function draftBehind({ sha, run, pull, repo, api, settle = () => ne
   return (await ask()).url;
 }
 
+/** The label that puts a pull request in the merge train's line (merge-train.mjs's LABEL.queue). */
+export const QUEUE = "queue";
+/** The label that keeps one in line without boarding (merge-train.mjs's HOLD). */
+export const HOLD = "queue:hold";
+/** The gate's name in a draft's run (merge-train.mjs's DRAFT_GATE). */
+export const DRAFT_GATE = "CI Success (draft)";
+/**
+ * How many times, `settle` apart (15 s), a ready pull request whose fast tier is already green asks again for `queue`:
+ * about 3 minutes. The feeder adds it only once that gate is green, on a pass every 60 s that can take as long again
+ * (108 s seen), and the train then cancels a full run started without it (about 19 runner-min, 2-4 of them on macOS).
+ */
+export const QUEUE_POLLS = 12;
+
+/**
+ * The green "CI Success (draft)" of another CI run of this pull request on this head, or null.
+ * @param {{ sha: string, run: number, pull: number, repo: string, api: (path: string) => Promise<any> }} pr
+ * @returns {Promise<string | null>} that run's address
+ */
+export async function draftGreen({ sha, run, pull, repo, api }) {
+  const { workflow_runs: runs } = await api(`actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sha}&per_page=100`);
+  const green = runs
+    .filter(
+      (r) =>
+        r.id !== run &&
+        r.head_sha === sha &&
+        r.path === ".github/workflows/ci.yml" &&
+        r.head_repository?.full_name === repo &&
+        r.pull_requests?.some((p) => p.number === pull) &&
+        r.status === "completed" &&
+        r.conclusion === "success",
+    )
+    .sort((a, b) => b.id - a.id);
+  for (const r of green) {
+    const { jobs } = await api(`actions/runs/${r.id}/jobs?per_page=100`);
+    if (jobs.some((j) => j.name === DRAFT_GATE && j.conclusion === "success")) return r.html_url;
+  }
+  return null;
+}
+
+/**
+ * How many commits of its base a ready pull request labelled `queue` lacks, or 0. Behind its base, it runs the fast tier
+ * as a draft does: the merge train boards it on its green "CI Success (draft)" and builds the batch on the base's tip,
+ * whose full run is the gate, and it cancels the pull request's own full run, which it would never land on. At the
+ * base's tip it runs everything: the train lands a lone pull request on its own run there, and rebases one that is
+ * behind onto the tip first, so that run plans everything. Without `queue` (`queue:priority` alone too) it runs
+ * everything, as before, but one whose fast tier is already green on this head (it left draft once that passed) first
+ * waits up to QUEUE_POLLS for the feeder's `queue`: it stops waiting, and runs everything, as soon as it gets
+ * `queue:hold`, turns back into a draft or gets another head.
+ * @param {{ pull: number, sha: string, api: (path: string) => Promise<any>, run?: number, repo?: string, settle?: () => Promise<void>, polls?: number }} pr
+ *   `pull` is the pull request's number, `run` this run's id; without `run` it does not wait
+ * @returns {Promise<number>}
+ */
+export async function queuedBehind({ pull, sha, api, run, repo, settle = () => new Promise((r) => setTimeout(r, SETTLE_MS)), polls = QUEUE_POLLS }) {
+  let pr = await api(`pulls/${pull}`);
+  const has = (name) => pr.labels?.some((l) => l.name === name);
+  const waits = () => !has(HOLD) && !pr.draft && pr.head?.sha === sha;
+  if (!has(QUEUE) && !(run && waits())) return 0;
+  const { behind_by: behind } = await api(`compare/${pr.base.ref}...${sha}`);
+  if (!(Number.isInteger(behind) && behind > 0)) return 0;
+  if (has(QUEUE)) return behind;
+  if (!(await draftGreen({ sha, run, pull, repo, api }))) return 0;
+  for (let i = 0; i < polls; i++) {
+    await settle();
+    pr = await api(`pulls/${pull}`);
+    if (!waits()) return 0;
+    if (has(QUEUE)) return behind;
+  }
+  return 0;
+}
+
 // A writer's base change, and GitHub's own when the old base branch was deleted (it tried: failed counts too).
 const BASE_CHANGES = new Set(["base_ref_changed", "automatic_base_change_succeeded", "automatic_base_change_failed"]);
 
@@ -292,10 +371,11 @@ async function retargeted(api, pulls) {
 
 /**
  * @param {string[] | null} files  null: the files are not known (a push, a list too long to read): every path gate is on
- * @param {{ draft: boolean, tested?: boolean, superseded?: boolean }} options  tested: a push to dev whose tree a green
- *   run already tested; superseded: one a newer push's run covers (supersededBy), planned as tested
+ * @param {{ draft: boolean, queued?: boolean, tested?: boolean, superseded?: boolean }} options  tested: a push to dev
+ *   whose tree a green run already tested; superseded: one a newer push's run covers (supersededBy), planned as tested;
+ *   queued: a ready pull request with `queue` behind its base (queuedBehind), planned as a draft
  */
-export function plan(files, { draft, tested = false, superseded = false }) {
+export function plan(files, { draft, queued = false, tested = false, superseded = false }) {
   // Only Tauri Backend runs: only a push to dev saves the Cargo cache that pull requests restore. It looks the cache up
   // first and builds only when this Cargo.lock and toolchain have none yet.
   if (tested || superseded) {
@@ -323,7 +403,11 @@ export function plan(files, { draft, tested = false, superseded = false }) {
   // Then the tier: a draft keeps only the fast jobs, and the site's checks and the Rust job when their gates are on.
   if (draft) {
     const fast = ["lint and types", "the affected unit tests", ...(site ? ["Website"] : []), ...(rust ? ["Tauri Backend"] : [])];
-    why.push(`Draft: the fast tier only (${fast.join(", ")}). Leaving draft runs everything`);
+    why.push(
+      queued
+        ? `Queued and behind its base: the fast tier only (${fast.join(", ")}). The merge train boards it on this run, and its batch's full run is the gate`
+        : `Draft: the fast tier only (${fast.join(", ")}). Leaving draft runs everything`,
+    );
   }
   return {
     lint: true,
@@ -360,6 +444,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     else console.log("This pull request left draft after this run's event, and no run of leaving draft waits behind this one: everything runs");
     process.exit(behind ? 0 : 1);
   }
+  // A ready pull request: exits 0 when it has `queue` (or gets it soon after its fast tier passed on this head) and its
+  // head is behind its base (see queuedBehind), else 1. Any doubt is a 1: the run plans everything, as before.
+  if (process.argv.includes("--queued-behind")) {
+    const { PR_HEAD_SHA: sha, PR_NUMBER: pull, GITHUB_RUN_ID: run, GITHUB_REPOSITORY: repo } = process.env;
+    const behind = await queuedBehind({ pull: Number(pull), sha, api, run: Number(run), repo }).catch((e) => {
+      console.log(`::notice::Could not read whether this pull request is queued behind its base (${e.message}): everything runs`);
+      return 0;
+    });
+    if (behind) console.log(`::notice::This pull request has \`${QUEUE}\` and its head is ${behind} commit(s) behind its base: the merge train's batch runs everything, so this run runs the fast tier`);
+    process.exit(behind ? 0 : 1);
+  }
+  const queued = process.argv.includes("--queued=true");
   let files = null;
   let tested = false;
   let superseded = false;
@@ -384,7 +480,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     files = (await new Response(process.stdin).text()).split("\n").filter(Boolean);
     if (!files.length) throw new Error("no changed files on stdin");
   }
-  const { why, ...jobs } = plan(files, { draft, tested, superseded });
+  const { why, ...jobs } = plan(files, { draft, queued, tested, superseded });
   for (const line of why) console.log(`::notice::${line}`);
   const lines = Object.entries(jobs).map(([job, run]) => `${job}=${run}`);
   console.log(lines.join("\n"));

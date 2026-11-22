@@ -278,7 +278,7 @@ describe("a group on the rail", () => {
 
   it("marks an invitation, and says what it waits for as its row does", () => {
     const view = folded([groupView({ id: "g1", name: "Climbing", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: "a".padEnd(52, "y"), members: 3, accepted: false } })]);
-    expect(group()).toHaveAccessibleName("Climbing, Invited by Alice · 3 members");
+    expect(group()).toHaveAccessibleName("Climbing, Invited by \u2068Alice\u2069 · 3 members");
     expect(within(group()).getByTestId("chat-rail-invitation")).not.toHaveAttribute("data-muted");
     view.unmount();
     // Accepted, the admin's app not answered yet: nothing for me to do, so the mark is grey.

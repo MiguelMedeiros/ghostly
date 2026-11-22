@@ -97,6 +97,10 @@ test("Lightning cards: New adds one of its own beside the mints' card; invoices 
   // once it is on for good (a disabled one would drop it to the page), and so does Rename once the name is saved.
   await showNetwork(page, "testnet");
   await mints.click();
+  // The card's panel follows the deck a render later (useDeferredValue), and as it comes its amount takes the focus (a
+  // card clicked): the switch is focused once the panel is the mints card's, or the focus went with the node card's
+  // panel and the Space below was typed into the amount.
+  await expect(page.getByTestId("lightning-card-name")).toHaveValue("Cashu");
   const toggle = page.getByTestId("lightning-card-default"), rename = page.getByTestId("lightning-card-rename");
   await toggle.focus();
   await page.keyboard.press("Space");

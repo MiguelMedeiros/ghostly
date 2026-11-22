@@ -10,6 +10,9 @@
 //   npm run test:affected -- --files a.ts b.tsx  # these files instead of the diff
 //   npm run test:affected -- --no-e2e --no-rust  # leave those out (also --no-lint, --no-typecheck)
 //   npm run test:affected -- --no-stack          # @gated tests: .env.e2e as it is, the shared stack not asked
+//   npm run test:affected -- --unit-group 3/4    # only CI draft runner 3's unit tests (cli half 1/2)
+//   npm run test:affected -- --integration       # also the integration tests the change reaches (real peers, daemons,
+//                                                # a DHT: tools/scripts/integration-tests.json, CI's Integration tests job)
 //
 // JOBS (default 2): vitest workers, cargo test threads. E2E_WORKERS (default 2): Playwright workers.
 // What is picked and why: tools/scripts/affected/select.mjs. The e2e mapping is e2e/features.json "paths".
@@ -20,7 +23,7 @@ import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HARNESS_PORTS, REMOTE, VARIABLES } from "../../e2e/infra/env.mjs";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "./affected/files.mjs";
-import { plan as makePlan, parseUnitGroup, unitGroupOf } from "./affected/select.mjs";
+import { draftUnitJob, integrationReached, plan as makePlan, parseUnitGroup, unitPartsOf } from "./affected/select.mjs";
 import { COMMANDS, SHARED, blanked, envTarget, gatedTests, stackDecision, statusWhy } from "./affected/stack.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..", "..");
@@ -30,9 +33,35 @@ const option = (name) => {
   const i = argv.indexOf(name);
   return i >= 0 ? argv[i + 1] : undefined;
 };
+// --help: the comment block at the top of this file, whatever its length.
+const usage = () => {
+  const lines = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1);
+  return lines.slice(0, lines.findIndex((l) => !l.startsWith("//"))).map((l) => l.replace(/^\/\/ ?/, "")).join("\n");
+};
 if (flag("--help") || flag("-h")) {
-  console.log(readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1, 17).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+  console.log(usage());
   process.exit(0);
+}
+// An argument it does not take is refused before anything runs: a mistyped --list or --no-e2e, or a path without
+// --files, would otherwise be dropped and start the full run.
+const FLAGS = ["--list", "--no-e2e", "--no-rust", "--no-lint", "--no-typecheck", "--no-stack", "--integration"];
+const OPTIONS = ["--base", "--port", "--unit-group"];
+const unknown = [];
+for (let i = 0; i < argv.length; i++) {
+  if (OPTIONS.includes(argv[i])) i++;
+  else if (argv[i] === "--files") while (i + 1 < argv.length && !argv[i + 1].startsWith("--")) i++;
+  else if (!FLAGS.includes(argv[i])) unknown.push(argv[i]);
+}
+if (unknown.length) {
+  console.error(`test:affected does not take ${unknown.join(" ")}\n\n${usage()}`);
+  process.exit(2);
+}
+// `npm run test:affected --list`, without the `--`: npm keeps the flag for itself (npm_config_list=true, `--no-e2e` as
+// npm_config_e2e="") and passes none, so the full run would start. An option's value still arrives, refused above.
+const kept = FLAGS.filter((f) => process.env[`npm_config_${f.replace(/^--(no-)?/, "").replaceAll("-", "_")}`] !== undefined);
+if (kept.length) {
+  console.error(`npm kept ${kept.join(" ")} for itself: put a -- before the script's arguments (npm run test:affected -- ${kept.join(" ")})`);
+  process.exit(2);
 }
 
 const JOBS = Math.max(1, Number(process.env.JOBS) || 2);
@@ -46,16 +75,32 @@ const noLint = flag("--no-lint");
 const noTypecheck = flag("--no-typecheck");
 const noStack = flag("--no-stack");
 const port = option("--port") ?? process.env.E2E_WEB_PORT;
+// A mistyped port would only show at the e2e step, after the unit tests, lint, typecheck and the web build.
+if (port && !(/^\d+$/.test(port) && Number(port) >= 1 && Number(port) <= 65535)) {
+  console.error(`${flag("--port") ? `--port ${port}` : `E2E_WEB_PORT=${port}`}: give a port number from 1 to 65535 (e.g. --port 50310)`);
+  process.exit(2);
+}
 const webUrl = process.env.E2E_WEB_URL;
 // --unit-group <i>/<n>: only the unit projects of group i of n (CI's draft tier runs one group per runner; select.mjs
-// UNIT_ALONE says which project goes where). Lint, typecheck, Rust and e2e are as without it.
+// UNIT_ALONE says which project goes where, UNIT_HALVED which run in two halves, `vitest --shard`, in two groups).
+// Lint, typecheck, Rust and e2e are as without it.
 const unitGroupText = flag("--unit-group") ? option("--unit-group") ?? "" : null;
 const unitGroup = unitGroupText === null ? null : parseUnitGroup(unitGroupText);
 if (unitGroupText !== null && !unitGroup) {
   console.error(`--unit-group ${unitGroupText}: give <i>/<n>, 1 ≤ i ≤ n (e.g. --unit-group 2/4)`);
   process.exit(2);
 }
-const otherGroup = (u) => unitGroup !== null && unitGroupOf(u.name, unitGroup.count) !== unitGroup.index;
+/** This group's part of a unit project: { shard } (null: all of it), or null when only other groups run it. */
+const partHere = (u) => (unitGroup === null ? { shard: null } : unitPartsOf(u.name, unitGroup.count).find((part) => part.group === unitGroup.index) ?? null);
+// One nothing reaches is skipped in every group: "group N runs it" would send the reader to a group that skips it too.
+const otherGroup = (u) => u.mode !== "skip" && partHere(u) === null;
+/** Where the other halves of a halved project run, for the plan's line: "; group 4 runs 2/2". */
+const otherParts = (u) => (unitGroup === null ? "" : unitPartsOf(u.name, unitGroup.count).filter((part) => part.group !== unitGroup.index && part.shard).map((part) => `; group ${part.group} runs ${part.shard}`).join(""));
+/** Where a project this group leaves out runs: "group 2 runs it", or "groups 3 and 4 run it in halves". */
+const runsIt = (u) => {
+  const parts = unitPartsOf(u.name, unitGroup.count);
+  return parts.length === 1 ? `group ${parts[0].group} runs it` : `groups ${parts.map((part) => part.group).join(" and ")} run it in halves`;
+};
 
 const git = (...args) => {
   const r = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
@@ -118,9 +163,15 @@ const e2eFiles = sources("e2e");
 // (tools/scripts/affected/files.mjs).
 const known = knownFiles(ROOT);
 const codeFiles = { ...repoCode(ROOT, known), ...e2eFiles };
-const p = makePlan({ changed, inventory, e2eFiles, codeFiles, packages: workspacePackages(ROOT, known) });
+const packages = workspacePackages(ROOT, known);
+const p = makePlan({ changed, inventory, e2eFiles, codeFiles, packages });
+// The package tests that start real peers, daemons or a DHT: named, and left to CI's Integration tests job unless
+// --integration (the unit runs below set GHOSTLY_INTEGRATION, tools/vitest.shared.ts).
+const integration = flag("--integration");
+const integrationList = JSON.parse(readFileSync(join(ROOT, "tools/scripts/integration-tests.json"), "utf8")).map((entry) => entry.file);
 
 // ---------- the plan, printed ----------
+const skipped = [];
 const short = (xs, n = 8) => (xs.length <= n ? xs.join(", ") : `${xs.slice(0, n).join(", ")} … (+${xs.length - n})`);
 console.log(`test:affected — ${changed.length} changed file(s) from ${from}`);
 for (const c of changed.slice(0, 40)) console.log(`  ${c.exists ? " " : "-"} ${c.path}`);
@@ -130,13 +181,17 @@ console.log(`\nworkers: vitest ${JOBS} (JOBS), playwright ${E2E_WORKERS} (E2E_WO
 
 console.log(`unit (vitest)${unitGroup ? `: group ${unitGroup.index} of ${unitGroup.count} (--unit-group)` : ""}`);
 for (const u of p.unit) {
-  if (otherGroup(u)) console.log(`  ${"other".padEnd(7)} ${u.name.padEnd(9)} group ${unitGroupOf(u.name, unitGroup.count)} runs it (${u.mode}: ${u.reason})`);
-  else console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.reason}`);
+  if (otherGroup(u)) console.log(`  ${"other".padEnd(7)} ${u.name.padEnd(9)} ${runsIt(u)} (${u.mode}: ${u.reason})`);
+  else console.log(`  ${u.mode.padEnd(7)} ${u.name.padEnd(9)} ${u.mode !== "skip" && partHere(u).shard ? `half ${partHere(u).shard} (vitest --shard${otherParts(u)}): ` : ""}${u.reason}`);
+  const reached = otherGroup(u) ? [] : integrationReached(u, integrationList, codeFiles, packages);
+  if (reached.length) console.log(`  ${"integ".padEnd(7)} ${u.name.padEnd(9)} ${reached.length} integration test file(s) it reaches, ${integration ? "run with it (--integration)" : "not run (CI's Integration tests job runs them; --integration runs them here)"}: ${short(reached.map((f) => f.split("/").pop()), 6)}`);
+  if (reached.length && !integration) skipped.push(`integration ${u.name}: ${reached.length} file(s) the change reaches (--integration runs them)`);
 }
 console.log("lint (eslint)");
-console.log(`  ${p.lint.mode.padEnd(7)} ${p.lint.reason}${p.lint.files ? `: ${short(p.lint.files)}` : ""}`);
+if (noLint && p.lint.mode !== "skip") console.log(`  ${"off".padEnd(7)} --no-lint`);
+else console.log(`  ${p.lint.mode.padEnd(7)} ${p.lint.reason}${p.lint.files ? `: ${short(p.lint.files)}` : ""}`);
 console.log("typecheck (tsc)");
-for (const t of p.typecheck) console.log(`  ${t.mode.padEnd(7)} ${t.name.padEnd(18)} ${t.reason}`);
+for (const t of p.typecheck) console.log(`  ${(noTypecheck && t.mode !== "skip" ? "off" : t.mode).padEnd(7)} ${t.name.padEnd(18)} ${noTypecheck && t.mode !== "skip" ? "--no-typecheck" : t.reason}`);
 console.log("rust (cargo)");
 for (const r of p.rust) console.log(`  ${(noRust && r.mode === "run" ? "off" : r.mode).padEnd(7)} ${r.name.padEnd(9)} ${noRust && r.mode === "run" ? "--no-rust" : r.reason}`);
 console.log("e2e (playwright)");
@@ -212,17 +267,22 @@ function run(label, cmd, args, opts = {}) {
     });
   });
 }
-const skipped = [];
 const started = Date.now();
 
 // unit
 for (const u of p.unit) {
-  if (otherGroup(u)) { skipped.push(`unit ${u.name}: group ${unitGroupOf(u.name, unitGroup.count)} runs it (--unit-group ${unitGroup.index}/${unitGroup.count})`); continue; }
+  if (otherGroup(u)) { skipped.push(`unit ${u.name}: ${runsIt(u)} (--unit-group ${unitGroup.index}/${unitGroup.count})`); continue; }
   if (u.mode === "skip") { skipped.push(`unit ${u.name}: ${u.reason}`); continue; }
   const cwd = join(ROOT, u.cwd);
-  const common = [...u.args, `--maxWorkers=${JOBS}`, "--passWithNoTests"];
-  if (u.mode === "whole") await run(`unit ${u.name} (whole: ${u.reason})`, "npx", ["vitest", "run", ...common], { cwd });
-  else await run(`unit ${u.name} (related)`, "npx", ["vitest", "related", ...u.files.map((f) => join(ROOT, f)), "--run", ...common], { cwd });
+  const { shard } = partHere(u);
+  const common = [...u.args, `--maxWorkers=${JOBS}`, "--passWithNoTests", ...(shard ? [`--shard=${shard}`] : [])];
+  const half = shard ? `, half ${shard}` : "";
+  const env = { GHOSTLY_INTEGRATION: integration ? "1" : "0" };
+  const ok = u.mode === "whole"
+    ? await run(`unit ${u.name} (whole: ${u.reason}${half})`, "npx", ["vitest", "run", ...common], { cwd, env })
+    : await run(`unit ${u.name} (related${half})`, "npx", ["vitest", "related", ...u.files.map((f) => join(ROOT, f)), "--run", ...common], { cwd, env });
+  // CI Success can only say that one of the groups failed: the group's job says which project.
+  if (!ok && unitGroup && process.env.GITHUB_ACTIONS === "true") console.log(`::error::${draftUnitJob(unitGroup)}: unit ${u.name}${shard ? ` (half ${shard})` : ""} failed`);
 }
 
 // lint
@@ -273,9 +333,11 @@ async function runE2e() {
   const needsExt = e2eSelected.some((s) => s.startsWith("e2e/extension/"));
   let url = webUrl;
   let preview = null;
-  // The suite's build: the local OIDC issuer and the SDK example's adapters (see e2e/playwright.config.ts).
+  // The suite's build: the local OIDC issuer, the SDK example's adapters and a services host on this port, so a
+  // contact's shared app opens on `<label>.localhost` (see e2e/playwright.config.ts).
   const issuer = /OIDC_TEST_ISSUER\s*=.*?"([^"]+)"/.exec(readFileSync(join(ROOT, "e2e/support/oidcIssuer.ts"), "utf8"))?.[1];
-  const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, VITE_ATPROTO_TEST_PLC: "https://plc.ghostly.test", GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1" };
+  const suiteEnv = { VITE_OIDC_TEST_ISSUER: process.env.E2E_OIDC_ISSUER ?? issuer, VITE_ATPROTO_TEST_PLC: "https://plc.ghostly.test", GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1",
+    VITE_SERVICES_HOST: `http://*.localhost:${port}`, VITE_SERVICES_APP_ORIGIN: `http://localhost:${port}` };
   // Extension specs pair with the web app too (interop), so a build is served whatever was picked.
   if (!url) {
     // Something already answering there is another session's build: testing it would test the wrong app.

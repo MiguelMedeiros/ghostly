@@ -241,6 +241,7 @@
       "closed": "Cerrado",
       "paid": "Pagado",
       "paidBy": "Pagado por {{name}}",
+      "paidByMe": "Pagado por ti",
       "saysPaid": "{{names}} dice que pagó · esperando la billetera de {{to}}",
       "saysPaidToMe": "{{names}} dice que pagó · esperando tu billetera",
       "sent": "Enviado · esperando a {{name}}",

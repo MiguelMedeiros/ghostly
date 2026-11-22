@@ -131,7 +131,9 @@ export function Profile() {
   const [error, setError] = useState<Problem | null>(null);
   useEffect(() => setName(plain), [plain]);
 
-  const chats = useStoredSessions(chatCount, Object.is);
+  // Its groups are chats too, as the chat list shows them.
+  const groups = useEngineValue(state => state?.groups.length ?? 0);
+  const chats = useStoredSessions(chatCount, Object.is) + groups;
   const attempt = (work: () => void) => { try { work(); setError(null); } catch (e) { setError(problemText(e, t)); } };
   const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => { renameProfile(current.id, name); setNameSaved(true); }); };
   const schemes: { value: ColorScheme; label: string }[] = [{ value: "light", label: t("settings.colorSchemes.light") }, { value: "dark", label: t("settings.colorSchemes.dark") }, { value: "system", label: t("settings.colorSchemes.system") }];
@@ -140,7 +142,8 @@ export function Profile() {
     <Page title={t("settings.profile")} width="md" testId="profile-page">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {/* The picture goes to paired contacts with the name: a fresh 128×128 JPEG, nothing of the file. */}
-        <label className="relative shrink-0 cursor-pointer group rounded-full focus-within:ring-2 focus-within:ring-accent" title={myAvatar ? t("profile.changePictureHint") : t("profile.addPictureHint")}>
+        {/* With no picture the badge is the accent itself: its ring sits past a gap of the page's colour, or it is not seen. */}
+        <label className="relative shrink-0 cursor-pointer group rounded-full focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-chat-bg" title={myAvatar ? t("profile.changePictureHint") : t("profile.addPictureHint")}>
           <ProfileBadge entry={{ ...current, name: name || plain }} size={52} avatar={myAvatar} />
           <span aria-hidden="true" className="absolute inset-0 rounded-full bg-black/45 grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
