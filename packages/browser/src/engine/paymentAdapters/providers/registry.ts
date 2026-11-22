@@ -1,14 +1,14 @@
-import { bdk } from "./bdk";
+import { bdk } from "./bdkProvider";
 import { bitcoindRpc } from "./bitcoindProvider";
-import { breez } from "./breez";
+import { breez } from "./breezProvider";
 import { cashuMint } from "./cashuMint";
 import { fedimint } from "./fedimint";
-import { coreLightning } from "./coreLightning";
+import { coreLightning } from "./coreLightningProvider";
 import { nwc } from "./nwcProvider";
-import { lnd } from "./lnd";
+import { lnd } from "./lndProvider";
 import type { LightningProviderDescriptor } from "./lightning";
 import type { OnchainProviderDescriptor } from "./onchain";
-import { webln } from "./webln";
+import { webln } from "./weblnProvider";
 import { fakeLightning, fakeOnchain, testProvidersEnabled } from "./testing";
 import { offeredIn } from "./types";
 import { registeredLightningProviders, registeredOnchainProviders, reserveAdapterIds } from "../../../plugins/registry";
@@ -55,11 +55,15 @@ function external<D extends { id: string }>(kind: string, builtIn: readonly D[],
 /**
  * The built-in providers, then the ones plugins registered, then the fakes when this browser asked
  * for them (e2e). Read each time: a plugin registering later shows up on the next read.
+ *
+ * The fakes' test of the build is `testBuild`'s, written out rather than called: a release build folds it to `false`
+ * and leaves the fakes, and `./testing` with them, out of the bundle. A call to `testBuild` is kept, and the fakes
+ * shipped behind it to every first load.
  */
 export function defaultRegistry(): ProviderRegistry {
   return {
-    get lightning() { return [...LIGHTNING_PROVIDERS, ...external("lightning", LIGHTNING_PROVIDERS, registeredLightningProviders()), ...(testProvidersEnabled() ? [fakeLightning] : [])]; },
-    get onchain() { return [...ONCHAIN_PROVIDERS, ...external("onchain", ONCHAIN_PROVIDERS, registeredOnchainProviders()), ...(testProvidersEnabled() ? [fakeOnchain] : [])]; },
+    get lightning() { return [...LIGHTNING_PROVIDERS, ...external("lightning", LIGHTNING_PROVIDERS, registeredLightningProviders()), ...((!!import.meta.env?.DEV || import.meta.env?.VITE_APPS_TEST === "1") && testProvidersEnabled() ? [fakeLightning] : [])]; },
+    get onchain() { return [...ONCHAIN_PROVIDERS, ...external("onchain", ONCHAIN_PROVIDERS, registeredOnchainProviders()), ...((!!import.meta.env?.DEV || import.meta.env?.VITE_APPS_TEST === "1") && testProvidersEnabled() ? [fakeOnchain] : [])]; },
   };
 }
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommunityWorld, type Peer } from "./communityWorld";
-import { MESH_GOSSIP_MS } from "../src/engine/groups";
+import { MESH_GOSSIP_MS, newestMarked, UNMARK_PAGE, type GroupStore } from "../src/engine/groups";
 // covers: groups.catch-up, groups.community.catch-up
 
 /**
@@ -31,6 +31,21 @@ async function deleteForEveryone(peer: Peer, id: string, messageId: string): Pro
   await peer.groups.removed(id, messageId);
   peer.messages.splice(peer.messages.indexOf(row), 1);
   await peer.groups.unmark(id, row);
+}
+
+/** The store with pages from the newest back, as the engine's database reads them (`db.getMessagePage`), and the rows each read returns counted. */
+function paged(store: GroupStore, read: { rows: number }): GroupStore {
+  const sorted = async (linkId: string) => (await store.getMessages(linkId)).sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return {
+    ...store,
+    getMessages: async linkId => { const rows = await sorted(linkId); read.rows += rows.length; return rows; },
+    getMessagePage: async (linkId, { limit, before }) => {
+      const kept = (await sorted(linkId)).filter(m => !before || m.timestamp < before.timestamp || (before.id !== undefined && m.timestamp === before.timestamp && m.id < before.id));
+      const messages = kept.slice(-limit);
+      read.rows += messages.length;
+      return { messages, more: kept.length > limit };
+    },
+  };
 }
 
 const marks = (world: CommunityWorld, peer: Peer, id: string) => {
@@ -65,6 +80,32 @@ describe("a group line deleted for everyone", { timeout: 120_000 }, () => {
     await world.restart(alice);
     const restarted = marks(world, alice, id);
     for (const mark of [restarted.lastPeerMessageAt, restarted.lastMentionAt, restarted.lastMessageAt]) expect(mark).toBeLessThanOrEqual(readAt);
+  });
+
+  it.each(["mesh", "community"] as const)("in a %s group with a long history: the newest line deleted reads the last rows only, and the marks are what the whole history says", async (kind) => {
+    const { world, peers, id } = await groupOf(kind, ["alice", "bob"]);
+    const [alice, bob] = peers;
+    const aliceKey = world.view(alice, id)!.myKey!;
+    const linkId = `group:${id}`;
+    // 1,500 older lines of Bob's, one of them mentioning Alice 100 rows back.
+    for (let i = 1_500; i > 0; i--) alice.messages.push({ linkId, id: `old-${i}`, text: `old ${i}`, sender: "bob", timestamp: world.now - 60_000 - i * 10, via: "datalink", ...(i === 100 && { mentioned: true }) });
+    const read = { rows: 0 };
+    alice.store = paged(alice.store, read);
+    await new Promise(r => setTimeout(r, 1_100));
+    await world.restart(alice);
+    const { messageId } = await bob.groups.send(id, "@alice typo", [{ k: aliceKey, o: 0, l: 6 }]);
+    await world.until(() => world.texts(alice, id).includes("@alice typo"), MESH_GOSSIP_MS + 60_000);
+    read.rows = 0;
+    await deleteForEveryone(alice, id, messageId!);
+    const rows = read.rows;
+    const whole = newestMarked(await alice.store.getMessages(linkId));
+    console.log(`LONG ${kind}: unmark read ${rows} of ${alice.messages.length} rows`);
+    expect(rows).toBeLessThanOrEqual(3 * (UNMARK_PAGE + 1));
+    const after = marks(world, alice, id);
+    expect(after.lastMessageAt).toBe(whole.last!.timestamp);
+    expect(after.lastPeerMessageAt).toBe(whole.peer!.timestamp);
+    expect(after.lastMentionAt).toBe(whole.mention!.timestamp);
+    expect(whole.mention!.id).toBe("old-100");
   });
 
   it("a member away while it was written and deleted gets no \"@\" from the copy refused when it comes", async () => {

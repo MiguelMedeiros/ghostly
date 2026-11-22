@@ -10,6 +10,27 @@ export function peerDisplayName(name: string | undefined): string | undefined {
   return name ? sanitizeDisplayText(name, MAX_NICK_LENGTH) : undefined;
 }
 
+/**
+ * A chat's name on this side as the engine keeps one (`renameLink`): one line, invisible and direction-changing
+ * characters gone, 48 characters at most. Undefined when nothing visible is left: the contact's own name shows.
+ */
+export function chatLabelOf(label: unknown): string | undefined {
+  return typeof label === "string" ? sanitizeDisplayText(label.replace(/\s+/gu, " "), 48)?.replace(/ {2,}/g, " ") : undefined;
+}
+
+/**
+ * A stored chat as parsed, its names read as they are written (`chatLabelOf`, `peerDisplayName`): a copy a restored
+ * backup, an older app or another page wrote is shown as one this page wrote.
+ */
+function parseSession(raw: string): ChatSession {
+  const session = JSON.parse(raw) as ChatSession;
+  if (session && typeof session === "object") {
+    if (session.label !== undefined) session.label = chatLabelOf(session.label);
+    if (session.nick !== undefined) session.nick = peerDisplayName(typeof session.nick === "string" ? session.nick : undefined);
+  }
+  return session;
+}
+
 export const GHOST_NAMES = [
   "Casper", "Phantom", "Specter", "Shadow", "Wraith",
   "Spirit", "Poltergeist", "Banshee", "Shade", "Apparition",
@@ -29,17 +50,6 @@ export function getRandomGhostName(): string {
   const draw = new Uint32Array(1);
   do crypto.getRandomValues(draw); while (draw[0]! >= limit);
   return GHOST_NAMES[draw[0]! % GHOST_NAMES.length];
-}
-
-export function getGhostName(peerKey: string): string {
-  let hash = 0;
-  for (let i = 0; i < peerKey.length; i++) {
-    const char = peerKey.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  const index = Math.abs(hash) % GHOST_NAMES.length;
-  return GHOST_NAMES[index];
 }
 
 let _profile = "";
@@ -77,18 +87,28 @@ export function keyOwner(): (key: string) => boolean {
 /**
  * The switches of this device, not of a profile, kept under the first profile's prefix: they never go with one. Every
  * profile here reads them: Keep awake, Stay connected, the call's small window (CallOverlay: its choice, its place and
- * size, the self view's) and the update notice dismissed (UpdateContext).
+ * size, the self view's), the group call's (GroupCallView: its choice, its place and size) and the update notice
+ * dismissed (UpdateContext).
  */
 const DEVICE_KEYS = new Set([
   "ghostly_keep_awake", "ghostly_stay_connected",
   "ghostly_call_mini", "ghostly_call_window_box", "ghostly_call_self_view_box", "ghostly_update_dismissed",
+  "ghostly_group_call_mini", "ghostly_group_call_window_box",
 ]);
 // Never one of this device's switches: Clear all data of the first profile turned them off for every profile here, taking
 // it back dropped them with its old copy's keys, and its backups and moves carried them (bug hunt, 2026-11-11).
 const ownsUnprefixed = (key: string, spaces = otherSpaces()) => {
   const rest = key.slice("ghostly_".length);
-  return !DEVICE_KEYS.has(key) && !PROFILE_KEY.test(rest) && !spaces.some((ns) => rest.startsWith(`${ns}_`));
+  if (DEVICE_KEYS.has(key)) return false;
+  if (OWN_PROFILE_SHAPED.has(key)) return true;
+  return !PROFILE_KEY.test(rest) && !spaces.some((ns) => rest.startsWith(`${ns}_`));
 };
+/**
+ * The first profile's own keys whose suffix starts as another profile's id would (10 letters or digits and `_`):
+ * Identities' news seen (`identities_seen`). Clear all data of the first profile left it, with its links' and proofs'
+ * ids, and its backups and moves left it out (bug hunt, 2026-11-12).
+ */
+const OWN_PROFILE_SHAPED = new Set(["ghostly_identities_seen"]);
 /**
  * Which keys are the first profile's own in its original namespace (`ghostly_` with no other profile's id or space
  * after it), whichever profile or space this page runs as: one a handoff installed elsewhere leaves them behind.
@@ -121,10 +141,12 @@ function getKey(sessionId: string): string {
 /**
  * The key a chat's id is read from, or null for an id no chat has: a chat's id never has `_` (`isSessionKey`), and one
  * that has it (a chat address's `chat_folders`) names another of the profile's keys or, in the first profile, whose
- * prefix starts every other profile's, another profile's chat.
+ * prefix starts every other profile's, another profile's chat. `profiles` has no `_` but, in the first profile, names the
+ * registry of profiles (`registryKey` in lib/profiles, not imported here: it would load lib/profiles with this module),
+ * and a chat's id is never it (`newSessionId`).
  */
 function readableKey(sessionId: string): string | null {
-  return sessionId && !sessionId.includes("_") ? getKey(sessionId) : null;
+  return sessionId && sessionId !== "profiles" && !sessionId.includes("_") ? getKey(sessionId) : null;
 }
 
 /** Whether a stored key is one of this profile's chats: the prefix and the chat's id; a longer key is another profile's, or not a chat. */
@@ -387,7 +409,7 @@ function loadStored(sessionId: string): ChatSession | null {
   try {
     const raw = readKey(key);
     if (!raw) return null;
-    return JSON.parse(raw) as ChatSession;
+    return parseSession(raw);
   } catch {
     return null;
   }
@@ -500,22 +522,43 @@ function dropOldCallLines(session: ChatSession): void {
 export function deleteMessage(
   sessionId: string,
   messageId: string,
+  /**
+   * The session as it is stored now, read already (the mirror's, `platform/sync.ts`), as `addMessages` takes it. Without
+   * it, the chat as the page's cache holds it (`loadShownSession`): one gone already (the mirror took it out when the
+   * engine told of its removal) costs no parse and merge of a chat of thousands. Neither is changed in place.
+   */
+  held?: ChatSession,
 ): ChatSession | null {
-  const session = loadSession(sessionId);
-  if (!session) return null;
+  return deleteMessages(sessionId, [messageId], held);
+}
 
-  const index = session.messages.findIndex((m) => m.id === messageId);
-  if (index === -1) return null;
+/**
+ * Forgets several messages on this device at once (`deleteMessage`), the chat written once: removals the engine told in
+ * one tick. Null when none of them is in the chat.
+ */
+export function deleteMessages(sessionId: string, messageIds: readonly string[], held?: ChatSession): ChatSession | null {
+  const shown = held ?? loadShownSession(sessionId);
+  if (!shown) return null;
 
-  session.messages.splice(index, 1);
-  session.deletedIds = [...(session.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS);
-  saveSession(session);
-
+  const ids = new Set(messageIds);
   // Unread is "messages since the last read one": a read message that goes
   // takes its place in that count with it, or every later one reads as unread.
   const lastRead = getLastReadCount(sessionId);
-  const older = session.older ?? 0;
-  setReadCount(sessionId, Math.min(older + index < lastRead ? lastRead - 1 : lastRead, older + session.messages.length));
+  const older = shown.older ?? 0;
+  const removed: string[] = [];
+  let readGone = 0;
+  const messages = shown.messages.filter((m, i) => {
+    if (!ids.has(m.id)) return true;
+    removed.push(m.id);
+    if (older + i < lastRead) readGone++;
+    return false;
+  });
+  if (!removed.length) return null;
+
+  const session = { ...shown, messages };
+  session.deletedIds = [...(session.deletedIds ?? []), ...removed].slice(-MAX_DELETED_IDS);
+  saveSession(session);
+  setReadCount(sessionId, Math.min(lastRead - readGone, (session.older ?? 0) + session.messages.length));
   return session;
 }
 
@@ -763,7 +806,7 @@ export function forgetShownSession(sessionId: string): void {
  */
 function readThrough(key: string, raw: string, cache?: SessionCache): { parsed: ChatSession; session: ChatSession } {
   const hit = cache?.get(key);
-  const parsed = hit?.raw === raw ? hit.session : JSON.parse(raw) as ChatSession;
+  const parsed = hit?.raw === raw ? hit.session : parseSession(raw);
   // With its older messages, the same object while neither it nor its whole history changed (the sync's reconcile
   // tells an unchanged list by its sessions' identity).
   const list = parsed.older ? whole.get(parsed.id) : undefined;
@@ -893,7 +936,7 @@ function namesOf(chat: ChatKeys): { label?: string; nick?: string } | undefined 
   let known = names.get(chat.key);
   if (known?.raw !== raw) {
     try {
-      const session = JSON.parse(raw) as ChatSession;
+      const session = parseSession(raw);
       names.set(chat.key, known = { raw, label: session.label, nick: session.nick });
     } catch {
       return undefined;
@@ -1132,7 +1175,7 @@ export function setSessionPeerNick(sessionId: string, peerNick: string): boolean
 export function updateSessionLabel(sessionId: string, label: string): void {
   const session = loadSession(sessionId);
   if (!session) return;
-  session.label = label || undefined;
+  session.label = chatLabelOf(label);
   saveSession(session);
 }
 

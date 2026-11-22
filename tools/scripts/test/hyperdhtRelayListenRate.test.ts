@@ -40,7 +40,7 @@ it("drops a client that starts more listens a minute than `listensPerMinute`, cl
     expect(relay.stats()).toMatchObject({ clients: 1, dropped: 0 });
     void churner.node.createServer().listen(DHT.keyPair()).catch(() => {});
     await within(churner.closed);
-    expect(reasons).toContain("dropped listen rate");
+    expect(reasons).toContain("dropped listen rate: 5 listens a minute (GHOSTLY_RELAY_LISTENS_PER_MINUTE)");
     expect(relay.stats()).toMatchObject({ clients: 0, dropped: 1 });
     // Refused listens (a key another client holds) count too: they cost the relay as much.
     const holder = await client(relay);

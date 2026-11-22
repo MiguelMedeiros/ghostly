@@ -1,14 +1,20 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GROUP_FILE_LIMITS, type GroupFileMeta } from "@ghostly/core";
 import { CommunityWorld, type Peer } from "./communityWorld";
 import { GroupFileDesk, groupFileId, type GroupFileStore, type GroupFileWriter } from "../src/engine/groupFiles";
 import type { StoredFile } from "../src/shared/idb";
 import type { FileTransferView } from "../src/shared/types";
+vi.mock("../../core/src/identity", async importOriginal => (await import("../../core/test/support/verifyOnce")).verifyOnce(await importOriginal()));
 // covers: groups.files
 
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("base64url");
 const pattern = (size: number, seed: number) => { const out = new Uint8Array(size); for (let i = 0; i < size; i++) out[i] = (i * 31 + seed * 7) & 0xff; return out; };
+
+const elapsed = performance.now;
+afterEach(() => { performance.now = elapsed; });
+/** A world whose time gone by, as every device's monotonic clock reads it, is the world's. */
+const newWorld = () => { const world = new CommunityWorld(); performance.now = () => world.now; return world; };
 
 /** A device's files store and file storage, in memory. */
 class MemoryFiles implements GroupFileStore {
@@ -54,7 +60,7 @@ const cases: [string, number, { autoDownloads?: boolean; serveFiles?: boolean } 
  */
 describe("a member back from away in a busy group", { timeout: 10 * 60_000 }, () => {
   it.each(cases)("asks for the files it missed about once each, and reports each file's row only when it changes: %s", async (_, senders, other) => {
-    const world = new CommunityWorld();
+    const world = newWorld();
     const files = new Map<Peer, { store: MemoryFiles; transfers: Map<string, FileTransferView> }>();
     const add = (name: string) => {
       const f = { store: new MemoryFiles(), transfers: new Map<string, FileTransferView>() };
@@ -144,7 +150,7 @@ describe("files waiting for their author, away", { timeout: 10 * 60_000 }, () =>
     const proto = GroupFileDesk.prototype as unknown as { ask(...args: unknown[]): unknown };
     const ask = proto.ask;
     try {
-      const world = new CommunityWorld();
+      const world = newWorld();
       const files = new Map<Peer, { store: MemoryFiles; transfers: Map<string, FileTransferView>; settings: { autoDownloads: boolean; serveFiles: boolean } }>();
       const add = (name: string) => {
         const f = { store: new MemoryFiles(), transfers: new Map<string, FileTransferView>(), settings: { autoDownloads: name !== "zed", serveFiles: true } };
@@ -215,6 +221,172 @@ describe("files waiting for their author, away", { timeout: 10 * 60_000 }, () =>
       expect(z.store.bytes.size).toBe(alices.length + bobs.length);
     } finally {
       proto.ask = ask;
+      Object.assign(limits, saved);
+    }
+  });
+
+  /**
+   * Each edge that came up asked every one of them again, twice (for its files/3 session and for the edge), though its
+   * member joined after them and holds none: a member back with 1,000 such files in a group of 16 asked 29,000 times at
+   * each restart, about a second of main-thread time, and 2,000 times each time a member's edge came back.
+   */
+  it("are not asked again by edges whose members cannot serve them, and come once their author is back", async () => {
+    const limits = GROUP_FILE_LIMITS as { -readonly [K in keyof typeof GROUP_FILE_LIMITS]: number };
+    const saved = { ...limits };
+    Object.assign(limits, { announcePerMinute: 1_000, announceTaken: 1_000 });
+    const proto = GroupFileDesk.prototype as unknown as { ask(...args: unknown[]): unknown; couldServe(...args: unknown[]): unknown };
+    const { ask, couldServe } = proto;
+    try {
+      const world = newWorld();
+      const files = new Map<Peer, { store: MemoryFiles; transfers: Map<string, FileTransferView> }>();
+      const add = (name: string) => {
+        const f = { store: new MemoryFiles(), transfers: new Map<string, FileTransferView>() };
+        const settings = { autoDownloads: name !== "zed", serveFiles: true };
+        const peer = world.add(name, p => ({ groupFiles: { store: f.store, transfers: f.transfers, brief: () => {}, settings: () => settings,
+          sendFiles: (linkId, frame) => world.sendFiles(p, linkId, frame) } }));
+        files.set(peer, f);
+        return peer;
+      };
+      const fileOf = (peer: Peer, m: string) => peer.messages.find(x => x.id === m)?.file?.id;
+      const waiting = (sent: string[]) => sent.filter(m => files.get(zed)!.transfers.get(fileOf(zed, m)!)?.stage === "waiting").length;
+      const online = (peer: Peer, others: Peer[]) => others.every(o => world.view(peer, id)!.members.find(m => m.key === world.view(o, id)!.myKey)?.online);
+
+      const [alice, zed] = ["alice", "zed"].map(add);
+      const id = await alice.groups.create("Files", "mesh");
+      const link = await alice.groups.enableLink(id);
+      await zed.groups.joinByLink(link);
+      await world.until(() => [alice, zed].every(p => world.view(p, id)?.members.length === 2 && world.view(p, id)!.members.every(m => m.online)), 30 * 60_000, 1000);
+      const alices: string[] = [];
+      for (let i = 0; i < 100; i++) {
+        const store = files.get(alice)!.store, fileId = groupFileId(id, "out"), bytes = pattern(500, i), d = sha(bytes);
+        const meta: GroupFileMeta = { name: `f-${i}.bin`, mime: "application/octet-stream", size: bytes.length, d };
+        store.bytes.set(fileId, bytes);
+        await store.put({ id: fileId, linkId: `group:${id}`, direction: "out", digest: d, createdAt: world.now, metadata: { name: meta.name, size: meta.size, mime: meta.mime, timestamp: world.now } });
+        const r = await alice.groups.sendFile(id, meta.name, meta, fileId);
+        expect(r.error).toBeNull();
+        alices.push(r.messageId!);
+        if (alices.length % 25 === 0) await world.run(10_000);
+      }
+      await world.until(() => alices.every(m => fileOf(zed, m)), 30 * 60_000, 1000);
+      // Members who joined after Alice's files: they could not read them, so only Alice can serve them.
+      const later = ["bob", "carol", "dan", "eve"].map(add);
+      for (const p of later) await p.groups.joinByLink(link);
+      const all = [alice, zed, ...later];
+      await world.until(() => all.every(p => world.view(p, id)?.members.length === all.length && world.view(p, id)!.members.every(m => m.online)), 30 * 60_000, 1000);
+      alice.online = false;
+      await world.until(() => !online(zed, [alice]), 30 * 60_000, 1000);
+      for (const m of alices) await zed.groups.downloadFile(fileOf(zed, m)!);
+      await world.run(2_000);
+      expect(waiting(alices)).toBe(alices.length);
+
+      // No new round for the waiting files while this runs, which would ask each once more whatever comes up.
+      limits.wantWaitMs = 30 * 60_000;
+      let asks = 0;
+      proto.ask = function (this: unknown, ...args: unknown[]) { asks++; return ask.apply(this, args); };
+      // Zed's app starts again, its edges going down and up: each file is asked once as it loads, not again at each edge.
+      zed.online = false;
+      await world.run(5_000);
+      await world.restart(zed);
+      await world.until(() => online(zed, later), 30 * 60_000, 1000);
+      await world.run(5_000);
+      expect(waiting(alices)).toBe(alices.length);
+      expect(asks).toBeLessThanOrEqual(alices.length + 10);
+
+      // A member's edge drops and comes back: none of them is asked of it, and they are looked at once for it, not once
+      // for its files/3 session opening and again for the edge coming up.
+      let looks = 0;
+      proto.couldServe = function (this: unknown, ...args: unknown[]) { looks++; return couldServe.apply(this, args); };
+      for (let flap = 0; flap < 3; flap++) {
+        asks = looks = 0;
+        later[0].online = false;
+        await world.until(() => !online(zed, [later[0]]), 30 * 60_000, 1000);
+        // Long enough for the edge, and its files/3 session, to close (the roster shows it away at once).
+        await world.run(5_000);
+        world.reopen(later[0]);
+        await world.until(() => online(zed, [later[0]]), 30 * 60_000, 1000);
+        await world.run(5_000);
+        expect(asks).toBeLessThanOrEqual(5);
+        expect(looks).toBe(alices.length);
+      }
+      proto.ask = ask;
+      proto.couldServe = couldServe;
+      expect(waiting(alices)).toBe(alices.length);
+
+      // Alice back: her edge comes up, and every file waiting for her comes.
+      limits.wantWaitMs = saved.wantWaitMs;
+      world.reopen(alice);
+      await world.until(() => alices.every(m => files.get(zed)!.transfers.get(fileOf(zed, m)!)?.state === "done"), 30 * 60_000, 1000);
+      expect(files.get(zed)!.store.bytes.size).toBe(alices.length);
+    } finally {
+      proto.ask = ask;
+      proto.couldServe = couldServe;
+      Object.assign(limits, saved);
+    }
+  });
+
+  /**
+   * An edge's files/3 session that closes and opens again is a new chance for the files waiting for its member: asked
+   * only once per edge up, they must be asked again when it comes back, not at the next round (`wantWaitMs`).
+   */
+  it("are asked again at once of a member that holds them, when its edge drops and comes back", async () => {
+    const limits = GROUP_FILE_LIMITS as { -readonly [K in keyof typeof GROUP_FILE_LIMITS]: number };
+    const saved = { ...limits };
+    Object.assign(limits, { announcePerMinute: 1_000, announceTaken: 1_000 });
+    try {
+      const world = newWorld();
+      const files = new Map<Peer, { store: MemoryFiles; transfers: Map<string, FileTransferView> }>();
+      const add = (name: string) => {
+        const f = { store: new MemoryFiles(), transfers: new Map<string, FileTransferView>() };
+        const settings = { autoDownloads: name !== "zed", serveFiles: true };
+        const peer = world.add(name, p => ({ groupFiles: { store: f.store, transfers: f.transfers, brief: () => {}, settings: () => settings,
+          sendFiles: (linkId, frame) => world.sendFiles(p, linkId, frame) } }));
+        files.set(peer, f);
+        return peer;
+      };
+      const fileOf = (peer: Peer, m: string) => peer.messages.find(x => x.id === m)?.file?.id;
+      const stateOf = (peer: Peer, m: string) => files.get(peer)!.transfers.get(fileOf(peer, m)!);
+      const online = (peer: Peer, other: Peer) => !!world.view(peer, id)!.members.find(m => m.key === world.view(other, id)!.myKey)?.online;
+
+      const [alice, bob, zed] = ["alice", "bob", "zed"].map(add);
+      const id = await alice.groups.create("Files", "mesh");
+      const link = await alice.groups.enableLink(id);
+      for (const p of [bob, zed]) await p.groups.joinByLink(link);
+      const all = [alice, bob, zed];
+      await world.until(() => all.every(p => world.view(p, id)?.members.length === 3 && world.view(p, id)!.members.every(m => m.online)), 30 * 60_000, 1000);
+      // More files than a member names to an edge that comes up (`haveIds`): the oldest are found only by asking again.
+      const alices: string[] = [];
+      for (let i = 0; i < 2 * GROUP_FILE_LIMITS.haveIds; i++) {
+        const store = files.get(alice)!.store, fileId = groupFileId(id, "out"), bytes = pattern(500, i), d = sha(bytes);
+        const meta: GroupFileMeta = { name: `f-${i}.bin`, mime: "application/octet-stream", size: bytes.length, d };
+        store.bytes.set(fileId, bytes);
+        await store.put({ id: fileId, linkId: `group:${id}`, direction: "out", digest: d, createdAt: world.now, metadata: { name: meta.name, size: meta.size, mime: meta.mime, timestamp: world.now } });
+        const r = await alice.groups.sendFile(id, meta.name, meta, fileId);
+        expect(r.error).toBeNull();
+        alices.push(r.messageId!);
+        if (alices.length % 25 === 0) await world.run(10_000);
+      }
+      // Bob, a member since before them, fetches them all by himself; Zed (automatic downloads off) does not.
+      await world.until(() => alices.every(m => fileOf(zed, m) && stateOf(bob, m)?.state === "done"), 30 * 60_000, 1000);
+      alice.online = false;
+      bob.online = false;
+      await world.until(() => !online(zed, alice) && !online(zed, bob), 30 * 60_000, 1000);
+      // Long enough for their edges, and their files/3 sessions, to close (the roster shows them away at once).
+      await world.run(5_000);
+      // No new round while this runs: only Bob's edge coming back can ask them again.
+      limits.wantWaitMs = 30 * 60_000;
+      const oldest = alices.slice(0, 10);
+      for (const m of oldest) await zed.groups.downloadFile(fileOf(zed, m)!);
+      await world.run(2_000);
+      expect(oldest.filter(m => stateOf(zed, m)?.stage === "waiting")).toHaveLength(oldest.length);
+
+      // Bob back: his edge comes up again, and the files waiting for him come within seconds, not at the next round.
+      world.reopen(bob);
+      await world.until(() => online(zed, bob), 30 * 60_000, 1000);
+      const took = await world.until(() => oldest.every(m => stateOf(zed, m)?.state === "done"), 5 * 60_000, 1000,
+        () => oldest.map(m => stateOf(zed, m)?.stage ?? "-").join(","));
+      expect(took).toBeLessThanOrEqual(60_000);
+      expect(files.get(zed)!.store.bytes.size).toBe(oldest.length);
+    } finally {
       Object.assign(limits, saved);
     }
   });

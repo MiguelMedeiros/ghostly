@@ -14,6 +14,7 @@
   "standby": "Standby",
   "switchTo": "Switch to {{name}}",
   "switching": "Opening {{name}}…",
+  "switchingFromOtherTab": "Another Ghostly tab opened {{name}}…",
   "title": "Switch profile",
   "unread": "{{count}} unread"
 }

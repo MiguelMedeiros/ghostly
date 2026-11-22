@@ -5,7 +5,7 @@ import { SearchStatus } from "../ui/SearchStatus";
 import { emojiCategories, emojiFailedAgain, emojiLoaded, emojiOf, loadEmoji, recentEmoji, rememberEmoji, searchEmoji, setSkinTone, skinTone, withSkin } from "../../lib/emoji";
 import { radioGroupKeys } from "../../lib/radioGroup";
 import { EMOJI_CATEGORY_ICONS } from "./icons";
-import { CategoryBar, PanelSearch } from "./PanelParts";
+import { CategoryBar, PanelSearch, type TabPanel } from "./PanelParts";
 
 interface Cell { native: string; name: string }
 interface Section { id: string; title: string; cells: Cell[] }
@@ -18,7 +18,7 @@ function scrollToSection(box: HTMLElement | null, id: string) {
 
 const TONES = ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"];
 
-type EmojiTabProps = { onPick: (emoji: string) => void; autoFocus?: boolean };
+type EmojiTabProps = { onPick: (emoji: string) => void; autoFocus?: boolean; panel?: TabPanel };
 
 /**
  * The panel's emoji, once their data set is here (`loadEmoji`: the first panel shown loads it, not the first screen).
@@ -37,7 +37,7 @@ export function EmojiTab(props: EmojiTabProps) {
   if (state === "ready") return <LoadedEmojiTab {...props} />;
   const busy = state === "loading" || state === "retrying";
   return (
-    <div className="expression-tab" data-testid="emoji-tab" aria-busy={busy || undefined}>
+    <div className="expression-tab" data-testid="emoji-tab" aria-busy={busy || undefined} {...props.panel}>
       {(state === "failed" || state === "retrying") && <div className="expression-trouble" data-testid="emoji-trouble" role="status">
         <p>{t("composer.emojiNotLoading")}</p>
         <button type="button" className="expression-retry" data-testid="emoji-retry" aria-busy={busy || undefined}
@@ -53,7 +53,7 @@ export function EmojiTab(props: EmojiTabProps) {
  * in one scrolling grid. The icons jump to their category and follow the scroll. The recent row is the one the
  * panel opened with, so the grid does not move under a pointer while picking several.
  */
-function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
+function LoadedEmojiTab({ onPick, autoFocus, panel }: EmojiTabProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [skin, setSkin] = useState(skinTone);
@@ -142,7 +142,7 @@ function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
 
   const shown = results ? [results] : sections;
   return (
-    <div className="expression-tab" data-testid="emoji-tab">
+    <div className="expression-tab" data-testid="emoji-tab" {...panel}>
       <CategoryBar label={t("composer.emojiCategories")} testIdPrefix="emoji-category" active={results ? null : active} onChoose={choose}
         items={sections.map((s) => ({ id: s.id, label: s.title, icon: EMOJI_CATEGORY_ICONS[s.id] }))} />
       <PanelSearch value={query} onChange={setQuery} placeholder={t("composer.searchEmoji")} inputRef={search} onKeyDown={searchKeys}

@@ -57,9 +57,10 @@ export interface GroupEditsHost {
 
 /**
  * What `edit` answers: `refused` when it is not something to edit (the page says so and keeps the edit open). `e`: a
- * removal's edit number (`removeMine`), what `Groups.taken` counts it by.
+ * removal's edit number (`removeMine`), what `Groups.taken` counts it by. `missing`, with a refusal once the message
+ * was looked for: whether the group has no message of that id (the CLI says "not found" without reading for it again).
  */
-export interface GroupEditResult { error: string | null; refused?: boolean; messageId?: string; e?: number }
+export interface GroupEditResult { error: string | null; refused?: boolean; missing?: boolean; messageId?: string; e?: number }
 
 /** My edits said again on an edge in one window (`GROUP_EDIT_RESEND_WINDOW_MS`): below what a receiver takes in one. */
 export const GROUP_EDIT_RESEND = 16;
@@ -129,13 +130,17 @@ export class GroupEdits {
    * of the new version, already checked (WISP 405 · Status Cards); a card message then takes `STATUS_CARD_LIMITS.edits`.
    */
   async edit(groupId: string, messageId: string, raw: string, added: readonly GroupMention[] = [], card?: StatusCard): Promise<GroupEditResult> {
-    const refuse = (error: string) => ({ error, refused: true });
+    const looked: { missing?: boolean } = {};
+    const refuse = (error: string) => ({ error, refused: true, ...looked });
     const membership = this.host.membership(groupId);
     if (!membership) return refuse(this.notMember(groupId));
     if (typeof messageId !== "string" || typeof raw !== "string") return refuse("No message to edit");
     const chat = chatOf(groupId);
     const message = await this.find(chat, messageId);
-    if (!message || !canEditInGroup(message) || underOldKey(message, membership)) return refuse("Only your own text messages can be edited");
+    looked.missing = !message;
+    if (!message || !canEditInGroup(message)) return refuse("Only your own text messages can be edited");
+    // Mine, but under the key I had before: said as such, not as someone else's (a reply was offered for it).
+    if (underOldKey(message, membership)) return refuse("This message is from before you were removed and invited back, and can't be edited now");
     const text = raw.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
     if (isJoinNotice(text)) return refuse("An edit cannot read as a join notice.");
@@ -170,7 +175,8 @@ export class GroupEdits {
     if (!membership) return refuse(this.notMember(groupId));
     const chat = chatOf(groupId);
     const message = typeof messageId === "string" ? await this.find(chat, messageId) : undefined;
-    if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id) || underOldKey(message, membership)) return refuse("Only your own messages can be deleted for everyone");
+    if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id)) return refuse("Only your own messages can be deleted for everyone");
+    if (underOldKey(message, membership)) return refuse("This message is from before you were removed and invited back, and can't be deleted for everyone now");
     if (!canRemove(message)) return refuse("A payment, a request or a notice cannot be deleted for everyone");
     const e = removalNumber(message.edit?.seq);
     await this.host.removeMine(chat, message, { id: message.id, e, at: this.now(), pending: true });
@@ -262,7 +268,8 @@ export class GroupEdits {
    * removed member's edits are dropped) and only of the sender's own message; the highest number wins. In a private
    * group a removal stands once its author is out too (`outlives`): the group took it under the epoch rules. One of a message
    * not here yet waits a minute for it. Past `EDIT_RECEIVE_LIMIT` a window from one member, the rest wait for the next
-   * window (`hold`): a catch-up hands back every edit of an author at once, and one dropped is never handed again.
+   * window (`hold`): a catch-up hands back every edit of an author at once, and one dropped is never handed again. One
+   * the row has already (another hub's copy) gives its room back: the window counts the edits that change something.
    */
   async receive(groupId: string, sender: string, edit: GroupEdit): Promise<"applied" | "stale" | "waiting" | "dropped"> {
     const membership = this.host.membership(groupId);
@@ -272,7 +279,9 @@ export class GroupEdits {
     if (!pace) this.receivePace.set(key, pace = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS, this.now));
     // Behind those that wait already, so a member's edits are taken in the order they came.
     if (this.held.get(groupId)?.has(key) || !pace.take()) return this.hold(groupId, sender, edit, pace);
-    return this.take(groupId, membership, sender, edit);
+    const result = await this.take(groupId, membership, sender, edit);
+    if (result === "stale") pace.giveBack();
+    return result;
   }
 
   /**
@@ -323,7 +332,7 @@ export class GroupEdits {
       // Unless a higher one took its place while the last was applied.
       if (waiting.get(id) !== edit) continue;
       waiting.delete(id);
-      await this.take(groupId, membership, sender, edit).catch(() => {});
+      if (await this.take(groupId, membership, sender, edit).catch(() => null) === "stale") pace.giveBack();
     }
     if (waiting.size) { if (!this.heldTimers.has(key) && !this.stopped) this.heldTimers.set(key, setTimeout(() => { void this.takeHeld(groupId, sender).catch(() => {}); }, Math.max(50, pace.wait()))); return; }
     if (group.get(key) === waiting) group.delete(key);
@@ -406,7 +415,9 @@ export class GroupEdits {
     this.keptMine.delete(key);
     if (this.stopped || edge === undefined || !membership || membership.community || !membership.members.has(to)) return;
     const mine = paced && kept?.edge === edge ? kept.mine : (await (this.host.history ? this.host.history(chat) : this.host.messages(chat)))
-      .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m))
+      // Not those under a member key I held before I was removed and invited back: the group refuses them, and each
+      // took a place in the pace ahead of my edits since.
+      .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m) && !underOldKey(m, membership))
       .sort((a, b) => a.edit!.at - b.edit!.at || (a.id < b.id ? -1 : 1));
     const last = this.heard.get(key);
     const after = (m: StoredMessage) => !last || m.edit!.at > last.at || (m.edit!.at === last.at && m.id > last.id);

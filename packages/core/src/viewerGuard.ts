@@ -13,16 +13,29 @@ import type { HeaderList } from "./frames";
  *   `contentDocument`, `getSVGDocument`) is guarded first, in a shadow tree too, and the frames of the document are
  *   gone over as one loads (an empty frame's first load fires as it is put in the page) and as the page changes;
  * - puts itself first in each `srcdoc` frame, in the shadow trees the page makes too, and, with `VIEWER_GUARD_CSP`,
- *   refuses `javascript:` URLs (its own Trusted Types default policy: one passes every other string on as it is);
+ *   refuses `javascript:` URLs (its own Trusted Types default policy: one passes every other string on as it is, or,
+ *   once the page made its own `default` policy, to that one's rules: the page's `createPolicy("default")` gets the
+ *   guard's policy back with them, and the copy of itself it puts in a `srcdoc` frame skips them; where a policy is
+ *   there before it, the clipboard guard's in a web page, it leaves that one as it is);
  * - refuses a declarative shadow root the page's script would make (`setHTMLUnsafe`, `Document.parseHTMLUnsafe`,
  *   `document.write`, a write split in two too): its `srcdoc` frames would be out of the guard's sight;
- * - listens for frames' loads again after `document.open()`, which takes every listener of the document away.
+ * - listens for frames' loads again after `document.open()`, which takes every listener of the document away;
+ * - starts a worker made from a `blob:` URL of the page's own (`URL.createObjectURL` in that window) from a script of its
+ *   own that makes a pass-through Trusted Types `default` policy there first and then runs the page's (`importScripts`;
+ *   for a module worker, a static `import` of the policy's module, then of the page's): such a worker takes the page's
+ *   policy, Trusted Types included, and no guard runs in it to make one. A `SharedWorker` made twice from one blob gets
+ *   the same script, so it is the same worker; the page's revoke of the blob's URL drops the guard's own a minute later.
+ *   A `data:` worker, and a blob made in another window, in a worker or already revoked, run as they were. Once per
+ *   window, whichever guard runs first (`ghostlyWorkerGuard`, `CLIPBOARD_GUARD_SCRIPT` does the same).
+ * - takes out each `<script type="speculationrules">` as it is put in the page, a shadow tree the page makes included:
+ *   Chromium would prefetch or prerender the pages it lists on a server the contact names, which no policy covers
+ *   (`'unsafe-inline'` lets inline rules in); the `Speculation-Rules` header is not passed on (`VIEWER_DROPPED_HEADERS`).
  * It uses nothing the page can change after it ran (the page's own code runs later, in the same realm).
  *
  * What a script put in the page cannot do, so where the viewer does not run it per document this is not a guarantee:
  * a frame's window read by its index (`window[0]`, never through the frame element) while the frame's page is still
- * on its way, and a `srcdoc` frame inside a shadow tree written in the HTML the page itself sends, run before the
- * guard is there.
+ * on its way, and a `srcdoc` frame or speculation rules inside a shadow tree written in the HTML the page itself sends,
+ * run before the guard is there.
  * No backslash, `${` or backtick in it: Desktop's copy (`SERVICE_GUARD`, apps/desktop/src/viewer.rs) is the same text.
  */
 export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
@@ -33,13 +46,33 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
     for (const name of Object.getOwnPropertyNames(w)) {
       if (/^(webkit)?RTC/.test(name)) { try { delete w[name]; } catch (e) {} }
     }
-    if (w.trustedTypes && !w.trustedTypes.defaultPolicy) {
+    const types = w.trustedTypes;
+    let passing = false;
+    if (types && !types.defaultPolicy) {
       try {
-        w.trustedTypes.createPolicy("default", {
-          createHTML: (input) => input,
-          createScript: (input, type, sink) => (sink === "Location href" ? null : input),
-          createScriptURL: (input) => input,
-        });
+        let rules = null;
+        const rule = (kind) => (input, type, sink) => {
+          if (kind === "createScript" && sink === "Location href") return null;
+          if (passing || rules === null) return input;
+          return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+        };
+        const members = ["createHTML", "createScript", "createScriptURL"];
+        const create = types.createPolicy;
+        const policy = apply(create, types, ["default", { createHTML: rule(members[0]), createScript: rule(members[1]), createScriptURL: rule(members[2]) }]);
+        const named = String;
+        const Mistyped = w.TypeError;
+        Object.getPrototypeOf(types).createPolicy = function createPolicy(name, options) {
+          if (this !== types || rules !== null || named(name) !== "default") return apply(create, this, arguments);
+          const given = { createHTML: null, createScript: null, createScriptURL: null };
+          for (let i = 0; i < members.length; i++) {
+            const found = options ? options[members[i]] : undefined;
+            if (found === undefined || found === null) continue;
+            if (typeof found !== "function") throw new Mistyped("The policy's " + members[i] + " is not a function");
+            given[members[i]] = found;
+          }
+          rules = given;
+          return policy;
+        };
       } catch (e) {}
     }
     const open = w.open;
@@ -115,7 +148,15 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
     const first = (frame) => {
       const doc = apply(getAttribute, frame, ["srcdoc"]);
       if (doc === null || apply(slice, doc, [0, own.length]) === own) return;
+      passing = true;
       try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
+      passing = false;
+    };
+    const trim = String.prototype.trim;
+    const drop = w.Element.prototype.remove;
+    const unruled = (script) => {
+      const type = apply(getAttribute, script, ["type"]);
+      if (type !== null && apply(lower, apply(trim, type, []), []) === "speculationrules") apply(drop, script, []);
     };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
@@ -124,6 +165,10 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
         try {
           const frames = apply(all, root, ["iframe[srcdoc]"]);
           for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+        } catch (e) {}
+        try {
+          const scripts = apply(all, root, ["script"]);
+          for (let i = apply(size, scripts, []); i-- > 0;) unruled(scripts[i]);
         } catch (e) {}
         sweep();
       };
@@ -139,13 +184,72 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
         return root;
       };
     }
+    if (w.trustedTypes && w.URL && w.Blob && !describe(w, "ghostlyWorkerGuard")) {
+      try {
+        define(w, "ghostlyWorkerGuard", { value: true });
+        const construct = Reflect.construct;
+        const json = JSON.stringify;
+        const later = w.setTimeout;
+        const Blob = w.Blob;
+        const sized = describe(Blob.prototype, "size").get;
+        const make = w.URL.createObjectURL;
+        const revoke = w.URL.revokeObjectURL;
+        const policy = "if (self.trustedTypes && !self.trustedTypes.defaultPolicy) { try { self.trustedTypes.createPolicy('default', { createHTML: (s) => s, createScript: (s) => s, createScriptURL: (s) => s }); } catch (e) {} }";
+        const script = (code) => apply(make, null, [new Blob([code], { type: "text/javascript" })]);
+        const known = { __proto__: null };
+        let first = null;
+        w.URL.createObjectURL = function createObjectURL(object) {
+          const made = apply(make, this, arguments);
+          try { apply(sized, object, []); known[made] = { blob: object, inner: null, classic: null, module: null }; } catch (e) {}
+          return made;
+        };
+        w.URL.revokeObjectURL = function revokeObjectURL(url) {
+          try {
+            const key = text(url);
+            const entry = known[key];
+            if (entry) {
+              delete known[key];
+              const ours = [entry.inner, entry.classic, entry.module];
+              apply(later, w, [() => { for (let i = 0; i < 3; i++) { if (ours[i] !== null) apply(revoke, null, [ours[i]]); } }, 60000]);
+            }
+          } catch (e) {}
+          return apply(revoke, this, arguments);
+        };
+        const start = (url, options) => {
+          const entry = known[text(url)];
+          if (!entry) return url;
+          const kind = options && typeof options === "object" && options.type === "module" ? "module" : "classic";
+          if (entry[kind] === null) {
+            if (entry.inner === null) entry.inner = apply(make, null, [entry.blob]);
+            if (kind === "module" && first === null) first = script(policy);
+            entry[kind] = script(kind === "module" ? "import " + json(first) + "; import " + json(entry.inner) + ";" : policy + " importScripts(" + json(entry.inner) + ");");
+          }
+          return entry[kind];
+        };
+        for (const name of ["Worker", "SharedWorker"]) {
+          const Real = w[name];
+          if (typeof Real !== "function") continue;
+          const started = function (url) {
+            if (new.target === undefined) return apply(Real, this, arguments);
+            const args = [];
+            for (let i = 0; i < arguments.length; i++) args[i] = arguments[i];
+            if (args.length > 0) { try { args[0] = start(url, args[1]); } catch (e) {} }
+            return construct(Real, args, new.target);
+          };
+          define(started, "name", { value: name });
+          started.prototype = Real.prototype;
+          define(Real.prototype, "constructor", { value: started, writable: true, enumerable: false, configurable: true });
+          w[name] = started;
+        }
+      } catch (e) {}
+    }
     apply(listen, home, ["load", sweep, true]);
     watch(home, w.Document.prototype.querySelectorAll);
   } catch (e) {}
 })(window)`;
 
 /** `VIEWER_GUARD_SCRIPT`'s hash, as a CSP source: a contact's own policy that would refuse it is given it (`allowingViewerGuard`). */
-export const VIEWER_GUARD_HASH = "'sha256-P3jYgJwfoJ/cAS31rQz7Tk99bBwsSeN2wDDqJubDMZw='";
+export const VIEWER_GUARD_HASH = "'sha256-ie6GQZQ0wmtjA66s3QLqLGKXUfK7SjGjsdWtUKNKArc='";
 
 /**
  * With the guard, where it is put in the page and not run by the viewer in every frame: frames only from the app's own
@@ -175,6 +279,14 @@ const NO_SCRIPTS_CSP = "script-src 'none'";
  * shows them in one).
  */
 const NO_SCRIPTS_OR_FRAMES_CSP = "script-src 'none'; frame-src 'none'; object-src 'none'";
+
+/**
+ * And for any of them but a PDF: an origin of its own. Its window is a realm the guard never ran in, and the app's page
+ * reads it by its index (`window[0]`) from the moment it commits; the guard's own look at a frame comes at its `load`,
+ * which the contact holds off for as long as it likes (an answer that never ends). A PDF keeps its origin: a PDF viewer
+ * may refuse a sandboxed frame, and Chromium's loads as it commits, so the guard reaches it then.
+ */
+const OWN_ORIGIN_CSP = "sandbox allow-forms";
 
 /** The `Sec-Fetch-Dest` (a request's `destination`) of a page: the ones the guard goes into. */
 const DOCUMENT_DESTINATIONS = new Set(["document", "iframe", "frame", "object", "embed", "fencedframe"]);
@@ -291,7 +403,8 @@ const LOOK_BYTES = 64 * 1024;
  * hashes (`allowingViewerGuard`) and `VIEWER_GUARD_CSP` goes along. A page (`destination`, null when the browser did not say)
  * that is HTML gets the guards first in it, in their order; one they cannot be put in (another type, more than one type, a
  * compressed, UTF-16 or ISO-2022-JP body, a type with a quote or a backslash in it, an escape byte before the guard's
- * place) runs no script at all. Anything that is not a page passes as it was. The caller adds Ghostly's own policy as before.
+ * place) runs no script at all, and but for a PDF has an origin of its own (`OWN_ORIGIN_CSP`). Anything that is not a
+ * page passes as it was. The caller adds Ghostly's own policy as before.
  */
 export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable<Uint8Array>, destination: string | null, guards: readonly PageGuard[] = [WEBRTC_GUARD]): Promise<{ headers: HeaderList; body: AsyncIterable<Uint8Array> }> {
   const hashes = guards.map((guard) => guard.hash);
@@ -313,7 +426,7 @@ export async function guardViewerAnswer(headers: HeaderList, body: AsyncIterable
   const essence = type.split(";")[0].trim();
   const html = essence === "text/html" && !unreadable && !/["\\]/.test(type);
   const noFrames = !/^(application\/pdf$|image\/(?!svg)|video\/|audio\/)/.test(essence);
-  const refused: [string, string] = ["content-security-policy", noFrames ? NO_SCRIPTS_OR_FRAMES_CSP : NO_SCRIPTS_CSP];
+  const refused: [string, string] = ["content-security-policy", [noFrames ? NO_SCRIPTS_OR_FRAMES_CSP : NO_SCRIPTS_CSP, ...(essence === "application/pdf" ? [] : [OWN_ORIGIN_CSP])].join("; ")];
   const encoded = values("content-encoding").some((encoding) => !["", "identity"].includes(encoding));
   const noScripts = () => ({ headers: [...out, refused], body });
   if (!html || encoded) return noScripts();

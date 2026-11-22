@@ -20,6 +20,20 @@ export const CLEAR_COOKIES = `${BRIDGE_DIR}clear-cookies`;
 export const WORKER_SCRIPT = "/ghostly-services-sw.js";
 
 /**
+ * The address the bridge registers the worker from: its query says whether Hide my IP from contacts is on, the one
+ * thing the worker cannot read from the app's answers (its pages can reach the bridge, and so answer a request
+ * themselves) nor keep anywhere the app cannot write.
+ */
+export function workerScript(relayOnly: boolean): string {
+  return `${WORKER_SCRIPT}?relay-only=${relayOnly ? 1 : 0}`;
+}
+
+/** Whether the worker at `href` keeps to Hide my IP from contacts: unless its address says it is off, it does. */
+export function workerRelayOnly(href: string): boolean {
+  try { return new URL(href).searchParams.get("relay-only") !== "0"; } catch { return true; }
+}
+
+/**
  * What the view's frame and the bridge's frame of the contact's app allow: nothing. No `fullscreen`: in full screen the
  * app would cover the view's bar, the one thing that says it is the contact's app and not Ghostly (as a mini-app's
  * frame, WISP 1200). No `clipboard-write`: once tapped, the contact's code could replace what the person copied (an
@@ -99,7 +113,7 @@ export interface ServiceRequestMessage {
   path: string;
   headers: [string, string][];
   body: ArrayBuffer | null;
-  /** The request's `destination` ("iframe", "script", …): whether the answer is a page (`guardViewerAnswer`). */
+  /** The request's `destination` ("iframe", "script", …), as the browser said it to the worker. */
   destination?: string;
   /** The worker says what the frame read (`ServiceRead`): the page sends only `ANSWER_AHEAD_BYTES` past it. */
   flow?: true;
@@ -143,6 +157,18 @@ export type BridgeRefusal = "blocked" | "unguarded";
  */
 export const BRIDGE_CLEAR = "ghostly-svc-clear";
 export const BRIDGE_CLEARED = "ghostly-svc-cleared";
+/**
+ * The bridge hands the app's page a link the contact's app opens in a new window (`url`: `target="_blank"`,
+ * `window.open`), which the view's sandbox drops: the app's page opens one to another site in a new tab, on the
+ * person's tap (`outsideLink` in opener.ts), as Desktop sends it to the system browser.
+ */
+export const BRIDGE_OPEN_LINK = "ghostly-svc-open-link";
+/**
+ * The bridge says a page of the contact's app is in its frame (its first once parsed, then each one that loads, as long
+ * as it may show it): until the first, the app
+ * says it is opening it, over the frame, rather than showing the bridge's empty page.
+ */
+export const BRIDGE_SHOWN = "ghostly-svc-shown";
 
 /** A request the app takes from a port: anything else (a page of the contact's posting to it) is dropped. */
 export function readRequest(data: unknown): ServiceRequestMessage | null {
@@ -158,6 +184,14 @@ export function readRequest(data: unknown): ServiceRequestMessage | null {
     ...(flow === true ? { flow } : {}),
   };
 }
+
+/**
+ * What every answer on a contact's app origin sends as `Origin-Agent-Cluster`: the bridge's files (nginx-services.conf)
+ * and every one the services worker makes. The apps' origins share one site (the services host), so a browser would put
+ * two contacts' apps open at once in one agent cluster, where `document.domain` joins them and they may share a process;
+ * keyed by origin, each stays alone.
+ */
+export const ORIGIN_AGENT_CLUSTER = "?1";
 
 /** Statuses a Response has no body for. */
 export const NULL_BODY = new Set([101, 103, 204, 205, 304]);

@@ -48,7 +48,7 @@ const testSats = (p: Peer) => p.page.getByTestId("wallet-balance");
 test.describe("Cashu and Lightning", () => {
   test.describe.configure({ retries: 2 });
 
-  test("Cashu: test coins in, a Send in the chat, and a Request paid in the chat", { tag: ["@feature:wallet.test-coins", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {
+  test("Cashu: test coins in, a Send in the chat, and a Request paid in the chat", { tag: ["@journey", "@feature:wallet.test-coins", "@feature:payments.cashu.send", "@feature:payments.cashu.request", "@feature:payments.chat.review"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["cashu-alice", "cashu-bob"]);
     await getTestCoins(alice);
     await expect(testSats(alice)).toHaveText(/^10,000\s*test sats/);
@@ -76,7 +76,7 @@ test.describe("Cashu and Lightning", () => {
   // A test mint marks its own invoices paid by itself, so its "paid" is nobody paying: Receive only makes the
   // invoice, and the balance stays where it was (the wallet waits for a payer's word, which a chat carries). Out,
   // the wallet pays an invoice the mint does not own.
-  test("Lightning: Receive only makes an invoice, out by paying someone else's invoice from Send", { tag: ["@feature:wallet.lightning.cashu-mint.receive", "@feature:wallet.lightning.cashu-mint.pay", "@feature:wallet.cashu.receive-lightning", "@feature:wallet.testnet.receive-held"] }, async ({ peer }) => {
+  test("Lightning: Receive only makes an invoice, out by paying someone else's invoice from Send", { tag: ["@journey", "@feature:wallet.lightning.cashu-mint.receive", "@feature:wallet.lightning.cashu-mint.pay", "@feature:wallet.cashu.receive-lightning", "@feature:wallet.testnet.receive-held"] }, async ({ peer }) => {
     const [alice, bob] = await twoInTestnet(peer, ["ln-alice", "ln-bob"]);
     await getTestCoins(alice);
     await expect(testSats(alice)).toHaveText(/^10,000\s*test sats/);
@@ -302,8 +302,14 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
   await expect(panel(alice).getByLabel(/^Amount in/)).toHaveValue("");
   await panel(alice).getByLabel(/^Amount in/).fill("2");
   await panel(alice).getByRole("button", { name: "Review payment" }).click();
-  await panel(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
-  await expect(panel(alice).getByTestId("review-status")).toHaveText("confirmed", { timeout: 60_000 });
+  const review = panel(alice).getByTestId("payment-review");
+  await review.getByRole("button", { name: "Approve payment" }).click();
+  // An RPC call that failed or timed out at Approve leaves it unknown until a later check (every 10 s, then slower)
+  // finds the receipt: on a loaded runner that can take past a minute. A red says which case it was: the review's
+  // own lines (its error under Status) and how far the chain got.
+  await expect(review.getByTestId("review-status")).toHaveText("confirmed", { timeout: 120_000 }).catch(async (error: Error) => {
+    throw new Error(`${error.message}\nReview: ${await review.innerText().catch(() => "(gone)")}\nChain height: ${Number(await rpc("eth_blockNumber").catch(() => NaN))}`);
+  });
   await openWallet(bob, "usdt-testnet");
   await expect(tokens(bob)).toHaveText("2 TEST-USDT", { timeout: 30_000 });
 

@@ -23,6 +23,7 @@ import type { AppFileAt } from "@ghostly/browser/engine/apps";
 import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppLinkedFile, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
 import { appInput } from "./open";
+import { relayedChannel } from "./relayedChannel";
 
 /** An app to run: its checked entry (the engine's `appEntry`), what the person granted it, and where it opens. */
 export interface AppLaunch {
@@ -191,18 +192,6 @@ export function withoutLoneSurrogates<T>(value: T): T {
   return hasLoneSurrogate(value) ? (fix(value, 0) as T) : value;
 }
 
-/** Whether `value` is plain JSON (what a request may carry), no deeper than MAX_DEPTH, with no lone surrogate. */
-export function isJsonValue(value: unknown, depth = 0): value is MiniAppJson {
-  if (depth > MAX_DEPTH) return false;
-  if (value === null || typeof value === "boolean") return true;
-  if (typeof value === "string") return wellFormedText(value);
-  if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every((item) => isJsonValue(item, depth + 1));
-  if (typeof value !== "object") return false;
-  if (!isPlainObject(value)) return false;
-  return Object.entries(value).every(([key, item]) => wellFormedText(key) && isJsonValue(item, depth + 1));
-}
-
 const NOT_JSON: unique symbol = Symbol("not JSON");
 
 /**
@@ -235,9 +224,10 @@ export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT
     if (!wellFormedText(key)) return NOT_JSON;
     const next = jsonValueOf(item, depth + 1);
     if (next === NOT_JSON) return NOT_JSON;
-    // Defined, not assigned: a member named `__proto__` (a word a person typed) is kept as JSON.stringify keeps it,
-    // where an assignment would set the copy's prototype and lose it.
-    Object.defineProperty(out, key, { value: next, enumerable: true, writable: true, configurable: true });
+    // A member named `__proto__` (a word a person typed) is defined, not assigned, and kept as JSON.stringify keeps it,
+    // where an assignment would set the copy's prototype and lose it. Defining every member took twice what assigning did.
+    if (key === "__proto__") Object.defineProperty(out, key, { value: next, enumerable: true, writable: true, configurable: true });
+    else out[key] = next;
   }
   return out;
 }
@@ -252,12 +242,15 @@ function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_J
   let bytes = 0;
   const walk = (item: unknown, depth: number): boolean => {
     // MAX_DEPTH within the args, one level below the request.
-    if (depth > MAX_DEPTH + 1 || item instanceof ArrayBuffer || ArrayBuffer.isView(item)) return false;
+    if (depth > MAX_DEPTH + 1) return false;
     if (typeof item === "string") bytes += item.length + 2;
+    // Binary data is an object: asking every number whether it was one took 10 times what JSON.stringify did.
+    else if (item === null || typeof item !== "object") bytes += 1;
+    else if (item instanceof ArrayBuffer || ArrayBuffer.isView(item)) return false;
     else if (Array.isArray(item)) {
       bytes += item.length + 1;
       for (let i = 0; i < item.length && bytes <= budget; i++) if (!walk(item[i], depth + 1)) return false;
-    } else if (item !== null && typeof item === "object") {
+    } else {
       // Only a plain object is JSON (jsonValueOf): anything else is refused before `for...in` lists its keys, which for
       // a String object of 10 million characters took 1.5 s on the page's thread and from 30 million threw.
       const proto = Object.getPrototypeOf(item);
@@ -270,7 +263,7 @@ function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_J
         bytes += key.length + 2;
         if (!walk(member, depth + 1)) return false;
       }
-    } else bytes += 1;
+    }
     return true;
   };
   try { return walk(value, 0) ? bytes : NOT_JSON; } catch { return NOT_JSON; }
@@ -333,6 +326,16 @@ function readRange(value: unknown): { offset: number; length: number } {
   if (!Number.isSafeInteger(length) || (length as number) < 1) refuse("bad-request");
   if ((length as number) > MINI_APP_LIMITS.filesReadBytes) refuse("too-large");
   return { offset: offset as number, length: length as number };
+}
+
+/**
+ * How many bytes a `storage.keys` answer takes as JSON, escapes included: a key is bounded by its UTF-8 bytes, but a
+ * control character, one byte kept, is six as JSON (`\u0001`), so a full scope's list reaches about 3.7 MB.
+ */
+function keysBytes(keys: readonly string[]): number {
+  let bytes = 2;
+  for (const key of keys) bytes += JSON.stringify(key).length + 1;
+  return bytes;
 }
 
 function storageKey(value: unknown): string {
@@ -438,8 +441,8 @@ export function createBroker({ host: platform, launch, view, post: postToApp, st
   };
 
   /**
-   * Counted against `fileBytesPerSecond` with every other read, one at a time: `file`, `files.read` and `files.list`
-   * share the chain, so an app cannot double its bytes a second by mixing them.
+   * Counted against `fileBytesPerSecond` with every other read, one at a time: `file`, `files.read`, `files.list` and
+   * `storage.keys` share the chain, so an app cannot double its bytes a second by mixing them.
    */
   const counted = <T>(load: () => Promise<T>, size: (answer: T) => number): Promise<T> => {
     const read = reading.then(async () => {
@@ -524,8 +527,9 @@ export function createBroker({ host: platform, launch, view, post: postToApp, st
       case "storage.set": {
         const key = storageKey(args[0]);
         const value = args[1];
-        // No value is a request the call does not take, not one too large (`storage.delete` removes a key).
-        if (!isJsonValue(value)) refuse("bad-request");
+        // No value is a request the call does not take, not one too large (`storage.delete` removes a key). Any other
+        // value is JSON already (jsonValueOf): walking it again cost as much as the rest of the request.
+        if (value === undefined) refuse("bad-request");
         if (utf8Bytes(JSON.stringify(value)) > MINI_APP_LIMITS.storageValueBytes) refuse("too-large");
         await host.storage.set(launch.ref, scope, key, value as MiniAppJson);
         return {};
@@ -534,7 +538,9 @@ export function createBroker({ host: platform, launch, view, post: postToApp, st
         await host.storage.delete(launch.ref, scope, storageKey(args[0]));
         return {};
       case "storage.keys":
-        return { value: await host.storage.keys(launch.ref, scope) };
+        // Counted with the file reads: the app sets the size of each list, and 50 lists a second of a full scope
+        // were ~185 MB of JSON a second for the page to write (and on Desktop, the main thread to read again).
+        return { value: await counted(() => host.storage.keys(launch.ref, scope), keysBytes) };
       case "chat.send": {
         if (!chatAllowed || !launch.chat) refuse("not-allowed");
         if (args.length !== 1 || utf8Bytes(JSON.stringify(args[0])) > MINI_APP_LIMITS.chatDataBytes) refuse("too-large");
@@ -744,10 +750,11 @@ export interface RunningApp {
 
 /**
  * Whether an app's frame is on screen: in the page, in a tab that shows, and not under anything hidden (a chat kept
- * loaded behind another one, a panel Back hid).
+ * loaded behind another one, a panel Back hid), nor inert under a layer over it (an app open alone, a dialog): a frame
+ * covered that way still counts as visible to `checkVisibility`.
  */
 export function onScreen(frame: HTMLIFrameElement): boolean {
-  return frame.isConnected && document.visibilityState !== "hidden" && (frame.checkVisibility?.() ?? true);
+  return frame.isConnected && document.visibilityState !== "hidden" && !frame.closest("[inert]") && (frame.checkVisibility?.() ?? true);
 }
 
 export interface AppWatch {
@@ -793,6 +800,35 @@ export function watchApp({ ping, hung, boundMs = UNRESPONSIVE_AFTER_MS, now = ()
     },
     pong(n) { if (asked?.n === n) asked = null; },
     hidden() { excused = true; },
+  };
+}
+
+/**
+ * How long, in any one second, the page may spend reading a running app's messages (`event.data`, the structured clone
+ * of what the app posted) before the app is stopped. The clone runs on the page's thread before any check of the broker:
+ * 21k empty objects a message at 450 a second held it 98% of the time (gaps of 2 s), and 20 messages of 4M numbers each
+ * 2.5 s, all short of the watchdog's bound. A request within 66 KiB clones in well under a millisecond.
+ */
+export const READ_MS_PER_SECOND = 200;
+
+/** Returned by `readWithin`'s reader once the reads of the last second took more than the budget. */
+export const OVER_BUDGET: unique symbol = Symbol("over budget");
+
+/**
+ * Times each read of an app's message and keeps a one-second sliding total: past `budgetMs` the reader answers
+ * `OVER_BUDGET`, and stopping the app closes its port, which drops the messages still queued without cloning them.
+ */
+export function readWithin(budgetMs = READ_MS_PER_SECOND, now = () => performance.now()): (read: () => unknown) => unknown {
+  const reads: { at: number; ms: number }[] = [];
+  let total = 0;
+  return (read) => {
+    const start = now();
+    const data = read();
+    const at = now();
+    reads.push({ at, ms: at - start });
+    total += at - start;
+    while (reads.length && reads[0]!.at <= at - 1000) total -= reads.shift()!.ms;
+    return total > budgetMs ? OVER_BUDGET : data;
   };
 }
 
@@ -881,6 +917,7 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
   frame.setAttribute("allow", "");
   frame.title = launch.title;
   let port: MessagePort | null = null;
+  let relay: ReturnType<typeof relayedChannel> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let watch: AppWatch | null = null;
   let watching: ReturnType<typeof setInterval> | null = null;
@@ -907,6 +944,7 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
       frame.removeEventListener("load", loaded);
       port?.close();
       port = null;
+      relay?.end();
       frame.remove();
       onStop?.(reason);
     },
@@ -926,9 +964,14 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
       watch.tick();
     }
     if (broker.phase !== "starting" || port) return;
-    const channel = new MessageChannel();
+    const channel = (relay = relayedChannel(STOP_REQUESTS_PER_SECOND, () => broker.stop("protocol")));
     port = channel.port1;
-    port.onmessage = (event) => broker.message(event.data);
+    const reading = readWithin();
+    port.onmessage = (event) => {
+      const data = reading(() => event.data);
+      if (data === OVER_BUDGET) return broker.stop("protocol");
+      broker.message(data);
+    };
     port.onmessageerror = () => broker.message(null);
     frame.contentWindow?.postMessage({ ghostly: "port" }, "*", [channel.port2]);
     port.postMessage({ event: "start", data: launch.entry });
