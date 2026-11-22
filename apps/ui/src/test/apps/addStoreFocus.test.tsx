@@ -111,6 +111,19 @@ describe("Add, the link of a store the person has already", () => {
     expect(onStoreAdded).toHaveBeenCalled();
   });
 
+  it("a newer index at a copy elsewhere: names the copy's host, which the store is read from at each refresh while its own link is behind", async () => {
+    const copy = "https://cdn.jsdelivr.net/gh/g/s@0123456789abcdef0123456789abcdef01234567/ghostly-store.json";
+    const { card, unmount: done } = await check(() => ({ ...held(6, 5)(), url: copy }));
+    expect(card).toHaveTextContent("Ghostly reads it from cdn.jsdelivr.net, which learns your IP address.");
+    done();
+    // An index that is not taken is read from nowhere: no such line.
+    for (const answer of [held(5, 5), held(4, 5)]) {
+      const { card: other, unmount } = await check(answer);
+      expect(other).not.toHaveTextContent("Ghostly reads it from");
+      unmount();
+    }
+  });
+
   it("an older copy of a store the person removed (or another under the number last taken): says so, and offers nothing to add", async () => {
     for (const refused of ["rollback", "equivocation"] as const) {
       const { card, added, unmount } = await check(() => ({ ...preview(), sequence: 4, refused }));

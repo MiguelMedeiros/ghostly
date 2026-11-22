@@ -8,12 +8,25 @@ import { endpoints } from "../infra/env.mjs";
 
 export const USDT_LOCAL = { network: "evm-local", chainId: 31337, provider: endpoints.usdt.rpc, token: endpoints.usdt.token, decimals: 6 };
 
+// Anvil fixes its clock offset once, at start, in whole seconds (genesis second minus the second it starts in). A start
+// that crosses a second boundary, as a slow one on a loaded host does, leaves every block a second or more behind the
+// wall clock for the chain's whole life, and a payment's block then looks older than the request it pays
+// (UsdtAdapter.receipt() refuses a block more than 1 s before issuedAt). One block at the wall clock resets the offset.
+async function syncClock(provider) {
+  const now = Math.ceil(Date.now() / 1000);
+  const last = Number((await provider.send("eth_getBlockByNumber", ["latest", false])).timestamp);
+  if (last >= now) return; // Level with or ahead of the wall clock: nothing to catch up, and time never goes back.
+  await provider.send("evm_setNextBlockTimestamp", [now]);
+  await provider.send("evm_mine", []);
+}
+
 export async function ready() {
   // Loaded here, not at the top: specs import USDT_LOCAL without paying for the compiler.
   const [{ default: solc }, { ContractFactory, JsonRpcProvider }] = await Promise.all([import("solc"), import("ethers")]);
   const provider = new JsonRpcProvider(USDT_LOCAL.provider);
   try {
     if ((await provider.getNetwork()).chainId !== 31337n) throw new Error("Local chain 31337 required");
+    await syncClock(provider);
     if ((await provider.getCode(USDT_LOCAL.token)) !== "0x") return { ...USDT_LOCAL, deployed: false };
     const input = { language: "Solidity", sources: { "TestUSDT.sol": { content: await readFile(new URL("../contracts/TestUSDT.sol", import.meta.url), "utf8") } }, settings: { evmVersion: "paris", outputSelection: { "*": { "*": ["abi", "evm.bytecode"] } } } };
     const compiled = JSON.parse(solc.compile(JSON.stringify(input)));

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { voiceLevel } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
 import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { useMediaDevices } from "../hooks/useMediaDevices";
 import { applySpeaker, canPickSpeaker, captureCamera, chooseDevice, deviceSource, isMediaDenied, mediaDeniedText, resolveDevice, type DeviceKind, type DeviceList } from "../lib/mediaDevices";
@@ -68,7 +69,8 @@ export function MediaSettings() {
       <DeviceRow kind="videoinput" list={list} choices={choices} info={t("settings.media.cameraInfo")}
         below={preview ? (id, fail) => <CameraPreview id={id} fail={(failure) => { fail(failure); if (failure) setPreview(false); }} /> : undefined}>
         {() => (
-          <Button data-testid="settings-camera-preview" aria-pressed={preview} onClick={() => setPreview(!preview)}>
+          // Named for what it does next (Preview, Stop), so it is no toggle: "Stop, pressed" read as stopped.
+          <Button data-testid="settings-camera-preview" onClick={() => setPreview(!preview)}>
             {preview ? t("settings.media.stop") : t("settings.media.preview")}
           </Button>
         )}
@@ -112,7 +114,7 @@ function DeviceRow({ kind, list, choices, info, children, below }: {
   return (
     <div>
       <Row label={name} info={info} testId={`${TEST_ID[kind]}-row`}
-        hint={missing ? <span role="status" data-testid={`${TEST_ID[kind]}-missing`}>{t("settings.media.missing", { name: missing })}</span>
+        hint={missing ? <span role="status" data-testid={`${TEST_ID[kind]}-missing`}>{withName(t("settings.media.missing", { name: NAME }), missing)}</span>
           : failed ? <span role="alert" data-testid={`${TEST_ID[kind]}-failed`} data-failure={failed} className="text-danger">{t(failed === "denied" ? deniedText() : "settings.media.failed")}</span> : undefined}>
         <Select fit aria-label={name} data-testid={TEST_ID[kind]} value={id ?? ""} options={options} onChange={pick} />
         {children(id, setFailed)}
@@ -181,7 +183,8 @@ function MicrophoneTest({ id, fail }: { id: string | undefined; fail: (failure: 
         <div className="h-full bg-accent" style={{ width: `${Math.round(level * 100)}%` }} />
       </div>
     )}
-    <Button data-testid="settings-microphone-test" aria-pressed={on} onClick={() => setOn(!on)}>
+    {/* Named for what it does next (Test, Stop), as the camera's Preview. */}
+    <Button data-testid="settings-microphone-test" onClick={() => setOn(!on)}>
       {on ? t("settings.media.stop") : t("settings.media.test")}
     </Button>
   </>;

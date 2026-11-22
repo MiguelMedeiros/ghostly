@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { APP_BUNDLE_MAGIC, canonicalJsonBytes, toBase64Url, utf8Encode, type AppPermission, type SignedAppRevocation } from "@ghostly/core";
+import { boundedAppFetch } from "../src/engine/appFetch";
 import { fileBytes, resetFileBytes } from "../src/shared/fileBytes";
 import { STORES, openDb, wrap } from "../src/shared/idb";
 import {
@@ -123,6 +124,34 @@ describe("install", () => {
     const again = apps(net);
     await again.addStore({ url: STORE_URL });
     expect(await again.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).toMatchObject({ unknownPublisher: true });
+  });
+
+  it("a curated store vouches only for the version it lists: another one, from a card, keeps Unknown publisher", async () => {
+    const v1 = await bundle();
+    const v2 = await bundle({ sequence: 2 });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v1, [BUNDLE_URL])] }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
+    const preview = await store.preview({ card: { ref: v2.ref, url: PINNED_URL, sequence: 2, digest: v2.digest } });
+    expect(preview).toMatchObject({ digest: v2.digest, unknownPublisher: true, listedBy: [] });
+    expect(await store.install({ digest: v2.digest, grant: ["chat"] })).toMatchObject({ unknownPublisher: true, listedBy: [] });
+    expect((await store.list())[0]).toMatchObject({ digest: v2.digest, unknownPublisher: true, listedBy: [] });
+  });
+
+  it("an app installed from a store keeps that store's name while the store lists a newer version it waits for", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v1)] }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
+    await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ sequence: 2, apps: [listing(v2, [PINNED_URL])] }));
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    expect((await store.list())[0]).toMatchObject({ digest: v1.digest, pending: { sequence: 2 }, unknownPublisher: false, listedBy: [{ key: keyOf(STORE_KEY) }] });
   });
 });
 
@@ -1133,6 +1162,24 @@ describe("an app installed from a store updates only to the version that store l
     expect(await appRows()).toEqual([]);
   });
 
+  it("installing from a store peeks a URL that may have moved on: one holding another version is not downloaded whole", async () => {
+    const v1 = await bundle({ sources: [HEAD] });
+    const v2 = await bundle({ sequence: 2, sources: [HEAD], data: new Uint8Array(256 * 1024) });
+    net.put(HEAD, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v1, [PINNED_URL, HEAD])] }));
+    // The commit-pinned copy's host has trouble (a 503): HEAD is tried next, and holds a version the store does not list.
+    const fetcher = boundedAppFetch({ fetcher: async (input, init) => (String(input) === PINNED_URL ? new Response("busy", { status: 503 }) : net.fetch(input, init)) });
+    const reads: { url: string; peek: boolean }[] = [];
+    const store = apps(net, { fetch: (url, options) => { reads.push({ url, peek: !!options.peek }); return fetcher(url, options); } });
+    await store.addStore({ url: STORE_URL });
+    // Try again on the install screen (the pinned copy's trouble may pass) reads them again.
+    for (let i = 0; i < 2; i++) await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).rejects.toThrow(/^status/);
+    expect(reads.filter((r) => r.url === HEAD), "HEAD only peeked, never read whole").toEqual([{ url: HEAD, peek: true }, { url: HEAD, peek: true }]);
+    // HEAD back on the listed version: peeked, then read whole and offered.
+    net.put(HEAD, v1.bytes);
+    expect(await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).toMatchObject({ digest: v1.digest, from: HEAD });
+  });
+
   it("an app added by URL or card is not pinned and keeps taking a newer version from its sources", async () => {
     const v1 = await bundle({ sources: [HEAD] });
     net.put(HEAD, v1.bytes);
@@ -1382,6 +1429,42 @@ describe("a restored profile (installed list, no bundle)", () => {
     await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
     net.files.delete(BUNDLE_URL);
     await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
+    expect(await bundleIds()).toEqual([]);
+  });
+
+  it("a restored record granting more than its bundle's manifest asks never runs", async () => {
+    const { v1, store } = await restored();
+    const [row] = await appRows() as { permissions: AppPermission[] }[];
+    row!.permissions = ["chat", "files", "internet", "name"];
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put(row));
+    // Its files missing: the bundle fetched by digest is not taken for it.
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
+    expect(await bundleIds()).toEqual([]);
+    // Its files here: the bundle read back refuses the record.
+    await (await fileBytes()).append(`app-${v1.digest}`, 0, v1.bytes);
+    await (await fileBytes()).close(`app-${v1.digest}`);
+    await expect(apps(net).entry({ ref: v1.ref })).rejects.toThrow(/^damaged/);
+  });
+
+  it("a restored record naming one app with another publisher's bundle never runs that bundle under its ref", async () => {
+    const other = await bundle({ by: signer("someone else"), permissions: [] });
+    const elsewhere = "https://raw.githubusercontent.com/eve/chess/HEAD/app.ghostlyapp";
+    net.put(elsewhere, other.bytes);
+    const first = apps(net);
+    await first.preview({ url: elsewhere });
+    await first.install({ digest: other.digest, grant: [] });
+    const [installed] = await appRows() as { ref: string; publisher: string; name: string }[];
+    const named = { ...installed!, ref: `${keyOf(PUBLISHER)}/chess`, publisher: keyOf(PUBLISHER), permissions: [] };
+    const db = await openDb();
+    const tx = db.transaction(STORES.apps, "readwrite");
+    tx.objectStore(STORES.apps).delete(installed!.ref);
+    tx.objectStore(STORES.apps).put(named);
+    await wrap(tx.objectStore(STORES.apps).count());
+    // Its files kept: read back, they are another app's.
+    await expect(apps(net).entry({ ref: named.ref })).rejects.toThrow(/^damaged/);
+    // Its files missing (a restored profile): the bundle fetched is not taken for it.
+    await (await fileBytes()).remove(`app-${other.digest}`);
+    await expect(apps(net).entry({ ref: named.ref })).rejects.toThrow(/^needs-files/);
     expect(await bundleIds()).toEqual([]);
   });
 
@@ -1638,6 +1721,25 @@ describe("files only partly written back (the page went away while they were wri
     expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
     expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
     expect(await storageRows()).toEqual(data);
+  });
+
+  it("files fetched back by an Open tell the pages, as files dropped do: every card and row then reads it as here", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    await (await fileBytes()).remove(`app-${v1.digest}`);
+    const checked = vi.fn();
+    const store = apps(net, { checked });
+    net.files.delete(BUNDLE_URL);
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^needs-files/);
+    expect(checked, "nothing came back: nothing to read again").not.toHaveBeenCalled();
+    net.put(BUNDLE_URL, v1.bytes);
+    expect((await store.entry({ ref: v1.ref })).digest).toBe(v1.digest);
+    expect(checked, "the pages read the list again: its files are here now").toHaveBeenCalledTimes(1);
+    expect(await store.fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect(checked, "already here: nothing new").toHaveBeenCalledTimes(1);
   });
 
   it("a whole file costs the list and the check before a run its size, no read and no hash", async () => {

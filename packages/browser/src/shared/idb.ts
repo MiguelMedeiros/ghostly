@@ -331,7 +331,7 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
  * rather than of what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending
  * operations), and a wallet record a newer version adds must never be deleted by mistake.
  */
-export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
 
 /** A group's small row in the settings store (`GroupLive`, `engine/groupRows.ts`): the profile's too. */
 export const groupLiveKey = (groupId: string): string => `groupLive:${groupId}`;

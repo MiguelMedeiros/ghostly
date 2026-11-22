@@ -4,7 +4,7 @@ import { IDENTITY_CHALLENGE_WINDOW, identityRefusal } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { focus } from "../../lib/connection";
 import { clockTime } from "../../lib/time";
-import { useEngineValue } from "../../lib/identities";
+import { receivedRefusal, useEngineValue } from "../../lib/identities";
 import { playSwitch, reducedMotion } from "../deck/motion";
 import "../deck/deck.css";
 import { IdCardFace } from "./IdCardFace";
@@ -92,7 +92,8 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
   // Mine refused: only a refusal this app writes, never the contact's own words as this app's line (identityRefusal).
   const why = state !== "failed" ? undefined : mine ? identityRefusal(entry.error) : entry.error;
   // The line is cut to one row: its tooltip reads it in full, in the same words (never the English it came from).
-  const reason = why && problemLine(why, t, "proof");
+  // Theirs refused here: said from this side (receivedRefusal), not in the words the contact was sent.
+  const reason = why && (mine ? problemLine(why, t, "proof") : receivedRefusal(why, t));
   // A mouse over the card: the deck's flourish, once (it ends at rest by itself). Never for a finger, nor with reduced motion.
   const flourish = (e: PointerEvent<HTMLButtonElement>) => {
     if (e.pointerType === "mouse" && !reducedMotion()) playSwitch({ glow: null, incoming: e.currentTarget, outgoing: null, dir: 1 });

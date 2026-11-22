@@ -6,6 +6,7 @@ import { expect, test } from "../support/fixtures";
  * The fields people type into show where the keyboard focus is: a ring around the chat list's search, the composer and
  * a chat's search, 3:1 or more against the colours on both of its sides (WCAG 2.4.11 and 1.4.11), in every colour theme,
  * light and dark. Before, each had `outline: none` and no ring: only the caret said where the focus was.
+ * And Profile's name: before, only its border turned from the muted ink to the accent, 1.1-1.3:1 apart.
  */
 
 const THEMES = ["classic", "cyan", "purple", "monochrome"] as const;
@@ -37,7 +38,8 @@ async function look(page: Page, colorTheme: string, scheme: "light" | "dark") {
 
 /**
  * The outline on `ring` (the field, or the shape around it): the lower of its contrasts with the background inside it
- * and the one outside it (WCAG's formula). 0 with no outline of 2 px or more.
+ * and the one outside it (WCAG's formula). An outline drawn off the element (a positive offset) has what is around the
+ * element on both of its sides. 0 with no outline of 2 px or more.
  */
 const ringContrast = (ring: Locator) => ring.evaluate((el) => {
   const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 4).map(Number);
@@ -53,7 +55,8 @@ const ringContrast = (ring: Locator) => ring.evaluate((el) => {
   if (style.outlineStyle === "none" || parseFloat(style.outlineWidth) < 2) return 0;
   const ring = lum(rgb(style.outlineColor));
   const ratio = (other: number) => (Math.max(ring, other) + 0.05) / (Math.min(ring, other) + 0.05);
-  return Math.min(ratio(lum(background(el))), ratio(lum(background(el.parentElement))));
+  const inside = parseFloat(style.outlineOffset) > 0 ? el.parentElement : el;
+  return Math.min(ratio(lum(background(inside))), ratio(lum(background(el.parentElement))));
 });
 
 test("the chat list's search, the composer and a chat's search show a ring with the focus, 3:1 or more in every theme", { tag: ["@feature:app.keyboard", "@feature:app.theme", "@feature:chat.search"] }, async ({ peer }) => {
@@ -91,6 +94,25 @@ test("the chat list's search, the composer and a chat's search show a ring with 
         await expect(field).not.toBeFocused();
         expect(await ringContrast(ring), `${name} without the focus, ${theme} ${scheme}`).toBe(0);
       }
+    }
+  }
+});
+
+test("Profile's name shows a ring with the focus, 3:1 or more in every theme", { tag: ["@feature:app.keyboard", "@feature:app.theme", "@feature:settings.nickname"] }, async ({ peer }) => {
+  test.setTimeout(3 * 60_000);
+  const { page } = await peer("ring-profile");
+  await page.goto("/#/profile");
+  const name = page.getByTestId("profile-name");
+  for (const theme of THEMES) {
+    for (const scheme of ["light", "dark"] as const) {
+      await look(page, theme, scheme);
+      await name.focus();
+      await expect(name).toBeFocused();
+      expect(await ringContrast(name), `${theme} ${scheme}`).toBeGreaterThanOrEqual(3);
+      // Without the focus, no ring.
+      await page.keyboard.press("Tab");
+      await expect(name).not.toBeFocused();
+      expect(await ringContrast(name), `without the focus, ${theme} ${scheme}`).toBe(0);
     }
   }
 });

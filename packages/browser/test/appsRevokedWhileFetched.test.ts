@@ -50,8 +50,8 @@ function holdRead(url: string): { asked: Promise<void>; release: () => void } {
   return { asked: seen, release };
 }
 
-/** The store's next index revokes `digest`, read before the next bundle write goes on. */
-function revokeAtWrite(store: ReturnType<typeof apps>, ref: string, digest: string): void {
+/** The store's next index revokes `digest`, read before the next bundle write goes on (then the store removed, with `remove`). */
+function revokeAtWrite(store: ReturnType<typeof apps>, ref: string, digest: string, remove = false): void {
   const target = store as unknown as { writeBundle: (digest: string, bytes: Uint8Array) => Promise<unknown> };
   const real = target.writeBundle.bind(store);
   let done = false;
@@ -60,6 +60,7 @@ function revokeAtWrite(store: ReturnType<typeof apps>, ref: string, digest: stri
       done = true;
       await net.putStore(await storeFiles({ sequence: 2, apps: [], revoked: [await revocation(ref, [digest])] }));
       await store.refreshStores();
+      if (remove) await store.removeStore({ key: (await store.listStores())[0]!.key });
     }
     return real(d, bytes);
   });
@@ -91,6 +92,23 @@ describe("a version a store revokes while it is fetched or written", () => {
     await store.refreshStores();
     expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
     await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^revoked/);
+  });
+
+  it("the update check: revoked while its bundle is written, then the store removed: the record carries it", async () => {
+    const { v1, v2, store } = await installed();
+    revokeAtWrite(store, v1.ref, v2.digest, true);
+    await store.checkUpdates();
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^revoked/);
+  });
+
+  it("Install: revoked while its bundle is written, then the store removed: it is refused and the installed version stays", async () => {
+    const { v1, v2, store } = await installed();
+    await store.preview({ url: V2_URL });
+    revokeAtWrite(store, v1.ref, v2.digest, true);
+    await expect(store.install({ digest: v2.digest, grant: ["chat"] })).rejects.toThrow(/^revoked/);
+    expect((await store.list())[0]).toMatchObject({ digest: v1.digest });
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
   });
 
   it("Install: revoked while its bundle is written, it is refused and the installed version stays", async () => {

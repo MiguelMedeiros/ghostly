@@ -234,12 +234,18 @@
     "listSeparator": ", ",
     "sendUnavailable": "Una richiesta al gruppo la paga un membro; per pagare qualcuno, sceglilo",
     "status": {
-      "claimedPaid": "{{names}} ha pagato · in attesa del portafoglio di {{to}}",
+      "claimedPaid": "{{names}} hanno pagato · in attesa del portafoglio di {{to}}",
+      "claimedPaidByMe": "Hai pagato · in attesa del portafoglio di {{to}}",
+      "claimedPaidToMe": "{{names}} hanno pagato · in attesa del tuo portafoglio",
+      "claimedPaidWithMe": "Tu e {{names}} avete pagato · in attesa del portafoglio di {{to}}",
       "closed": "Chiuso",
       "paid": "Pagato",
       "paidBy": "Pagato da {{name}}",
+      "paidByMe": "Pagato da te",
       "saysPaid": "{{names}} dice di aver pagato · in attesa del portafoglio di {{to}}",
+      "saysPaidToMe": "{{names}} dice di aver pagato · in attesa del tuo portafoglio",
       "sent": "Inviato · in attesa di {{name}}",
+      "sentToMe": "Inviato · in attesa del tuo portafoglio",
       "takenBack": "Ripreso",
       "waiting": "In attesa del pagamento"
     },
@@ -247,9 +253,16 @@
     "theGroup": "il gruppo",
     "title": {
       "asked": "{{to}} ha chiesto a {{from}}",
+      "askedByMe": "Hai chiesto a {{from}}",
       "askedGroup": "{{to}} ha chiesto al gruppo",
+      "askedGroupByMe": "Hai chiesto al gruppo",
+      "askedMe": "{{to}} ti ha chiesto",
       "paying": "{{from}} sta pagando {{to}}",
-      "sent": "{{from}} ha inviato a {{to}}"
+      "payingByMe": "Stai pagando {{to}}",
+      "payingMe": "{{from}} ti sta pagando",
+      "sent": "{{from}} ha inviato a {{to}}",
+      "sentByMe": "Hai inviato a {{to}}",
+      "sentToMe": "{{from}} ti ha inviato"
     },
     "why": {
       "noPayments": "La sua app non accetta pagamenti nei gruppi (serve un aggiornamento), o ha disattivato ogni metodo",

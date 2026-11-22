@@ -9,6 +9,7 @@ import type { EngineState, GroupView, LinkView, MessageFile } from "@ghostly/bro
 import { callApi, type ApiContext } from "../src/api";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { chatViewOf } from "./support/chatView";
 // covers: headless.files, files.image.metadata
 
 /** `file send` of a photo: it leaves without its metadata, as the apps send it; one that cannot be stripped is refused. */
@@ -37,6 +38,7 @@ beforeAll(async () => {
 describe("file send of a photo", () => {
   const sent: MessageFile[] = [];
   const node = {
+    chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [group], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
     getMessage: vi.fn(async () => undefined),

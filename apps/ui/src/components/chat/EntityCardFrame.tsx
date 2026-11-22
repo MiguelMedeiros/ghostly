@@ -12,7 +12,7 @@ export const cardQuiet =
 /**
  * One card under a message's text: a mark, what it is, one line of who or what, and whatever the card shows and
  * does below. Drawn inside the bubble, so it reads on either bubble colour (see e2e/web/bubble-contrast.spec.ts); the
- * small label and subtitle at 80%, the least that keeps 4.5:1 on every theme's sent bubble (entityCardContrast.test.tsx).
+ * small label and subtitle at 80%, the least that keeps 4.5:1 on every theme's sent bubble (entityCards.test.tsx).
  */
 export function EntityCardFrame({ testId, mark, label, title, subtitle, children, data }: {
   testId: string; mark: ReactNode; label: string; title: ReactNode; subtitle?: ReactNode; children?: ReactNode;
@@ -25,7 +25,9 @@ export function EntityCardFrame({ testId, mark, label, title, subtitle, children
         <span className="shrink-0">{mark}</span>
         <div className="min-w-0 flex-1">
           <p className="m-0 chat-text-card-label uppercase tracking-wider text-text-primary/80">{label}</p>
-          <p className="m-0 chat-text-card-heading font-semibold leading-snug text-text-primary [overflow-wrap:anywhere]">{title}</p>
+          {/* Often someone else's words (a group's name, a profile's): in their own direction, lined up with the label
+              beside the mark. In the app's, "Team (dev)" in Arabic was drawn "(Team (dev". It wraps, so no "…" is lost. */}
+          <p dir="auto" className="m-0 chat-text-card-heading font-semibold leading-snug text-text-primary [overflow-wrap:anywhere] text-match-parent">{title}</p>
           {subtitle && <p className="m-0 mt-0.5 chat-text-card-small leading-snug text-text-primary/80 [overflow-wrap:anywhere]">{subtitle}</p>}
         </div>
       </div>
