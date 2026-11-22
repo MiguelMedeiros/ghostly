@@ -244,11 +244,20 @@ jobs:
           BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
         run: npm run test:map -- --summary ${BASE:+--base=$BASE}
 
+  # npm run test:app in three shards of about the same time, as the packages' below (tools/scripts/test-shards.mjs
+  # --app): one runner took it in 9-13 minutes, the UI's tests 11 of them, the longest job of a ready run. The name
+  # keeps "Frontend tests (app)" at its start, the name the merge train knows the job by.
   frontend-tests:
-    name: Frontend tests (app)
+    name: Frontend tests (app) ${{ matrix.shard }}/3
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The 3 below and in the name must match this list.
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -260,7 +269,8 @@ jobs:
           cache: "npm"
 
       # `npm test` is test:packages (the shards below) then test:app (here). A test added beside the two would run
-      # nowhere; tools/scripts/test-shards.mjs checks test:packages is a list of workspaces it knows how to split.
+      # nowhere; tools/scripts/test-shards.mjs checks test:packages is a list of workspaces it knows how to split, and
+      # test:app a list of `vitest run -c <config>` scripts.
       - name: The two halves are all of npm test
         run: |
           test="$(node -p 'require("./package.json").scripts.test')"
@@ -272,8 +282,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Unit tests (npm run test:app)
-        run: npm run test:app
+      - name: Unit tests (npm run test:app, shard ${{ matrix.shard }} of 3)
+        run: node tools/scripts/test-shards.mjs --app ${{ matrix.shard }} 3 --report-dir "$RUNNER_TEMP/test-reports"
+
+      # Each file's time, for `node tools/scripts/test-shards.mjs --record` after a test file gets slower.
+      - name: Keep the test times
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-test-reports-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-reports
+          retention-days: 14
+          if-no-files-found: ignore
 
   # The packages' unit tests (npm run test:packages) in four shards of about the same time, each on its own runner
   # (tools/scripts/test-shards.mjs, by tools/scripts/test-durations.json). One runner took them in 6.5 minutes, package after
