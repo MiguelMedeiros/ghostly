@@ -367,7 +367,7 @@ async function session(g: Globals, options: RuntimeOptions, again = true, first?
   const host = await openOneShot(g, options);
   if (host instanceof DaemonClient) return throughDaemon(host, anew);
   const call = async (m: string, p?: unknown) => {
-    if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, p as Record<string, unknown>);
+    if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, m, p as Record<string, unknown>, READS.has(m));
     return callApi(host.ctx, m, p ?? {});
   };
   return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };
