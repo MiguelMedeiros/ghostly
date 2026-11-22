@@ -60,7 +60,7 @@ describe("a Desktop viewer window whose app the contact took back", () => {
     const request: ServiceRequest = { id: 7, peer: PEER, service: "atlas", method: "GET", path: "/", headers: [], body_b64: null };
     await listeners.get("ghostly-svc-request")!({ payload: request });
     const [, args] = called.mock.calls.find(([command]) => command === "service_respond")!;
-    expect(page((args as { response: ServiceWindowResponse }).response)).toBe("Atlas is no longer shared with you.");
+    expect(page((args as { response: ServiceWindowResponse }).response)).toBe("⁨Atlas⁩ is no longer shared with you.");
   });
 });
 

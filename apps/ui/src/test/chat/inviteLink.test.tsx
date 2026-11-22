@@ -38,6 +38,19 @@ describe("the address of a chat no longer on this device", () => {
     await waitFor(() => expect(window.location.hash).toBe("#/"));
   });
 
+  it("a stored chat's address with a trailing slash opens the chat, as the address without it does", async () => {
+    const reading = readInvite(createChatInvite().inviteCode);
+    if (!reading.ok) throw new Error("a fresh invite reads");
+    const id = ensureSession(reading.keys);
+
+    render(<Root />);
+    go(`#/chat/${id}/`);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+    expect(window.location.hash).toBe(`#/chat/${id}/`);
+    deleteSession(id);
+  });
+
   it("a code that looks like an invite keeps its refusal", async () => {
     render(<Root />);
     go("#/chat/ghostly1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq");

@@ -71,6 +71,8 @@ describe("the copy of the network settings", () => {
     expect(deviceNetworkOf({ online: false, ...NETWORK } as never)).toEqual({ off: true, ...NETWORK });
     expect(deviceNetworkOf({ online: true, relays: ["https://a.test"], readRelays: false, iceServers: [] })).toEqual({ relays: ["https://a.test"] });
     expect(deviceNetworkOf({ online: true, relays: [], iceServers: [], hyperdhtRelay: " " })).toEqual({});
+    expect(deviceNetworkOf({ online: true, relays: [], iceServers: [], relayOnly: true })).toEqual({ relayOnly: true });
+    expect(deviceNetworkOf({ online: true, relays: [], iceServers: [], relayOnly: false })).toEqual({});
   });
 
   it("is written into the record of a profile with a device set, only when it changed, and never for one with none", async () => {
@@ -223,6 +225,32 @@ describe("a standby's network", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("reads the relays at a browser's pace on a Desktop with Hide my IP from contacts on, as its engine does", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    // The relay reads of a Desktop standby (the DHT's pace, a transport it can tell to keep off the DHT) over ten minutes.
+    const linkReads = async (network: DeviceNetwork) => {
+      setDeviceMirror(null); resetDeviceGates();
+      await closeDevicesDb(); await closeDeviceKeysDb(); await dropDevicesDatabase(); await dropKeys();
+      await standbyRecord(network);
+      const gate = await openDeviceGate("ghostly");
+      const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+      const engine = (await standbyEngine(gate, { transport: { ...pkarr.transport(), configure: () => {} }, pollIntervals: DHT_POLL_INTERVALS }))!;
+      await engine.start({ gate, show: () => {} });
+      for (let i = 0; i < 600; i++) await vi.advanceTimersByTimeAsync(1_000);
+      const reads = pkarr.reads;
+      const stopping = engine.stop();
+      for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(100);
+      await stopping;
+      return reads;
+    };
+    try {
+      const dht = await linkReads({});
+      const hidden = await linkReads({ relayOnly: true });
+      expect(hidden).toBeGreaterThan(0);
+      expect(hidden).toBeLessThan(dht);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("asks nothing of anyone with the network off: no relay, no DHT, no link, no turn read", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
     try {
@@ -272,6 +300,8 @@ describe("the active device's engine", () => {
     expect((await readDeviceRecord("ghostly"))!.network).toMatchObject({ irohRelays: NETWORK.irohRelays, iceServers: NETWORK.iceServers });
     await server.node.updateSettings({ settings: { online: false } });
     expect((await readDeviceRecord("ghostly"))!.network).toMatchObject({ off: true });
+    await server.node.updateSettings({ settings: { relayOnly: true } });
+    expect((await readDeviceRecord("ghostly"))!.network).toMatchObject({ relayOnly: true });
     // A change of something else writes nothing.
     const saved = (await readDeviceRecord("ghostly"))!.saved;
     await server.node.updateSettings({ settings: { nick: "Miguel" } });
