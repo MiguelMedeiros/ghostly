@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
+import { identityFromSeedB64 } from "@ghostly/core";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { open as openEnvelope } from "@ghostly/browser/backup/envelope";
@@ -8,7 +9,11 @@ import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { bool, str, type Method } from "./apiKit";
 import { CliError, localFileError } from "./errors";
-import { RESTORED_MARK, profileExists, profilePaths, removeStoppedRestores, type ProfilePaths } from "./profiles";
+import { RESTORED_MARK, listProfiles, profileExists, profilePaths, removeStoppedRestores, type ProfilePaths } from "./profiles";
+import { peekStores } from "./runtime/storage";
+
+/** The engine's own database in a profile's store. */
+const PEER_DB = "ghostly";
 
 /**
  * A headless profile's backup: the WISP 05 envelope around the profile itself, its store and its files, written and
@@ -167,7 +172,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
     if (passphrase && unsealed) throw new CliError("bad_request", "Give a passphrase or noPassphrase, not both");
     // The folder it goes in, checked first: a missing one is named, not the file written beside `path`.
     const folder = dirname(path);
-    if (!(await stat(folder)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);
+    if (!(await stat(folder)).isDirectory()) throw new CliError("not_found", `${folder} is a file, not a folder`);
     const paths = ctx.runtime.paths;
     // The store as one snapshot with every value in it (the messages too, which the profile keeps in rows.db): a backup
     // any ghostly restores, this one or an older one. Its name is this backup's own: two at once in one daemon shared
@@ -321,6 +326,44 @@ async function restoringFolder(home: string, name: string): Promise<ProfilePaths
 }
 
 /**
+ * The keys a profile answers its contacts with, from the store in `db` (the app's `identityKeysOf`): each chat's
+ * participation key (its chat key for an older chat) and the DID key. A seed sealed with a key is not compared.
+ */
+export function identityKeys(db: string): Set<string> {
+  const stores = peekStores(db, PEER_DB, ["links", "settings"]);
+  const keys = new Set<string>();
+  for (const link of stores.get("links")!.values()) {
+    const { participationSeed, seedB64 } = (link ?? {}) as { participationSeed?: unknown; seedB64?: unknown };
+    const seed = typeof participationSeed === "string" ? participationSeed : typeof seedB64 === "string" ? seedB64 : null;
+    if (!seed) continue;
+    try { keys.add(`chat:${identityFromSeedB64(seed).pubKeyZ32}`); } catch { /* not a seed: nothing to compare */ }
+  }
+  const did = (stores.get("settings")!.get("profileDid") as { publicKey?: unknown } | undefined)?.publicKey;
+  if (typeof did === "string" && did) keys.add(`did:${did}`);
+  return keys;
+}
+
+/**
+ * The backup whose store is in `db` is of the same person as profiles of this home (WISP 05 § Restoring on the same
+ * device): a copy beside them would answer their contacts as them, and with both running messages land in either one
+ * and wallets race on the same funds. Refused, naming them, unless `copy` says to make it anyway. Each profile's store
+ * is read from its files, a running one's too; one that cannot be read is no match, and a backup whose store this
+ * cannot read has nothing to compare.
+ */
+export function refuseSameProfile(home: string, db: string, copy: boolean): void {
+  if (copy) return;
+  let theirs: Set<string>;
+  try { theirs = identityKeys(db); } catch { return; }
+  if (!theirs.size) return;
+  const same = listProfiles(home).filter((name) => {
+    try { return [...identityKeys(profilePaths(home, name).db)].some((key) => theirs.has(key)); } catch { return false; }
+  });
+  if (!same.length) return;
+  const named = same.join(", ");
+  throw new CliError("refused", `This backup is of the same person as ${same.length > 1 ? "profiles" : "profile"} ${named}: a copy would act as them to their contacts, and with both running messages can land in either one and wallets can spend the same money. Pass --copy to restore it anyway`, { reason: "same-profile", profiles: same });
+}
+
+/**
  * The folder is whole: marked as a restored copy (`RESTORED_MARK`, which names the files a light backup left out),
  * then given the profile's name. Never over a profile.
  */
@@ -338,13 +381,14 @@ async function finishRestore(home: string, name: string, work: ProfilePaths, lef
  * Runs with no engine: nothing is open yet. A backup that is refused, damaged or cut short leaves no profile behind,
  * and neither does a restore that is stopped while it runs (`restoringFolder`): `stop` aborted (Ctrl-C) ends it at its
  * next record with its reason, the folder removed. The profile is marked as a restored copy: its engine, the first
- * time it starts, treats the money in it as a restore does (`RESTORED_MARK`).
+ * time it starts, treats the money in it as a restore does (`RESTORED_MARK`). A backup of the same person as a
+ * profile of this home is refused once its store is read, before its files, unless `copy` (`refuseSameProfile`).
  */
-export async function restoreProfile(home: string, name: string, file: string, passphrase?: string, stop?: AbortSignal): Promise<ProfilePaths> {
-  if (passphrase === undefined) return await restoreWith(home, name, file, undefined, stop);
+export async function restoreProfile(home: string, name: string, file: string, passphrase?: string, stop?: AbortSignal, copy = false): Promise<ProfilePaths> {
+  if (passphrase === undefined) return await restoreWith(home, name, file, undefined, stop, copy);
   let first: unknown;
   for (const form of passphraseForms(passphrase)) {
-    try { return await restoreWith(home, name, file, form, stop); } catch (error) {
+    try { return await restoreWith(home, name, file, form, stop, copy); } catch (error) {
       if (!(error instanceof CliError && error.code === "refused" && error.message.startsWith("Wrong passphrase"))) throw error;
       first ??= error;
     }
@@ -368,7 +412,7 @@ export function passphraseForms(given: string): string[] {
 }
 
 /** One restore with one passphrase (none for a backup made without one). */
-async function restoreWith(home: string, name: string, file: string, passphrase?: string, stop?: AbortSignal): Promise<ProfilePaths> {
+async function restoreWith(home: string, name: string, file: string, passphrase?: string, stop?: AbortSignal, copy = false): Promise<ProfilePaths> {
   if (profileExists(home, name)) throw new CliError("refused", `Profile ${name} exists: restore into a new name`);
   const source = await fileSource(file);
   let work: ProfilePaths | null = null;
@@ -380,6 +424,7 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
       stop?.throwIfAborted();
       work = await restoringFolder(home, name);
       await writeWhole(work, payload, stop);
+      refuseSameProfile(home, work.db, copy);
       return await finishRestore(home, name, work, [], stop);
     }
     const next = async () => { stop?.throwIfAborted(); try { return await reader.next(); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); } };
@@ -393,7 +438,7 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
     work = await restoringFolder(home, name);
     const paths = work;
     await mkdir(paths.db, { recursive: true, mode: 0o700 });
-    let out: { handle: FileHandle; left: number } | null = null, files = 0, bytes = 0, ended = false, stored = false;
+    let out: { handle: FileHandle; left: number; store: boolean } | null = null, files = 0, bytes = 0, ended = false, stored = false;
     try {
       for (let record = await next(); record; record = await next()) {
         if (ended) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
@@ -403,7 +448,13 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
           out.left -= record.bytes.length;
           continue;
         }
-        if (out) { if (out.left) throw new CliError("refused", "This backup is damaged: it was changed or cut short"); await out.handle.close(); out = null; }
+        if (out) {
+          if (out.left) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
+          await out.handle.close();
+          const store = out.store;
+          out = null;
+          if (store) refuseSameProfile(home, paths.db, copy);
+        }
         const value = parse(record.json);
         if (value.t === "end") { ended = value.files === files && value.bytes === bytes; if (!ended) throw new CliError("refused", "This backup is damaged: it was changed or cut short"); continue; }
         if (value.t === "setting") {
@@ -416,7 +467,7 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
         let target: string;
         if (value.kind === "store") { target = join(paths.db, "snapshot.bin"); stored = true; }
         else { target = inside(paths.files, value.path); await mkdir(dirname(target), { recursive: true, mode: 0o700 }); files += 1; bytes += value.size; }
-        out = { handle: await open(target, "wx", 0o600), left: value.size };
+        out = { handle: await open(target, "wx", 0o600), left: value.size, store: value.kind === "store" };
       }
       if (out || !ended || !stored) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
     } finally { await out?.handle.close().catch(() => {}); }

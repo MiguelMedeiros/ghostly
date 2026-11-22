@@ -112,6 +112,8 @@ describe("search in a chat that shows received messages translated", () => {
     await search("movies");
     expect(count()).toBe("1 of 1");
     expect(marks()).toEqual({ pt: ["movies"] });
+    // A screen reader hears the match in the words it was found by, the ones on screen.
+    expect(screen.getByTestId("chat-search-said").textContent).toMatch(/^1 of 1: .+, Let's go to the movies tomorrow$/);
 
     // "amanhã" is in the original, which is not on screen: only my own message, which shows it, is found.
     await search("amanhã");

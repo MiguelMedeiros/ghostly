@@ -328,7 +328,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The 4 below and in the name must match this list.
+        # The 4 below, in the name and in CI Success's check must match this list.
         group: [1, 2, 3, 4]
     steps:
       # The pull request's merge commit and its first parent, the base it is merged onto: their difference is the change.
@@ -356,8 +356,9 @@ jobs:
   # ============================================
   # The shards above run on x64 only. Here: the CLI packed as npm publishes it, installed into an empty folder the way
   # `npm install -g @ghostlytools/cli` does (its dependencies from npm, so node-datachannel's linux-arm64 build comes
-  # from its own optional package), must start a daemon with WebRTC and calls on. Then the CLI's whole test suite, the
-  # two-peer story included: pairing, messages, files and a voice call over libdatachannel, on arm64.
+  # from its own optional package), must start a daemon with WebRTC and calls on. The CLI's whole test suite on arm64
+  # (the two-peer story, a voice call over libdatachannel) runs nightly in cli-arm64-nightly.yml: on x64 the packages
+  # shards above already run it on every pull request.
   # No Rust: the Iroh WebAssembly the CLI bundles is committed (packages/iroh-web/pkg).
   cli-linux-arm64:
     name: CLI on Linux ARM64
@@ -365,7 +366,7 @@ jobs:
     if: needs.changes.outputs.packages == 'true'
     runs-on: ubuntu-24.04-arm
     # A daemon that never exits would otherwise hold the runner for 6 hours.
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -417,15 +418,6 @@ jobs:
           '
           $ghostly daemon stop
           trap - EXIT
-
-      # The CLI's own suite, as the packages shards run it on x64 (its Vitest builds dist/ again first). Skipped here as
-      # on x64: fedimint (a regtest federation) and payments (a test mint), which need the Docker e2e services, the long
-      # chat bench, and the ffmpeg comparisons in voicePeaks when ffmpeg is missing.
-      - name: jq for the Claude Code agent example
-        run: command -v jq || { sudo apt-get update && sudo apt-get install -y jq; }
-
-      - name: CLI tests
-        run: npm run test -w @ghostlytools/cli
 
   frontend-build:
     name: Frontend builds
@@ -959,16 +951,20 @@ jobs:
           # Skipped only counts when `changes` chose to skip that job.
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$2" == "false" ) ]]; }
           # One error per job that did not pass, by the name the run page shows: the summary alone hid it among the skips.
+          # A matrix has one result for all its jobs: the error names their range and says so ($4), and each job names
+          # its own failure.
           failed=0
           check() {
             ok "$2" "$3" && return
-            if [[ "$2" == "skipped" ]]; then echo "::error::$1 was skipped, but this change needs it"; else echo "::error::$1 ended $2"; fi
+            if [[ "$2" == "skipped" ]]; then echo "::error::$1 was skipped, but this change needs it"
+            elif [[ -n "${4:-}" ]]; then echo "::error::$1: $4 ended $2"
+            else echo "::error::$1 ended $2"; fi
             failed=1
           }
           check "Frontend lint and types" "$FRONTEND_CHECKS" "$LINT"
           check "Frontend tests (app)" "$FRONTEND_TESTS" "$FULL"
           check "Frontend builds" "$FRONTEND_BUILD" "$FULL"
-          check "Affected unit tests (draft)" "$AFFECTED" "$AFFECTED_GATE"
+          check "Affected unit tests (draft 1/4 to 4/4)" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"
           check "Frontend tests (packages)" "$PACKAGES_TESTS" "$PACKAGES"
           check "CLI on Linux ARM64" "$CLI_ARM64" "$PACKAGES"
           check "Tauri Backend" "$TAURI" "$RUST"
