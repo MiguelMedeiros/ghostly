@@ -936,7 +936,8 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const resolved = here(out) as string, path = (out.endsWith("/") || out.endsWith(sep)) && !resolved.endsWith(sep) ? `${resolved}${sep}` : resolved;
       // The folder it goes in, as the backup checks it (backup.ts): a missing one, or a file in its place, is named before the profile opens.
       if (!path.endsWith(sep) && !localStat(dirname(path)).isDirectory()) throw new CliError("not_found", `${dirname(path)} is a file, not a folder`);
-      const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: cleanEnds(await backupPassphrase(parsed.options["passphrase-file"]), parsed.options["passphrase-file"]), ...light };
+      const passphrase = unsealed ? undefined : cleanEnds(await backupPassphrase(parsed.options["passphrase-file"]), parsed.options["passphrase-file"]);
+      const params = passphrase === undefined ? { path, noPassphrase: true, ...light } : { path, passphrase, ...light };
       const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("ghostly: Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
       print(made);
@@ -1038,19 +1039,24 @@ const END_NAMES: Record<string, string> = { " ": "a space", "\t": "a tab", "\r":
 const endName = (char: string) => END_NAMES[char] ?? `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")} (a space)`;
 
 /**
- * A new backup's passphrase, refused when it starts or ends with whitespace or a byte order mark, or holds a NUL (a
- * file saved as UTF-16): only the one line break at a file's end is left out, so the same passphrase typed, pasted or
- * held by a password manager would open nothing ("Wrong passphrase"). Restore takes any passphrase: old backups open.
+ * A new backup's passphrase, refused when it starts or ends with whitespace or a byte order mark, holds a NUL (a file
+ * saved as UTF-16), or holds a line break inside (`pass show x | ...`: the password, then notes on the next lines):
+ * only the one line break at a file's end is left out, so the same passphrase typed, pasted or held by a password
+ * manager would open nothing ("Wrong passphrase"). Restore takes any passphrase: old backups open.
  */
 function cleanEnds(passphrase: string, file: unknown): string {
   const source = typeof file !== "string" ? "GHOSTLY_BACKUP_PASSPHRASE" : file === "-" ? "stdin" : file;
   if (passphrase.includes("\0")) throw new CliError("bad_request", `${source} holds a NUL: a file saved as UTF-16? Save the passphrase as UTF-8 text`);
   const trimmed = passphrase.trim();
-  if (trimmed === passphrase) return passphrase;
-  const at = trimmed && passphrase.startsWith(trimmed) ? "ends" : "starts";
-  const char = at === "ends" ? passphrase.at(-1)! : passphrase[0]!;
-  const fileRule = typeof file === "string" ? " (one line break at its end is left out already)" : "";
-  throw new CliError("bad_request", `The passphrase in ${source} ${at} with ${endName(char)}${fileRule}: the same passphrase typed or pasted would not open the backup. Take it out`);
+  if (trimmed !== passphrase) {
+    const at = trimmed && passphrase.startsWith(trimmed) ? "ends" : "starts";
+    const char = at === "ends" ? passphrase.at(-1)! : passphrase[0]!;
+    const fileRule = typeof file === "string" ? " (one line break at its end is left out already)" : "";
+    throw new CliError("bad_request", `The passphrase in ${source} ${at} with ${endName(char)}${fileRule}: the same passphrase typed or pasted would not open the backup. Take it out`);
+  }
+  const lines = passphrase.split(/\r\n|\r|\n/).length;
+  if (lines > 1) throw new CliError("bad_request", `The passphrase in ${source} has ${lines} lines: a restore would need all ${lines}, and the first line alone would not open the backup. Keep it to one line (e.g. pass show x | head -1)`);
+  return passphrase;
 }
 
 /** Set on `startDetached`'s child: its parent waits for the profile and starts it again, so the child does not wait too. */

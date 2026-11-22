@@ -287,6 +287,30 @@ it("a backup refuses a passphrase with a space, line break or byte order mark at
   expect(ok(await ghostly(["--home", dir, "profile", "restore", out, "copy", "--copy"], { env: PASS }))).toMatchObject({ restored: "copy" });
 });
 
+// A file with more than one line (`pass show x | ...`: the password, then notes) sealed the backup with every line: the
+// first line alone, typed or set in the environment, was "Wrong passphrase". Refused now, as an extra line break at the
+// end already was, with the count of lines.
+it("a backup refuses a passphrase with more than one line, and says how many", async () => {
+  const dir = home("backup-lines");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Lines bot"]));
+  const out = join(dir, "x.ghostly-backup"), file = join(dir, "pass"), pass = PASS.GHOSTLY_BACKUP_PASSPHRASE;
+  const RULE = "and the first line alone would not open the backup. Keep it to one line (e.g. pass show x | head -1)";
+  writeFileSync(file, `${pass}\nurl: example.org\n`);
+  const fromFile = error(await ghostly(["--home", dir, "profile", "backup", "--out", out, "--passphrase-file", file], { env: NO_PASS }), "bad_request", 1);
+  expect(fromFile.message).toBe(`The passphrase in ${file} has 2 lines: a restore would need all 2, ${RULE}`);
+  // Stdin with CRLF lines, and the environment.
+  const piped = error(await ghostly(["--home", dir, "profile", "backup", "--out", out, "--passphrase-file", "-"], { env: NO_PASS, input: `${pass}\r\nline two\r\nline three\r\n` }), "bad_request", 1);
+  expect(piped.message).toBe(`The passphrase in stdin has 3 lines: a restore would need all 3, ${RULE}`);
+  const env = error(await ghostly(["--home", dir, "profile", "backup", "--out", out], { env: { GHOSTLY_BACKUP_PASSPHRASE: `${pass}\nnotes` } }), "bad_request", 1);
+  expect(env.message).toBe(`The passphrase in GHOSTLY_BACKUP_PASSPHRASE has 2 lines: a restore would need all 2, ${RULE}`);
+  expect(existsSync(out), "nothing written for a refused passphrase").toBe(false);
+  // One line (its line break at the end left out) is made, and the environment opens it (`--copy`: the backup is of this
+  // home's own profile).
+  writeFileSync(file, `${pass}\n`);
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", out, "--passphrase-file", file], { env: NO_PASS }));
+  expect(ok(await ghostly(["--home", dir, "profile", "restore", out, "copy", "--copy"], { env: PASS }))).toMatchObject({ restored: "copy" });
+});
+
 // The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a
 // profile that was listed and opened, with the keys of the original and a file cut short.
 it("a restore stopped while it writes leaves no profile, and the next one is whole", { timeout: 120_000 }, async () => {
