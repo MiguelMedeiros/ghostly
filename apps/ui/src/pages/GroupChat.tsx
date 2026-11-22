@@ -484,6 +484,9 @@ export function GroupChat() {
   // is opened.
   const rotatingRef = useRef(new Set<string>());
   const [rotating, setRotating] = useState<ReadonlySet<string>>(() => new Set());
+  /** The group whose last Rotate keys is done, said once by its live line; another group opened forgets it. */
+  const [rotated, setRotated] = useState<string | null>(null);
+  if (rotated && rotated !== groupId) setRotated(null);
   const [showMute, setShowMute] = useState(false);
   const [showTranslate, setShowTranslate] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
@@ -884,9 +887,12 @@ export function GroupChat() {
     const id = groupId;
     if (rotatingRef.current.has(id)) return;
     const mark = (on: boolean) => { if (on) rotatingRef.current.add(id); else rotatingRef.current.delete(id); setRotating(new Set(rotatingRef.current)); };
-    mark(true);
-    void act(() => engine.call("rotateGroup", { groupId: id })).finally(() => mark(false));
+    mark(true); setRotated(null);
+    void act(async () => { await engine.call("rotateGroup", { groupId: id }); setRotated(id); }).finally(() => mark(false));
   };
+  // The menu closes at the press and the timeline's event line is not read out: this one says it started and that it is
+  // done. A refusal is the notice's.
+  const rotateLine = rotating.has(groupId) ? t("group.menu.rotating") : rotated === groupId ? t("group.menu.rotated") : "";
   // Knocking again, Try again goes: the focus it had goes to Cancel joining beside it, not to the page.
   const tryAgain = (pressed: HTMLElement) => void act(async () => {
     await engine.call("acceptGroupInvitation", { groupId });
@@ -958,7 +964,7 @@ export function GroupChat() {
               {!invited && <TranslateMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowTranslate(true); }} />}
               {!invited && <FolderMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowFolders(true); }} />}
               {!noTimeline && !invited && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
-              {group.isAdmin && <MenuItem testId="group-rotate" busy={rotating.has(groupId)} onClick={rotate}>{t("group.menu.rotate")}</MenuItem>}
+              {group.isAdmin && <MenuItem testId="group-rotate" busy={rotating.has(groupId)} onClick={rotate}>{rotating.has(groupId) ? t("group.menu.rotating") : t("group.menu.rotate")}</MenuItem>}
               {!invited && <MenuSeparator />}
               {group.status === "active" && <MenuItem danger testId="group-leave" onClick={() => { closeMenu(); setConfirmLeave(true); }}>{t("group.menu.leave")}</MenuItem>}
               <MenuItem danger testId="group-forget" onClick={() => { closeMenu(); setConfirmForget(true); }}>{t("group.menu.forget")}</MenuItem>
@@ -980,6 +986,9 @@ export function GroupChat() {
       {connecting && !error &&<div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
       </div>}
+      {/* There from the start, so its words are read when they come. Shown while the rotation goes (the row saying so is in
+          a closed menu); once done, the timeline's event line shows it. */}
+      <p role="status" data-testid="group-rotate-live" className={rotating.has(groupId) ? "m-0 px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border" : "sr-only"}>{rotateLine}</p>
       {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
       {group.entryJammed && group.isAdmin && group.status === "active" && <LinkJammed groupId={group.id} onReplaced={() => setSharing("share")} />}
       {/* Joiners the door let in whose side never came up, many lately: real ones may not get in. A new link, asked as
