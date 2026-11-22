@@ -218,7 +218,7 @@ describe("GroupShareDialog", () => {
     expect(screen.getByTestId("group-options")).toHaveFocus();
   });
 
-  it("closes when a community member is removed under it, rather than say the admin turned the link off, and gives the focus to the ⋮", async () => {
+  it("closes when a community member is removed under it, rather than say the admin turned the link off, and gives the focus to the line that says why", async () => {
     const member = admin({ isAdmin: false, profile: "community", entryLink: LINK, members: [{ ...me, role: "member" }] });
     const { user } = openGroup(member);
     await user.click(screen.getByTestId("group-share"));
@@ -227,7 +227,7 @@ describe("GroupShareDialog", () => {
     act(() => fakeEngine.update({ groups: [{ ...member, status: "removed", entryLink: undefined, canSend: false }] }));
     expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
     expect(screen.getByTestId("group-notice")).toHaveTextContent("You were removed. Open the group's link to join again.");
-    expect(screen.getByTestId("group-options")).toHaveFocus();
+    expect(screen.getByTestId("group-notice")).toHaveFocus();
   });
 
   it("leaves the focus in the group when a new group's link is put away: on what had it, else on Share", async () => {

@@ -521,8 +521,8 @@ export function GroupChat() {
   const setError = (problem: Problem | null) => { if (openGroupId.current === groupId) setRefused(problem && { groupId, problem }); };
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
   // Where the Share dialog gives the focus back: Share, or the ⋮ once the link went off and took Share with it (or
-  // Share is a row of ⋮, on the narrowest phone).
-  const shareBack = useMemo(() => ({ get current() { return shareRef.current ?? optionsRef.current; } }), []);
+  // Share is a row of ⋮, on the narrowest phone). Out of the group under it, the line that says why comes before the ⋮.
+  const shareBack = useMemo(() => ({ get current() { return shareRef.current ?? noticeRef.current ?? optionsRef.current; } }), []);
   // At 320px the back button, the picture, the connection, Share and ⋮ left the name about 70px ("Clube d…" for every
   // "Clube de …"): there Share is a row of ⋮, and the name has half again as much room, as a 1:1 chat's has.
   const narrow = useNarrowPhone();
