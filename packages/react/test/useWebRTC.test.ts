@@ -730,6 +730,22 @@ describe("answering a call", () => {
     expect(call.result.current.callState).toBe("connecting");
   });
 
+  it("tells each offer it holds back, and none it rings, so a handoff does not wait on a call that never rings", () => {
+    const call = renderCall();
+    const first = Date.now();
+    call.receive(remote.offer(first));
+    call.receive(remote.hangUp(first + 1));
+    const held: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      act(() => { vi.advanceTimersByTime(1900); });
+      held.push(Date.now());
+      call.receive(remote.offer(Date.now()));
+    }
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.offerHeld.mock.calls).toEqual(held.map((ts) => [ts]));
+  });
+
   it("calling back once the held-back call stopped ringing places a call of its own", async () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
@@ -1033,7 +1049,7 @@ describe("a headless caller starting over on a second offer", () => {
     expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_connected")).toHaveLength(1);
   });
 
-  it("an offer is not a restart for a call we placed, nor for one whose connection came up", async () => {
+  it("an offer is not a restart for a call we placed, nor for one whose connection came up: that one is the caller starting over", async () => {
     const call = renderCall();
     const { pc } = await offered(call);
     call.receive(remote.answer(Date.now() + 1));
@@ -1049,8 +1065,11 @@ describe("a headless caller starting over on a second offer", () => {
     act(() => { answeredPc.setIceState("connected"); answeredPc.setConnectionState("connected"); });
     other.receive(remote.offer(Date.now() + 3));
     await settle();
-    expect(answeredPc.close).not.toHaveBeenCalled();
-    expect(other.result.current.callState).toBe("connected");
+    // Not answered on a new connection: the call ends here with no hang-up, and the offer rings as a new call.
+    expect(FakePeerConnection.instances).toHaveLength(2);
+    expect(answeredPc.close).toHaveBeenCalledOnce();
+    expect(other.result.current.callState).toBe("incoming");
+    expect(other.publishedKinds()).toEqual(["a", null]);
   });
 });
 
@@ -1271,6 +1290,28 @@ describe("when the prompt is refused or there is no device", () => {
     expect(call.result.current.mediaProblemOf).toBe("camera");
   });
 
+  it("the note that the camera is off goes once the camera comes on in the call", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(true); });
+    devices.userMedia[0].deny(new DOMException("Requested device not found", "NotFoundError"));
+    await settle();
+    devices.userMedia[1].grant();
+    await settle();
+    const pc = FakePeerConnection.instances[0];
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+    expect(call.result.current.mediaProblem).toBe("unavailable");
+
+    // The camera plugged in (or the app holding it closed), well within the note's time: Camera turns it on.
+    act(() => { void call.result.current.toggleVideo(); });
+    devices.userMedia[2].grant();
+    await settle();
+
+    expect(call.result.current.isVideoOff).toBe(false);
+    expect(call.result.current.mediaProblem).toBeNull();
+  });
+
   it.each([
     ["NotAllowedError", "denied"],
     ["SecurityError", "denied"],
@@ -1470,6 +1511,25 @@ describe("when the prompt is refused or there is no device", () => {
       expect(devices.liveTracks()).toEqual([]);
       expect(call.result.current.callState).toBe("idle");
     });
+
+    it("a call that ends while the camera is asked for lets the microphone go at once, and the camera once allowed", async () => {
+      const call = eachAlone();
+      call.receive(remote.offer(Date.now(), true));
+      act(() => { void call.result.current.acceptCall(true); });
+      devices.userMedia[0].grant();
+      await settle();
+      // The caller gives up while Android's camera dialog is still up: no call is left to hold the microphone for.
+      call.receive(remote.hangUp(Date.now() + 1));
+      await settle();
+
+      expect(call.result.current.callState).toBe("idle");
+      expect(devices.liveTracks()).toEqual([]);
+
+      devices.userMedia[1].grant();
+      await settle();
+      expect(devices.liveTracks()).toEqual([]);
+      expect(call.result.current.localStream).toBeNull();
+    });
   });
 
   it("an answer the connection refuses reports the error and closes everything", async () => {
@@ -1666,14 +1726,17 @@ describe("a call ringing in another chat while one is on (End and answer)", () =
     expect(other.addCallEventMessage).not.toHaveBeenCalled();
   });
 
-  it("the same contact offering again during the call is not a second call: it is ignored, as before", async () => {
-    const { call } = await onACall();
+  it("the same contact offering again during the call we placed is them starting over: ours ends with no hang-up, theirs rings", async () => {
+    const { call, pc } = await onACall();
 
     call.receive(remote.offer(Date.now() + 1));
 
-    expect(call.result.current.callState).toBe("connected");
-    expect(call.result.current.otherCallOn).toBe(false);
-    expect(call.addCallEventMessage).not.toHaveBeenCalledWith("call_received", expect.anything(), undefined, expect.anything());
+    expect(call.result.current.callState).toBe("incoming");
+    expect(pc.close).toHaveBeenCalledOnce();
+    // Our offer is cleared, and no hang-up is sent: it would end their new call there as declined.
+    expect(call.publishedKinds()).toEqual(["o", null]);
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_ended", false, expect.any(Number));
+    expect(call.addCallEventMessage).toHaveBeenCalledWith("call_received", false, undefined, expect.any(Number));
   });
 
   it("a chat that goes away with its call on no longer counts as on", async () => {
@@ -1706,6 +1769,89 @@ describe("unmounting", () => {
     act(() => { vi.advanceTimersByTime(5000); });
 
     expect(call.publishedKinds()).toEqual(["h"]);
+  });
+});
+
+describe("ringing out (RING_MS) counts from the offer, not from the microphone prompt", () => {
+  it("a prompt left open past RING_MS rings nobody out: no hang-up, no unanswered line, no \"No answer\"", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+
+    act(() => { vi.advanceTimersByTime(RING_MS + 1); });
+
+    expect(call.published).toEqual([]);
+    expect(lines(call)).toEqual(["call_started"]);
+    expect(call.result.current.noAnswer).toBe(false);
+    expect(call.result.current.callState).toBe("offering");
+
+    // Allowed at last: the call goes out as any other.
+    devices.userMedia[0].grant();
+    await settle();
+    expect(call.publishedKinds()).toEqual(["o"]);
+    expect(call.result.current.callState).toBe("offering");
+  });
+
+  it("a prompt allowed after 30 s rings out RING_MS after the offer, not after the start", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+    act(() => { vi.advanceTimersByTime(30_000); });
+    devices.userMedia[0].grant();
+    await settle();
+    expect(call.publishedKinds()).toEqual(["o"]);
+
+    act(() => { vi.advanceTimersByTime(RING_MS - 1); });
+    expect(call.result.current.callState).toBe("offering");
+    expect(call.result.current.noAnswer).toBe(false);
+    expect(call.publishedKinds()).toEqual(["o"]);
+
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.noAnswer).toBe(true);
+    expect(call.publishedKinds()).toEqual(["o", "h"]);
+    expect(lines(call)).toEqual(["call_started", "call_unanswered"]);
+  });
+
+  it("a call cancelled while the prompt is open ends as it always has, and never rings out later", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+    act(() => { vi.advanceTimersByTime(30_000); });
+
+    act(() => call.result.current.hangUp());
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.publishedKinds()).toEqual(["h"]);
+    expect(lines(call)).toEqual(["call_started", "call_cancelled"]);
+
+    devices.userMedia[0].grant();
+    await settle();
+    act(() => { vi.advanceTimersByTime(RING_MS * 2); });
+
+    expect(call.publishedKinds()).toEqual(["h", null]);
+    expect(lines(call)).toEqual(["call_started", "call_cancelled"]);
+    expect(call.result.current.noAnswer).toBe(false);
+    expect(devices.liveTracks()).toEqual([]);
+  });
+
+  it("Android's two dialogs (microphone, then camera) open past RING_MS ring nobody out; the offer then rings its whole minute", async () => {
+    const call = renderCall(undefined, undefined, { asksEachAlone: true });
+    act(() => { void call.result.current.startCall(true); });
+    act(() => { vi.advanceTimersByTime(20_000); });
+    devices.userMedia[0].grant();
+    await settle();
+    act(() => { vi.advanceTimersByTime(RING_MS); });
+
+    expect(call.published).toEqual([]);
+    expect(lines(call)).toEqual(["call_started"]);
+    expect(call.result.current.noAnswer).toBe(false);
+
+    devices.userMedia[1].grant();
+    await settle();
+    expect(JSON.parse(call.published[0]!)).toMatchObject({ t: "o", v: 1 });
+
+    act(() => { vi.advanceTimersByTime(RING_MS - 1); });
+    expect(call.result.current.callState).toBe("offering");
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(call.result.current.noAnswer).toBe(true);
+    expect(call.publishedKinds()).toEqual(["o", "h"]);
   });
 });
 

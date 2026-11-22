@@ -77,6 +77,13 @@ export const RELAY_URL = /^((https|wss):\/\/[^\s]{1,120}|(http|ws):\/\/(127\.0\.
 export const RELAY_WITH_SECRETS = /^[a-z]+:\/\/[^/?#]*@|[?#]/i;
 /** A relay URL a descriptor may name: `RELAY_URL`, with nothing but the server's address in it. */
 export const relayUrl = (value: unknown): value is string => typeof value === "string" && RELAY_URL.test(value) && !RELAY_WITH_SECRETS.test(value);
+/** `RELAY_URL` at any length. */
+const RELAY_URL_ANY_LENGTH = /^((https|wss):\/\/[^\s]+|(http|ws):\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?(\/[^\s]*)?)$/;
+/**
+ * A relay URL `relayUrl` refuses for its length alone (past 120 characters, a loopback path past 100): a relay setting
+ * asks for a shorter one, where "not a relay address" sent the person looking for a typo in it.
+ */
+export const relayUrlTooLong = (value: string): boolean => !relayUrl(value) && !RELAY_WITH_SECRETS.test(value) && RELAY_URL_ANY_LENGTH.test(value);
 /**
  * Whether an Iroh endpoint may dial a contact through the relay its descriptor names (none: a direct address alone).
  * The contact chose that relay and this device opens it on its own, again on each redial, so it is held to what a held

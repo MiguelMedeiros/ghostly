@@ -39,6 +39,8 @@ export interface DeviceNetwork {
   iceServers?: { urls: string; username?: string; credential?: string }[];
   /** The push relay a browser page hands a wake-up to (Settings, Network): how a standby web app wakes another device. */
   pushRelay?: string;
+  /** "Hide my IP from contacts" is on: a Desktop keeps off the DHT, so its links read the relays at a browser's pace. */
+  relayOnly?: boolean;
 }
 
 /** A push target as the device record keeps it: a subscription, the VAPID pair it was made with, base64url throughout. */
@@ -475,6 +477,7 @@ function isNetwork(value: unknown): value is DeviceNetwork {
   const n = value as Record<string, unknown>;
   if (n.off !== undefined && typeof n.off !== "boolean") return false;
   if (n.readRelays !== undefined && typeof n.readRelays !== "boolean") return false;
+  if (n.relayOnly !== undefined && typeof n.relayOnly !== "boolean") return false;
   if (n.pushRelay !== undefined && (typeof n.pushRelay !== "string" || n.pushRelay.length > 2048)) return false;
   if (n.hyperdhtRelay !== undefined && (typeof n.hyperdhtRelay !== "string" || n.hyperdhtRelay.length > 2048)) return false;
   if (n.relays !== undefined && !texts(n.relays, 16)) return false;

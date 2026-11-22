@@ -1,3 +1,4 @@
+import { startDetectorWorker } from "./translateDetectorStart";
 import type { DetectLanguages, LanguageGuess } from "./translateWhich";
 
 /** The detector on the page: a block of about half a second as its module is evaluated. */
@@ -53,7 +54,7 @@ export function loadDetector(): Promise<DetectLanguages | null> {
   if (import.meta.env.VITE_TRANSLATE !== "1") return Promise.resolve(null);
   if (!loaded) {
     let worker: Worker | null = null;
-    try { worker = new Worker(new URL("./translateDetector.worker.ts", import.meta.url), { type: "module" }); } catch { /* detected on the page */ }
+    try { worker = startDetectorWorker(); } catch { /* detected on the page */ }
     loaded = worker ? Promise.resolve(inWorker(worker)) : onPage();
     // A page's copy that did not load is tried again with the next one who asks.
     loaded.catch(() => { loaded = undefined; });

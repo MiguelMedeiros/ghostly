@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GroupPayments, WAITING, authoredNote, mayAuthor, mergeGroupPay, parseGroupPay, type GroupPaymentsHost, type Placement } from "../src/engine/groupPayments";
+import { paymentWireId } from "../src/shared/paymentIds";
 import type { GroupPayFrame, GroupPayNote, PaymentView, StoredMessage } from "../src/shared/types";
 // covers: groups.payments.member, groups.payments.group-request, groups.payments.notes
 
@@ -112,6 +113,27 @@ describe("mergeGroupPay: forward only, the initiator describes it", () => {
     expect(merge(described, note({ to: B, f: A }), B), "another payee for the same id").toBeUndefined();
   });
 
+  it("a request to one member is claimed by that member alone; nobody changes who pays", () => {
+    const toB = merge(undefined, note(), A)!;
+    expect(merge(toB, note({ f: "*", st: "sent", by: C }), C), "a claim on a request made to B").toBeUndefined();
+    expect(merge(toB, note({ f: "*" }), A), "the request made to the group later").toBeUndefined();
+    expect(merge(toB, note({ f: B, st: "sent", by: B }), B)).toMatchObject({ claims: [B] });
+    // A claim that arrived before the payee's note keeps waiting, but the request to B leaves only B's.
+    const early = merge(merge(undefined, note({ f: "*", st: "sent", by: C }), C), note({ st: "sent", by: B }), B)!;
+    expect(early.claims).toEqual([B, C].sort());
+    const described = merge(early, note(), A)!;
+    expect(described).toMatchObject({ from: B, claims: [B] });
+    expect(described.undescribed).toBeUndefined();
+    expect(merge(merge(undefined, note({ f: "*", st: "sent", by: C }), C), note(), A)!.claims, "C's claim alone").toBeUndefined();
+    // A member who did not know the request was to the group says it paid it as itself.
+    expect(merge(merge(undefined, note({ f: "*" }), A), note({ f: C, st: "sent", by: C }), C)).toMatchObject({ from: "*", claims: [C] });
+    // A payment's payer is its own: another member does not take it over.
+    const sent = merge(undefined, note({ k: "pay", f: B, to: A, st: "sent", id: "pay-00001" }), B)!;
+    expect(merge(sent, note({ k: "pay", f: C, to: A, st: "sent", id: "pay-00001" }), C), "another payer for the same id").toBeUndefined();
+    const paidFirst = merge(undefined, note({ k: "pay", f: B, to: A, st: "paid", id: "pay-00001" }), A)!;
+    expect(merge(paidFirst, note({ k: "pay", f: C, to: A, st: "sent", id: "pay-00001" }), C), "nor before the payer's note arrives").toBeUndefined();
+  });
+
   it("a direct payment: sent, then paid by the payee's word", () => {
     const sent = merge(undefined, note({ k: "pay", f: B, to: A, st: "sent", id: "pay-00001" }), B)!;
     expect(sent).toMatchObject({ kind: "payment", state: "sent" });
@@ -159,6 +181,12 @@ describe("authoredNote: what this device says about its own payments", () => {
     const r = pay({ id: "req-00001", linkId: "group:g1", group: "g1", mints: ["https://mint.real"], state: "settled" });
     const ecash = pay({ id: "p1", kind: "payment", direction: "in", requestId: r.id, state: "settled", linkId: "AC" });
     expect(authoredNote(r, { groupId: "g1", me: A }, [r, ecash], undefined, id => id === "AC" ? C : undefined)).toMatchObject({ f: "*", to: A, st: "paid", by: C });
+    // Notes naming it (kept so by an older version), or ecash short of it, came first: neither stands for who paid it.
+    const settled = { ...r, mint: "https://mint.real" };
+    const notes = pay({ id: "p0", kind: "payment", direction: "in", requestId: r.id, state: "settled", linkId: "AD", amount: 1, federation: "fed1" });
+    const short = pay({ id: "p0b", kind: "payment", direction: "in", requestId: r.id, state: "settled", linkId: "AD", amount: 1, mint: "https://mint.real" });
+    const full = { ...ecash, mint: "https://mint.real" };
+    expect(authoredNote(settled, { groupId: "g1", me: A }, [settled, notes, short, full], undefined, id => ({ AC: C, AD: D })[id])).toMatchObject({ st: "paid", by: C });
     const invoice = { ...r, invoice: "lnbc1", mints: [] };
     const paid = authoredNote(invoice, { groupId: "g1", me: A }, [invoice], { claims: [D] } as GroupPayNote);
     expect(paid).toMatchObject({ r: "lightning", st: "paid" });
@@ -358,6 +386,35 @@ describe("GroupPayments: every member hears it, the parties say it", () => {
     await peers.get("C")!.engine.receive("g1", B, note({ st: "paid", by: B }));
     await peers.get("C")!.engine.receive("g1", B, { t: "group-pay", junk: true });
     expect(noteOf("C", "req-00001")).toBeUndefined();
+  });
+});
+
+describe("GroupPayments: an id another member used first", () => {
+  // A asks B for 1,000 sats; B, who learned the id from that request, says something else under it, sometimes first.
+  const request = note({ id: "req-00042", v: "1000", m: "rent" });
+  const shown = (history: Map<string, StoredMessage[]>, name: string) => (history.get(name) ?? [])
+    .flatMap(m => (m.groupPay ? [{ ...m.groupPay, id: paymentWireId(m.groupPay.id) }] : [])).sort((a, b) => a.kind.localeCompare(b.kind));
+
+  it.each<[string, GroupPayFrame]>([
+    ["B's claim on a request made to C", note({ id: "req-00042", f: B, to: C, by: B, st: "sent" })],
+    ["B's own payment to A", note({ id: "req-00042", k: "pay", f: B, to: A, v: "1", st: "sent" })],
+  ])("%s keeps neither A's request nor its paid out, in either order", async (_, other) => {
+    const seen: ReturnType<typeof shown>[][] = [];
+    for (const order of [[[B, other], [A, request]], [[A, request], [B, other]]] as [string, GroupPayFrame][][]) {
+      const { peers, history } = world({ A, B, C, D });
+      for (const [author, frame] of order) await peers.get("D")!.engine.receive("g1", author, frame);
+      const open = shown(history, "D");
+      // D restarts before A's paid arrives.
+      const d = peers.get("D")!;
+      d.engine = new GroupPayments((d.engine as unknown as { host: GroupPaymentsHost }).host);
+      await d.engine.receive("g1", A, { ...request, st: "paid", by: B });
+      seen.push([open, shown(history, "D")]);
+    }
+    const [[open, paid]] = seen;
+    expect(open).toContainEqual(expect.objectContaining({ kind: "request", from: B, to: A, amount: "1000", memo: "rent", state: "open" }));
+    expect(paid).toContainEqual(expect.objectContaining({ kind: "request", from: B, to: A, amount: "1000", memo: "rent", state: "paid", by: B }));
+    expect(paid.filter(n => n.kind === "request")).toHaveLength(1);
+    expect(seen[1], "the same history in both orders").toEqual(seen[0]);
   });
 });
 

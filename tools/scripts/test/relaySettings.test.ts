@@ -77,7 +77,7 @@ describe("the relays' settings", () => {
   it.each([
     [{ GHOSTLY_RELAY_CLOUDFLARE: "0" }, "0.0.0.0"],
     [{ GHOSTLY_RELAY_CLOUDFLARE: "1" }, "127.0.0.1"],
-    [{ GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_PROXIES: "1" }, "127.0.0.1"],
+    [{ GHOSTLY_RELAY_CLOUDFLARE: "0", GHOSTLY_RELAY_PROXIES: "1" }, "127.0.0.1"],
     [{ GHOSTLY_RELAY_CLOUDFLARE: "1", HOST: "0.0.0.0" }, "0.0.0.0"],
   ])("the HyperDHT relay listens where %j says: %s", (env, host) => {
     expect(hyperdhtSettings(env).host).toBe(host);
@@ -169,6 +169,13 @@ describe("the relays' settings", () => {
     expect(() => hyperdhtSettings({ GHOSTLY_HYPERDHT_TESTNET: "3", GHOSTLY_HYPERDHT_BOOTSTRAP: "127.0.0.1:1" }))
       .toThrow('GHOSTLY_HYPERDHT_TESTNET="3": expected no GHOSTLY_HYPERDHT_BOOTSTRAP with it (the testnet is a network of its own)');
     expect(hyperdhtSettings({ GHOSTLY_HYPERDHT_TESTNET: "0", GHOSTLY_HYPERDHT_BOOTSTRAP: "127.0.0.1:1" }).bootstrap).toEqual(["127.0.0.1:1"]);
+  });
+
+  it("the HyperDHT relay refuses CF-Connecting-IP and X-Forwarded-For together, of which it would read only the first", () => {
+    expect(() => hyperdhtSettings({ GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_PROXIES: "1" }))
+      .toThrow('GHOSTLY_RELAY_PROXIES="1": expected no GHOSTLY_RELAY_CLOUDFLARE=1 with it (behind Cloudflare set GHOSTLY_RELAY_CLOUDFLARE alone; behind nginx or Caddy set GHOSTLY_RELAY_CLOUDFLARE=0)');
+    expect(hyperdhtSettings({ GHOSTLY_RELAY_CLOUDFLARE: "0", GHOSTLY_RELAY_PROXIES: "1" })).toMatchObject({ cloudflare: false, proxies: 1 });
+    expect(hyperdhtSettings({ GHOSTLY_RELAY_CLOUDFLARE: "1", GHOSTLY_RELAY_PROXIES: "0" })).toMatchObject({ cloudflare: true, proxies: 0 });
   });
 
   it("the HyperDHT relay's start line names its network: its own testnet, the bootstrap nodes or the public one", () => {
@@ -265,5 +272,18 @@ describe("the HyperDHT relay's container", () => {
     expect(env).toMatch(/\bHOST=0\.0\.0\.0\b/);
     // The compose file turns the Cloudflare setting on by default; the Dockerfile's HOST must still win over it.
     expect(hyperdhtSettings({ HOST: "0.0.0.0", GHOSTLY_RELAY_CLOUDFLARE: "1" }).host).toBe("0.0.0.0");
+  });
+
+  // The Desktop with "Hide my IP from contacts" on dials HyperDHT through the relay from its webview, which sends the
+  // webview's own origin (measured in WebKitGTK: `tauri://localhost`): left out, every chat of it was refused (403).
+  it("lets in by default every Ghostly client that opens it from a page: the web app, the extension and the Desktop", async () => {
+    const { readFileSync } = await import("node:fs");
+    const compose = readFileSync(resolve(__dirname, "../../../infra/services/hyperdht-relay/docker-compose.yml"), "utf8");
+    const GHOSTLY_RELAY_ORIGINS = /GHOSTLY_RELAY_ORIGINS: \$\{GHOSTLY_RELAY_ORIGINS:-([^}]*)\}/.exec(compose)?.[1];
+    expect(hyperdhtSettings({ GHOSTLY_RELAY_ORIGINS }).origins).toEqual(expect.arrayContaining([
+      "https://app.ghostly.tools", "chrome-extension://nbedaagicniejlmfcncndfjcejaidbcf",
+      // macOS and Linux, then Windows and Android (apps/ui/src/lib/url.ts).
+      "tauri://localhost", "http://tauri.localhost",
+    ]));
   });
 });

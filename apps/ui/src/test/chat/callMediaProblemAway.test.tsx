@@ -10,13 +10,14 @@ import { renderApp } from "../render";
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 /** What the call hook says, set by the test: the camera refused in a call, not the call itself, is what is tested here. */
-const hook = vi.hoisted(() => ({ mediaProblem: null as "denied" | "unavailable" | null }));
+const hook = vi.hoisted(() => ({ mediaProblem: null as "denied" | "unavailable" | null, callState: null as "connected" | null }));
 vi.mock("../../hooks/useWebRTC", async () => {
   const real = await vi.importActual<typeof import("../../hooks/useWebRTC")>("../../hooks/useWebRTC");
   return {
     useWebRTC: (options: Parameters<typeof real.useWebRTC>[0]) => {
       const webrtc = real.useWebRTC(options);
-      return hook.mediaProblem ? { ...webrtc, mediaProblem: hook.mediaProblem, mediaProblemId: 1, mediaProblemOf: "camera" as const } : webrtc;
+      const call = hook.callState ? { ...webrtc, callState: hook.callState } : webrtc;
+      return hook.mediaProblem ? { ...call, mediaProblem: hook.mediaProblem, mediaProblemId: 1, mediaProblemOf: "camera" as const } : call;
     },
   };
 });
@@ -50,7 +51,7 @@ describe("the camera's note of a call whose chat is not on screen", () => {
     }
   });
 
-  it("stays at the top of the chat's column while the chat is on screen", () => {
+  it("stays at the top of the chat's column while the chat is on screen with no call window up", () => {
     save();
     hook.mediaProblem = "denied";
     const layer = document.createElement("div");
@@ -64,6 +65,29 @@ describe("the camera's note of a call whose chat is not on screen", () => {
     } finally {
       layer.remove();
       hook.mediaProblem = null;
+    }
+  });
+
+  // Camera pressed in a call's whole-screen window with the camera refused for good (an Android phone after its second
+  // "Don't allow"): the window covers the chat's column, and the column is a container, so the note's z-index counted
+  // only inside it. Nothing showed, not even Open settings. It hangs where the call's window does.
+  it("shows over the call's window while the chat is on screen", () => {
+    save();
+    hook.mediaProblem = "denied";
+    hook.callState = "connected";
+    const layer = document.createElement("div");
+    document.body.append(layer);
+    try {
+      renderApp(<Chat sessionId="chat-cam" onCallChange={() => {}} callLayer={layer} visible />);
+      const note = within(layer).getByTestId("call-media-problem");
+      expect(note).toHaveTextContent("No access to the camera, so video is off");
+      expect(note.closest(".chat-column")).toBeNull();
+      expect(screen.getAllByTestId("call-media-problem")).toHaveLength(1);
+      expect(within(layer).getByTestId("call-window")).toBeInTheDocument();
+    } finally {
+      layer.remove();
+      hook.mediaProblem = null;
+      hook.callState = null;
     }
   });
 });
