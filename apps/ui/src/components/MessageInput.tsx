@@ -5,7 +5,7 @@ import { PaymentComposer } from "./PaymentComposer";
 import { ComposerIdentityPicker, useSharedIdentityCount } from "./identities/ComposerIdentities";
 import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
-import type { LinkPreview, TypingKind, VoiceMeta } from "@ghostly/core";
+import { sanitizeFileName, type LinkPreview, type TypingKind, type VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { NAME, withName } from "./apps/aroundName";
 import { isolate } from "../lib/ownStatus";
@@ -220,9 +220,10 @@ export function MessageInput({
   const [toastAction, setToastAction] = useState<{ label: string; run: () => void } | null>(null);
   /**
    * `caption`: the guard asks about a pasted file's caption, not the draft; `translated`: about the translation shown;
-   * `translate`: about the draft, before it is translated (what Send anyway does then).
+   * `translate`: about the draft, before it is translated (what Send anyway does then); `files`: about a picked file's
+   * name; `sheet`: about a name in the sheet, which sends with this caption.
    */
-  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean; translate?: () => void } | null>(null);
+  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean; translate?: () => void; files?: File[]; sheet?: string } | null>(null);
   /** The draft the guard was answered Send for before Translate: its translation does not ask again. */
   const guardedDraft = useRef<string | null>(null);
   /** Files pasted or dropped here, waiting on the sheet for Send. */
@@ -779,9 +780,17 @@ export function MessageInput({
     }
   };
 
+  /**
+   * A file's name reaches the contact as a message's text does: the first that looks like a secret, read as it goes
+   * (`sanitizeFileName`: a key split by a `:` the name loses is whole), as the CLI's `file send` reads it.
+   */
+  const secretName = (files: File[]) => files.reduce<SecretFinding | null>((found, file) => found ?? findSecret(sanitizeFileName(file.name)), null);
+
   const sendFiles = (files: FileList | null, input: HTMLInputElement) => {
     const chosen = [...(files ?? [])];
     input.value = "";
+    const found = secretName(chosen);
+    if (found) { setSecret({ finding: found, files: chosen }); return; }
     void sendChosen(chosen);
   };
 
@@ -894,8 +903,11 @@ export function MessageInput({
     if (err) showToast(err);
   };
 
-  const sendAttached = async (caption: string) => {
+  const sendAttached = async (caption: string, confirmed = false) => {
     const files = attached ?? [];
+    // Asked with the sheet still open: Cancel keeps its files and caption.
+    const found = confirmed ? null : secretName(files);
+    if (found) { setSecret({ finding: found, sheet: caption }); return; }
     setAttached(null);
     if (await sendChosen(files)) await sendCaption(caption);
   };
@@ -1301,7 +1313,9 @@ export function MessageInput({
         <SecretGuardDialog finding={secret.finding} recipient={recipient ?? payments?.contact ?? identities?.contact}
           onCancel={() => setSecret(null)} onConfirm={() => {
             setSecret(null);
-            if (secret.caption !== undefined) void sendCaption(secret.caption, true);
+            if (secret.files) void sendChosen(secret.files);
+            else if (secret.sheet !== undefined) void sendAttached(secret.sheet, true);
+            else if (secret.caption !== undefined) void sendCaption(secret.caption, true);
             else if (secret.translate) secret.translate();
             else if (secret.translated) void sendTranslation(true);
             else void handleSubmit(true);
