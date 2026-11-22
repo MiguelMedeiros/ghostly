@@ -8,7 +8,11 @@ import type { Language } from "../lib/settings";
 import { forgetTranslations } from "../lib/translateReceived";
 import { firstPairs, readingPairs } from "../lib/translateSettings";
 
-interface Asked { status: TranslationStatus; from: string; to: string; back: boolean; pairs: string[]; bytes: number }
+interface Asked {
+  status: TranslationStatus; from: string; to: string; back: boolean; pairs: string[]; bytes: number;
+  /** Who waits on the answer (`askPair`): true once the pairs are here, false when the question goes without. */
+  answer?: (downloaded: boolean) => void;
+}
 
 /**
  * A download goes on in Desktop whatever the app shows (it has no cancel), for minutes with the engine: closing the
@@ -84,6 +88,28 @@ export function useTranslateDownload(downloaded?: () => void) {
     setAsking({ status, ...wanted, bytes });
   }, []);
 
+  /**
+   * The question for the one pair a translation needs (`<from>-<to>`), as the composer's Translate asks it: the pinned
+   * pair straight, or both legs through English (`readingPairs`), only what is not here counted. True once Download
+   * brought them, false on Not now (or the question gone otherwise), undefined when there is nothing to ask.
+   */
+  const askPair = useCallback(async (pair: string): Promise<boolean | undefined> => {
+    const [from = "", to = ""] = pair.split("-");
+    let status: TranslationStatus;
+    try { status = await translationStatus(); } catch { return undefined; }
+    const known = status.pairs.map((p) => p.pair);
+    const pairs = readingPairs(from, to, known);
+    if (!pairs.length || pairs.some((each) => !known.includes(each))) return undefined;
+    const bytes = downloadBytes(status, pairs);
+    if (!bytes) return undefined;
+    return new Promise<boolean>((answer) => {
+      setProblem(null);
+      setAsking({ status, from, to, back: false, pairs, bytes, answer });
+    });
+  }, []);
+  // A question closed, replaced, or left with its page goes unanswered: that is Not now.
+  useEffect(() => () => asking?.answer?.(false), [asking]);
+
   const download = async (question: Asked) => {
     setProblem(null);
     setDownloads({ running: [...downloads.running, question], failed: null });
@@ -91,6 +117,7 @@ export function useTranslateDownload(downloaded?: () => void) {
     try {
       // One after the other; a pair already here answers at once, so Download again fetches only what is missing.
       for (const pair of question.pairs) { await downloadTranslation(pair); brought.push(pair); }
+      question.answer?.(true);
     } catch (cause) {
       const failure: Problem = { tone: "error", title: t("translate.download.failed"), next: t("translate.download.failedNext"), detail: rawError(cause) };
       if (onScreen.current === question) setProblem(failure);
@@ -112,7 +139,7 @@ export function useTranslateDownload(downloaded?: () => void) {
     <TranslateDownloadDialog from={asking.from} to={asking.to} back={asking.back} bytes={asking.bytes}
       engine={!asking.status.runtime} busy={busy} problem={problem} onNotNow={() => setAsking(null)} onDownload={() => void download(asking)} />
   );
-  return { ask, question, askAgain };
+  return { ask, askPair, question, askAgain };
 }
 
 /** The question again for a download that failed with its own gone, for `TranslateDownloadFailure` to render. */

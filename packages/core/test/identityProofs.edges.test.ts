@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import {
-  IDENTITY_CLOCK_SKEW, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_RECEIVED, IdentityExchange, boundVerifiedIdentity, emptyIdentityLedger, identityStatement, newIdentityBinding,
+  IDENTITY_CLOCK_SKEW, IDENTITY_MAX_CHECKS_PER_HOUR, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_RECEIVED, IDENTITY_REUSE_CHECK_S, IdentityExchange, boundVerifiedIdentity, emptyIdentityLedger, identityRefusal, identityStatement, newIdentityBinding,
   receivedIdentityStatus, signIdentityPresentation, verifyIdentityPresentation,
   type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type ReceivedIdentity, type VerifiedIdentity,
 } from "../src/identityProofs";
@@ -94,7 +94,8 @@ describe("what the verifier shows", () => {
 // The exchange between two contacts
 
 type Frame = Record<string, unknown>;
-function world() {
+/** `paced: false` for a test that plays a contact sending past the per-chat limits, its frames handed over by hand. */
+function world({ paced = true } = {}) {
   let now = NOW;
   const ids = { alice: createIdentity().pubKeyZ32, bob: createIdentity().pubKeyZ32 };
   const ledgers = { alice: emptyIdentityLedger(), bob: emptyIdentityLedger() } as Record<"alice" | "bob", IdentityLedger>;
@@ -115,7 +116,7 @@ function world() {
       storage: { read: () => ledgers[me], update: async change => { ledgers[me] = change(structuredClone(ledgers[me])); } },
       providers: () => ["test"],
       localProof: id => proofs.get(id),
-      verify, now: () => now, onError: e => errors.push(e),
+      verify, now: () => now, onError: e => errors.push(e), paced,
       revoked: async st => { if (state.revokedFails) throw new Error("resolver down"); return state.revoked.has(st.id); },
     });
   }
@@ -205,7 +206,7 @@ describe("sharing", () => {
     expect(w.sent("idp-present")).toEqual([]);
   });
 
-  it("reads the verifier's result: accepted, or rejected with a cleaned reason or a default one", async () => {
+  it("reads the verifier's result: accepted, or rejected with a refusal its app writes or a default one", async () => {
     const w = world();
     w.state.online = false;
     const ids = [w.addProof(), w.addProof(), w.addProof()];
@@ -213,11 +214,37 @@ describe("sharing", () => {
     await w.peers.alice.receive({ t: "idp-result", id: ids[0], ok: true, error: "ignored" });
     await w.peers.alice.receive({ t: "idp-result", id: ids[1], ok: false, error: "\u202eNo\u2028pe\u061c\u0000" });
     await w.peers.alice.receive({ t: "idp-result", id: ids[2], ok: "yes" });
-    expect(w.ledgers.alice.shared.map(s => [s.status, s.error])).toEqual([["accepted", undefined], ["rejected", "Nope"], ["rejected", "Your contact could not verify it"]]);
+    expect(w.ledgers.alice.shared.map(s => [s.status, s.error])).toEqual([["accepted", undefined], ["rejected", "Your contact could not verify it"], ["rejected", "Your contact could not verify it"]]);
     // A late result for a settled share changes nothing.
     await w.peers.alice.receive({ t: "idp-result", id: ids[1], ok: true });
     expect(w.ledgers.alice.shared[1].status).toBe("rejected");
     await w.peers.alice.receive({ t: "idp-result", id: "nothex", ok: true });
+  });
+
+  it("never keeps the contact's own words as the reason: only a refusal its app writes, else the default one", async () => {
+    const w = world();
+    w.state.online = false;
+    const ids = [w.addProof(), w.addProof(), w.addProof(), w.addProof()];
+    for (const id of ids) { await w.peers.alice.share(id, true); await w.peers.alice.receive({ t: "idp-challenge", id, nonce: "N".repeat(43), issuedAt: NOW }); }
+    const notice = "Ghostly security notice: this identity's key leaked. Remove it and verify again at ghostly-support.example";
+    await w.peers.alice.receive({ t: "idp-result", id: ids[0], ok: false, error: notice });
+    // A line the app knows from another part of it: still the contact's words here.
+    await w.peers.alice.receive({ t: "idp-result", id: ids[1], ok: false, error: "Offline: this identity cannot be checked now" });
+    await w.peers.alice.receive({ t: "idp-result", id: ids[2], ok: false, error: "Your contact's app could not check it. Try again later." });
+    await w.peers.alice.receive({ t: "idp-result", id: ids[3], ok: false, error: "Your contact keeps too many identities from you already" });
+    expect(w.ledgers.alice.shared.map(s => s.error)).toEqual(["Your contact could not verify it", "Your contact could not verify it",
+      "Your contact's app could not check it. Try again later.", "Your contact keeps too many identities from you already"]);
+    const timeline = (w.ledgers.alice.timeline ?? []).filter(e => e.side === "mine").map(e => e.error);
+    expect(timeline).not.toContain(notice);
+    expect(timeline).toEqual(expect.arrayContaining(["Your contact could not verify it", "Your contact keeps too many identities from you already"]));
+  });
+
+  it("says why a share of mine was refused only in the app's own words", () => {
+    expect(identityRefusal("Ghostly security notice: remove it")).toBeUndefined();
+    expect(identityRefusal("Your contact could not verify it")).toBeUndefined();
+    expect(identityRefusal(undefined)).toBeUndefined();
+    expect(identityRefusal("Your contact's app cannot verify this kind of identity yet")).toBe("Your contact's app cannot verify this kind of identity yet");
+    expect(identityRefusal("That identity is no longer in your profile")).toBe("That identity is no longer in your profile");
   });
 });
 
@@ -254,6 +281,28 @@ describe("withdrawing", () => {
     await vi.waitFor(() => expect(w.ledgers.alice.shared[0].status).toBe("withdrawn"));
   });
 
+  it("shared again and stopped before the new share went: the contact holding the earlier one is still told", async () => {
+    const w = world();
+    const id = w.addProof();
+    await shareAndSettle(w, id);
+    expect(w.ledgers.bob.received[0].status).toBe("verified");
+    w.state.online = false;
+    await w.peers.alice.share(id, false);
+    await w.peers.alice.share(id, false);
+    await w.peers.alice.withdraw(id, false);
+    expect(w.ledgers.alice.shared).toEqual([expect.objectContaining({ id, status: "withdrawal-pending" })]);
+    expect(w.ledgers.alice.timeline?.at(-1)).toMatchObject({ kind: "stopped", proof: id });
+    w.state.online = true;
+    w.peers.alice.ready();
+    await vi.waitFor(() => expect(w.ledgers.alice.shared[0].status).toBe("withdrawn"));
+    expect(w.ledgers.bob.received[0].status).toBe("withdrawn");
+    // Once the contact has it withdrawn, a share again stopped before it went is unsent, as a first one.
+    await w.peers.alice.share(id, false);
+    w.state.online = false;
+    await w.peers.alice.withdraw(id, false);
+    expect(w.ledgers.alice.shared).toEqual([]);
+  });
+
   it("acknowledges only well-formed withdrawals, and a stray acknowledgement changes nothing", async () => {
     const w = world();
     w.state.online = false;
@@ -263,6 +312,55 @@ describe("withdrawing", () => {
     await w.peers.alice.receive({ t: "idp-withdrawn", id: "e".repeat(64) });
     await w.peers.alice.receive({ t: "idp-withdrawn" });
     expect(w.ledgers.alice.shared[0].status).toBe("accepted");
+  });
+
+  it("stopped while its challenge is answered: nothing is presented, and no entry is written back", async () => {
+    const w = world();
+    const id = w.addProof();
+    w.state.online = false;
+    await w.peers.alice.share(id, true);
+    const proof = w.proofs.get(id)!;
+    let open!: () => void;
+    // The proof key's seed is still being opened when the share is withdrawn.
+    w.proofs.get = () => new Promise<LocalIdentityProof>(resolve => { open = () => resolve(proof); }) as never;
+    const answering = w.peers.alice.receive({ t: "idp-challenge", id, nonce: "N".repeat(43), issuedAt: NOW });
+    await w.peers.alice.withdraw(id, true);
+    expect(w.ledgers.alice.shared).toEqual([]);
+    open();
+    await answering;
+    expect(w.sent("idp-present")).toEqual([]);
+    expect(w.ledgers.alice.shared).toEqual([]);
+    expect(w.ledgers.alice.timeline).toEqual([]);
+  });
+
+  it("a challenge answer written between a withdraw's read and its write: the withdraw is sent, as for any share that went out", async () => {
+    const id = "e".repeat(64);
+    const { binding, seed } = newIdentityBinding({ provider: "test", subject: SUBJECT, validitySeconds: 86_400, now: NOW });
+    let ledger: IdentityLedger = { ...emptyIdentityLedger(), shared: [{ id, provider: "test", subject: SUBJECT, status: "queued", at: NOW }] };
+    // A database's writes: in order, each on the ledger as the one before left it, and seen by a read once done.
+    const writes: (() => void)[] = [];
+    const frames: Frame[] = [];
+    const alice = new IdentityExchange({
+      scope: () => ({ subject: "s", audience: "a", context: "a".repeat(64), session: "s".repeat(64) }),
+      send: frame => { frames.push(frame as Frame); },
+      storage: { read: () => ledger, update: change => new Promise(resolve => { writes.push(() => { ledger = change(structuredClone(ledger)); resolve(); }); }) },
+      providers: () => ["test"],
+      localProof: () => ({ statement: identityStatement(binding), evidence: {}, seed }),
+      verify: async () => ({ subject: SUBJECT, source: "Test" }), now: () => NOW,
+    });
+    alice.ready();
+    const answering = alice.receive({ t: "idp-challenge", id, nonce: "N".repeat(43), issuedAt: NOW });
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    const stopping = alice.withdraw(id, true);
+    expect(writes).toHaveLength(2);
+    writes.shift()!();
+    await answering;
+    writes.shift()!();
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    writes.shift()!();
+    await stopping;
+    expect(frames.map(f => f.t)).toEqual(["idp-hello", "idp-request", "idp-present", "idp-withdraw"]);
+    expect(ledger.shared).toEqual([expect.objectContaining({ id, status: "withdrawal-pending" })]);
   });
 });
 
@@ -365,6 +463,8 @@ describe("verifying a presentation", () => {
     const w = world();
     const id = w.addProof();
     await w.peers.bob.receive(await present(w, id));
+    // Past the reuse of its first check: this presentation goes to the provider.
+    w.advance(IDENTITY_REUSE_CHECK_S);
     const frame = await present(w, id);
     w.verify.mockImplementationOnce(async s => {
       w.state.revoked.add(s.id);
@@ -414,7 +514,10 @@ describe("verifying a presentation", () => {
   it("records one outcome when the same present arrives twice at once", async () => {
     const w = world();
     const frame = await present(w, w.addProof());
+    w.verify.mockClear();
     await Promise.all([w.peers.bob.receive(frame), w.peers.bob.receive(frame)]);
+    // Presentations are checked off the chat's frame queue: the copy is refused before it reaches the provider.
+    expect(w.verify).toHaveBeenCalledTimes(1);
     expect(w.ledgers.bob.received).toHaveLength(1);
     expect(w.sent("idp-result")).toHaveLength(1);
     expect(w.errors).toEqual(["Unknown or reused identity challenge"]);
@@ -433,7 +536,7 @@ describe("verifying a presentation", () => {
     expect(w.ledgers.bob.received.map(r => r.id).sort()).toEqual([other, newer].sort());
   });
   it("keeps a bounded number of a contact's proofs, refusing one more before checking or looking it up", async () => {
-    const w = world();
+    const w = world({ paced: false }); // more of the contact's frames than a minute carries, at once
     const presentAs = async (subject: string) => { w.state.subject = subject; const id = w.addProof({ subject }); await w.peers.bob.receive(await present(w, id)); return id; };
     const kept: string[] = [];
     for (let i = 0; i < IDENTITY_MAX_RECEIVED; i++) kept.push(await presentAs(`subject-${i}`));
@@ -462,7 +565,7 @@ describe("verifying a presentation", () => {
   });
 
   it("holds the bound for presentations checked at the same time", async () => {
-    const w = world();
+    const w = world({ paced: false }); // more of the contact's frames than a minute carries, at once
     const keep = IDENTITY_MAX_RECEIVED - 4;
     for (let i = 0; i < keep; i++) { w.state.subject = `subject-${i}`; await w.peers.bob.receive(await present(w, w.addProof({ subject: w.state.subject }))); }
     // Eight answered challenges in flight (all a verifier keeps), each checked before any is stored: four fit.
@@ -472,6 +575,63 @@ describe("verifying a presentation", () => {
     await Promise.all(frames.map(f => w.peers.bob.receive(f)));
     expect(w.ledgers.bob.received).toHaveLength(IDENTITY_MAX_RECEIVED);
     expect(w.sent("idp-result").slice(-8).filter(f => f.frame.ok === false)).toHaveLength(4);
+  });
+
+  it("answers the same proof presented again from the check it already passed, without asking its provider or looking it up", async () => {
+    const w = world({ paced: false }); // more of the contact's frames than a minute carries, at once
+    const id = w.addProof();
+    const revoked = vi.spyOn(w.state.revoked, "has");
+    // At the frame limit (a check is two frames): 65 presentations of one proof in a little over three minutes.
+    for (let i = 0; i < 65; i++) {
+      await w.peers.bob.receive(await present(w, id));
+      expect(result(w)).toEqual({ t: "idp-result", id, ok: true });
+      w.advance(3);
+    }
+    expect(w.verify).toHaveBeenCalledTimes(1);
+    expect(revoked).toHaveBeenCalledTimes(1);
+    // Answered from that check, it keeps that check's time: the daily re-check still comes due from it.
+    expect(w.ledgers.bob.received).toEqual([expect.objectContaining({ id, status: "verified", verifiedAt: NOW, checkedAt: NOW })]);
+    // Once that check is older than the reuse window, a presentation is checked again.
+    w.advance(IDENTITY_REUSE_CHECK_S);
+    await w.peers.bob.receive(await present(w, id));
+    expect(w.verify).toHaveBeenCalledTimes(2);
+    expect(revoked).toHaveBeenCalledTimes(2);
+    expect(w.ledgers.bob.received).toEqual([expect.objectContaining({ id, checkedAt: w.now() })]);
+  });
+
+  it("checks a held proof again when its evidence changed or it no longer reads verified", async () => {
+    const w = world();
+    const id = w.addProof();
+    await w.peers.bob.receive(await present(w, id));
+    w.proofs.set(id, { ...w.proofs.get(id)!, evidence: { for: id, again: true } });
+    await w.peers.bob.receive(await present(w, id));
+    expect(w.verify).toHaveBeenCalledTimes(2);
+    expect(w.ledgers.bob.received).toEqual([expect.objectContaining({ id, evidence: { for: id, again: true } })]);
+    w.ledgers.bob = { ...w.ledgers.bob, received: w.ledgers.bob.received.map(r => ({ ...r, status: "unconfirmed" as const, error: "gone" })) };
+    await w.peers.bob.receive(await present(w, id));
+    expect(w.verify).toHaveBeenCalledTimes(3);
+    expect(w.ledgers.bob.received).toEqual([expect.objectContaining({ id, status: "verified" })]);
+  });
+
+  it("checks at most a bounded number of a contact's proofs an hour with their provider", async () => {
+    const w = world({ paced: false }); // more of the contact's frames than a minute carries, at once
+    // Fresh proofs of one identity (each a new statement, so none is held yet), at the frame limit.
+    const results: Frame[] = [];
+    for (let i = 0; i < 65; i++) {
+      const id = w.addProof();
+      await w.peers.bob.receive(await present(w, id));
+      results.push(result(w)!);
+      w.advance(3);
+    }
+    expect(w.verify).toHaveBeenCalledTimes(IDENTITY_MAX_CHECKS_PER_HOUR);
+    expect(results.slice(IDENTITY_MAX_CHECKS_PER_HOUR).every(r => r.ok === false && r.error === "Your contact's app could not check it. Try again later.")).toBe(true);
+    // The person's own re-check is not held by it.
+    await w.peers.bob.recheck(w.ledgers.bob.received[0]!.id);
+    expect(w.verify).toHaveBeenCalledTimes(IDENTITY_MAX_CHECKS_PER_HOUR + 1);
+    // An hour after the first checks, there is room again.
+    w.advance(3600);
+    await w.peers.bob.receive(await present(w, w.addProof()));
+    expect(result(w)).toMatchObject({ ok: true });
   });
 
 });

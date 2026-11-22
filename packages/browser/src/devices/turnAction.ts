@@ -28,6 +28,12 @@ export interface TurnFacts {
   lower?: boolean;
   /** `tombstone`: this device is still listed. */
   listed?: boolean;
+  /**
+   * `tombstone`: signed by the device this one believes active (the one its record names, or the one it released the
+   * turn to). False: by another slot, which holds the old `D` too and may be the removed or a stolen device; such a
+   * tombstone stops this device and ends it never. Absent: believed.
+   */
+  believed?: boolean;
 }
 
 export type TurnAction =
@@ -62,7 +68,8 @@ export function turnRow(state: DeviceState, atStart: boolean): TurnRow {
   return state;
 }
 
-const tombstone = (facts: TurnFacts): StoredDeviceState => (facts.listed ? "moving" : "removed");
+/** Only a tombstone the device it believes signed ends a device that it does not list; any other leaves it waiting. */
+const tombstone = (facts: TurnFacts): StoredDeviceState => (facts.listed || facts.believed === false ? "moving" : "removed");
 const STAY: TurnAction = { do: "stay", offers: [] };
 const IMPOSSIBLE: TurnAction = { do: "impossible" };
 
@@ -126,8 +133,9 @@ function cell(row: TurnRow, column: TurnColumn, facts: TurnFacts): TurnAction {
       break;
     case "moving":
       switch (column) {
-        // Until a `set-update` signed by the device its stored record names active arrives; a tombstone that no longer lists it ends the wait.
-        case "tombstone": return facts.listed ? { do: "stay", offers: [], awaits: "set-update" } : { do: "become", state: "removed", reload: false };
+        // Until a `set-update` signed by the device its stored record names active arrives; a tombstone of that device's
+        // that no longer lists it ends the wait.
+        case "tombstone": return tombstone(facts) === "moving" ? { do: "stay", offers: [], awaits: "set-update" } : { do: "become", state: "removed", reload: false };
         // The tombstone expired at that source, or the source lags; the active device puts it again.
         case "mine": case "other": case "clone": case "none": case "unreachable": return { do: "stay", offers: [], awaits: "set-update" };
       }

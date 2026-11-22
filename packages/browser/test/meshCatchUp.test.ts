@@ -85,13 +85,13 @@ describe("a private group catches up a member from whoever is there", { timeout:
     const [alice, , , dave] = peers;
     dave.online = false;
     await world.run(2_000);
-    for (let i = 0; i < 40; i++) await alice.groups.send(id, `alice before ${i}`);
+    for (let i = 0; i < 40; i++) { await alice.groups.send(id, `alice before ${i}`); await world.run(400); }
     await world.run(2_000);
     // Erin's join starts a new epoch: Alice's last 32 are all of it, so her own answer shows Dave nothing of the one before.
     const erin = world.add("erin");
     await erin.groups.joinByLink(await alice.groups.enableLink(id));
     await world.until(() => world.view(erin, id)?.members.length === 5, 5 * 60_000, 1000);
-    for (let i = 0; i < 40; i++) await alice.groups.send(id, `alice after ${i}`);
+    for (let i = 0; i < 40; i++) { await alice.groups.send(id, `alice after ${i}`); await world.run(400); }
     await world.run(2_000);
     const back = world.now;
     world.reopen(dave);
@@ -109,7 +109,7 @@ describe("a private group catches up a member from whoever is there", { timeout:
     dave.online = false;
     await world.run(2_000);
     // Bob and Carol hold all 200 (256 kept); a sync names 32 of the missing at a time (`GROUP_LIMITS.miss`).
-    for (let i = 0; i < 200; i++) await alice.groups.send(id, `alice ${i}`);
+    for (let i = 0; i < 200; i++) { await alice.groups.send(id, `alice ${i}`); await world.run(400); }
     await world.run(2_000);
     const syncs: { to: string; at: number }[] = [];
     const has = () => world.texts(dave, id).filter(t => t.startsWith("alice ")).length;
@@ -140,7 +140,7 @@ describe("a private group catches up a member from whoever is there", { timeout:
       dave.online = false;
       await world.run(2_000);
       const mine = (t: string) => t.startsWith(`${author.name} ${round}.`);
-      for (let i = 0; i < 256; i++) await author.groups.send(id, `${author.name} ${round}.${i}`);
+      for (let i = 0; i < 256; i++) { await author.groups.send(id, `${author.name} ${round}.${i}`); await world.run(400); }
       await world.run(2_000);
       const back = world.now;
       syncs.length = 0;
@@ -187,6 +187,27 @@ describe("a private group catches up a member from whoever is there", { timeout:
     for (let i = 12; i < 30; i++) { await alice.groups.send(id, `alice ${i}`); await world.run(MESH_GOSSIP_MS / 3); }
     expect(world.texts(dave, id).filter(t => t.startsWith("alice "))).toHaveLength(20);
     expect(asks.sort()).toEqual(["bob", "carol"]);
+  });
+
+  it("every member online gets all of a burst of 200 from one author, though each takes 64 of them live", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, ...others] = peers;
+    // Sent at once, as a bot's `group send` over the daemon's socket: past the pace the others apply (`AuthorPace`).
+    for (let i = 0; i < 200; i++) await alice.groups.send(id, `alice ${i}`);
+    const has = (p: Peer) => world.texts(p, id).filter(t => t.startsWith("alice ")).length;
+    expect(others.map(has)).toEqual([64, 64, 64]);
+    // The others ask Alice for the ones they did not take, and she hands them from what she kept (`GroupState.owed`).
+    await world.until(() => others.every(p => has(p) === 200), 5 * 60_000, 1000, () => others.map(p => `${p.name} has ${has(p)} of 200`).join(", "));
+    for (const p of others) expect(new Set(world.texts(p, id)).size).toBe(world.texts(p, id).length);
+  });
+
+  it("every member online gets all of 500 messages three authors send in turn at once", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const authors = peers.slice(0, 3);
+    for (let i = 0; i < 500; i++) await authors[i % 3]!.groups.send(id, `m ${i}`);
+    const has = (p: Peer) => world.texts(p, id).filter(t => t.startsWith("m ")).length;
+    await world.until(() => peers.every(p => has(p) === 500), 5 * 60_000, 1000, () => peers.map(p => `${p.name} has ${has(p)} of 500`).join(", "));
+    for (const p of peers) expect(new Set(world.texts(p, id)).size).toBe(world.texts(p, id).length);
   });
 
   it("a member back after a while is announced once, and the others look fast for it", async () => {

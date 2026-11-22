@@ -12,8 +12,13 @@ import { useChatTargets, type ChatTarget } from "../../hooks/useChatTargets";
 import { rawError } from "../../lib/errorText";
 import { problemLine } from "../../lib/problemText";
 import { listParts, listText } from "../../lib/listText";
+import { fillNodes } from "../../lib/fillNodes";
 import type { Translate } from "../../locales/translate";
 import { useBackCloses } from "../../hooks/useDismiss";
+import { SearchStatus } from "../ui/SearchStatus";
+import { FocusSafeButton } from "../ui/FocusSafeButton";
+import { neighbourOptions } from "../MessageBubble";
+import { focusLost } from "../../lib/focus";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
@@ -38,6 +43,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const [secret, setSecret] = useState<SecretFinding | null>(null);
   const [busy, setBusy] = useState(false);
   useBackCloses(() => { if (!busy) onClose(); });
+  /** `partial`: how much of it the chat got, when it got some ("1 of 2 sent"). */
   const [problems, setProblems] = useState<{ name: string; partial?: string; error: string }[]>([]);
   /** The chats a send that others refused went to: out of the selection, so Send again does not send them it twice. */
   const [sentTo, setSentTo] = useState<string[]>([]);
@@ -48,10 +54,18 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const [got, setGot] = useState<Record<string, string[]>>({});
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
+    // Opened from a message's ⋮: the message can leave the chat while the dialog is open (the contact deleted it for
+    // everyone, and the dialog closes with it). The focus then goes to the ⋮ of the message now in its place, as a
+    // delete of mine leaves it, not to the page.
+    const around = neighbourOptions(previous);
     const element = dialog.current!;
     element.showModal();
     search.current?.focus();
-    return () => { element.close(); if (previous?.isConnected) previous.focus(); };
+    return () => {
+      element.close();
+      if (previous?.isConnected) previous.focus();
+      else if (focusLost()) around.find((el) => el.isConnected)?.focus({ preventScroll: true });
+    };
   }, []);
 
   const shown = useMemo(() => findChatTargets(targets, query), [targets, query]);
@@ -93,7 +107,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     const failed = outcome.filter(o => o.error !== null).map(o => {
       const name = chosen.find(c => c.target === o.to)?.name ?? "", part = gotNow[o.to]?.length ?? 0;
       const error = problemLine(o.error, t);
-      return { name, partial: part ? ` (${t("chat.forward.partial", { sent: String(part), count: String(messages.length) })})` : "", error };
+      return { name, partial: part ? t("chat.forward.partial", { sent: String(part), count: String(messages.length) }) : undefined, error };
     });
     if (failed.length) {
       setProblems(failed);
@@ -108,12 +122,14 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   };
 
   return createPortal(<dialog ref={dialog} data-testid="forward-dialog" aria-labelledby={`${id}-title`}
-    onCancel={(e) => { e.preventDefault(); if (!busy) onClose(); }}
+    // Not a cancel from the seed question over it (SecretGuardDialog): React hands it here too, and it is the question's.
+    onCancel={(e) => { e.preventDefault(); if (!busy && e.target === e.currentTarget) onClose(); }}
     className="m-auto w-[calc(100%_-_2rem)] max-w-md max-h-[min(640px,calc(100dvh_-_2rem))] flex-col rounded-2xl border border-border bg-sidebar-bg p-0 text-text-primary shadow-2xl backdrop:bg-black/60 open:flex">
     <div className="px-4 pt-4 pb-2 space-y-2">
       <h2 id={`${id}-title`} className="text-base font-semibold">{t("chat.forward.title")}</h2>
       {messages.length > 1 && <p className="m-0 text-xs text-text-muted" data-testid="forward-count">{t("chat.forward.messages", { count: String(messages.length) })}</p>}
       <ChatTargetSearch inputRef={search} list={list} testId="forward-search" value={query} onChange={setQuery} />
+      <SearchStatus testId="forward-found" text={!query.trim() ? "" : shown.length ? t("chat.forward.found", { count: shown.length }) : t(targets.length ? "chat.forward.noMatch" : "chat.forward.noChats")} />
     </div>
     {/* As tall as its rows, shrinking and scrolling within the dialog's max height: `flex-1` (a basis of 0) in a
         dialog as tall as its content leaves WebKit a list of no height at all, with no chat to pick. */}
@@ -131,10 +147,15 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
         </ul>
       )}
     </div>
+    {/* The alert around the list, not on it: on the <ul> it took the place of the list, and its lines were read as no list. */}
     {problems.length > 0 && (
-      <ul className="m-0 mx-4 mt-2 list-none space-y-1 p-0" role="alert" data-testid="forward-error">
-        {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
-      </ul>
+      <div className="mx-4 mt-2" role="alert" data-testid="forward-error">
+        <ul className="m-0 list-none space-y-1 p-0">
+          {/* The name in its `<bdi>`, the brackets and colon the language's own ("Ana（2 件中 1 件送信済み）：…"). */}
+          {problems.map((p, i) => <li key={i} className="text-xs text-danger">{!p.name ? p.error
+            : fillNodes(p.partial ? t("chat.forward.refusedPartial", { partial: p.partial }) : t("chat.forward.refused"), { name: <bdi>{p.name}</bdi>, error: p.error })}</li>)}
+        </ul>
+      </div>
     )}
     {sentTo.length > 0 && <p className="m-0 mx-4 mt-1 line-clamp-2 break-words text-xs text-text-muted" data-testid="forward-sent"
       title={namesTitle(sentTo, t)}>{sentBefore}<NameList names={sentTo} />{sentAfter}</p>}
@@ -149,8 +170,8 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
           {full ? t("chat.forward.limit", { count: String(FORWARD_MAX_TARGETS) }) : ""}
         </p>
       </div>
-      <button type="button" data-testid="forward-cancel" onClick={onClose} disabled={busy}
-        className="min-h-10 rounded-lg px-3 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">{t("common.cancel")}</button>
+      <FocusSafeButton type="button" data-testid="forward-cancel" onClick={onClose} disabled={busy}
+        className="min-h-10 rounded-lg px-3 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">{t("common.cancel")}</FocusSafeButton>
       {/* Not disabled while it runs: a focused button that turns disabled drops the focus to the page, and a refusal
           left Enter doing nothing. A press then is ignored by `send`. */}
       <button type="button" data-testid="forward-send" onClick={() => void send()} disabled={!chosen.length}

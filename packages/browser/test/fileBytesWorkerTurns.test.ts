@@ -10,7 +10,9 @@ import type { WorkerReply, WorkerRequest } from "../src/shared/fileBytesWorker";
  */
 const ipc = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-class FakeFile { bytes = new Uint8Array(0) }
+/** `open`: a sync access handle on it is not closed. Such a file is locked, as in the browser: it cannot be removed. */
+class FakeFile { bytes = new Uint8Array(0); open = false }
+const locked = () => new DOMException("The file is locked", "NoModificationAllowedError");
 class FakeDir {
   readonly entries = new Map<string, FakeDir | FakeFile>();
   async getDirectoryHandle(name: string, options?: { create?: boolean }) {
@@ -29,6 +31,7 @@ class FakeDir {
     return {
       async createSyncAccessHandle() {
         await ipc();
+        held.open = true;
         return {
           getSize: () => held.bytes.length,
           read: (out: Uint8Array, options?: { at?: number }) => {
@@ -44,13 +47,24 @@ class FakeDir {
           },
           truncate: (size: number) => { held.bytes = held.bytes.slice(0, size); },
           flush: () => {},
-          close: () => {},
+          close: () => { held.open = false; },
         };
       },
       async getFile() { await ipc(); return readyBlob(held.bytes); },
     };
   }
-  async removeEntry(name: string) { await ipc(); this.entries.delete(name); }
+  /** A folder's removal takes what it can and fails on a locked file, leaving it (and the folder) in place. */
+  async removeEntry(name: string, options?: { recursive?: boolean }) {
+    await ipc();
+    const entry = this.entries.get(name);
+    if (entry instanceof FakeFile && entry.open) throw locked();
+    if (entry instanceof FakeDir) {
+      if (entry.entries.size && !options?.recursive) throw new DOMException("Not empty", "InvalidModificationError");
+      for (const [inner, file] of [...entry.entries]) if (!(file instanceof FakeFile && file.open)) entry.entries.delete(inner);
+      if (entry.entries.size) throw locked();
+    }
+    this.entries.delete(name);
+  }
 }
 
 /** A Blob with its bytes ready: each read is answered without waiting for a task. */
@@ -115,5 +129,40 @@ describe("a page's file storage while a large file is copied in or checked", () 
     expect(answered).toEqual([8]);
     // The check itself is the same.
     expect(await closed).toEqual({ ...first, n: 7 });
+  });
+});
+
+describe("a profile's folder dropped while a file in it is still being written", () => {
+  /** The page's side (`OpfsFileBytes`) on this worker, the worker run in this test's scope as the browser runs it. */
+  async function openStore() {
+    const scope: Scope = { onmessage: null, postMessage: (reply) => { setTimeout(() => page.onmessage?.({ data: reply } as MessageEvent<WorkerReply>), 0); } };
+    const page = {
+      onmessage: null as ((event: MessageEvent<WorkerReply>) => void) | null,
+      onerror: null,
+      postMessage: (request: WorkerRequest) => { setTimeout(() => scope.onmessage!({ data: request }), 0); },
+      terminate: () => {},
+    };
+    vi.stubGlobal("self", scope);
+    vi.stubGlobal("navigator", { storage: { getDirectory: async () => root } });
+    vi.stubGlobal("Worker", function Worker() { return page; });
+    vi.resetModules();
+    await import("../src/shared/fileBytesWorker");
+    const { OpfsFileBytes } = await import("../src/shared/fileBytesOpfs");
+    return (await OpfsFileBytes.open())!;
+  }
+  const folders = async () => [...(await root.getDirectoryHandle("ghostly-files")).entries.keys()];
+
+  it("a move stopped mid-file: its folder goes whole, the file it was writing included", async () => {
+    const store = await openStore();
+    const staged = store.forSpace("ghostly_stage");
+    // One file whole and closed, the next one half written: the move stopped there, and nothing closed it.
+    await staged.append("done", 0, new Uint8Array(1000));
+    await staged.close("done");
+    await staged.append("half", 0, new Uint8Array(500));
+    await store.dropSpace("ghostly_stage");
+    expect(await folders()).not.toContain("ghostly_stage");
+    // Written again later (another move): a new file, not one the dropped folder left open.
+    await staged.append("half", 0, new Uint8Array(10));
+    expect(await staged.size("half")).toBe(10);
   });
 });

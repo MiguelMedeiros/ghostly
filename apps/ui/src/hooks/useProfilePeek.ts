@@ -3,7 +3,8 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { testSwitch } from "@ghostly/browser/shared/features";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
-import { useServicesPlatform } from "./useServicesPlatform";
+import { usePlatformValue } from "./useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { activeProfileId } from "../lib/profiles";
 import { isDesktopApp } from "../lib/externalLink";
 import { showPrivateNotification } from "../lib/notifications";
@@ -17,7 +18,8 @@ const testPace = () => Number(testSwitch("ghostly-test-peek-ms")) || undefined;
  * one runs. This profile forgets what was seen for it from elsewhere: it runs now, and fetches that itself.
  */
 export function useProfilePeek(): void {
-  const canSwitch = !!useServicesPlatform()?.features.profiles;
+  // The one value it needs: the whole platform drew the app's shell, and every chat it holds, on every engine state.
+  const canSwitch = usePlatformValue(() => !!servicesPlatform?.features.profiles);
   const { settings } = useSettings();
   const { t } = useI18n();
   const latest = useRef({ settings, t });

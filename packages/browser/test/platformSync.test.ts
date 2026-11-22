@@ -17,6 +17,8 @@ const fake = vi.hoisted(() => ({
     stateListeners: [] as (() => void)[],
     messageListeners: [] as ((linkId: string, messages: StoredMessage[]) => void)[],
     connect: async () => {},
+    start() {},
+    keepMarks() {},
     subscribe(listener: () => void) { fake.engine.stateListeners.push(listener); return () => {}; },
     onMessages(listener: (linkId: string, messages: StoredMessage[]) => void) { fake.engine.messageListeners.push(listener); return () => {}; },
     // No change tick here: every list comes whole.
@@ -192,6 +194,24 @@ describe("keeping links and chats in step", () => {
     expect(forgotten).toContainEqual({ tag: viewerTag("me-gone") });
   });
 
+  it("stops an app still running in a deleted chat (a Desktop app window, which no chat panel stops), and none elsewhere", async () => {
+    const { registerRunningApp } = await import("../../../apps/ui/src/lib/apps/open");
+    const stopped: string[] = [];
+    const running = (name: string, linkId: string | null) => registerRunningApp({ ref: "pk/chess", digest: "d", runAnyway: false, linkId, takeDown: () => {}, stop: () => stopped.push(name) });
+    const unregister = [running("in the deleted chat", "gone"), running("in another chat", "kept"), running("alone", null)];
+    imported();
+    storage.saveSession(session({ id: "s1", peerPubKeyB64: "p-gone" }));
+    storage.saveSession(session({ id: "s2", mySeedB64: "seed-2", peerPubKeyB64: "p-kept" }));
+    await start([link({ id: "gone", peerPubKeyZ32: "p-gone" }), link({ id: "kept", peerPubKeyZ32: "p-kept" })]);
+    expect(stopped).toEqual([]);
+    storage.deleteSession("s1");
+    window.dispatchEvent(new Event("session-updated"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.calls).toContainEqual(["removeLink", { linkId: "gone" }]);
+    expect(stopped).toEqual(["in the deleted chat"]);
+    for (const off of unregister) off();
+  });
+
   it("keeps a link whose chat still exists, and takes its delivery mode", async () => {
     imported();
     storage.saveSession(session({ deliveryMode: "stream" }));
@@ -252,6 +272,22 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(stored.messages[0]).toMatchObject({ id: "mine", delivery: "failed", deliveryError: "offline" });
   });
 
+  it("drops a file's waiting state once the engine sends it live, and keeps the status the chat gave a text of mine", async () => {
+    const file = { id: "link-1-out-f1", name: "a.txt", size: 3, mime: "text/plain" } as StoredMessage["file"];
+    const waiting = message({ id: "me_file", sender: "me", text: "a.txt", file, delivery: "waiting", deliveryError: "Sent when you are live." });
+    const text = { id: "me_text", sender: "me" as const, text: "hi", timestamp: 11, delivery: "sent" as const };
+    let stored = await mirror([waiting], { messages: [text] });
+    expect(stored.messages.find((m) => m.id === "me_file")).toMatchObject({ delivery: "waiting" });
+    changes = 0;
+    engine.messageListeners[0]("link-1", [{ ...waiting, delivery: undefined, deliveryError: undefined }, message({ id: "me_text", sender: "me", timestamp: 11 })]);
+    stored = storage.loadSession("s1")!;
+    const sent = stored.messages.find((m) => m.id === "me_file")!;
+    expect(sent.delivery).toBeUndefined();
+    expect(sent.deliveryError).toBeUndefined();
+    expect(stored.messages.find((m) => m.id === "me_text")).toMatchObject({ delivery: "sent" });
+    expect(changes).toBe(1);
+  });
+
   it("puts an edit's new text in place: the same message, nothing new to read, and the preview follows", async () => {
     const shown = { id: "peer_x", sender: "peer" as const, text: "v0 https://a.example/", timestamp: 10, preview: { u: "https://a.example/" } };
     const stored = await mirror([message({ id: "peer_x", text: "v2", edit: { seq: 2, at: 20, history: [{ at: 10, text: "v0 https://a.example/" }] } })], { messages: [shown] });
@@ -264,6 +300,15 @@ describe("mirroring what the peer stores into the chat", () => {
     engine.messageListeners[0]("link-1", [message({ id: "peer_x", text: "v2", edit: { seq: 2, at: 20, history: [] } })]);
     expect(changes).toBe(0);
     expect(sync.toChatMessage(message({ id: "me_y", sender: "me", edit: { seq: 1, at: 5, history: [], pending: true } }), "peer-1", "me-1", true).edit).toEqual({ seq: 1, at: 5, history: [], pending: true });
+  });
+
+  it("shows a contact request's text as not confirmed, and drops the mark once the engine's row is confirmed", async () => {
+    const stored = await mirror([message({ id: "peer_contact_k", text: "Hi, it's me", unconfirmed: true })]);
+    expect(stored.messages[0]).toMatchObject({ id: "peer_contact_k", unconfirmed: true });
+    changes = 0;
+    engine.messageListeners[0]("link-1", [message({ id: "peer_contact_k", text: "Hi, it's me" })]);
+    expect(storage.loadSession("s1")!.messages[0]!.unconfirmed).toBeUndefined();
+    expect(changes).toBe(1);
   });
 
   it("a received row the engine gave a place to takes that place here too, with the time its sender said", async () => {

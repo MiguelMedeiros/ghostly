@@ -1,4 +1,4 @@
-import { FRAME_MS, frameBytes, frameSamples, PlaybackQueue, type CallRate } from "./pcm";
+import { FRAME_MS, frameBytes, frameSamples, monotonic, PlaybackQueue, type CallRate } from "./pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter } from "./rtp";
 
 /** The longest stall of the sender whose frames are still sent after it (see `catchUp`). */
@@ -38,6 +38,7 @@ export interface CallAudioOptions {
   onFrame(frame: Buffer): void;
   /** What the program wrote, to send (the call's own, kept from before the media existed); a new one if none. */
   queue?: PlaybackQueue;
+  /** The clock frames are sent by; the call's own (`monotonic`) if none. */
   now?: () => number;
 }
 
@@ -70,17 +71,21 @@ export class CallAudio {
   private lastQuiet: Buffer | null = null;
   private same = 0;
   private quiet: Buffer | null = null;
+  /** The contact's last packet decoded, what it decoded to, and whether the one before was the same and gave the same (see `decoded`). */
+  private lastIn: Buffer | null = null;
+  private lastPcm: Buffer | null = null;
+  private steady = false;
   /** Whether the encoder's FEC is on (`OpusCodec.fec`); unknown until the first frame. */
   private fecOn: boolean | undefined;
   private stopped = false;
   /** Frames sent and received, for `call list`. */
   sent = 0;
   received = 0;
-  /** When the last packet, RTP or RTCP, came from the contact (Date.now(); 0: none yet), for the call's watch. */
+  /** When the last packet, RTP or RTCP, came from the contact (on `now`, `monotonic` by default; 0: none yet), for the call's watch. */
   heardAt = 0;
 
   constructor(private readonly options: CallAudioOptions) {
-    const now = options.now ?? Date.now;
+    const now = options.now ?? monotonic;
     this.queue = options.queue ?? new PlaybackQueue(options.rate, now);
     this.writer = new RtpWriter(options.ssrc, options.payloadType);
     this.frame = frameBytes(options.rate);
@@ -92,7 +97,7 @@ export class CallAudio {
   /** Starts sending, a frame every 20 ms from now on. */
   start(): void {
     if (this.timer || this.stopped) return;
-    this.startedAt = (this.options.now ?? Date.now)();
+    this.startedAt = (this.options.now ?? monotonic)();
     this.ticks = 0;
     this.schedule();
   }
@@ -147,19 +152,43 @@ export class CallAudio {
   /** Handles one packet from the track. Exposed for tests. */
   receive(packet: Buffer): void {
     if (this.stopped) return;
-    this.heardAt = (this.options.now ?? Date.now)();
+    this.heardAt = (this.options.now ?? monotonic)();
     if (isRtcp(packet)) return;
     const rtp = parseRtp(packet);
     if (!rtp || rtp.payloadType !== this.options.payloadType) return;
     for (const item of this.reorder.push(rtp)) {
       let pcm: Buffer;
-      if ("lost" in item) pcm = this.conceal();
+      if ("lost" in item) { this.forgetSteady(); pcm = this.conceal(); }
       else {
         this.concealed = null;
-        try { pcm = this.options.decoder.decode(item.payload); } catch { pcm = this.silence; }
+        pcm = this.decoded(item.payload);
       }
       this.emit(pcm);
     }
+  }
+
+  /**
+   * A packet of the contact's, decoded. Their silence settles into one packet sent again and again (the CLI's own,
+   * `settle`; an app's muted microphone), and the decoder settles with it: once the same packet gave the same audio
+   * twice in a row, it is not decoded again while it lasts, and the program gets that audio again. The audio after it
+   * decodes to the same bytes as with every packet decoded, and decoding it was half of a quiet call's work on the
+   * daemon's thread (libopus in WebAssembly, 50 times a second).
+   */
+  private decoded(payload: Buffer): Buffer {
+    if (this.steady && this.lastIn!.equals(payload)) return this.lastPcm!;
+    let pcm: Buffer;
+    try { pcm = this.options.decoder.decode(payload); } catch { this.forgetSteady(); return this.silence; }
+    this.steady = !!this.lastIn?.equals(payload) && !!this.lastPcm?.equals(pcm);
+    // Copies: the packet's buffer and the decoder's are not this call's to keep.
+    this.lastIn = Buffer.from(payload);
+    this.lastPcm = Buffer.from(pcm);
+    return pcm;
+  }
+
+  /** A packet lost or unreadable: the decoder moved on without the packet (`decoded`) that came last. */
+  private forgetSteady(): void {
+    this.lastIn = this.lastPcm = null;
+    this.steady = false;
   }
 
   /**
@@ -189,7 +218,7 @@ export class CallAudio {
   }
 
   private schedule(): void {
-    const now = this.options.now ?? Date.now;
+    const now = this.options.now ?? monotonic;
     const due = this.startedAt + (this.ticks + 1) * FRAME_MS;
     this.timer = setTimeout(() => {
       if (this.stopped) return;
@@ -209,11 +238,13 @@ export class CallAudio {
    * slower than a frame for a while (every 40 ms under a large file) keeps up, and a program writing at real time
    * stays there. The contact's jitter buffer takes the short burst. A stall past MAX_CATCH_UP_MS is not replayed: the
    * clock starts again and what the program wrote during it is dropped, or it would be heard that much late for the
-   * rest of the call.
+   * rest of the call. The frames it skipped still move the RTP timestamp on (the sampling time, RFC 3550), so the
+   * contact's jitter buffer does not take the gap for seconds of jitter.
    */
   private catchUp(late: number): void {
-    const now = this.options.now ?? Date.now;
+    const now = this.options.now ?? monotonic;
     if (late > MAX_CATCH_UP_MS) {
+      this.writer.skip(Math.round(late / FRAME_MS));
       this.owed = late;
       this.kept = this.ahead;
       this.owedUntil = now() + MAX_CATCH_UP_MS;
@@ -232,7 +263,7 @@ export class CallAudio {
    */
   private drop(): void {
     if (this.owed <= 0) return;
-    if ((this.options.now ?? Date.now)() > this.owedUntil) { this.owed = 0; return; }
+    if ((this.options.now ?? monotonic)() > this.owedUntil) { this.owed = 0; return; }
     this.owed -= this.queue.skip(Math.min(this.owed, this.queue.queuedMs - this.kept));
   }
 }

@@ -216,12 +216,26 @@ describe("[text](url) links", () => {
     // Dots drawn like one at the baseline or a little above, and letters and digits that look like one.
     for (const dot of [
       "\u02d9", "\u0660", "\u06f0", "\u0702", "\u0f0b", "\u1427", "\u16eb", "\u2022", "\u2219", "\u22c5", "\u2e31", "\u2e33",
-      "\u30fb", "\uff65", "\ua4f8", "\ua60e", "\ua78f", "\u{10a50}",
+      "\u30fb", "\uff65", "\ua4f8", "\ua60e", "\ua78f", "\u{10a50}", "\u{1d16d}", "\u2981", "\u0323",
     ]) {
       expect(labelMisleads(`paypal${dot}com`, "https://evil.example/login"), `U+${dot.codePointAt(0)!.toString(16)}`).toBe(true);
       expect(labelMisleads(`ghostly${dot}tools`, "https://ghostly.tools"), `U+${dot.codePointAt(0)!.toString(16)}`).toBe(false);
     }
     expect(link("[paypal\ua4f8com](https://evil.example/login)")).toMatchObject({ data: { showUrl: true } });
+  });
+
+  it("shows the address when the text is the link's own host in letters a bare link shows in punycode", () => {
+    for (const [label, url] of [
+      ["\u0440\u0430\u0443\u0440\u0430l.com", "https://xn--l-7sba6dbr.com/login"],
+      ["\u0430pple.com", "https://xn--pple-43d.com/"],
+      ["www.\u0430pple.com", "https://xn--pple-43d.com/"],
+      ["g\u043e\u043egle.com", "https://xn--ggle-55da.com/"],
+      ["https://\u0430pple.com/x", "https://xn--pple-43d.com/"],
+    ]) {
+      expect(labelMisleads(label, url), label).toBe(true);
+      expect(link(`[${label}](${url})`), label).toMatchObject({ data: { showUrl: true } });
+      expect(plainText(`[${label}](${url})`), label).toBe(url);
+    }
   });
 
   it.each([
@@ -233,6 +247,45 @@ describe("[text](url) links", () => {
 
   it("shows the address when a character that draws as nothing splits the text's host", () => {
     expect(link("[paypal\u034f.com](https://evil.example/)")).toMatchObject({ data: { showUrl: true } });
+  });
+
+  it("reads a space narrower than a word's beside a dot as no gap, as the eye does", () => {
+    for (const space of [" ", " ", " ", " ", " ", " ", " ", " "]) {
+      for (const label of [`paypal${space}.com`, `paypal.${space}com`, `paypal${space}.${space}com`, `paypal·${space}com`]) {
+        const name = `${label} U+${space.codePointAt(0)!.toString(16)}`;
+        expect(labelMisleads(label, "https://evil.example/login"), name).toBe(true);
+        expect(link(`[${label}](https://evil.example/login)`), name).toMatchObject({ data: { showUrl: true } });
+      }
+      expect(labelMisleads(`ghostly${space}.tools`, "https://ghostly.tools/docs")).toBe(false);
+    }
+    // A word's space, a no-break one and an ideographic one show their gap: a sentence, not a host.
+    for (const label of ["see the docs. next", "Mr. Smith", "公司。　詳細", "paypal .com"]) {
+      expect(labelMisleads(label, "https://ghostly.tools/p"), label).toBe(false);
+    }
+  });
+
+  it("reads a combining mark as part of the host it sits in, as a browser does", () => {
+    for (const label of ["paypal\u0332.com", "paypal.c\u0332om", "wiki\u0307.com", "paypal\u0320.com", "paypal.\u0332com", "paypal.co\u0332m"]) {
+      expect(labelMisleads(label, "https://evil.example/login"), label).toBe(true);
+    }
+    expect(link("[paypal.c\u0332om](https://evil.example/login)")).toMatchObject({ data: { showUrl: true } });
+  });
+
+  it("shows the address when formatting splits the text's host, as the bubble joins it again", () => {
+    for (const label of [
+      "paypal.**com**", "paypal._com_", "paypal.*com*", "paypal.__com__", "paypal.~~com~~", "paypal.||com||",
+      "**pay**pal.com", "paypal͏.**com**", "paypal.**c­om**", "pay​pal._com_",
+    ]) {
+      expect(link(`[${label}](https://evil.example/login)`), label).toMatchObject({ data: { showUrl: true } });
+      expect(plainText(`[${label}](https://evil.example/login)`), label).toBe("https://evil.example/login");
+    }
+    expect(link("[ghostly.**tools**](https://ghostly.tools/docs)")).toMatchObject({ data: { showUrl: false } });
+  });
+
+  it("shows the text when its bold or italic words are not a host", () => {
+    for (const label of ["**the plan**", "read _this_ first", "v1.**2** notes", "**Node**.js docs", "e.g. *this*", "the **docs**."]) {
+      expect(link(`[${label}](https://ghostly.tools/p)`), label).toMatchObject({ data: { showUrl: false } });
+    }
   });
 
   it("shows the text when its only hidden characters are an emoji's own", () => {

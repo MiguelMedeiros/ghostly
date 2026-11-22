@@ -1,5 +1,6 @@
 import {test,expect} from "../support/fixtures";
 import type {Page} from "@playwright/test";
+import {iosKeyboard,keyboard} from "../support/keyboard";
 
 /** The emoji/GIF panel is inside the window, and on a wide screen inside the chat's column too. */
 async function fits(page:Page){
@@ -65,4 +66,60 @@ test("mobile emoji sheet stays visible and supports touch selection and dismissa
   return first.y>=strip.y-1 && first.y+first.height<=strip.y+strip.height+1;
  }).toBe(true);
  await page.screenshot({path:info.outputPath("emoji-phone-landscape.png")});
+});
+
+/**
+ * A short screen with the keyboard up for the panel's search (iOS's keyboard: only the visual viewport gets shorter):
+ * the grabber, the categories, the search and the switch left the results 8 px and no emoji on a phone on its side,
+ * and one row on the smallest phone upright. The panel goes compact there, the switch beside the search, and two whole
+ * rows of 44 px emoji show above the keyboard. A phone upright with room for two rows keeps the usual panel.
+ */
+test.describe("emoji search with the keyboard up",()=>{
+ const cases=[
+  {name:"a phone on its side",width:667,height:375,keys:200,compact:true,rows:2},
+  {name:"two panes on a phone on its side",width:874,height:402,keys:240,compact:true,rows:2},
+  {name:"the smallest phone upright",width:320,height:568,keys:253,compact:true,rows:2},
+  {name:"a phone upright",width:375,height:667,keys:260,compact:false,rows:2},
+ ];
+ for(const c of cases){
+  test(`${c.name} (${c.width}×${c.height}, ${c.keys} px keyboard): whole rows of emoji above the keyboard`,{ tag: ["@feature:app.emoji-picker", "@feature:app.composer.expressions", "@feature:app.mobile-layout"] },async({peer},info)=>{
+   const {page}=await peer("emoji keyboard",{mobile:true,viewport:{width:c.width,height:c.height}});
+   await iosKeyboard(page);
+   await page.getByTitle("New Chat").click();await page.getByTestId("composer-expressions").tap();
+   const panel=page.getByTestId("expression-panel");await expect(panel).toBeVisible();
+   const search=panel.getByTestId("expression-search");
+   await search.focus();await keyboard(page,c.keys);
+   await expect(page.locator("html")).toHaveAttribute("data-keyboard","true");
+   await search.fill("face");
+   const visible=c.height-c.keys;
+   if(c.compact) await expect(panel).toHaveAttribute("data-compact","true");
+   else await expect(panel).not.toHaveAttribute("data-compact");
+   // The panel, its search and its switch between the top of the screen and the keyboard.
+   await expect.poll(async()=>{const r=(await panel.boundingBox())!;return r.y>=-1 && r.y+r.height<=visible+1;}).toBe(true);
+   const field=(await search.boundingBox())!,tab=(await panel.getByTestId("expression-tab-gif").boundingBox())!;
+   expect(field.y).toBeGreaterThanOrEqual(0);expect(tab.y+tab.height).toBeLessThanOrEqual(visible+1);
+   if(c.compact){
+    // Beside the search, and no grabber or categories over it.
+    expect(tab.y).toBeLessThan(field.y+field.height);expect(tab.y+tab.height).toBeGreaterThan(field.y);
+    await expect(panel.locator(".expression-categories")).toBeHidden();
+    expect(await panel.evaluate((el)=>getComputedStyle(el,"::before").display)).toMatch(/none|^$/);
+   }else{
+    await expect(panel.locator(".expression-categories")).toBeVisible();
+   }
+   // Whole rows of 44 px emoji in the results, above the keyboard.
+   await expect.poll(()=>panel.locator(".expression-scroll").evaluate((strip,bottom)=>{
+    const shown=strip.getBoundingClientRect(),rows=new Set<number>();
+    for(const cell of strip.querySelectorAll(".emoji-cell")){
+     const r=cell.getBoundingClientRect();
+     if(r.height>=43.5 && r.top>=shown.top-1 && r.bottom<=shown.bottom+1 && r.bottom<=bottom+1) rows.add(Math.round(r.top));
+    }
+    return rows.size;
+   },visible)).toBeGreaterThanOrEqual(c.rows);
+   await page.screenshot({path:info.outputPath(`emoji-keyboard-${c.width}x${c.height}.png`)});
+   // Keyboard down: the usual panel again.
+   await search.blur();await keyboard(page,0);
+   await expect(page.locator("html")).toHaveAttribute("data-keyboard","false");
+   await expect(panel).not.toHaveAttribute("data-compact");
+  });
+ }
 });

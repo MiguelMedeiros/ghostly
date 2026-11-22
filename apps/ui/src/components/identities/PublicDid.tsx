@@ -16,7 +16,7 @@ import { InfoLine } from "../devices/DeviceDialog";
  * Copy and a QR code, whether it is published, and a switch per identity that lists it in the document for
  * everyone to see. Every switch starts off; chats never need any of this.
  */
-export function PublicDid({ state }: { state: EngineState }) {
+export function PublicDid({ state }: { state: Pick<EngineState, "did" | "identityProofs"> & { settings: Pick<EngineState["settings"], "online"> } }) {
   const { t } = useI18n();
   const did = state.did;
   const { copied, failed, copy } = useCopyKey(did?.id ?? "");
@@ -58,7 +58,7 @@ export function PublicDid({ state }: { state: EngineState }) {
         <InfoLine testId="did-warning" className="text-xs text-warn-ink" info={t("identities.did.warningInfo")}>{t("identities.did.warning")}<span className="block text-text-secondary">{t("identities.did.warningNext")}</span></InfoLine>
         {listable.length === 0 ? <p className="text-xs text-text-muted" data-testid="did-none">{t("identities.did.none")}</p>
           : listable.map(p => {
-            const card = idCard(p, { now });
+            const card = idCard(p, { now, t });
             const listed = did.listed.includes(p.id);
             const current = p.expiresAt > now;
             return (
@@ -68,7 +68,7 @@ export function PublicDid({ state }: { state: EngineState }) {
                   <p className="text-sm text-text-primary break-words">{card.label} <span className="text-text-muted">{card.short}</span></p>
                   <p className="text-xs text-text-muted break-all">{current ? p.publicUri : t("identities.did.expired")}</p>
                 </div>
-                <Switch testId="did-list" checked={listed} disabled={!!busy || (!listed && !current)}
+                <Switch testId="did-list" checked={listed} disabled={(!!busy && busy !== p.id) || (!listed && !current)} busy={busy === p.id}
                   label={t("identities.did.listOne", { identity: `${card.label} ${card.short}` })} onChange={next => list(p.id, next)} />
               </div>
             );

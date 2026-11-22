@@ -123,7 +123,7 @@ describe("the account switcher on the account bar", () => {
 
     expect(lastRouteOf("")).toBe("/wallet");
     expect(pendingSwitch()).toMatchObject({ id: work.id, name: "Work" });
-    expect(screen.getByTestId("profile-switch-splash")).toHaveTextContent("Opening Work…");
+    expect(screen.getByTestId("profile-switch-splash")).toHaveTextContent("Opening \u2068Work\u2069…");
     // Under the overlay this page is still Personal until the moment it reloads as Work.
     expect(activeProfileId()).toBe("");
     act(() => { vi.advanceTimersByTime(100); });
@@ -141,23 +141,36 @@ describe("the account switcher on the account bar", () => {
     await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
     const items = [...menu().querySelectorAll<HTMLElement>("[role^=menuitem]")];
     // Each profile's initial is drawn, not text: a profile reads as its name, not "WWork".
-    expect(items.map((item) => item.textContent)).toEqual([expect.stringContaining("Personal"), "Work", "Family", "+Add a profile", "Add this device to another profile", "Manage profiles"]);
-    // The first other profile has the focus: the likeliest next step.
-    expect(items[1]).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
+    expect(items.map((item) => item.textContent)).toEqual([expect.stringContaining("Personal"), "Set a status", "Work", "Family", "+Add a profile", "Add this device to another profile", "Manage profiles"]);
+    // The first other profile has the focus: the likeliest next step (past this profile's status).
     expect(items[2]).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(items[3]).toHaveFocus();
     await user.keyboard("{End}");
-    expect(items[5]).toHaveFocus();
+    expect(items[6]).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(items[0]).toHaveFocus();
     await user.keyboard("{ArrowUp}");
-    expect(items[5]).toHaveFocus();
+    expect(items[6]).toHaveFocus();
     await user.keyboard("{Home}");
     expect(items[0]).toHaveFocus();
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(before).toHaveFocus();
+  });
+
+  it("opens with the key that types P on any keyboard, as Ctrl+N and Ctrl+F do", () => {
+    createProfile("Work");
+    renderBar();
+    // Dvorak: the key at a US keyboard's P types L (the chat list's Alt+Shift+L), and P is at R's place.
+    fireEvent.keyDown(window, { code: "KeyP", key: "L", altKey: true, shiftKey: true });
+    expect(screen.queryByTestId("profile-switcher")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { code: "KeyR", key: "P", altKey: true, shiftKey: true });
+    expect(screen.getByTestId("profile-switcher")).toBeInTheDocument();
+    // A keyboard with no Latin letters (Russian): the key at P's place.
+    fireEvent.keyDown(window, { code: "KeyP", key: "З", altKey: true, shiftKey: true });
+    expect(screen.queryByTestId("profile-switcher")).not.toBeInTheDocument();
   });
 
   it("stays shut on Alt+Shift+P behind a modal dialog or the lock screen, and opens again once it is gone", async () => {
@@ -290,12 +303,19 @@ describe("the switch overlay after the reload", () => {
     sessionStorage.setItem("ghostly_switching", JSON.stringify({ id: "", name: "Personal", color: "#22d3ee", at: Date.now() }));
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     renderApp(<LockScreenProvider><ProfileSwitchSplash /></LockScreenProvider>);
-    expect(screen.getByRole("status")).toHaveTextContent("Opening Personal…");
+    expect(screen.getByRole("status")).toHaveTextContent("Opening \u2068Personal\u2069…");
     act(() => { vi.advanceTimersByTime(300); });
     expect(screen.getByTestId("profile-switch-splash")).toHaveAttribute("data-leaving");
     act(() => { vi.advanceTimersByTime(200); });
     expect(screen.queryByTestId("profile-switch-splash")).not.toBeInTheDocument();
     expect(pendingSwitch()).toBeNull();
+  });
+
+  // In a language of the other direction, a name's ending punctuation was drawn on its other side ("!Club").
+  it("names the profile in its own direction", () => {
+    sessionStorage.setItem("ghostly_switching", JSON.stringify({ id: "", name: "Club!", color: "#22d3ee", at: Date.now() }));
+    renderApp(<LockScreenProvider><ProfileSwitchSplash /></LockScreenProvider>, { language: "ar" });
+    expect(screen.getByRole("status")).toHaveTextContent("جارٍ فتح \u2068Club!\u2069…");
   });
 });
 

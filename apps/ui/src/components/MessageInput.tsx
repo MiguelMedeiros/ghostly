@@ -1,4 +1,4 @@
-import { getSessionDraft, setSessionDraft } from "../lib/storage";
+import { flushSessionDraft, getSessionDraft, setSessionDraft, setSessionDraftLater } from "../lib/storage";
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useId, type ClipboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { PaymentComposer } from "./PaymentComposer";
@@ -7,6 +7,8 @@ import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
 import type { LinkPreview, TypingKind, VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
+import { NAME, withName } from "./apps/aroundName";
+import { isolate } from "../lib/ownStatus";
 import { useIsLocked } from "../contexts/LockScreenContext";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ComposerMenu, type ComposerAction } from "./composer/ComposerMenu";
@@ -14,6 +16,7 @@ import { SecretGuardDialog } from "./SecretGuardDialog";
 import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { ExpressionPanel } from "./composer/ExpressionPanel";
 import { CameraCapture, cameraByFileInput, useHasCamera } from "./composer/CameraCapture";
+import { openAppSettings, useCameraRefusal } from "../desktop/androidCameraRefusal";
 import { AppsGlyph, CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon, TranslateIcon } from "./composer/icons";
 import type { ComposerServices } from "./composer/servicesRow";
 import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";
@@ -21,9 +24,11 @@ import type { GroupMention } from "@ghostly/core";
 import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
+import { useEngineValue } from "../lib/engineState";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
-import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
+import { keepEditWords, keptEditWords } from "../lib/keptEdits";
+import { keepShareFor, onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight, useFieldFitsView } from "./composer/fieldHeight";
 import { useKeptOnScreen } from "./composer/keptOnScreen";
 import { useComposition } from "../hooks/useComposition";
@@ -36,7 +41,7 @@ import { problemLine } from "../lib/problemText";
 import { readingTime } from "../lib/readingTime";
 import { TranslatePreview } from "./composer/TranslatePreview";
 import { translationStale, useDraftTranslation, type ComposerTranslation, type DraftTranslationFailure } from "../hooks/useDraftTranslation";
-import { languageName } from "../lib/documentLanguage";
+import { draftDirection, languageName } from "../lib/documentLanguage";
 import { carryMentions } from "../lib/translateDraft";
 import { translateEnabled } from "../lib/translateFlag";
 import { isConvertibleVideo, prepareVideo, type PreparedVideo } from "../lib/videoSend";
@@ -106,7 +111,7 @@ interface MessageInputProps {
   linkPreviews?: boolean;
   /**
    * Typing (a paired chat): true on a keystroke that leaves text, false when the text is cleared or sent; with
-   * `"recording"` while a voice note is recorded, false when it is sent or thrown away.
+   * `"recording"` while a voice note is recorded, false when it is paused, sent or thrown away.
    */
   onTyping?: (typing: boolean, kind?: TypingKind) => void;
   /**
@@ -117,8 +122,9 @@ interface MessageInputProps {
   /**
    * A message of mine being edited (WISP 400 § Edits): its text fills the field, the draft waits and comes back after.
    * Enter saves through `onSave`; ✕ or Escape leaves it. Either way `onClose` ends it. A new `key` edits another one.
+   * `preview`: the message's link preview, which goes with the edit while its link stays and is not removed.
    */
-  edit?: { key: string; text: string; snippet: string; onSave: (text: string, extra?: { preview?: LinkPreview; mentions?: GroupMention[] }) => Promise<string | null>; onClose: () => void };
+  edit?: { key: string; text: string; snippet: string; preview?: LinkPreview; onSave: (text: string, extra?: { preview?: LinkPreview; mentions?: GroupMention[] }) => Promise<string | null>; onClose: () => void };
   /** ↑ in an empty field: edit my last message, as in Slack and Telegram. */
   onEditLast?: () => void;
   /**
@@ -143,6 +149,13 @@ const DEFAULT_MAX = 500;
 const TOAST_DURATION = 5_000;
 /** How often the line takes a video conversion's progress: the converter tells each sample. */
 const PROGRESS_EVERY_MS = 250;
+/** The pause in the typing after which the draft is written (and the secret guard reads it). */
+const DRAFT_SAVE_PAUSE = 400;
+/**
+ * What a text's envelope takes of the DHT's bytes once sealed: about 248 of the 256 fit (the CLI's `DHT_TEXT_FITS`). The
+ * edge moves by a byte or two with the chat's sequence, so the composer's count says "about".
+ */
+const DHT_SEAL_BYTES = 8;
 
 /** The same file on disk, picked again: a picker gives a new File each time. */
 
@@ -203,6 +216,8 @@ export function MessageInput({
   const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
   const textRef = useRef(text); textRef.current = text;
   const [toast, setToast] = useState<string | null>(null);
+  /** What the card offers to do about what it says (a camera blocked: Android's settings). */
+  const [toastAction, setToastAction] = useState<{ label: string; run: () => void } | null>(null);
   /**
    * `caption`: the guard asks about a pasted file's caption, not the draft; `translated`: about the translation shown;
    * `translate`: about the draft, before it is translated (what Send anyway does then).
@@ -215,6 +230,10 @@ export function MessageInput({
   /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
   const [reading, setReading] = useState(false);
   const readingRef = useRef(false);
+  /** Drops the platform is reading (another app's files, on Linux), said on screen as a paste is. */
+  const [dropsReading, setDropsReading] = useState(0);
+  /** A share from the "Share to…" picker waits for this chat's edit to end: said by the edit bar. */
+  const [shareWaits, setShareWaits] = useState(false);
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -247,7 +266,11 @@ export function MessageInput({
   const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
   // Translate what I send, this chat's choice on this device (the Translation sheet).
   const translatesSend = useTranslatesWhatISend(draftId);
-  const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled);
+  // Hide my IP from contacts: reading a link's page tells its site this device's address, and a pasted link may be a
+  // contact's server. With it on no preview is made; the link goes as text (a picture link someone sent is not read either).
+  // Until the engine's first state it counts as on: a kept draft's link would otherwise be read before the engine says.
+  const relayOnly = useEngineValue((state) => !state || state.settings.relayOnly === true);
+  const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled && !relayOnly, edit?.preview);
 
   // Ready to type when the chat opens, where that costs nothing: on a touch screen the keyboard would come up over
   // the chat before the person asked for it, so there the field waits for a tap (apps/ui/src/lib/touchOnly.ts).
@@ -285,27 +308,70 @@ export function MessageInput({
   }, [replyKey]);
 
   // Editing: the message's words in the field, the caret at their end; the draft is kept aside until the edit ends.
+  // An edit open as this composer went (the chat left for the Share to… picker) comes back with the words typed into it
+  // (lib/keptEdits.ts); the draft set aside is the one in storage, the field's as the composer opens.
   const editKey = edit?.key, editText = edit?.text;
   const draftAside = useRef<string | null>(null);
+  /** The words an edit opened with, until the field shows them: before that, the field still holds the draft. */
+  const editOpening = useRef<string | null>(null);
   useEffect(() => {
     if (!editKey || editText === undefined) return;
     if (draftAside.current === null) draftAside.current = textareaRef.current?.value ?? "";
-    caretRef.current = editText.length;
-    setText(editText);
+    const words = (draftId && keptEditWords(draftId, editKey)) ?? editText;
+    editOpening.current = words;
+    caretRef.current = words.length;
+    setText(words);
     textareaRef.current?.focus({ preventScroll: true });
-  }, [editKey, editText]);
-  const endEdit = () => {
-    const draft = draftAside.current ?? "";
+  }, [draftId, editKey, editText]);
+  useEffect(() => {
+    if (!draftId || !editKey || draftAside.current === null) return;
+    if (editOpening.current !== null) {
+      if (text !== editOpening.current) return;
+      editOpening.current = null;
+    }
+    keepEditWords(draftId, editKey, text);
+  }, [draftId, editKey, text]);
+  /** `typed`: what the person wrote while the edit was being saved, which is not the edit: it joins the draft set aside. */
+  const endEdit = (typed = "") => {
+    const aside = draftAside.current ?? "";
+    const draft = aside && typed ? `${aside}${/\s$/.test(aside) ? "" : " "}${typed}` : aside || typed;
     draftAside.current = null;
+    editOpening.current = null;
+    if (draftId) keepEditWords(draftId, null);
     setText(draft);
     edit?.onClose();
   };
+  // The edit taken away (its message deleted meanwhile): it ends as Cancel ends it, the draft set aside back in the field.
+  useEffect(() => {
+    if (editKey || draftAside.current === null) return;
+    const draft = draftAside.current;
+    draftAside.current = null;
+    editOpening.current = null;
+    if (draftId) keepEditWords(draftId, null);
+    setText(draft);
+  }, [draftId, editKey]);
 
   const editing = !!edit;
+  // The draft is written after a pause in the typing (the guard reads all of it: per key, a long draft cost a frame on a
+  // slow phone), and at once as the page goes or is hidden, or the chat closes. Sent or cleared meanwhile (its chat
+  // deleted, its group left), it is not written back (storage.ts setSessionDraftLater).
   useEffect(() => {
     // A draft holding a seed or a key is not written to storage; ecash is, since the draft may be its only copy.
     // Not while editing: the draft is the one kept aside.
-    if (draftId && !editing) { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); }
+    if (!draftId) return;
+    if (!editing) setSessionDraftLater(draftId, () => { const found = findSecret(text); setSessionDraft(draftId, found && found.kind !== "cashu" ? "" : text); });
+    const pause = setTimeout(() => flushSessionDraft(draftId), DRAFT_SAVE_PAUSE);
+    return () => clearTimeout(pause);
+  }, [draftId,text,editing]);
+  useEffect(() => {
+    if (!draftId) return;
+    const flush = () => flushSessionDraft(draftId);
+    const hidden = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", hidden);
+    return () => { window.removeEventListener("pagehide", flush); document.removeEventListener("visibilitychange", hidden); flush(); };
+  }, [draftId]);
+  useEffect(() => {
     // Text put in by the app (an emoji, an edit, a share): the field fits it. A keystroke was fitted already.
     // Emptied by the app (an edit ended, saved or not) after it grew: back to one line.
     const input=textareaRef.current;
@@ -330,6 +396,13 @@ export function MessageInput({
     toastTimerRef.current = null;
     toastHeld.current = { pointer: false, focus: false };
     setToast(null);
+    setToastAction(null);
+  }, []);
+
+  // The composer goes (the chat closed): its card's wait goes with it, never to run on a page that is gone.
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = null;
   }, []);
 
   /** The card's time runs again, in full, unless it is pointed at or has the focus: it stays until it has been read. */
@@ -340,8 +413,9 @@ export function MessageInput({
     toastTimerRef.current = setTimeout(hideToast, toastMs.current);
   }, [hideToast]);
 
-  const showToast = useCallback((msg: string) => {
+  const showToast = useCallback((msg: string, action?: { label: string; run: () => void }) => {
     setToast(msg);
+    setToastAction(action ?? null);
     // Long enough to read in the app's language: a line in Japanese or Chinese takes twice the 5 s and more.
     toastMs.current = readingTime(msg, language, TOAST_DURATION);
     runToast();
@@ -357,6 +431,10 @@ export function MessageInput({
   const ownFilesId = useId();
   const filesId = draftId ?? ownFilesId;
   const { preparing, converting } = useFilesOnTheirWay(filesId, showToast);
+  // The phone's Camera refused by Android, which the file input takes as a cancel: said, with its settings once Android no longer asks.
+  const askCamera = useCameraRefusal((blocked) => blocked
+    ? showToast(t("composer.cameraBlocked"), { label: t("settings.noticesOpenSettings"), run: () => void openAppSettings() })
+    : showToast(t("composer.cameraRefused")));
 
   // The draft translated on Translate, shown above the field until something is sent.
   const drafting = useDraftTranslation({ config: translation, appLanguage: language, onFailure: (reason: DraftTranslationFailure, pair: string) => {
@@ -438,7 +516,11 @@ export function MessageInput({
         const named = picker.compose(text);
         const extra = { ...(linkPreview.preview && { preview: linkPreview.preview }), ...(named.length && { mentions: named }) };
         const err = await edit.onSave(text, Object.keys(extra).length ? extra : undefined);
-        if (err) showToast(err); else { picker.reset(); linkPreview.reset(); endEdit(); }
+        // The field stays open while the save is on its way (a second or so while the extension's peer starts again):
+        // what was typed on after the saved words, or in their place, is kept rather than wiped.
+        const now = textRef.current;
+        const typed = now === text ? "" : (now.startsWith(text) ? now.slice(text.length) : now).trim();
+        if (err) showToast(err); else { picker.reset(); linkPreview.reset(); endEdit(typed); }
       } finally {
         saving.current = false;
       }
@@ -590,7 +672,8 @@ export function MessageInput({
     if (next.length > Math.max(maxLength, 16_384)) return false;
     caretRef.current = start + words.length;
     setText(next);
-    onTyping?.(true);
+    // As a typed key: editing a sent message is not writing a new one.
+    if (!edit) onTyping?.(true);
     return true;
   };
   const insertRef = useRef(insertText); insertRef.current = insertText;
@@ -622,6 +705,16 @@ export function MessageInput({
     sharedIdentity.current = false;
     if (!phone) textareaRef.current?.focus({ preventScroll: true });
   }, [showIdentities, phone]);
+
+  /**
+   * The payment sheet closed (its Close, Escape, a click outside): the focus in it goes to the message field, as a sent
+   * payment's does, not to the page. On a touch screen the field would bring the keyboard up: there it falls.
+   */
+  const closePayment = () => {
+    const at = document.activeElement;
+    setShowPayment(false);
+    if (at?.closest(".composer-sheet") && !touchOnly()) textareaRef.current?.focus({ preventScroll: true });
+  };
 
   /** Whatever the composer has open over it. */
   const closeAll = () => {
@@ -676,7 +769,7 @@ export function MessageInput({
         const err = await onSendFile(prepared.file).finally(done);
         // Said in the chat, or there when it is opened again: the chat may have been left meanwhile.
         if (err) { sayInChat(id, err); return false; }
-        if (prepared.asIs) sayInChat(id, t("composer.videoSentAsIs", { name: file.name }));
+        if (prepared.asIs) sayInChat(id, t("composer.videoSentAsIs", { name: isolate(file.name) }));
       }
       return true;
     } finally {
@@ -704,15 +797,30 @@ export function MessageInput({
     return true;
   };
   const offerRef = useRef(offerFiles); offerRef.current = offerFiles;
-  /** A share's files to the sheet: the Android app's are read into the page only now; a read that fails says so, as a paste's. */
+  /**
+   * A share's files to the sheet: the Android app's are read into the page only now; a read that fails says so, as a
+   * paste's. Read to its end where files cannot go any more (an edit began meanwhile), they wait for this chat again.
+   */
   const offerShared = (share: IncomingShare) => {
-    shareFiles(share).then((files) => offerRef.current(files), (error: unknown) => showToast(problemLine(error, t)));
+    shareFiles(share).then((files) => {
+      if (files.length && !offerRef.current(files) && draftId) { keepShareFor(draftId, { title: "", text: "", url: "", files }); setShareWaits(true); }
+    }, (error: unknown) => showToast(problemLine(error, t)));
   };
   const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
-  /** A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said. */
+  /**
+   * A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said, and so
+   * is a read that ends where files cannot go any more (an edit began meanwhile).
+   */
   const offerHeld = (held: Promise<File[]>) => {
-    held.then((files) => { if (!files.length) showToast(t("errors.files.dropUnreadable")); else offerRef.current(files); },
-      (error: unknown) => showToast(problemLine(error, t)));
+    // Up to 256 MB read in steps: the line says so until the sheet, or the reason there is none, takes its place.
+    setDropsReading((was) => was + 1);
+    const ended = () => setDropsReading((was) => was - 1);
+    held.then((files) => {
+      ended();
+      if (!files.length) showToast(t("errors.files.dropUnreadable"));
+      else if (!offerRef.current(files)) showToast(t("errors.files.dropLate"));
+    },
+      (error: unknown) => { ended(); showToast(problemLine(error, t)); });
   };
   const offerHeldRef = useRef(offerHeld); offerHeldRef.current = offerHeld;
 
@@ -733,7 +841,7 @@ export function MessageInput({
     // Ctrl+V again while the first is read would read the same clipboard beside it: every file twice on the sheet.
     if (readingRef.current) return true;
     const read = platformPastedFiles();
-    if (!read) return false;
+    if (!read) return keptFiles(data);
     readingRef.current = true;
     setReading(true);
     // With what it brought, in one go: the line gives way to the sheet, or to the reason there is none.
@@ -747,6 +855,17 @@ export function MessageInput({
       else if (picture && plain) { if (!insertRef.current(plain)) showToast(t("errors.files.pasteUnreadable")); }
       else if (named || picture) showToast(t("errors.files.pasteUnreadable"));
     }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
+    return true;
+  };
+  /**
+   * A paste that says it carries files and hands the page none, where nothing else can read them (the web app): iOS
+   * Safari's paste of a PDF copied in Files. Said, with the file picker one tap away (not beside the sheet, whose files
+   * the picker would not join); anything else is left to the field.
+   */
+  const keptFiles = (data: DataTransfer | null): boolean => {
+    if (!pasteKeepsFiles(data)) return false;
+    if (fileUnavailable) showToast(fileUnavailable);
+    else showToast(t("errors.files.pasteKept"), attached ? undefined : { label: t("composer.chooseFiles"), run: () => fileInputRef.current?.click() });
     return true;
   };
   const takeRef = useRef(takePaste); takeRef.current = takePaste;
@@ -777,12 +896,15 @@ export function MessageInput({
   // Files are listened for where they can go, and where there is a reason to give for why they cannot (a group).
   const hearsFiles = canAttach || (!!fileUnavailable && !disabled && !locked);
   // Something shared into the app from another one, sent to this chat from the "Share to…" picker: its text into
-  // the draft, its files onto the sheet a paste opens. Files wait until they can go (the composer unlocked).
+  // the draft, its files onto the sheet a paste opens. Files wait until they can go (the composer unlocked). While
+  // one of my messages is edited here, the whole share waits for the edit to end (saved or left): the field holds the
+  // edit's words, the draft it goes into is set aside, and an edit takes no files. Said by the edit, until it lands.
   useEffect(() => {
     if (!draftId) return;
     const take = () => {
       const waiting = peekShareFor(draftId);
-      if (!waiting || (waiting.files.length && !canAttach && !fileUnavailable)) return;
+      setShareWaits(!!waiting && editing);
+      if (!waiting || editing || (waiting.files.length && !canAttach && !fileUnavailable)) return;
       const share = takeShareFor(draftId)!;
       const shared = shareText(share);
       // Longer than the field takes, or than one message can be once in the draft (counted in bytes, as Send counts):
@@ -801,15 +923,16 @@ export function MessageInput({
     };
     take();
     return onShareChange(take);
-  }, [draftId, canAttach, fileUnavailable, maxLength, maxBytes, textBytes, t]);
+  }, [draftId, editing, canAttach, fileUnavailable, maxLength, maxBytes, textBytes, t]);
 
   // A paste where no field has the focus (the chat's messages clicked last) still brings its files here: to the chat
-  // on screen only. Every loaded chat's composer is mounted, and the document has one paste for all of them.
+  // on screen only. Every loaded chat's composer is mounted, and the document has one paste for all of them. A dialog
+  // over the chat keeps its paste: a panel that says so (`role`) or a native `<dialog>`, which has no role.
   useEffect(() => {
     if (!hearsFiles || !onScreen) return;
     const paste = (e: globalThis.ClipboardEvent) => {
       const target = e.target instanceof Element ? e.target : null;
-      if (e.defaultPrevented || target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return;
+      if (e.defaultPrevented || target?.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog'], dialog")) return;
       if (takeRef.current(e.clipboardData)) e.preventDefault();
     };
     document.addEventListener("paste", paste);
@@ -889,7 +1012,7 @@ export function MessageInput({
     actions.push({ id: "media", label: t("composer.media"), icon: <MediaGlyph />, testId: "composer-media", unavailable: fileUnavailable,
       onSelect: () => mediaInputRef.current?.click() });
     if (hasCamera) actions.push({ id: "camera", label: t("composer.camera"), icon: <CameraGlyph />, testId: "composer-camera", unavailable: fileUnavailable,
-      onSelect: () => cameraByFileInput() ? cameraInputRef.current?.click() : setShowCamera(true) });
+      onSelect: () => { if (cameraByFileInput()) { askCamera(); cameraInputRef.current?.click(); } else setShowCamera(true); } });
   }
 
   // Translate (beside Send): in a chat with a language other than the app's, or a group with several, for a draft.
@@ -901,8 +1024,26 @@ export function MessageInput({
   const bytes = maxBytes || softBytes || textBytes ? new TextEncoder().encode(text.trim()).length : 0;
   const remaining = maxBytes ? maxBytes - bytes : textBytes ? textBytes - bytes : maxLength - text.length;
   const overSoft = !!softBytes && bytes > softBytes;
+  // Within the DHT's 256 bytes, but past what its packet carries once sealed (about 248, core dhtDelivery.ts
+  // `DHT_PACKET_BUDGET`): it does not go there either, so it reads amber as one past 256 does.
+  const nearSoft = !!softBytes && !overSoft && bytes > softBytes - DHT_SEAL_BYTES;
   // Near the limit that refuses, its count wins over the DHT's (past 16 KiB is past 256 B too).
   const nearHard = remaining < 100 && (!softBytes || !!maxBytes || !!textBytes);
+  const dhtCounted = !!softBytes && !maxBytes && !nearHard && bytes > softBytes - 60;
+  // What the count's colour says, in words the field carries (its description) and a screen reader hears once as it
+  // changes: a `title` on the count reaches only a mouse.
+  const countState = dhtCounted ? (overSoft ? "overSoft" : nearSoft ? "nearSoft" : null)
+    : nearHard && remaining < 50 ? (remaining < 0 ? "over" : "left") : null;
+  const countNote = countState === "overSoft" ? t("composer.overSoft", { bytes: softBytes! })
+    : countState === "nearSoft" ? t("composer.nearSoft", { bytes: softBytes! - DHT_SEAL_BYTES })
+    : countState === "left" ? t(maxBytes || textBytes ? "composer.bytesLeft" : "composer.charactersLeft", { count: remaining })
+    : countState !== "over" ? undefined
+    : maxBytes ? t("composer.dhtTooLong", { bytes, max: maxBytes })
+    : textBytes ? t("composer.tooLongBytes", { bytes: formatAmount(bytes, t.language), max: formatAmount(textBytes, t.language) })
+    : t("composer.tooLong", { count: formatAmount(text.length, t.language), max: formatAmount(maxLength, t.language) });
+  const countNoteId = useId();
+  const [countSaid, setCountSaid] = useState<{ state: typeof countState; text: string }>({ state: null, text: "" });
+  if (countSaid.state !== countState) setCountSaid({ state: countState, text: countNote ?? "" });
 
   // With the sheet open the composer is behind its veil, outside the dialog: what it has to say is said on the sheet.
   const sheetOpen = !!attached && !locked;
@@ -933,6 +1074,12 @@ export function MessageInput({
       <span className="text-[13px] text-text-primary leading-snug flex-1 min-w-0 [overflow-wrap:anywhere]">
         {toast}
       </span>
+      {toastAction && (
+        <button type="button" data-testid="composer-toast-action" onClick={() => { toastAction.run(); hideToast(); }}
+          className="-my-1.5 min-h-8 max-md:min-h-[44px] shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
+          {toastAction.label}
+        </button>
+      )}
       <button
         type="button"
         onClick={hideToast}
@@ -943,10 +1090,10 @@ export function MessageInput({
       </button>
     </div>
   );
-  const readingLine = reading && !locked && (
+  const readingLine = (reading || dropsReading > 0) && !locked && (
     <p role="status" data-testid="paste-reading" className="m-0 flex items-center gap-2 text-[13px] text-text-secondary animate-fade-in">
       <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
-      {t("composer.pasteReading")}
+      {t(reading ? "composer.pasteReading" : "composer.dropReading")}
     </p>
   );
   const shown = preparing[0];
@@ -956,10 +1103,11 @@ export function MessageInput({
     <div className="flex items-center gap-3 animate-fade-in">
       <p role="status" data-testid="file-preparing" className="m-0 flex min-w-0 items-center gap-2 text-[13px] text-text-secondary">
         <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
+        {/* The file's name keeps its own direction in a line in the page's. */}
         <span className="min-w-0 truncate">
-          {shownProgress !== undefined
-            ? t("composer.videoConverting", { name: shown.name })
-            : t("composer.filePreparing", { name: shown.name })}
+          {withName(shownProgress !== undefined
+            ? t("composer.videoConverting", { name: NAME })
+            : t("composer.filePreparing", { name: NAME }), shown.name)}
         </span>
       </p>
       {/* Outside the status: a screen reader is told the conversion once, not each percent. */}
@@ -972,7 +1120,7 @@ export function MessageInput({
       )}
       {shownConverting && (
         <button ref={cancelRef} type="button" data-testid="video-convert-cancel" onClick={() => cancelConverting(filesId, shown)}
-          className="min-h-6 max-md:min-h-11 shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
+          className="min-h-6 max-md:min-h-[44px] shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
           {t("common.cancel")}
         </button>
       )}
@@ -983,7 +1131,7 @@ export function MessageInput({
   // above the composer cut at the top of the screen rather than off it (composer/fieldHeight.ts, composer/keptOnScreen.ts).
   useFieldFitsView(textareaRef);
   const aboveShown = (toastBox || readingLine || preparingLine) && !sheetOpen;
-  useKeptOnScreen(aboveRef, aboveShown ? `${toast ?? ""}|${reading}|${shown?.name ?? ""}|${shownProgress !== undefined}` : null);
+  useKeptOnScreen(aboveRef, aboveShown ? `${toast ?? ""}|${reading}|${dropsReading}|${shown?.name ?? ""}|${shownProgress !== undefined}` : null);
 
   return (
     <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
@@ -995,6 +1143,7 @@ export function MessageInput({
         </div>
       )}
       {edit && <EditBar snippet={edit.snippet} onCancel={() => { endEdit(); textareaRef.current?.focus({ preventScroll: true }); }} />}
+      {edit && shareWaits && <p role="status" data-testid="composer-share-waits" className="m-0 mb-2 px-1 text-[13px] text-text-secondary animate-fade-in">{t("composer.shareWaitsForEdit")}</p>}
       {reply && !edit && <ReplyBar name={reply.name} snippet={reply.snippet} mine={reply.mine} member={reply.member} onCancel={() => { reply.onCancel(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {previewOpen && <TranslatePreview state={drafting.state!} stale={translationStale(drafting.state, text)} disabled={disabled} onEdit={drafting.edit}
         onChoose={(code) => guardThen(() => void drafting.translateInto(code, text, picker.compose(text)))} onAgain={translateAgain}
@@ -1035,11 +1184,14 @@ export function MessageInput({
               placeholder={disabled ? disabledPlaceholder ?? t("composer.placeholder") : t("composer.placeholder")}
               disabled={disabled}
               rows={1}
+              dir={draftDirection(text)}
+              aria-describedby={countNote ? countNoteId : undefined}
               className="composer-textarea"
             />
-            {softBytes && !maxBytes && !nearHard && bytes > softBytes - 60 && (
-              <span data-testid="dht-byte-count" title={overSoft ? t("composer.overSoft", { bytes: softBytes }) : undefined}
-                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-warn-ink" : "text-text-muted"}`}>
+            {countNote && <span id={countNoteId} className="sr-only">{countNote}</span>}
+            {dhtCounted && (
+              <span data-testid="dht-byte-count" title={countNote}
+                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft || nearSoft ? "text-warn-ink" : "text-text-muted"}`}>
                 {bytes} / {softBytes} B
               </span>
             )}
@@ -1065,8 +1217,9 @@ export function MessageInput({
             unavailable={fileUnavailable}
             disabled={disabled}
             onError={showToast}
-            // Recording: the composer's pickers close, and the contact sees "recording audio…" until it ends.
-            onActiveChange={(active) => { setRecording(active); if (active) closeAll(); onTyping?.(active, "recording"); }}
+            // Recording: the composer's pickers close, and the contact sees "recording audio…" while sound is taken.
+            onActiveChange={(active) => { setRecording(active); if (active) closeAll(); }}
+            onRecordingChange={(taking) => onTyping?.(taking, "recording")}
           />
         ) : <button
           aria-label={sendsTranslated && translation?.language ? t("composer.translate.sendTranslated", { language: languageName(translation.language, language) }) : t("composer.sendMessage")}
@@ -1074,9 +1227,10 @@ export function MessageInput({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => previewOpen ? submitTranslated() : handleSubmit()}
           disabled={disabled || !text.trim()}
-          className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
+          className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          {/* Points where the message goes: to the left where the app reads right to left. */}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" className="rtl:-scale-x-100">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
           </svg>
         </button>}
@@ -1084,7 +1238,7 @@ export function MessageInput({
         {picker.element}
 
         {/* What the + opens */}
-        {showPayment && paymentComposer && !paymentsUnavailable && !disabled && paymentComposer(() => setShowPayment(false))}
+        {showPayment && paymentComposer && !paymentsUnavailable && !disabled && paymentComposer(closePayment)}
         {showPayment && !paymentComposer && payments && (paymentsConfigurable || !paymentsUnavailable) && !disabled && (
           <PaymentComposer
             reviewContext={payments.reviewContext}
@@ -1096,7 +1250,7 @@ export function MessageInput({
             payUnavailable={paymentsUnavailable}
             payUnavailableContact={paymentsUnavailableContact}
             onSaveMethods={payments.onSaveMethods}
-            onClose={() => setShowPayment(false)}
+            onClose={closePayment}
             // Sent or requested: back to the chat, where its bubble shows how it goes, and to writing.
             onDone={() => { setShowPayment(false); if (!touchOnly()) textareaRef.current?.focus({ preventScroll: true }); }}
           />
@@ -1162,6 +1316,8 @@ export function MessageInput({
           void onSendFile(file).then((err) => { if (err) showToast(err); });
         }} />
       )}
+      {/* Said once as the count's state changes (muted, near, over), not on each key. */}
+      <span data-testid="composer-count-said" className="sr-only" aria-live="polite">{countSaid.text}</span>
     </div>
   );
 }

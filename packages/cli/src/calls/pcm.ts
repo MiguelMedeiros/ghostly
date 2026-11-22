@@ -26,6 +26,13 @@ export const MAX_QUEUE_MS = 5 * 60_000;
 export const PARTIAL_WAIT_MS = 60;
 
 /**
+ * The call's own clock, in ms: monotonic, so the device's clock set back or ahead mid-call (a phone or a VM fixing its
+ * time) moves the time of day, not the audio. On `Date.now()`, a clock set back held the next frame for as long as the
+ * jump, and one set ahead read as that long without a packet from the contact.
+ */
+export const monotonic = (): number => performance.now();
+
+/**
  * What the program wrote, waiting to be sent: taken one 20 ms frame per tick, silence when there is nothing, and
  * dropped whole by a flush (barge-in). The program may write any amount at any time, faster than real time too.
  */
@@ -34,13 +41,15 @@ export class PlaybackQueue {
   private head = 0;
   private length = 0;
   private lastPush = 0;
+  /** Half a sample was dropped (a flush, a full queue): the program's next byte is its other half, dropped too. */
+  private owed = false;
   private readonly frame: number;
   private readonly max: number;
   private readonly silence: Buffer;
   /** Bytes dropped because the queue was full, since the start. */
   dropped = 0;
 
-  constructor(readonly rate: CallRate, private readonly now: () => number = Date.now, maxMs = MAX_QUEUE_MS) {
+  constructor(readonly rate: CallRate, private readonly now: () => number = monotonic, maxMs = MAX_QUEUE_MS) {
     this.frame = frameBytes(rate);
     // Whole samples only: an odd byte waits for its other half.
     this.max = Math.floor((rate * maxMs) / 1000) * 2;
@@ -51,10 +60,16 @@ export class PlaybackQueue {
   push(chunk: Buffer): number {
     if (!chunk.length) return 0;
     this.lastPush = this.now();
+    if (this.owed) {
+      this.owed = false;
+      chunk = chunk.subarray(1);
+    }
     const room = this.max - this.length;
     const kept = chunk.length <= room ? chunk : chunk.subarray(0, Math.max(0, room));
     const lost = chunk.length - kept.length;
     this.dropped += lost;
+    // The queue ends on a whole sample here, so an odd number lost ends on half of one.
+    if (lost % 2) this.owed = true;
     if (kept.length) { this.chunks.push(Buffer.from(kept)); this.length += kept.length; }
     return lost;
   }
@@ -79,6 +94,8 @@ export class PlaybackQueue {
   /** Drops everything queued; returns how much, in milliseconds. */
   flush(): number {
     const ms = this.queuedMs;
+    // Half a sample queued: its other half is the program's next byte.
+    if (this.length % 2) this.owed = true;
     this.chunks = [];
     this.head = 0;
     this.length = 0;
@@ -90,6 +107,21 @@ export class PlaybackQueue {
     const frames = Math.min(Math.floor(ms / FRAME_MS), Math.floor(this.length / this.frame));
     if (frames > 0) this.take(frames * this.frame);
     return Math.max(0, frames) * FRAME_MS;
+  }
+
+  /**
+   * Another program writes from now on (it replaced the last one on the call's socket): what the last one left is
+   * dropped, half a sample included, so the new one starts on a whole sample and is heard at once. Returns how much
+   * was dropped, in milliseconds.
+   */
+  newWriter(): number {
+    const ms = this.queuedMs;
+    this.chunks = [];
+    this.head = 0;
+    this.length = 0;
+    // A flush that cut the last program's half sample owes nothing to the next program: it starts on a whole sample.
+    this.owed = false;
+    return ms;
   }
 
   private take(bytes: number): Buffer {

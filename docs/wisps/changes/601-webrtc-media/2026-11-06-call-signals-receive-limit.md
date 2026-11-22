@@ -1,0 +1,1 @@
+Paired profile: a receiver reads at most 150 `paired-call` frames from a contact in any minute, counted before they are read, and drops the rest, as it does past the edits' limit; a contact's app that loops its offers and hang-ups no longer sets how often the call runs and its missed-call line is written. A person's busiest minute stays under half of it. No wire change.

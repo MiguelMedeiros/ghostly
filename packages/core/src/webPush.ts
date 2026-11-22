@@ -40,6 +40,12 @@ export interface PushRequest {
 export class WebPushError extends Error {}
 
 const RECORD_SIZE = 4096;
+/**
+ * Every wake-up's record is padded to this many bytes (its plaintext, the delimiter and zeros, RFC 8188), so the push
+ * service and a relay see one body length for a message, a call and a device handoff. 128 holds the longest of them
+ * with the longest token a contact may give (64 characters).
+ */
+export const PUSH_PAD_BYTES = 128;
 /** Push services refuse a token valid for more than 24 hours; 12 leaves room for skewed clocks. */
 const TOKEN_SECONDS = 12 * 60 * 60;
 
@@ -98,18 +104,19 @@ export function vapidAuthorization(endpoint: string, keys: VapidKeys, subject: s
 }
 
 /**
- * `plaintext` encrypted for a subscription (RFC 8291 with RFC 8188 `aes128gcm`, one record). `sender` fixes
- * the sender's ephemeral key and salt, for the RFC's test vector only.
+ * `plaintext` encrypted for a subscription (RFC 8291 with RFC 8188 `aes128gcm`, one record). `padTo`: the record's
+ * plaintext is padded with zeros after the delimiter to this many bytes (a longer one goes as it is). `secret` and
+ * `salt` fix the sender's ephemeral key and salt, for the RFC's test vector only.
  */
-export function encryptPushPayload(plaintext: Uint8Array, target: Pick<PushTarget, "p256dh" | "auth">, sender?: { secret: Uint8Array; salt: Uint8Array }): Uint8Array {
+export function encryptPushPayload(plaintext: Uint8Array, target: Pick<PushTarget, "p256dh" | "auth">, options: { padTo?: number; secret?: Uint8Array; salt?: Uint8Array } = {}): Uint8Array {
   const receiver = point(target.p256dh, "The subscription key");
   let auth: Uint8Array;
   try { auth = fromBase64Url(target.auth); } catch { throw new WebPushError("The auth secret is not base64url"); }
   if (auth.length !== 16) throw new WebPushError("The auth secret is not 16 bytes");
   if (plaintext.length > RECORD_SIZE - 17 - 86) throw new WebPushError("The payload is too long for one record");
 
-  const secret = sender?.secret ?? p256.utils.randomSecretKey();
-  const salt = sender?.salt ?? randomBytes(16);
+  const secret = options.secret ?? p256.utils.randomSecretKey();
+  const salt = options.salt ?? randomBytes(16);
   const senderPublic = p256.getPublicKey(secret, false);
   const shared = p256.getSharedSecret(secret, receiver).subarray(1);
 
@@ -117,8 +124,11 @@ export function encryptPushPayload(plaintext: Uint8Array, target: Pick<PushTarge
   const ikm = hkdf(sha256, shared, auth, keyInfo, 32);
   const cek = hkdf(sha256, ikm, salt, utf8Encode("Content-Encoding: aes128gcm\0"), 16);
   const nonce = hkdf(sha256, ikm, salt, utf8Encode("Content-Encoding: nonce\0"), 12);
-  // The last (and only) record ends with the delimiter 0x02, no padding.
-  const ciphertext = gcm(cek, nonce).encrypt(concatBytes(plaintext, Uint8Array.of(2)));
+  // The last (and only) record: the plaintext, the delimiter 0x02, then zeros up to `padTo`.
+  const record = new Uint8Array(Math.max(plaintext.length + 1, Math.min(options.padTo ?? 0, RECORD_SIZE - 17 - 86)));
+  record.set(plaintext);
+  record[plaintext.length] = 2;
+  const ciphertext = gcm(cek, nonce).encrypt(record);
 
   const header = new Uint8Array(16 + 4 + 1 + senderPublic.length);
   header.set(salt, 0);
@@ -152,11 +162,12 @@ export function decryptPushPayload(body: Uint8Array, receiverSecret: Uint8Array,
 
 /**
  * The whole request that wakes a subscription: POST, encrypted body, VAPID authorization, a short time to live
- * (a wake-up an hour late is no use) and high urgency (a phone on battery saver still gets it).
+ * (a wake-up an hour late is no use) and high urgency (a phone on battery saver still gets it). The body is padded to
+ * `PUSH_PAD_BYTES`, so its length does not tell one kind of wake-up from another.
  */
 export function pushRequest(target: PushTarget, keys: VapidKeys, payload: Uint8Array, options: { subject: string; ttlSeconds?: number; now?: number }): PushRequest {
   checkPushEndpoint(target.endpoint);
-  const body = encryptPushPayload(payload, target);
+  const body = encryptPushPayload(payload, target, { padTo: PUSH_PAD_BYTES });
   return {
     url: target.endpoint,
     headers: {

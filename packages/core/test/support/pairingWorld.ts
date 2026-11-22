@@ -17,8 +17,37 @@ import type { PairingCredentials, PairingState } from "../../src/pairedSession";
  * as leaveDhtOnly.test.ts's harness, for the first pairing rather than the way back from DHT-only.
  */
 
-const realSetTimeout = globalThis.setTimeout;
-export const yieldToLoop = () => new Promise<void>(resolve => realSetTimeout(resolve, 0));
+/**
+ * WebCrypto calls not settled yet. They run on Node's thread pool, in real time: a step of fake time waits for them,
+ * so where they fall in fake time does not hang on how fast the machine is.
+ */
+const pendingCrypto: Set<Promise<unknown>> = ((globalThis as { [k: symbol]: Set<Promise<unknown>> })[Symbol.for("ghostly.test.pendingCrypto")] ??= (() => {
+  const pending = new Set<Promise<unknown>>();
+  const subtle = globalThis.crypto.subtle as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  for (const name of ["digest", "sign", "verify", "importKey", "exportKey", "generateKey", "encrypt", "decrypt", "deriveBits", "deriveKey", "wrapKey", "unwrapKey"]) {
+    const real = subtle[name].bind(subtle);
+    subtle[name] = (...args: unknown[]) => {
+      const call = real(...args);
+      pending.add(call);
+      void call.catch(() => {}).finally(() => pending.delete(call));
+      return call;
+    };
+  }
+  return pending;
+})());
+const realSetImmediate = globalThis.setImmediate;
+const turn = () => new Promise<void>(resolve => realSetImmediate(resolve));
+/**
+ * Lets what the last step of fake time started run: one turn of the event loop, and every WebCrypto call to its end.
+ * (A real `setTimeout(…, 0)` waited 1 ms each step: 100 ms steps over minutes of fake time took minutes of real time.)
+ */
+export async function yieldToLoop(): Promise<void> {
+  await turn();
+  while (pendingCrypto.size) {
+    await Promise.allSettled([...pendingCrypto]);
+    await turn();
+  }
+}
 const after = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 export interface NetworkModel {
@@ -121,8 +150,13 @@ export const CONNECT_MS = 600;
  * `answerSrflxAfterMs`: the same for an answer's. Unset: at once.
  * `needsSrflx`: the contact is behind a NAT that lets nothing through to an offer without one: such an offer, answered,
  * goes `failed` 3 s later (ICE gives up).
+ * `lateAnswerMs`: an answer that goes in this long or more after its offer was made finds the answering side's ICE given
+ * up on it: that connection goes `failed` at once, and the offer's connects nothing (the CLI lab of agents#971, where the
+ * answerer's connection failed 0.1 s after the offerer took an answer it read 68 s late).
+ * `answerAppliedAfterMs`: the offer's `setRemoteDescription` of its answer resolves this long after it was called; past
+ * `CONNECT_MS`, the channel is open before it does (a busy page: the offerer's data link goes from offering to open).
  */
-export const rtc: { blocked: boolean; answerFailsAfterMs?: number; blockedFailsAfterMs?: number; noCandidates: Set<string>; srflxAfterMs?: number; answerSrflxAfterMs?: number; needsSrflx?: boolean } = { blocked: false, noCandidates: new Set() };
+export const rtc: { blocked: boolean; answerFailsAfterMs?: number; blockedFailsAfterMs?: number; noCandidates: Set<string>; srflxAfterMs?: number; answerSrflxAfterMs?: number; needsSrflx?: boolean; lateAnswerMs?: number; answerAppliedAfterMs?: number } = { blocked: false, noCandidates: new Set() };
 
 class FakePeerConnection extends EventTarget {
   /** The app this connection belongs to, for `killRtc`. */
@@ -133,9 +167,11 @@ class FakePeerConnection extends EventTarget {
   connectionState: RTCPeerConnectionState = "new";
   channel!: FakeChannel;
   closed = false;
+  /** When this connection made its offer (`rtc.lateAnswerMs`). */
+  offeredAt = 0;
   getConfiguration() { return { iceServers: [] }; }
   createDataChannel() { this.channel = new FakeChannel(); return this.channel as unknown as RTCDataChannel; }
-  async createOffer() { return { type: "offer" as const, sdp: this.made("actpass") }; }
+  async createOffer() { this.offeredAt = Date.now(); return { type: "offer" as const, sdp: this.made("actpass") }; }
   async createAnswer() { return { type: "answer" as const, sdp: this.made("active") }; }
   private made(setup: string) { const made = sdp(setup, !rtc.noCandidates.has(this.owner ?? "")); byFingerprint.set(made.fingerprint, this); return made.sdp; }
   async setLocalDescription(description: RTCSessionDescriptionInit) {
@@ -165,6 +201,14 @@ class FakePeerConnection extends EventTarget {
     // The answer came back to the offer it answers: the two connect.
     const answerer = byFingerprint.get(fingerprintOf(description.sdp!));
     if (!answerer || answerer.closed || fingerprintOf(answerer.remoteDescription!.sdp!) !== fingerprintOf(this.localDescription!.sdp!)) return;
+    if (rtc.lateAnswerMs !== undefined && Date.now() - this.offeredAt >= rtc.lateAnswerMs) {
+      setTimeout(() => {
+        if (answerer.closed || answerer.connectionState === "connected") return;
+        answerer.connectionState = "failed";
+        answerer.dispatchEvent(new Event("connectionstatechange"));
+      }, 100);
+      return;
+    }
     // The offer as the contact got it (a candidate that came after it went is not in it).
     if (rtc.needsSrflx && !/ typ srflx/.test(answerer.remoteDescription?.sdp ?? "")) {
       setTimeout(() => {
@@ -188,6 +232,7 @@ class FakePeerConnection extends EventTarget {
       if (this.closed || answerer.closed) return;
       for (const pc of [this, answerer]) { pc.connectionState = "connected"; pc.channel.open(); }
     }, CONNECT_MS);
+    if (rtc.answerAppliedAfterMs !== undefined) await new Promise(resolve => setTimeout(resolve, rtc.answerAppliedAfterMs));
   }
   close() { this.closed = true; this.connectionState = "closed"; this.channel?.close(); }
 }
@@ -341,5 +386,7 @@ export async function closeWorld(): Promise<void> {
   rtc.srflxAfterMs = undefined;
   rtc.answerSrflxAfterMs = undefined;
   rtc.needsSrflx = undefined;
+  rtc.lateAnswerMs = undefined;
+  rtc.answerAppliedAfterMs = undefined;
   vi.useRealTimers();
 }

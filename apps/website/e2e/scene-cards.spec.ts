@@ -59,7 +59,33 @@ async function playChapter(page: Page, id: string) {
   }
 }
 
-const VIEWPORTS: { w: number; h: number; name: string; touch?: boolean; calm?: boolean }[] = [
+/**
+ * How long one chapter may take to play and be read: about a second, several on a loaded runner. Now and then (about 1
+ * run in 60 on a loaded machine, always just after the agree chapter's stills come into view, reduced motion) the
+ * browser's page stops answering for good: its main thread sleeps on a lock with every one of its threads idle, so no
+ * frame comes, no script of the page or of the test runs, no screenshot is taken. That is the browser, not the page's
+ * code, and the test waited out its whole minute on it.
+ */
+const CHAPTER_MS = 20_000;
+
+/** The chapter played and read, or undefined if the page did not answer in time. */
+async function readChapter(page: Page, id: string): Promise<Figure[] | undefined> {
+  const read = (async () => {
+    await playChapter(page, id);
+    return page.evaluate(figures, id);
+  })();
+  // A page that stopped answering rejects once it is closed.
+  read.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<undefined>((done) => (timer = setTimeout(done, CHAPTER_MS)));
+  try {
+    return await Promise.race([read, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const VIEWPORTS:{ w: number; h: number; name: string; touch?: boolean; calm?: boolean }[] = [
   // Upright touch devices above 860px (an upright window with a mouse runs the film: scene-overlap.spec.ts).
   { w: 1024, h: 1366, name: "tablet upright", touch: true },
   { w: 900, h: 1200, name: "tablet upright", touch: true },
@@ -75,13 +101,27 @@ const VIEWPORTS: { w: number; h: number; name: string; touch?: boolean; calm?: b
 for (const { w, h, name, touch, calm } of VIEWPORTS) {
   test.describe(() => {
     test.use({ viewport: { width: w, height: h }, hasTouch: !!touch, isMobile: false, reducedMotion: calm ? "reduce" : "no-preference" });
-    test(`home story cards: every ghost and label inside its still at ${w}×${h} (${name})`, async ({ page }) => {
-      await page.goto("/", { waitUntil: "networkidle" });
-      await expect(page.locator(`#${CHAPTERS[0]}.scene--static`)).toHaveCount(1);
+    test(`home story cards: every ghost and label inside its still at ${w}×${h} (${name})`, async ({ page: first, context }) => {
+      // Room for one chapter read again on a fresh page.
+      test.setTimeout(90_000);
+      const open = async (page: Page) => {
+        await page.goto("/", { waitUntil: "networkidle" });
+        await expect(page.locator(`#${CHAPTERS[0]}.scene--static`)).toHaveCount(1);
+        return page;
+      };
+      let page = await open(first);
       const found: string[] = [];
       for (const id of CHAPTERS) {
-        await playChapter(page, id);
-        (await page.evaluate(figures, id)).forEach((f, i) => {
+        let read = await readChapter(page, id);
+        if (!read) {
+          // The page stopped answering (CHAPTER_MS): the chapter is read again on a fresh page, once.
+          test.info().annotations.push({ type: "page stopped answering", description: `#${id}: read again on a fresh page` });
+          await page.close().catch(() => {});
+          page = await open(await context.newPage());
+          read = await readChapter(page, id);
+          if (!read) throw new Error(`#${id}: the page stopped answering twice`);
+        }
+        read.forEach((f, i) => {
           for (const part of f.parts) if (!inside(part.rect, f.box)) found.push(`${id} step ${i + 1}: ${part.what} ${fmt(part.rect)} is cut by its figure ${fmt(f.box)}`);
         });
       }

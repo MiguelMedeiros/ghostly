@@ -14,7 +14,7 @@
  *   npm run og-image                   write both cards
  *   npm run og-image -- --html og      print a card's HTML instead (og or social; to look at it in a browser)
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
@@ -30,7 +30,7 @@ const CARDS = {
     boo: { x: 748, y: 138, size: 190 }, casper: { x: 962, y: 190, size: 190 },
   },
   social: {
-    w: 1280, h: 640, out: "../docs/assets/social-preview.png", maxBytes: 1024 * 1024,
+    w: 1280, h: 640, out: "../../docs/assets/social-preview.png", maxBytes: 1024 * 1024,
     left: 96, brand: 42, title: 80,
     boo: { x: 804, y: 128, size: 200 }, casper: { x: 1028, y: 184, size: 200 },
   },
@@ -135,6 +135,11 @@ const htmlFlag = process.argv.indexOf("--html");
 if (htmlFlag !== -1) {
   process.stdout.write(page(CARDS[process.argv[htmlFlag + 1] ?? "og"]));
   process.exit(0);
+}
+
+// Every card's folder first: a missing one would stop the run after the cards before it were rewritten.
+for (const c of Object.values(CARDS)) {
+  if (!existsSync(dirname(join(ROOT, c.out)))) throw new Error(`og-image: no folder for ${c.out}, nothing written`);
 }
 
 const browser = await chromium.launch();

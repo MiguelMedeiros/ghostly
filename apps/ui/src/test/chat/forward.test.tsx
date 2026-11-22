@@ -1,4 +1,5 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { MessageBubble } from "../../components/MessageBubble";
@@ -11,6 +12,7 @@ import { saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
 import { engineState, fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { axeViolations } from "../axe";
 
 // covers: chat.forward
 
@@ -78,7 +80,7 @@ describe("the Forward to… picker", () => {
   function Where() {
     return <p data-testid="where">{useLocation().pathname}</p>;
   }
-  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt" | "ar") => renderApp(<Routes>
+  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt" | "ar" | "ja") => renderApp(<Routes>
     <Route path="/here" element={<ForwardDialog from={from} messages={messages} onClose={() => {}} />} />
     <Route path="*" element={<Where />} />
   </Routes>, { route: "/here", language });
@@ -91,6 +93,28 @@ describe("the Forward to… picker", () => {
     expect(names()).toEqual(["Friends"]);
     await user.type(screen.getByTestId("forward-search"), "x");
     expect(screen.getByTestId("forward-none")).toHaveTextContent("No chat by that name");
+  });
+
+  it("says how many chats a settled search found, or that none has that name, once the typing settles", async () => {
+    const { user } = open([message()]);
+    const status = screen.getByTestId("forward-found");
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveTextContent("");
+    await user.type(screen.getByTestId("forward-search"), "fri");
+    expect(status).toHaveTextContent("");
+    await waitFor(() => expect(status).toHaveTextContent("1 chat"));
+    await user.type(screen.getByTestId("forward-search"), "x");
+    await waitFor(() => expect(status).toHaveTextContent("No chat by that name"));
+    await user.clear(screen.getByTestId("forward-search"));
+    await waitFor(() => expect(status).toHaveTextContent(""));
+  });
+
+  it("says the count in the language's own forms (Arabic's dual)", async () => {
+    const { user } = open([message()], "link-bo", "ar");
+    await user.type(screen.getByTestId("forward-search"), "n");
+    await waitFor(() => expect(screen.getByTestId("forward-found")).toHaveTextContent("محادثتان"));
+    await user.type(screen.getByTestId("forward-search"), "x");
+    await waitFor(() => expect(screen.getByTestId("forward-found")).toHaveTextContent("لا توجد محادثة بهذا الاسم"));
   });
 
   it("starts on its search; the down arrow goes on to the chats found, up from the first goes back", async () => {
@@ -319,6 +343,24 @@ describe("the Forward to… picker", () => {
     expect(screen.queryByTestId("forward-error")).toBeNull();
   });
 
+  // A refusal's brackets and colon were English ones glued around the translated parts: "Ana (2 件中 1 件送信済み): …".
+  it("says how much a chat got with the language's own brackets and colon, its name still isolated", async () => {
+    const all = [message({ id: "a", timestamp: 1 }), message({ id: "b", timestamp: 2 })];
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(t => {
+      const sent = t === "link-ana" ? ["a"] : t === "link-bo" ? [] : messageIds;
+      return { to: t, messageIds: sent.map(id => `me_${id}`), sent, error: sent.length < messageIds.length ? "You are offline" : null };
+    }) }));
+    const { user } = open(all, "link-1", "ja");
+    const rows = screen.getAllByTestId("forward-target");
+    await user.click(rows[0]!);
+    await user.click(rows[2]!);
+    await user.click(screen.getByTestId("forward-send"));
+    const [ana, bo] = within(screen.getByTestId("forward-error")).getAllByRole("listitem");
+    expect(ana).toHaveTextContent(/^Ana（2 件中 1 件送信済み）：\S/);
+    expect(bo).toHaveTextContent(/^Bo：\S/);
+    expect(ana!.querySelector("bdi")).toHaveTextContent(/^Ana$/);
+  });
+
   // In one Arabic string a Latin name's end punctuation went to the line's side: "Ana!" read "!Ana", and the chosen names
   // ran in English order. Each name is isolated, as in the rows above.
   it("keeps each chat's name in its own direction in an Arabic line", async () => {
@@ -339,6 +381,9 @@ describe("the Forward to… picker", () => {
     const lines = within(screen.getByTestId("forward-error")).getAllByRole("listitem");
     expect(lines.map(line => line.querySelector("bdi")?.textContent)).toEqual(["Ana!", "Bo?"]);
     expect(lines[0]).toHaveTextContent("Ana! (أُرسل 1 من 2): ");
+    // Read out as an alert and still as a list of 2: the alert on the list itself took the list away from its lines.
+    expect(screen.getByTestId("forward-error")).toHaveAttribute("role", "alert");
+    expect(await axeViolations(screen.getByRole("dialog"))).toEqual([]);
     expect(isolated("forward-sent")).toEqual(["Friends"]);
     expect(screen.getByTestId("forward-sent")).toHaveTextContent(/^أُرسل إلى Friends$/);
     expect(isolated("forward-chosen")).toEqual(["Ana!", "Bo?"]);
@@ -447,6 +492,23 @@ describe("the Forward to… picker", () => {
     await user.click(screen.getByTestId("secret-guard-send"));
     expect(fakeEngine.callsTo("forwardMessages")).toHaveLength(1);
   });
+
+  // The guard is the picker's child in React's tree (portalled out of it): React handed the guard's cancel to the
+  // picker's too, and one Escape closed both, the chosen chats with them.
+  it("Escape on the seed question closes only the question: the picker stays with its chats chosen", async () => {
+    const onClose = vi.fn();
+    const { user } = renderApp(<ForwardDialog from="link-bo" messages={[message({ text: SEED })]} onClose={onClose} />);
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    // The browser's cancel on Escape: on the dialog, not bubbling.
+    act(() => { screen.getByTestId("secret-guard").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(screen.queryByTestId("secret-guard")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent("Ana");
+    // The next Escape is the picker's.
+    act(() => { screen.getByTestId("forward-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("choosing several", () => {
@@ -485,6 +547,26 @@ describe("choosing several", () => {
     expect(screen.queryByTestId("select-bar")).toBeNull();
   });
 
+  it("Forward to… open from a ⋮ closes when the contact deletes its message for everyone, the focus on the next message's ⋮", async () => {
+    let take = (_id: string) => {};
+    function Live() {
+      const [shown, setShown] = useState(messages);
+      take = (id) => setShown((all) => all.filter((m) => m.id !== id));
+      return <div data-message-list><Timeline messages={shown} /></div>;
+    }
+    const { user } = renderApp(<Live />);
+    const options = (text: string) => within(screen.getByText(text).closest<HTMLElement>("[data-message-row]")!).getByTestId("message-options");
+    options("first").focus();
+    await user.keyboard("{Enter}");
+    screen.getByTestId("message-forward").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("forward-dialog")).toContainElement(document.activeElement as HTMLElement);
+    act(() => take("a"));
+    expect(screen.queryByTestId("forward-dialog")).toBeNull();
+    expect(screen.queryByText("first")).toBeNull();
+    expect(document.activeElement).toBe(screen.getAllByTestId("message-options")[0]);
+  });
+
   it("Escape, ✕ or taking the last one off ends it", async () => {
     const { user } = renderApp(<Timeline messages={messages} />);
     await user.click(screen.getAllByTestId("message-options")[0]!);
@@ -506,6 +588,25 @@ describe("choosing several", () => {
     await user.click(screen.getAllByTestId("message-options")[0]!);
     await user.click(screen.getByTestId("message-select-start"));
     fireEvent.click(screen.getByText("first"));
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+  });
+
+  // A <dialog> opened over the chat while messages were chosen (Delete chat from the header's ⋮): the browser closes it
+  // on the Escape's default action, which the choice's own listener cancelled. The first Escape ended the choice behind
+  // and left the dialog open.
+  it("an Escape in a dialog over the chat is the dialog's: the choice stays, and the key is not cancelled", async () => {
+    const { user } = renderApp(<Timeline messages={messages} />);
+    await user.click(screen.getAllByTestId("message-options")[0]!);
+    await user.click(screen.getByTestId("message-select-start"));
+    const dialog = document.createElement("dialog");
+    document.body.append(dialog);
+    dialog.setAttribute("open", "");
+    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    act(() => { dialog.dispatchEvent(escape); });
+    expect(escape.defaultPrevented).toBe(false);
+    expect(screen.getByTestId("select-bar")).toBeInTheDocument();
+    dialog.remove();
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true })); });
     expect(screen.queryByTestId("select-bar")).toBeNull();
   });
 

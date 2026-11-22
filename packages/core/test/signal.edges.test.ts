@@ -4,7 +4,7 @@ import { buildDataSdp, extractRtcParams, parseRtcSignal, type RtcSignal } from "
 
 // covers: transport.webrtc
 
-const valid: RtcSignal = { t: "o", ts: 1, u: "ufrag", p: "pwd+/=_-", f: "ab".repeat(32), s: "actpass", c: ["h,192.168.1.2,5000", "s,203.0.113.5,6000", "r,turn.example,3478"] };
+const valid: RtcSignal = { t: "o", ts: 1, u: "ufrag", p: "pwd+/=_-", f: "ab".repeat(32), s: "actpass", c: ["h,192.168.1.2,5000", "s,203.0.113.5,6000", "r,198.51.100.9,3478"] };
 const json = (patch: Record<string, unknown>) => JSON.stringify({ ...valid, ...patch });
 
 describe("untrusted RTC signals", () => {
@@ -43,6 +43,17 @@ describe("untrusted RTC signals", () => {
     expect(parseRtcSignal(input)).toBeNull();
   });
 
+  it("keeps a candidate only on an IP address or a browser's <uuid>.local name, skipping one on any other name", () => {
+    const kept = ["h,192.168.1.2,5000", "h,6f2b1c3e-1111-4222-8333-944445555666.local,5001", "s,2001:db8::7,6000", "r,::ffff:198.51.100.9,3478"];
+    const named = ["h,attacker.example.com,9", "s,xn--e1afmkfd.example,3478", "r,a-b.c,1", "h,example.local,9", "h,probe.6f2b1c3e-1111-4222-8333-944445555666.local,9"];
+    const parsed = parseRtcSignal(json({ c: [...named.slice(0, 2), ...kept, ...named.slice(2, 4)] }));
+    expect(parsed?.c).toEqual(kept);
+    const sdp = buildDataSdp(parsed!);
+    expect(sdp).not.toMatch(/example|a-b\.c/);
+    expect(sdp.match(/^a=candidate:/gm)).toHaveLength(kept.length);
+    expect(parseRtcSignal(json({ c: named }))?.c).toEqual([]);
+  });
+
   it("refuses non-finite timestamps", () => {
     expect(parseRtcSignal(json({}).replace('"ts":1', '"ts":1e999'))).toBeNull();
   });
@@ -52,7 +63,7 @@ describe("untrusted RTC signals", () => {
       const parsed = parseRtcSignal(json({ u, p, c: [`h,${addr},1`] }));
       if (!parsed) return;
       const lines = buildDataSdp(parsed).trimEnd().split("\r\n");
-      expect(lines).toHaveLength(buildDataSdp(valid).trimEnd().split("\r\n").length - 2);
+      expect(lines).toHaveLength(buildDataSdp(valid).trimEnd().split("\r\n").length - valid.c.length + parsed.c.length);
       expect(lines.every(l => !l.includes("\n") && !l.includes("\r"))).toBe(true);
     }), { numRuns: 200 });
   });

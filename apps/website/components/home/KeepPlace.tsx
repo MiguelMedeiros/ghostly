@@ -14,15 +14,38 @@ const STEPS = ".scene-steps, .scene-static-steps";
  */
 const PARTS = [".scene-visual, .scene-static-figure", TITLE, STEP, STEPS, ".eyebrow"];
 
-/** One element on the way from what is at the middle of the screen up to the page, the point of it to keep (`f` of
- * the way down it) and where on the screen that point was. `el` is null for a mark kept over a reload. */
-type Mark = { el: Element | null; id: string | null; f: number; at: number; home: string | null; part: string | null; i: number };
+/**
+ * One element on the way from what is at the middle of the screen up to the page, the point of it to keep (`f` of
+ * the way down it) and where on the screen that point was, in a window `h` high (a window that changed height puts it
+ * as far down the new one: the middle stays the middle). `el` is null for a mark kept over a reload.
+ * `pinned`: it was held on screen while the page scrolled under it (the film's picture and copy, in `.scene-sticky`
+ * once their chapter has reached the top), so where it is says nothing about how far into its chapter the reader
+ * is: the chapter itself does.
+ */
+type Mark = { el: Element | null; id: string | null; f: number; at: number; h: number; home: string | null; part: string | null; i: number; pinned: boolean };
 
 function marked(el: Element, f: number, at: number): Mark {
   const section = el.closest("section[id]");
   const part = PARTS.find((sel) => el.matches(sel)) ?? null;
   const i = section && part ? Array.prototype.indexOf.call(section.querySelectorAll(part), el) : -1;
-  return { el, id: el.id || null, f, at, home: section?.id ?? null, part, i };
+  return { el, id: el.id || null, f, at, h: window.innerHeight, home: section?.id ?? null, part, i, pinned: false };
+}
+
+/** Whether the element holds still on screen as the page scrolls: fixed, or sticky and held away from where its
+ * parent would put it (a sticky element still at the top of its parent scrolls with the page). */
+function stuck(el: Element): boolean {
+  const at = getComputedStyle(el).position;
+  if (at === "fixed") return true;
+  return at === "sticky" && !!el.parentElement && el.getBoundingClientRect().top - el.parentElement.getBoundingClientRect().top > 0.5;
+}
+
+/** Whether the element is inside one that may hold still (in the page as it is now, whatever the scroll). */
+function inSticky(el: Element): boolean {
+  for (let e: Element | null = el; e && e !== document.body; e = e.parentElement) {
+    const at = getComputedStyle(e).position;
+    if (at === "sticky" || at === "fixed") return true;
+  }
+  return false;
 }
 
 /** What sits at the middle of the screen, from the innermost element out. None while a link to a section is still
@@ -55,6 +78,12 @@ function mark(): Mark[] | null {
     if (el.matches(TITLE)) marks.push(marked(el, 0, r.top));
     else marks.push(marked(el, r.height > 0 ? Math.min(1, Math.max(0, (y - r.top) / r.height)) : 0, y));
   }
+  // Everything inside the outermost element that holds still holds still with it.
+  let held = -1;
+  marks.forEach((m, i) => {
+    if (m.el && stuck(m.el)) held = i;
+  });
+  for (let i = 0; i <= held; i++) marks[i].pinned = true;
   return marks.length ? marks : null;
 }
 
@@ -81,13 +110,36 @@ function find(m: Mark): Element | null {
   return m.id ? document.getElementById(m.id) : null;
 }
 
+/**
+ * Keeps the middle of the screen in the reader's chapter. When what was at the middle is gone from the chapter's new
+ * shape (a tablet turned, the figure drawn anew before the resize event), its step is held by its title where the
+ * title was: above the screen, for a reader further down the step. In the shorter shape (the cards) that lands past
+ * the chapter's end, on the statement after it: the reader was in the chapter, and stays in it.
+ */
+function inChapter(home: string | null) {
+  const section = home ? document.getElementById(home) : null;
+  if (!section) return;
+  const r = section.getBoundingClientRect();
+  const middle = window.innerHeight / 2;
+  if (r.top <= middle && r.bottom > middle) return;
+  // The nearest point of the chapter, a little way in from its edge, goes to the middle.
+  const margin = Math.min(r.height, window.innerHeight) / 4;
+  const point = Math.min(Math.max(middle, r.top + margin), r.bottom - margin);
+  window.scrollBy({ top: point - middle, behavior: "instant" });
+}
+
 function hold(marks: Mark[]) {
   for (const m of marks) {
     const el = find(m);
-    if (!el) continue;
+    // An element the new size does not show (a picture for another width) has no place to hold. One that was held on
+    // screen and still may be is held by its chapter; once the chapter has taken a shape that scrolls (the cards), its
+    // part of the chapter is where the reader is.
+    if (!el || !el.getClientRects().length || (m.pinned && inSticky(el))) continue;
     const r = el.getBoundingClientRect();
-    const by = r.top + m.f * r.height - m.at;
+    const at = m.h > 0 ? (m.at * window.innerHeight) / m.h : m.at;
+    const by = r.top + m.f * r.height - at;
     if (Math.abs(by) >= 1) window.scrollBy({ top: by, behavior: "instant" });
+    inChapter(m.home);
     return;
   }
 }
@@ -193,9 +245,13 @@ function goBack(): () => void {
 /**
  * The server draws the story for a wide window with a mouse (stage.tsx), and on a phone the chapters take their
  * phone shape once the page runs: a reader who has already scrolled into the story would see it jump, the page
- * above them a different height. In the commit that changes the shape, this notes what is at the middle of the
- * screen before the chapters change and scrolls it back to the middle (a step: its title back where it was) before
- * the browser paints. A reader at the top stays at the top.
+ * above them a different height. The same goes for a window that changes size (a tablet turned, a download bar,
+ * devtools): the chapters are sized in viewport heights and the scroll stays in pixels, and the browser's own
+ * scroll anchoring does not act inside them. So this notes what is at the middle of the screen whenever the page
+ * scrolls, and when the window changes size, or the chapters change shape, scrolls it back to the middle (a step:
+ * its title back where it was) before the browser paints. By the time either runs, the page has already been laid
+ * out anew (the window's new size, and the layout script's flags that follow it), so the place is the one noted
+ * before. A reader at the top stays at the top.
  *
  * A reload (or a step back from another site) would restore the reader's offset into the server's page, then hold
  * what that offset shows there, a place the reader never saw: the page keeps the reader's place by what was on screen
@@ -222,20 +278,64 @@ export function KeepPlace() {
 }
 
 class Hold extends Component<{ shape: string }> {
-  // Runs before React changes the page, in the same commit as the chapters.
-  getSnapshotBeforeUpdate(prev: { shape: string }): Mark[] | null {
-    return prev.shape === this.props.shape ? null : mark();
+  private last: Mark[] | null = null;
+  private frame = 0;
+  private held = 0;
+  private width = 0;
+
+  componentDidMount() {
+    this.last = mark();
+    this.width = window.innerWidth;
+    window.addEventListener("scroll", this.onScroll, { passive: true });
+    window.addEventListener("resize", this.onResize);
   }
 
+  componentWillUnmount() {
+    cancelAnimationFrame(this.frame);
+    cancelAnimationFrame(this.held);
+    window.removeEventListener("scroll", this.onScroll);
+    window.removeEventListener("resize", this.onResize);
+  }
+
+  // Once a frame at most, after the scroll and before any resize the next frame brings.
+  private onScroll = () => {
+    if (this.frame) return;
+    this.frame = requestAnimationFrame(() => {
+      this.frame = 0;
+      this.last = mark();
+    });
+  };
+
+  // Runs before the layout script's media queries flip its flags and before React reshapes the chapters.
+  private onResize = () => {
+    const turned = window.innerWidth !== this.width;
+    this.width = window.innerWidth;
+    // On a touch screen the height alone changes as the browser's toolbar slides in and out under a scrolling finger.
+    if (this.last && (turned || !("touch" in document.documentElement.dataset))) hold(this.last);
+    this.last = mark();
+  };
+
+  // The place noted before the window or the layout script's flags changed, not what is at the middle now.
+  getSnapshotBeforeUpdate(prev: { shape: string }): Mark[] | null {
+    return prev.shape === this.props.shape ? null : this.last;
+  }
+
+  // Each chapter takes its new shape in a commit of its own (React answers every media query listener on its own),
+  // all before the next frame: the place is held in that frame, once they all have, before it paints.
   componentDidUpdate(_prev: { shape: string }, _state: unknown, marks: Mark[] | null) {
     if (!marks) return;
     // Held once the task is done with the page, not in this commit: a deck mounts at no width, measures itself in a
     // layout effect and renders again before the task ends. Held here, the page would sit a card's height off
     // between that render and the next frame, where another task may read it.
     queueMicrotask(() => hold(marks));
+    if (this.held) return;
     // Some of the page sizes itself only in a later task (a deck that measures its width again as it settles): held
-    // once more then, still before the browser paints.
-    requestAnimationFrame(() => hold(marks));
+    // once more then, still before the browser paints, and noted anew from there.
+    this.held = requestAnimationFrame(() => {
+      this.held = 0;
+      hold(marks);
+      this.last = mark();
+    });
   }
 
   render() {

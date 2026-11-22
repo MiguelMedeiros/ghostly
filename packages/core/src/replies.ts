@@ -34,14 +34,49 @@ export const PAIRED_REPLY_AUTHORS = ["sender", "recipient"] as const;
 /** A picture sent inline has no line worth quoting. */
 const INLINE_PICTURE = /^data:image\//i;
 
+/** What a spoiler reads as in a line of it: nothing of what it hides (the chat list's `SPOILER_PLAIN` in apps/ui). */
+const SPOILER_COVER = "▒▒▒";
+
+const PIPES = /\|{2,}/gu;
+const SPACE = /\s/u;
+const PUNCT = /[\p{P}\p{S}]/u;
+
 /**
- * A line of a message to quote: plain text on one line (line breaks and runs of spaces become one space), without
- * control, invisible or direction characters (WISP 400, as for names), at most `REPLY_LIMITS.snippet` code points,
- * the last of them an ellipsis when it was cut.
+ * A line of text with its spoilers (`||hidden||`, WISP 400 § Formatting) as `SPOILER_COVER`. The bubble's parser
+ * (apps/ui lib/parse) is not here, so this covers at least what it hides: from the first `||` on the line that may
+ * open one to the last that may close one, by the parser's word-edge rules without its exceptions. Two spoilers on a
+ * line read as one, with the words between them. `open`: the line goes on past this text, so a spoiler opened on it
+ * runs to its end.
+ */
+function coverSpoilers(line: string, open: boolean): string {
+  let start = -1, end = -1;
+  for (const run of line.matchAll(PIPES)) {
+    const at = run.index, after = line[at + run[0].length], before = line[at - 1];
+    // A run of three or more is text to the parser, unless one end of it is a code span's or a link's.
+    const long = run[0].length > 2;
+    if (start < 0) {
+      if (long || (after !== undefined && !SPACE.test(after) && (before === undefined || SPACE.test(before) || PUNCT.test(before)))) start = at;
+    } else if (long || (before !== undefined && !SPACE.test(before) && (after === undefined || SPACE.test(after) || PUNCT.test(after)))) {
+      end = at + run[0].length;
+    }
+  }
+  if (start < 0) return line;
+  if (open) return line.slice(0, start) + SPOILER_COVER;
+  return end < 0 ? line : line.slice(0, start) + SPOILER_COVER + line.slice(end);
+}
+
+/**
+ * A line of a message to quote: plain text on one line (line breaks and runs of spaces become one space), its
+ * spoilers covered, without control, invisible or direction characters (WISP 400, as for names), at most
+ * `REPLY_LIMITS.snippet` code points, the last of them an ellipsis when it was cut.
  */
 export function replySnippet(text: string): string {
   if (INLINE_PICTURE.test(text.trimStart())) return "🖼️ Picture";
-  const flat = text.slice(0, REPLY_LIMITS.raw * 2).replace(/\s+/gu, " ");
+  const head = text.slice(0, REPLY_LIMITS.raw * 2);
+  // Spoilers pair within a line, so each is covered before the lines are joined.
+  const lines = head.split("\n");
+  const covered = lines.map((line, i) => coverSpoilers(line, head.length < text.length && i === lines.length - 1)).join("\n");
+  const flat = covered.replace(/\s+/gu, " ");
   const clean = sanitizeDisplayText(flat, REPLY_LIMITS.snippet + 1) ?? "";
   const points = [...clean];
   return points.length > REPLY_LIMITS.snippet ? `${points.slice(0, REPLY_LIMITS.snippet - 1).join("").trimEnd()}…` : clean;

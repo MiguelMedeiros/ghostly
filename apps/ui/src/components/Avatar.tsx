@@ -1,5 +1,6 @@
 import { usePeerAvatar } from "../hooks/useAvatars";
 import { initial } from "../lib/initial";
+import { PeerPresenceDot } from "./PresenceMarks";
 
 /**
  * A round picture, or the name's initial when there is none. `src` is a checked data URL (ours, or one
@@ -37,10 +38,13 @@ export function Identicon({ seed }: { seed: string }) {
 /**
  * The picture a contact shares with this chat; else their initial, or a pattern of their key when they have no name.
  * `photo`: the picture of the identity the contact is shown as (identities/contactFace.ts), which wins over theirs.
+ * `presence`: the dot that says they are online (WISP 401 § Presence and status) on its corner, `<testId>-presence`;
+ * its words go beside the name (PresenceMarks.tsx `PeerPresenceLine`).
  */
-export function PeerAvatar({ peerPubKey, label, named = true, testId, photo }: { peerPubKey?: string; label: string; named?: boolean; testId?: string; photo?: string }) {
+export function PeerAvatar({ peerPubKey, label, named = true, testId, photo, presence = false }: { peerPubKey?: string; label: string; named?: boolean; testId?: string; photo?: string; presence?: boolean }) {
   const sent = usePeerAvatar(peerPubKey);
   const src = photo ?? sent;
-  if (!src && !named && peerPubKey) return <Identicon seed={peerPubKey} />;
-  return <Avatar src={src} label={label} testId={testId} />;
+  const picture = !src && !named && peerPubKey ? <Identicon seed={peerPubKey} /> : <Avatar src={src} label={label} testId={testId} />;
+  if (!presence) return picture;
+  return <>{picture}<PeerPresenceDot peerKey={peerPubKey} testId={`${testId ?? "avatar"}-presence`} /></>;
 }

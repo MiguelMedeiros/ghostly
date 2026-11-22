@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { BROWSER_ARGS } from "./helpers";
+import { BROWSER_ARGS, CHROMIUM_SANDBOX } from "./helpers";
 
 // The shared regtest environment's variables (npm run e2e:infra:use -- --host one writes them): the
 // wallets are funded from there. A variable the shell already set wins.
@@ -29,6 +29,6 @@ export default defineConfig({
   use: {
     baseURL: process.env.CAPTURE_URL ?? "http://localhost:4380",
     actionTimeout: 30_000,
-    launchOptions: { args: BROWSER_ARGS },
+    launchOptions: { chromiumSandbox: CHROMIUM_SANDBOX, args: BROWSER_ARGS },
   },
 });

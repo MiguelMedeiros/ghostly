@@ -278,8 +278,22 @@ const PORT_TAKEN = /Unable to listen for HTTP server|can not listen to address/;
 
 class PortTaken extends Error {}
 
+/** An open app, from `openDesktop`. */
+export interface OpenDesktop {
+  app: DesktopApp;
+  stop: () => Promise<void>;
+  /**
+   * What the driver, the app and its WebKit processes wrote to stdout and stderr so far (the last `OUTPUT_KEPT`
+   * characters): GStreamer's own errors among it with `GST_DEBUG` set, which a page's MediaError never says.
+   */
+  output: () => string;
+}
+
+/** How much of a driver's output an open app keeps for `output`. */
+const OUTPUT_KEPT = 512 * 1024;
+
 /** `tauri-driver`, and the app it opens, until `stop`. A driver that lost one of its ports starts again on others. */
-export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: DesktopApp; stop: () => Promise<void> }> {
+export async function openDesktop(options: DesktopOptions = {}): Promise<OpenDesktop> {
   // Before anything is spawned: a missing binary is not something to retry for 30 seconds.
   const application = options.binary ?? desktopBinary();
   for (let attempt = 1; ; attempt++) {
@@ -291,7 +305,7 @@ export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: 
   }
 }
 
-async function launchDesktop(application: string, options: DesktopOptions): Promise<{ app: DesktopApp; stop: () => Promise<void> }> {
+async function launchDesktop(application: string, options: DesktopOptions): Promise<OpenDesktop> {
   const port = await freePort();
   const nativePort = await freePort();
   // A session bus of its own unless the test brings one: see `privateBus`.
@@ -309,24 +323,26 @@ async function launchDesktop(application: string, options: DesktopOptions): Prom
       env: desktopTestNetworkEnv({
         GHOSTLY_E2E: "1",
         GHOSTLY_FAKE_MEDIA: "1",
+        ...webkitMediaEnv(),
         GHOSTLY_PROFILE: options.profile ?? process.env.GHOSTLY_PROFILE ?? "e2e",
         ...(options.home ? homeEnv(options.home) : {}),
         ...(bus ? { DBUS_SESSION_BUS_ADDRESS: bus.address } : {}),
       }, options.env),
     },
   );
-  const log: string[] = [];
+  let log = "";
   let lostPort: (error: Error) => void = () => {};
   const taken = new Promise<never>((_, fail) => { lostPort = fail; });
-  for (const stream of [driver.stdout, driver.stderr]) stream?.on("data", (chunk: Buffer) => {
-    log.push(chunk.toString());
-    if (PORT_TAKEN.test(log.join(""))) lostPort(new PortTaken(`A driver port (${port}, ${nativePort}) was taken:\n${log.join("")}`));
-  });
-  const died = new Promise<never>((_, fail) =>
-    driver.on("exit", (code) => fail(new Error(`tauri-driver exited (${code}). Is it installed, with a WebDriver for this platform?\n${log.join("")}`))),
-  );
   // Once either has ended the open, the session's retries stop too: no asking a driver that is gone.
   const settled = new AbortController();
+  for (const stream of [driver.stdout, driver.stderr]) stream?.on("data", (chunk: Buffer) => {
+    log = (log + chunk.toString()).slice(-OUTPUT_KEPT);
+    // A port is taken only as the driver binds, before the app is open.
+    if (!settled.signal.aborted && PORT_TAKEN.test(log)) lostPort(new PortTaken(`A driver port (${port}, ${nativePort}) was taken:\n${log}`));
+  });
+  const died = new Promise<never>((_, fail) =>
+    driver.on("exit", (code) => fail(new Error(`tauri-driver exited (${code}). Is it installed, with a WebDriver for this platform?\n${log}`))),
+  );
 
   const endpoint = `http://127.0.0.1:${port}`;
   const exited = new Promise<void>((done) => driver.once("exit", () => done()));
@@ -353,7 +369,7 @@ async function launchDesktop(application: string, options: DesktopOptions): Prom
       const started = launched();
       await app.close();
       await end(started);
-    } };
+    }, output: () => log };
   } catch (error) {
     await end(launched());
     throw error;
@@ -377,6 +393,23 @@ async function expectUnderTest(app: Driver): Promise<void> {
 }
 
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+/**
+ * WebKitGTK's media players without its GL video sink, on Linux, unless the run says otherwise
+ * (`WEBKIT_GST_DISABLE_GL_SINK=0`).
+ *
+ * The GL sink draws through one GStreamer GL context per WebKit web process, made once by wrapping WebKit's own EGL
+ * context (WebCore's PlatformDisplayGStreamer.cpp). On the loop's Xvfb (Mesa, no DRI3) that wrap sometimes fails as the
+ * first player starts ("Failed to fill in GStreamer context: could not retrieve egl config id from egl context:
+ * EGL_NOT_INITIALIZED"), and WebKit keeps the broken context for the life of the process: from then on every <video>
+ * in that window fails (`MediaError` 4, `EGL_BAD_CONTEXT` in GStreamer's output), a call window's picture and a fresh
+ * canvas stream alike, though the frames keep coming. No wait in a test brings that window's pictures back. The
+ * fallback sink hands frames to WebKit's compositor without a GStreamer GL context; Xvfb's GL is software anyway.
+ */
+export function webkitMediaEnv(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  if (platform !== "linux") return {};
+  return { WEBKIT_GST_DISABLE_GL_SINK: env.WEBKIT_GST_DISABLE_GL_SINK ?? "1" };
+}
 
 /**
  * A D-Bus session bus for one app (a `dbus-daemon` of its own, ended by `stop`), or null where there is none to start

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
-import { resetEngine } from "./fakeEngine";
+import { engineControl, resetEngine } from "./fakeEngine";
 import { bootExtension, restartServiceWorker, useProfile } from "./extension";
 
 // covers: app.attention.notifications, profiles.switch, app.clear-data
@@ -179,6 +179,22 @@ describe("a new peer: the chats of the one before are not this one's", () => {
     expect(world.notices.has(personal)).toBe(false);
   });
 
+  it("one a tab of the profile before shows while its peer stops goes too, with the chat kept for it", async () => {
+    expect(await ensure()).toEqual({ ok: true });
+    // Another tab switched; this one is still on the old peer while it stops, and a message it heard then ends in a
+    // notification: a click on it would open that chat in the next profile ("This chat is gone").
+    const page = await openPage();
+    let late = "";
+    engineControl().onShutdown = async () => { late = await notify(page.lib, "message:link-a:m2", "chat-a"); };
+
+    useProfile(world, "work000000");
+    expect(await ensure()).toEqual({ ok: true });
+    await settle();
+    expect(late).not.toBe("");
+    expect(world.notices.has(late)).toBe(false);
+    expect(noticeKeys()).toEqual([]);
+  });
+
   it("Clear all data: the cleared chats' notifications go with them", async () => {
     const page = await openPage();
     const id = await notify(page.lib, "message:link-a:m1", "chat-a");
@@ -198,6 +214,31 @@ describe("a new peer: the chats of the one before are not this one's", () => {
 
     await click(id);
     expect(world.callsTo("tabs.create").at(-1)).toEqual([`${APP}#/chat/chat-a`]);
+  });
+});
+
+describe("a deleted profile: its \"New messages in\" notifications go with it", () => {
+  const noticeKeys = () => [...world.session.keys()].filter((key) => key.startsWith("notice:"));
+  const clearPeek = async (profile: string) => {
+    const peek = await world.load("page", () => import("../../ui/src/lib/profilePeek"));
+    await world.load("page", async () => peek.clearPeek(profile));
+    await settle();
+  };
+
+  it("shown from the page that deletes it, and from one before it reloaded; another profile's and a chat's stay", async () => {
+    const page = await openPage();
+    const before = await notify(page.lib, "peek-gone-1", "profile:gone000000");
+    await closePage(page.tabId, true);
+    const next = await openPage();
+    const now = await notify(next.lib, "peek-gone-2", "profile:gone000000");
+    const other = await notify(next.lib, "peek-other-1", "profile:other00000");
+    const message = await notify(next.lib, "message:link-a:m1", "chat-a");
+
+    // As `deleteProfile` does, before the profile leaves the registry.
+    await clearPeek("gone000000");
+    expect([before, now].filter((id) => world.notices.has(id))).toEqual([]);
+    expect([...world.notices.keys()].sort()).toEqual([other, message].sort());
+    expect(noticeKeys().sort()).toEqual([`notice:${other}`, `notice:${message}`].sort());
   });
 });
 

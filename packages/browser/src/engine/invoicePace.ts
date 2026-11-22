@@ -20,6 +20,13 @@ export const INVOICE_PACE = {
   watchMs: 90_000,
   /** A quote or an invoice goes only this long after its expiry, once its mint or source says it is unpaid. */
   expiryGraceMs: 60_000,
+  /**
+   * A mint or a Lightning card's source that does not answer about an invoice, or answers with an error, is asked again
+   * after this, then twice as late each time up to `missedCapMs` (`AskBackoff`): the pace above never looked at whether
+   * it answered, and a dead mint or node was asked every minute (every 4 s about a paid invoice) for good.
+   */
+  missedMs: 30_000,
+  missedCapMs: 30 * 60_000,
   /** Due this close to now counts as due: a timer may fire a moment before the clock reads its time. */
   dueSlackMs: 250,
 } as const;

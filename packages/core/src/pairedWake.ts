@@ -14,7 +14,9 @@ import { checkPushEndpoint, pushRequest, vapidKeysMatch, type PushRequest, type 
  * of a few bytes to the endpoint: `{"wake":1,"k":"<token>"}`. It says nothing about the message: the contact's
  * app shows "New message", opens on a tap, connects and fetches the message itself. The token is the contact's
  * own name for this chat, different for every contact, so its app knows which chat (and whether it is muted)
- * without the push service learning anything: it sees only that a push happened, and when.
+ * without the push service learning anything: every wake-up is padded to one size (`PUSH_PAD_BYTES`), so it sees that
+ * a push happened, and when; only the time to live and a call's repeats set a call, an online notice or a device
+ * handoff apart (an online notice has a handoff's time to live).
  *
  * It needs `wake/1` in `paired-capabilities` on both sides. The VAPID key pair belongs to that one subscription,
  * so sharing its private half lets a contact post to that subscription and nothing else. Rotating it (a new
@@ -26,20 +28,30 @@ export const WAKE_FRAME = "paired-wake";
 
 /** At most one wake-up per contact in this long. A burst of messages is one push. */
 export const WAKE_INTERVAL_MS = 5 * 60_000;
+/**
+ * A wake-up that did not reach the push service (no network, the push relay did not forward it, the push service
+ * answered 429 or 5xx) is not the contact's wake-up: the next one may go this long after it, not 5 minutes. Never a
+ * retry of that one; only a pause, so a relay that is refusing is not asked again on every message.
+ */
+export const WAKE_RETRY_MS = 30_000;
 /** A wake-up that has not reached the phone within this is no use: the push service may drop it. */
 export const WAKE_TTL_SECONDS = 60 * 60;
 /** The VAPID subject push services ask for: who to contact about abuse. The project, never a person. */
 export const WAKE_SUBJECT = "https://ghostly.tools";
 
-/** What a contact shares: its push subscription, the key pair it was made with, and its token for this chat. */
+/**
+ * What a contact shares: its push subscription, the key pair it was made with, and its token for this chat. `online`:
+ * it wants an online notice when this side comes online while its app is closed (`o: 1`, revision 2026-10-27).
+ */
 export interface WakeTarget extends PushTarget {
   vapid: VapidKeys;
   token: string;
+  online?: true;
 }
 
 export type WakeFrame = {
   t: typeof WAKE_FRAME;
-  w: { e: string; p: string; a: string; vp: string; vk: string; k: string } | null;
+  w: { e: string; p: string; a: string; vp: string; vk: string; k: string; o?: 1 } | null;
 };
 
 /** A fresh per-contact token: 16 random bytes, base64url. */
@@ -50,7 +62,7 @@ export function newWakeToken(): string {
 export function wakeFrame(target: WakeTarget | null): WakeFrame {
   return {
     t: WAKE_FRAME,
-    w: target && { e: target.endpoint, p: target.p256dh, a: target.auth, vp: target.vapid.publicKey, vk: target.vapid.privateKey, k: target.token },
+    w: target && { e: target.endpoint, p: target.p256dh, a: target.auth, vp: target.vapid.publicKey, vk: target.vapid.privateKey, k: target.token, ...(target.online && { o: 1 as const }) },
   };
 }
 
@@ -66,19 +78,34 @@ export function parseWakeFrame(frame: Record<string, unknown>): WakeTarget | nul
   if (frame.w === null) return null;
   const w = frame.w as Record<string, unknown> | undefined;
   if (!w || typeof w !== "object") return undefined;
-  const { e, p, a, vp, vk, k } = w;
+  const { e, p, a, vp, vk, k, o } = w;
   if (typeof e !== "string" || ![p, a, vp, vk].every((v) => typeof v === "string" && B64URL.test(v)) || typeof k !== "string" || !TOKEN.test(k)) return undefined;
   try { checkPushEndpoint(e); } catch { return undefined; }
-  const target: WakeTarget = { endpoint: e, p256dh: p as string, auth: a as string, vapid: { publicKey: vp as string, privateKey: vk as string }, token: k };
+  const target: WakeTarget = { endpoint: e, p256dh: p as string, auth: a as string, vapid: { publicKey: vp as string, privateKey: vk as string }, token: k, ...(o === 1 && { online: true as const }) };
   if (!vapidKeysMatch(target.vapid)) return undefined;
   return target;
 }
 
 /**
  * What a wake-up is for: a message waits, or a call does (the caller rings until the contact's app is live, then
- * calls). The receiving app picks its own words for each; the push says nothing more.
+ * calls), or this side just came online (revision 2026-10-27; only to a contact that asked, `online`). The receiving
+ * app picks its own words for each; the push says nothing more.
  */
-export type WakeKind = "message" | "call";
+export type WakeKind = "message" | "call" | "online";
+
+/** At most one online notice per contact in this long, whatever the message wake-ups do. Kept across restarts. */
+export const WAKE_ONLINE_INTERVAL_MS = 30 * 60_000;
+/** An online notice the phone gets later than this is stale: worse than none. */
+export const WAKE_ONLINE_TTL_SECONDS = 5 * 60;
+/** How long after this side comes online it waits for the chat to go live before it says so: a live contact needs no push. */
+export const WAKE_ONLINE_DELAY_MS = 30_000;
+/**
+ * Most online notices that go out in `WAKE_ONLINE_BATCH_MS`; the rest wait for the next one. A page posts its wake-ups
+ * through a push relay, which takes 30 a minute from one address: all at once, a profile with 30 contacts that asked
+ * spent the whole minute, and a call or message wake-up right after was refused.
+ */
+export const WAKE_ONLINE_BATCH = 10;
+export const WAKE_ONLINE_BATCH_MS = 60_000;
 
 /** At most one call wake-up per contact in this long: a caller who tries again at once is not a new push. */
 export const WAKE_CALL_INTERVAL_MS = 30_000;
@@ -87,9 +114,9 @@ export const WAKE_CALL_WAIT_MS = 60_000;
 /** A call wake-up is useless once the caller stopped waiting: the push service may drop it after this. */
 export const WAKE_CALL_TTL_SECONDS = 60;
 
-/** The wake-up's plaintext: the contact's token for this chat, and whether it is for a call. Nothing else. */
+/** The wake-up's plaintext: the contact's token for this chat, and whether it is for a call or an online notice. Nothing else. */
 export function wakePayload(token: string, kind: WakeKind = "message"): Uint8Array {
-  return utf8Encode(JSON.stringify(kind === "call" ? { wake: 1, k: token, c: 1 } : { wake: 1, k: token }));
+  return utf8Encode(JSON.stringify({ wake: 1, k: token, ...(kind === "call" && { c: 1 }), ...(kind === "online" && { o: 1 }) }));
 }
 
 /**
@@ -100,9 +127,9 @@ export function wakePayload(token: string, kind: WakeKind = "message"): Uint8Arr
 export function readWake(text: string | null | undefined): { token: string; kind: WakeKind | "device" } | null {
   if (!text || text.length > 200) return null;
   try {
-    const value = JSON.parse(text) as { wake?: unknown; k?: unknown; c?: unknown; d?: unknown };
+    const value = JSON.parse(text) as { wake?: unknown; k?: unknown; c?: unknown; d?: unknown; o?: unknown };
     if (value?.wake !== 1 || typeof value.k !== "string" || !TOKEN.test(value.k)) return null;
-    return { token: value.k, kind: value.d === 1 ? "device" : value.c === 1 ? "call" : "message" };
+    return { token: value.k, kind: value.d === 1 ? "device" : value.c === 1 ? "call" : value.o === 1 ? "online" : "message" };
   } catch {
     return null;
   }
@@ -130,7 +157,7 @@ export function readWakePayload(text: string | null | undefined): string | null 
 /** The request that wakes the contact. Throws `WebPushError` when the target cannot be used. */
 export function wakeRequest(target: WakeTarget, now = Date.now(), kind: WakeKind = "message"): PushRequest {
   return pushRequest(target, target.vapid, wakePayload(target.token, kind), {
-    subject: WAKE_SUBJECT, ttlSeconds: kind === "call" ? WAKE_CALL_TTL_SECONDS : WAKE_TTL_SECONDS, now,
+    subject: WAKE_SUBJECT, ttlSeconds: kind === "call" ? WAKE_CALL_TTL_SECONDS : kind === "online" ? WAKE_ONLINE_TTL_SECONDS : WAKE_TTL_SECONDS, now,
   });
 }
 
@@ -144,6 +171,14 @@ export class WakeLimiter {
     if (before !== undefined && now - before < this.interval) return false;
     this.last.set(contact, now);
     return true;
+  }
+  /**
+   * The wake-up taken at `takenAt` did not reach the push service: it does not count, and the next may go
+   * `retryMs` from now. Nothing changes when another was taken since, or the count started over.
+   */
+  missed(contact: string, takenAt: number, retryMs = WAKE_RETRY_MS, now = Date.now()): void {
+    if (this.last.get(contact) !== takenAt) return;
+    this.last.set(contact, now - this.interval + Math.min(retryMs, this.interval));
   }
   /** The contact answered (it is live again): the next time it is away, it may be woken at once. */
   reset(contact: string): void {

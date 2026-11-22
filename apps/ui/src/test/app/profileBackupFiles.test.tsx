@@ -5,6 +5,7 @@ import { DeleteProfileDialog } from "../../components/DeleteProfileDialog";
 import { ProfileBackups } from "../../components/ProfileBackups";
 import { backUpToFile } from "../../lib/backupFile";
 import { openProfileBackup, profileBackupSizes, restoreOpenedBackup, type BackupOptions, type BackupProgress } from "../../lib/profileBackup";
+import { axeViolations } from "../axe";
 import { fakeEngine, walletView } from "../fakeEngine";
 import { renderApp } from "../render";
 // covers: backup.profile.file, backup.progress, backup.unprotected, profiles.delete, backup.light
@@ -64,6 +65,14 @@ describe("a profile backup's file", () => {
     await user.upload(screen.getByTestId("restore-file"), new File(["{}"], "real.ghostly-backup", { type: "application/json" }));
     await waitFor(() => expect(screen.getByTestId("restore-go")).toBeEnabled());
     expect(screen.queryByTestId("backup-error")).not.toBeInTheDocument();
+  });
+
+  it.each([["en", "Backup to restore"], ["ja", "復元するバックアップ"]] as const)("Restore's file picker is named for what it picks, in the app's language (%s)", async (language, name) => {
+    // Unnamed, it was read as the browser's own "Choose File", in the browser's language.
+    const { user } = renderApp(<ProfileBackups canSwitch={false} />, { language });
+    await user.click(screen.getByTestId("restore-open"));
+    expect((await axeViolations(screen.getByTestId("profile-backups"))).filter((hit) => hit.startsWith("label:"))).toEqual([]);
+    expect(screen.getByLabelText(name)).toBe(screen.getByTestId("restore-file"));
   });
 
   it("shows what a backup is doing as it goes: the stage, the file, the bytes, then where it was saved", async () => {
@@ -211,12 +220,25 @@ describe("a profile backup's file", () => {
     expect(await screen.findByTestId("restore-unprotected")).toHaveTextContent("This backup has no passphrase. Anyone who had the file could read it.");
     expect(screen.queryByTestId("restore-passphrase")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("restore-go"));
-    expect(await screen.findByTestId("backup-done")).toHaveTextContent("Restored as “Work (restored)”.");
+    expect(await screen.findByTestId("backup-done")).toHaveTextContent("Restored as “\u2068Work (restored)\u2069”.");
     expect(vi.mocked(openProfileBackup).mock.calls[0][1], "no passphrase is made up for it").toBeUndefined();
     // A sealed one picked next asks for its passphrase again.
     await user.upload(screen.getByTestId("restore-file"), new File(['{"format":"ghostly-backup","version":1}'], "sealed.ghostly-backup"));
     expect(await screen.findByTestId("restore-passphrase")).toBeInTheDocument();
     expect(screen.queryByTestId("restore-unprotected")).not.toBeInTheDocument();
+  });
+
+  // In a language of the other direction, a name's ending punctuation was drawn on its other side ("!Club").
+  it("says which profile it restored, its name in its own direction", async () => {
+    vi.mocked(openProfileBackup).mockResolvedValue({ name: "Club!", protection: "none", payload: { profile: { name: "Club!" }, storage: {} } });
+    vi.mocked(restoreOpenedBackup).mockResolvedValue({ id: "copycopyco", name: "Club!", createdAt: 1, restored: true });
+    const { user } = renderApp(<ProfileBackups canSwitch={false} />, { language: "ar" });
+    await user.click(screen.getByTestId("restore-open"));
+    const header = `${JSON.stringify({ format: "ghostly-backup", version: 2, protection: "none", check: { name: "SHA-256-chain" } })}\n`;
+    await user.upload(screen.getByTestId("restore-file"), new File([header, "frames"], "open.ghostly-backup"));
+    await screen.findByTestId("restore-unprotected");
+    await user.click(screen.getByTestId("restore-go"));
+    expect(await screen.findByTestId("backup-done")).toHaveTextContent("تمت الاستعادة باسم «\u2068Club!\u2069».");
   });
 
   it("a restore shows its progress, and Cancel says nothing was restored", async () => {
@@ -240,6 +262,24 @@ describe("a profile backup's file", () => {
     await user.click(screen.getByTestId("backup-progress-cancel"));
     await waitFor(() => expect(screen.queryByTestId("backup-progress")).not.toBeInTheDocument());
     expect(screen.getByTestId("backup-done")).toHaveTextContent("Cancelled. Nothing was restored.");
+  });
+
+  it("while it works, Tab and Shift+Tab stay in the progress dialog, never on the page behind it", async () => {
+    // From Cancel, Tab went on to the Backups section and the rest of the page, usable while the backup ran.
+    const backup = drivenBackup();
+    const { user } = renderApp(<ProfileBackups canSwitch={false} />);
+    await startBackup(user);
+    const dialog = await screen.findByTestId("backup-progress");
+    const cancel = screen.getByTestId("backup-progress-cancel");
+    cancel.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(cancel);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(cancel);
+    // Saving the file: no Cancel left, and Tab stays on the dialog.
+    await backup.saving();
+    await user.tab();
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
   });
 
   it("on a phone the progress is a sheet from the bottom", async () => {

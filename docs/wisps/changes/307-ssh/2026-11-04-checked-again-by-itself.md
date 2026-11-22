@@ -1,0 +1,1 @@
+The contact's app checks a GitHub or GitLab key proof again by itself about a day after its last check, not only when "Check again" is pressed. A forge that could not be asked (not reached, limiting lookups) leaves the proof as it was. Wire identifiers are unchanged.

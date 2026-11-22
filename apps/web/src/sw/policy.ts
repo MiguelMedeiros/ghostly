@@ -90,12 +90,13 @@ export function desktopOnlyFiles(bundle: Iterable<{ type: string; fileName: stri
 /**
  * What only an online flow loads, by module id: a Pubky approval (it waits on a relay for a remote signer) and the
  * homeserver reads, a Keet proof (signed for, or checked from, a contact on a live channel), a device handoff's PAKE
- * (both devices online), and the USDT and Ark wallets' adapters and SDK (nothing without their RPC or Ark server; their
- * wasm is not precached either). 2.4 MiB of the build: cached the first time one is used, not at install.
+ * (both devices online), the USDT and Ark wallets' adapters and SDK (nothing without their RPC or Ark server; their
+ * wasm is not precached either), and a group call's LiveKit client with its E2EE worker (a call joins with a pass the
+ * node hands out, WISP 602). 3 MiB of the build: cached the first time one is used, not at install.
  */
 const ONLINE_ONLY_MODULES = [
   "/node_modules/@synonymdev/pubky/", "/node_modules/keet-identity-key/", "/node_modules/@serenity-kit/opaque/", "/node_modules/@arkade-os/sdk/",
-  "/paymentAdapters/usdt.ts", "/paymentAdapters/arkade.ts",
+  "/paymentAdapters/usdt.ts", "/paymentAdapters/arkade.ts", "/hooks/groupCallLivekit.ts",
 ];
 
 /** A language's dictionary, a chunk of its own (`loadLocale`). English is in the entry. */
@@ -111,15 +112,33 @@ export interface BundleFile {
   facadeModuleId?: string | null;
   imports?: readonly string[];
   dynamicImports?: readonly string[];
+  /** The files a chunk names by URL (a worker it starts, `new URL(…, import.meta.url)`), as Vite records them. */
+  viteMetadata?: { importedAssets?: ReadonlySet<string> } | null;
+  /** An asset's content: the app's page (`index.html`) names the scripts it loads. */
+  source?: string | Uint8Array;
+}
+
+/**
+ * The scripts the app's page loads, by file name: its module scripts and modulepreloads. Vite drops an entry chunk that is
+ * nothing but imports (the `main` group took its code) and names those in the page instead, so the page, not an entry
+ * chunk, is where the app starts.
+ */
+function pageScripts(bundle: readonly BundleFile[]): string[] {
+  const page = bundle.find((file) => file.type === "asset" && file.fileName === "index.html")?.source;
+  const html = typeof page === "string" ? page : page ? new TextDecoder().decode(page) : "";
+  return [...html.matchAll(/<(?:script[^>]*\ssrc|link[^>]*rel="modulepreload"[^>]*\shref)="\/?(assets\/[^"]+\.js)"/g)].map(([, name]) => name!);
 }
 
 /**
  * The build's chunks the install leaves to their first use: those only reached through a dynamic import of an
  * online-only module (`onlineOnly`) or of a language (`languages`, by language: the install takes the person's own,
- * `installList`). Walked from the entries along every import but those: a chunk any other path reaches is kept.
+ * `installList`). Walked from the entries and the scripts the app's page loads, along every import but those: a chunk
+ * any other path reaches is kept. A file an online-only chunk names by URL (its worker) is online-only too, unless a
+ * kept chunk names it as well.
  */
 export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: string[]; languages: Record<string, string[]> } {
-  const chunks = new Map([...bundle].filter((file) => file.type === "chunk").map((file) => [file.fileName, file]));
+  const files = [...bundle];
+  const chunks = new Map(files.filter((file) => file.type === "chunk").map((file) => [file.fileName, file]));
   const facade = (file: BundleFile) => file.facadeModuleId?.replace(/\\/g, "/") ?? "";
   const languageOf = (file: BundleFile) => LANGUAGE_MODULE.exec(facade(file))?.[1];
   const door = (file: BundleFile) => languageOf(file) !== undefined || ONLINE_ONLY_MODULES.some((id) => facade(file).includes(id));
@@ -134,7 +153,7 @@ export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: strin
     }
     return seen;
   };
-  const kept = walk([...chunks.values()].filter((file) => file.isEntry).map((file) => file.fileName), new Set(), true);
+  const kept = walk([...[...chunks.values()].filter((file) => file.isEntry).map((file) => file.fileName), ...pageScripts(files)], new Set(), true);
   const languages: Record<string, string[]> = {};
   for (const file of chunks.values()) {
     const language = languageOf(file);
@@ -142,7 +161,11 @@ export function optionalFiles(bundle: Iterable<BundleFile>): { onlineOnly: strin
     languages[language] = [...walk([file.fileName], new Set(), false)].filter((name) => !kept.has(name)).sort();
   }
   const ofLanguages = new Set(Object.values(languages).flat());
-  const onlineOnly = [...chunks.keys()].filter((name) => !kept.has(name) && !ofLanguages.has(name)).sort();
+  const onlineChunks = [...chunks.keys()].filter((name) => !kept.has(name) && !ofLanguages.has(name));
+  const assetsOf = (names: Iterable<string>) => [...names].flatMap((name) => [...(chunks.get(name)?.viteMetadata?.importedAssets ?? [])]);
+  const keptAssets = new Set(assetsOf([...kept, ...ofLanguages]));
+  const onlineAssets = assetsOf(onlineChunks).filter((name) => !keptAssets.has(name));
+  const onlineOnly = [...new Set([...onlineChunks, ...onlineAssets])].sort();
   return { onlineOnly, languages };
 }
 
@@ -173,8 +196,7 @@ export function installList(precache: readonly string[], languages: Readonly<Rec
 /**
  * What the build precaches: the app's page, its hashed files except the WebAssembly (wallets load theirs when
  * one is used, and they are most of the build's weight), the Desktop-only chunks and the optional ones (`leaveOut`), and the static
- * files beside it. Never the update check, the sign-in callback or the worker itself, nor the language detector's
- * worker: a build emits it as an asset, whether it translates or not.
+ * files beside it. Never the update check, the sign-in callback or the worker itself.
  */
 export function precacheList(files: readonly string[], leaveOut: readonly string[] = []): string[] {
   const left = new Set(leaveOut.map((file) => "/" + file.replace(/^\/+/, "")));
@@ -182,22 +204,42 @@ export function precacheList(files: readonly string[], leaveOut: readonly string
     .map((file) => "/" + file.replace(/^\/+/, ""))
     .filter((path) => !NEVER.has(path) && !left.has(path))
     .filter((path) => !/\.(wasm|map)$/.test(path))
-    .filter((path) => !path.startsWith("/assets/translateDetector.worker-"))
     .filter((path) => path !== "/index.html");
   return ["/", ...new Set(paths)].sort((a, b) => (a === "/" ? -1 : b === "/" ? 1 : a.localeCompare(b)));
 }
 
 /**
- * What the worker is built with, from the public folder's files and the bundle: the precache, and each language's files
- * (but English's, in the entry), which the install takes for the person's language only (`installList`).
+ * What the worker is built with, from the public folder's files and the bundle: the precache, each language's files
+ * (but English's, in the entry), which the install takes for the person's language only (`installList`), and the
+ * build's other hashed files (`lazy`: the WebAssembly, the online-only chunks), kept on their first use (`asset`).
+ * `bundle` is read before Vite's own `generateBundle`, its entry chunks still there for the walk (`optionalFiles`);
+ * `written`, when given, is what the build writes after it: a name it dropped (an entry chunk that was only imports,
+ * named in index.html instead) is in no list, as one 404 fails the install.
  */
-export function serviceWorkerFiles(publicFiles: readonly string[], bundle: readonly (BundleFile & { moduleIds?: readonly string[] })[]): { precache: string[]; languages: Record<string, string[]> } {
+export function serviceWorkerFiles(publicFiles: readonly string[], bundle: readonly (BundleFile & { moduleIds?: readonly string[] })[], written?: readonly string[]): { precache: string[]; languages: Record<string, string[]>; lazy: string[] } {
   const { onlineOnly, languages } = optionalFiles(bundle);
+  const kept = written && new Set(written.map((file) => "/" + file.replace(/^\/+/, "")));
+  const writes = (path: string) => !kept || !path.startsWith("/assets/") || kept.has(path);
   const leaveOut = [...desktopOnlyFiles(bundle), ...onlineOnly, ...Object.values(languages).flat()];
-  return {
-    precache: precacheList([...publicFiles, ...bundle.map((file) => file.fileName)], leaveOut),
-    languages: Object.fromEntries(Object.entries(languages).map(([language, files]) => [language, files.map((file) => "/" + file.replace(/^\/+/, ""))])),
-  };
+  const precache = precacheList([...publicFiles, ...bundle.map((file) => file.fileName)], leaveOut).filter(writes);
+  const byLanguage = Object.fromEntries(Object.entries(languages).map(([language, files]) => [language, files.map((file) => "/" + file.replace(/^\/+/, "")).filter(writes)]));
+  const installed = new Set([...precache, ...Object.values(byLanguage).flat()]);
+  const lazy = [...new Set(bundle.map((file) => "/" + file.fileName.replace(/^\/+/, "")))]
+    .filter((path) => path.startsWith("/assets/") && !path.endsWith(".map") && !installed.has(path) && writes(path))
+    .sort();
+  return { precache, languages: byLanguage, lazy };
+}
+
+/**
+ * The files the install takes from the caches of earlier builds (`held`, path → cache) instead of the network: a hashed
+ * file has a digest of its content in its name, so the copy an older cache holds is the file. The browser's HTTP cache
+ * may have let it go: the worker answered from its own cache since, so nothing read it, and clearing the browser's
+ * cached files empties it but not the worker's. Those it needs (`wanted`), and those it keeps on first use (`lazy`) that
+ * an earlier build kept: the next use of a wallet does not download its WebAssembly again. Never the files whose
+ * names stay from one deploy to the next (`precacheMode`).
+ */
+export function carriedOver(wanted: readonly string[], lazy: readonly string[], held: ReadonlyMap<string, string>): string[] {
+  return [...new Set([...wanted, ...lazy])].filter((path) => precacheMode(path) === "default" && held.has(path));
 }
 
 /**
@@ -339,12 +381,12 @@ export function pushScopeProfile(scope: string): string | null {
  * who does not could otherwise fill the screen with "Incoming call" notices that stay until dismissed. Past the gap
  * the next one shows; inside it the notice already on screen is kept, with no new sound.
  */
-export const WAKE_NOTICE_GAP_MS = { call: 30_000, message: 5 * 60_000 } as const;
+export const WAKE_NOTICE_GAP_MS = { call: 30_000, message: 5 * 60_000, online: 30 * 60_000 } as const;
 
-/** Whether a wake-up of this kind may show now, given when this token last showed one of its kind. */
-export function wakeNoticeDue(lastShown: number | undefined, call: boolean, now: number): boolean {
+/** Whether a wake-up of this kind (true: a call; "online": an online notice) may show now, given when this token last showed one of its kind. */
+export function wakeNoticeDue(lastShown: number | undefined, call: boolean | "online", now: number): boolean {
   if (lastShown === undefined || lastShown > now) return true;
-  return now - lastShown >= WAKE_NOTICE_GAP_MS[call ? "call" : "message"];
+  return now - lastShown >= WAKE_NOTICE_GAP_MS[call === "online" ? "online" : call ? "call" : "message"];
 }
 
 /** A notice the push worker shows. `quiet`: no sound, no vibration, nothing that stays up (a device that is not the active one). */
@@ -364,7 +406,7 @@ export interface NoticeDevice {
   active?: string;
   /** The tokens this device gave its other devices, each with that device's name. */
   tokens: Record<string, string>;
-  /** The chats' tokens the active device still hands out; a token not among them shows nothing. Absent: any. */
+  /** The chats' tokens the active device still hands out; a token not among them shows no notice of its own. Absent: any. */
   allowed?: string[];
 }
 
@@ -390,11 +432,11 @@ const fill = (template: string, device: string) => template.split("{device}").jo
  *   "Call for you. Active on <device>.", quietly, and a tap opens the standby screen. Once the active device said which
  *   chats' tokens it hands out (`allowed`), only those show: a chat deleted or muted there stays quiet here. Before it
  *   said, any well-formed wake-up shows (a chat made on the active device has a token this one never knew), except one
- *   this device knows for a muted chat. A removed device shows nothing.
+ *   this device knows for a muted chat. A removed device shows no notice of its own. In every such case the worker shows `quietWakeNotice`.
  * - **The active device, or a profile on one device**: today's notices (`wakeNotice`).
  */
 export function pushNotice(
-  wake: { token: string; kind: "message" | "call" | "device" } | null,
+  wake: { token: string; kind: "message" | "call" | "online" | "device" } | null,
   found: Parameters<typeof wakeNotice>[0],
   device: NoticeDevice | null,
   options: { now: number; appVisible: boolean; profile: string; text?: Partial<Record<keyof typeof DEVICE_NOTICE_DEFAULTS, string>> & { title?: string } },
@@ -405,13 +447,15 @@ export function pushNotice(
   const home = { path: "/", profile: options.profile };
   const runs = !device || device.state === "active";
   if (wake.kind === "device") {
-    const asker = device?.tokens[wake.token];
-    if (asker === undefined || options.appVisible) return null;
-    const name = asker || "Ghostly";
+    // Only a token of its own: one that names what every object has (`__defineGetter__`) is no device's.
+    if (!device || !Object.prototype.hasOwnProperty.call(device.tokens, wake.token) || options.appVisible) return null;
+    const name = device.tokens[wake.token] || "Ghostly";
     return { title, body: fill(runs ? text.takeover : text.moveHere, name), tag: `device:${options.profile}`, call: false, data: home };
   }
   if (runs) return wakeNotice(found, { now: options.now, appVisible: options.appVisible, profile: options.profile, kind: wake.kind });
-  if (device.state === "removed" || options.appVisible) return null;
+  // A contact online is news only where the person is: the active device. Here it has no notice of its own (the worker
+  // shows `quietWakeNotice`).
+  if (device.state === "removed" || options.appVisible || wake.kind === "online") return null;
   // A chat deleted or muted on the active device, or a token nobody hands out any more (a removed device's): nothing.
   if (device.allowed && !device.allowed.includes(wake.token)) return null;
   const muted = found?.entry.mutedUntil;
@@ -422,21 +466,58 @@ export function pushNotice(
 }
 
 /**
- * What a wake-up shows (WISP 401 § Wake-up push): "New message" for a chat the token names, or nothing at all
- * for a token this profile no longer knows (a contact it stopped sharing with), for a muted chat, and while the
- * app is on screen (it is live, and the message arrives by itself). Never a sender or any text of the message.
+ * What a push with nothing of its own to show shows (WISP 401 § Wake-up push): the app's name alone, quietly, one per
+ * profile, replaced in place. Browsers end a subscription whose pushes show nothing, so the worker never shows nothing.
  */
-export function wakeNotice(found: { entry: { path: string; mutedUntil?: number | "forever" }; text: { title: string; body: string; call?: string } } | undefined, options: { now: number; appVisible: boolean; profile: string; kind?: "message" | "call" }):
+export function quietWakeNotice(profile: string, title?: string): Omit<PushNotice, "quiet"> {
+  return { title: title || "Ghostly", body: "", tag: quietWakeTag(profile), call: false, data: { path: "/", profile } };
+}
+
+/** The tag of a profile's quiet notice (`quietWakeNotice`): a notice of the profile that says something closes it. */
+export function quietWakeTag(profile: string): string {
+  return `quiet:${profile}`;
+}
+
+/** The tag of a chat's wake-up notice, one per kind: an online notice never replaces a "New message", nor either a call. */
+export function wakeTag(kind: "wake" | "wake-call" | "wake-online", profile: string, path: string): string {
+  return `${kind}:${profile}:${path}`;
+}
+
+/**
+ * The wake-up notices of a chat that are stale once the person has it on screen: its "New message" and its online
+ * notice. A call's is not among them: it says the caller is waiting, and it stays while the call rings.
+ */
+export function seenChatWakeTags(profile: string, path: string): string[] {
+  return [wakeTag("wake", profile, path), wakeTag("wake-online", profile, path)];
+}
+
+/**
+ * What a wake-up shows (WISP 401 § Wake-up push): "New message" for a chat the token names, or no notice of its own
+ * (the worker shows `quietWakeNotice`) for a token this profile no longer knows (a contact it stopped sharing with),
+ * for a muted chat, and while the app is on screen (it is live, and the message arrives by itself). Never a sender or
+ * any text of the message.
+ * An online notice (revision 2026-10-27) names the contact only by the name the table already holds for that chat,
+ * else "A contact is online"; only for a 1:1 chat, under a tag of its own so it never replaces a "New message".
+ * With "Notify me when a contact comes online" turned off here (`onlineOff`, written by the page), an online push has no
+ * notice of its own (the worker shows `quietWakeNotice`): a contact that has not heard of the switch yet still sends one.
+ */
+export function wakeNotice(found: { entry: { path: string; name?: string; mutedUntil?: number | "forever" }; text: { title: string; body: string; call?: string; online?: string; onlineUnnamed?: string; onlineOff?: boolean } } | undefined, options: { now: number; appVisible: boolean; profile: string; kind?: "message" | "call" | "online" }):
   { title: string; body: string; tag: string; call: boolean; data: { path: string; profile: string } } | null {
   if (!found || options.appVisible) return null;
   const { entry, text } = found;
   if (entry.mutedUntil === "forever" || (typeof entry.mutedUntil === "number" && entry.mutedUntil > options.now)) return null;
   if (!/^\/(chat|group)\/[^/?#]+$/.test(entry.path)) return null;
+  if (options.kind === "online") {
+    if (!entry.path.startsWith("/chat/") || text.onlineOff) return null;
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    const body = name ? (text.online || "{name} is online").split("{name}").join(name) : text.onlineUnnamed || "A contact is online";
+    return { title: text.title, body, tag: wakeTag("wake-online", options.profile, entry.path), call: false, data: { path: entry.path, profile: options.profile } };
+  }
   // A call says so ("Incoming call", the app's own words): the caller is waiting for the chat to go live.
   // Groups have no calls: a group's token woken as a call is a message wake-up (WISP 902 · Group Mesh § Wake-up push).
   const call = options.kind === "call" && entry.path.startsWith("/chat/");
   return {
-    title: text.title, body: call ? text.call || "Incoming call" : text.body, tag: `${call ? "wake-call" : "wake"}:${options.profile}:${entry.path}`, call,
+    title: text.title, body: call ? text.call || "Incoming call" : text.body, tag: wakeTag(call ? "wake-call" : "wake", options.profile, entry.path), call,
     data: { path: entry.path, profile: options.profile },
   };
 }

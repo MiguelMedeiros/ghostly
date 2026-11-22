@@ -3,6 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
 import { GIF, chat, expect, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
+import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 
 /**
  * A message's details (WISP 400 § Message details), between two people on the web: a text, a file and a voice
@@ -14,6 +15,7 @@ const SAMPLE = fileURLToPath(new URL("../support/voice-sample.wav", import.meta.
 
 test.use({
   launchOptions: {
+    chromiumSandbox: CHROMIUM_SANDBOX,
     args: [
       "--disable-features=WebRtcHideLocalIpsWithMdns",
       "--use-fake-device-for-media-stream",
@@ -39,8 +41,11 @@ async function openFromMenu(peer: Peer, row: Locator) {
 /**
  * Each value that copies is at least 24 px tall (WCAG 2.2 SC 2.5.8), at whatever width the page has: the rows sit
  * 2 px apart, so a shorter one has no spacing exception and a near miss copies its neighbour. And axe agrees.
+ * Measured once the panel has slid in: mid-slide its rows are mapped through a fractional translate, and a 24 px row
+ * reads 23.99994 (it stays in getAnimations(), filled).
  */
 async function copiesAreTargets(page: Page) {
+  await panel(page).evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
   const copies = panel(page).getByTestId("message-details-copy");
   expect(await copies.count()).toBeGreaterThan(1);
   for (const box of await copies.evaluateAll((all) => all.map((copy) => copy.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(24);

@@ -424,6 +424,107 @@ describe("while the contact is away, a file's offer takes its place on the DHT f
     await vi.waitFor(() => expect(c.said).toEqual(["m1 floor", "f2 floor", "m3 floor"]));
     await c.box.stop();
   });
+
+  // Ten files sent a minute apart to an away contact, each said on the floor: each kept a check of its own every five
+  // minutes, which read the chat's whole history and could not send it, 60 whole reads an hour for as long as the
+  // contact stayed away (300,600 rows an hour at 5,000 messages).
+  it("files whose offers are on the floor read none of the chat's history while the contact stays away", async () => {
+    vi.useFakeTimers();
+    const rows = Array.from({ length: 5_000 }, (_, i) => row(i + 1, "delivered")), said: string[] = [];
+    const counted = { reads: 0, rows: 0 }, state = { live: false };
+    const store = {
+      read: async () => { counted.reads++; counted.rows += rows.length; return rows.map(m => ({ ...m })); },
+      get: async (id: string) => { const m = rows.find(r => r.id === id); return m && { ...m }; },
+      getMany: async (ids: string[]) => ids.map(id => { const m = rows.find(r => r.id === id); return m && { ...m }; }),
+      update: async (id: string, delivery: Delivery, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        const found = rows.find(m => m.id === id);
+        if (found && found.delivery !== "delivered") Object.assign(found, extra, { delivery, deliveryError: error });
+      },
+    };
+    const box = new Outbox(store, async () => null, 60_000, undefined, { resender: {
+      ready: m => state.live || (!!m.file && !m.wireId && !m.fileOnFloor),
+      via: () => (state.live ? "datalink" : "pkarr"),
+      sendFile: async message => {
+        const found = rows.find(m => m.id === message.id)!;
+        said.push(`${message.text} ${state.live ? "live" : "floor"}`);
+        if (state.live) delete found.delivery; else found.fileOnFloor = "sent";
+      },
+    } });
+    for (let n = 1; n <= 10; n++) {
+      await box.storing(Promise.resolve(rows.push(file(10_000 + n))));
+      // A look at the chat as each is sent: its offer goes on the floor.
+      await box.flush({ reopened: true });
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+    expect(said).toHaveLength(10);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    counted.reads = 0; counted.rows = 0;
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(counted).toEqual({ reads: 0, rows: 0 });
+    // Back live: every file goes, in the order they were written.
+    state.live = true;
+    await box.flush({ reopened: true });
+    expect(said.slice(10)).toEqual(Array.from({ length: 10 }, (_, i) => `f${10_001 + i} live`));
+    await box.stop();
+  });
+
+  // Three texts written a minute apart to an away contact, with no held items: each kept a check every five minutes
+  // that read the chat's whole history and could not send it, 36 whole reads an hour (180,000 rows at 5,000 messages)
+  // for as long as the contact stayed away, up to the 7-day window.
+  it("texts waiting for an away contact read none of the chat's history at their checks, and go once it is live", async () => {
+    vi.useFakeTimers();
+    const rows = Array.from({ length: 5_000 }, (_, i) => row(i + 1, "delivered")), sent: string[] = [];
+    const counted = { reads: 0, rows: 0 }, state = { live: false };
+    const store = {
+      read: async () => { counted.reads++; counted.rows += rows.length; return rows.map(m => ({ ...m })); },
+      get: async (id: string) => { const m = rows.find(r => r.id === id); return m && { ...m }; },
+      getMany: async (ids: string[]) => ids.map(id => { const m = rows.find(r => r.id === id); return m && { ...m }; }),
+      update: async (id: string, delivery: Delivery, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        const found = rows.find(m => m.id === id);
+        if (found && found.delivery !== "delivered") Object.assign(found, extra, { delivery, deliveryError: error });
+      },
+    };
+    // The contact's receipt comes as each goes.
+    const box: Outbox = new Outbox(store, async m => { sent.push(m.text); await box.received(m.wireId!); return null; }, 60_000, undefined, { resender: { ready: () => state.live } });
+    await box.recover();
+    for (const n of [10_001, 10_002, 10_003]) {
+      // As the engine does for a text the chat cannot carry: stored waiting, then handed over.
+      rows.push(row(n, "waiting", { timestamp: Date.now(), deliveryError: "Sent when your contact is reachable." }));
+      await box.wait(`me_${wire(n)}`, "Sent when your contact is reachable.");
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    counted.reads = 0; counted.rows = 0;
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(counted).toEqual({ reads: 0, rows: 0 });
+    expect(sent).toEqual([]);
+    // Still within its window: each waits, and each goes at its next check once the contact is reachable.
+    expect([10_001, 10_002, 10_003].map(n => rows.find(m => m.id === `me_${wire(n)}`)?.delivery)).toEqual(["waiting", "waiting", "waiting"]);
+    state.live = true;
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(sent).toEqual(["m10001", "m10002", "m10003"]);
+    await box.stop();
+  });
+
+  it("a text waiting for an away contact still fails at the end of its window, read by id", async () => {
+    vi.useFakeTimers();
+    const rows = Array.from({ length: 1_000 }, (_, i) => row(i + 1, "delivered"));
+    const counted = { reads: 0 };
+    const box = new Outbox({
+      read: async () => { counted.reads++; return rows.map(m => ({ ...m })); },
+      get: async (id: string) => { const m = rows.find(r => r.id === id); return m && { ...m }; },
+      getMany: async (ids: string[]) => ids.map(id => { const m = rows.find(r => r.id === id); return m && { ...m }; }),
+      update: async (id, delivery, error, extra) => { const found = rows.find(m => m.id === id); if (found && found.delivery !== "delivered") Object.assign(found, extra, { delivery, deliveryError: error }); },
+    }, async () => null, 60_000, undefined, { resender: { ready: () => false }, monotonic: () => Date.now(), boot: null });
+    await box.recover();
+    rows.push(row(2_000, "waiting", { timestamp: Date.now() }));
+    await box.wait(`me_${wire(2_000)}`, "Sent when your contact is reachable.");
+    const reads = counted.reads;
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.windowMs + 10 * 60_000);
+    expect(rows[1_000].delivery).toBe("failed");
+    expect(counted.reads).toBe(reads);
+    await box.stop();
+  });
 });
 
 /**
@@ -575,6 +676,19 @@ describe("a new text while others of mine are on their way", () => {
     expect(c.counts.reads).toBe(reads + 1);
     expect(c.counts.gets - gets).toBeLessThanOrEqual(1);
     expect(c.sent[c.sent.length - 1]).toBe("m41");
+    await c.box.stop();
+  });
+
+  it("reads the rows on their way in one go, however many, where the store can", async () => {
+    const c = long(1_000), batches: number[] = [];
+    Object.assign(c.box["store"], { getMany: async (ids: string[]) => { batches.push(ids.length); return ids.map(id => { const found = c.rows.find(m => m.id === id); return found && { ...found }; }); } });
+    for (let n = 1001; n <= 1040; n++) await c.box.transmit(c.add(row(n, "sending")));
+    const { reads, gets } = c.counts;
+    await c.box.transmit(c.add(row(1041, "sending")));
+    expect([c.counts.reads - reads, c.counts.gets - gets]).toEqual([0, 0]);
+    // The forty awaiting their receipts and the new one.
+    expect(batches[batches.length - 1]).toBe(41);
+    expect(c.sent).toEqual(Array.from({ length: 41 }, (_, i) => `m${1001 + i}`));
     await c.box.stop();
   });
 

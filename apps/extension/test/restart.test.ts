@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
-import { OTHER_PEER, PEER, SERVICE, TAG, bodyText, bootExtension, engine, openViewer, pauseRequest, restartServiceWorker } from "./extension";
+import { OTHER_PEER, PEER, SERVICE, TAG, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest, restartServiceWorker } from "./extension";
 
 // covers: extension.engine, services.open, app.updates.extension
 
@@ -53,6 +53,7 @@ describe("after the service worker restarts", () => {
   });
 
   it("does not create a second document when it stopped while the first was still starting", async () => {
+    endBootPeer(world);
     let loadPeer!: () => void;
     const loaded = new Promise<void>((resolve) => (loadPeer = resolve));
     world.onCreateDocument = async () => {
@@ -63,12 +64,16 @@ describe("after the service worker restarts", () => {
     await settle();
     expect(world.offscreenDocument).toBe(true);
 
-    await restartServiceWorker(world);
+    // The new worker starts the peer as it loads, and that start waits on the document's script too.
+    world.restartServiceWorker();
+    vi.resetModules();
+    await world.load("background", () => import("../src/background.ts"));
     const reply = send({ target: "background", type: "ensure-engine" });
     await settle();
     loadPeer();
     expect(await reply).toEqual({ ok: true });
-    expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
+    // The one the worker made as it first loaded, and the one in place of it: none by the restarted worker.
+    expect(world.callsTo("offscreen.createDocument")).toHaveLength(2);
   });
 
   it("keeps an update Chrome announced before the restart", async () => {
@@ -99,5 +104,6 @@ describe("after the service worker restarts", () => {
     expect(background(world.chrome.debugger.onDetach as never)).toBe(1);
     expect(background(world.chrome.action.onClicked as never)).toBe(1);
     expect(background(world.chrome.tabs.onRemoved as never)).toBe(1);
+    expect(background(world.chrome.alarms.onAlarm as never)).toBe(1);
   });
 });

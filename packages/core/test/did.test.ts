@@ -189,6 +189,25 @@ describe("DID documents", () => {
     expect(() => parseDidDocument(ported, { id: "did:web:example.com%3a8444:u" })).toThrow(/another DID/);
   });
 
+  it("reads a did:web whose document writes the domain in capitals as the same DID, as it reads what was typed", () => {
+    // A domain names one host whatever its case, and parseDid lowercases it: the owner's own writing was refused as "another DID".
+    const typed = "did:web:Example.COM:User";
+    const canonical = normalizeDid(typed);
+    expect(canonical).toBe("did:web:example.com:User");
+    const k = keyOn("Ed25519");
+    const view = parseDidDocument(canonical, {
+      id: typed,
+      verificationMethod: [{ id: `${typed}#key-1`, type: "JsonWebKey2020", publicKeyJwk: { kty: "OKP", crv: "Ed25519", x: b64u(k.pub) } }],
+      authentication: [`${typed}#key-1`],
+    });
+    expect(view.keys.map(key => [key.id, key.relationships.join("+")])).toEqual([[`${canonical}#key-1`, "authentication"]]);
+    expect(didWebFileNames(didWebFile(typed, STATEMENT), canonical, STATEMENT)).toBe(true);
+    expect(checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view, `${typed}#key-1`).key.id).toBe(`${canonical}#key-1`);
+    expect(checkDidJws(k.jws({ kid: `${typed}#key-1` }), messages, view).key.id).toBe(`${canonical}#key-1`);
+    // A path is not a domain: its case still names another document.
+    expect(() => parseDidDocument(canonical, { id: "did:web:example.com:user" })).toThrow(/another DID/);
+  });
+
   it("refuses a document for another DID, or not an object", () => {
     expect(() => parseDidDocument(did, { ...doc, id: "did:web:evil.example" })).toThrow(/another DID/);
     expect(() => parseDidDocument(did, [])).toThrow(/not a JSON object/);
@@ -261,7 +280,7 @@ describe("DID signatures", () => {
     expect(() => checkDidJws(other.jws({}), messages, k.doc())).toThrow(/does not match/);
     expect(() => checkDidJws(k.jws({}, utf8Encode("something else")), messages, k.doc())).toThrow(/another text/);
     expect(() => checkDidJws(k.jws({ kid: `${other.did}#x` }), messages, k.doc())).toThrow(/not a key of/);
-    expect(() => checkDidJws(k.jws({ kid: `${k.did}#nope` }), messages, k.doc())).toThrow(/lists no key/);
+    expect(() => checkDidJws(k.jws({ kid: `${k.did}#nope` }), messages, k.doc())).toThrow(/^The DID document does not list the key the JWS names$/);
     expect(() => checkDidSignature(other.raw(utf8Encode(STATEMENT)), messages, k.doc())).toThrow(/does not match/);
     const secp = keyOn("secp256k1");
     expect(() => checkDidJws(secp.jws({}), messages, k.doc())).toThrow(/no secp256k1 key/);
@@ -286,8 +305,8 @@ describe("DID signatures", () => {
     }
     // Named by its id that may not sign, it is still refused.
     const view = parseDidDocument(did, { id: did, verificationMethod: [vm("#enc"), vm("#sig")], authentication: ["#sig"] });
-    expect(() => checkDidJws(k.jws({ kid: "#enc" }), messages, view)).toThrow(/#enc, which the DID document does not list/);
-    expect(() => checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view, "#enc")).toThrow(/#enc, which the DID document does not list/);
+    expect(() => checkDidJws(k.jws({ kid: "#enc" }), messages, view)).toThrow(/^Signed by a key the DID document does not list/);
+    expect(() => checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view, "#enc")).toThrow(/^Signed by a key the DID document does not list/);
   });
 
   it("parses only JWS it can check", () => {

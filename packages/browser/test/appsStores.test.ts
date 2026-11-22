@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { APP_CHECK_TIMINGS } from "../src/engine/apps";
 import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, boundedAppFetch, isAppFetchUrl } from "../src/engine/appFetch";
 import { DEFAULT_APP_STORES, DEFAULT_STORE_KEY, DEFAULT_STORE_URL } from "../src/engine/appDefaults";
-import { isAppKey, readAppStoreSteps } from "@ghostly/core";
+import { canonicalJsonBytes, isAppKey, readAppStoreSteps } from "@ghostly/core";
 import {
-  BUNDLE_URL, FakeNet, NOW_MS, NOW_S, PINNED_URL, SIG_URL, STORE_KEY, STORE_URL, apps, bundle, emptyProfile, keyOf, listing, revocation, signer, storeFiles,
+  BUNDLE_URL, FakeNet, NOW_MS, NOW_S, PINNED_URL, REPO, SIG_URL, STORE_KEY, STORE_URL, apps, bundle, emptyProfile, keyOf, listing, revocation, signer, storeFiles,
 } from "./appsSupport";
 // covers: apps.engine.stores, apps.engine.network
 
@@ -267,7 +267,28 @@ describe("no request with nothing installed", () => {
     store.stop();
   });
 
-  it("the scheduled check waits while the network is off", async () => {
+  it("a check marked ahead of the clock (the clock went back since) is not fresh: the check after start runs, and marks it now", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    // Checked while the device's clock ran a year ahead.
+    const ahead = Date.now() + 365 * 24 * 60 * 60 * 1000;
+    const first = apps(net, { now: () => ahead });
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    await first.checkUpdates();
+    expect(await first.list()).toMatchObject([{ checkedAt: ahead }]);
+    net.fetch.mockClear();
+    clock();
+    const store = apps(net, { now: () => Date.now() });
+    await store.start();
+    await pass(APP_CHECK_TIMINGS.afterStartMs);
+    expect(net.fetch, "the check after start").toHaveBeenCalled();
+    const [app] = await store.list();
+    expect(app!.checkedAt, "marked at the clock's time, so the next start judges it").toBeLessThanOrEqual(Date.now());
+    store.stop();
+  });
+
+  it("the scheduled check waits while the network is off, and runs soon after it comes back, not a day later", async () => {
     const v1 = await bundle({ sources: [BUNDLE_URL] });
     net.put(BUNDLE_URL, v1.bytes);
     const first = apps(net);
@@ -275,11 +296,146 @@ describe("no request with nothing installed", () => {
     await first.install({ digest: v1.digest, grant: ["chat"] });
     net.fetch.mockClear();
     clock();
-    const store = apps(net, { online: () => false });
+    let online = false;
+    const store = apps(net, { online: () => online });
     await store.start();
     await pass(APP_CHECK_TIMINGS.afterStartMs);
     await pass(APP_CHECK_TIMINGS.everyMs);
     expect(net.fetch).not.toHaveBeenCalled();
+    online = true;
+    await pass(APP_CHECK_TIMINGS.offlineRetryMs);
+    expect(net.fetch, "the check the network missed").toHaveBeenCalled();
+    store.stop();
+  });
+
+  /** Every request of `net` fails while `down()` says so: as `fail` (a thrown fetch, no network) or with that status. */
+  function outage(down: () => false | "fail" | number): void {
+    const real = net.fetch.getMockImplementation()! as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const now = down();
+      if (now === "fail") { net.requests.push(String(input)); throw new TypeError("Failed to fetch"); }
+      if (now) { net.requests.push(String(input)); return new Response("busy", { status: now }); }
+      return real(input, init);
+    });
+  }
+
+  it("a scheduled check none of whose reads answer (no network on the device, Ghostly's on) is not a check: tried again soon, and a revocation published meanwhile is read then", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    const [installed] = await first.list();
+    clock();
+    let down: false | "fail" = "fail";
+    outage(() => down);
+    net.fetch.mockClear();
+    const store = apps(net, { now: () => Date.now() });
+    await store.start();
+    await pass(APP_CHECK_TIMINGS.afterStartMs);
+    expect(net.fetch, "the check after start ran, and every read failed").toHaveBeenCalled();
+    expect((await store.list())[0]!.checkedAt, "not marked checked").toBe(installed!.checkedAt);
+    // A reload within the hour: the failed check is not taken as a fresh one.
+    store.stop();
+    net.fetch.mockClear();
+    const reloaded = apps(net, { now: () => Date.now() });
+    await reloaded.start();
+    await pass(APP_CHECK_TIMINGS.afterStartMs);
+    expect(net.fetch, "the check after the reload runs").toHaveBeenCalled();
+    // The publisher revokes the installed version, and the network comes back.
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v1.digest])]));
+    down = false;
+    net.fetch.mockClear();
+    await pass(APP_CHECK_TIMINGS.offlineRetryMs);
+    expect(net.fetch.mock.calls.map(([u]) => String(u)), "tried again 10 minutes later, not a day later").toContain(`${REPO}/ghostly-revoke.json`);
+    const [app] = await reloaded.list();
+    expect(app!.run, "the revocation read").toMatchObject({ status: "revoked", reason: "Leaked key" });
+    expect(app!.checkedAt, "marked checked now").toBeGreaterThan(Date.now() - APP_CHECK_TIMINGS.offlineRetryMs);
+    // Reached: the next check is the next day's.
+    net.fetch.mockClear();
+    await pass(APP_CHECK_TIMINGS.everyMs - 1000);
+    expect(net.fetch).not.toHaveBeenCalled();
+    await pass(1000);
+    expect(net.fetch).toHaveBeenCalled();
+    reloaded.stop();
+  });
+
+  it("a host answering 503 or 429 to every read is tried again after 10 minutes, then later each time, up to every 2 hours", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    const [installed] = await first.list();
+    clock();
+    let down: false | number = 503;
+    outage(() => down);
+    net.fetch.mockClear();
+    const store = apps(net, { now: () => Date.now() });
+    await store.start();
+    await pass(APP_CHECK_TIMINGS.afterStartMs);
+    expect(net.fetch).toHaveBeenCalled();
+    expect((await store.list())[0]!.checkedAt, "a 503 is not an answer").toBe(installed!.checkedAt);
+    down = 429;
+    // 10, 20, 40, 80 minutes, then 2 hours each time.
+    for (const minutes of [10, 20, 40, 80, 120, 120]) {
+      net.fetch.mockClear();
+      await pass(minutes * 60_000 - 1000);
+      expect(net.fetch, `not before ${minutes} minutes`).not.toHaveBeenCalled();
+      await pass(1000);
+      expect(net.fetch, `tried again after ${minutes} minutes`).toHaveBeenCalled();
+    }
+    expect((await store.list())[0]!.checkedAt, "a 429 is not an answer").toBe(installed!.checkedAt);
+    store.stop();
+  });
+
+  it("a publisher with no revocations file (404) answered: the app is marked checked, and the next check is a day later", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    clock();
+    net.fetch.mockClear();
+    const store = apps(net, { now: () => Date.now() });
+    await store.start();
+    await pass(APP_CHECK_TIMINGS.afterStartMs);
+    expect(net.fetch.mock.calls.map(([u]) => String(u)), "the revocations file asked: 404").toContain(`${REPO}/ghostly-revoke.json`);
+    expect((await store.list())[0]!.checkedAt, "marked checked").toBeGreaterThan(Date.now() - APP_CHECK_TIMINGS.afterStartMs);
+    net.fetch.mockClear();
+    await pass(APP_CHECK_TIMINGS.everyMs - 1000);
+    expect(net.fetch, "no retry: the 404 is an answer").not.toHaveBeenCalled();
+    await pass(1000);
+    expect(net.fetch).toHaveBeenCalled();
+    store.stop();
+  });
+
+  it("a scheduled check whose read of the installed apps fails once is tried again soon, and the checks go on", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const first = apps(net);
+    await first.preview({ url: BUNDLE_URL });
+    await first.install({ digest: v1.digest, grant: ["chat"] });
+    net.fetch.mockClear();
+    clock();
+    const store = apps(net, { now: () => Date.now() });
+    await store.start();
+    // The installed list's read fails once (a lost IndexedDB connection), at the check after start.
+    const getAll = IDBObjectStore.prototype.getAll;
+    let failing = true;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "getAll").mockImplementation(function (this: IDBObjectStore, ...args) {
+      if (failing && this.name === "apps") { failing = false; throw new DOMException("Connection to Indexed Database server lost", "UnknownError"); }
+      return getAll.apply(this, args);
+    });
+    await pass(APP_CHECK_TIMINGS.afterStartMs);
+    spy.mockRestore();
+    expect(failing, "the read failed").toBe(false);
+    expect(net.fetch).not.toHaveBeenCalled();
+    await pass(APP_CHECK_TIMINGS.offlineRetryMs);
+    const retried = net.fetch.mock.calls.length;
+    expect(retried, "the check the failed read missed, 10 minutes later").toBeGreaterThan(0);
+    await pass(APP_CHECK_TIMINGS.everyMs);
+    expect(net.fetch.mock.calls.length, "and the next day's").toBeGreaterThan(retried);
     store.stop();
   });
 });
@@ -488,6 +644,26 @@ describe("stores", () => {
     }
   });
 
+  it("the preview of a store removed says what Add would refuse: an index older than the last one taken, or another under its sequence", async () => {
+    const OLD_URL = `https://cdn.jsdelivr.net/gh/ghostly/store@${"0".repeat(40)}/ghostly-store.json`;
+    await net.putStore(await storeFiles({ sequence: 5 }), OLD_URL);
+    await net.putStore(await storeFiles({ sequence: 6 }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL });
+    await store.removeStore({ key: keyOf(STORE_KEY) });
+    const older = await store.previewStore({ url: OLD_URL });
+    expect(older).toMatchObject({ sequence: 5, refused: "rollback" });
+    expect(older.held, "a store removed is not one the person has").toBeUndefined();
+    await expect(store.addStore({ url: OLD_URL })).rejects.toThrow(/^rollback/);
+    await net.putStore(await storeFiles({ sequence: 6, apps: [listing(await bundle())] }), OLD_URL);
+    expect(await store.previewStore({ url: OLD_URL })).toMatchObject({ sequence: 6, refused: "equivocation" });
+    // The one last taken, or a newer one, is offered as the first time.
+    expect(await store.previewStore({ url: STORE_URL })).not.toHaveProperty("refused");
+    await net.putStore(await storeFiles({ sequence: 7 }), OLD_URL);
+    expect(await store.previewStore({ url: OLD_URL })).not.toHaveProperty("refused");
+    expect(await store.addStore({ url: OLD_URL })).toMatchObject({ sequence: 7 });
+  });
+
   it("an index whose bytes have not changed is not checked again, only its expiry; a changed one is read whole", async () => {
     const v1 = await bundle();
     await net.putStore(await storeFiles({ apps: [listing(v1)], revoked: [await revocation(v1.ref, [v1.digest])], expires: NOW_S + 3600 }));
@@ -568,5 +744,27 @@ describe("stores", () => {
     net.fetch.mockClear();
     await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).rejects.toThrow(/^host/);
     expect(net.fetch).not.toHaveBeenCalled();
+  });
+
+  it("a listing none of whose URLs read says the host's own trouble over another URL's refusal: trying again may read it", async () => {
+    const v1 = await bundle(), v2 = await bundle({ sequence: 2 });
+    const BUSY = "https://raw.githubusercontent.com/ana/chess/main/app.ghostlyapp";
+    const OTHER = "https://raw.githubusercontent.com/ana/chess-copy/HEAD/app.ghostlyapp";
+    const answer = net.fetch.getMockImplementation()!;
+    let status = 503;
+    net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input) === BUSY ? new Response("busy", { status }) : answer(input, init));
+    const store = apps(net);
+    // The busy URL first, then one that is not there (404), or holds a version the store does not list.
+    for (const [other, held] of [[OTHER, null], [OTHER, v2.bytes]] as const) {
+      if (held) net.put(other, held);
+      await net.putStore(await storeFiles({ sequence: held ? 3 : 2, apps: [listing(v1, [BUSY, other])] }));
+      if (held) await store.refreshStores(); else await store.addStore({ url: STORE_URL });
+      // 408: the host's own timeout, said as its trouble with Try again on the install screen (apps/ui lib/apps/errors.ts).
+      for (status of [503, 429, 408]) {
+        await expect(store.preview({ store: keyOf(STORE_KEY), ref: v1.ref }), `${status}, then ${held ? "another version" : "404"}`)
+          .rejects.toThrow(`status: The host answered ${status}`);
+      }
+    }
   });
 });

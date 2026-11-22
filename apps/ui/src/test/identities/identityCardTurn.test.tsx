@@ -78,7 +78,7 @@ it("waits again when the card is turned back and over once more", async () => {
   const { user } = open({ links: [paired()], identityProofs: [proofView({ id: "a" })] });
   await user.click(ghostly());
   await waitFor(() => expect(copyKey()).toBeEnabled());
-  await user.click(screen.getByRole("button", { name: "Choose another identity" }));
+  await user.click(screen.getByRole("button", { name: "Cards" }));
   await user.click(await screen.findByTestId("composer-identity-ghostly"));
   expect(copyKey()).toBeDisabled();
   await waitFor(() => expect(copyKey()).toBeEnabled());

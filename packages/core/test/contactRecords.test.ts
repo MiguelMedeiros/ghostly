@@ -4,7 +4,7 @@ import { createChatInvite } from "../src/invite";
 import { measureRecords } from "../src/pkarr";
 import { createContactLink } from "../src/contactLink";
 import {
-  ContactRequestError, contactDay, knockHolds, knockSlotIdentity, knockSlotOf, knockSlotRecords, linkRecords, makeStamp, makeStampPaced, mergeContactKnocks,
+  ContactRequestError, contactAskerFrame, contactAskerHolds, contactDay, knockHolds, knockSlotIdentity, knockSlotOf, knockSlotRecords, linkRecords, makeStamp, makeStampPaced, mergeContactKnocks,
   openRequest, readKnockSlot, readLinkRecord, requestPlaintextBytes, requestRecords, seenEntry, stampHolds,
   KNOCK_SLOTS, MAX_SEEN, MAX_SLOT_KNOCKS, REQUEST_LIFETIME_MS, REQUEST_PACKET_BYTES, type ContactKnock, type ContactRequest,
 } from "../src/contactRecords";
@@ -71,6 +71,31 @@ describe("a contact link's request", () => {
     const records = requestRecords(asker.seedB64, link.linkKeyZ32, request({ expires: NOW + 60_000 }));
     expect(openRequest(link.seedB64, asker.pubKeyZ32, records, NOW + 59_999)).not.toBeNull();
     expect(openRequest(link.seedB64, asker.pubKeyZ32, records, NOW + 60_000)).toBeNull();
+  });
+});
+
+describe("the asker's proof in the chat", () => {
+  const chat = { inviter: createIdentity().pubKeyZ32, joiner: createIdentity().pubKeyZ32 };
+  const expected = { link: link.linkKeyZ32, key: asker.pubKeyZ32 };
+
+  it("holds for the asker key, the link and the chat it was made in", () => {
+    const frame = contactAskerFrame(asker.seedB64, link.linkKeyZ32, chat);
+    expect(frame).toMatchObject({ t: "contact-asker", l: link.linkKeyZ32, k: asker.pubKeyZ32 });
+    expect(JSON.stringify(frame).length).toBeLessThan(300);
+    expect(contactAskerHolds(JSON.parse(JSON.stringify(frame)), expected, chat)).toBe(true);
+  });
+
+  it("holds for nothing else: another key, link, chat, the two sides swapped, a changed signature, or no frame", () => {
+    const frame = contactAskerFrame(asker.seedB64, link.linkKeyZ32, chat);
+    const other = createIdentity();
+    expect(contactAskerHolds(contactAskerFrame(other.seedB64, link.linkKeyZ32, chat), expected, chat)).toBe(false);
+    expect(contactAskerHolds({ ...contactAskerFrame(other.seedB64, link.linkKeyZ32, chat), k: asker.pubKeyZ32 }, expected, chat)).toBe(false);
+    expect(contactAskerHolds(contactAskerFrame(asker.seedB64, createContactLink().linkKeyZ32, chat), expected, chat)).toBe(false);
+    expect(contactAskerHolds(frame, expected, { ...chat, joiner: other.pubKeyZ32 })).toBe(false);
+    expect(contactAskerHolds(frame, expected, { inviter: chat.joiner, joiner: chat.inviter })).toBe(false);
+    expect(contactAskerHolds({ ...frame, s: (frame.s[0] === "A" ? "B" : "A") + frame.s.slice(1) }, expected, chat)).toBe(false);
+    expect(contactAskerHolds({ ...frame, t: "paired-message" }, expected, chat)).toBe(false);
+    for (const nothing of [null, undefined, "x", 1, {}]) expect(contactAskerHolds(nothing, expected, chat)).toBe(false);
   });
 });
 

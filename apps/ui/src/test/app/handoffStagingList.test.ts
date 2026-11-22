@@ -4,14 +4,17 @@ import { registerFileBytes, resetFileBytes, type FileBytes } from "@ghostly/brow
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import type { HandoffFile } from "@ghostly/browser/devices/handoff";
 import { handoffProfileHost } from "../../lib/handoffProfile";
+import { namespaceOf, registryKey } from "../../lib/profiles";
 // covers: devices.handoff
 
 /*
  * The note of which files a taker's staging holds whole and checked (WISP 06 § The handoff): what a pull that stopped
  * goes on from. It was one list under one key, read, parsed, written again whole for every file that began and for
  * every file that finished: a profile of 2,000 files moved 0.77 GB of text through the page's storage, on the page's
- * main thread, and the cost of each file grew with the files before it (bug hunt, 2026-10-09). Each file has its own
- * key now, so a file costs the same whether it is the first or the five-thousandth.
+ * main thread, and the cost of each file grew with the files before it (bug hunt, 2026-10-09). Then each file had its
+ * own localStorage key, which filled the origin's fixed localStorage cap at about 20k files on WebKit (bug hunt,
+ * 2026-11-06). Each file has its own record in IndexedDB now: the same cost for the first or the five-thousandth file,
+ * and no cap but the disk's.
  */
 
 /** File storage as the origin-private file system keeps it: one folder per profile space. */
@@ -34,9 +37,11 @@ const fileOf = (n: number): HandoffFile => ({ id: `chat${n % 40}-in-${String(n).
 const bytes = new Uint8Array(3);
 const legacyKey = (database: string) => `ghostly-staging:${database.replace(/^ghostly_/, "")}`;
 const byId = (a: HandoffFile, b: HandoffFile) => (a.id < b.id ? -1 : 1);
+const stagingKeys = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key): key is string => !!key?.startsWith("ghostly-staging:"));
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.clear();
+  for (const { name } of await indexedDB.databases()) if (name) await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase(name); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
   setDatabaseName("ghostly");
   const store = folders();
   registerFileBytes("opfs", async () => store);
@@ -52,25 +57,28 @@ afterEach(() => {
 describe("the note of the files a taker's staging holds", () => {
   it("costs the same for each file, however many files are staged already", async () => {
     const staging = await handoffProfileHost("1.1.7", "web").staging.open();
-    let moved = 0;
-    const get = localStorage.getItem.bind(localStorage), set = localStorage.setItem.bind(localStorage);
-    vi.spyOn(localStorage, "getItem").mockImplementation((key) => { const value = get(key); moved += value?.length ?? 0; return value; });
-    const writes = vi.spyOn(localStorage, "setItem").mockImplementation((key, value) => { moved += value.length; set(key, value); });
-    const stage = async (from: number, to: number) => {
-      const before = moved;
-      for (let n = from; n < to; n++) { const file = fileOf(n); await staging.begin(file.id); await staging.append(file.id, 0, bytes); await staging.finish(file); }
-      return moved - before;
-    };
+    // As one list: 473,421 characters for the first 50 files, 11,006,010 for the 550th to the 600th.
+    const puts = vi.spyOn(IDBObjectStore.prototype, "put"), lists = vi.spyOn(IDBObjectStore.prototype, "getAll");
+    for (let n = 0; n < 600; n++) { const file = fileOf(n); await staging.begin(file.id); await staging.append(file.id, 0, bytes); await staging.finish(file); }
 
-    const first = await stage(0, 50);
-    await stage(50, 550);
-    const last = await stage(550, 600);
-
-    // As one list: 473,421 characters for the first 50 files, 11,006,010 for these 50. Now 3,250 for either.
-    expect(last).toBeLessThanOrEqual(first * 2);
-    // A file that begins writes nothing, one that finishes writes once.
-    expect(writes).toHaveBeenCalledTimes(600);
+    // A file that finishes writes its own note once, and nothing reads the others'.
+    expect(puts).toHaveBeenCalledTimes(600);
+    expect(lists).not.toHaveBeenCalled();
     expect((await staging.held()).length).toBe(600);
+  });
+
+  it("stages a move's files when the origin's localStorage is full", async () => {
+    // localStorage has a fixed cap per origin, whatever the disk holds: about 2.6M characters on WebKit, 5.2M on
+    // Chromium. A note of 124 characters per file filled it at about 20k files on an iPhone, and the move failed with
+    // "Not enough space on this device" with 10 GB of quota free (bug hunt, 2026-11-06).
+    const staging = await handoffProfileHost("1.1.7", "web").staging.open();
+    const writes = vi.spyOn(localStorage, "setItem").mockImplementation(() => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); });
+    const files = Array.from({ length: 50 }, (_, n) => fileOf(n));
+    try {
+      for (const file of files) { await staging.begin(file.id); await staging.append(file.id, 0, bytes); await staging.finish(file); }
+      expect((await staging.held()).sort(byId)).toEqual(files.sort(byId));
+      expect(writes).not.toHaveBeenCalled();
+    } finally { writes.mockRestore(); }
   });
 
   it("lists what was finished, and no longer a file that began again or was discarded", async () => {
@@ -101,7 +109,23 @@ describe("the note of the files a taker's staging holds", () => {
 
     await host.staging.drop(staging.database);
     expect(await (await host.staging.open(staging.database)).held()).toEqual([]);
-    expect(Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key) => key?.startsWith("ghostly-staging:"))).toEqual([]);
+    expect(stagingKeys()).toEqual([]);
+  });
+
+  it("goes on from the notes the previous build kept in localStorage, one key per file, a held Blob's included", async () => {
+    const host = handoffProfileHost("1.1.7", "web");
+    const staging = await host.staging.open();
+    const [a, b, c] = [fileOf(1), fileOf(2), fileOf(3)];
+    const ns = staging.database.replace(/^ghostly_/, "");
+    localStorage.setItem(`ghostly-staging:${ns}:${a.id}`, JSON.stringify({ size: a.size, sha256: a.sha256 }));
+    localStorage.setItem(`ghostly-staging:${ns}:${b.id}`, JSON.stringify({ size: b.size, sha256: b.sha256, held: { database: "ghostly", id: "old-b" } }));
+
+    expect((await staging.held()).sort(byId)).toEqual([a, b]);
+    expect(stagingKeys()).toEqual([]);
+    // The held Blob's note still says where its bytes are: a copy of it under another id is left there too.
+    await staging.copyStaged(b.id, c);
+    expect((await staging.held()).sort(byId)).toEqual([a, b, c]);
+    expect(await (await host.staging.open(staging.database)).held()).toHaveLength(3);
   });
 
   it("keeps another namespace's files apart, one whose name begins the same included", async () => {
@@ -115,5 +139,22 @@ describe("the note of the files a taker's staging holds", () => {
     expect(await other.held()).toEqual([b]);
     await host.staging.drop("ghostly_stage");
     expect(await other.held()).toEqual([b]);
+  });
+
+  it("keeps none of a move's notes once its namespace is installed: they only served a pull that had not finished", async () => {
+    localStorage.setItem(registryKey(), JSON.stringify({ version: 1, active: "", profiles: [{ id: "", name: "Personal", createdAt: 0 }] }));
+    const host = handoffProfileHost("1.1.7", "web");
+    const staging = await host.staging.open(), unfinished = await host.staging.open("ghostly_stage");
+    for (let n = 0; n < 1_000; n++) { const file = fileOf(n); await staging.begin(file.id); await staging.append(file.id, 0, bytes); await staging.finish(file); }
+    await unfinished.begin(fileOf(1).id); await unfinished.append(fileOf(1).id, 0, bytes); await unfinished.finish(fileOf(1));
+
+    // The install, then the take drops the old namespace (bug hunt, 2026-11-04: 1,000 keys, 125,690 characters left).
+    await host.staging.install("ghostly", staging.database);
+    await host.staging.drop("ghostly");
+
+    expect(namespaceOf("")).toBe(staging.database.replace(/^ghostly_/, ""));
+    expect(await (await host.staging.open(staging.database)).held()).toEqual([]);
+    // Another staging, not installed, still goes on from its own.
+    expect(await unfinished.held()).toEqual([fileOf(1)]);
   });
 });

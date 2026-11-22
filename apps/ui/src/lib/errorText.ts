@@ -2,6 +2,7 @@ import { parseEngineError, type EngineErrorCode } from "@ghostly/core";
 import type { Translate, TranslationKey } from "../contexts/I18nContext";
 import { formatAmount } from "./amount";
 import { english } from "./english";
+import { SERVICE_LOCKED } from "./serviceWindows";
 
 /*
  * An error said in the app's language. The engine, the platform layer and the extension throw plain English (they
@@ -27,10 +28,15 @@ interface Rule {
   reason?: "next" | "title";
   /** The error as it was thrown goes to the detail behind the ⓘ too: what it names (a member, an epoch) is for whoever debugs. */
   detail?: true;
+  /** Why, in the language, behind the ⓘ: the line stays short (a rule with no `reason` only). */
+  info?: TranslationKey;
 }
 
-/** An error in three parts: a title, maybe a next line, and the English behind the ⓘ when part of it is not said. */
-export interface ErrorParts { title: string; next?: string; detail?: string }
+/**
+ * An error in parts: a title, maybe a next line, and behind the ⓘ the why in the language (`info`) and the English when
+ * part of it is not said (`detail`).
+ */
+export interface ErrorParts { title: string; next?: string; detail?: string; info?: string }
 
 const exact = (text: string, key: TranslationKey, next?: TranslationKey): Rule => ({ match: new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`), key, ...(next && { next }) });
 
@@ -83,6 +89,12 @@ export const SAVE_REFUSED = /^(?:The file could not be saved there|Unreadable fi
  */
 export const DESKTOP_SAVE_REFUSED = /^(?:.+ \(os error \d+\)|The chosen place has no file name)$/;
 
+/**
+ * A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
+ * worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
+ */
+export const PART_NOT_LOADED = /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/;
+
 /** No room left in the storage that holds items for an away contact (WISP 404, engine/hold.ts): it sends once some are picked up. */
 const HOLD_FULL_ITEMS = /^At most (?<max>\d+) items can wait for this contact\. Wait until some are picked up\.$/;
 const HOLD_FULL_BYTES = /^Items waiting for this contact would exceed (?<max>\d+) MB\. Wait until some are picked up\.$/;
@@ -115,10 +127,10 @@ const RULES: readonly Rule[] = [
   // The page's way to the peer and its services (packages/browser/src/platform).
   exact("Ghostly is starting…", "errors.app.starting"),
   exact("Ghostly is still starting. Try again in a moment.", "errors.app.stillStarting"),
-  exact("Lost the Ghostly peer", "errors.app.lostPeer"),
-  // A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
-  // worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
-  { match: /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
+  // A call the peer was answering when it went away (an extension's offscreen restart, Clear all data or a profile
+  // switch in another tab): the old peer may have done it before it went, so it says to look before trying again.
+  exact("Lost the Ghostly peer", "errors.app.lostPeer", "errors.app.lostPeerNext"),
+  { match: PART_NOT_LOADED, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
   // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent. A
   // forward's copy that found no room (engine/forwards.ts forwardError) says Desktop's io error the same way.
   { match: /^Not enough space on this device \((?:QuotaExceededError(?:: [\s\S]*)?|No space left on device[\s\S]*)\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
@@ -126,7 +138,17 @@ const RULES: readonly Rule[] = [
   exact("This device has no room left to save this", "errors.app.noRoomToSave", "errors.app.noRoomToSaveNext"),
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
-  exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
+  // A no in the host's question (Chrome's prompt, Desktop's dialog), from Share or a card's Allow: it can be asked again.
+  exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress", "errors.app.localAddressNext"),
+  // The Share form's address checks (packages/core http.ts parseLocalTarget; the CLI matches the English) and its name
+  // check (engine/node.ts addService): what is wrong, then what to type.
+  exact("Not a valid URL", "errors.services.badAddress", "errors.services.addressNext"),
+  exact("Only http and https targets are supported", "errors.services.webOnly", "errors.services.addressNext"),
+  exact("Credentials in the target URL are not supported", "errors.services.noCredentials", "errors.services.addressNext"),
+  exact("Only services on this machine can be shared (localhost, 127.0.0.1 or [::1])", "errors.services.thisComputer", "errors.services.addressNext"),
+  exact("The target cannot contain a query or fragment", "errors.services.noQuery", "errors.services.addressNext"),
+  exact("Port 0 is not a port a web app can listen on", "errors.services.portZero", "errors.services.addressNext"),
+  exact("Give the service a name", "errors.services.name"),
   exact("Pick a Lightning card first", "errors.app.pickCard"),
   exact("This client cannot install updates", "errors.app.installUpdates"),
   exact("That update is no longer available", "errors.app.updateGone"),
@@ -139,6 +161,8 @@ const RULES: readonly Rule[] = [
   exact("This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", "errors.files.pictureMetadata", "errors.files.pictureMetadataNext"),
   // A video whose metadata could not be removed, refused before it is sent (packages/core videoMetadata.ts).
   exact("This video cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded", "errors.files.videoMetadata", "errors.files.videoMetadataNext"),
+  // An audio file whose tags could not be removed, refused before it is sent (packages/core audioMetadata.ts).
+  exact("This audio cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded", "errors.files.audioMetadata", "errors.files.audioMetadataNext"),
   exact("This file cannot be retried", "errors.files.cannotRetry"),
   exact("This file is no longer here", "errors.files.gone"),
   { match: /^Not enough space on your contact's device for this file \((?<free>.+) free\)\.$/, key: "errors.files.noRoom", next: "errors.files.noRoomNext" },
@@ -154,15 +178,26 @@ const RULES: readonly Rule[] = [
   exact("The file arrived damaged and was deleted. Ask for it again.", "errors.files.refused.damaged", "errors.files.askAgain"),
   exact("The offer expired", "errors.files.offerExpired", "errors.files.askAgain"),
   exact("Cancelled by the sender", "chat.file.cancelled", "errors.files.askAgain"),
+  // A 1:1 file declined or cancelled, by the contact (chatFiles.ts `refusalText`) or here: the status says what, the ⓘ who.
+  exact("Declined by your contact", "chat.file.declined", "errors.files.declinedThere"),
+  exact("Cancelled by your contact", "chat.file.cancelled", "errors.files.cancelledThere"),
+  exact("You declined it", "chat.file.declined", "errors.files.declinedHere"),
+  exact("You cancelled it", "chat.file.cancelled", "errors.files.cancelledHere"),
   // A file said on the DHT floor that ended here before it came (packages/browser engine/fileDesk.ts): why this device
   // refused its offer, or its week ran out. Its sender still has it, and its next offer takes the bubble over.
   exact("No room on this device for this file", "errors.files.noRoomHere", "errors.files.floor.noRoomNext"),
   exact("Too many files are waiting here", "errors.files.floor.tooMany", "errors.files.floor.tooManyNext"),
   exact("It was refused here", "errors.files.floor.refused", "errors.files.askAgain"),
   exact("It did not come within a week", "errors.files.floor.notInAWeek", "errors.files.askAgain"),
+  // Accept on an offer larger than the room left now (engine/fileDesk.ts `accept`): it keeps waiting, its room shown.
+  // One that fits the free space but not beside the files still coming: waiting for them, or cancelling one, makes room.
+  { match: /^No room on this device for this file beside the files still coming \((?<left>.+) left of (?<free>.+) free\)$/, key: "errors.files.noRoomBesideComing", next: "errors.files.noRoomBesideComingNext" },
+  { match: /^No room on this device for this file \((?<free>.+) free\)$/, key: "errors.files.noRoomHere", next: "errors.app.noRoomNext" },
   // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
   exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
-  { match: /^Could not store the file: (?:This device has no space left for the file|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
+  // A received file this device had no room for (packages/core chatFiles.ts `storeFailure`): named QuotaExceededError
+  // by the engine, whatever the storage said; the older lines as each storage worded it (OPFS, IndexedDB, Desktop).
+  { match: /^Could not store the file: (?:This device has no space left for the file|This device has no room left to save this|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
   { match: /^Could not store the file: [\s\S]+$/, key: "errors.files.storeFailed", next: "errors.files.askAgain", detail: true },
   exact("Not delivered in time", "errors.files.notDelivered", "errors.files.sendWhenBack"),
   exact("Your contact asked for the same part of this file too many times", "errors.files.askedTooOften", "errors.files.refused.sendAgain"),
@@ -174,6 +209,9 @@ const RULES: readonly Rule[] = [
   exact("The clipboard's picture is damaged", "errors.files.pasteDamaged", "errors.files.pasteDamagedNext"),
   exact("Clipboard unavailable", "errors.files.clipboardUnavailable", "errors.files.clipboardUnavailableNext"),
   exact("That paste is gone. Paste it again.", "errors.files.pasteGone", "errors.files.pasteGoneNext"),
+  // Another app's drop the platform held (Linux Desktop), refused as a paste would be (lib/pastedFiles.ts).
+  exact("That is too large to drop. Send it with + → Document.", "errors.files.dropTooLarge"),
+  exact("That drop is gone. Drop it again.", "errors.files.dropGone", "errors.files.dropGoneNext"),
   { match: /^Could not read the pasted file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
   // A file being sent whose copy could not be read (packages/core chatFiles.ts): picked with + or dropped, not pasted.
   { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.unreadable", next: "errors.files.unreadableNext", detail: true },
@@ -182,6 +220,9 @@ const RULES: readonly Rule[] = [
   // A file forwarded that is still arriving here, or whose bytes are gone (engine/forwards.ts `copyForForward`).
   exact("The file has not arrived yet", "errors.files.notArrived", "errors.files.notArrivedNext"),
   exact("The file is not on this device any more", "errors.files.notHere", "errors.files.notHereNext"),
+  // A stored file with fewer bytes here than its size says: a forward's copy of one cut short (engine/forwards.ts), a
+  // file read for a backup or a move to another device (lib/backupFile.ts, lib/handoffProfile.ts, shared/storedFiles.ts).
+  exact("The file is shorter than it says", "errors.files.incomplete"),
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
   { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
@@ -243,14 +284,22 @@ const RULES: readonly Rule[] = [
   exact("Could not share the screen. Try again.", "calls.share.failed", "calls.share.failedNext"),
   exact("Your contact's app cannot show a screen in this call", "calls.share.contactCannot"),
   exact("Screen sharing is not available on Linux yet", "calls.share.notOnLinux"),
+  // Why a group's call button is off on the Linux Desktop (apps/ui/src/desktop/groupCallSupport.ts).
+  exact("Group calls aren't on Linux yet: join from app.ghostly.tools in a browser", "calls.noGroupOnLinux"),
   exact("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
-  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts). A
-  // browser sees no status on a refused WebSocket, so a relay that leaves this app's origin out reads "unreachable" too.
+  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts; the
+  // Iroh WASM's own, native/transports/iroh-web/src/lib.rs). A browser sees no status on a refused WebSocket, so a
+  // relay that leaves this app's origin out reads "unreachable" too.
   exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable", "errors.transport.hyperdhtUnreachableNext"),
   exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent", "errors.transport.hyperdhtCheckNext"),
   exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed", "errors.transport.hyperdhtCheckNext"),
   exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused", "errors.transport.hyperdhtRefusedNext"),
   exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
+  exact("Iroh relay unreachable", "errors.transport.irohUnreachable", "errors.transport.irohUnreachableNext"),
+  // A contact's Iroh relay this device does not dial (irohWeb.ts, apps/desktop paired_transport.rs): not a public https
+  // one nor one of the person's own, or, with Hide my IP from contacts on, not one of theirs.
+  exact("The contact's Iroh relay is not one this device dials", "errors.transport.irohRelayNotDialled", "errors.transport.irohRelayNotDialledNext"),
+  exact("The contact is not on one of this profile's Iroh relays", "errors.transport.irohNotOwnRelay", "errors.transport.irohNotOwnRelayNext"),
   // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
   // ghostlink.ts `confirmPair`).
   { match: /^(?:The connection changed\. )?Compare the current code again\.$/, key: "errors.verify.codeChanged", next: "errors.verify.codeChangedNext" },
@@ -259,6 +308,8 @@ const RULES: readonly Rule[] = [
   // A send or an edit a chat refused (engine/node.ts sendMessage, editMessage, replyRef; platform/useChat.ts).
   { match: /^Message exceeds (?<max>\d+) UTF-8 bytes\.$/, key: "errors.chat.tooLong", next: "errors.chat.tooLongNext" },
   exact("Message too long once encoded. Shorten it or send it as a file.", "errors.chat.tooLong", "errors.chat.tooLongNext"),
+  // A text within the DHT's 256 bytes that its envelope, ratchet and receipt still do not fit (core dhtDelivery.ts).
+  exact("Text and authentication exceed the DHT packet budget. Shorten the message.", "errors.chat.dhtTooLong", "errors.chat.dhtTooLongNext"),
   { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
   { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
   // A forward of a message deleted meanwhile, or of none (engine/node.ts forwardMessages).
@@ -283,11 +334,16 @@ const RULES: readonly Rule[] = [
   exact("This wallet has no test mint to ask for test coins", "errors.cashu.noTestMint"),
   exact("Select a configured mint", "errors.cashu.selectMint"),
   exact("That is not a valid ecash token", "errors.cashu.badToken"),
+  // Redeeming a token whose keyset its mint does not have (cashu-ts): a crafted token, or one of a keyset the mint dropped.
+  { match: /^Keyset '[^']*' is not a keyset of this mint$/, key: "errors.cashu.unknownKeyset", next: "errors.cashu.unknownKeysetNext" },
   exact("Add a mint in Settings first", "errors.cashu.addMint"),
   exact("Not enough sats in your wallet", "errors.cashu.notEnough"),
   { match: /^Not enough sats in your wallet: (?<amount>\d[\d.,\s']*?) sats leave room for the fee$/, key: "errors.cashu.notEnoughForFee", params: ({ amount }, t) => ({ amount: sats(amount, t) }) },
   exact("None of your mints can pay an invoice with no amount", "errors.cashu.mintsNoAnyAmount", "errors.cashu.mintsNoAnyAmountNext"),
   exact("This invoice is already being paid", "errors.cashu.alreadyPaying"),
+  exact("The mint quoted another amount than this invoice's. Nothing was paid.", "errors.cashu.quoteMismatch", "errors.cashu.quoteMismatchNext"),
+  // Also a browser wallet's (paymentAdapters/providers/webln.ts).
+  exact("That is not an invoice this wallet can pay", "errors.cashu.cannotPayInvoice"),
   exact("A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.", "errors.cashu.inFlight", "errors.cashu.inFlightNext"),
   // A failed payment and what came back: "<why> The sats are back in your wallet[, less N sats the mint kept as its fee]."
   { match: /^(?<reason>[\s\S]+?) The sats are back in your wallet, less (?<fee>\d+) sats? the mint kept as its fee\.$/, key: "errors.cashu.notPaid", reason: "title", next: "errors.cashu.backInWalletLessFee" },
@@ -328,10 +384,20 @@ const RULES: readonly Rule[] = [
   { match: /^The Lightning fee \((?<fee>\d+) sats\) is too high$/, key: "errors.pay.feeTooHigh" },
   exact("Nothing to take back", "errors.pay.nothingToTakeBack"),
   exact("The federation has not answered yet: try again in a moment", "errors.pay.federationSilent"),
-  exact("Nothing to reclaim", "errors.pay.nothingToReclaim"),
+  // The Cashu side of Take it back: said in the button's words, as the Fedimint side above.
+  exact("Nothing to reclaim", "errors.pay.nothingToTakeBack"),
   { match: /^Your contact does not accept (?<method>.+) in this chat$/, key: "errors.pay.contactRefuses", params: ({ method }, t) => ({ method: railName(method, t) }) },
   exact("This request cannot be paid from another wallet", "errors.pay.notFromOtherWallet"),
   exact("You are offline", "errors.pay.offline"),
+  // What a payee's app sends back for a payment it did not take, on the payer's bubble; a USDT receipt's, on the payee's.
+  exact("Too many payments at once: send it again in a minute", "errors.pay.busy", "errors.pay.busyNext"),
+  exact("This ecash does not pay the request: the amount or the mint differs", "errors.pay.ecashMismatch", "errors.pay.ecashMismatchNext"),
+  exact("This transaction already paid another request", "errors.pay.txUsed"),
+  exact("Too many open USDT requests of this amount: wait for one to be paid", "errors.pay.usdtTooMany", "errors.pay.usdtTooManyNext"),
+  // A group's pay to one member the engine refused, its member list stale (engine/communityPay.ts): the list's own words.
+  exact("Payments are turned off in this group.", "errors.group.paymentsOff"),
+  exact("They are no longer in this group", "errors.group.memberGone"),
+  exact("They take no way of paying this device allows.", "payments.group.why.noWay"),
   exact("This is a Mainnet payment (real money): a Testnet wallet never pays it. Use a Mainnet wallet.", "errors.pay.wrongNetworkMainnet", "errors.pay.wrongNetworkMainnetNext"),
   exact("This is a Testnet payment (test coins): a Mainnet wallet never pays it. Use a Testnet wallet.", "errors.pay.wrongNetworkTestnet", "errors.pay.wrongNetworkTestnetNext"),
   { match: /^This pays with real money: confirm it with Send real money first\. Nothing was sent\.$/, key: "errors.pay.confirmRealFirst", next: "errors.pay.confirmRealFirstNext", params: (_, t) => ({ button: t("payments.confirmReal.send") }) },
@@ -411,6 +477,7 @@ const RULES: readonly Rule[] = [
   exact("These notes are from a federation I have not joined", "errors.pay.notesUnknownFederation"),
   exact("These notes are worth less than a sat", "errors.pay.notesTooSmall"),
   exact("These notes were already redeemed", "errors.pay.notesRedeemed"),
+  exact("These notes were already received", "errors.pay.notesReceived"),
   exact("The server took too long to answer", "errors.lnurl.tooSlow"),
   exact("No way to reach the network here", "errors.lnurl.noNetwork"),
   { match: /^(?<host>[^\s:/]+\.[^\s:/]+(?::\d+)?) refused: (?<reason>[\s\S]+)$/, key: "errors.lnurl.refused", reason: "next" },
@@ -420,6 +487,9 @@ const RULES: readonly Rule[] = [
   { match: /^(?<domain>\S+) did not answer with a pay request$/, key: "errors.lnurl.noPayRequest" },
   { match: /^(?<domain>\S+) did not answer with an invoice$/, key: "errors.lnurl.noInvoice" },
   exact("The invoice the service answered with has already expired", "errors.lnurl.invoiceExpired"),
+  // An invoice for another amount than the one chosen, or for any amount (lnurl.ts parseInvoiceCallback): nothing was
+  // paid; the amounts the service and the person named go behind the ⓘ.
+  { match: /^The invoice asks for (?:any amount|[\d,]+ sats), not the [\d,]+ sats you chose$/, key: "wallet.lightning.mismatch", next: "errors.lnurl.mismatchNext", detail: true },
 
   // Groups (packages/core/src/groupSession.ts and groupCommunity.ts, packages/browser/src/engine/groups.ts and
   // community.ts): why a group stopped (its notice, the line under its name, its row in the list), what a send or an
@@ -460,7 +530,6 @@ const RULES: readonly Rule[] = [
   exact("Nobody in the group is connected right now to take your leave. Try again in a moment.", "errors.group.nobodyForLeave", "errors.group.nobodyForLeaveNext"),
   exact("Only the admin can share a link to the group", "errors.group.adminShares"),
   exact("This is not a link to a group", "errors.group.notALink", "errors.group.notALinkNext"),
-  exact("You are already joining this group", "errors.group.alreadyJoining"),
   exact("This group is joined with its current link", "errors.group.currentLink"),
   // A group's link the engine refuses for a group already here (engine/groups.ts joinGroupByLink).
   exact("You have an invitation to this group. Answer it first.", "errors.group.invitedFirst", "errors.group.invitedFirstNext"),
@@ -474,6 +543,8 @@ const RULES: readonly Rule[] = [
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
   exact("This member has left the group. Make someone else the admin.", "errors.group.heirLeft", "errors.group.heirLeftNext"),
+  // Hand over admin, Remove or a hub choice confirmed for a member whose leave or removal came in meanwhile (core groupSession/groupCommunity).
+  exact("Not a member", "errors.group.memberGone"),
   exact("Only the admin can change the group's picture", "errors.group.adminPicture"),
   exact("Only the admin can rename the group", "errors.group.adminRename"),
   exact("Only the admin can choose the group's hubs", "errors.group.adminHubs"),
@@ -522,6 +593,10 @@ const RULES: readonly Rule[] = [
   { match: /^The (?<label>.+?) wallet did not come up\. Nothing was lost: try again\.$/, key: "errors.wallet.didNotComeUp" },
   exact("It did not answer in time", "errors.wallet.didNotAnswer"),
   exact("No mint answered", "errors.wallet.noMintAnswered"),
+  // A mint that took a swap and has not answered (engine/wallet.ts SwapUnsettledError): nothing failed, and the next
+  // line says what comes back. Three sentences, so it read as "Something went wrong" (or in English) without these.
+  { match: new RegExp(`^${HOST} has not answered yet\\. The payment was not made\\. The sats set aside for it return to your wallet a few minutes after the mint answers\\.$`), key: "errors.wallet.mintSilent", next: "errors.wallet.mintSilentPayNext" },
+  { match: new RegExp(`^${HOST} has not answered yet\\. The ecash is added to your wallet as soon as it does\\.$`), key: "errors.wallet.mintSilent", next: "errors.wallet.mintSilentRedeemNext" },
   exact("Paste the federation's invite code (fed11…)", "errors.wallet.pasteInvite"),
   { match: /^Choose a (?<kind>Lightning|Bitcoin) source that runs on (?<network>Mainnet|Testnet)$/, key: "errors.wallet.chooseSource" },
   exact("This wallet cannot be made here", "errors.wallet.cannotBeMade"),
@@ -534,6 +609,8 @@ const RULES: readonly Rule[] = [
   { match: /^(?<chain>\S+) is a (?<network>Mainnet|Testnet) network: this is the (?<wallet>Mainnet|Testnet) (?<kind>Ark|Bark|Spark|USDT) wallet$/, key: "errors.wallet.wrongChain" },
   { match: /^Could not connect to (?<label>[^:]+): (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotConnect", reason: "next" },
   { match: /^Could not read the balance: (?<reason>[\s\S]+)$/, key: "errors.wallet.couldNotReadBalance", reason: "next" },
+  // A Receive, or a chat request, on a Lightning card connected without invoice lookup (paymentAdapters/providers/lightningService.ts).
+  { match: /^(?<label>.+?) cannot look up its invoices, so a payment to it would never be seen: receive with another Lightning card, or connect it with invoice lookup allowed$/, key: "errors.wallet.noLookup", next: "errors.wallet.noLookupNext" },
   { match: /^(?<id>\S+) is not available in this version of Ghostly$/, key: "errors.wallet.notInThisVersion" },
   { match: /^the Esplora server at (?<host>\S+) did not answer in (?<seconds>\d+) s$/, key: "errors.wallet.esploraSlow" },
   { match: /^the Esplora server at (?<host>\S+) did not answer \((?<reason>[\s\S]+)\)$/, key: "errors.wallet.esploraSilent", reason: "next" },
@@ -561,7 +638,9 @@ const RULES: readonly Rule[] = [
   exact("Switch to another profile first", "errors.profile.switchFirst"),
   exact("Unknown profile", "errors.profile.unknown"),
   exact("This profile is open in another window. Close it, then try again.", "errors.profile.openElsewhere"),
+  exact("Could not delete this profile's data", "errors.profile.notDeleted", "errors.profile.notDeletedNext"),
   exact("Wrong lock password for that profile", "errors.profile.wrongPassword"),
+  { match: /^Too many attempts\. Try again in (?<seconds>\d+) s$/, key: "lockScreen.tooManyAttempts" },
   exact("This backup does not hold a profile", "errors.profile.notABackup"),
   exact("Wrong passphrase, or the backup was changed", "errors.profile.wrongPassphrase", "errors.profile.wrongPassphraseNext"),
   exact("This is not a Ghostly backup", "errors.profile.notGhostlyBackup"),
@@ -597,6 +676,77 @@ const RULES: readonly Rule[] = [
   { match: /^(?<domain>\S+) has no address$/, key: "errors.proof.noAddress", next: "errors.proof.noAddressNext", detail: true },
   { match: /^(?<domain>\S+) points to a private network address, so it was not contacted$/, key: "errors.proof.privateAddress", next: "errors.proof.privateAddressNext", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
+  // Add's refusals for an SSH key proof (providers/ssh.ts, core sshsig.ts): what is wrong with the key, the account or the
+  // pasted signature, then what to do. They read as they came, in English, in every language until 2026-11-15.
+  exact("Paste your public key (the one line in ~/.ssh/id_ed25519.pub) or its SHA256: fingerprint", "errors.proof.sshNotKey", "errors.proof.sshNotKeyNext"),
+  { match: /^Unsupported SSH key type(?: "[^"]*")?$/, key: "errors.proof.sshKeyType", next: "errors.proof.sshKeyTypeNext" },
+  { match: /^RSA keys must be (?<min>\d+)-(?<max>\d+) bits$/, key: "errors.proof.sshRsaSize", next: "errors.proof.sshRsaSizeNext" },
+  { match: /^Enter a (?<forge>GitHub|GitLab) username$/, key: "errors.proof.sshForgeLogin" },
+  exact("Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----", "errors.proof.sshWholeSignature", "errors.proof.sshWholeSignatureNext"),
+  { match: /^That signature is for "(?<namespace>[^"]*)", not "ghostly": run the command with -n ghostly$/, key: "errors.proof.sshNamespace", next: "errors.proof.sshNamespaceNext" },
+  exact("The signature is not over this statement: copy the command again and sign exactly what it shows", "errors.proof.sshNotStatement", "errors.proof.sshNotStatementNext"),
+  // Why a contact's proof failed this app's check, the first time or on the daily re-check (verify.ts, the providers'
+  // verify(), core identityProofs.ts onPresent), and the refusals a contact's app sends back for mine. The account,
+  // host or domain stays a value; an address or status code goes behind the ⓘ.
+  { match: /^(?<forge>GitHub|GitLab) has no account (?<login>\S+)$/, key: "errors.proof.noAccount", next: "errors.proof.noAccountNext" },
+  { match: /^(?<host>\S+) is limiting lookups; check again later$/, key: "errors.proof.hostLimiting", next: "errors.proof.laterNext" },
+  { match: /^(?<domain>\S+) answered \d{3}$/, key: "errors.proof.hostAnswered", next: "errors.proof.laterNext", detail: true },
+  { match: /^(?<domain>\S+) answered with a redirect; the file must be served at exactly https:\/\/\S+$/, key: "errors.proof.hostRedirect", next: "errors.proof.redirectNext", detail: true },
+  exact("The record is no longer in the account's repository", "errors.proof.recordGone"),
+  exact("The account is no longer on its server", "errors.proof.accountGone"),
+  exact("The account's DID is not registered, or was deactivated", "errors.proof.didGone"),
+  { match: /^The account's DID no longer resolves: .+$/, key: "errors.proof.didNoResolve", detail: true },
+  exact("The account's DID could not be resolved", "errors.proof.didUnresolved", "errors.proof.laterNext"),
+  exact("This DID is deactivated: its owner retired it", "errors.proof.didDeactivated"),
+  // A DID's lookup that found no document it can use (proofs/did.ts, providers/did.ts previewOf): a DID card in a
+  // message and the Add dialog's preview. The document's address stays a value.
+  { match: /^No DID document at (?<url>https:\/\/\S+)$/, key: "errors.proof.didNoDocument" },
+  { match: /^(?<url>https:\/\/\S+\/did\.json) is not JSON$/, key: "errors.proof.didNotJson" },
+  exact("This DID lists no Ed25519, secp256k1 or P-256 key for authentication or assertionMethod, so it cannot sign", "errors.proof.didNoSigningKey"),
+  exact("The proof file is not on the homeserver", "errors.proof.pubkyFileGone"),
+  exact("The file on the homeserver is not this proof", "errors.proof.pubkyFileOther"),
+  exact("This Pubky key has no records on the Pkarr relays", "errors.proof.pubkyNoRecords"),
+  exact("The homeserver of this Pubky key has no records on the Pkarr relays", "errors.proof.pubkyHomeserverNoRecords"),
+  exact("This Pubky key names no homeserver", "errors.proof.pubkyNoHomeserver"),
+  { match: /^Signed by another (?:Nostr|SSH) key$/, key: "errors.proof.otherKey" },
+  exact("Invalid Nostr signature", "errors.proof.badSignature"),
+  exact("The evidence is for another identity", "errors.proof.otherIdentity"),
+  exact("This app cannot verify this kind of identity", "errors.proof.unsupportedKind"),
+  exact("The proof lasts longer than this kind of identity allows", "errors.proof.tooLong"),
+  exact("Offline: this identity cannot be checked now", "errors.proof.offline"),
+  exact("The proof is dated in the future", "errors.proof.future"),
+  exact("The proof key did not sign this conversation's challenge", "errors.proof.challenge"),
+  exact("Its owner revoked this proof", "errors.proof.revoked"),
+  exact("The proof has expired", "errors.proof.expired"),
+  exact("Your contact's app cannot verify this kind of identity yet", "errors.proof.contactUnsupported"),
+  exact("Your contact's app could not check it. Try again later.", "errors.proof.contactUnavailable", "errors.proof.laterNext"),
+  exact("Your contact keeps too many identities from you already", "errors.proof.contactTooMany"),
+  exact("Your contact keeps a newer proof of this identity from you", "errors.proof.contactNewer"),
+  exact("That identity is no longer in your profile", "errors.proof.notInProfile"),
+  exact("Your contact could not verify it", "errors.proof.contactRefused"),
+  // A check that could not run (IdentityCheckUnavailable: sshForges.ts, providers/atproto.ts, atproto/resolve.ts, pubky.ts,
+  // did.ts, domain.ts, core didDht.ts, engine/identities.ts): a host, resolver or relay down says nothing about the proof,
+  // so it reads as that and "try again later", never as the proof fallback's "couldn't be verified" (agents#3781). The
+  // host stays a value; an address the contact chose, a status code or a resolver's name goes behind the ⓘ.
+  { match: /^(?<domain>\S+) could not be reached: [\s\S]+$/, key: "errors.proof.hostUnreachable", next: "errors.proof.laterNext", detail: true },
+  { match: /^The (?:account's server|homeserver) \(?(?<domain>[^\s()]+)\)? could not be reached$/, key: "errors.proof.hostUnreachable", next: "errors.proof.laterNext" },
+  { match: /^The (?:account's server|homeserver) (?<domain>\S+) was not contacted: [\s\S]+$/, key: "errors.proof.hostUnreachable", next: "errors.proof.laterNext", detail: true },
+  { match: /^The homeserver (?<domain>\S+) answered \d{3}$/, key: "errors.proof.hostAnswered", next: "errors.proof.laterNext", detail: true },
+  { match: /^The homeserver (?<host>\S+) answers on port \d+; only port 443 is contacted$/, key: "errors.proof.homeserverPort", detail: true },
+  { match: /^The account's server \((?<host>\S+)\) did not send the record$/, key: "errors.proof.serverNoRecord", next: "errors.proof.laterNext" },
+  { match: /^Unexpected answer from (?<host>\S+)$/, key: "errors.proof.hostBadAnswer", next: "errors.proof.laterNext" },
+  { match: /^(?<domain>\S+) could not be reached\. It must serve https:\/\/\S+ over HTTPS, without a redirect, with the header Access-Control-Allow-Origin: \*$/, key: "errors.proof.hostUnreachable", next: "errors.proof.hostUnreachableNext", detail: true },
+  { match: /^(?<domain>\S+) answered with a redirect; it must serve exactly https:\/\/\S+$/, key: "errors.proof.hostRedirect", next: "errors.proof.redirectNext", detail: true },
+  { match: /^(?<domain>\S+) answered \d{3} for https:\/\/\S+$/, key: "errors.proof.hostAnswered", next: "errors.proof.laterNext", detail: true },
+  { match: /^(?:Quad9|Cloudflare|Google) (?:could not resolve \S+|sent an unusable answer|sent an answer that is too large)$/, key: "errors.proof.resolverFailed", next: "errors.proof.resolverNext", detail: true },
+  { match: /^No Pkarr relay (?:answered for this did:dht|to ask)$/, key: "errors.relays.noneAnswered", next: "errors.relays.noneAnsweredNext", detail: true },
+  { match: /^Hide my IP from contacts is on: \S+, a server your contact chose, was not contacted$/, key: "errors.proof.hiddenIpNotContacted", detail: true },
+  // An OpenPGP key of a kind or size Ghostly does not accept (proofs/openpgp.ts): the kind it is stays a value.
+  { match: /^This key uses (?<kind>.+), which Ghostly does not accept\. Use Ed25519, ECDSA \(P-256, P-384, P-521, brainpool\) or RSA with 2048 to (?<max>\d+) bits\.$/, key: "errors.proof.pgpKeyKind", next: "errors.proof.pgpKeyKindNext" },
+  { match: /^This key uses RSA with a (?<bits>\d+)-bit public exponent, which Ghostly does not accept\. Use a key made by GnuPG \(exponent 65537\)\.$/, key: "errors.proof.pgpExponent", next: "errors.proof.pgpExponentNext" },
+  { match: /^This is an OpenPGP v(?<version>\d) key, which Ghostly does not accept\. Use a v4 key \(gpg makes Ed25519 ones\) or a v6 key\.$/, key: "errors.proof.pgpKeyVersion", next: "errors.proof.pgpKeyVersionNext" },
+  // A key from keys.openpgp.org that its owner has not confirmed an email for: served without the user IDs it is checked by.
+  exact("This copy of the key has no user IDs (keys.openpgp.org leaves them out until you confirm an email there), so it cannot be checked. Paste your public key instead.", "errors.proof.pgpNoUserIds", "errors.proof.pgpNoUserIdsNext"),
   // What the Add dialog's field refuses before anything is signed (a domain, a Bitcoin address and signature, a DID:
   // packages/core domainProofs.ts, bip322.ts, did.ts and proofs/providers/bitcoin.ts). The names they quote stay as values.
   exact("Enter a domain name, like example.com", "errors.proof.domainEnter"),
@@ -625,15 +775,38 @@ const RULES: readonly Rule[] = [
   exact("That did:jwk does not hold a JSON Web Key", "errors.proof.didJwkNone"),
   exact("That did:jwk contains a private key. Never share it: make a new key", "errors.proof.didJwkPrivate", "errors.proof.didJwkPrivateNext"),
   exact("That did:jwk is not an Ed25519, secp256k1 or P-256 key", "errors.proof.didJwkUnknown"),
+  // What the Add dialog (or a proof's delete) refuses for the other kinds (proofs/providers: nostr.ts, openpgp.ts, did.ts,
+  // pubky.ts, atproto.ts, oidc.ts). A line also read on a contact's proof (the Nostr event, the did.json) has no next step.
+  exact("Enter a Nostr public key: npub1… or 64 hex characters", "errors.proof.nostrEnterKey", "errors.proof.nostrEnterKeyNext"),
+  exact("That is not a signed Nostr event", "errors.proof.nostrNotEvent"),
+  exact("The signer did not sign the exact Ghostly statement", "errors.proof.nostrOtherStatement"),
+  exact("Use the full fingerprint, not a key ID: gpg --fingerprint shows it.", "errors.proof.pgpKeyId", "errors.proof.pgpKeyIdNext"),
+  exact("Enter your key's fingerprint: 40 hex characters (gpg --fingerprint).", "errors.proof.pgpEnterFingerprint", "errors.proof.pgpEnterFingerprintNext"),
+  exact("Paste your public key too: the second command prints it (-----BEGIN PGP PUBLIC KEY BLOCK-----).", "errors.proof.pgpPastePublicKey", "errors.proof.pgpPastePublicKeyNext"),
+  exact("That is this profile's own Ghostly DID: your contacts already see your Ghostly identity. Add another DID.", "errors.proof.didOwn", "errors.proof.didOwnNext"),
+  exact("Publishing works for did:web only: sign the statement instead", "errors.proof.didWebOnly", "errors.proof.didWebOnlyNext"),
+  exact("The did.json has no Ghostly service for this proof: it was removed, or not added yet", "errors.proof.didNoService", "errors.proof.didNoServiceNext"),
+  exact("That is another Pubky identity: approve with the one this proof is for", "errors.proof.pubkyOtherIdentity", "errors.proof.pubkyOtherIdentityNext"),
+  exact("Not an AT Protocol account (did:plc or did:web)", "errors.proof.atprotoNotAccount", "errors.proof.atprotoNotAccountNext"),
+  exact("Your server only offers full access to your account. Try again to approve that; Ghostly only deletes this one record.", "errors.proof.atprotoFullAccess", "errors.proof.atprotoFullAccessNext"),
+  exact("This provider is not set up in this Ghostly build.", "errors.proof.oidcNotSetUp", "errors.proof.oidcNotSetUpNext"),
   { match: /^Enter at least one relay address \((?:https|wss):\/\/…\)$/, key: "errors.relays.atLeastOne" },
   // "Hide my IP from contacts" without the TURN server it needs (packages/browser/src/engine/node.ts, updateSettings).
   { match: /^Add a TURN server first$/, key: "errors.relayOnly.needsTurn", next: "errors.relayOnly.needsTurnNext" },
   { match: /^Hide my IP from contacts needs a TURN server\. Turn it off first$/, key: "errors.relayOnly.keepsTurn", next: "errors.relayOnly.keepsTurnNext" },
+  // A contact's app the extension and the web app do not open while it is on (apps/extension/src/background.ts and
+  // apps/web/src/host.ts, RELAY_ONLY_REFUSED): one short line, and why, with the desktop app that opens it, behind the ⓘ.
+  { match: /^A contact's app does not open in the browser extension while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInExtension", info: "errors.relayOnly.appInBrowserInfo" },
+  { match: /^A contact's app does not open in the web app while Hide my IP from contacts is on$/, key: "errors.relayOnly.appInWeb", info: "errors.relayOnly.appInBrowserInfo" },
+  // A contact's app the profile's lock overtook while it opened on the web (apps/web/src/host.ts): it showed nothing.
+  exact(SERVICE_LOCKED, "errors.services.lockedBeforeOpen", "errors.services.lockedBeforeOpenNext"),
   // An Iroh, push, Pkarr or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts,
   // packages/core/src/relay.ts, nostr/relay.ts): the address typed stays in the line, which has no ⓘ. A Pkarr relay
   // list's line may hold spaces ("relay .example.org").
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
   { match: /^Not a relay address: (?<address>.+)$/, key: "errors.relays.notAddress" },
+  // An Iroh or HyperDHT relay past what a contact reads (`relayUrlTooLong`): a relay address, one too long.
+  { match: /^Use a shorter relay address: (?<address>\S+)$/, key: "errors.relays.useShorter" },
   // The rest of what Settings, Network refuses before or on Save (packages/browser/src/shared: hyperdhtRelay.ts,
   // pushRelay.ts, ice.ts; engine/node.ts updateSettings). The field it is about is marked there, so no line names it.
   { match: /^Enter a relay address \((?<example>(?:https|wss):\/\/)…\)$/, key: "errors.relays.enterAddress" },
@@ -665,6 +838,9 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   testMintOnMainnet: "errors.engine.testMintOnMainnet",
   realMintOnTestnet: "errors.engine.realMintOnTestnet",
   mintHoldsSats: "errors.engine.mintHoldsSats",
+  mintFailedQuote: "errors.engine.mintFailedQuote",
+  mintFailedFaucet: "errors.engine.mintFailedFaucet",
+  mintFailedInvoice: "errors.engine.mintFailedInvoice",
   lastMint: "errors.engine.lastMint",
   noSharedMint: "errors.engine.noSharedMint",
   reviewedSatsGone: "errors.engine.reviewedSatsGone",
@@ -693,6 +869,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   ecashFeeTakesAll: "errors.engine.ecashFeeTakesAll",
   lightningRefused: "errors.engine.lightningRefused",
   ecashOtherUnit: "errors.engine.ecashOtherUnit",
+  ecashUnnamedUnit: "errors.engine.ecashUnnamedUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
   lnurlRange: "errors.engine.lnurlRange",
@@ -705,11 +882,18 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintAlreadyJoined: "errors.engine.fedimintAlreadyJoined",
   fedimintConnecting: "errors.engine.fedimintConnecting",
   fedimintNotEnough: "errors.engine.fedimintNotEnough",
+  fedimintRedeemUnheard: "errors.engine.fedimintRedeemUnheard",
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnet",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnet",
   walletAway: "errors.engine.walletAway",
   walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
+  groupNoCall: "errors.engine.groupNoCall",
+  groupCallNotMember: "errors.engine.groupCallNotMember",
+  groupCallRefused: "errors.engine.groupCallRefused",
+  groupCallBusy: "errors.engine.groupCallBusy",
+  groupCallFailed: "errors.engine.groupCallFailed",
+  serviceShareFull: "errors.engine.serviceShareFull",
   // As the chat's payment line says them (Chat.tsx).
   contactNoWallet: "chat.payments.noWallet",
   contactNoPayments: "chat.payments.offOrOld",
@@ -718,20 +902,30 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
 const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   cannotSubmitAgain: "errors.engine.cannotSubmitAgainNext",
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnetNext",
+  fedimintRedeemUnheard: "errors.engine.fedimintRedeemUnheardNext",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",
+  groupCallBusy: "errors.engine.groupCallBusyNext",
+  groupCallFailed: "errors.engine.groupCallFailedNext",
+  groupCallNotMember: "errors.engine.groupCallNotMemberNext",
+  groupCallRefused: "errors.engine.groupCallRefusedNext",
+  groupNoCall: "errors.engine.groupNoCallNext",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmedNext",
   lastMint: "errors.engine.lastMintNext",
   lightningRefused: "errors.engine.lightningRefusedNext",
   lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
+  mintFailedFaucet: "errors.engine.mintFailedFaucetNext",
+  mintFailedInvoice: "errors.engine.mintFailedInvoiceNext",
+  mintFailedQuote: "errors.engine.mintFailedQuoteNext",
   parkedSigned: "errors.engine.parkedSignedNext",
   requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpentNext",
   reviewedSatsGone: "errors.engine.reviewedSatsGoneNext",
   sentAfterReview: "errors.engine.sentAfterReviewNext",
+  serviceShareFull: "errors.engine.serviceShareFullNext",
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
 /** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
-const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused"]);
+const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused", "mintFailedQuote", "mintFailedFaucet", "mintFailedInvoice"]);
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 
@@ -798,7 +992,7 @@ export function knownErrorParts(cause: unknown, t: Translate = english): ErrorPa
     const groups = { ...found.groups };
     const params = rule.params ? rule.params(groups, t) : groups;
     const fixed = rule.next ? t(rule.next, params) : undefined;
-    if (!rule.reason) return { title: t(rule.key, params), ...(fixed && { next: fixed }), ...(rule.detail && { detail: raw }) };
+    if (!rule.reason) return { title: t(rule.key, params), ...(fixed && { next: fixed }), ...(rule.detail && { detail: raw }), ...(rule.info && { info: t(rule.info, params) }) };
     const reason = reasonLine(groups.reason ?? "", t);
     const detail = reason === undefined ? { detail: raw } : {};
     if (rule.reason === "title" && reason) return { title: reason, ...(fixed && { next: fixed }) };

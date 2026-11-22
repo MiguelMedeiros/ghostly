@@ -45,7 +45,9 @@ describe("Public DID", () => {
     const at = Date.UTC(2026, 8, 25, 12, 0);
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, upToDate: true }) }));
     expect(screen.getByTestId("did-published")).toHaveTextContent("Published");
-    expect(screen.getByTestId("did-status")).toHaveTextContent(`Published ${formatAt(at, { dateStyle: "medium", timeStyle: "short" }, "en")}`);
+    // The text is read with its spaces made plain: compare it with the time's spaces made plain too (where the engine
+    // writes a plain space before "AM", formatAt keeps them together with a no-break one).
+    expect(screen.getByTestId("did-status")).toHaveTextContent(`Published ${formatAt(at, { dateStyle: "medium", timeStyle: "short" }, "en").replace(/\s+/g, " ")}`);
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, upToDate: false }) }));
     expect(screen.getByTestId("did-status")).toHaveTextContent("Publishing the change…");
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, error: "Publish failed on every relay" }) }));
@@ -86,6 +88,36 @@ describe("Public DID", () => {
     expect(switches().map(s => s.getAttribute("aria-checked"))).toEqual(["false", "true"]);
     await user.click(switches()[1]);
     expect(engine.callsTo("setDidListed")).toEqual([{ id: "github", listed: true }, { id: "github", listed: false }]);
+  });
+
+  it("keeps the keyboard focus on a switch while its listing is saved, and takes no second press then", async () => {
+    let release!: () => void;
+    const { engine, user } = renderApp(<IdentityProofsSection />);
+    engine.on("setDidListed", () => new Promise<void>((resolve) => { release = resolve; }));
+    act(() => engine.update({ did: didView(), identityProofs: [
+      proofView({ id: "domain", provider: "domain", subject: "example.com", publicUri: "https://example.com" }),
+      proofView({ id: "github", provider: "ssh-github", subject: "octocat", verified: { subject: "octocat", source: "SSH signature" }, publicUri: "https://github.com/octocat" }),
+    ] }));
+    await ghostlyCard(user);
+    const toggle = switches()[1];
+    toggle.focus();
+    await user.keyboard(" ");
+    expect(engine.callsTo("setDidListed")).toEqual([{ id: "github", listed: true }]);
+    // Busy, not disabled: a disabled button would drop the focus to the page, and the next Tab would start from the top.
+    expect(toggle).toHaveFocus();
+    expect(toggle).toBeEnabled();
+    expect(toggle).toHaveAttribute("aria-busy", "true");
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard(" ");
+    expect(engine.callsTo("setDidListed")).toHaveLength(1);
+    // The other switch waits for this call to end.
+    expect(switches()[0]).toBeDisabled();
+    await act(async () => { release(); });
+    act(() => engine.update({ did: didView({ listed: ["github"], alsoKnownAs: ["https://github.com/octocat"] }) }));
+    expect(switches()[1]).not.toHaveAttribute("aria-busy");
+    expect(switches()[1]).toHaveAttribute("aria-checked", "true");
+    expect(switches()[1]).toHaveFocus();
+    expect(switches()[0]).toBeEnabled();
   });
 
   it("says why a listing was refused, and keeps an expired identity out until it is renewed", async () => {

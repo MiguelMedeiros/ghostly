@@ -4,9 +4,13 @@
 //! - The app's broker (in the Ghostly window) asks; only the Ghostly window may call these commands, and an app window
 //!   never names a path: it reads by the ids given here.
 //! - A folder brings everything under it except hidden files and folders (a name starting with ".") and folders that
-//!   cannot be read; symbolic links are not followed. `accept`, when it names extensions, keeps only those.
-//! - A link remembers the size and date its file had when picked: a file that changed since reads as `changed`, one
-//!   that went as `gone`, until it is picked again.
+//!   cannot be read. `accept`, when it names extensions, keeps only those.
+//! - Symbolic links are never followed below what was picked: a link picked one by one, in a folder, or put where a
+//!   picked file or folder was (before the pick is kept or after) is not a file of it. A linked file is opened name by
+//!   name from the picked folder (the folder of a file picked one by one), each name refused if it is a link when it
+//!   is opened (`open_link`), so a swap between a check and the open finds nothing to follow.
+//! - A link remembers the size and date its file had when picked, and which file it was: a file that changed since,
+//!   or another put in its place, reads as `changed`, one that went as `gone`, until it is picked again.
 //! - Links live in `linked/<space>/<app>.json` in the app's data folder (`space` is the page's database name, `<app>`
 //!   the SHA-256 of the app's reference in hex), and go with the profile's files (`file_bytes_remove_where`). Each
 //!   file is read once and kept in memory, so a read costs the read and not the size of the library.
@@ -21,9 +25,10 @@
 //! `too-large`).
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fs;
-use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::io::{self, Read, Seek, SeekFrom};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
@@ -54,6 +59,9 @@ const MAX_BOOKS: usize = 16;
 const COMPACT_AFTER: usize = 1_000;
 /// A link's id: 16 random bytes in base64url (`random_id`).
 const ID_CHARS: usize = 22;
+/// How long `list` answers each link's `available` as it last found it, rather than looking at every file on disk again:
+/// 100,000 links took 150-200 ms a list on a local disk, more on a network share.
+const RECHECK_AFTER: Duration = Duration::from_secs(2);
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 struct Link {
@@ -65,7 +73,13 @@ struct Link {
     size: u64,
     /// Milliseconds since 1970.
     modified: u64,
+    /// Which file it was when picked (`file_id`). Links kept before it was remembered have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file: Option<FileId>,
 }
+
+/// Which file it is on its disk: device and inode on Unix, volume and file index on Windows.
+type FileId = (u64, u64);
 
 /// A link as the app sees it (`MiniAppLinkedFile`).
 #[derive(Serialize, Debug, PartialEq, Eq)]
@@ -79,15 +93,18 @@ pub struct Entry {
 
 /// One app's links, in the order they were picked, and where each id is among them. A forgotten link leaves a hole
 /// (`None`) until the file is written whole again (`LinkedFiles::compact`); `gone` counts the forgotten lines on disk.
+/// `made` tells this book from every other made since the start: a forget leaves each link where it was, so it keeps it.
 #[derive(Default, Clone)]
 struct Book {
     links: Vec<Option<Link>>,
     by_id: HashMap<String, usize>,
     gone: usize,
+    made: u64,
 }
 
 impl Book {
     fn new(links: Vec<Link>) -> Self {
+        static MADE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let by_id = links
             .iter()
             .enumerate()
@@ -97,6 +114,7 @@ impl Book {
             links: links.into_iter().map(Some).collect(),
             by_id,
             gone: 0,
+            made: MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         }
     }
 
@@ -149,6 +167,15 @@ pub struct LinkedFiles {
     /// The apps whose system dialog is up, by their links file (`start_pick`): kept here and not in the page, which a
     /// reload (a profile switch) starts again while the dialog stays on screen.
     picking: Arc<Mutex<HashSet<PathBuf>>>,
+    /// What `list` last found on disk for each app's links, by their file.
+    looked: Arc<Mutex<HashMap<PathBuf, Looked>>>,
+}
+
+/// Which of a book's links `list` found there as they were (by their place in it, a hole `false`), and when.
+struct Looked {
+    book: u64,
+    at: Instant,
+    available: Arc<Vec<bool>>,
 }
 
 /// A pick whose dialog is up: its app gets no other until this one is answered and dropped.
@@ -213,6 +240,149 @@ fn stamp(meta: &fs::Metadata) -> (u64, u64) {
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map_or(0, |d| d.as_millis() as u64);
     (meta.len(), modified)
+}
+
+fn not_a_picked_file() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, "Not a file of what was picked")
+}
+
+/// Opens a linked file, a regular one, without following a symbolic link below what was picked: from the picked
+/// folder (the folder of a file picked one by one), which is opened as the person named it, each name below it is
+/// opened in the one before and refused if it is a link (`open_below`). `path` (as the app sees it, the picked
+/// folder's name first) says how many names of `full` are below. A named pipe or a device is refused without waiting
+/// on it.
+fn open_link(full: &Path, path: &str) -> io::Result<(fs::File, fs::Metadata)> {
+    let below = path.split('/').count().saturating_sub(1).max(1);
+    let mut base = full.to_path_buf();
+    let mut names: Vec<OsString> = Vec::with_capacity(below);
+    for _ in 0..below {
+        let Some(Component::Normal(name)) = base.components().next_back() else {
+            return Err(not_a_picked_file());
+        };
+        names.push(name.to_os_string());
+        base.pop();
+    }
+    names.reverse();
+    let file = open_below(&base, &names)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(not_a_picked_file());
+    }
+    Ok((file, meta))
+}
+
+/// Each name opened in the folder opened before it, with `O_NOFOLLOW`: a link there, swapped in or not, fails the open
+/// itself. The file is opened `O_NONBLOCK`, so a named pipe opens at once (and is refused as no file).
+#[cfg(unix)]
+fn open_below(base: &Path, names: &[OsString]) -> io::Result<fs::File> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut at = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY)
+        .open(base)?;
+    for (n, name) in names.iter().enumerate() {
+        let name = std::ffi::CString::new(name.as_bytes()).map_err(|_| not_a_picked_file())?;
+        let kind = if n + 1 == names.len() {
+            libc::O_NONBLOCK
+        } else {
+            libc::O_DIRECTORY
+        };
+        let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | kind;
+        // SAFETY: `at` is an open folder and `name` a C string, both alive for the call; the descriptor it gives is
+        // owned by the File made of it, and by nothing else.
+        let fd = unsafe { libc::openat(at.as_raw_fd(), name.as_ptr(), flags) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        at = unsafe { fs::File::from_raw_fd(fd) };
+    }
+    Ok(at)
+}
+
+/// Windows opens by path only: each folder below must be no link (a symbolic link or a junction) when looked at, and
+/// the file is opened twice, as itself (`FILE_FLAG_OPEN_REPARSE_POINT`, refused if it is a link) and as what is read,
+/// which must be that same file. A link swapped in for a folder between its look and the open is caught at every
+/// later read, which must open the file the link remembers (`file_id`).
+#[cfg(windows)]
+fn open_below(base: &Path, names: &[OsString]) -> io::Result<fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    let (name, folders) = names.split_last().ok_or_else(not_a_picked_file)?;
+    let mut at = base.to_path_buf();
+    for folder in folders {
+        at.push(folder);
+        if !fs::symlink_metadata(&at)?.is_dir() {
+            return Err(not_a_picked_file());
+        }
+    }
+    at.push(name);
+    let itself = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(&at)?;
+    let meta = itself.metadata()?;
+    if meta.is_symlink() {
+        return Err(not_a_picked_file());
+    }
+    // Opened again as a file is read: a placeholder of a cloud drive (a reparse point too) is fetched, not read empty.
+    let file = fs::File::open(&at)?;
+    if file_id(&itself, &meta)? != file_id(&file, &file.metadata()?)? {
+        return Err(not_a_picked_file());
+    }
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn file_id(_file: &fs::File, meta: &fs::Metadata) -> io::Result<FileId> {
+    use std::os::unix::fs::MetadataExt;
+    Ok((meta.dev(), meta.ino()))
+}
+
+/// The volume and the file index (`GetFileInformationByHandle`): std's own are not stable yet.
+#[cfg(windows)]
+fn file_id(file: &fs::File, _meta: &fs::Metadata) -> io::Result<FileId> {
+    use std::os::windows::io::AsRawHandle;
+    /// `BY_HANDLE_FILE_INFORMATION`.
+    #[repr(C)]
+    #[derive(Default)]
+    struct Info {
+        attributes: u32,
+        times: [u32; 6],
+        volume: u32,
+        size: [u32; 2],
+        links: u32,
+        index_high: u32,
+        index_low: u32,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFileInformationByHandle(file: *mut std::ffi::c_void, info: *mut Info) -> i32;
+    }
+    let mut info = Info::default();
+    // SAFETY: a handle open for the whole call, and room for what it writes.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((
+        u64::from(info.volume),
+        u64::from(info.index_high) << 32 | u64::from(info.index_low),
+    ))
+}
+
+/// Which file a path's own metadata (`symlink_metadata`) names, where it says: not on Windows.
+fn path_id(meta: &fs::Metadata) -> Option<FileId> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((meta.dev(), meta.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        None
+    }
 }
 
 fn random_id() -> Result<String, String> {
@@ -343,6 +513,7 @@ impl LinkedFiles {
             writing: Arc::default(),
             cleared: Arc::default(),
             picking: Arc::default(),
+            looked: Arc::default(),
         }
     }
 
@@ -498,13 +669,14 @@ impl LinkedFiles {
         let mut new = Vec::with_capacity(count);
         let mut added = Vec::with_capacity(count);
         for (path, full) in picked {
-            // A file only, as `walk` keeps: opening a named pipe picked with the files waited for a writer for good.
-            if !fs::metadata(&full).is_ok_and(|meta| meta.is_file()) {
+            // A regular file only, as `walk` keeps, and never through a symbolic link (one picked, or swapped in for
+            // a file or a folder since the walk). Opened, not only looked at: a file that cannot be read (another
+            // user's) is left out, as `walk` leaves out a folder that cannot be, rather than listed as there and then
+            // `gone` on every read. A named pipe picked with the files is refused without waiting for a writer.
+            let Ok((file, meta)) = open_link(&full, &path) else {
                 continue;
-            }
-            // Opened, not only looked at: a file that cannot be read (another user's) is left out, as `walk` leaves
-            // out a folder that cannot be, rather than listed as there and then `gone` on every read.
-            let Ok(meta) = fs::File::open(&full).and_then(|file| file.metadata()) else {
+            };
+            let Ok(at) = file_id(&file, &meta) else {
                 continue;
             };
             let (size, modified) = stamp(&meta);
@@ -514,6 +686,7 @@ impl LinkedFiles {
                 full,
                 size,
                 modified,
+                file: Some(at),
             };
             added.push(Entry {
                 id: link.id.clone(),
@@ -537,9 +710,40 @@ impl LinkedFiles {
         Ok(added)
     }
 
-    /// Every link the app keeps; `available` says whether its file is there as it was.
+    /// Every link the app keeps; `available` says whether its file is there as it was, as last looked at: each file is
+    /// looked at again once `RECHECK_AFTER` passed, or the links changed other than by a forget.
     pub fn list(&self, space: &str, app: &str) -> Result<Vec<Entry>, String> {
-        Ok(self.load(space, app)?.live().map(entry).collect())
+        let file = self.file(space, app)?;
+        let book = self.load(space, app)?;
+        let fresh = locked(&self.looked)
+            .get(&file)
+            .filter(|seen| seen.book == book.made && seen.at.elapsed() < RECHECK_AFTER)
+            .map(|seen| seen.available.clone());
+        let found = match fresh {
+            Some(found) => found,
+            None => {
+                let at = Instant::now();
+                let found: Arc<Vec<bool>> = Arc::new(
+                    book.links
+                        .iter()
+                        .map(|link| link.as_ref().is_some_and(available))
+                        .collect(),
+                );
+                let seen = Looked {
+                    book: book.made,
+                    at,
+                    available: found.clone(),
+                };
+                keep(&mut locked(&self.looked), file, seen);
+                found
+            }
+        };
+        Ok(book
+            .links
+            .iter()
+            .zip(found.iter())
+            .filter_map(|(link, &there)| link.as_ref().map(|link| shown(link, there)))
+            .collect())
     }
 
     /// One link as `list` gives it, or None for an id the app does not keep: what `files.serve` looks up, so serving
@@ -559,15 +763,20 @@ impl LinkedFiles {
     ) -> Result<Vec<u8>, String> {
         let book = self.load(space, app)?;
         let link = book.get(id).ok_or("gone: No such file")?;
-        let meta = fs::metadata(&link.full).map_err(|_| "gone: The file is no longer there")?;
-        if stamp(&meta) != (link.size, link.modified) {
+        // The file opened is the one checked and read: a link swapped in after the check is never followed.
+        let (mut file, meta) =
+            open_link(&link.full, &link.path).map_err(|_| "gone: The file is no longer there")?;
+        let same_file = match link.file {
+            Some(at) => file_id(&file, &meta).is_ok_and(|id| id == at),
+            None => true,
+        };
+        if !same_file || stamp(&meta) != (link.size, link.modified) {
             return Err("changed: The file changed since it was picked".into());
         }
         if offset >= link.size {
             return Ok(Vec::new());
         }
         let length = length.min(MAX_READ).min(link.size - offset);
-        let mut file = fs::File::open(&link.full).map_err(|_| "gone: The file cannot be read")?;
         file.seek(SeekFrom::Start(offset))
             .map_err(|e| e.to_string())?;
         let mut bytes = Vec::with_capacity(length as usize);
@@ -638,6 +847,7 @@ impl LinkedFiles {
         let removed = fs::remove_dir_all(&folder);
         // After the files went: a read meanwhile finds them gone, not kept in memory.
         locked(&self.books).retain(|file, _| !file.starts_with(&folder));
+        locked(&self.looked).retain(|file, _| !file.starts_with(&folder));
         match removed {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
             _ => Ok(()),
@@ -645,10 +855,21 @@ impl LinkedFiles {
     }
 }
 
-/// A link as the app sees it, `available` when its file is there as it was.
+/// A link as the app sees it, `available` when its file is there as it was now.
 fn entry(link: &Link) -> Entry {
-    let available =
-        fs::metadata(&link.full).is_ok_and(|meta| stamp(&meta) == (link.size, link.modified));
+    shown(link, available(link))
+}
+
+/// Whether a link's file is there as it was: itself, not a symbolic link to one. Looked at, not opened (a list of
+/// 100,000): a folder above swapped for a link shows at the read, refused there.
+fn available(link: &Link) -> bool {
+    fs::symlink_metadata(&link.full).is_ok_and(|meta| {
+        let other_file = matches!((link.file, path_id(&meta)), (Some(at), Some(id)) if at != id);
+        meta.is_file() && !other_file && stamp(&meta) == (link.size, link.modified)
+    })
+}
+
+fn shown(link: &Link, available: bool) -> Entry {
     Entry {
         id: link.id.clone(),
         path: link.path.clone(),
@@ -663,8 +884,8 @@ fn forgotten_file(file: &Path) -> PathBuf {
     file.with_extension("forgotten")
 }
 
-/// Keeps an app's links in memory, letting another app's go past `MAX_BOOKS`.
-fn keep(books: &mut HashMap<PathBuf, Arc<Book>>, file: PathBuf, book: Arc<Book>) {
+/// Keeps an app's links (or what was found of them) in memory, letting another app's go past `MAX_BOOKS`.
+fn keep<T>(books: &mut HashMap<PathBuf, T>, file: PathBuf, book: T) {
     if books.len() >= MAX_BOOKS && !books.contains_key(&file) {
         if let Some(other) = books.keys().next().cloned() {
             books.remove(&other);
@@ -896,6 +1117,105 @@ mod tests {
             .unwrap()
             .iter()
             .all(|(p, _)| !p.contains("elsewhere") && !p.contains("link.mp4")));
+    }
+
+    /// A symbolic link picked one by one, or one put where a picked file or folder was (between the walk and the pick
+    /// being kept, or after), gave the app the bytes of the file it points to.
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_is_never_linked_nor_read_wherever_it_appears() {
+        use std::os::unix::fs::symlink;
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let outside = folder();
+        fs::create_dir(outside.join("Season 1")).unwrap();
+        fs::write(outside.join("Season 1").join("E01.mp4"), b"key").unwrap();
+        fs::write(outside.join("secret.mp4"), b"secret-key").unwrap();
+        let secret = outside.join("secret.mp4");
+        // Picked one by one.
+        symlink(&secret, root.join("link.mp4")).unwrap();
+        let picked = picked_files(vec![root.join("link.mp4")], &[]);
+        assert!(pick(&links, picked).unwrap().is_empty(), "a link picked");
+        // A file, and a folder above one, swapped for a link between the walk and the pick being kept.
+        let walked = walk(&root, &["mp4".to_string()]).unwrap();
+        fs::remove_file(root.join("Up.mp4")).unwrap();
+        symlink(&secret, root.join("Up.mp4")).unwrap();
+        fs::rename(root.join("Season 1"), root.join("Season 1 before")).unwrap();
+        symlink(outside.join("Season 1"), root.join("Season 1")).unwrap();
+        let added = pick(&links, walked).unwrap();
+        assert!(
+            added.is_empty(),
+            "swapped in before the pick was kept: {added:?}"
+        );
+        // Linked as files, then each swapped for a link to one of the same size and date.
+        fs::remove_file(root.join("Up.mp4")).unwrap();
+        fs::write(root.join("Up.mp4"), b"0123456789").unwrap();
+        fs::remove_file(root.join("Season 1")).unwrap();
+        fs::rename(root.join("Season 1 before"), root.join("Season 1")).unwrap();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
+        assert_eq!(added.len(), 2);
+        let same = |from: &Path, to: &Path| {
+            let modified = fs::metadata(from).unwrap().modified().unwrap();
+            fs::File::options()
+                .write(true)
+                .open(to)
+                .unwrap()
+                .set_modified(modified)
+                .unwrap();
+        };
+        same(&root.join("Up.mp4"), &secret);
+        same(
+            &root.join("Season 1").join("E01.mp4"),
+            &outside.join("Season 1").join("E01.mp4"),
+        );
+        fs::remove_file(root.join("Up.mp4")).unwrap();
+        symlink(&secret, root.join("Up.mp4")).unwrap();
+        fs::rename(root.join("Season 1"), root.join("Season 1 before")).unwrap();
+        symlink(outside.join("Season 1"), root.join("Season 1")).unwrap();
+        for linked in &added {
+            assert!(
+                links.read("ghostly", APP, &linked.id, 0, 100).is_err(),
+                "{} read through a link",
+                linked.path
+            );
+            assert!(
+                !links
+                    .entry("ghostly", APP, &linked.id)
+                    .unwrap()
+                    .unwrap()
+                    .available
+            );
+        }
+        // Put back as they were picked, they read again.
+        fs::remove_file(root.join("Season 1")).unwrap();
+        fs::rename(root.join("Season 1 before"), root.join("Season 1")).unwrap();
+        let e01 = added.iter().find(|e| e.path.ends_with("E01.mp4")).unwrap();
+        assert_eq!(links.read("ghostly", APP, &e01.id, 0, 100).unwrap(), b"abc");
+    }
+
+    /// Links kept before they remembered which file they were still read, with no link followed.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_kept_before_it_remembered_its_file_still_reads() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let up = root.join("Up.mp4");
+        let (size, modified) = stamp(&fs::metadata(&up).unwrap());
+        let file = links.file("ghostly", APP).unwrap();
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let id = "AAAAAAAAAAAAAAAAAAAAAA";
+        fs::write(
+            &file,
+            serde_json::json!([{ "id": id, "path": "Films/Up.mp4", "full": up, "size": size, "modified": modified }])
+                .to_string(),
+        )
+        .unwrap();
+        assert_eq!(links.read("ghostly", APP, id, 0, 3).unwrap(), b"012");
+        fs::rename(&root, root.with_file_name("Films before")).unwrap();
+        fs::create_dir(&root).unwrap();
+        std::os::unix::fs::symlink(root.with_file_name("Films before").join("Up.mp4"), &up)
+            .unwrap();
+        assert!(links.read("ghostly", APP, id, 0, 3).is_err());
     }
 
     /// A whole drive has no name of its own (`/`, `D:\`): it is linked under one that keeps every path relative.
@@ -1224,6 +1544,36 @@ mod tests {
         let other = APP.replace("/cinema", "/chess");
         assert_eq!(links.entry("ghostly", &other, &up.id).unwrap(), None);
         assert!(links.entry("../x", APP, &up.id).is_err());
+    }
+
+    // Every list looked at each linked file on disk: 150-200 ms a list with 100,000 links.
+    #[test]
+    fn a_list_looks_at_the_files_again_once_its_last_look_is_old_or_a_pick_came() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
+        let up = &added[1];
+        let available = || -> Vec<bool> {
+            let listed = links.list("ghostly", APP).unwrap();
+            listed.iter().map(|e| e.available).collect()
+        };
+        assert_eq!(available(), [true, true]);
+        // As last looked at; the one link looked up alone is looked at now.
+        fs::write(root.join("Up.mp4"), b"01234567890").unwrap();
+        assert_eq!(available(), [true, true]);
+        let alone = links.entry("ghostly", APP, &up.id).unwrap().unwrap();
+        assert!(!alone.available);
+        // A pick looks at them all again.
+        let srt = pick(&links, picked_files(vec![root.join("Up.srt")], &[])).unwrap();
+        assert_eq!(available(), [true, false, true]);
+        // A forget leaves the others as last looked at.
+        fs::remove_file(root.join("Season 1").join("E01.mp4")).unwrap();
+        links.forget("ghostly", APP, &srt[0].id).unwrap();
+        assert_eq!(available(), [true, false]);
+        // Once the last look is old, looked at again.
+        let file = links.file("ghostly", APP).unwrap();
+        locked(&links.looked).get_mut(&file).unwrap().at -= RECHECK_AFTER;
+        assert_eq!(available(), [false, false]);
     }
 
     #[test]

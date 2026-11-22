@@ -24,8 +24,8 @@ import { TakeoverRefusal, checkTakeoverPassword, oneTry, takeoverTarget } from "
  * 5. Its own tombstone there: it is `active` in the new set, alone, with one more takeover and its counters raised before
  *    the engine starts; the old address is put again every hour as an earlier set's, and a tombstone found in its place
  *    there stops those puts and tells the person (`remove.ts`). Another valid tombstone that does not list it: `removed`
- *    (a second `moving` device did the same first). One that still lists it (the remover's came back on top): it stays
- *    `moving`, and may try again.
+ *    (a second `moving` device did the same first), unless this device was the active one, which no other slot's
+ *    tombstone ends. One that still lists it (the remover's came back on top): it stays `moving`, and may try again.
  *
  * The other devices must be added again: the person is told so before, and they hold the old secret only.
  */
@@ -51,6 +51,14 @@ export interface OwnSetPorts {
  * read that counts yet (offline, or a source that took the put did not answer); the plan is kept and resumed.
  */
 export type OwnSetOutcome = "start" | "removed" | "lost" | "wait";
+
+/**
+ * Whether another valid tombstone that does not list this device ends it here. A device that was the active one
+ * believes no other device, so another slot's tombstone (a stolen device's, which needs only `D` and a slot's key)
+ * leaves it `moving`, and it may try again. Any other device yields: that is how two `moving` devices of one remover
+ * settle which of them goes on.
+ */
+const yieldsTo = (record: DeviceRecord): boolean => record.activeSlot !== record.ownSlot;
 
 /** Whether this device may offer it: `moving`, a copy here, and a remover it still believes (not one it can only be added back from). */
 export function canStartOwnSet(record: DeviceRecord | null): boolean {
@@ -85,7 +93,7 @@ export async function startOwnSet(ports: OwnSetPorts, request: { password: strin
   const standing = classifyTurnRead({ keys, ownKey: fromBase64Url(record.deviceSet[record.ownSlot]!.key), stored: null }, await ports.network.turnRead(keys.identity.pubKeyZ32));
   if (!standing.good) return "wait";
   // A tombstone that no longer lists this device: another device of the old set made a set of its own first.
-  if (standing.result === "tombstone" && !standing.listed) { await ports.move("removed", {}); return "removed"; }
+  if (standing.result === "tombstone" && !standing.listed && yieldsTo(record)) { await ports.move("removed", {}); return "removed"; }
   await ports.amend({ ownSet: await planOwnSet(record, ports, standing.result === "tombstone" ? standing.record?.instance : undefined) });
   return resumeOwnSet(ports);
 }
@@ -161,7 +169,7 @@ export async function resumeOwnSet(ports: OwnSetPorts): Promise<OwnSetOutcome> {
   if (read.result !== "tombstone" || !read.payload) return "wait";
   if (bytesEqual(read.payload, tomb)) { await won(ports, record, plan, now()); return "start"; }
   // Another tombstone counts there. One that does not list this device: another device of the old set made its own first.
-  if (!read.listed) { await ports.move("removed", { ownSet: undefined }); return "removed"; }
+  if (!read.listed && yieldsTo(record)) { await ports.move("removed", { ownSet: undefined }); return "removed"; }
   await ports.amend({ ownSet: undefined });
   return "lost";
 }

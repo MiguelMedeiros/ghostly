@@ -39,6 +39,12 @@ describe("a daemon's log of joins through a group's link", () => {
     expect(lines[0]).toMatch(/ at \d{4}-\d\d-\d\dT[\d:.]+Z$/);
   });
 
+  it("says a join that gave up, and how to knock again", () => {
+    // Before: the knocks stopped after an hour nobody answered, with no line, and the log ended on "knock left".
+    expect(joinLogLine(JSON.stringify({ t: 1, g: G, step: "join.unanswered" })))
+      .toBe(`ghostly: group ${G}: nobody answered for an hour: knocks stopped (ghostly group accept knocks again) at 1970-01-01T00:00:00.001Z`);
+  });
+
   it("leaves out an edge's own steps and what is not a trace line", () => {
     expect(joinLogLine(JSON.stringify({ t: 1, g: G, step: "link.open", role: "edge" }))).toBeNull();
     expect(joinLogLine(JSON.stringify({ t: 1, g: G, step: "link.start", role: "guest" }))).toBe(`ghostly: group ${G}: entry session starting (joining) at 1970-01-01T00:00:00.001Z`);

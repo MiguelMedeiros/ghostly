@@ -213,6 +213,14 @@ describe("AT Protocol resolution", () => {
     net.zone.a!["alice.example.com"] = ["203.0.113.11"];
     const doc = await resolveAtprotoDid(web.did, { fetch: net.fetch });
     expect(doc).toMatchObject({ did: "did:web:alice.example.com", pds: "https://pds.example.com", handle: "web.example.com" });
+    // The domain is the identity: once it has no address, the DID no longer resolves (not "could not run").
+    delete net.zone.a!["alice.example.com"];
+    const gone = await resolveAtprotoDid(web.did, { fetch: net.fetch }).catch((e: unknown) => e);
+    expect(gone).toBeInstanceOf(Error);
+    expect(gone).not.toBeInstanceOf(IdentityCheckUnavailable);
+    expect((gone as Error).message).toBe("The account's DID no longer resolves: alice.example.com has no address");
+    // No resolver answered: that one could not run.
+    await expect(resolveAtprotoDid(web.did, { fetch: async () => { throw new TypeError("Failed to fetch"); } })).rejects.toThrow(IdentityCheckUnavailable);
   });
 
   it("does not fetch a did:web document from a private network", async () => {

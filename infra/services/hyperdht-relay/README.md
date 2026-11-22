@@ -3,7 +3,9 @@
 Browsers have no UDP, so they cannot run HyperDHT (WISP 103) themselves. This relay runs the UDP half for them
 and talks to each browser over one WebSocket, with Holepunch's
 [`@hyperswarm/dht-relay`](https://github.com/holepunchto/hyperswarm-dht-relay) protocol. The web app and the
-extension use it when a relay is set in **Settings → Network → HyperDHT relay** (`packages/browser/src/platform/hyperdhtRelay.ts`).
+extension use it when a relay is set in **Settings → Network → HyperDHT relay** (`packages/browser/src/platform/hyperdhtRelay.ts`),
+and so does the Desktop while **Hide my IP from contacts** is on: its own HyperDHT is off then, and its webview dials
+through the relay as a browser does.
 
 ## What it sees, and what it doesn't
 
@@ -38,7 +40,7 @@ are in WISP 103, "Browser profile".
 
 | | default | env |
 |---|---|---|
-| WebSockets at once | 512 | `GHOSTLY_RELAY_CLIENTS` |
+| WebSockets at once (when full, an address that would hold fewer than the one holding the most gets in, in place of that one's oldest client; once per 10 s per address) | 512 | `GHOSTLY_RELAY_CLIENTS` |
 | from one address | 16 | `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS` |
 | largest message | 256 KiB | `GHOSTLY_RELAY_PAYLOAD_BYTES` |
 | bytes a client sends per second, burst | 512 KiB/s, 4 MiB | `GHOSTLY_RELAY_BYTES_PER_SECOND`, `GHOSTLY_RELAY_BURST_BYTES` |
@@ -46,35 +48,82 @@ are in WISP 103, "Browser profile".
 | listens per client per minute, refused ones too (an app starts at most 8 on start or reconnect) | 60 | `GHOSTLY_RELAY_LISTENS_PER_MINUTE` |
 | dials per client per minute | 60 | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
 | HyperDHT streams one client holds open (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_STREAMS` |
-| bytes waiting for a client that it has not read yet | 8 MiB | `GHOSTLY_RELAY_QUEUED_BYTES` |
-| bytes waiting unread over all clients (past it, the client holding the most is dropped) | 96 MiB | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
+| bytes waiting for a client that it has not read yet, with what it sent that its far peers have not taken yet (one stream past half of it is closed) | 8 MiB | `GHOSTLY_RELAY_QUEUED_BYTES` |
+| bytes waiting, both ways, over all clients (past it, the client holding the most is dropped) | 96 MiB | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
 | a client with no listen open and no dial | 30 s | `GHOSTLY_RELAY_IDLE_MS` |
 | ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |
 | a client's part of a handshake (its answer) | 15 s | `GHOSTLY_RELAY_HANDSHAKE_MS` |
-| handshakes waiting on one client's answer at once (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
+| handshakes waiting on one client's answer at once (its dials and incoming ones; one key's incoming ones at most a quarter, and a quarter kept for its dials) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
 
 Past a limit the client is dropped, or its socket is paused (the byte rate), or an incoming stream past
-`streams` is closed. Topic lookups and announcements
+`streams` is closed, or a handshake past `handshakes` is refused (`refused handshake <why>` in the log). Topic lookups and announcements
 are refused: Ghostly never makes them, and they would make the relay an open crawler.
+
+### In the log
+
+Each limit reached is a line of its own kind. The first one of a kind names the limit and the setting that moves it
+(`refused address: 16 clients from one address (GHOSTLY_RELAY_CLIENTS_PER_ADDRESS)`); the next ones are the kind alone,
+at most 5 a minute, then one count a minute while it goes on (`refused address (812 more this minute, not logged)`).
+
+| log | what happened | to change |
+|---|---|---|
+| `refused full` | a new client got 503: the relay holds `clients`, and no address holds more than the newcomer's would | `GHOSTLY_RELAY_CLIENTS` |
+| `refused address` | a new client got 429: its address already holds `clientsPerAddress` | `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS`; behind a proxy, `GHOSTLY_RELAY_PROXIES` or `GHOSTLY_RELAY_CLOUDFLARE`, or every client counts as the proxy |
+| `dropped room` | on a full relay, the oldest client of the address holding the most, for a newcomer | `GHOSTLY_RELAY_CLIENTS` |
+| `dropped idle` | a client with no listen and no dial for `idleMs` | `GHOSTLY_RELAY_IDLE_MS` |
+| `dropped no pong` | a client that had not answered the last ping by the next | `GHOSTLY_RELAY_PING_MS` |
+| `dropped listen rate`, `dropped listen limit` | a client past `listensPerMinute`, or past `listens` at once | `GHOSTLY_RELAY_LISTENS_PER_MINUTE`, `GHOSTLY_RELAY_LISTENS` |
+| `dropped dial limit` | a client past `connectsPerMinute` | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
+| `dropped stream limit` | a client dialling past `streams` open | `GHOSTLY_RELAY_STREAMS` |
+| `dropped queue`, `closed far queue` | a client holding more than `queuedBytes` unread or untaken, or one of its streams half of it (closed, the client stays) | `GHOSTLY_RELAY_QUEUED_BYTES` |
+| `dropped queue total` | the client holding the most, while all of them hold more than `queuedTotalBytes` | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
+| `refused handshake limit`, `refused handshake listen share`, `refused handshake incoming` | a handshake past `handshakes` waiting on one client, past a quarter of it on one of its keys, or incoming ones past the three quarters left after its dials' | `GHOSTLY_RELAY_HANDSHAKES` |
+
+The rest name no limit: `refused stopping` (a new client while the relay stops), `refused origin "<origin>"` (see
+`GHOSTLY_RELAY_ORIGINS` below), `refused listen <code>` (HyperDHT refused the listen, `KEYPAIR_ALREADY_USED` for a key
+another client holds), `dropped topic query` (a lookup or an announcement, never relayed), and `dropped protocol error`,
+`dropped unsendable <message>`, `dropped sessions` (a second relay session on one WebSocket), `dropped socket error`,
+`dropped stream error` (a client that broke the protocol or its connection).
+
+A time limit (`*_MS`) is at most 2147483647 (about 24 days), the longest a Node timer waits; a longer one stops the
+start, as any other value not of its kind does.
 
 Other settings:
 
 - `GHOSTLY_RELAY_ORIGINS` lists the allowed origins, comma-separated, each as a browser sends it: scheme, host and a
-  port only (`https://app.ghostly.tools`, `chrome-extension://<id>`). Case, a default port (`:443`) and a trailing `/`
-  do not matter; an entry with a path, a query or no scheme stops the start. Left out, any origin may connect. A
+  port only (`https://app.ghostly.tools`, `chrome-extension://<id>`). The Desktop's webview sends `tauri://localhost`
+  (macOS, Linux) or `http://tauri.localhost` (Windows, Android): list both for Desktops with Hide my IP on. Case, a
+  default port (`:443`) and a trailing `/` do not matter; an entry with a path, a query or no scheme stops the start.
+  Left out, any origin may connect. A
   refused one gets 403, and the log says `refused origin "<origin>"` once an hour per origin, for at most 16 origins
   an hour. It keeps other websites from using the relay; it is no defence against other programs.
-- `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel).
+- `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel). It does not go
+  with `GHOSTLY_RELAY_PROXIES`: both set stops the start, since behind nginx or Caddy a client writes that header.
 - `GHOSTLY_RELAY_PROXIES` is the number of reverse proxies in front of it (`1` for one nginx): each client then
   counts by the `X-Forwarded-For` entry that many from the end, the ones before it being the client's to write.
   Without either, the headers are ignored, and the first request that carries one logs which setting is missing
-  (`requests carry CF-Connecting-IP but GHOSTLY_RELAY_CLOUDFLARE is not set`). A client that reaches the port past the proxy could write them itself,
-  so publish it only where the proxy is (`HYPERDHT_RELAY_BIND`, loopback by default).
+  (`requests carry CF-Connecting-IP but GHOSTLY_RELAY_CLOUDFLARE is not set`). With one set, the first request
+  without its header (a proxy that does not write it, such as nginx without `proxy_set_header X-Forwarded-For
+  $proxy_add_x_forwarded_for`) logs `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set`
+  (or `CF-Connecting-IP` and `GHOSTLY_RELAY_CLOUDFLARE`): it counts as the proxy, as every other one would. One with
+  fewer `X-Forwarded-For` entries than `GHOSTLY_RELAY_PROXIES` (`2` behind a single nginx) logs `requests carry 1
+  X-Forwarded-For entry though GHOSTLY_RELAY_PROXIES is 2`: set it to the number of proxies that write the header.
+  Until such a request comes, a client that writes the header itself chooses the address it counts as; from it on, the
+  relay reads no deeper than the fewest entries a request has come with (no header at all: the proxy's address). With
+  neither set and no header at all (a proxy that writes none, unnamed), every browser is the proxy's one address and
+  the 17th is refused (429): the first refusal at `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS` from a loopback or private
+  address logs `clients refused at GHOSTLY_RELAY_CLIENTS_PER_ADDRESS (16) come from a loopback or private address`,
+  with the header and settings to set, once per start. With either set, the
+  relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
+  write that header. The container sets `HOST=0.0.0.0` inside it and publishes the port where the proxy is
+  (`HYPERDHT_RELAY_BIND`, loopback by default).
 
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`, a limit of `0`) stops the
 start with one line that names it; leave a setting out for its default. The start line says how clients are counted,
-each limit set away from its default, and which origins it serves (`any origin` when none is set).
+each limit set away from its default, and which origins it serves (`any origin` when none is set). Before it, a line
+names each `GHOSTLY_RELAY_*` or `GHOSTLY_HYPERDHT_*` variable the relay does not read, with the closest name it does
+(`GHOSTLY_RELAY_PROXY (GHOSTLY_RELAY_PROXIES?) is not a setting of this relay; ignored`).
 
 ## Running it
 
@@ -96,18 +145,22 @@ a port another program holds or one below 1024 this user may not take (`PORT`), 
 machine or no name at all: one line names the setting instead of a stack trace, and nothing is left running.
 
 `docker-compose.yml` is set up for one server, "zero" behind the Cloudflare tunnel: it counts each client by
-`CF-Connecting-IP` and lets in only Ghostly's own app and extension. Anywhere else, set two variables (in the shell or
-an `.env` file next to it):
+`CF-Connecting-IP` and lets in only Ghostly's own app, extension and Desktop. Anywhere else, set two variables (in the
+shell or an `.env` file next to it):
 
 - `GHOSTLY_RELAY_CLOUDFLARE=0`, or every client could name its own address in that header; behind nginx or Caddy add
-  `GHOSTLY_RELAY_PROXIES=1`;
-- `GHOSTLY_RELAY_ORIGINS` with the origins of the web app you serve, or every browser on it is refused (403).
+  `GHOSTLY_RELAY_PROXIES=1` (with the default `GHOSTLY_RELAY_CLOUDFLARE=1` left on, the relay does not start);
+- `GHOSTLY_RELAY_ORIGINS` with the origins of the web app you serve, and `tauri://localhost,http://tauri.localhost`
+  for the Desktop, or every browser on it is refused (403), and so is every Desktop with Hide my IP on.
 
-`GET /healthz` answers with the counts (clients, accepted, refused, dropped) and the HyperDHT node's state: `nodes`
-in its routing table, `firewalled`, and `sinceAnswerMs` since another node last answered it (`null`: never). It is
-`ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
+`GET /healthz` answers with the HyperDHT node's state: `nodes` in its routing table and `firewalled`
+(`{"ok":true,"firewalled":false,"nodes":20}`); `HEAD` and a query string (`/healthz?x=1`) answer the same. Anyone who reaches the relay may read it, so it carries no count of
+clients; refusals and drops are in the log. It is `ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
 firewall or a container network without it), so nobody reaches the browsers listening through it. The start log
-says `bootstrap reached no node` then. The log has counts and reasons only: never a key, an address or anyone's
+says so with what to check (`bootstrap reached no node: check that this host can send UDP out ...`, and that
+`GHOSTLY_HYPERDHT_BOOTSTRAP` names running nodes when it is set). While the relay stops (up to a second, until each client has answered its
+going-away close, 1001), it reads `{"ok":false,"stopping":true}` with HTTP 503 and refuses new WebSockets with 503
+and `Retry-After: 1`. The log has counts and reasons only: never a key, an address or anyone's
 traffic.
 
 ## Cost, measured
@@ -129,6 +182,6 @@ Nobody runs a public dht-relay for Ghostly.
 
 - **Proposal:** this container on "zero" behind the Cloudflare tunnel, as `wss://hyperdht-relay.ghostly.tools`
   (`HYPERDHT_RELAY_BIND=<LAN address>:49443`).
-- **Origins:** the app's origin and the extension's.
+- **Origins:** the app's origin, the extension's and the Desktop's two.
 - **App default:** it stays off (`DEFAULT_HYPERDHT_RELAY` in `packages/browser/src/shared/hyperdhtRelay.ts`)
   until the relay runs.

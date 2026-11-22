@@ -257,15 +257,38 @@ describe("reading and forgetting", () => {
 });
 
 describe("the sheet's words", () => {
+  /** The app's or the folder's own words, isolated in the sentence. */
+  const own = (text: string) => `\u2068${text}\u2069`;
   it("are the person's language", () => {
     const pt = pickSheetText(translatorFor("pt"));
-    expect(pt.ask("Cinema", true)).toBe("Cinema pede para ler uma pasta");
+    expect(pt.ask("Cinema", true)).toBe(`${own("Cinema")} pede para ler uma pasta`);
     expect(pt.choose(false)).toBe("Escolher arquivos");
     expect(pt.cancel).toBe("Cancelar");
-    expect(pickSheetText(translatorFor("en")).note("Cinema")).toBe("Nothing is copied: Cinema reads what you pick, on this device.");
-    expect(pt.askAgain("Cinema", "Filmes", 0)).toBe("Cinema pede para ler “Filmes” de novo");
-    expect(pt.askAgain("Cinema", "Filmes", 23)).toBe("Cinema pede para ler “Filmes” e mais 23 de novo");
-    expect(pickSheetText(translatorFor("en")).askAgain("Cinema", "Films", 1)).toBe("Cinema asks to read “Films” and 1 more again");
+    expect(pickSheetText(translatorFor("en")).note("Cinema")).toBe(`Nothing is copied: ${own("Cinema")} reads what you pick, on this device.`);
+    expect(pt.askAgain("Cinema", "Filmes", 0)).toBe(`${own("Cinema")} pede para ler “${own("Filmes")}” de novo`);
+    expect(pt.askAgain("Cinema", "Filmes", 23)).toBe(`${own("Cinema")} pede para ler “${own("Filmes")}” e mais 23 de novo`);
+    expect(pickSheetText(translatorFor("en")).askAgain("Cinema", "Films", 1)).toBe(`${own("Cinema")} asks to read “${own("Films")}” and 1 more again`);
+  });
+
+  it("keep the page's direction whatever the app is called: a Hebrew title starts an English sheet, an English one an Arabic sheet", async () => {
+    for (const [language, app, folder] of [["en", "שחמט", "סרטים"], ["ar", "Cinema", "Films"]] as const) {
+      document.documentElement.dir = language === "ar" ? "rtl" : "ltr";
+      const words = pickSheetText(translatorFor(language));
+      const host = webLinkedFiles({ text: () => words, picker: async () => null });
+      const pick = host.pick(REF, app, { folder: true, accept: [] });
+      const sheet = await shown("[data-testid=app-files-sheet]");
+      const [title, note] = [sheet.querySelector("h2")!, sheet.querySelector("p")!];
+      // Laid out by the page (its `dir`), never by the first letters, the app's: `dir="auto"` drew "asks to read a
+      // folder" right to left after a Hebrew title.
+      for (const line of [title, note]) expect(line.closest("[dir]")).toBe(document.documentElement);
+      expect(title.textContent).toBe(words.ask(app, true));
+      expect(title.textContent).toContain(own(app));
+      expect(note.textContent).toContain(own(app));
+      expect(words.askAgain(app, folder, 0)).toContain(own(folder));
+      (document.querySelector("[data-testid=app-files-cancel]") as HTMLButtonElement).click();
+      await expect(pick).rejects.toThrow(/^cancelled: /);
+    }
+    document.documentElement.removeAttribute("dir");
   });
 });
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { copyText } from "../lib/shareLink";
+import { copyMessageText } from "../lib/shareLink";
 
 export type MessageCopyNote = { said: "copied" | "failed"; text: string };
 
@@ -17,7 +17,7 @@ export function useMessageCopy(back: () => HTMLElement | null | undefined): [Mes
     clearTimeout(timer.current);
     setNote(null);
     back()?.focus({ preventScroll: true });
-    void copyText(text).then(() => {
+    void copyMessageText(text).then(() => {
       setNote({ said: "copied", text });
       timer.current = setTimeout(() => setNote(null), 1500);
     }, () => setNote({ said: "failed", text }));

@@ -149,7 +149,8 @@ test("back from a chosen card by its Cards button and by Escape, then a payment 
   await card("lightning").click();
   await expect(page.getByTestId("payment-amount")).toBeFocused();
   const back = page.getByTestId("payment-change-card");
-  await expect(back).toHaveAccessibleName("Back to the cards");
+  await expect(back).toHaveAccessibleName("Cards");
+  await expect(back).toHaveAccessibleDescription("Back to the cards");
   // It leads the card's head, before the mark and the name (its place on screen moves while the card turns).
   await expect(page.getByTestId("payment-back").locator(".payment-back-head > :first-child")).toHaveAttribute("data-testid", "payment-change-card");
   await back.click();

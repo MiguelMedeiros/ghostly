@@ -1,6 +1,6 @@
 import { atprotoDidMethod, IdentityCheckUnavailable, isAtprotoDid, parseAtprotoDidDocument, txtValue, type AtprotoDidDocument } from "@ghostly/core";
 import type { IdentityFetch } from "../contract";
-import { assertPublicHost, dohQuery, type DohResolverId } from "../domain";
+import { assertPublicHost, dohQuery, DomainCheckError, type DohResolverId } from "../domain";
 
 /**
  * AT Protocol identity resolution, the network half: a DID to its document (the PLC directory for
@@ -48,16 +48,23 @@ export function didDocumentUrl(did: string, plc = plcDirectory()): string {
 /**
  * Refuses a host the account chose (a did:web host, the PDS its document names) that points to a private
  * network address: a contact's app never knocks on its own local network for someone else's proof.
+ * A host with no address is "could not run" too, except for a did:web host (`isDid`): that domain is the
+ * identity, so the resolver's answer that it has none says the DID no longer resolves (as for did:web proofs).
+ * A PDS name that is gone is its operator's, like a Pubky homeserver's: the check could not run.
  */
-export async function assertPublicServer(host: string, options: AtprotoResolveOptions): Promise<void> {
+export async function assertPublicServer(host: string, options: AtprotoResolveOptions, isDid = false): Promise<void> {
   try { await assertPublicHost(host, { fetch: options.fetch, signal: options.signal, resolver: options.resolver }); }
-  catch (e) { throw new IdentityCheckUnavailable(`The account's server ${host} was not contacted: ${e instanceof Error ? e.message : String(e)}`); }
+  catch (e) {
+    // eslint-disable-next-line preserve-caught-error -- A message people can act on; the library's error stays out of the UI (ES2020 has no Error.cause).
+    if (isDid && e instanceof DomainCheckError) throw new Error(`The account's DID no longer resolves: ${e.message}`);
+    throw new IdentityCheckUnavailable(`The account's server ${host} was not contacted: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** A DID's document, checked (parseAtprotoDidDocument). Throws a message people can read. */
 export async function resolveAtprotoDid(did: string, options: AtprotoResolveOptions): Promise<AtprotoDidDocument> {
   const url = didDocumentUrl(did, options.plc);
-  if (atprotoDidMethod(did) === "web") await assertPublicServer(did.slice("did:web:".length), options);
+  if (atprotoDidMethod(did) === "web") await assertPublicServer(did.slice("did:web:".length), options, true);
   let response: Awaited<ReturnType<IdentityFetch>>;
   try {
     response = await options.fetch(url, { headers: { accept: "application/did+ld+json, application/json" }, maxBytes: DID_DOCUMENT_MAX_BYTES, signal: options.signal, redirect: "error" });

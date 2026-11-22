@@ -1,4 +1,4 @@
-import { parseSshPublicKey, sameSshKey, type SshPublicKey } from '@ghostly/core';
+import { IdentityCheckUnavailable, parseSshPublicKey, sameSshKey, type SshPublicKey } from '@ghostly/core';
 import type { IdentityFetch } from './contract';
 
 /** "This account publishes that key", without OAuth: GitHub and GitLab publish every account's SSH
@@ -24,12 +24,16 @@ export function validForgeLogin(forge: SshForge, login: string): boolean {
     : /^[A-Za-z0-9_.][A-Za-z0-9_.-]{0,63}$/.test(login) && !/\.(?:git|atom)$/i.test(login);
 }
 
+/** A forge that could not be asked (not reached, limiting lookups, an error or a page that is not its API) is IdentityCheckUnavailable: it says nothing about the key. */
 async function get(fetcher: IdentityFetch, url: string, signal?: AbortSignal): Promise<{ status: 404 } | { status: 200; body: unknown }> {
-  const response = await fetcher(url, { maxBytes: MAX_BODY, signal });
+  const host = new URL(url).host;
+  let response: Awaited<ReturnType<IdentityFetch>>;
+  try { response = await fetcher(url, { maxBytes: MAX_BODY, signal }); }
+  catch (e) { throw e instanceof IdentityCheckUnavailable ? e : new IdentityCheckUnavailable(`${host} could not be reached: ${e instanceof Error ? e.message : String(e)}`); }
   if (response.status === 404) return { status: 404 };
-  if (response.status === 403 || response.status === 429) throw new Error(`${new URL(url).host} is limiting lookups; check again later`);
-  if (response.status !== 200) throw new Error(`${new URL(url).host} answered HTTP ${response.status}`);
-  try { return { status: 200, body: JSON.parse(response.text) }; } catch { throw new Error(`Unexpected answer from ${new URL(url).host}`); }
+  if (response.status === 403 || response.status === 429) throw new IdentityCheckUnavailable(`${host} is limiting lookups; check again later`);
+  if (response.status !== 200) throw new IdentityCheckUnavailable(`${host} answered HTTP ${response.status}`);
+  try { return { status: 200, body: JSON.parse(response.text) }; } catch { throw new IdentityCheckUnavailable(`Unexpected answer from ${host}`); }
 }
 
 function keysFrom(body: unknown): SshPublicKey[] {

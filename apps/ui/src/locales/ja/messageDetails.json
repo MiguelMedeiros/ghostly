@@ -28,7 +28,7 @@
   },
   "delivery": {
     "delivered": "配信済み（受領確認あり）",
-    "failed": "失敗",
+    "failed": "未送信",
     "held": "連絡先のために保管中",
     "queued": "まだ確認なし、自動で再送します",
     "sending": "送信中",
@@ -161,6 +161,12 @@
     "timing": "タイミング",
     "voice": "音声",
     "wire": "通信形式"
+  },
+  "send": {
+    "failed": "失敗",
+    "failedBecause": "失敗：{{error}}",
+    "sending": "送信中",
+    "sent": "送信済み"
   },
   "storage": {
     "blob": "ファイル全体を IndexedDB に",

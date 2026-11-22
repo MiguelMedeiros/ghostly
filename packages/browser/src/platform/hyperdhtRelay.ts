@@ -1,6 +1,6 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { fromBase64Url, type BoundChannel, type FrameChannel, type NativeEndpoint } from "@ghostly/core";
-import { hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
+import { hyperdhtRelayProblem, hyperdhtRelayUrl } from "../shared/hyperdhtRelay";
 
 export { hyperdhtRelayProblem as relayUrlProblem };
 
@@ -26,6 +26,13 @@ const HANDSHAKE_MS = 20_000;
 const RELAY_OPEN_MS = 10_000;
 const LISTEN_MS = 20_000;
 const MAX_CHANNELS = 2;
+/**
+ * Streams dialled in that have not sent the preface yet. They hold none of the MAX_CHANNELS: a new one past this many
+ * drops the oldest of them, so streams that stall can never keep the contact's out.
+ */
+const MAX_UNPREFACED = 4;
+/** The places of the streams dialled in: those whose preface came, and those still waiting for it (oldest first). */
+interface DialledIn { live: Set<RelayedChannel>; unprefaced: Set<RelayedChannel> }
 /**
  * How the relay client is always made: never custodial. dht-relay's default is custodial, which sends every
  * secret key to the relay so it can run the handshake and the stream itself. Nothing here takes this from
@@ -88,8 +95,6 @@ interface RelayClient {
   node: RelayedNode;
   endpoints: Set<{ unavailable(): void }>;
   gone: boolean;
-  /** Settles when the relay connection closes. */
-  closed: Promise<void>;
 }
 const clients = new Map<string, Promise<RelayClient>>();
 
@@ -118,10 +123,9 @@ async function relayClient(url: string, createSocket: (url: string) => WebSocket
     // Non-custodial: the relay is told public keys only, never a secret key (dht-relay's default sends them).
     // The node's own key is never used to listen or dial: a random one says nothing about this app.
     const node = new RelayedDHT(new WebSocketStream(true, socket), { ...NON_CUSTODIAL, keyPair: hyperKeyPair(crypto.getRandomValues(new Uint8Array(32))) }) as RelayedNode;
-    let closed!: () => void;
-    const client: RelayClient = { node, endpoints: new Set(), gone: false, closed: new Promise(resolve => { closed = resolve; }) };
+    const client: RelayClient = { node, endpoints: new Set(), gone: false };
     socket.addEventListener("close", () => {
-      client.gone = true; closed();
+      client.gone = true;
       if (clients.get(url) === opening) clients.delete(url);
       for (const endpoint of [...client.endpoints]) endpoint.unavailable();
     });
@@ -130,6 +134,16 @@ async function relayClient(url: string, createSocket: (url: string) => WebSocket
   clients.set(url, opening);
   opening.catch(() => { if (clients.get(url) === opening) clients.delete(url); });
   return opening;
+}
+
+/**
+ * dht-relay 0.4.3's server waits for the relay connection to close (to close itself) and never stops waiting once it has
+ * closed, so every listener ever opened on the connection, closed or refused, stayed in memory with its chat's endpoint
+ * until the connection went. The relay forgets its own side the same way (infra/services/hyperdht-relay `Servers`).
+ */
+function forgetServer(server: RelayedServer): void {
+  const internal = server as unknown as { _protocol?: { _stream?: { off(event: string, listener: () => void): unknown } }; _onStreamClose?: () => void };
+  if (internal._onStreamClose) internal._protocol?._stream?.off("close", internal._onStreamClose);
 }
 
 function release(url: string, client: RelayClient, endpoint: { unavailable(): void }): void {
@@ -205,11 +219,18 @@ function writeFrame(socket: SecretSocket, payload: Uint8Array, binary = false): 
  * Waits for the peer's preface on an authenticated stream (sending ours as soon as the handshake is
  * done), then hands the channel over with the binding the stream itself gives. A frame of the wrong size,
  * bytes that are not UTF-8 or another protocol close the stream.
+ *
+ * `dialledIn`: the stream was dialled in, and takes one of its MAX_CHANNELS only once its preface came. This side's own
+ * dials are not counted: one always goes out.
  */
-function attach(socket: SecretSocket, channels: Set<RelayedChannel>): Promise<BoundChannel> {
-  if (channels.size >= MAX_CHANNELS) { socket.destroy(); return Promise.reject(new Error("Native connection limit reached")); }
+function attach(socket: SecretSocket, channels: Set<RelayedChannel>, dialledIn?: DialledIn): Promise<BoundChannel> {
+  if (dialledIn && dialledIn.live.size >= MAX_CHANNELS) { socket.destroy(); return Promise.reject(new Error("Native connection limit reached")); }
+  if (dialledIn && dialledIn.unprefaced.size >= MAX_UNPREFACED) {
+    const [oldest] = dialledIn.unprefaced;
+    dialledIn.unprefaced.delete(oldest); oldest.close();
+  }
   const channel = new RelayedChannel(socket);
-  channels.add(channel);
+  channels.add(channel); dialledIn?.unprefaced.add(channel);
   return new Promise<BoundChannel>((resolve, reject) => {
     let buffer = new Uint8Array(0);
     let prefaced = false;
@@ -218,7 +239,7 @@ function attach(socket: SecretSocket, channels: Set<RelayedChannel>): Promise<Bo
     const fail = (error: Error) => { socket.destroy(error); };
     socket.on("error", (error: Error) => reject(error));
     socket.on("close", () => {
-      clearTimeout(timer); channels.delete(channel);
+      clearTimeout(timer); channels.delete(channel); dialledIn?.live.delete(channel); dialledIn?.unprefaced.delete(channel);
       reject(new Error("Native channel closed"));
       channel.closedByPeer();
     });
@@ -257,6 +278,11 @@ function attach(socket: SecretSocket, channels: Set<RelayedChannel>): Promise<Bo
         if (!prefaced) {
           if (text !== PREFACE) { fail(new Error("Unexpected application protocol")); return; }
           prefaced = true; clearTimeout(timer);
+          if (dialledIn) {
+            dialledIn.unprefaced.delete(channel);
+            if (dialledIn.live.size >= MAX_CHANNELS) { fail(new Error("Native connection limit reached")); return; }
+            dialledIn.live.add(channel);
+          }
           resolve({ channel, binding: { transport: "hyperdht/1", context: hex(socket.handshakeHash!),
             identities: [hex(socket.publicKey), hex(socket.remotePublicKey)].sort() as [string, string] } });
         } else if (!channel.receive(text)) { fail(new Error("Receive queue exceeded")); return; }
@@ -288,12 +314,16 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
   const keyPair = hyperKeyPair(fromBase64Url(seedB64));
   const client = await relayClient(url, options.createSocket ?? (address => new WebSocket(address)));
   const channels = new Set<RelayedChannel>();
+  const dialledIn: DialledIn = { live: new Set(), unprefaced: new Set() };
   let stopped = false;
   let handler: NativeEndpoint["onConnection"] = null;
   const waiting: BoundChannel[] = [];
   let endpoint: NativeEndpoint | null = null;
+  // Fails the listen below when the relay connection closes while it waits.
+  let relayClosed: (() => void) | null = null;
   const member = {
     unavailable() {
+      if (client.gone) relayClosed?.();
       if (stopped) return;
       stopped = true;
       for (const channel of channels) channel.close();
@@ -302,7 +332,7 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
   };
   client.endpoints.add(member);
   const server = client.node.createServer({}, socket => {
-    void attach(socket, channels).then(bound => {
+    void attach(socket, channels, dialledIn).then(bound => {
       if (stopped) bound.channel.close();
       else if (handler) handler(bound);
       else if (waiting.length < MAX_CHANNELS) waiting.push(bound);
@@ -310,12 +340,18 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
     }).catch(() => {});
   });
   let serverClosed = false;
-  server.once("close", () => { serverClosed = true; member.unavailable(); });
+  server.once("close", () => { serverClosed = true; forgetServer(server); member.unavailable(); });
+  // Neither wait outlasts the listen: one on `client.closed` stayed there, holding this endpoint, closed or refused, for as
+  // long as the relay connection stayed open.
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
       server.listen(keyPair),
-      client.closed.then(() => { throw new Error("The HyperDHT relay closed the connection"); }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("The HyperDHT relay did not let this chat listen")), LISTEN_MS)),
+      new Promise((_, reject) => {
+        relayClosed = () => reject(new Error("The HyperDHT relay closed the connection"));
+        if (client.gone) relayClosed();
+        timer = setTimeout(() => reject(new Error("The HyperDHT relay did not let this chat listen")), LISTEN_MS);
+      }),
     ]);
     if (client.gone) throw new Error("The HyperDHT relay closed the connection");
     if (serverClosed || !server.address()?.port) throw new Error("The HyperDHT relay did not let this chat listen");
@@ -324,8 +360,11 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
     void server.close().catch(() => {});
     release(url, client, member);
     throw error;
+  } finally {
+    clearTimeout(timer);
+    relayClosed = null;
   }
-  const descriptor: RelayedHyperDescriptor = { publicKey: hex(keyPair.publicKey), relayed: true, relay: url };
+  const descriptor: RelayedHyperDescriptor = { publicKey: hex(keyPair.publicKey), relayed: true, relay: hyperdhtRelayUrl(url) };
   endpoint = {
     transport: "hyperdht/1", descriptor, onDescriptor: null, onUnavailable: null,
     get onConnection() { return handler; },
