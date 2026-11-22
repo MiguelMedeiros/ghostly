@@ -131,7 +131,7 @@ describe("opening a service on a given port", () => {
     const [first, second] = await Promise.all([openOn(), openOn()]);
     expect(second.url).toBe(first.url);
     await SERVICE_METHODS["service.close"](ctx, { chat: link.id, service: "app" });
-    await expect(fetch(first.url, { redirect: "manual" })).rejects.toThrow();
+    await expect(get({ host: new URL(first.url).host } as OpenedService, "/")).rejects.toThrow(/ECONNREFUSED/);
     // One whose port could not be taken is not left in the way of the next open.
     const taken = createNetServer();
     await new Promise<void>((r) => taken.listen(0, "127.0.0.1", r));
@@ -140,6 +140,24 @@ describe("opening a service on a given port", () => {
     expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
     await new Promise((r) => taken.close(r));
     expect(portOf((await openOn()).url)).toBeGreaterThan(0);
+  });
+
+  it("open already, once the contact no longer shares it (taken back, or not live): not_found as for a first open, and its port is closed", async () => {
+    const shared = link.peerServices;
+    const { url } = await openOn();
+    try {
+      for (const gone of [[], undefined]) {
+        link.peerServices = gone as typeof shared;
+        await expect(openOn()).rejects.toMatchObject({ code: "not_found", message: "The contact shares no service app (or is not live)" });
+        await expect(get({ host: new URL(url).host } as OpenedService, "/")).rejects.toThrow(/ECONNREFUSED/);
+        await expect(SERVICE_METHODS["service.close"](ctx, { chat: link.id, service: "app" })).rejects.toMatchObject({ code: "not_found" });
+      }
+      // Shared again: it opens anew.
+      link.peerServices = shared;
+      expect(portOf((await openOn()).url)).toBeGreaterThan(0);
+    } finally {
+      link.peerServices = shared;
+    }
   });
 
   it("the API takes a whole number only, for a socket caller too", async () => {
