@@ -109,6 +109,14 @@ describe("GroupPaymentComposer: whom first", () => {
     expect(screen.getAllByTestId("group-pay-recipient")).toHaveLength(3);
   });
 
+  // The sheet's head is mirrored in a right-to-left language (the step back at the right): its chevron still pointing
+  // left pointed on, into the sheet's title, instead of back.
+  it("the step back's chevron is mirrored in a right-to-left language", async () => {
+    const { user } = composer();
+    await user.click(screen.getAllByTestId("group-pay-recipient")[0]);
+    expect(screen.getByTestId("payment-recipient-change").querySelector("svg")).toHaveClass("rtl:-scale-x-100");
+  });
+
   it("the whole group: only Cashu or Lightning, no Send, and the request goes to the group on the chosen rail and network", async () => {
     const { user, engine } = composer();
     engine.on("requestGroupPayment", () => ({ paymentId: "g1" }));

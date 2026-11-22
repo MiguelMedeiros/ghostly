@@ -9,7 +9,7 @@ import { p256 } from "@noble/curves/nist.js";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { base58 } from "@scure/base";
 import {
-  createIdentity, didDhtDocument, didGhostlyServiceEntry, IdentityCheckUnavailable, didWebFile, encodeDidDhtPacket, identityStatement, newIdentityBinding, sign, signDidDhtPacket,
+  createIdentity, didDhtDocument, didGhostlyServiceEntry, IdentityCheckUnavailable, didWebFile, encodeDidDhtDeactivated, encodeDidDhtPacket, identityStatement, newIdentityBinding, sign, signDidDhtPacket,
   toBase64Url, utf8Encode, type DidDhtDocument, type IdentityStatement,
 } from "@ghostly/core";
 import type { IdentityFetch, IdentityFetchOptions, IdentityProofProvider, VerifyContext } from "../src/proofs/contract";
@@ -388,6 +388,26 @@ describe("resolving a did:dht", () => {
     clearDidCache();
     const deactivated = async () => ({ document: net.document, metadata: { versionId: "1", updated: "", deactivated: true as const }, relay: "x" });
     await expect(resolveDid(net.didDht, { fetch: net.fetch, dht: deactivated })).rejects.toThrow(/deactivated/);
+  });
+
+  it("refuses a DID deactivated on a relay that answers later than one still holding the live record", async () => {
+    vi.useFakeTimers();
+    try {
+      const net = dhtNetwork();
+      const ended = signDidDhtPacket(net.identity, encodeDidDhtDeactivated(net.identity.publicKey), 1_800_000_000);
+      const live = signDidDhtPacket(net.identity, encodeDidDhtPacket(net.document), 1_700_000_000);
+      const fetch: IdentityFetch = async url => {
+        const late = url.startsWith("https://pkarr.pubky.app/");
+        await new Promise(resolve => setTimeout(resolve, late ? 3_500 : 0));
+        return { status: 200, contentType: "application/pkarr.org/relays#payload", text: "", bytes: late ? ended : live };
+      };
+      const resolving = resolveDid(net.didDht, { fetch });
+      const refused = expect(resolving).rejects.toThrow(/deactivated/);
+      await vi.advanceTimersByTimeAsync(3_500);
+      await refused;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("marks relays it could not read as this side's network, not the DID's record: none reached, or none answering", async () => {

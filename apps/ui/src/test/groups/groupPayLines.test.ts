@@ -77,7 +77,18 @@ describe("a group payment's status where I am the payer or payee", () => {
     expect(mine.map(patch => groupPayStatus(note(patch), group, t).text)).toEqual(lines[language]);
   });
 
+  /** A request to the group that I paid, once its payee says so: "دفعه أنت", "あなた が支払い済み" and "由 你 支付" before. */
+  const paidByMe: Record<Language, string> = {
+    en: "Paid by you", pt: "Pago por você", es: "Pagado por ti", fr: "Payé par vous", it: "Pagato da te", ar: "دفعتَه", ja: "あなたが支払い済み", zh: "由你支付",
+  };
+  it.each(Object.keys(paidByMe) as Language[])("paid by me, in %s", async (language) => {
+    await loadLocale(language);
+    const t = translatorFor(language);
+    expect(groupPayStatus(note({ from: "*", state: "paid", by: ME }), group, t).text).toBe(paidByMe[language]);
+  });
+
   it("between two other members, names both", () => {
+    expect(groupPayStatus(note({ from: "*", state: "paid", by: BOB }), group).text).toBe("Paid by Bob");
     expect(groupPayStatus(note({ claims: [BOB] }), group).text).toBe("Bob says they paid · waiting for Alice's wallet");
     expect(groupPayStatus(note({ kind: "payment", state: "sent" }), group).text).toBe("Sent · waiting for Alice");
   });

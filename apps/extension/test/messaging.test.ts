@@ -432,7 +432,7 @@ describe("viewer tabs", () => {
     expect(reply).toEqual({ ok: false, error: "A contact's app does not open in the browser extension while Hide my IP from contacts is on" });
     expect(world.callsTo("tabs.create")).toEqual([]);
     expect(world.callsTo("debugger.attach")).toEqual([]);
-    expect(world.session.size).toBe(0);
+    expect([...world.session.keys()].filter((key) => key.startsWith("viewer:"))).toEqual([]);
     // A page that says anything but true counts as off.
     const shown = await openViewer(world, PEER, SERVICE, OTHER_TAG, undefined, "yes");
     expect(world.tabs.get(shown)!.url).toBe(`https://${SERVICE}.${PEER}.${OTHER_TAG}.invalid/`);
@@ -668,7 +668,7 @@ describe("viewer tabs", () => {
     const { default: ar } = await import("../../ui/src/locales/ar/services.json");
     // Arabic's chunk transformed once here, so the peer's own `loadLocale` is not slower than `pauseRequest` waits.
     await import("../../ui/src/locales/ar/index.ts");
-    const named = (text: string) => text.replace("{{app}}", "&#60;b&#62;Atlas&#60;/b&#62;");
+    const named = (text: string) => text.replace("{{app}}", "⁨&#60;b&#62;Atlas&#60;/b&#62;⁩");
 
     // The contact's machine answered in place of their app, which is not running there (docs/PROTOCOL.md "Host errors").
     engineControl().respond = async () =>
@@ -691,7 +691,7 @@ describe("viewer tabs", () => {
       okResponse("This peer does not share that service.\n", 404, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unknown-service"]]);
     const gone = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
     expect(gone.params).toMatchObject({ responseCode: 404 });
-    expect(bodyText(gone.params)).toContain(">Atlas is no longer shared with you.<");
+    expect(bodyText(gone.params)).toContain(">⁨Atlas⁩ is no longer shared with you.<");
   });
 
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {
@@ -720,6 +720,61 @@ describe("viewer tabs", () => {
     expect(world.tabs.has(tabId)).toBe(false);
     expect(world.session.has(`viewer:${tabId}`)).toBe(false);
     expect(world.callsTo("debugger.detach")).toEqual([[{ tabId }]]);
+  });
+
+  it("opens a link the app opens in a new window in a tab of the browser, on the person's tap only, as the web view and Desktop do", async () => {
+    const tabId = await openViewer(world);
+    // What Chromium sends for a `target="_blank"` click or a `window.open` the viewer's sandbox (no allow-popups) blocks.
+    const windowOpen = (url: string, userGesture = true, tab = tabId) =>
+      fire(world.chrome.debugger.onEvent, { tabId: tab }, "Page.windowOpen", { url, windowName: "_blank", windowFeatures: [], userGesture });
+    const opened = () => world.callsTo("tabs.create").slice(1).map(([url]) => url);
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      windowOpen("https://example.org/doc?q=1");
+      await settle();
+      expect(opened()).toEqual(["https://example.org/doc?q=1"]);
+
+      // None the app opens by itself, none to this machine or the local network, to an app's origin or that is no web page.
+      now += 10_000;
+      windowOpen("https://example.org/self", false);
+      for (const url of ["http://localhost:8080/", "http://192.168.1.1/", "https://nas.local/", "http://router/", "http://[::1]/",
+        "http://[2002:c0a8:101::1]/", "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/", "http://[2::1]/", "http://[20::1]/",
+        `https://${SERVICE}.${PEER}.${TAG}.invalid/other`, `https://${SERVICE}.${PEER}.${TAG}.invalid../other`, "javascript:alert(1)", "file:///etc/passwd", "chrome://settings", `https://example.org/${"a".repeat(4100)}`]) windowOpen(url);
+      await settle();
+      expect(opened()).toEqual(["https://example.org/doc?q=1"]);
+
+      // One every 2 seconds at most.
+      windowOpen("https://example.org/a");
+      windowOpen("https://example.org/b");
+      await settle();
+      expect(opened()).toEqual(["https://example.org/doc?q=1", "https://example.org/a"]);
+
+      // And none from a tab that is no viewer.
+      now += 10_000;
+      const bank = await world.chrome.tabs.create({ url: "https://bank.example/" });
+      windowOpen("https://example.org/c", true, bank.id);
+      await settle();
+      expect(opened()).toEqual(["https://example.org/doc?q=1", "https://example.org/a", "https://bank.example/"]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("opens at most 20 links from one viewer tab", async () => {
+    const tabId = await openViewer(world);
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    try {
+      for (let i = 0; i < 25; i++) {
+        now += 3_000;
+        fire(world.chrome.debugger.onEvent, { tabId }, "Page.windowOpen", { url: `https://example.org/${i}`, windowName: "_blank", windowFeatures: [], userGesture: true });
+        await settle();
+      }
+      expect(world.callsTo("tabs.create").slice(1)).toHaveLength(20);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("forgets the tab when the debugger leaves it, as when the person cancels Chrome's debugging bar", async () => {

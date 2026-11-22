@@ -17,6 +17,7 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useAppsState } from "../lib/apps/flag";
 import { AppGlyph } from "./apps/AppIcon";
 import { initial } from "../lib/initial";
+import { listText } from "../lib/listText";
 
 
 /**
@@ -104,9 +105,9 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
   // Where there is one profile only, the place is the way to the Profile page.
   const switcher = useProfileSwitcher(canSwitch);
   const glances = useProfileGlances();
-  const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? t("services.online") : t("services.offline")}${
-    canSwitch && glances.othersFresh ? `, ${t("profileSwitcher.othersNew")}` : canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
-  const walletLabel = `${unseenSatsLabel(t("tabs.wallets"), unseen, t)}${backupDue ? `, ${t("wallet.backupReminder.label")}` : ""}`;
+  const others = canSwitch && glances.othersFresh ? t("profileSwitcher.othersNew") : canSwitch && glances.othersUnread ? t("profileSwitcher.othersUnread") : "";
+  const profileLabel = t("common.labelValue", { label: t("settings.profile"), value: listText([profile.name, name || t("common.anonymous"), online ? t("services.online") : t("services.offline"), others].filter(Boolean), t) });
+  const walletLabel = listText([unseenSatsLabel(t("tabs.wallets"), unseen, t), backupDue ? t("wallet.backupReminder.label") : ""].filter(Boolean), t);
 
   // The place open now, in forced colors (index.css `current-mark`): a bar under it while the places sit in a row, at its
   // start side when the rail stacks them.
@@ -122,7 +123,7 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
           aria-label={profileLabel}
           aria-current={onProfile ? "page" : undefined}
           className={`account-action ${mark} select-none ${onProfile ? "bg-surface-hover" : "hover:bg-surface-alt"}`}
-          title={`${t("settings.profile")}: ${profile.name}`}
+          title={t("common.labelValue", { label: t("settings.profile"), value: profile.name })}
         >
           <span className="relative w-[23px] h-[23px] shrink-0 flex items-center justify-center">
             {/* The active profile's initial in its own color: which profile this is, at a glance. Drawn by CSS, so the
@@ -169,7 +170,7 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
         <button
           data-testid="account-identities"
           onClick={() => (onIdentities ? nav.home() : nav.place("/identities"))}
-          aria-label={`${t("tabs.identities")}${identityAttention ? `, ${t("identities.attention")}` : ""}`}
+          aria-label={identityAttention ? listText([t("tabs.identities"), t("identities.attention")], t) : t("tabs.identities")}
           aria-current={onIdentities ? "page" : undefined}
           className={`account-action ${mark} text-text-muted hover:text-text-primary hover:bg-surface-alt`}
           title={t("tabs.identities")}

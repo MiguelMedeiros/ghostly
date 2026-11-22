@@ -6,7 +6,7 @@ import { connectionDetails, pair, verifyContact } from "../support/paired";
  * working chat without anyone comparing a code, and the optional comparison is
  * there afterwards for whoever wants it.
  */
-test("a first connection needs no comparison, and says so", { tag: ["@feature:chat.paired.pair", "@feature:chat.paired.send", "@feature:chat.paired.verify"] }, async ({ peer }) => {
+test("a first connection needs no comparison, and says so", { tag: ["@journey", "@feature:chat.paired.pair", "@feature:chat.paired.send", "@feature:chat.paired.verify"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("tofu-alice"), peer("tofu-bob")]);
   await pair(alice, bob);
 

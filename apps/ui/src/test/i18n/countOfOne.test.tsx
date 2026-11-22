@@ -19,7 +19,7 @@ import { LANGUAGES, LOCALES } from "./locales";
 const ONE = {
   "services.requestCount": { en: "· 1 request", es: "· 1 solicitud", fr: "· 1 requête", it: "· 1 richiesta", pt: "· 1 pedido", ar: "· طلب واحد", ja: "· 1 件のリクエスト", zh: "· 1 次请求" },
   "settings.deleteAllChatsConfirm": {
-    en: "Delete your only chat?", es: "¿Eliminar tu único chat?", fr: "Supprimer 1 discussion ?", it: "Eliminare l'unica chat?", pt: "Excluir 1 conversa?",
+    en: "Delete your only chat?", es: "¿Eliminar tu único chat?", fr: "Supprimer 1 discussion\u202f?", it: "Eliminare l'unica chat?", pt: "Excluir 1 conversa?",
     ar: "حذف المحادثة الوحيدة؟", ja: "1件のチャットを削除しますか?", zh: "删除 1 个聊天?",
   },
   "connection.why.flapping": {

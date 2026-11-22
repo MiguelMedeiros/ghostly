@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
-import { link, linkEnd } from "./parse/links";
+import { LINK_STOP_CHARS } from "@ghostly/core";
+import { linkEnd } from "./parse/links";
 
 /*
  * Something another app shared into Ghostly (the installed web app is a share target): text, a link, images,
@@ -43,9 +44,10 @@ export interface IncomingShare {
   read?: () => Promise<File[]>;
   /**
    * Keeps the share for the page that loads next (a profile switch restarts the app), which shows it in its picker
-   * again. False where it could not be kept. Without it, the share goes with this page.
+   * again. False where it could not be kept. Without it, the share goes with this page. Called with the share's
+   * `dropped` as it is now (those not kept counted since it came), which the next page says with it.
    */
-  carry?: () => boolean;
+  carry?: (dropped?: number) => boolean;
   /**
    * Told when the share is sent to a chat: it no longer waits in the picker, so a later share does not take its place
    * (the Android app's copies stay until that chat's composer reads them, or the page goes).
@@ -142,7 +144,7 @@ export function dropIncomingShare(): void {
  * is redrawn: the page is going.
  */
 export function carryIncomingShare(): boolean {
-  const carry = (share: IncomingShare | null) => { try { return share?.carry?.() ?? false; } catch { return false; } };
+  const carry = (share: IncomingShare | null) => { try { return share?.carry?.(share.dropped) ?? false; } catch { return false; } };
   let sent = false;
   for (const [chat, shares] of forChat) {
     const left = shares.filter((share) => !carry(share));
@@ -213,20 +215,47 @@ export function keepShareFor(chat: string, share: IncomingShare): void {
   forChat.set(chat, [share, ...forChat.get(chat) ?? []]);
 }
 
-/** A web address as the browser reads it ("HTTPS://X.EXAMPLE" is "https://x.example/"), or nothing when it is none. */
-function sameUrl(url: string): string | null {
-  try { return new URL(url).href; } catch { return null; }
-}
+/** How many places `carriesLink` reads, and how far past the link: a sentence's punctuation and closing brackets. */
+const MAX_LINK_LOOKS = 64;
+const MAX_LINK_TAIL = 64;
+/** What may stand right before and right after a link of its own in a shared text. */
+const LINK_BEFORE = new RegExp(`[\\s\\p{Ps}\\p{Pi}"'${LINK_STOP_CHARS}]`, "u");
+const LINK_AFTER = new RegExp(`[\\s${LINK_STOP_CHARS}]`);
 
 /**
- * Whether a share's text already carries its link: one of the text's links is that same address, read as URLs (a
- * site's root with or without its "/", the scheme and host in any case), not one that merely starts with it. A link
- * that is no web address is looked for as typed.
+ * Whether `text` carries `url` as a link of its own: after the text's start, a space, an opening bracket or quote or
+ * the CJK or Arabic punctuation a link stops at ("链接：https://a.example/p"), and ending where a bubble's link would
+ * (`linkEnd`: "https://a.example/p.", "(https://a.example/p)" or "https://a.example/p。見て" carry it).
+ * A longer address that starts with it ("https://a.example/p2") or holds it ("…?u=https://a.example/p") does not.
+ * Any website can post a share, of megabytes: only the first `MAX_LINK_LOOKS` places it turns up are read, each up to
+ * `MAX_LINK_TAIL` characters past it (a word longer than that is not taken for it), so the text is never read once per
+ * place. Past those, the link goes in once more, which says nothing wrong.
+ * A web address is the same one read as a URL: a site's root with or without its "/", the scheme and host in any case
+ * ("HTTPS://A.EXAMPLE" carries "https://a.example/"); its path's case is the page's own. Anything else is as typed.
  */
 function carriesLink(text: string, url: string): boolean {
-  const href = /^https?:\/\//i.test(url) ? sameUrl(url) : null;
-  if (!href) return text.includes(url);
-  return [...text.matchAll(new RegExp(link.pattern))].some((match) => sameUrl(linkEnd(match[0])) === href);
+  const web = webAddress(url) !== null;
+  const stem = web ? url.replace(/^(https?:\/\/[^/?#]+)\/$/i, "$1") : url;
+  const place = new RegExp(stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), web ? "gi" : "g");
+  const word = new RegExp(`[^\\s${LINK_STOP_CHARS}]{0,${url.length + MAX_LINK_TAIL}}`, "y");
+  const address = (link: string) => webAddress(link) ?? link;
+  const own = address(linkEnd(url));
+  let looks = 0;
+  for (let found = place.exec(text); found && looks < MAX_LINK_LOOKS; place.lastIndex = found.index + 1, found = place.exec(text), looks += 1) {
+    const at = found.index;
+    if (at > 0 && !LINK_BEFORE.test(text[at - 1]!)) continue;
+    word.lastIndex = at;
+    const link = word.exec(text)![0];
+    if (!LINK_AFTER.test(text[at + link.length] ?? " ")) continue;
+    if (address(linkEnd(link)) === own) return true;
+  }
+  return false;
+}
+
+/** A web address as the browser reads it ("HTTPS://X.EXAMPLE" is "https://x.example/"), or nothing when it is none. */
+function webAddress(link: string): string | null {
+  if (!/^https?:\/\//i.test(link)) return null;
+  try { return new URL(link).href; } catch { return null; }
 }
 
 /**

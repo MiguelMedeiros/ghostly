@@ -22,7 +22,20 @@ describe("linkInAddress", () => {
     expect(linkInAddress("#web%2Bghostly%3Aghostly1abc")).toBe("web%2Bghostly%3Aghostly1abc");
     expect(linkInAddress("#/join/group2/abc")).toBe("/join/group2/abc");
     expect(linkInAddress("#work#ghostly1zabc")).toBe("work#ghostly1zabc");
+    // A doubled `#` before it (a `#` typed after the app's own `#/`): the link it doubles.
+    expect(linkInAddress(`##${CODE}`)).toBe(`/${CODE}`);
+    expect(linkInAddress(`#/#${CODE}`)).toBe(`/${CODE}`);
+    expect(linkInAddress("##/join/group2/abc")).toBe("/join/group2/abc");
+    expect(linkInAddress("#/#web%2Bghostly%3Aghostly1abc")).toBe("/web%2Bghostly%3Aghostly1abc");
     for (const plain of ["", "#", "#/", "#/chat/0123abcd", "#/settings", "#/shared"]) expect(linkInAddress(plain)).toBeNull();
+  });
+
+  it("reads an older invite link's `#/chat/…` forms, never a chat's own address", () => {
+    expect(linkInAddress(`#/chat/${CODE}`)).toBe(`/chat/${CODE}`);
+    expect(linkInAddress("#/chat/c2VlZA/pubkeyz32/ZW5j")).toBe("/chat/c2VlZA/pubkeyz32/ZW5j");
+    expect(linkInAddress("#/chat/a1b2c3d4-e5f6")).toBeNull();
+    // A chat's address with a `/` after it is still that chat's (`chatRouteSession`), not an older invite.
+    expect(linkInAddress("#/chat/a1b2c3d4-e5f6/")).toBeNull();
   });
 });
 

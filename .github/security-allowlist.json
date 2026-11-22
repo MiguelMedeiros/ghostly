@@ -8,6 +8,7 @@
     { "package": "pin-utils", "id": "RUSTSEC-2026-0441", "until": "2026-12-31", "why": "Unmaintained, not vulnerable: its pin_mut! macro is in std (core::pin::pin!). Comes in only through hyper 1.x (via reqwest/hyper-rustls under iroh, iroh-relay, pkarr and tauri-plugin-updater, and hyper-util). Goes away when hyper drops it." },
     { "package": "zvariant", "id": "RUSTSEC-2026-0370", "until": "2026-11-30", "why": "Unmaintained, not vulnerable: merged into zbus 6.0.0 (2026-10-16). Linux D-Bus only, via zbus 5 in apps/desktop and in notify-rust, tauri-plugin-notification and tauri-plugin-single-instance, whose latest releases still require zbus 5. Move to zbus 6 when they do." },
     { "package": "zbus_names", "id": "RUSTSEC-2026-0371", "until": "2026-11-30", "why": "Same as RUSTSEC-2026-0370 (merged into zbus 6)." },
-    { "package": "zvariant_derive", "id": "RUSTSEC-2026-0372", "until": "2026-11-30", "why": "Same as RUSTSEC-2026-0370 (merged into zbus 6)." }
+    { "package": "zvariant_derive", "id": "RUSTSEC-2026-0372", "until": "2026-11-30", "why": "Same as RUSTSEC-2026-0370 (merged into zbus 6)." },
+    { "package": "chrono", "id": "RUSTSEC-2026-0543", "until": "2027-02-28", "why": "Unmaintained, not a vulnerability, and no release fixes it yet. Comes in only through tauri -> tauri-utils -> serde_with and iroh -> netwatch -> wmi (Windows network watch), in Cargo.lock and native/transports/iroh-web/Cargo.lock. Replace it (time or jiff, upstream) or re-check by the date." }
   ]
 }

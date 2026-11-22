@@ -327,6 +327,11 @@ export const useChat: typeof Desktop.useChat = (params) => {
     if (linkIdRef.current) await engine.call("setCallSignal", { linkId: linkIdRef.current, signal }).catch(() => {});
   }, []);
 
+  /** This page kept the contact's offer of `ts` as missed, with no ring: the engine does not count it as a call waiting. */
+  const callOfferHeld = useCallback((ts: number) => {
+    if (linkIdRef.current) void engine.call("callOfferHeld", { linkId: linkIdRef.current, ts }).catch(() => {});
+  }, []);
+
   const setChatFastPoll = useCallback((fast: boolean) => {
     if (linkIdRef.current) void engine.call("setFastPoll", { linkId: linkIdRef.current, fast }).catch(() => {});
   }, []);
@@ -426,6 +431,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
     incomingCallSignal,
     callHandledElsewhere,
     setCallSignal,
+    callOfferHeld,
     setChatFastPoll,
     addSystemMessage,
     addMissedCallMessage,
