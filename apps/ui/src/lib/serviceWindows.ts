@@ -96,6 +96,12 @@ export function windowFilledNow(): boolean {
   return filling > 0;
 }
 
+/**
+ * A name the contact chose (their app's, their own) in a sentence: isolated, so a name in another direction cannot
+ * turn it around ("Notes!" read "!Notes" in Arabic).
+ */
+const isolated = (name: string) => `⁨${name}⁩`;
+
 const HOST_ERRORS: Record<string, TranslationKey> = {
   unreachable: "services.window.notAnswering",
   timeout: "services.window.tooSlow",
@@ -115,7 +121,17 @@ export function hostErrorText(headers: readonly (readonly [string, string])[], a
   if (code === undefined) return null;
   console.warn(`The contact's machine answered for ${app}: ${code}`);
   const key = HOST_ERRORS[code];
-  return key ? t(key, { app }) : t("services.window.failed");
+  return key ? t(key, { app: isolated(app) }) : t("services.window.failed");
+}
+
+/** The open view's lines that name the contact's app: what it says while the app opens, or why it cannot. */
+export function serviceAppWords(app: string, t: Translate) {
+  const named = { app: isolated(app) };
+  return {
+    loading: t("services.window.loading", named), callOn: t("services.window.callOn", named), tooSlow: t("services.window.tooSlow", named),
+    offline: t("services.window.offline", named), stillOffline: t("services.window.stillOffline", named),
+    blocked: t("services.window.blocked", named), unguarded: t("services.window.unguarded", named),
+  };
 }
 
 /**
@@ -126,6 +142,6 @@ export function hostErrorText(headers: readonly (readonly [string, string])[], a
  */
 export function serviceFraming(app: string, names: { label?: string; nick?: string } | undefined, peer: string, t: Translate): { label: string; owner: string } {
   const named = names?.label?.trim() || names?.nick?.trim() || t("common.unnamedContact", { key: contactTag(peer) });
-  const contact = `\u2068${named}\u2069`;
-  return { label: t("services.window.label", { app, contact }), owner: t("services.window.owner", { contact }) };
+  const contact = isolated(named);
+  return { label: t("services.window.label", { app: isolated(app), contact }), owner: t("services.window.owner", { contact }) };
 }
