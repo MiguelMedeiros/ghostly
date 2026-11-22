@@ -5,6 +5,8 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { checkLocales } from "../locales-sort.mjs";
 
+// guards: #8398
+
 /**
  * `npm run locales:sort -- --check` (CI's lint job) fails on what reads the locale files alone: a key out of order, a
  * European-Portuguese word in the app's Brazilian Portuguese, Arabic standby said as waiting. Each line names the file
