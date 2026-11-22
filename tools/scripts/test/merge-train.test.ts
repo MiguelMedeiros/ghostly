@@ -4659,6 +4659,33 @@ describe("building a batch with git", () => {
     }
   }, 60_000);
 
+  it("lands an epic's lone pull request only at the head it read, as dev's squash merge does", async () => {
+    const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
+    const origin = join(root, "origin");
+    const git = (args: string[], cwd = origin) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    try {
+      git(["init", "-q", "-b", "dev", "origin"], root);
+      git(["commit", "-q", "--allow-empty", "-m", "base"]);
+      git(["branch", "-q", "epic/x", "dev"]);
+      git(["checkout", "-q", "-b", "fix-1", "dev"]);
+      git(["commit", "-q", "--allow-empty", "-m", "fix 1"]);
+      git(["update-ref", "refs/pull/1/head", "HEAD"]);
+      const p = { number: 1, title: "fix: number 1", sha: git(["rev-parse", "HEAD"]), branch: "fix-1", fork: false };
+      // The author pushes once more after the train read the head (and its CI) and before it lands.
+      git(["commit", "-q", "--allow-empty", "-m", "fix 1, again"]);
+      git(["update-ref", "refs/pull/1/head", "HEAD"]);
+      const epic = git(["rev-parse", "epic/x"]);
+      git(["clone", "-q", "origin", "clone"], root);
+      const layer = gitLayer({ cwd: join(root, "clone") });
+      // Refused as GitHub refuses dev's squash merge of a moved head (409): the next run reads the new head.
+      expect(await layer.landPull("epic/x", p)).toMatchObject({ ok: false, status: 409 });
+      expect(git(["rev-parse", "epic/x"])).toBe(epic);
+      layer.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("tells a pull request that conflicts only with one applied before it from one that conflicts with the base", async () => {
     // Each of #10, #11 and #12 changes the same line of file.txt, and each merges cleanly onto dev by itself; #13 changes
     // a line dev changed too, after it branched. (2026-11-07: ghostly#5693 and #5694 both behind #5696.)
