@@ -51,8 +51,9 @@ export async function standbyEngine(gate: DeviceGate, options: NodeOptions | und
     transport: network.transport,
     createPeerConnection: network.createPeerConnection,
     // The pace the engine would read at (`GhostlyNode`): the relays' where the host gives none (a page, the extension).
-    // A link's own default is the DHT's, which only an app that reaches the DHT itself (the Desktop) may keep.
-    pollIntervals: options?.pollIntervals ?? RELAY_POLL_INTERVALS,
+    // A link's own default is the DHT's, which only an app that reaches the DHT itself (the Desktop) may keep, and not
+    // with "Hide my IP from contacts" on: its DHT stays closed, so every read goes to the relays.
+    pollIntervals: record?.network?.relayOnly === true && options?.transport?.configure ? RELAY_POLL_INTERVALS : options?.pollIntervals ?? RELAY_POLL_INTERVALS,
     nativeTransports: {
       // HyperDHT through the person's relay where this app runs none of its own, as the engine's chats (`nativeFactories`).
       ...(network.hyperdhtRelay && !options?.nativeTransports?.["hyperdht/1"]

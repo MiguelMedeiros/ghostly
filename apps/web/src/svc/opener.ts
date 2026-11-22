@@ -32,10 +32,11 @@ function ownsBuffer(chunk: Uint8Array): chunk is Uint8Array<ArrayBuffer> {
  * while the contact is offline; `reaching` while Try again asks the engine to reach them, and `stillOffline` once that
  * ended with them still offline (without these, `offline`). `blocked` and `unguarded`: the view's notice when the bridge shows no app
  * (`BRIDGE_REFUSED`). `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the view's
- * name and the line under the app's name. `openLink`: the bar's button for a link the app asked for that the view held
+ * name and the line under the app's name. `frameTitle`: the bridge's name of the app's frame, which the app can read
+ * (`serviceFrameTitle`: no chat label of this side's). `openLink`: the bar's button for a link the app asked for that the view held
  * back (`openOutside`), for its site.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; loading?: string; reaching?: string; stillOffline?: string; blocked: string; unguarded: string; label: string; owner: string; openLink: (site: string) => string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; loading?: string; reaching?: string; stillOffline?: string; blocked: string; unguarded: string; label: string; owner: string; frameTitle?: string; openLink: (site: string) => string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
@@ -263,6 +264,10 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     clearTimeout(late);
     if (ended) return;
     post({ type: "head", status: answer.status, headers: out });
+    // The engine letting go of the answer while the frame leaves it unread ends the wait for it to read on: its place
+    // here goes to the app's next request, and the frame gets the error.
+    let lost = null as Error | null;
+    void answer.failed?.then((error) => { lost = error; wake(); });
     let sent = 0;
     for await (const chunk of body) {
       if (stop.signal.aborted) break;
@@ -270,12 +275,14 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
       sent += bytes.byteLength;
       post({ type: "chunk", bytes }, [bytes.buffer]);
       // Not read on from the link until the frame takes what went ahead: left unread there, the engine lets it go.
-      while (request.flow && sent - read > ANSWER_AHEAD_BYTES && !stop.signal.aborted) await new Promise<void>((resolve) => { readOn = resolve; });
+      while (request.flow && sent - read > ANSWER_AHEAD_BYTES && !stop.signal.aborted && !lost) await new Promise<void>((resolve) => { readOn = resolve; });
+      if (lost) throw lost;
     }
     post({ type: "end" });
   } catch (error) {
     const gone = error instanceof GhostlyHttpError && ["unreachable", "timeout", "closed", "offline", "unknown-peer"].includes(error.code);
-    if (!gone && !stop.signal.aborted) console.warn("Service request failed:", error);
+    const unread = error instanceof GhostlyHttpError && error.code === "unread";
+    if (!gone && !unread && !stop.signal.aborted) console.warn("Service request failed:", error);
     post({ type: "error", status: gone ? 503 : 502, text: gone ? words.unreachable : words.failed });
   } finally {
     release?.();
@@ -609,8 +616,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     ports.add(channel.port1);
     channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words, signal); };
     // With Hide my IP on, the bridge runs the WebRTC guard too (the app's frame, on its origin, reaches its window), and
-    // registers the services worker that guards the app's pages for it (`workerScript`).
-    frame.contentWindow!.postMessage({ type: BRIDGE_PORT, relayOnly: options.relayOnly === true }, origin, [channel.port2]);
+    // registers the services worker that guards the app's pages for it (`workerScript`). Its frame of the app is named
+    // in the profile's language too, as a screen reader reaches both, but never by `label`: the app reads that name.
+    frame.contentWindow!.postMessage({ type: BRIDGE_PORT, relayOnly: options.relayOnly === true, title: options.words.frameTitle }, origin, [channel.port2]);
   };
   // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
   // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
