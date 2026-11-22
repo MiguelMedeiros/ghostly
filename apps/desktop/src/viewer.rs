@@ -434,8 +434,8 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           let rules = null;
           const rule = (kind) => (input, type, sink) => {
             if (kind === "createScript" && sink === "Location href") return null;
-            if (passing || rules === null) return input;
-            return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+            if (passing || rules === null || !rules[kind]) return input;
+            return apply(rules[kind], undefined, [input, type, sink]);
           };
           const members = ["createHTML", "createScript", "createScriptURL"];
           const create = types.createPolicy;
