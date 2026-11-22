@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-// guards: #8460
+// guards: #8414
 
 /**
  * test-map.mjs --base: what a branch adds is held to more than what is there already. A test file it adds must declare
