@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { clockTime } from "../../lib/time";
+import { plainSpaces } from "../timeSpaces";
 
 // covers: chat.scroll
 
 // Real timers on purpose: fake timers fake `Intl` too, and its formatter takes a time of 0 for "now".
 describe("clockTime (the time beside a message)", () => {
   it("writes a time as toLocaleTimeString did, a time no date holds included", () => {
+    // Its spaces aside (timeSpaces.ts): the space before "PM" is held by the app on one ICU and not another.
     for (const at of [0, 1_700_000_000_000, 1_700_000_000_000 + 13 * 3_600_000 + 7 * 60_000, -86_400_000, 8.64e15, 1e20, NaN, Infinity]) {
-      expect(clockTime(at)).toBe(new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+      expect(plainSpaces(clockTime(at))).toBe(plainSpaces(new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })));
     }
   });
 });
