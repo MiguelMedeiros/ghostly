@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { MAX_NICK_LENGTH } from "@ghostly/core";
 import { cleanName, shownName } from "./apiKit";
 import { childEnv } from "./childEnv";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 import { runtimePath } from "./privateFolder";
 
 /**
@@ -41,8 +41,10 @@ export function userPath(path: string, home = false): string {
   return resolve(path);
 }
 
+const isProfileName = (name: string): boolean => NAME.test(name) && !name.includes("..");
+
 export function checkProfileName(name: string): string {
-  if (!NAME.test(name) || name.includes("..")) throw new CliError("usage", `Not a profile name: ${JSON.stringify(name)} (letters, digits, ".", "_" and "-", up to 64)`);
+  if (!isProfileName(name)) throw new CliError("usage", `Not a profile name: ${shownValue(name)} (letters, digits, ".", "_" and "-", up to 64)`);
   return name;
 }
 
@@ -76,13 +78,35 @@ export function checkShownNameOption(name: string): string {
 export function currentProfile(home: string, option?: string): string {
   if (option === "") throw new CliError("usage", "--profile needs a profile name");
   if (option !== undefined) return checkProfileName(option);
-  if (process.env.GHOSTLY_PROFILE) return checkProfileName(process.env.GHOSTLY_PROFILE);
+  const env = process.env.GHOSTLY_PROFILE;
+  // Nobody typed it on this line: refused naming the variable and the way out, not as a `--profile` given here.
+  if (env && !isProfileName(env)) {
+    throw new CliError("usage", `GHOSTLY_PROFILE names no profile (${JSON.stringify(env)}): set it to a profile's name (letters, digits, ".", "_" and "-", up to 64), or unset it`);
+  }
+  if (env) return env;
   const file = join(home, "current");
   if (existsSync(file)) {
     const name = readFileSync(file, "utf8").trim();
-    if (name) return checkProfileName(name);
+    // Nobody typed it: refused naming the file and the way out, not a usage error of a name the command never had.
+    if (name && !isProfileName(name)) {
+      throw new CliError("refused", `${file} names no profile (${JSON.stringify(name)}): ghostly profile use <name> or ghostly profile create <name> --use replaces it, or delete the file`, { file });
+    }
+    if (name) return name;
   }
   return DEFAULT_PROFILE;
+}
+
+/**
+ * The current profile, or null when `<home>/current` names none: for the commands that list profiles or replace that
+ * file (`profile list`, `use`, `create`, `restore`), which a bad name there would otherwise block.
+ */
+export function currentProfileOrNone(home: string, option?: string): string | null {
+  try {
+    return currentProfile(home, option);
+  } catch (error) {
+    if (error instanceof CliError && error.details?.file) return null;
+    throw error;
+  }
 }
 
 export function profileDir(home: string, name: string): string {
@@ -216,9 +240,27 @@ export function profileExists(home: string, name: string): boolean {
   return existsSync(profileDir(home, name));
 }
 
+/** While a restore writes it, the profile's folder is not a profile: no profile name starts with a dot (`listProfiles`). */
+export const RESTORING = /^\.restoring-(.+)-(\d+)$/;
+
+/**
+ * Removes what a restore left once the process that made it is gone (killed before its own cleanup ran): the profile
+ * in the clear, its whole store and files, in a folder `profile list` never shows. A live process's restore stays.
+ */
+export function removeStoppedRestores(root: string): void {
+  for (const entry of existsSync(root) ? readdirSync(root) : []) {
+    const pid = Number(RESTORING.exec(entry)?.[2]);
+    if (!pid) continue;
+    let alive = pid === process.pid;
+    if (!alive) try { process.kill(pid, 0); alive = true; } catch (error) { alive = (error as NodeJS.ErrnoException).code === "EPERM"; }
+    if (!alive) rmSync(join(root, entry), { recursive: true, force: true });
+  }
+}
+
 export function listProfiles(home: string): string[] {
   const root = join(home, "profiles");
   if (!existsSync(root)) return [];
+  removeStoppedRestores(root);
   return readdirSync(root).filter((name) => NAME.test(name) && statSync(join(root, name)).isDirectory()).sort();
 }
 
@@ -226,8 +268,10 @@ export function listProfiles(home: string): string[] {
 export const noProfile = (name: string): CliError =>
   new CliError("not_found", `No profile ${JSON.stringify(name)} (ghostly profile list, or ghostly profile create ${name})`);
 
+/** Makes `name` current; `default` is made on first use, as every command makes it, any other must exist. */
 export function selectProfile(home: string, name: string): void {
-  if (!profileExists(home, name)) throw noProfile(name);
+  if (name === DEFAULT_PROFILE) createProfile(home, name, { existing: true });
+  else if (!profileExists(home, name)) throw noProfile(name);
   ensureFolder(home);
   writeFileSync(join(home, "current"), name + "\n", { mode: 0o600 });
 }

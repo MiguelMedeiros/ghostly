@@ -21,6 +21,7 @@ import { problemLine } from "../../lib/problemText";
 import { localProvider } from "../../lib/providerWords";
 import { focusLost } from "../../lib/focus";
 import { fillNames } from "../../lib/fillNodes";
+import { listText } from "../../lib/listText";
 import { sourceWords } from "../../lib/providerWords";
 
 type Entry =
@@ -176,7 +177,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
               <p className="text-xs text-text-muted leading-5">
                 <bdi>{sourceWords(p.provider, p.verified.source, t)}</bdi>. {card.attested ? (p.verified.attester ? fillNames(t("identities.mine.attested"), { attester: p.verified.attester }) : t("identities.mine.attestedByProvider")) : t("identities.contact.holderOnly")} {t("identities.mine.checkedWhenMade")}
               </p>
-              {card.refusedBy.length > 0 && <p className="text-xs text-danger" data-testid="identity-proof-refused">{t("identities.mine.refusedBy", { names: card.refusedBy.join(", ") })}</p>}
+              {card.refusedBy.length > 0 && <p className="text-xs text-danger" data-testid="identity-proof-refused">{t("identities.mine.refusedBy", { names: listText(card.refusedBy, t) })}</p>}
               {(card.status === "expired" || card.status === "expiring") && (
                 <div className="flex flex-wrap items-center gap-3">
                   <p className="flex-1 min-w-[12rem] text-xs text-text-muted">{t("identities.mine.renewHint")}</p>
@@ -208,7 +209,11 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
                 <Button disabled={revoking === p.id} onClick={e => { handOff.current = { from: e.currentTarget, to: [REMOVE] }; removeAbort.current?.abort(); setRemoving(null); setRemoval({}); }}>{t("identities.mine.keep")}</Button>
               </> : <Button data-testid="identity-proof-remove" onClick={() => setRemoving(p.id)}>{t("identities.mine.remove")}</Button>}
             </Row>
-            {removing === p.id && <Block testId="identity-proof-remove-notes"><Notice>{t("identities.mine.removeNote")}{localOf(p.provider)?.unpublish ? ` ${localOf(p.provider)!.unpublish!.description}` : ""}</Notice>
+            {removing === p.id && <Block testId="identity-proof-remove-notes">
+              {/* The take-down's step below, said out loud (a server is written to, an approval may be asked): there
+                  from Remove on, so its first words are heard. */}
+              <p role="status" data-testid="identity-proof-remove-live" className="sr-only">{busyHere ? removal.progress : ""}</p>
+              <Notice>{t("identities.mine.removeNote")}{localOf(p.provider)?.unpublish ? ` ${localOf(p.provider)!.unpublish!.description}` : ""}</Notice>
               {approval && takingDown === p.id && <ApprovalPanel request={approval} onCancel={() => removeAbort.current?.abort()} />}
               {removal.progress && busyHere && <Notice testId="identity-proof-remove-progress">{removal.progress}</Notice>}
               {removal.failed === p.id && !busyHere && <p className="text-xs text-text-muted">{t("identities.mine.takeDownFailed")}</p>}

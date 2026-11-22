@@ -39,14 +39,20 @@ export interface PickSheetText {
   notNow: string;
 }
 
+/**
+ * The app's title and a picked folder's name, isolated in the sentence: in another direction than the person's language
+ * (a Hebrew title in English), a title starting the sentence turned the whole of Ghostly's words around.
+ */
+const isolate = (text: string) => `\u2068${text}\u2069`;
+
 /** The sheets' words from the person's translator. */
 export function pickSheetText(t: Translate): PickSheetText {
   return {
-    ask: (app, folder) => t(folder ? "apps.files.askFolder" : "apps.files.askFiles", { app }),
+    ask: (app, folder) => t(folder ? "apps.files.askFolder" : "apps.files.askFiles", { app: isolate(app) }),
     choose: (folder) => t(folder ? "apps.files.chooseFolder" : "apps.files.chooseFiles"),
-    note: (app) => t("apps.files.note", { app }),
+    note: (app) => t("apps.files.note", { app: isolate(app) }),
     cancel: t("common.cancel"),
-    askAgain: (app, name, more) => (more ? t("apps.files.askAgainMore", { app, name, count: more }) : t("apps.files.askAgain", { app, name })),
+    askAgain: (app, name, more) => (more ? t("apps.files.askAgainMore", { app: isolate(app), name: isolate(name), count: more }) : t("apps.files.askAgain", { app: isolate(app), name: isolate(name) })),
     allow: t("apps.files.allow"),
     notNow: t("apps.files.notNow"),
   };
@@ -313,8 +319,8 @@ export function sheet(parts: { title: string; note?: string; secondary: string; 
     // No taller than the window, with its own scroll: its buttons are always within reach.
     box.className = "max-h-[90dvh] w-full max-w-sm overflow-y-auto rounded-lg border border-border bg-sidebar-bg p-4 text-text-primary shadow-lg";
     const title = document.createElement("h2");
+    // Ghostly's words, in the page's direction: `dir="auto"` took it from the app's title when the sentence starts with it.
     title.className = "m-0 text-base font-semibold [overflow-wrap:anywhere]";
-    title.dir = "auto";
     title.id = `app-files-${randomId()}`;
     title.textContent = parts.title;
     box.setAttribute("aria-labelledby", title.id);
@@ -322,7 +328,6 @@ export function sheet(parts: { title: string; note?: string; secondary: string; 
     if (parts.note) {
       const note = document.createElement("p");
       note.className = "mt-2 text-sm text-text-secondary [overflow-wrap:anywhere]";
-      note.dir = "auto";
       note.textContent = parts.note;
       box.append(note);
     }

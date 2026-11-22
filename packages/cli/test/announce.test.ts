@@ -22,6 +22,7 @@ it("reads the engine's state only for an event that may announce a join", async 
   const state = { settings: { nick: "Bot" }, links: [{ id: "c1", profile: { name: "Ana" }, pairingProgress: { role: "inviter" } }] };
   const node = {
     getState: () => { reads++; return state; },
+    getSettings: () => { reads++; return state.settings; },
     sendMessage: async ({ text }: { text: string }) => { sent.push(text); },
   } as unknown as GhostlyNode;
   announceJoins(hub, node);

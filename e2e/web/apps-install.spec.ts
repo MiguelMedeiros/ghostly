@@ -54,7 +54,8 @@ test("install from a store, open it in a chat, and the contact installs it from 
   await listed.getByTestId("app-listing-install").click();
 
   const screen = ana.page.getByTestId("app-install");
-  await expect(screen.getByTestId("app-store-line")).toHaveText(`In ${store.storeName}`);
+  // A store other than the official one is shown with its fingerprint after its name.
+  await expect(screen.getByTestId("app-store-line")).toHaveText(new RegExp(`^In ${store.storeName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}( \\S{4}){4}$`));
   await expect(screen.getByTestId("app-publisher-name")).toHaveText("Publisher");
   await expect(screen.getByTestId("app-permissions")).toContainText("Talk to the same app on your contact's side");
   // One line about who learns the address; the rest behind its ⓘ. Chromium is not WebKit: no Safari line.

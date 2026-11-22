@@ -1,9 +1,14 @@
 {
   "iroh": "1.3.0",
   "wasmBindgen": "0.2.106",
-  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
-  "source": "3dc19ade76d8849e58f025b7588162167de683cd4886a97a9ae40fcc20ffb585",
-  "sha256": "574b515b19d2225f006d9fc8a46b9fc67fbec7bebcef84b2755c45b6ddb80d6f",
-  "bytes": 2758233,
-  "gzipBytes": 1043822
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "source": "393dd5f48ce41cfdc4c69ef51393cd2b79cf589d8e235b758f5efbb0b2bbb30b",
+  "sha256": "8983ed43431ffe5a98b7eb9000a2b3c041d3b2f8395fd236fbcb7a1aeee6a5f9",
+  "bytes": 2761188,
+  "gzipBytes": 1046429,
+  "files": {
+    "ghostly_iroh_web.d.ts": "b767e0ba7bdd5e734c28fac478e6f1c895c906fff906747404331608f05c71c3",
+    "ghostly_iroh_web.js": "066e933d53b0fe6113b79fd3f5e98a6a09f62784096805a5cb4d1500b9317d2d",
+    "ghostly_iroh_web_bg.wasm.d.ts": "bc8a15a6b152b45961a20587d26f3d71886b6d3478485f1ce8456b7843580119"
+  }
 }
