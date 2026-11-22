@@ -28,7 +28,11 @@
  *   this script first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
  *   a `javascript:` URL is refused (its own Trusted Types default policy; one passes every other string on as it is,
  *   or, once the page made its own `default` policy, to that one's rules: the page's `createPolicy("default")` gets the
- *   guard's policy back with them, and the copy of itself it puts in a `srcdoc` frame skips them).
+ *   guard's policy back with them, a kind of string they have no rule for passes on as it is, and the copy of itself it
+ *   puts in a `srcdoc` frame skips them. The guard cannot tell an app's own `require-trusted-types-for` from its own, so
+ *   it keeps none: an app that enforces Trusted Types itself has every string its rules leave out passed on);
+ * - starts a worker made from a `blob:` URL of the page's own from a script that makes a pass-through Trusted Types
+ *   `default` policy in it first, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`, whichever of the two runs first).
  * A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
  * bridge's guard reaches the app's frame then): there this script only watches the new document. Each document it
  * watches is marked (`ghostlyClipboardGuard`, fixed in place): the bridge reads that to know the guard ran in the page
@@ -187,8 +191,8 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
           let rules = null;
           const rule = (kind) => (input, type, sink) => {
             if (kind === "createScript" && sink === "Location href") return null;
-            if (passing || rules === null) return input;
-            return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+            if (passing || rules === null || !rules[kind]) return input;
+            return apply(rules[kind], undefined, [input, type, sink]);
           };
           const members = ["createHTML", "createScript", "createScriptURL"];
           const create = types.createPolicy;
@@ -206,6 +210,66 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
             rules = given;
             return policy;
           };
+        } catch (e) {}
+      }
+      if (types && w.URL && w.Blob && !describe(w, "ghostlyWorkerGuard")) {
+        try {
+          define(w, "ghostlyWorkerGuard", { value: true });
+          const construct = w.Reflect.construct;
+          const json = w.JSON.stringify;
+          const later = w.setTimeout;
+          const Blob = w.Blob;
+          const sized = describe(Blob.prototype, "size").get;
+          const make = w.URL.createObjectURL;
+          const revoke = w.URL.revokeObjectURL;
+          const policy = "if (self.trustedTypes && !self.trustedTypes.defaultPolicy) { try { self.trustedTypes.createPolicy('default', { createHTML: (s) => s, createScript: (s) => s, createScriptURL: (s) => s }); } catch (e) {} }";
+          const script = (code) => apply(make, null, [new Blob([code], { type: "text/javascript" })]);
+          const known = { __proto__: null };
+          let first = null;
+          w.URL.createObjectURL = function createObjectURL(object) {
+            const made = apply(make, this, arguments);
+            try { apply(sized, object, []); known[made] = { blob: object, inner: null, classic: null, module: null }; } catch (e) {}
+            return made;
+          };
+          w.URL.revokeObjectURL = function revokeObjectURL(url) {
+            try {
+              const key = text(url);
+              const entry = known[key];
+              if (entry) {
+                delete known[key];
+                const ours = [entry.inner, entry.classic, entry.module];
+                apply(later, w, [() => { for (let i = 0; i < 3; i++) { if (ours[i] !== null) apply(revoke, null, [ours[i]]); } }, 60000]);
+              }
+            } catch (e) {}
+            return apply(revoke, this, arguments);
+          };
+          const start = (url, options) => {
+            const entry = known[text(url)];
+            if (!entry) return url;
+            const kind = options && typeof options === "object" && options.type === "module" ? "module" : "classic";
+            if (entry[kind] === null) {
+              if (entry.inner === null) entry.inner = apply(make, null, [entry.blob]);
+              if (kind === "module" && first === null) first = script(policy);
+              entry[kind] = script(kind === "module" ? "import " + json(first) + "; import " + json(entry.inner) + ";" : policy + " importScripts(" + json(entry.inner) + ");");
+            }
+            return entry[kind];
+          };
+          const makers = ["Worker", "SharedWorker"];
+          for (let i = 0; i < makers.length; i++) {
+            const Real = w[makers[i]];
+            if (typeof Real !== "function") continue;
+            const started = function (url) {
+              if (new.target === undefined) return apply(Real, this, arguments);
+              const args = [];
+              for (let j = 0; j < arguments.length; j++) args[j] = arguments[j];
+              if (args.length > 0) { try { args[0] = start(url, args[1]); } catch (e) {} }
+              return construct(Real, args, new.target);
+            };
+            define(started, "name", { value: makers[i] });
+            started.prototype = Real.prototype;
+            define(Real.prototype, "constructor", { value: started, writable: true, enumerable: false, configurable: true });
+            w[makers[i]] = started;
+          }
         } catch (e) {}
       }
       const reopen = proto.open;
@@ -274,4 +338,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-ay9kpYD2BIflB8W9w+iAbo1krsFBwIJunUmXTACfhao='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-ZIUer015gpdSl+NHTw8K4XFujxpTKEB2a6nNrV84YS4='";

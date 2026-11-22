@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
+import { NAME, withName } from "../apps/aroundName";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
@@ -19,6 +20,8 @@ import { Highlight } from "../chat/ChatSearch";
 import { FORCED_EDGE, ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
+import { roomHeld } from "../../lib/filesComing";
+import { FilesStillComing } from "../chat/FilesStillComing";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
@@ -49,6 +52,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const [duration, setDuration] = useState(remembered?.duration ?? 0);
   const [rate, setRate] = useState(voiceRate);
   const [actionError, setActionError] = useState("");
+  // Accept refused for the files still coming: which ones, from which chat, show under the offer (FileBubble).
+  const [heldRoom, setHeldRoom] = useState(false);
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
   const whyId = useId();
@@ -221,7 +226,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
 
   const act = (action: FileAction) => {
     setActionError("");
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => setActionError(problemLine(error, t)));
+    setHeldRoom(false);
+    void platform?.fileAction?.(file.id, action).catch((error: Error) => { setActionError(problemLine(error, t)); setHeldRoom(roomHeld(error)); });
   };
   const save = () => {
     if (!platform) return;
@@ -295,7 +301,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           </span>
         )}
         <div className="flex-1 min-w-0">
-          <p dir="auto" className="chat-text-audio-name leading-tight truncate m-0" title={file.name} data-testid="audio-name"><Highlight text={file.name} term={highlight} /></p>
+          {/* Whole, wrapping anywhere: cut with … at its end, a long name hid its extension on a phone. */}
+          <p dir="auto" className="chat-text-audio-name leading-tight [overflow-wrap:anywhere] m-0" title={file.name} data-testid="audio-name"><Highlight text={file.name} term={highlight} /></p>
           <input
             type="range"
             data-testid="audio-seek"
@@ -331,7 +338,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
       {offered && (
         <div className="mt-1.5 px-1" data-testid="audio-offer">
           <div className="flex items-center gap-2">
-            <button type="button" data-testid="audio-accept" disabled={noRoom} onClick={() => act("accept")}
+            {/* Not turned off by a room shown less than its size: that room may be old, and the engine reads it again. */}
+            <button type="button" data-testid="audio-accept" onClick={() => act("accept")}
               className={`text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}>
               {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
             </button>
@@ -339,9 +347,10 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           </div>
           {typeof transfer.room === "number" && (
             <p className={`chat-text-media-meta m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/75"}`} data-testid="audio-room">
-              {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
+              {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
             </p>
           )}
+          {!group && (heldRoom || noRoom) && <FilesStillComing except={file.id} open={heldRoom} />}
         </div>
       )}
       {controls && !offered && !group && (canPause || pausedHere || canCancel) && (

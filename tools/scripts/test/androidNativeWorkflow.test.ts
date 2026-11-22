@@ -38,4 +38,14 @@ describe("android-native.yml", () => {
     expect(rootFiles).toEqual(expect.arrayContaining(["Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]));
     for (const file of rootFiles) expect(covered(file), file).toBe(true);
   });
+
+  it("runs the Kotlin unit tests (app/src/test) after the APK build, which writes the Gradle files they need", () => {
+    const apk = text.match(/^ {2}apk:\n((?: {4}.*\n|\n)+)/m)?.[1] ?? "";
+    const build = apk.indexOf("android build --debug");
+    const tests = apk.indexOf("./gradlew :app:testUniversalDebugUnitTest");
+    expect(build).toBeGreaterThan(-1);
+    expect(tests).toBeGreaterThan(build);
+    expect(apk.indexOf("upload-artifact")).toBeGreaterThan(tests);
+    expect(covered("apps/desktop/gen/android/app/src/test/java/tools/ghostly/app/SaveSlotTest.kt")).toBe(true);
+  });
 });

@@ -118,10 +118,10 @@ test("forced colors keep Settings' switches, the chosen Mode and Chat list optio
 
 /**
  * A group's main buttons, filled with the accent alone: forced colors fill them with the page's colour, so New group's
- * Create and an invitation's Accept (on the chat list's row and on the invitation's page) read as bare bold text. Each
- * keeps an edge there, and shows none in normal colours.
+ * Create and an invitation's Accept (on the chat list's row and on the invitation's page) read as bare bold text; Leave
+ * group's answer, tinted red alone, as Cancel. Each keeps an edge there, and shows none in normal colours.
  */
-test("forced colors keep an edge on New group's Create and an invitation's Accept", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:groups.create", "@feature:groups.invite"] }, async ({ peer }) => {
+test("forced colors keep an edge on New group's Create, an invitation's Accept and Leave group's answer", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:groups.create", "@feature:groups.invite"] }, async ({ peer }) => {
   test.setTimeout(5 * 60_000);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await pair(alice, bob);
@@ -162,6 +162,59 @@ test("forced colors keep an edge on New group's Create and an invitation's Accep
   await keepsAnEdge(bob.page, invitation.getByTestId("group-accept"), "the invitation page's Accept");
   await bob.page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
   await bob.page.screenshot({ path: test.info().outputPath("forced-group-invitation.png") });
+
+  // The answer that ends something, drawn by its red tint alone: it read as Cancel beside it.
+  await alice.page.getByTestId("group-options").click();
+  await alice.page.getByTestId("group-leave").click();
+  await keepsAnEdge(alice.page, alice.page.getByTestId("group-leave-confirm"), "Leave group's answer");
+  await alice.page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  await alice.page.screenshot({ path: test.info().outputPath("forced-group-leave.png") });
+});
+
+/**
+ * A first visit's main buttons, filled with the accent alone: the chat list's New and its arrow, the invite's Copy
+ * invite, the install hint's Install and the New in Wallets' and Identities' headers read as bare bold text in forced
+ * colors, dark and light. Each keeps an edge there, as Home's New chat does, and has its old size in normal colours.
+ */
+test("forced colors keep an edge on the chat list's New, Copy invite, Install and a page's New", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:invite.copy", "@feature:app.pwa.install"] }, async ({ peer }) => {
+  const { page } = await peer("first-run-edges");
+  await page.setViewportSize({ width: 1280, height: 800 });
+  async function keepsAnEdge(button: Locator, name: string): Promise<void> {
+    await expect(button, name).toBeVisible();
+    await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
+    const box = (await button.boundingBox())!;
+    expect((await look(button)).border, `${name} in normal colours`).toBe(0);
+    for (const colorScheme of ["dark", "light"] as const) {
+      await page.emulateMedia({ forcedColors: "active", colorScheme });
+      const forced = await look(button);
+      expect.soft(forced.border, `${name}, ${colorScheme}: border in forced colors`).toBeGreaterThanOrEqual(1);
+      expect.soft(forced.borderColor, `${name}, ${colorScheme}: border against what it sits on`).not.toBe(forced.around);
+    }
+    await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
+    const back = (await button.boundingBox())!;
+    expect({ width: back.width, height: back.height }, `${name}: its size in normal colours`).toEqual({ width: box.width, height: box.height });
+  }
+
+  await still(page);
+  await keepsAnEdge(page.getByTestId("sidebar-new-chat"), "the chat list's New");
+  await page.getByTitle("New Chat").first().click();
+  await keepsAnEdge(page.getByTestId("invite-card").getByRole("button", { name: "Copy invite", exact: true }), "Copy invite");
+
+  // The browser offers to install it, and there is a chat now: the hint.
+  await page.evaluate(() => dispatchEvent(Object.assign(new Event("beforeinstallprompt", { cancelable: true }), {
+    prompt: () => Promise.resolve(), userChoice: Promise.resolve({ outcome: "dismissed" as const }),
+  })));
+  await page.goto("/#/");
+  await still(page);
+  await keepsAnEdge(page.getByTestId("install-hint-install"), "the install hint's Install");
+
+  for (const [hash, id, name] of [["/#/wallet", "wallet-add", "Wallets' New"], ["/#/identities", "identities-new", "Identities' New"]] as const) {
+    await page.goto(hash);
+    await still(page);
+    await keepsAnEdge(page.getByTestId(id), name);
+  }
+  await page.emulateMedia({ forcedColors: "active", colorScheme: "dark" });
+  await page.screenshot({ path: test.info().outputPath("forced-identities-new.png") });
 });
 
 /**

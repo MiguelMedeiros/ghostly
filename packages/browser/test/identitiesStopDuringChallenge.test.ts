@@ -65,7 +65,7 @@ describe("a proof stopped while its challenge is answered", () => {
   ] as const)("%s pressed while the proof key is opened for the contact's challenge holds (run %i)", async action => {
     const { engines, ledgers, state, frames, make } = pair();
     await transact([STORES.settings], stores => {
-      for (const key of ["identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound"]) stores[STORES.settings].delete(key);
+      for (const key of ["identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups"]) stores[STORES.settings].delete(key);
     });
     await engines.a.load(); await engines.b.load();
     const { draftId, binding } = engines.a.begin({ provider: "fake-key", subject: fakeKeySubject() });

@@ -15,6 +15,7 @@ export function renderCall(media?: CallMedia, devices?: () => { audio?: Constrai
   const published: (string | null)[] = [];
   const publishCallSignal = vi.fn((signal: string | null) => { published.push(signal); });
   const setFastPoll = vi.fn();
+  const offerHeld = vi.fn();
   let lines = 0;
   /** Each line gets an id, as the chat's history gives one. */
   const addCallEventMessage = vi.fn((type: string) => `line_${type}_${++lines}`);
@@ -24,7 +25,7 @@ export function renderCall(media?: CallMedia, devices?: () => { audio?: Constrai
   let props: { signal: string | null; handled?: number } = { signal: null, handled: 0 };
   const hook = renderHook(
     ({ signal, handled }: { signal: string | null; handled?: number }) =>
-      useWebRTC({ incomingCallSignal: signal, callHandledElsewhere: handled, publishCallSignal, setFastPoll, addCallEventMessage, removeCallEventMessage, onError, media, devices, ...network, chatId }),
+      useWebRTC({ incomingCallSignal: signal, callHandledElsewhere: handled, publishCallSignal, offerHeld, setFastPoll, addCallEventMessage, removeCallEventMessage, onError, media, devices, ...network, chatId }),
     { initialProps: props },
   );
 
@@ -34,6 +35,7 @@ export function renderCall(media?: CallMedia, devices?: () => { audio?: Constrai
     /** The kinds (`o`, `a`, `h`, `v`) of what was published, `null` for a cleared record. */
     publishedKinds: () => published.map((s) => (s === null ? null : (JSON.parse(s) as { t: string }).t)),
     setFastPoll,
+    offerHeld,
     addCallEventMessage,
     removeCallEventMessage,
     onError,

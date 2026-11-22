@@ -105,7 +105,7 @@ for (const { name, mode, pointer } of TAKEOVERS) {
       for (const ch of TEXT) await key(page, ch);
     }
 
-    await expect(app.getByTestId("mini-app-stopped")).toHaveText("Notes was stopped: it kept taking the keyboard");
+    await expect(app.getByTestId("mini-app-stopped")).toHaveText("\u2068Notes\u2069 was stopped: it kept taking the keyboard");
     await expect(app.locator("iframe")).toHaveCount(0);
     await expect(app.getByTestId("mini-app-open-again")).toHaveCount(0);
     const typed = await field.inputValue();
@@ -126,7 +126,16 @@ test("an app that focuses its own field once keeps running, and a click or a Tab
   test.setTimeout(240_000);
   const { page, app, frame, field, heard } = await setUp(peer);
   const inApp = app.frameLocator("iframe");
-  await frame.evaluate(() => (document.querySelector("input") as HTMLInputElement).focus());
+  // The page gives the focus back a turn of the event loop after the app took it (`holdFocus`), and a key typed before
+  // then is the app's: the keys go once its field has lost the focus and the message field has it again.
+  await frame.evaluate(() => new Promise<void>((back) => {
+    const note = document.querySelector("input") as HTMLInputElement;
+    note.addEventListener("blur", () => back(), { once: true });
+    setTimeout(back, 5_000);
+    note.focus();
+    if (document.activeElement !== note) back();
+  }));
+  await expect(field).toBeFocused();
   for (const ch of TEXT.slice(0, 60)) await key(page, ch);
   expect(heard()).toBe(0);
   expect(await field.inputValue()).toBe(TEXT.slice(0, 60));

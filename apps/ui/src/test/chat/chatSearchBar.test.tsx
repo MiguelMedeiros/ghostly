@@ -52,6 +52,7 @@ const settle = (ms = 50) => act(() => vi.advanceTimersByTimeAsync(ms));
 const row = (id: string) => document.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!;
 const field = () => screen.getByTestId<HTMLInputElement>("chat-search-input");
 const count = () => screen.getByTestId("chat-search-count").textContent;
+const said = () => screen.getByTestId("chat-search-said");
 const ctrlF = () => fireEvent.keyDown(window, { key: "f", ctrlKey: true });
 const marked = () => [...document.querySelectorAll("[data-search-match]")].map(mark => mark.textContent);
 const type = async (text: string) => { fireEvent.change(field(), { target: { value: text } }); await settle(SEARCH_DEBOUNCE_MS + 10); };
@@ -109,8 +110,9 @@ describe("search inside a chat", () => {
     openChat(true, short());
     await screen.findByText(`Message ${COUNT - 1}`);
     ctrlF();
-    // 40 × 40 px before; the measure is a browser's (e2e/web/phone-touch-targets.spec.ts).
-    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:w-11", "max-md:h-11");
+    // 40 × 40 px before; in px, not rem, so a larger text size leaves the field its room. The measure is a browser's
+    // (e2e/web/phone-touch-targets.spec.ts, e2e/web/chat-search.spec.ts).
+    for (const id of ["chat-search-info", "chat-search-older", "chat-search-newer", "chat-search-close"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:w-[44px]", "max-md:h-[44px]");
   });
 
   it("on a phone held upright puts the count on a line of its own under the field, and keeps it beside the field when wider", async () => {
@@ -138,10 +140,45 @@ describe("search inside a chat", () => {
     expect(status).not.toHaveClass("order-last");
     expect(status).not.toHaveClass("basis-full");
     expect(status.previousElementSibling).toBe(field());
-    // The same live region either way, with the same words: moving it would have read the count twice or not at all.
-    expect(status).toHaveAttribute("role", "status");
-    expect(status).toHaveAttribute("aria-live", "polite");
+    // What is said is not the count seen but a live line of its own, which stays where it is either way: moving the
+    // live region would have read the count twice or not at all.
+    expect(status).toHaveAttribute("aria-hidden", "true");
+    expect(status).not.toHaveAttribute("role");
+    expect(said()).toHaveAttribute("role", "status");
+    expect(said()).toHaveAttribute("aria-live", "polite");
+    expect(said()).toHaveClass("sr-only");
     expect(count()).toBe("No results");
+    expect(said().textContent).toBe("No results");
+  });
+
+  it("says the match with the count, who wrote it and the start of what it says, as Enter and Shift+Enter move", async () => {
+    openChat();
+    await screen.findByText(`Message ${COUNT - 1}`);
+    ctrlF();
+    await type("CAFE");
+    // Before, only "1 of 1": a screen reader heard nothing of the message found, the focus staying in the field.
+    expect(said().textContent).toBe("1 of 1: Ana, Um Café amanhã?");
+
+    await type("message 29");
+    expect(said().textContent).toBe("1 of 11: Ana, Message 299");
+    fireEvent.keyDown(field(), { key: "Enter" });
+    fireEvent.keyDown(field(), { key: "Enter" });
+    // One of mine: "You", as a reply's quote names it.
+    expect(said().textContent).toBe("3 of 11: You, Message 297");
+    expect(count()).toBe("3 of 11");
+    fireEvent.keyDown(field(), { key: "Enter", shiftKey: true });
+    expect(said().textContent).toBe("2 of 11: Ana, Message 298");
+
+    // A file is said as the chat list says it, by its name.
+    await type("relatorio");
+    expect(said().textContent).toMatch(/^1 of 1: Ana, .*Relatório Final\.pdf/);
+
+    // The match gone (deleted): the count alone, where it stood.
+    await type("message 29");
+    fireEvent.keyDown(field(), { key: "Enter" });
+    act(() => { deleteMessage("chat-1", "m298"); notifySessionsChanged(); });
+    await vi.waitFor(() => expect(row("m298")).toBeNull());
+    expect(said().textContent).toBe("2 of 10");
   });
 
   it("gives the focus back as it closes: to ⋮ when opened from its menu, to the composer after Ctrl+F there", async () => {
@@ -277,7 +314,8 @@ describe("search inside a chat", () => {
     // Before, the search began again at the newest ("Message 299"), as if its words had just been typed.
     act(() => { deleteMessage("chat-1", "m297"); notifySessionsChanged(); });
     await vi.waitFor(() => expect(row("m297")).toBeNull());
-    expect(count()).toContain("of 10");
+    // The count keeps the place it stood at, as Older and Newer do. Before, it read "1 of 10" (and said so aloud).
+    expect(count()).toBe("3 of 10");
     fireEvent.click(screen.getByTestId("chat-search-older"));
     expect(last()).toBe("m296");
     expect(count()).toBe("3 of 10");
@@ -289,9 +327,22 @@ describe("search inside a chat", () => {
       notifySessionsChanged();
     });
     await vi.waitFor(() => expect(count()).toContain("of 9"));
+    expect(count()).toBe("3 of 9");
     fireEvent.click(screen.getByTestId("chat-search-newer"));
     expect(last()).toBe("m298");
     expect(count()).toBe("2 of 9");
+
+    // The oldest match gone: its place is past the end, the count stays on the last one rather than reading "9 of 8".
+    fireEvent.keyDown(field(), { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(field(), { key: "Enter", shiftKey: true });
+    expect(last()).toBe("m29");
+    expect(count()).toBe("9 of 9");
+    act(() => { deleteMessage("chat-1", "m29"); notifySessionsChanged(); });
+    await vi.waitFor(() => expect(row("m29")).toBeNull());
+    expect(count()).toBe("8 of 8");
+    fireEvent.click(screen.getByTestId("chat-search-older"));
+    expect(last()).toBe("m299");
+    expect(count()).toBe("1 of 8");
   });
 
   it("finds whatever the case and accents, a file by its name, and says when nothing is found", async () => {

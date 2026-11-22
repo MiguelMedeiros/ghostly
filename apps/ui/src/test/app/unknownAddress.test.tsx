@@ -18,6 +18,17 @@ it.each(["#/wallets", "#/join", "#/nonsense", "#/wallet/x", "#/settings/a/b", "#
   await waitFor(() => expect(window.location.hash).toBe("#/"));
 });
 
+/*
+ * A route that starts with `//` or `/\` (a link pasted after a `/`, an extra `/` typed): read as another site's
+ * address, the router refused to go there and the app opened on "Something went wrong".
+ */
+it.each(["#//x", "#///x", "#//settings", "#//join/abc", "#//ghostly1abc", "#//chat/abc", "#/\\x"])("%s goes home", async (address) => {
+  window.location.hash = address;
+  render(<Root />);
+  expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+});
+
 it("an invite code that can't be read still says why, and goes home", async () => {
   window.location.hash = "#ghostly1nothing";
   render(<Root />);

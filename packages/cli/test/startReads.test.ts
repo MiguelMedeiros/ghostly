@@ -176,8 +176,8 @@ describe("what a start reads of a long chat", { timeout: 120_000 }, () => {
     // step with them, and only the deletion is told.
     await run(paths, async (host, { seenReads, wholeReads, pageReads, reported }) => {
       host.ctx.runtime.server.node.deleteMessage({ linkId: chat, messageId: `peer_${LONG}` });
-      // The row goes a turn later.
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // The row goes later (its file, the store, the chat's newest read again): on a busy machine well past a turn.
+      await vi.waitFor(() => expect(reported().at(-1)).toBe(`message.deleted:${chat}:peer_${LONG}`), { timeout: 10_000 });
       await host.close();
       expect([seenReads(), wholeReads(chat), pageReads(chat)]).toEqual([0, 0, 0]);
       // The deleted message's own event leaves the journal with it.
