@@ -42,6 +42,16 @@ it("cuts a failure's message on a character, so the runner's own cut cannot spli
   expect(kept.startsWith("expected 'a' to be 'xxx")).toBe(true);
 });
 
+it("cuts between whole characters wherever the emoji falls, and keeps the cut message within the limit itself", () => {
+  for (let shift = 0; shift < 4; shift++) {
+    const [line] = errorLines(`${"x".repeat(RUNNER_MESSAGE_LIMIT - 4 + shift)}${"👻".repeat(8)}`);
+    expect(line!.isWellFormed(), `shift ${shift}`).toBe(true);
+    const message = line!.slice(line!.indexOf("::", 3) + 2);
+    expect(message.length, `shift ${shift}`).toBeLessThanOrEqual(RUNNER_MESSAGE_LIMIT);
+    expect(message.endsWith("…"), `shift ${shift}`).toBe(true);
+  }
+});
+
 it("counts an escaped newline or percent as the one character the runner reads", () => {
   // Newlines take 3 characters in the command, 1 in the message: a message under the limit stays whole.
   const output = `${"line\n".repeat(Math.floor(RUNNER_MESSAGE_LIMIT / 5) - 1)}50% 👻`;
