@@ -43,14 +43,14 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [term, setTerm] = useState("");
-  const [current, setCurrent] = useState<string | null>(null);
+  const [pick, setPick] = useState<{ term: string; id: string | null }>({ term: "", id: null });
   const inputRef = useRef<HTMLInputElement>(null);
   /** What had the focus as the search opened, to have it back: not a menu's row (it goes with the menu), not the bar. */
   const before = useRef<HTMLElement | null>(null);
   // Behind the lock screen the chat stays mounted: Ctrl/Cmd+F typed there is the lock screen's, not the chat's.
   const locked = useIsLocked();
 
-  const close = useCallback(() => { setOpen(false); setQuery(""); setTerm(""); setCurrent(null); }, []);
+  const close = useCallback(() => { setOpen(false); setQuery(""); setTerm(""); setPick({ term: "", id: null }); }, []);
   const show = useCallback(() => {
     const at = document.activeElement;
     const bar = inputRef.current?.closest("[data-testid=chat-search]");
@@ -112,11 +112,13 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   const found = useMemo(() => new Set(results), [results]);
   const latest = useRef(results);
   latest.current = results;
+  // The match being read is the newest one from the render the new words come in, not after it.
+  const current = pick.term === term ? pick.id : (results[0] ?? null);
 
   // New words: the newest match. A message coming in meanwhile moves nothing.
   useEffect(() => {
     const first = latest.current[0] ?? null;
-    setCurrent(first);
+    setPick({ term, id: first });
     if (!first) return;
     // Its own task: drawing every row (a long chat still drawing its older ones) cannot happen inside an effect.
     const timer = setTimeout(() => jump(first), 0);
@@ -156,7 +158,7 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
     const gone = at < 0 && current ? placeOf(current, held.current, list) : -1;
     const next = gone >= 0 ? list[(by === 1 ? gone : gone - 1 + list.length) % list.length]
       : list[at < 0 ? 0 : (at + by + list.length) % list.length];
-    setCurrent(next);
+    setPick({ term, id: next });
     jump(next);
   }, [current, query, term]);
   const older = useCallback(() => step(1), [step]);
