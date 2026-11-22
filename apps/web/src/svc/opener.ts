@@ -32,10 +32,11 @@ function ownsBuffer(chunk: Uint8Array): chunk is Uint8Array<ArrayBuffer> {
  * while the contact is offline; `reaching` while Try again asks the engine to reach them, and `stillOffline` once that
  * ended with them still offline (without these, `offline`). `blocked` and `unguarded`: the view's notice when the bridge shows no app
  * (`BRIDGE_REFUSED`). `label` and `owner`: whose app it is and that it is not Ghostly (`serviceFraming`), the view's
- * name and the line under the app's name. `openLink`: the bar's button for a link the app asked for that the view held
+ * name and the line under the app's name. `frameTitle`: the bridge's name of the app's frame, which the app can read
+ * (`serviceFrameTitle`: no chat label of this side's). `openLink`: the bar's button for a link the app asked for that the view held
  * back (`openOutside`), for its site.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; loading?: string; reaching?: string; stillOffline?: string; blocked: string; unguarded: string; label: string; owner: string; openLink: (site: string) => string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; loading?: string; reaching?: string; stillOffline?: string; blocked: string; unguarded: string; label: string; owner: string; frameTitle?: string; openLink: (site: string) => string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
@@ -610,8 +611,8 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words, signal); };
     // With Hide my IP on, the bridge runs the WebRTC guard too (the app's frame, on its origin, reaches its window), and
     // registers the services worker that guards the app's pages for it (`workerScript`). Its frame of the app is named
-    // as this one, in the profile's language: a screen reader reaches both.
-    frame.contentWindow!.postMessage({ type: BRIDGE_PORT, relayOnly: options.relayOnly === true, title: options.words.label }, origin, [channel.port2]);
+    // in the profile's language too, as a screen reader reaches both, but never by `label`: the app reads that name.
+    frame.contentWindow!.postMessage({ type: BRIDGE_PORT, relayOnly: options.relayOnly === true, title: options.words.frameTitle }, origin, [channel.port2]);
   };
   // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
   // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
