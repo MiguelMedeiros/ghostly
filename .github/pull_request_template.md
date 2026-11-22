@@ -13,3 +13,14 @@
 - [ ] The e2e specs this touches ran locally, phone width included when the UI changed
 - [ ] A new feature has its line in `e2e/features.json` and a test (`npm run test:map`)
 - [ ] No keys, seeds, tokens, invite links or device codes in the code, tests or this description
+
+## Tests
+
+<!-- For each test this adds or changes. Delete this section when there is none. -->
+
+- [ ] Its name says the behaviour or the bug it guards
+- [ ] It goes into the area's existing test file
+- [ ] A lint rule or a type would not catch the same thing
+- [ ] No e2e spec already checks it
+- [ ] Real network, timers or two peers make it an `integration` test
+- [ ] No fixed waits or ms budgets (a timing check is `@perf`)
