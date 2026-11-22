@@ -113,6 +113,15 @@ const groupIn = (ctx: ApiContext, groupId: string): GroupView | undefined => gro
 const alone = (group: GroupView | undefined): boolean => group?.profile === "mesh" && !group.members.some((m) => !m.me);
 
 /**
+ * An answer's `note` on a group write in a private group with nobody else in it (`nobodyElseIn`): `what` reaches nobody.
+ * Only `group send` said it: a reaction, edit, pin, removal, forward, button update or card there answered `sent:
+ * false` at once with nothing more. Nothing in any other group.
+ */
+export const reachesNobody = (ctx: ApiContext, groupId: string, what: string): { note?: string } => nobodyElseIn(ctx, groupId)
+  ? { note: `Nobody else is in this group: nobody gets ${what}, not even someone who joins later` }
+  : {};
+
+/**
  * Why I am no longer in a group (removed, say), or null while I am. A member removed while away learns it only after
  * it is back, so what it sent in between is never taken, and from then on nothing goes. A community's `lost` is not
  * out: it asks to be let in again by itself.

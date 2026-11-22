@@ -11,7 +11,7 @@ import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
 import { CARD_UPDATE_GAP_MS, flushCardUpdates, mergeCard } from "../src/statusCards";
-import { chatViewOf } from "./support/chatView";
+import { chatViewOf, groupViewOf } from "./support/chatView";
 // covers: headless.status-cards
 
 /** `task send` and `task update` (WISP 405 · Status Cards) against an engine that keeps what it is sent. */
@@ -36,7 +36,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon", out: { delivery?: StoredMe
   const emit = (event: GhostlyEvent) => { for (const listener of listeners) listener(event); };
   const card = (raw: unknown) => { const checked = checkStatusCard(raw); if ("error" in checked) throw new Error(checked.error); return checked.card; };
   const node = {
-    chatView: chatViewOf, getState: () => ({ links: [link("chat-one", { label: "Coordinator" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link("chat-one", { label: "Coordinator" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
     getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => of(`group:${groupId}`).map((m) => ({ ...m }))),
@@ -547,6 +547,20 @@ describe("task update", () => {
     vi.useFakeTimers({ now: Date.now() + CARD_UPDATE_GAP_MS });
     expect(await callApi(ctx, "task.update", { chat: "g1", task: "t1", card: { progress: 60 } })).toMatchObject({ group: "g1", task: "t1", edits: 1 });
     expect(node.editMessage).toHaveBeenCalledWith(expect.objectContaining({ linkId: "group:g1", messageId: "me_1" }));
+  });
+
+  // The fake's group has nobody but me: a card and its update answered `edges: 0` at once and said nothing more.
+  it("says nobody gets a group's card or its update when nobody else is in the group", async () => {
+    const { ctx, node } = fake("one-shot");
+    node.groupTaken.mockReturnValue(0);
+    const nobody = (what: string) => `Nobody else is in this group: nobody gets ${what}, not even someone who joins later`;
+    expect(await callApi(ctx, "task.send", { chat: "g1", card: { id: "t1", title: "Fix" }, wait: "sent", timeout: 1 })).toMatchObject({ edges: 0, note: nobody("this card") });
+    vi.useFakeTimers({ now: Date.now() + CARD_UPDATE_GAP_MS });
+    expect(await callApi(ctx, "task.update", { chat: "g1", task: "t1", card: { progress: 60 }, wait: "sent", timeout: 1 })).toMatchObject({ edges: 0, note: nobody("this update") });
+    vi.useRealTimers();
+    const state = node.getState();
+    node.getState = () => ({ ...state, groups: [group({ members: [...state.groups[0]!.members, { key: "anakey", role: "member", me: false, online: true, missing: 0 }] })] });
+    expect(await callApi(ctx, "task.send", { chat: "g1", card: { id: "t2", title: "Fix" } })).not.toHaveProperty("note");
   });
 });
 

@@ -15,7 +15,7 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
-import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
+import { ended, foldsAnyway, goesOn, outOf, purgeMessage, reachesNobody, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdEnds, holdOf, releaseHold } from "./holds";
@@ -736,7 +736,7 @@ const METHODS: Record<string, Method> = {
       const n = result.n, pinned = remove ? null : messageId;
       const edges = !n ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, target.id, messageId ?? "", { pin: n }, ms)
         : node(ctx).groupTaken({ groupId: target.id, messageId: messageId ?? "", pin: n });
-      return { group: target.id, messageId: pinned, removed: remove, sent: edges > 0, edges };
+      return { group: target.id, messageId: pinned, removed: remove, sent: edges > 0, edges, ...(n && reachesNobody(ctx, target.id, remove ? "this unpin" : "this pin")) };
     }
     // The chat's one pin of mine waiting for the contact is this one (none: the contact confirmed it already).
     const mine = node(ctx).chatUnconfirmed({ linkId: target.linkId }).pin;
@@ -851,6 +851,7 @@ const METHODS: Record<string, Method> = {
         edges = Math.min(edges ?? took, took);
       }
       result.edges = edges ?? 0;
+      if (result.messageIds.length) Object.assign(result, reachesNobody(ctx, to[i]!.id, "this message"));
     }
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
       if (to[i]!.group) continue;
@@ -927,7 +928,7 @@ const METHODS: Record<string, Method> = {
         const edges = !e ? 0 : wait === "sent"
           ? await goneHere(() => waitForGroupFrame(ctx, target.id, message.id, e, ms), `${ended(ctx, ms)}: the message is gone here and no member's edge took its removal yet (it goes when one opens). Its removal ${goesOn(ctx)}`)
           : node(ctx).groupTaken({ groupId: target.id, messageId: message.id, edit: e });
-        return { group: target.id, messageId: message.id, deleted: message.id, everyone: true, sent: edges > 0, edges, ...purged };
+        return { group: target.id, messageId: message.id, deleted: message.id, everyone: true, sent: edges > 0, edges, ...purged, ...(e && reachesNobody(ctx, target.id, "this removal")) };
       }
       if (wait === "confirmed") await goneHere(() => waitForRemoval(ctx, target.linkId, message.id, ms));
       return { chat: target.id, messageId: message.id, deleted: message.id, everyone: true, confirmed: !node(ctx).removalPending({ linkId: target.linkId, messageId: message.id }), ...purged };
@@ -1126,7 +1127,7 @@ const METHODS: Record<string, Method> = {
     const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, ms) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
     return {
       group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}),
-      ...(messageId && nobodyElseIn(ctx, group.id) ? { note: "Nobody else is in this group: nobody gets this message, not even someone who joins later" } : {}),
+      ...(messageId && reachesNobody(ctx, group.id, "this message")),
     };
   },
   /**
@@ -1162,7 +1163,7 @@ const METHODS: Record<string, Method> = {
     const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, ms)
       : node(ctx).groupTaken({ groupId: group.id, messageId, edit: edits });
     // Before 2026-11-01 `sent` was also true for an edit no edge had taken, once it no longer waited for the pace.
-    return { group: group.id, messageId, edits, sent: edges > 0, edges };
+    return { group: group.id, messageId, edits, sent: edges > 0, edges, ...(edits && reachesNobody(ctx, group.id, "this edit")) };
   },
   /**
    * WISP 400 § Reactions in a group, which has no receipts: `edges` says how many took it, `sent` whether one did.
@@ -1176,7 +1177,7 @@ const METHODS: Record<string, Method> = {
     const { n, ...said } = await react(ctx, `group:${group.id}`, params, { group: true, ref }).catch((error) => { throw error instanceof CliError ? notInYetError(group, ref, error) : error; });
     const edges = !n ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, said.messageId, { reaction: n }, ms)
       : node(ctx).groupTaken({ groupId: group.id, messageId: said.messageId, reaction: n });
-    return { group: group.id, ...said, sent: edges > 0, edges };
+    return { group: group.id, ...said, sent: edges > 0, edges, ...(n && reachesNobody(ctx, group.id, "this reaction")) };
   },
   /**
    * WISP 902 · Group Mesh § Typing: `chat.typing` in a private group, said on the edges that are open (`reached`: to
