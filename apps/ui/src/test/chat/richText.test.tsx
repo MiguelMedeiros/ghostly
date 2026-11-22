@@ -4,6 +4,7 @@ import { MessageBubble } from "../../components/MessageBubble";
 import { previewText } from "../../lib/chatList";
 import type { ChatMessage } from "../../lib/types";
 import { renderApp } from "../render";
+import { plainSpaces } from "../timeSpaces";
 
 // covers: chat.rich.format, chat.rich.code, chat.rich.spoiler, chat.rich.blob, chat.rich.time, chats.list.rows
 
@@ -237,12 +238,13 @@ describe("times", () => {
     const { user } = bubble("standup at 14:00 UTC");
     const time = screen.getByTestId("rich-time");
     const button = within(time).getByRole("button", { name: "14:00 UTC" });
-    const local = new Date(Date.UTC(2026, 8, 25, 14)).toLocaleString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
-    expect(button).toHaveAttribute("title", `${local} your time`);
+    // Its spaces aside (timeSpaces.ts): the space before "AM"/"PM" is held by the app on one runtime and not another.
+    const local = plainSpaces(new Date(Date.UTC(2026, 8, 25, 14)).toLocaleString([], { hour: "2-digit", minute: "2-digit", timeZoneName: "short" }));
+    expect(plainSpaces(button.getAttribute("title")!)).toBe(`${local} your time`);
     expect(time.querySelector("time")).toHaveAttribute("datetime", "2026-09-25T14:00:00.000Z");
     expect(screen.queryByTestId("rich-time-local")).toBeNull();
     await user.click(button);
-    expect(screen.getByTestId("rich-time-local")).toHaveTextContent(`(${local} your time)`);
+    expect(plainSpaces(screen.getByTestId("rich-time-local").textContent!)).toContain(`(${local} your time)`);
   });
 
   it("leaves a time without a zone alone", () => {
