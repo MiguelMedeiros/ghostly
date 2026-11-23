@@ -544,6 +544,37 @@ describe("real money", () => {
     await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", maxFee: 2 })).rejects.toMatchObject({ message: "The fee may reach 3 sats, more than the 2 allowed" });
     expect(node.walletPayQuote).not.toHaveBeenCalled();
   });
+
+  it("pay --amount and --max-fee take whole sats, a usage error in the flag's words", () => {
+    // Found in a bug hunt: `--amount 0` answered "amount must be a number from 1 to …" (exit 1), `--max-fee -1` named
+    // `maxFee`, and `--amount 1.5` went on to the address's server, as other number flags never do.
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    for (const [argv, message] of [
+      [["alice@example.com", "--amount", "0"], "--amount takes a whole number of sats from 1 to 9007199254740991, not 0"],
+      [["alice@example.com", "--amount", "-5"], /^--amount .*, not -5$/],
+      [["alice@example.com", "--amount", "1.5"], /^--amount .*, not 1\.5$/],
+      [["lntbs10u1pxyz", "--max-fee", "-1"], "--max-fee takes a whole number of sats from 0 to 9007199254740991, not -1"],
+      [["lntbs10u1pxyz", "--max-fee", "0.5"], /^--max-fee .*, not 0\.5$/],
+    ] as const) expect(() => params("pay", [...argv]), argv.join(" ")).toThrow(expect.objectContaining({ code: "usage", message: typeof message === "string" ? message : expect.stringMatching(message) }));
+    expect(() => params("chat pay-request", ["Alice", "p1", "--max-fee", "0.5"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--max-fee /) }));
+    expect(params("pay", ["alice@example.com", "--amount", "5", "--max-fee", "0"])).toMatchObject({ amount: 5, maxFee: 0 });
+    expect(params("chat pay-request", ["Alice", "p1", "--max-fee", "2"])).toMatchObject({ maxFee: 2 });
+  });
+
+  it("pay over the socket refuses a fraction of a sat, and a bad --amount before the mint is asked", async () => {
+    const { ctx, node } = fake();
+    const lnurlResolve = vi.fn(async () => ({ id: "l", domain: "example.com", minSat: 1, maxSat: 100 }));
+    Object.assign(node, { lnurlResolve });
+    await expect(callApi(ctx, "pay", { target: "alice@example.com", amount: 1.5 })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^amount must be a whole number/) });
+    expect(lnurlResolve).not.toHaveBeenCalled();
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", amount: 0 })).rejects.toMatchObject({ code: "bad_request" });
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", maxFee: 0.5 })).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^maxFee must be a whole number/) });
+    expect(node.walletQuoteInvoice).not.toHaveBeenCalled();
+  });
 });
 
 describe("a chat whose invite nobody took", () => {
