@@ -21,6 +21,9 @@ const settings = (node: Node) => ({ url: CLN_REGTEST[node].websocket as string, 
 // send them as it expects): `ws` stands in for the browser's.
 const socket: SocketFactory = (url) => new WebSocket(url) as never;
 const connect = (node: Node, overrides: Partial<ReturnType<typeof settings>> = {}) => CoreLightning.connect({ ...settings(node), ...overrides }, undefined, socket);
+// A node says an invoice paid (and `pay` returns) as the preimage goes out; its channel balance moves only once the
+// HTLC is off both commitments, a round later. Read at once, it was still the one from before (every night from 11-17).
+const settled = (provider: ReturnType<typeof connect>) => expect.poll(async () => (await provider.info()).balance, { timeout: 10_000, interval: 100 });
 
 // Real nodes, runes made through docker exec: seconds, not milliseconds.
 describe.skipIf(!enabled)("Core Lightning on regtest", { timeout: 60_000 }, () => {
@@ -62,11 +65,11 @@ describe.skipIf(!enabled)("Core Lightning on regtest", { timeout: 60_000 }, () =
       expect(paid.state).toBe("paid");
       expect((await alice.invoiceStatus(invoice))).toEqual({ state: "paid", amount: 1234 });
       expect(await bob.paymentStatus({ invoice: invoice.invoice, paymentHash: invoice.paymentHash })).toMatchObject({ state: "paid" });
-      expect((await alice.info()).balance).toBe(before.alice + 1234);
-      expect((await bob.info()).balance).toBe(before.bob - 1234 - (paid.state === "paid" ? paid.fee ?? 0 : 0));
+      await settled(alice).toBe(before.alice + 1234);
+      await settled(bob).toBe(before.bob - 1234 - (paid.state === "paid" ? paid.fee ?? 0 : 0));
       // Paying it again is refused by the node, and the payment is still the one that went through.
       await expect(bob.payInvoice(invoice.invoice, 10)).resolves.toMatchObject({ state: "paid" });
-      expect((await bob.info()).balance).toBe(before.bob - 1234);
+      await settled(bob).toBe(before.bob - 1234);
       expect(spendable("alice")).toBeGreaterThan(0);
     } finally { await alice.close(); await bob.close(); }
   });
