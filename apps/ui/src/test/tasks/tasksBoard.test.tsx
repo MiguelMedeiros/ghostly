@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readStatusCard, statusCardText, type RoutineCard, type TaskCard } from "@ghostly/core";
@@ -289,6 +289,24 @@ describe("the Tasks board", () => {
     await user.keyboard("{Enter}");
     expect(screen.queryByTestId("tasks-clear-finished")).not.toBeInTheDocument();
     expect(screen.getByTestId("tasks-group-status")).toHaveFocus();
+  });
+
+  it("with Group by on Bot, Clear finished hands the focus to the chosen option, not the first one", async () => {
+    const { user } = profile([row("link-1", task({ id: "relay", status: "running" })), row("link-1", task({ id: "done", status: "done" }))]);
+    await loaded();
+    await user.click(screen.getByTestId("tasks-group-bot"));
+    screen.getByTestId("tasks-clear-finished").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("tasks-group-bot")).toHaveFocus();
+  });
+
+  it("Clear finished leaves the focus where it is when it was not lost (a click from the filter)", async () => {
+    const { user } = profile([row("link-1", task({ id: "relay", status: "running" })), row("link-1", task({ id: "done", status: "done" }))]);
+    await loaded();
+    await user.click(screen.getByTestId("tasks-filter"));
+    fireEvent.click(screen.getByTestId("tasks-clear-finished"));
+    expect(screen.queryByTestId("tasks-clear-finished")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tasks-filter")).toHaveFocus();
   });
 
   it("with routines too, Clear finished hands the focus to the Tasks/Routines switch after it", async () => {
