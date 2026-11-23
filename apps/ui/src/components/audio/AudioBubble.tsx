@@ -61,6 +61,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const audioRef = useRef<HTMLAudioElement>(null);
   useChosenSpeaker(audioRef, src);
   const playRef = useRef<HTMLButtonElement>(null);
+  const acceptRef = useRef<HTMLButtonElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   useFocusKept(rootRef);
   const srcRef = useRef<string | null>(null);
@@ -339,7 +340,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
         <div className="mt-1.5 px-1" data-testid="audio-offer">
           <div className="flex items-center gap-2">
             {/* Not turned off by a room shown less than its size: that room may be old, and the engine reads it again. */}
-            <button type="button" data-testid="audio-accept" onClick={() => act("accept")}
+            <button ref={acceptRef} type="button" data-testid="audio-accept" onClick={() => act("accept")}
               className={`text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}>
               {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
             </button>
@@ -350,7 +351,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
               {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
             </p>
           )}
-          {!group && (heldRoom || noRoom) && <FilesStillComing except={file.id} open={heldRoom} />}
+          {!group && (heldRoom || noRoom) && <FilesStillComing except={file.id} open={heldRoom} accept={acceptRef} />}
         </div>
       )}
       {controls && !offered && !group && (canPause || pausedHere || canCancel) && (
