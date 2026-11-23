@@ -34,6 +34,30 @@ test("another repository's issue with no owner, or under this one's owner, is fo
   assert.deepEqual(privateRefs(body), ["other-repo#1", "tracker#2", "OTHER-REPO#3", "MiguelMedeiros/other-repo#4"]);
 });
 
+test("a section of a document whose anchor starts with a number is no repository's issue", () => {
+  const body = [
+    "[records](PROTOCOL.md#4-records), `WEB.md#2-storage`, [intro](BROWSER.md#1-intro), README.md#123, [steps](setup#4-steps) and [here](#1-intro).",
+    "Still found: other-repo#12, (other-repo#13), `other-repo#14` and MiguelMedeiros/other-repo#15.",
+  ].join("\n");
+  assert.deepEqual(privateRefs(body), ["other-repo#12", "other-repo#13", "other-repo#14", "MiguelMedeiros/other-repo#15"]);
+});
+
+test("a full link to an issue or pull request of this owner's other repositories is found; this repository's is not", () => {
+  const body = [
+    "https://github.com/MiguelMedeiros/other-repo/issues/12 and https://github.com/MiguelMedeiros/other-repo/pull/13,",
+    "github.com/MiguelMedeiros/other-repo/issues/14, github.com/miguelmedeiros/Other-Repo/issues/15/ and",
+    "[t](https://github.com/MiguelMedeiros/other-repo/issues/16?x=1#c).",
+    "Left alone: https://github.com/MiguelMedeiros/ghostly/issues/17, github.com/MiguelMedeiros/ghostly/pull/18 and owner/repo#19.",
+  ].join("\n");
+  assert.deepEqual(privateRefs(body), [
+    "github.com/MiguelMedeiros/other-repo/issues/12",
+    "github.com/MiguelMedeiros/other-repo/pull/13",
+    "github.com/MiguelMedeiros/other-repo/issues/14",
+    "github.com/miguelmedeiros/Other-Repo/issues/15",
+    "github.com/MiguelMedeiros/other-repo/issues/16",
+  ]);
+});
+
 test("no document the site publishes, revision logs included, cites another repository's issue a reader may not open", () => {
   // What scripts/sync-references.mjs publishes: every WISP, its change files (the revision log), and the other docs.
   const wisps = join(repo, "docs/wisps");
