@@ -448,7 +448,7 @@ describe("a community's saves", () => {
     expect(last).toBeGreaterThan(Math.max(...oldSaid));
   });
 
-  it("past the numbers its record reserves under one commit, a message writes the record again, so a restart sends above them", async () => {
+  it("past the numbers its record reserves under one commit, a message writes the record again, so a restart and an app from before send above them", async () => {
     const memory = counted();
     const now = engine(memory.store);
     await now.groups.load();
@@ -462,7 +462,13 @@ describe("a community's saves", () => {
 
     const again = engine(memory.store);
     await again.groups.load();
-    expect(numberOf((await again.groups.send(id, "after the restart")).messageId)).toBe(SEQ_BLOCK + 1);
+    const next = numberOf((await again.groups.send(id, "after the restart")).messageId);
+    expect(next).toBe(SEQ_BLOCK + 1);
+    await again.groups.flush();
+
+    const old = engine(memory.as(true));
+    await old.groups.load();
+    expect(numberOf((await old.groups.send(id, "old app")).messageId)).toBeGreaterThan(next);
   }, 120_000);
 
   it("a community record written whole by an app from before, with no small row, loads as it is", async () => {
