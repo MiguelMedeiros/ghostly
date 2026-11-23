@@ -200,7 +200,10 @@
       "noFee": "sem taxa",
       "none": "Nada ainda",
       "note": {
+        "notSent": "Um pagamento não foi enviado",
+        "paidRequest": "Pedido de um contato pago",
         "paymentFailed": "Um pagamento Lightning falhou",
+        "paymentFailedFor": "O pagamento falhou: {{note}}",
         "requestPaid": "Pedido pago via Lightning",
         "testCoins": "Moedas de teste do mint de teste"
       }
