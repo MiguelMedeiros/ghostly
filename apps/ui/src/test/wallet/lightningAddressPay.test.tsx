@@ -399,4 +399,47 @@ describe("a Lightning address or LNURL the mint leaves pending reads as waiting,
       expect(screen.queryByTestId("lnurl-pending")).toBeNull();
     });
   });
+
+  describe("the service's words for a paid invoice show only once it is paid", () => {
+    /**
+     * What a service leaves after a payment (a LUD-09 success action: its thanks, or a link to a receipt or a download) is
+     * for a payment that went. It showed under the waiting line, and under "the payee was not paid" once it failed.
+     */
+    const stateOf = (patch: Partial<WalletState>) => walletView({ mode: "testnet", mints: [mint(TEST_MINT, 5_000)], balance: 5_000, ...patch });
+    const pendingWith = async (successAction: { tag: "message"; message: string } | { tag: "url"; description: string; url: string }) => {
+      fakeEngine.setState({ wallet: stateOf({ setAside: 6 } as Partial<WalletState>) });
+      const wallet: WalletPlatform = Object.assign(Object.create(servicesPlatform!.wallet.forNetwork("testnet")), {
+        ...methods("alice@example.com", false),
+        lightningAddressInvoice: async () => ({ invoice: "lnbcrt-x", note: "Paid alice@example.com", successAction }),
+      });
+      const { user, engine } = renderApp(<LightningAddressPay wallet={wallet} text="alice@example.com" via="cashu" />);
+      await user.click(screen.getByTestId("lnurl-lookup"));
+      await user.type(await screen.findByTestId("lnurl-amount"), "5");
+      await user.click(screen.getByTestId("lnurl-invoice"));
+      await user.click(await screen.findByTestId("lnurl-pay"));
+      return { engine, done: await screen.findByTestId("lnurl-done") };
+    };
+
+    for (const action of [{ tag: "message", message: "Thanks for the coffee" }, { tag: "url", description: "Your receipt", url: "https://example.com/receipt" }] as const) {
+      it(`a ${action.tag}: not while pending, not once failed`, async () => {
+        const { engine, done } = await pendingWith(action);
+        expect(screen.getByTestId("lnurl-pending")).toBeInTheDocument();
+        expect(done.textContent).not.toMatch(/Thanks for the coffee|Your receipt/);
+        expect(done.querySelector("a")).toBeNull();
+        engine.setState({ wallet: stateOf({}) });
+        expect(await screen.findByTestId("lnurl-failed")).toBeInTheDocument();
+        expect(screen.getByTestId("lnurl-done").textContent).not.toMatch(/Thanks for the coffee|Your receipt/);
+        expect(screen.getByTestId("lnurl-done").querySelector("a")).toBeNull();
+      });
+
+      it(`a ${action.tag}: shown once the pending payment is paid`, async () => {
+        const { engine } = await pendingWith(action);
+        engine.setState({ wallet: stateOf({ balance: 4_995, history: [{ id: "out-q-2", timestamp: Date.now(), mint: TEST_MINT, kind: "lightning-out", amount: 5, fee: 0, quote: "q-2" }] } as Partial<WalletState>) });
+        expect(await screen.findByTestId("lnurl-paid")).toBeInTheDocument();
+        const done = screen.getByTestId("lnurl-done");
+        if (action.tag === "message") expect(screen.getByTestId("lnurl-success")).toHaveTextContent("example.com says: Thanks for the coffee");
+        else expect(done.querySelector("a")).toHaveTextContent("https://example.com/receipt");
+      });
+    }
+  });
 });
