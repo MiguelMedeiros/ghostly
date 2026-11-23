@@ -3,7 +3,7 @@ import { isGood, type Badge } from "./contactBadges";
 import { BadgeMark } from "./BadgeMark";
 import type { TipAt } from "./markTip";
 import { useI18n } from "../../contexts/I18nContext";
-import { namesText } from "../../lib/listText";
+import { fillNodes, listNodes } from "../../lib/fillNodes";
 
 /*
  * A contact's identity marks name themselves in a small card: the chat list's marks and the header's stack, the same
@@ -25,7 +25,7 @@ function TipIdentity({ badge: b }: { badge: Badge }) {
         <bdi className="identity-tip-name" data-testid="identity-tip-name">{b.name ?? b.short}</bdi>
         <span className="identity-tip-sub">{b.providerName}{b.name ? <> · <bdi>{b.handle ?? b.short}</bdi></> : null}</span>
         <span className="identity-tip-state" data-good={good || undefined} data-testid="identity-tip-state">{good && CHECK}{capital(b.stateText)}</span>
-        {b.hosts && <span className="identity-tip-source" data-testid="identity-tip-source">{t("identities.profile.loadedFromHosts", { hosts: namesText(b.hosts, t) })}</span>}
+        {b.hosts && <span className="identity-tip-source" data-testid="identity-tip-source">{fillNodes(t("identities.profile.loadedFromHosts"), { hosts: listNodes(b.hosts, t) })}</span>}
       </span>
     </div>
   );

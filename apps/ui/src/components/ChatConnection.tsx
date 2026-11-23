@@ -11,7 +11,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
 import { CONTACT, connectionSummary, lasting, liveAttemptText, namedReason, transportWaitText } from "../lib/transportEvents";
 import { clockTime, formatAt } from "../lib/time";
-import { fillNames } from "../lib/fillNodes";
+import { fillNames, fillNodes, listNodes } from "../lib/fillNodes";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { PairingDetail } from "./pairing/PairingDetail";
 import { PairingGlyph } from "./pairing/PairingGlyph";
@@ -33,7 +33,6 @@ import { useOnline } from "../hooks/useOnline";
 import { useEngineReconnecting, useEngineValue } from "../lib/engineState";
 import { focusLost } from "../lib/focus";
 import { FocusSafeButton } from "./ui/FocusSafeButton";
-import { namesText } from "../lib/listText";
 
 const name = transportName;
 /**
@@ -372,7 +371,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             })()}</p>}
             {summary && <dl data-testid="connection-summary" className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5">
               <dt>{t("connection.detail.transport")}</dt><dd className="min-w-0 text-text-primary">{summary.name}</dd>
-              {summary.relays && <><dt>{t("connection.panel.path")}</dt><dd data-testid="connection-relayed" className="min-w-0 text-text-primary break-words">{summary.relays.length ? t("connection.panel.relayedVia", { relays: namesText(summary.relays, t) }) : t("connection.panel.relayed")}</dd></>}
+              {summary.relays && <><dt>{t("connection.panel.path")}</dt><dd data-testid="connection-relayed" className="min-w-0 text-text-primary break-words">{summary.relays.length ? fillNodes(t("connection.panel.relayedVia"), { relays: listNodes(summary.relays, t) }) : t("connection.panel.relayed")}</dd></>}
               {summary.rttMs !== undefined && <><dt>{t("connection.detail.roundTrip")}</dt><dd className="text-text-primary">{t("connection.ms", { ms: summary.rttMs })}</dd></>}
               {summary.since !== undefined && <><dt>{t("connection.panel.liveSince")}</dt><dd className="text-text-primary">{clock(summary.since)} ({lasting(Date.now() - summary.since, t)})</dd></>}
               <dt>{t("connection.detail.why")}</dt><dd className="min-w-0 break-words text-text-primary">{summary.why}</dd>

@@ -10,15 +10,15 @@ import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { problemLine } from "../../lib/problemText";
 import { ownDirection } from "../../lib/ownDirection";
-import { namesText } from "../../lib/listText";
+import { fillNodes, listNodes } from "../../lib/fillNodes";
 
 const shortCode = (code: string) => (code.length > 24 ? `${code.slice(0, 14)}…${code.slice(-6)}` : code);
 const keyOf = (p: NostrPointer) => (p.type === "profile" ? `p:${p.pubkey}` : `e:${p.id}`);
 
 /** What was loaded on this device while the app runs, so a card scrolled away and back shows it again. Never stored. */
 const loaded = new Map<string, NostrLookupResult>();
-/** "relay.damus.io, nos.lol": relays as people read them. */
-const relayNames = (relays: readonly string[], t: Translate) => namesText(relays.map(r => r.replace(/^wss?:\/\//, "").replace(/\/+$/, "")), t);
+/** "relay.damus.io, nos.lol": relays as people read them, each its own <bdi>. */
+const relayNames = (relays: readonly string[], t: Translate) => listNodes(relays.map(r => r.replace(/^wss?:\/\//, "").replace(/\/+$/, "")), t);
 
 /**
  * An `npub`, `nprofile`, `note` or `nevent` in a message. Nothing is fetched until a tap: then the engine asks the
@@ -70,9 +70,9 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
         : <p dir="auto" data-testid="entity-nostr-note" className="m-0 line-clamp-6 whitespace-pre-wrap break-words text-text-primary">{note.content}</p>)}
       {note && <p className="m-0 text-text-primary/65" data-testid="entity-nostr-age">{ago(note.createdAt)}{note.reply ? ` · ${t("chat.entity.aReply")}` : ""}</p>}
       {result
-        ? <p className="m-0 chat-text-card-label text-text-primary/65" data-testid="entity-nostr-source">{t("chat.entity.nostrSource", { relays: relayNames(result.relays, t), when: ago(result.fetchedAt) })}</p>
+        ? <p className="m-0 chat-text-card-label text-text-primary/65" data-testid="entity-nostr-source">{fillNodes(t("chat.entity.nostrSource", { when: ago(result.fetchedAt) }), { relays: relayNames(result.relays, t) })}</p>
         : <p className="m-0 chat-text-card-label text-text-primary/65" data-testid="entity-nostr-where">
-          {profile ? t("chat.entity.loadKeyHint", { relays: relayNames(relays, t) }) : t("chat.entity.loadNoteHint", { relays: relayNames(relays, t) })}
+          {fillNodes(t(profile ? "chat.entity.loadKeyHint" : "chat.entity.loadNoteHint"), { relays: relayNames(relays, t) })}
           {pointer.relays.length > 0 && ` ${t("chat.entity.codeRelays")}`}
         </p>}
       <button type="button" data-testid="entity-nostr-load" aria-disabled={busy || undefined} aria-busy={busy || undefined} className={cardQuiet} onClick={() => void load()}>
