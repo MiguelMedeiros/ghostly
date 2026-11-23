@@ -24,6 +24,7 @@ export function TranslateSettings() {
   const [unread, setUnread] = useState<unknown>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ pair: string; cause: unknown } | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   const read = useCallback(async () => {
     try {
@@ -40,14 +41,15 @@ export function TranslateSettings() {
 
   // A Remove that went through, or a Try again that read the list, takes its row away and the focus with it: it goes to
   // the Remove now at `land` (the one after the gone pair, else the last), or the switch when no pair is left. A list
-  // that could not be read hands it to its Try again.
+  // that could not be read hands it to its Try again. Nothing lands while the Remove or Try again still works: a draw in
+  // between (a download starting, a settings change) would use the landing up while the button still has the focus.
   const land = useRef<number | null>(null);
   const removeButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const retryButton = useRef<HTMLButtonElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const at = land.current;
-    if (at === null || removing !== null) return;
+    if (at === null || removing !== null || retrying) return;
     land.current = null;
     if (!focusLost()) return;
     const buttons = removeButtons.current.filter((button) => button?.isConnected);
@@ -86,7 +88,11 @@ export function TranslateSettings() {
       {unread !== null ? (
         <Row label={t("settings.translate.downloaded")} hint={<span role="status">{t("settings.translate.unread")}</span>} info={rawError(unread)}
           testId="settings-translate-unread">
-          <Button ref={retryButton} onClick={() => { land.current = 0; void read(); }}>{t("settings.languageRetry")}</Button>
+          <Button ref={retryButton} loading={retrying} onClick={() => {
+            land.current = 0;
+            setRetrying(true);
+            void read().finally(() => setRetrying(false));
+          }}>{t("settings.languageRetry")}</Button>
         </Row>
       ) : lines.length === 0 ? (
         settings.translateMessages && <Row label={t("settings.translate.none")} testId="settings-translate-none" />
