@@ -4,6 +4,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { ProfileOpenFailure } from "@ghostly/browser/shared/idb";
 import { useI18n } from "../contexts/I18nContext";
 import { NAME, withName } from "./apps/aroundName";
+import { InfoButton } from "./layout/Section";
 import { useUpdate } from "../contexts/UpdateContext";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { externalLinkProps } from "../lib/externalLink";
@@ -58,11 +59,7 @@ export function ProfileUnavailable({ failure }: { failure: ProfileOpenFailure })
         </div>
         <p className="flex items-start justify-center gap-1.5 text-text-secondary text-sm">
           <span className="min-w-0 break-words">{t(other ? `app.profileUnavailable.try.${other}` : unloaded ? "app.pageNotLoaded.hint" : "app.profileUnavailable.newerHint")}</span>
-          <button type="button" data-testid="profile-unavailable-info" aria-expanded={open} aria-controls={id} aria-label={t("common.moreInfo")} title={t("common.moreInfo")}
-            onClick={() => setOpen(!open)}
-            className="relative grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted transition-colors hover:text-accent aria-expanded:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-2.5 before:content-['']">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
-          </button>
+          <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId="profile-unavailable-info" />
         </p>
         {open && (
           <div id={id} data-testid="profile-unavailable-text" className="rounded-lg bg-surface-hover px-3 py-2 text-start text-xs leading-5 text-text-secondary break-words space-y-1.5">

@@ -1082,15 +1082,15 @@ jobs:
             failed=1
           }
           check "Frontend lint and types" "$FRONTEND_CHECKS" "$LINT"
-          check "Frontend tests (app)" "$FRONTEND_TESTS" "$FULL"
+          check "Frontend tests (app) 1/3 to 3/3" "$FRONTEND_TESTS" "$FULL" "one or more shards"
           check "Frontend builds" "$FRONTEND_BUILD" "$FULL"
           check "Affected unit tests (draft 1/4 to 4/4)" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"
-          check "Frontend tests (packages)" "$PACKAGES_TESTS" "$PACKAGES"
+          check "Frontend tests (packages 1/4 to 4/4)" "$PACKAGES_TESTS" "$PACKAGES" "one or more shards"
           check "Integration tests (1/2 to 2/2)" "$INTEGRATION_TESTS" "$PACKAGES" "one or more shards"
           check "CLI on Linux ARM64" "$CLI_ARM64" "$PACKAGES"
           check "Tauri Backend" "$TAURI" "$RUST"
           check "Website" "$WEBSITE" "$WEBSITE_GATE"
-          check "Website browser checks" "$WEBSITE_E2E" "$WEBSITE_E2E_GATE"
+          check "Website browser checks (1/4 to 4/4)" "$WEBSITE_E2E" "$WEBSITE_E2E_GATE" "one or more shards"
           check "Desktop media" "$DESKTOP_MEDIA" "$APP"
           check "Desktop on macOS" "$DESKTOP_MACOS" "$APP"
           summary="draft=$DRAFT tested=$TESTED changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS integration-tests=$INTEGRATION_TESTS affected-tests=$AFFECTED cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
