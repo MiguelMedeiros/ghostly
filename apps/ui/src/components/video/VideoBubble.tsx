@@ -423,7 +423,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
         </p>
       )}
-      {offered && !group && (heldRoom || noRoom) && <div className="px-1"><FilesStillComing except={file.id} open={heldRoom} /></div>}
+      {offered && !group && (heldRoom || noRoom) && <div className="px-1"><FilesStillComing except={file.id} open={heldRoom} accept={acceptRef} /></div>}
       {(status || canRetry || stuck) && (!offered || reason) && (
         <div className="flex items-center gap-2 mt-1 px-1">
           {canRetry ? (

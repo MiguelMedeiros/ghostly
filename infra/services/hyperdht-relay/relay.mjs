@@ -287,9 +287,10 @@ const listensOn = (dht, keyPair) => keyPair?.publicKey?.byteLength === 32 && hol
  * the key, and the asking client's other listens, go on. The asking client is told: dht-relay has no message for a
  * refusal and its client drops a `closed` for a server that has had no `listening`, so the server says `listening` at
  * no address (0.0.0.0:0, the browser's sign of a refusal), then `closed`. A listen by a client that does not sign for
- * the key (holdsKey) is refused the same way, before the node holds the key.
+ * the key (holdsKey) is refused the same way, before the node holds the key. Each listen and dial is also counted for
+ * the client's address (`fromAddress`, see startRelay), over all its clients, closed ones too.
  */
-function clientDht(dht, limits, drop, gone, log, wrote) {
+function clientDht(dht, limits, drop, gone, log, wrote, fromAddress) {
   let listening = 0
   let listens = []
   let dials = []
@@ -341,6 +342,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         const now = monotonicNow()
         listens = listens.filter(at => now - at < 60_000)
         if (listens.push(now) > limits.listensPerMinute) { drop('listen rate'); throw new Error('Listen rate reached') }
+        if (!fromAddress('listens', now)) { drop('address listen rate'); throw new Error('Listen rate reached') }
         if (++listening > limits.listens) { drop('listen limit'); throw new Error('Listen limit reached') }
         watchIdle()
         const server = target.createServer({ ...options, createHandshake: untracked(options?.createHandshake) }, onconnection)
@@ -368,6 +370,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         const now = monotonicNow()
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
+        if (!fromAddress('dials', now)) { drop('address dial limit'); throw new Error('Dial limit reached') }
         if (streams.size >= limits.streams) { drop('stream limit'); throw new Error('Stream limit reached') }
         watchIdle()
         return hold(target.connect(publicKey, { ...options, createHandshake: reachedOnly(untracked(options?.createHandshake) ?? noiseWrap) }))
@@ -878,6 +881,8 @@ export function limitReasons (limits) {
     ['dropped listen rate', `${counted(limits.listensPerMinute, 'listen')} a minute (${limitVariable('listensPerMinute')})`],
     ['dropped listen limit', `${counted(limits.listens, 'key')} listened on at once (${limitVariable('listens')})`],
     ['dropped dial limit', `${counted(limits.connectsPerMinute, 'dial')} a minute (${limitVariable('connectsPerMinute')})`],
+    ['dropped address listen rate', `${counted(limits.listensPerMinute * limits.clientsPerAddress, 'listen')} a minute from one address (${limitVariable('listensPerMinute')} × ${limitVariable('clientsPerAddress')})`],
+    ['dropped address dial limit', `${counted(limits.connectsPerMinute * limits.clientsPerAddress, 'dial')} a minute from one address (${limitVariable('connectsPerMinute')} × ${limitVariable('clientsPerAddress')})`],
     ['dropped stream limit', `${counted(limits.streams, 'stream')} open at once (${limitVariable('streams')})`],
     ['dropped queue', `${mebibytes(limits.queuedBytes)} waiting for the client and its far peers (${limitVariable('queuedBytes')})`],
     ['closed far queue', `a far peer leaving half of ${mebibytes(limits.queuedBytes)} untaken on one stream (${limitVariable('queuedBytes')})`],
@@ -1002,8 +1007,26 @@ export async function startRelay(options = {}) {
     const [[, evict]] = most
     return () => { madeRoom.set(address, monotonicNow()); evict() }
   }
+  /**
+   * The listens and dials each address has started in the last minute, over all its clients, the ones it has closed too:
+   * a client's own budgets start over with each WebSocket, so an address that closes each one and opens another would
+   * have the relay's node announce as fast as it reconnects. An address gets its clients' budgets times
+   * `clientsPerAddress`, what it could start with all of them open; one past that is refused and not counted.
+   */
+  const spent = new Map()
+  const perMinute = { listens: limits.listensPerMinute * limits.clientsPerAddress, dials: limits.connectsPerMinute * limits.clientsPerAddress }
+  const fromAddress = address => (kind, now) => {
+    let entry = spent.get(address)
+    if (!entry) spent.set(address, entry = { listens: [], dials: [] })
+    entry[kind] = entry[kind].filter(at => now - at < 60_000)
+    if (entry[kind].length >= perMinute[kind]) return false
+    entry[kind].push(now)
+    return true
+  }
   const forgetRoom = setInterval(() => {
     for (const [address, at] of madeRoom) if (monotonicNow() - at >= ROOM_MS) madeRoom.delete(address)
+    const now = monotonicNow()
+    for (const [address, entry] of spent) if ([...entry.listens, ...entry.dials].every(at => now - at >= 60_000)) spent.delete(address)
   }, 60_000)
   forgetRoom.unref?.()
 
@@ -1140,9 +1163,10 @@ export async function startRelay(options = {}) {
         setTimeout(() => { paused = false; ws._socket?.resume() }, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
       }
     }
-    ws.on('message', data => spend(data.length ?? data.byteLength ?? 0))
-    // A control frame from a client is its payload and 6 bytes (header and mask), so an empty one still costs.
-    const CONTROL_FRAME_BYTES = 6
+    // Each frame from a client costs its payload and 64 bytes: the relay's work on a frame (parsing it, and for a message
+    // the protocol's decode and answer) does not shrink with its payload, so tiny ones are bounded as bytes are.
+    const FRAME_BYTES = 64
+    ws.on('message', data => spend((data.length ?? data.byteLength ?? 0) + FRAME_BYTES))
     // At most one pong waits to be written: a ping that comes meanwhile is kept, the last one only, and answered once
     // it is (RFC 6455 5.5.3 lets a pong answer only the most recent ping). Each pong waiting cost the process about
     // 700 bytes, and one client sent a million pings a second. The payload is copied: it is a view into the chunk the
@@ -1159,7 +1183,7 @@ export async function startRelay(options = {}) {
       })
     }
     ws.on('ping', data => {
-      spend(data.length + CONTROL_FRAME_BYTES)
+      spend(data.length + FRAME_BYTES)
       if (dropped) return
       if (ponging) nextPing = Buffer.from(data)
       else pong(Buffer.from(data))
@@ -1167,7 +1191,7 @@ export async function startRelay(options = {}) {
     // A peer that has gone without closing (a sleeping laptop, a dead route) still holds its slot: one that has not
     // answered the last ping by the next is dropped.
     let answered = true
-    ws.on('pong', data => { spend(data.length + CONTROL_FRAME_BYTES); answered = true })
+    ws.on('pong', data => { spend(data.length + FRAME_BYTES); answered = true })
     const ping = setInterval(() => {
       if (!answered) return drop('no pong')
       answered = false
@@ -1206,7 +1230,7 @@ export async function startRelay(options = {}) {
     // protomux keeps itself on a stream whose userData is null (a WsStream has none), and relay() makes the client's
     // mux at once: guardMux gets it there.
     stream.userData = null
-    const session = relay(clientDht(dht, limits, drop, gone, refusals.line, wrote), stream)
+    const session = relay(clientDht(dht, limits, drop, gone, refusals.line, wrote, fromAddress(address)), stream)
     guardMux(stream.userData, drop)
     void session.then(node => {
       guardProtocol(node._protocol, drop)

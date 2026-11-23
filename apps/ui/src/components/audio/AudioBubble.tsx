@@ -344,7 +344,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
               {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
             </p>
           )}
-          {!group && (heldRoom || noRoom) && <FilesStillComing except={file.id} open={heldRoom} />}
+          {!group && (heldRoom || noRoom) && <FilesStillComing except={file.id} open={heldRoom} accept={acceptRef} />}
         </div>
       )}
       {controls && !offered && !group && (canPause || pausedHere || canCancel) && (

@@ -289,7 +289,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
               data-testid="file-accept" onClick={() => act("accept")}>{t("chat.file.accept")}</button>
             <button type="button" className={`${answerButton} bg-black/20 text-inherit`} data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
           </div>
-          {(heldRoom || (typeof transfer.room === "number" && transfer.room < file.size)) && <FilesStillComing except={file.id} open={heldRoom} />}
+          {(heldRoom || (typeof transfer.room === "number" && transfer.room < file.size)) && <FilesStillComing except={file.id} open={heldRoom} accept={acceptRef} />}
         </div>
       )}
       {(controls && !offered && !group && (canPause || pausedHere || canCancel)) && (

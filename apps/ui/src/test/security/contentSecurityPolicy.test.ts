@@ -191,7 +191,8 @@ describe("the web app's opener policy", () => {
 
   it("is a line of each location: the shared file goes to the return page too, and nothing outside a location reaches one", () => {
     expect(sent(read("apps/web/nginx-headers.conf"))).toEqual([]);
-    expect(nginx.replace(/location\s+[^{]+\{[^}]*\}/g, "")).not.toContain("add_header");
+    // Only what nginx's own answers need is said there (the server's policy for them, below).
+    expect(sent(nginx.replace(/location\s+[^{]+\{[^}]*\}/g, ""))).toEqual([]);
   });
 
   it("the page served without it is the one the sign-in returns to, and Vite's servers send the same on the runner", () => {
@@ -256,6 +257,28 @@ describe("a contact's app origin", () => {
     const answering = locations.filter(([, match]) => !match!.trim().startsWith("@"));
     expect(answering.length).toBe(3);
     for (const [, match, body] of answering) expect(body, match).toContain(`add_header Origin-Agent-Cluster "${ORIGIN_AGENT_CLUSTER}" always;`);
+  });
+
+  // Each answer of the server's own (its 404, a 400 or a 414 of nginx's) is a page of the app's origin too: an app's
+  // page that frames one reaches anywhere through its window, under that page's policy alone. The server's headers
+  // reach only what no location answers (a location's own add_header drops them), and the Dockerfile adds the
+  // `frame-ancestors` after each policy's `form-action 'none'`. A request line nginx cannot take (a 414) is answered
+  // before the Host is read, by the app's own server (nginx.conf), on a contact's app origin too.
+  it("lets nothing load or run from any answer of the server's own, at every location and outside them", () => {
+    const own = /add_header Content-Security-Policy "default-src 'none';[^"]*form-action 'none'" always;/;
+    const nosniff = 'add_header X-Content-Type-Options "nosniff" always;';
+    const outside = (conf: string) => conf.replace(/location\s+[^{]+?\s*\{(?:[^{}]|\{[^{}]*\})*\}/g, "");
+    const conf = read("apps/web/nginx-services.conf").replace(/#.*$/gm, "");
+    const locations = [...conf.matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)];
+    const answering: [string, string][] = [["server", outside(conf)], ...locations.filter(([, match]) => !match!.trim().startsWith("@")).map(([, match, body]) => [match!, body!] as [string, string])];
+    expect(answering.length).toBe(4);
+    for (const [match, body] of answering) {
+      if (!body.includes("return 204;")) expect(body, match).toMatch(own);
+      expect(body, match).toContain(nosniff);
+    }
+    const app = outside(read("apps/web/nginx.conf").replace(/#.*$/gm, "").replace(/^[\s\S]*?\nserver \{/, "server {"));
+    expect(app, "nginx.conf").toMatch(own);
+    expect(app, "nginx.conf").toContain(nosniff);
   });
 });
 

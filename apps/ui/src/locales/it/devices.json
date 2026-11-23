@@ -13,6 +13,7 @@
     "noMatch": "Non corrispondono",
     "notPublished": "Gli altri tuoi dispositivi lo vedranno appena questo dispositivo raggiunge la rete.",
     "refused": "Un altro dispositivo ha provato a usare questo codice. Non ha ricevuto nulla.",
+    "refusedFound": "Due dispositivi hanno usato questo codice. Scegli Corrispondono solo se il tuo nuovo dispositivo mostra queste stesse cifre. Se non ne mostra nessuna, scegli Non corrispondono.",
     "scan": "Inquadralo con la fotocamera del telefono.",
     "scanInfo": "Su un computer, apri Ghostly e scegli Aggiungi questo dispositivo a un altro profilo, poi scansiona o incolla il codice. Vale una volta, per 10 minuti.",
     "title": "Aggiungi un dispositivo",

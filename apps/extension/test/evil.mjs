@@ -10,6 +10,19 @@ const PAGE = `<!doctype html>
 <body>
   <h1>Totally harmless</h1>
   <pre id="out">loading</pre>
+  <button id="tap">Tap me</button><pre id="copied"></pre>
+  <script>
+    // A tap's activation lasts seconds: a copy from a timer after it would replace what the person copied.
+    document.getElementById("tap").addEventListener("click", () => setTimeout(() => {
+      const area = document.createElement("textarea");
+      area.value = "evil";
+      document.body.append(area);
+      area.select();
+      let copied;
+      try { copied = document.execCommand("copy"); } catch { copied = false; }
+      document.getElementById("copied").textContent = String(copied);
+    }, 1500));
+  </script>
   <script type="module">
     const [, peer] = location.hostname.split(".");
     // Works for the old (<svc>.<peer>.ghostly.invalid) and the new (<svc>.<peer>.invalid) scheme.

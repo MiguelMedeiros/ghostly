@@ -116,9 +116,10 @@ function shorten(name: string): string {
 export function sanitizeFileName(name: string): string {
   const visible = name.replace(INVISIBLE, "").replace(BLANK, "").replace(/[/\\:]/g, "")
     .replace(IGNORABLE_RUN, dropIgnorable).replace(SPACE_RUN, " ");
-  // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too.
-  const clean = shorten(visible.replace(/^[\s.]+/, "").trim());
-  if (WINDOWS_DEVICE.test(clean)) return shorten("_" + clean);
+  // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too. Dots and spaces at the end go as
+  // Windows drops them when it names the file: "a.exe." is saved there as "a.exe", and its mark must name that file.
+  const clean = shorten(visible.replace(/^[\s.]+/, "").trim()).replace(/[\s.]+$/, "");
+  if (WINDOWS_DEVICE.test(clean)) return shorten("_" + clean).replace(/[\s.]+$/, "");
   return clean || "file";
 }
 
