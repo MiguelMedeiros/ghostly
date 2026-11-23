@@ -62,6 +62,8 @@ const EMOJI =
  * counts, which errs on the safe side: the bubble shows the address.
  */
 export function labelMisleads(label: string, url: string): boolean {
+  // A letter with a dot below ("ḷ") is drawn as the letter and U+0323, which reads as a dot: split it into both.
+  label = label.normalize("NFD");
   const target = hostOf(url);
   if (!target) return true;
   if (new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
