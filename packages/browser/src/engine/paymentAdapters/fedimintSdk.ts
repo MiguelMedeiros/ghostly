@@ -269,16 +269,22 @@ class RealClient implements FedimintClient {
 export interface FedimintPlatform {
   /** A `@fedimint/types` Transport onto a new worker of its own, which one database will be opened in. */
   transport(): Promise<{ terminate(): void }>;
+  /**
+   * Whether the database is there. False only when it surely is not: any other failure to look throws, since a
+   * restored federation whose database is not there is joined again, and a failed join removes the database by name.
+   */
   exists(database: string): Promise<boolean>;
   /** Deletes a database, and is done when there is none. */
   remove(database: string): Promise<void>;
 }
 
-const BROWSER: FedimintPlatform = {
+export const BROWSER: FedimintPlatform = {
   transport: browserTransport,
   async exists(database) {
     const root = await navigator.storage.getDirectory();
-    try { const file = await (await root.getFileHandle(database)).getFile(); return file.size > 0; } catch { return false; }
+    let handle: FileSystemFileHandle;
+    try { handle = await root.getFileHandle(database); } catch (error) { if ((error as { name?: string })?.name === "NotFoundError") return false; throw error; }
+    return (await handle.getFile()).size > 0;
   },
   async remove(database) {
     const root = await navigator.storage.getDirectory();

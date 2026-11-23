@@ -622,4 +622,71 @@ describe("a Fedimint wallet restored with its profile", () => {
     expect(restored.view.balance, "the federation's recovery gave the ecash back").toBe(1_500);
     expect(fake.databases.has("ghostly-fedimint-restored.db")).toBe(true);
   });
+
+  /** A funded federation's records restored elsewhere: its client's database is not on this device. */
+  async function restoredWallet() {
+    const w = await funded(1_500);
+    await w.stop();
+    const stored = await wrap<{ federations: { database: string }[] }>((await store(STORES.settings, "readonly")).get("fedimintWallet-testnet"));
+    await transact([STORES.settings], (s) => { s[STORES.settings].put({ ...stored, federations: stored.federations.map((f) => ({ ...f, database: "ghostly-fedimint-restored.db" })) }, "fedimintWallet-testnet"); });
+    return wallet();
+  }
+
+  it("a recovery join that failed (the guardians not answering, the device offline) is tried again as a join, and recovers", async () => {
+    const restored = await restoredWallet();
+    fake.unreachable = true;
+    await restored.ensureReady();
+    expect(restored.view.federations[0]).toMatchObject({ status: "error" });
+    // The database the failed join made goes with it: left, every later try opened it, which fails on a database that
+    // never joined, every 30 s and at every start, and the federation's ecash never came back.
+    expect(fake.halfMade.has("ghostly-fedimint-restored.db")).toBe(false);
+    fake.unreachable = false;
+    await restored.ensureReady();
+    await restored.refresh();
+    expect(restored.view.federations[0]).toMatchObject({ status: "ready" });
+    expect(restored.view.balance, "the federation's recovery gave the ecash back").toBe(1_500);
+    await restored.stop();
+  });
+
+  it("a database that could not be looked at is neither joined over nor removed: it opens at the next try", async () => {
+    // A failed join removes its database by name: a read error taken for "not there" would remove a funded one.
+    const w = await funded(1_500);
+    await w.stop();
+    const restarted = await wallet();
+    fake.existsFails = 1;
+    await restarted.ensureReady();
+    expect(restarted.view.federations[0]).toMatchObject({ status: "error" });
+    expect(federation.joined.size === 1 && [...federation.joined.values()][0], "joined once, when it was funded").toBe(1);
+    expect(fake.removed).toEqual([]);
+    await restarted.ensureReady();
+    await restarted.refresh();
+    expect(restarted.view.federations[0]).toMatchObject({ status: "ready" });
+    expect(restarted.view.balance).toBe(1_500);
+    await restarted.stop();
+  });
+
+  it("a recovery join the mode gate gave up on is waited for, its failure's removal too, before the next try looks", async () => {
+    const restored = await restoredWallet();
+    let release = () => {};
+    fake.joinHold = new Promise<void>((resolve) => { release = resolve; });
+    fake.failJoins = 1;
+    const first = restored.ensureReady();
+    await vi.waitFor(() => expect(fake.halfMade.has("ghostly-fedimint-restored.db")).toBe(true));
+    // The app moves away while the guardians are slow: the wallet stops waiting for the join, which runs on.
+    restored.cutShort();
+    await first;
+    restored.resume();
+    const loads = fake.loads;
+    const next = restored.ensureReady();
+    await vi.waitFor(() => expect(fake.loads).toBe(loads + 1));
+    for (let i = 0; i < 5; i++) await settle();
+    // It does not look before the first join settles: it would find the database that join made, open it, and fail.
+    release();
+    await next;
+    await restored.refresh();
+    expect(restored.view.federations[0]).toMatchObject({ status: "ready" });
+    expect(restored.view.balance).toBe(1_500);
+    expect(fake.removed).toEqual(["ghostly-fedimint-restored.db"]);
+    await restored.stop();
+  });
 });
