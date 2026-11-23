@@ -9,6 +9,7 @@ import { SendScan } from "./wallet/SendScan";
 import { typedByKey } from "../lib/typedByKey";
 import { routeBitcoinSend } from "../lib/sendRoute";
 import { SourcePicker } from "./wallet/providers/SourcePicker";
+import { providerLabel } from "./wallet/providers/providerText";
 import { changeableFields } from "./wallet/providers/sourceStatus";
 import { useI18n } from "../contexts/I18nContext";
 import { formatAt } from "../lib/time";
@@ -29,6 +30,8 @@ const DEFAULT_FEE_CAP = 2_000;
 export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; state: WalletState }) {
   const bt = state.bitcoin;
   const { t } = useI18n();
+  // Its source's name in the app's language ("Carteira BDK"); a plugin's stays its own.
+  const label = bt?.providerId && bt.label ? providerLabel(t, bt.providerId, bt.label) : bt?.label;
   // The button pressed is busy while it works and keeps the keys (`loading`, by the key `run` was given); the others wait.
   const { busy, running, error, run } = useRun();
   const [action, setAction] = useState<Action>("receive");
@@ -62,7 +65,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
         // Not connected: "Connecting…" while it is tried again by itself (with the last balance it read), not
         // connected once that has failed for a while; either way, Retry now or move to another server.
         <div className="bg-surface rounded-xl p-6 text-center space-y-3" data-testid="bitcoin-connecting" data-status={bt.status}>
-          <p className="text-text-primary">{bt.status === "error" ? (bt.label ? t("wallet.bitcoin.notConnected", { label: bt.label }) : t("wallet.bitcoin.notConnectedDefault")) : bt.label ? t("wallet.bitcoin.connectingTo", { label: bt.label }) : t("wallet.bitcoin.connectingDefault")}</p>
+          <p className="text-text-primary">{bt.status === "error" ? (label ? t("wallet.bitcoin.notConnected", { label }) : t("wallet.bitcoin.notConnectedDefault")) : label ? t("wallet.bitcoin.connectingTo", { label }) : t("wallet.bitcoin.connectingDefault")}</p>
           {bt.balance !== undefined && (
             <p className="text-text-secondary text-sm" data-testid="bitcoin-last-balance">
               {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit: unitFor(t, unit, bt.balance ?? 0), date: formatAt(bt.balanceAt, { dateStyle: "medium", timeStyle: "short" }, t.language) }) : t("wallet.bitcoin.lastBalance", { unit: unitFor(t, unit, bt.balance ?? 0) }), { balance: <span className="tabular-nums">{formatAmount(bt.balance, t.language)}</span> })}

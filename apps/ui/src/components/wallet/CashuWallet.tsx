@@ -28,6 +28,7 @@ import { problemLine, problemText } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
 import { copySecret } from "../../lib/shareLink";
 import { FocusSafeButton } from "../ui/FocusSafeButton";
+import { providerLabel } from "./providers/providerText";
 
 const TX_LABEL = {
   "lightning-in": "wallet.cashu.tx.lightningIn",
@@ -149,7 +150,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
   // The Cashu card always uses the mints; the Lightning card uses its network's source (the mints by default).
   const ln = state.lightning;
   const viaMint = rail === "cashu" || !ln?.providerId || ln.providerId === CASHU_MINT_SOURCE;
-  const sourceName = ln?.alias ?? ln?.label;
+  const sourceName = ln?.alias ?? (ln?.providerId && ln.label ? providerLabel(t, ln.providerId, ln.label) : ln?.label);
   const unit = satsIn(t, testnet ? "testnet" : "mainnet");
   // Test sats say so wherever an amount shows on a Testnet wallet: its invoice, its mints, what came in.
   const sats = (amount: number) => t("wallet.cards.amount", { amount: formatAmount(amount, t.language), unit });

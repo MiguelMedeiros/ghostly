@@ -114,7 +114,7 @@
     "maxFee": "Lo máximo que aceptas en comisiones",
     "maxFeeInput": "Comisión máxima en {{unit}}",
     "newAddress": "Nueva dirección",
-    "notConnected": "{{label}} no está conectado",
+    "notConnected": "Sin conexión con {{label}}",
     "notConnectedDefault": "La fuente Bitcoin no está conectada",
     "nothingYet": "Nada todavía",
     "refresh": "Actualizar",
@@ -714,7 +714,8 @@
               "bip84": "SegWit nativo (BIP84, bc1q…)"
             }
           }
-        }
+        },
+        "label": "Billetera BDK"
       },
       "bitcoind": {
         "description": "Una billetera en tu propio nodo Bitcoin Core, por su RPC. Tu nodo guarda las claves y firma. Necesita la app de escritorio.",
@@ -741,7 +742,8 @@
         "description": "Una billetera Lightning autocustodiada en Spark, mediante el SDK de Breez. Su frase de recuperación queda sellada en este dispositivo; tú guardas los sats."
       },
       "cashu-mint": {
-        "description": "Las facturas se pagan a tu saldo Cashu, y desde él. Los mints guardan los sats."
+        "description": "Las facturas se pagan a tu saldo Cashu, y desde él. Los mints guardan los sats.",
+        "label": "Mints Cashu"
       },
       "core-lightning": {
         "description": "Tu propio nodo Core Lightning, por Commando con una rune. Tu nodo guarda los sats. La app web solo lo alcanza por wss://.",
@@ -778,7 +780,8 @@
             "help": "El puerto REST de LND (restlisten, 8080 por defecto). En un navegador, el nodo debe permitir esta app con restcors y tener un certificado en el que el navegador confíe; la app de escritorio no necesita ninguno de los dos.",
             "label": "Dirección REST"
           }
-        }
+        },
+        "label": "Nodo LND"
       },
       "nwc": {
         "description": "Una billetera que conectas con su URI NWC (Alby Hub, el servicio NWC de un nodo, una billetera alojada). Esa billetera guarda los sats y fija su propio límite de comisión: que sea custodial o no depende de la billetera.",
@@ -790,7 +793,8 @@
         }
       },
       "webln": {
-        "description": "Una billetera Lightning en este navegador (Alby y otras). Esa billetera guarda los sats y te pregunta antes de pagar."
+        "description": "Una billetera Lightning en este navegador (Alby y otras). Esa billetera guarda los sats y te pregunta antes de pagar.",
+        "label": "Billetera del navegador (WebLN)"
       }
     },
     "reconfigured": "{{name}} usa ahora ese servidor.",

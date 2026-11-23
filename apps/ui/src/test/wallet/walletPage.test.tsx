@@ -832,6 +832,11 @@ describe("Remove, in a wallet's details", () => {
     expect(engine.callsTo("walletRemove")).toEqual([{ type: "lightning", network: "testnet" }]);
   });
 
+  it("a source without a name of its own is named in the app's language: the money stays in Nó LND", async () => {
+    const { dialog } = await removing(walletView({ mints: [mint(TEST_MINT, 0)], lightning: lightningSource({ mode: "testnet", providerId: "lnd", label: "LND node", balance: 800, status: "ready" }) }), "lightning-testnet", "pt");
+    expect(within(dialog).getByTestId("wallet-remove-held")).toHaveTextContent("Seu dinheiro fica em Nó LND: o Ghostly só esquece como alcançá-lo.");
+  });
+
   it("Lightning through the mints comes with Cashu: it points there instead of removing on its own", async () => {
     const { user, engine } = renderApp(<Wallet />);
     engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 0)] }) });

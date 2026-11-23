@@ -21,6 +21,7 @@ import { Notice } from "./ui/Notice";
 import { focusLost, working } from "../lib/focus";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { FocusSafeButton } from "./ui/FocusSafeButton";
+import { providerLabel } from "./wallet/providers/providerText";
 
 /** A mint as a person knows it: its own name, else its host (the full URL says nothing more to them). */
 const mintLabel = (m: { url: string; name: string }) => {
@@ -258,7 +259,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText, mine = fals
               if (quote.amount !== payment.amount) throw new Error(t("payments.bubble.error.amountMismatch"));
               if (quote.feeReserve > Number(feeInput)) throw new Error(t("payments.bubble.error.feeAbove", { fee: formatAmount(quote.feeReserve, t.language), unit: sats }));
               const ln = payer.getState()?.lightning;
-              setLnReview({ fee: quote.feeReserve, source: quote.source && quote.source === ln?.providerId ? (payerCard && ln.name) || ln.alias || ln.label || quote.source : quote.source ?? t("payments.bubble.cashuMints") });
+              setLnReview({ fee: quote.feeReserve, source: quote.source && quote.source === ln?.providerId ? (payerCard && ln.name) || ln.alias || (ln.label && providerLabel(t, ln.providerId, ln.label)) || quote.source : quote.source ?? t("payments.bubble.cashuMints") });
               return;
             }
             const target=payment.target ?? {method:"cashu" as const,network:mintNetwork(selectedMint!) === "testnet" ? "cashu-test" as const : "bitcoin" as const,provider:selectedMint!,asset:"BTC" as const,unit:"sat" as const,address:payment.id,expiresAt:Date.now()+15*60*1000};
