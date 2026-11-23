@@ -106,6 +106,9 @@ export function Profile() {
   // Cancel goes with the form: the focus goes back to New profile, which takes its place, not to the page.
   const [cancelled, setCancelled] = useState(false);
   useFocusLanding(cancelled ? "[data-testid='profile-new']" : null, () => setCancelled(false));
+  // The Restored tag's × goes with the tag: the focus goes to the name beside it, which stays.
+  const [unmarked, setUnmarked] = useState(false);
+  useFocusLanding(unmarked ? "[data-testid='profile-name']" : null, () => setUnmarked(false));
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
   // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
@@ -160,8 +163,8 @@ export function Profile() {
         {current.restored && (
           <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
             {t("profile.restoredTag")}
-            <button type="button" data-testid="profile-restored-remove" aria-label={t("profile.restoredRemove")} title={t("profile.restoredRemove")} onClick={() => attempt(() => clearRestoredMark(current.id))}
-              className="grid place-items-center w-7 h-7 rounded-full hover:text-text-primary hover:bg-surface-hover cursor-pointer">
+            <button type="button" data-testid="profile-restored-remove" aria-label={t("profile.restoredRemove")} title={t("profile.restoredRemove")} onClick={() => attempt(() => { clearRestoredMark(current.id); setUnmarked(true); })}
+              className="tap-target grid place-items-center w-7 h-7 rounded-full hover:text-text-primary hover:bg-surface-hover cursor-pointer">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
             </button>
           </span>

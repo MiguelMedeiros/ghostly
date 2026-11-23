@@ -71,6 +71,18 @@ describe("a restored profile's name field", () => {
     expect(shownName()).toBe("Older work");
   });
 
+  it("the tag's x, pressed from the keyboard, leaves the focus on the name field, and is a thumb's size on a phone", async () => {
+    restoredWorkInUse();
+    const { user } = renderApp(<Profile />, { language: "en" });
+    const remove = screen.getByTestId("profile-restored-remove");
+    expect(remove).toHaveClass("tap-target");
+    remove.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("profile-restored-tag")).not.toBeInTheDocument();
+    // It goes with the tag: the focus lands on the name beside it, not on the page.
+    await waitFor(() => expect(screen.getByTestId("profile-name")).toHaveFocus());
+  });
+
   it("a registry an earlier build left with the translated word in the name and no mark is read as restored", () => {
     localStorage.setItem(registryKey(), JSON.stringify({ version: 1, active: WORK, profiles: [{ id: "", name: "Personal", createdAt: 0 }, { id: WORK, name: "Old work (restaurado)", createdAt: 1 }] }));
     renderApp(<Profile />, { language: "en" });
