@@ -125,6 +125,42 @@ export const OPENED_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe
 export const OPENED_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
 
 /**
+ * Added to the policy of every answer, as the extension's viewer adds it (`sandboxed()`): the page keeps its scripts,
+ * its origin (cookies, storage) and its forms, but starts no download, opens no window or tab (a `target="_blank"`
+ * link, `window.open`) and shows none of the browser's own dialogs (`alert`, `confirm`, `prompt`), as on the web and in
+ * Desktop. A tab here has no word of the person's tap, so a link the app opens in a new window is dropped, as the
+ * sandbox drops it.
+ */
+export const OPENED_SERVICE_SANDBOX = "sandbox allow-scripts allow-same-origin allow-forms";
+
+/** The types a tab shows as a page; a browser saves any other as a file (the extension's `SHOWN_TYPES`). */
+const SHOWN_TYPES = new Set([
+  "text/html", "text/plain", "text/css", "text/javascript", "text/xml", "application/xml", "application/xhtml+xml", "application/json", "application/javascript",
+  "image/svg+xml", "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon", "image/vnd.microsoft.icon",
+  "video/mp4", "video/webm", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4", "audio/flac",
+]);
+
+/** The `Sec-Fetch-Dest` of a page's own load: the tab's, or a frame's. */
+const PAGE_LOADS = new Set(["document", "iframe", "frame"]);
+
+/** A page's load answered with a file to save (`shownAsPage` false): refused, as the extension's viewer refuses it. */
+export const SERVICE_SAVES_A_FILE = "The app answered a page with a file to save";
+
+/**
+ * Whether a browser would show this answer to a page's load, not save it as a file (the extension's `shownAsPage`).
+ * The sandbox keeps the page from starting a download, but a load that no page of the app started (the link
+ * `service open` gives, a reload, back) has none, so it is refused instead, as Desktop and the web view save no file a
+ * contact's app sends. Fail closed: no type, an unknown one, several, or a disposition other than inline.
+ */
+function shownAsPage(status: number, headers: [string, string][]): boolean {
+  const named = (name: string) => headers.filter(([key]) => key.toLowerCase() === name).map(([, value]) => value);
+  if (status === 204 || status === 205 || (status >= 300 && status < 400 && named("location").length)) return true;
+  if (named("content-disposition").some((value) => value.split(";")[0].trim().toLowerCase() !== "inline")) return false;
+  const types = named("content-type").flatMap((value) => value.split(","));
+  return types.length === 1 && SHOWN_TYPES.has(types[0].split(";")[0].trim().toLowerCase());
+}
+
+/**
  * The contact's headers that are not passed on: each makes the browser send something to a place it names, outside
  * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
  * early connections; `Speculation-Rules` prefetches and prerenders). Only the contact's server is reached.
@@ -171,10 +207,11 @@ function plain(response: ServerResponse, status: number, text: string, headers: 
  * cookies and storage are its own, apart from any other app on 127.0.0.1 or localhost, and a name that merely
  * resolves here (DNS rebinding) is not it. Only a browser given the link (which sets `OPEN_COOKIE`) is served; anyone
  * else on this machine who finds the port gets 404. The body streams through, bounded by `MAX_RESPONSE_BYTES`.
- * `relayOnly`: Hide my IP from contacts was on when it opened (`OPENED_SERVICE_CSP_RELAY_ONLY`).
+ * `relayOnly`: Hide my IP from contacts was on when it opened (`OPENED_SERVICE_CSP_RELAY_ONLY`). Either way with
+ * `OPENED_SERVICE_SANDBOX`.
  */
 export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly = false }: { relayOnly?: boolean } = {}): Promise<OpenedService> {
-  const policy = relayOnly ? OPENED_SERVICE_CSP_RELAY_ONLY : OPENED_SERVICE_CSP;
+  const policy = `${relayOnly ? OPENED_SERVICE_CSP_RELAY_ONLY : OPENED_SERVICE_CSP}; ${OPENED_SERVICE_SANDBOX}`;
   const name = `${randomBytes(16).toString("hex")}.localhost`;
   const token = randomBytes(32).toString("hex");
   const cookies = new Set<string>();
@@ -241,6 +278,13 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
     }
     out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), policy];
     out["permissions-policy"] = VIEWER_PERMISSIONS_POLICY;
+    // What the browser loads (`Sec-Fetch-Dest`, which no page can set): a page's own load is refused when the browser
+    // would save its answer as a file.
+    const dest = request.headers["sec-fetch-dest"];
+    if (typeof dest === "string" && PAGE_LOADS.has(dest.toLowerCase()) && !shownAsPage(answer.status, answer.headers)) {
+      stop.abort();
+      return plain(response, 502, SERVICE_SAVES_A_FILE);
+    }
     response.writeHead(answer.status, out);
     // Streamed, not gathered: past the cap (or when the contact drops it) the body stops and the connection closes.
     await pipeline(Readable.from(answer.body, { objectMode: false }), response);
