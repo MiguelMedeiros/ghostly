@@ -511,7 +511,9 @@ describe("the standby screen", () => {
     const name = within(mac).getByText("MacBook");
     expect(name).not.toHaveClass("truncate");
     expect(name).toHaveClass("break-words");
-    expect(name.parentElement).toHaveClass("min-w-0");
+    // The column keeps the name's one-line width in the row's line breaking (flex-auto, not flex-1): Check connection
+    // goes below it first, and only a name wider than the whole row wraps.
+    expect(name.parentElement).toHaveClass("min-w-0", "flex-auto");
   });
 
   it("on a phone Check connection is 44 px tall, as the screen's other buttons are", async () => {

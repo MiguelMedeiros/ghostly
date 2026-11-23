@@ -362,7 +362,7 @@ function LinkRow({ device, answer, onCheck }: { device: DeviceSetView["devices"]
   return (
     <li ref={row} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center gap-3 px-4 py-3">
       <DeviceGlyph name={device.name} active={device.active} />
-      <div className="min-w-0 max-w-full flex-1">
+      <div className="min-w-0 max-w-full flex-auto">
         <p dir="auto" className="break-words text-text-primary">{device.name}</p>
         <p className="text-xs text-text-muted">
           {device.active ? `${t("devices.section.active")} · ` : ""}
