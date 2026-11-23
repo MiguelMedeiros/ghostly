@@ -7,6 +7,7 @@ import { BoardCard } from "../components/tasks/BoardCard";
 import { chosenInForcedColors } from "../components/wallet/ui";
 import { useI18n } from "../contexts/I18nContext";
 import { draftDirection } from "../lib/documentLanguage";
+import { focusLost } from "../lib/focus";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { JUMP_TO } from "../hooks/useJumpTo";
@@ -163,7 +164,15 @@ export function Tasks() {
   const model = useMemo(() => boardModel(board.tasks, { grouping, filter, tag, now, older, clearedAt, statusWord }), [board.tasks, grouping, filter, tag, now, older, clearedAt, t]);
   // A chosen tag no task on the board carries now (Clear finished took its last one) has no pill to unpick it: it goes.
   if (tag && !model.tags.includes(tag)) setTag(undefined);
-  const clearFinished = () => { const at = Date.now(); writeClearedAt(at); setClearedAt(at); };
+  // Clear finished goes with the tasks it clears: its focus would drop to the page, and the next Tab start from the top.
+  // The next control in its row (Tasks/Routines, or Group by) takes it.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const clearFinished = () => {
+    const at = Date.now();
+    writeClearedAt(at);
+    flushSync(() => setClearedAt(at));
+    if (focusLost()) toolbarRef.current?.querySelector<HTMLElement>("button:not([tabindex='-1'])")?.focus({ preventScroll: true });
+  };
   const routines = useMemo(() => sortRoutines(board.routines), [board.routines]);
   const nameOf = (group: BoardGroup) => group.label ?? t(`cards.board.column.${group.id as BoardColumn}`);
   const showing = routines.length && (view === "routines" || !board.tasks.length) ? "routines" : "tasks";
@@ -260,7 +269,7 @@ export function Tasks() {
         </div>
       ) : (
         <div data-testid="tasks-scroller" onScrollCapture={fold} className="flex min-h-0 flex-1 flex-col short:overflow-y-auto short:overscroll-y-contain">
-          <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
+          <div ref={toolbarRef} className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
             <p data-testid="tasks-summary" className="m-0 text-xs text-text-secondary">{summary}</p>
             {showing === "tasks" && model.finished > 0 && (
               <button type="button" data-testid="tasks-clear-finished" onClick={clearFinished} title={t("cards.board.clearFinishedHint")}
