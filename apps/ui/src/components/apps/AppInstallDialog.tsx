@@ -149,7 +149,8 @@ function ErrorLine({ error, testId }: { error: AppErrorView; testId?: string }) 
 /**
  * Install here ends the store's hold on the app's updates (a newer version by link or card, WISP 1200 § Updates and
  * rollback): said before Install, as removing the store says it. The store is named as on its store line, with its
- * fingerprint unless it is the official one; by its fingerprint alone while no index of it was read.
+ * fingerprint unless it is the official one; by its fingerprint alone while no index of it was read. From another store's
+ * listing (`to`), Install pins the app to that store: its updates then wait for it, not for the publisher's links.
  */
 function LeavesStore({ title, store }: { title: string; store: NonNullable<AppPreview["leavesStore"]> }) {
   const { t } = useI18n();
@@ -157,7 +158,7 @@ function LeavesStore({ title, store }: { title: string; store: NonNullable<AppPr
   const named = store.name ?? fingerprint;
   return (
     <Line tone="warning" testId="app-install-leaves-store">
-      {withNames(t("apps.install.leavesStore", { title: NAME, name: SECOND_NAME }), [title, named])}
+      {withNames(t(store.to === undefined ? "apps.install.leavesStore" : "apps.install.leavesStoreTo", { title: NAME, name: SECOND_NAME }), [title, named])}
       {store.name !== undefined && store.key !== DEFAULT_STORE_KEY && <> <Fingerprint value={fingerprint} /></>}
     </Line>
   );

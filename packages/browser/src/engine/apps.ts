@@ -320,9 +320,11 @@ export interface AppPreview {
   /**
    * The store the installed app takes its updates from (`InstalledApp.store`), when Install here ends that: a newer
    * version by URL or card unpins it, another store's listing pins it to that store (WISP 1200 § Updates and rollback).
-   * The screen says so, as removing the store does. `name` is absent while no index of the store was read.
+   * The screen says so, as removing the store does. `name` is absent while no index of the store was read. `to`: the
+   * store this screen's listing is from, which the app's updates then wait for instead; absent when they then come from
+   * the publisher's links.
    */
-  leavesStore?: { key: string; name?: string };
+  leavesStore?: { key: string; name?: string; to?: string };
   /** Read from the bundle this build carries (a built-in app): no server was asked for it, `from` notwithstanding. */
   carried?: true;
   /** This screen's bundle and source, for `install`: Install on it installs from where it said, whatever screen opened since. */
@@ -1973,7 +1975,7 @@ export class Apps {
       install, asks,
       run: this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
-      ...(leaves && { leavesStore: { key: pin, ...(leftName !== undefined && { name: leftName }) } }),
+      ...(leaves && { leavesStore: { key: pin, ...(leftName !== undefined && { name: leftName }), ...(fromStore !== undefined && { to: fromStore }) } }),
       ...(carried && { carried: true as const }),
       stage,
     };

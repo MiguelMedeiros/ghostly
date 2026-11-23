@@ -130,6 +130,7 @@
     "ipLine": "从 {{host}} 下载，该主机会看到你的 IP 地址。",
     "ipLineInstalled": "其发布者可能会知道你的 IP 地址。",
     "leavesStore": "{{title}} 目前只在 {{name}} 列出更新后才会更新。安装此版本将结束这一点：之后的更新将来自其发布者的链接。",
+    "leavesStoreTo": "{{title}} 目前只在 {{name}} 列出更新后才会更新。从这里安装此版本将结束这一点：之后的更新要等此商店列出后才会到来。",
     "newPermissions": "此更新还要求",
     "notListed": "不在你的任何商店中",
     "perm": {

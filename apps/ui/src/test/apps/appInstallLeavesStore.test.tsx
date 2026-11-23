@@ -37,9 +37,17 @@ describe("an install screen whose Install ends the app's store pin", () => {
       "Chess now takes updates only once Ghostly Store lists them. Installing this version ends that: its updates then come from its publisher's links.");
   });
 
-  it("names another store with its fingerprint, and one not read yet by its fingerprint alone", async () => {
+  it("names a store other than the official one with its fingerprint after it", async () => {
     await open({ leavesStore: { key: OTHER, name: "Ghostly Store" } });
     expect(screen.getByTestId("app-install-leaves-store").textContent).toContain(`once Ghostly Store lists them. Installing this version ends that: its updates then come from its publisher's links. ${appFingerprint(OTHER)}`);
+  });
+
+  // Install from another store's listing pins the app to that store: its updates do not then come from the publisher.
+  it("from another store's listing, says the updates then wait for this store", async () => {
+    await open({ leavesStore: { key: DEFAULT_STORE_KEY, name: "Ghostly Store", to: OTHER }, listedBy: [{ key: OTHER, name: "Other store", kind: "curated" }] });
+    const line = screen.getByTestId("app-install-leaves-store").textContent;
+    expect(line).toBe("Chess now takes updates only once Ghostly Store lists them. Installing this version from here ends that: its updates then come only once this store lists them.");
+    expect(line).not.toContain("publisher");
   });
 
   it("names a store with no index read by its fingerprint", async () => {
