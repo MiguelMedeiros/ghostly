@@ -53,6 +53,7 @@ interface RawRecord { key: Key; value: unknown }
 interface RawIndex {
   name: string; rawObjectStore: RawStore; initialize(transaction: unknown): void; keyPath: string | string[]; multiEntry: boolean; unique: boolean; initialized: boolean; deleted: boolean;
   records: RawRecordStore; storeRecord(record: RawRecord): void;
+  getAllValues(range: unknown, count: number | undefined, direction: string | undefined): unknown[];
 }
 interface RawNode { record: RawRecord; left: RawNode | undefined; right: RawNode | undefined; parent: RawNode | undefined; deleted: boolean; red: boolean }
 interface RawRecordStore {
@@ -1143,8 +1144,12 @@ const uncopied = new WeakSet<object>();
 /**
  * fake-indexeddb copies every value a read hands out (`structuredClone`), as it must for its tree, which keeps the
  * values. A store kept on disk read its values from rows.db just now (v8 made them), and copying them again made a
- * whole-chat read 1.6 times the cost of one in memory. Its `get` and `getAll`, and an index's (which read through the
- * store's `getValue`), hand those out as they are (`handOut`).
+ * whole-chat read 1.6 times the cost of one in memory. Its `get` and `getAll`, and an index's, hand those out as they
+ * are (`handOut`).
+ *
+ * An index's `getAll` read each record it names through the store's `getValue`, one rows.db read each: `file list` in
+ * a chat of 1,600 files held a daemon 155 ms. It takes the record keys off the index first, in its order and up to
+ * its count, then reads them all in a few (`SqlTree.getMany`), the transaction's own writes over rows.db as `get` has.
  */
 function readWithoutCopy(classes: RawClasses) {
   const storeProto = classes.ObjectStore.prototype as RawStore;
@@ -1164,6 +1169,18 @@ function readWithoutCopy(classes: RawClasses) {
       if (values.length >= most) break;
     }
     return values;
+  };
+  const indexProto = classes.Index.prototype as RawIndex;
+  const indexGetAllValues = indexProto.getAllValues;
+  indexProto.getAllValues = function (this: RawIndex, range, count, direction) {
+    const tree = this.rawObjectStore.records.records;
+    if (!(tree instanceof SqlTree)) return indexGetAllValues.call(this, range, count, direction);
+    const keys: Key[] = [], most = count || Infinity;
+    for (const entry of this.records.values(range, direction)) {
+      keys.push(entry.value);
+      if (keys.length >= most) break;
+    }
+    return tree.getMany(keys).map((record) => (record === undefined ? undefined : handOut(record.value)));
   };
 }
 
