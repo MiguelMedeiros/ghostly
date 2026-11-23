@@ -17,7 +17,7 @@ import type { Translate } from "../locales/translate";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
-import { groupPath, groupReadAt, groupRouteId, invitationRow } from "../lib/groups";
+import { authorRoster, groupPath, groupReadAt, groupRouteId, invitationRow } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useLabelsFit } from "../hooks/useLabelsFit";
 import { Menu, MenuItem } from "./Menu";
@@ -69,9 +69,15 @@ import { draftDirection } from "../lib/documentLanguage";
 import { useEngineValue } from "../lib/engineState";
 
 const NO_GROUPS: ListedGroup[] = [];
-/** A group as the list reads it (`ListedGroup`): a member typing, coming online or reconnecting draws nothing. */
-const listedGroup = ({ members, typing: _typing, community: _community, ...group }: GroupView): ListedGroup =>
-  ({ ...group, members: members.map(({ key, role, me, nick }) => ({ key, role, me, nick })) });
+/**
+ * A group as the list reads it (`ListedGroup`): a member typing, coming online or reconnecting draws nothing, nor does a
+ * change to a member the row does not name. Only the reaction line shown names one (`SameGroupRow`), after the latest message.
+ */
+const listedGroup = ({ members, typing: _typing, community: _community, ...group }: GroupView): ListedGroup => {
+  const by = group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction.by : undefined;
+  const reactors = by ? authorRoster(members, by, group.formerNames).map(({ key, me, nick }) => ({ key, me, nick })) : [];
+  return { ...group, memberCount: members.length, reactors };
+};
 /** What the list reads of the engine's state itself, for `useEngineValue`: its groups, and whether they came yet. */
 const listOfState = (state: typeof engine.state) => ({ groups: state?.groups?.map(listedGroup) ?? NO_GROUPS, groupsLoaded: !!state?.groupsLoaded });
 
