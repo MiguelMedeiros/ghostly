@@ -392,8 +392,32 @@ describe("group link", () => {
     expect(enableGroupLink).not.toHaveBeenCalled();
   });
 
+  // Found in a bug hunt: a community's admin who turned its link off and ran `group link` to look at it got a new link,
+  // and joining was on again for anyone a member handed it to, without a word. A community's link is on from its
+  // creation, so off is the admin's doing: only --reset (`reset` or `on: true` over the socket) turns it on again.
+  it("leaves a community's link the admin turned off as it is, and says how to make a new one", async () => {
+    const { ctx, node } = fake();
+    const enableGroupLink = vi.fn(async () => ({ link: LINK }));
+    Object.assign(node, { enableGroupLink });
+    const off = (profile: "community" | "mesh") => { node.getState = () => ({ links: [], groups: [{ ...group, profile, entryLink: undefined }], settings: {}, transport: {} }) as unknown as EngineState; };
+    off("community");
+    await expect(callApi(ctx, "group.link", { group: "Crew" })).rejects.toMatchObject({ code: "refused",
+      message: "The link is off: nobody can join with it, and the link shared before will not work again. ghostly group link g1 --reset makes a new one to share (reset: true over the socket)" });
+    expect(enableGroupLink).not.toHaveBeenCalled();
+    // The command line asks for no more than a look: `on` goes only with --off.
+    expect(COMMANDS["group link"].params!(parseArgs(["Crew"], COMMANDS["group link"].options!), { group: "Crew" })).toEqual({ group: "Crew", reset: false });
+    expect(COMMANDS["group link"].params!(parseArgs(["Crew", "--off"], COMMANDS["group link"].options!), { group: "Crew" })).toEqual({ group: "Crew", on: false, reset: false });
+    // Asked for in so many words, it is on again, as a new link.
+    expect(await callApi(ctx, "group.link", { group: "Crew", reset: true })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
+    expect(await callApi(ctx, "group.link", { group: "Crew", on: true })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
+    // A private group starts with no link: there `group link` is how it is turned on.
+    off("mesh");
+    expect(await callApi(ctx, "group.link", { group: "Crew" })).toEqual({ group: "g1", link: LINK, url: expect.stringMatching(/#\/join\//) });
+    expect(enableGroupLink.mock.calls).toEqual([[{ groupId: "g1", reset: true }], [{ groupId: "g1" }], [{ groupId: "g1" }]]);
+  });
+
   it("says in its help that it prints the link, and that anyone who has it can join", () => {
-    expect(COMMANDS["group link"].summary).toBe("Print the group's link (anyone who has it can join); --reset: a new one, the old one stops working; --off");
+    expect(COMMANDS["group link"].summary).toBe("Print the group's link (anyone who has it can join), turning a private group's on; --reset: a new one, the old one stops working (a community's link that is off: on again); --off");
     expect(COMMANDS["group create"].summary).toContain("anyone who has its link can join");
   });
 });
