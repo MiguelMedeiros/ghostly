@@ -139,7 +139,9 @@
       "confirmed_two": "{{sign}}{{amount}} · تأكيدان",
       "unconfirmed": "{{sign}}{{amount}} · غير مؤكدة"
     },
-    "unconfirmed": "{{amount}} {{unit}} غير مؤكدة"
+    "unconfirmed": "{{amount}} {{unit}} غير مؤكدة",
+    "unconfirmed_one": "{{amount}} {{unit}} غير مؤكد",
+    "unconfirmed_other": "{{amount}} {{unit}} غير مؤكدة"
   },
   "cards": {
     "amount": "{{amount}} {{unit}}",
@@ -278,6 +280,8 @@
     },
     "unconfirmed": "{{amount}} {{unit}} غير مؤكدة",
     "unconfirmedInfo": "أخذت دار السك هذه الـ sats في عملية تبديل ولا تستطيع أن تقول ما أعطته مقابلها. تواصل المحفظة السؤال. قد لا تعود.",
+    "unconfirmed_one": "{{amount}} {{unit}} غير مؤكد",
+    "unconfirmed_other": "{{amount}} {{unit}} غير مؤكدة",
     "unreachable": "لا يمكن الوصول إليها الآن",
     "working": "جارٍ العمل…"
   },
@@ -935,7 +939,9 @@
     "uncounted_other": "{{count}} بطاقة خارج المجموع",
     "uncounted_two": "بطاقتان خارج المجموع",
     "unknown": "تعذّرت قراءته الآن، خارج المجموع",
-    "waiting": "{{amount}} {{unit}} غير قابلة للإنفاق بعد"
+    "waiting": "{{amount}} {{unit}} غير قابلة للإنفاق بعد",
+    "waiting_one": "{{amount}} {{unit}} غير قابل للإنفاق بعد",
+    "waiting_other": "{{amount}} {{unit}} غير قابلة للإنفاق بعد"
   },
   "ui": {
     "amountIn": "المبلغ بـ {{unit}}",
