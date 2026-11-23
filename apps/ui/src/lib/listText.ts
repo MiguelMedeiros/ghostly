@@ -34,3 +34,11 @@ export function listParts(items: readonly string[], t: Translate = englishT): { 
   if (!format) return items.flatMap((text, i) => i ? [{ item: false, text: ", " }, { item: true, text }] : [{ item: true, text }]);
   return format.formatToParts(items).map(part => ({ item: part.type === "element", text: part.value }));
 }
+
+/**
+ * Names (hosts, relays, files) in a sentence, as the language lists them, each isolated (U+2068…U+2069): Latin hosts
+ * in an Arabic sentence keep their own order, and the language's 、 or و comes between them, not an English comma.
+ */
+export function namesText(names: readonly string[], t: Translate = englishT): string {
+  return listText(names.map((name) => `⁨${name}⁩`), t);
+}
