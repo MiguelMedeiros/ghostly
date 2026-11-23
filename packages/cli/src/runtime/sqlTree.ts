@@ -26,6 +26,8 @@ interface Range { lower?: unknown; upper?: unknown; lowerOpen: boolean; upperOpe
 interface Layer { owner: object | null; seq: number; cleared: boolean; puts: Map<string, Entry | null>; byValue: Map<string, Set<string>> }
 
 const buffer = (bytes: string) => Buffer.from(bytes, "latin1");
+/** Ids `readMany` asks SQLite for in one statement: well under its variable limit (32,766). */
+const READ_MANY = 256;
 
 /**
  * Values just read from rows.db, which nothing else holds: fake-indexeddb copies each value it hands out, and for these
@@ -63,6 +65,8 @@ export class TreeFile {
   private readonly put: StatementSync;
   private readonly remove: StatementSync;
   private readonly empty: StatementSync;
+  /** `readMany`'s statement, prepared at its first read. */
+  private many: StatementSync | undefined;
   /** `range`'s page reads by their SQL: a few shapes (direction, bounds), each prepared once. */
   private readonly pages = new Map<string, StatementSync>();
 
@@ -192,6 +196,21 @@ export class TreeFile {
     const row = this.get.get(id, buffer(bytes)) as { key: Uint8Array; value: Uint8Array } | undefined;
     return row && { key: deserialize(row.key), value: thaw(row.value) };
   }
+  /**
+   * @internal The values of these ids that are there, by id: `READ_MANY` ids a statement, not a `read` each (an index's
+   * `getAll`, `SqlTree.getMany`).
+   */
+  readMany(id: number, ids: readonly string[]): Map<string, unknown> {
+    const found = new Map<string, unknown>();
+    this.many ??= this.db.prepare(`SELECT id, value FROM entries WHERE tree = ? AND id IN (${Array(READ_MANY).fill("?").join(", ")})`);
+    for (let at = 0; at < ids.length; at += READ_MANY) {
+      const page = ids.slice(at, at + READ_MANY).map(buffer);
+      // One statement for every page: the last one's ids padded with its own last, which IN takes once.
+      while (page.length < READ_MANY) page.push(page.at(-1)!);
+      for (const row of this.many.all(id, ...page) as { id: Uint8Array; value: Uint8Array }[]) found.set(Buffer.from(row.id).toString("latin1"), thaw(row.value));
+    }
+    return found;
+  }
   /** @internal */
   size(id: number): number { return Number((this.count.get(id) as { n: number }).n); }
   /** @internal */
@@ -302,6 +321,24 @@ export class SqlTree {
     const found = this.lookup(bytes);
     if (found !== undefined) return found ?? undefined;
     return this.file.read(this.id, bytes);
+  }
+
+  /**
+   * A store's records by these keys, in their order, as `get` finds each (the layers, then rows.db), with what rows.db
+   * has of them read in a few statements (`readMany`), not one each. A key twice is its record twice, one value.
+   */
+  getMany(keys: readonly unknown[]): (Entry | undefined)[] {
+    if (!this._keysAreUnique) throw new Error("getMany reads a store's records, not an index's entries");
+    const out = new Array<Entry | undefined>(keys.length), below = new Map<string, number[]>();
+    keys.forEach((key, at) => {
+      const bytes = keyBytes(key);
+      const found = this.lookup(bytes);
+      if (found !== undefined) { out[at] = found ?? undefined; return; }
+      const ats = below.get(bytes);
+      if (ats) ats.push(at); else below.set(bytes, [at]);
+    });
+    if (below.size) for (const [bytes, value] of this.file.readMany(this.id, [...below.keys()])) for (const at of below.get(bytes)!) out[at] = { key: keys[at], value };
+    return out;
   }
 
   contains(record: Entry): boolean { return this.get(record) !== undefined; }
