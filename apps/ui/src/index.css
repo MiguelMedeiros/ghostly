@@ -7,8 +7,10 @@
    every keystroke in proportion to the chat's length. */
 @source not "./test";
 
-/* A short window: a phone on its side (320-500px high), where rows that stay put leave a list no room. */
-@custom-variant short (@media (max-height: 500px));
+/* A short window: a phone on its side (320-500px high), where rows that stay put leave a list no room. In em, which a
+   media query takes from the browser's text size: those rows grow with it, and at 200% a 667px phone held them and left
+   the Tasks board 31px. 500px at the default 16px. */
+@custom-variant short (@media (max-height: 31.25em));
 
 @theme {
   /* Tailwind's breakpoints in px, as the app's own media queries and its JS layout queries are (`MOBILE_QUERY` is
