@@ -169,4 +169,23 @@ describe("a new program on the call's audio", () => {
       await socket.close();
     }
   });
+
+  it("the socket: a program that exits is off at once, though the call writes it nothing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gw-"));
+    dirs.push(dir);
+    const path = audioSocketPath(dir, "abc");
+    const clients: boolean[] = [];
+    const socket = await AudioSocket.open(path, 16000, { onAudio: () => {}, onClient: (connected) => { clients.push(connected); } });
+    try {
+      const a = await program(path);
+      a.socket.write(`${socket.token}\n`);
+      await until(() => socket.connected);
+      // Ringing, or a contact who says nothing: no frame goes to it that would fail on the closed connection.
+      a.socket.destroy();
+      await until(() => !socket.connected, 1000);
+      expect(clients).toEqual([true, false]);
+    } finally {
+      await socket.close();
+    }
+  });
 });
