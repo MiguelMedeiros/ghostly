@@ -45,6 +45,12 @@ const ROUND = "w-14 h-14 max-md:w-[72px] max-md:h-[72px] shrink-0 rounded-full f
 export const DECLINE = `${ROUND} bg-danger-fill text-white hover:bg-danger-fill/80`;
 export const ACCEPT = `${ROUND} bg-accent text-on-accent hover:bg-accent-hover`;
 
+/**
+ * Each card's box, and where its focus goes back to. Two chats can ring at once: the second card's target is then the
+ * first's box, and once that one is gone the focus goes on to where the first's would have, never to the page.
+ */
+const focusBackOf = new WeakMap<HTMLElement, HTMLElement | null>();
+
 export function IncomingCallNotification({
   peerName,
   hasVideo,
@@ -66,8 +72,15 @@ export function IncomingCallNotification({
   useBackCloses(() => {});
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
-    box.current?.focus({ preventScroll: true });
-    return () => { if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true }); };
+    const card = box.current;
+    if (card) focusBackOf.set(card, before);
+    card?.focus({ preventScroll: true });
+    return () => {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      let back = before;
+      while (back && !back.isConnected) back = focusBackOf.get(back) ?? null;
+      back?.focus({ preventScroll: true });
+    };
   }, []);
   // A newer offer of the contact's can take the ringing call's place as the other kind (useWebRTC): the card stays and
   // its kind changes. That change is said once, politely; one of the same kind says nothing. Accept video goes with a
