@@ -118,16 +118,26 @@ describe("the secret guard", () => {
     await write(user, CASHU_21);
     await user.keyboard("{Enter}");
     expect(guard()).toHaveAttribute("data-kind", "cashu");
-    expect(screen.getByRole("alertdialog", { name: "Send 21 sats to Alice?" })).toBeInTheDocument();
+    expect(screen.getByRole("alertdialog", { name: "Send 21 sats to ⁨Alice⁩?" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Send" }));
     expect(onSend).toHaveBeenCalledExactlyOnceWith(CASHU_21);
+  });
+
+  // The contact's name is their own words: between FSI and PDI, or in Arabic "Bob!" read "!Bob" ("Ana (casa)" turned
+  // its brackets round), its punctuation taking the sentence's direction.
+  it("keeps the contact's name in its own direction in an Arabic question", async () => {
+    const { user } = renderApp(<LockScreenProvider><MessageInput draftId="guard-test" onSend={onSend} identities={{ peerKey: "peer", contact: "Bob!" }} /></LockScreenProvider>, { language: "ar" });
+    await user.click(screen.getByRole("textbox"));
+    await user.paste(CASHU_21);
+    await user.keyboard("{Enter}");
+    expect(guard()!.querySelector("h2")!.textContent).toContain(" ⁨Bob!⁩؟");
   });
 
   it("names the group in a group chat, \"this chat\" with no contact, and leaves out an amount it cannot read", async () => {
     const first = composer({ recipient: "Hiking club" });
     await write(first.user, CASHU_21);
     await first.user.keyboard("{Enter}");
-    expect(screen.getByRole("alertdialog", { name: "Send 21 sats to Hiking club?" })).toBeInTheDocument();
+    expect(screen.getByRole("alertdialog", { name: "Send 21 sats to ⁨Hiking club⁩?" })).toBeInTheDocument();
     first.unmount();
 
     const second = composer({ identities: undefined, draftId: "guard-test-2" });

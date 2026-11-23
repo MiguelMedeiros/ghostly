@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { parseDid } from "@ghostly/core";
 import { PUBKY_RELAYS, pubkyHomeserver } from "@ghostly/browser/proofs/pubky";
 import { boundedIdentityFetch } from "@ghostly/browser/proofs/verify";
@@ -11,20 +11,18 @@ import { useT, type Translate } from "../../contexts/I18nContext";
 import { problemLine } from "../../lib/problemText";
 import { localProvider } from "../../lib/providerWords";
 import { namesText } from "../../lib/listText";
+import { fillNames } from "../../lib/fillNodes";
 
 const fetchForCard = boundedIdentityFetch({ online: () => globalThis.navigator?.onLine !== false });
 const host = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
 
-/** The badge's words for a contact's proof of it: "Proved by Ana". */
-function stateWords(t: Translate, state: BadgeState, named: string): string {
-  const who = named || t("chat.entity.someContact");
-  switch (state) {
-    case "verified": case "expiring": return t("chat.entity.provedBy", { who });
-    case "revoked": return t("chat.entity.revokedBy", { who });
-    case "failed": return t("chat.entity.checkFailed", { who });
-    case "expired": return t("chat.entity.proofExpired", { who });
-  }
+/** The badge's words for a contact's proof of it: "Proved by ~Ana", the name its own <bdi> (in Arabic "~Bob!" read "!Bob~"). */
+function stateWords(t: Translate, state: BadgeState, named: string): ReactNode {
+  if (!named) return t(STATE_WORDS[state], { who: t("chat.entity.someContact") });
+  return fillNames(t(STATE_WORDS[state]), { who: named });
 }
+
+const STATE_WORDS = { verified: "chat.entity.provedBy", expiring: "chat.entity.provedBy", revoked: "chat.entity.revokedBy", failed: "chat.entity.checkFailed", expired: "chat.entity.proofExpired" } as const satisfies Record<BadgeState, string>;
 
 /**
  * How a subject is looked up, said before the tap, and whether it can run on this device alone. `hidden`: none at all,
