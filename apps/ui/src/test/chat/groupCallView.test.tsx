@@ -187,6 +187,8 @@ describe("the group call window", () => {
     // happy-dom lays nothing out: the hit area is the ::before grown past the mark, on a phone 16 px up and 8 down (the
     // tiles start 8 px under it); e2e/web/group-call-targets-phone.spec.ts measures it.
     expect(screen.getByTestId("group-call-info")).toHaveClass("relative", "before:absolute", "before:-inset-2.5", "max-md:before:-inset-3", "max-md:before:-top-4", "max-md:before:-bottom-2");
+    // Its 12 px grown side ends at the Small window button (16 + 44 px) when a long name pushes it to the row's edge.
+    expect(screen.getByTestId("group-call-info").parentElement).toHaveClass("max-md:px-[72px]");
   });
 
   it("rides in a small window away from the group, showing who speaks, and goes back to it", async () => {

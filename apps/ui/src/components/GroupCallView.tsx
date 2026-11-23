@@ -350,7 +350,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         </div>
       ) : (
         <>
-          <div className="call-top flex items-center justify-center gap-1.5 px-16 pt-6 pb-2">
+          {/* On a phone the row keeps 12 px (the ⓘ's grown side) from the Small window button and from the "N removed" chip. */}
+          <div className="call-top flex items-center justify-center gap-1.5 max-md:gap-3 px-16 max-md:px-[72px] pt-6 pb-2">
             <p dir="auto" className="min-w-0 truncate text-text-primary font-medium">{groupName}</p>
             {/* Its phone hit area reaches up into the window's top, not down onto the tiles drawn over it 8 px below. */}
             <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className="max-md:before:-top-4 max-md:before:-bottom-2" />

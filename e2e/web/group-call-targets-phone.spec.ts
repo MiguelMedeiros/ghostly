@@ -5,7 +5,8 @@ import { smallTargets } from "../support/touchTargets";
 
 /*
  * A group call's whole window on a phone: every button a thumb can take, 44 px where a tap lands, as the 1:1 call's are.
- * The ⓘ beside the group's name was a 20 px circle with nothing grown around it, between the name and the window's top.
+ * The ⓘ beside the group's name was a 20 px circle with nothing grown around it, between the name and the window's top;
+ * with a name long enough to be cut, its grown side must also stop short of the Small window button.
  * No LiveKit here: the group's node answers a pass, and the room it names never answers, so the window stays open on
  * its own tile.
  */
@@ -25,7 +26,8 @@ test("on a phone the group call window's buttons are 44 px targets, in English a
   const node = new HeadlessBot();
   try {
     await node.start(await relay.listen(), "Call node");
-    const group = (await node.run("group", "create", "Quinta")).group as string;
+    // A name cut at 320 px puts the ⓘ at the row's edge, next to the Small window button in Arabic.
+    const group = (await node.run("group", "create", "Quinta da família ".repeat(3).trim())).group as string;
     await node.run("group", "call", group, "--sfu", SFU);
     const link = (await node.run("group", "link", group)).link as string;
 
