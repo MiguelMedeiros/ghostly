@@ -622,4 +622,24 @@ describe("a Fedimint wallet restored with its profile", () => {
     expect(restored.view.balance, "the federation's recovery gave the ecash back").toBe(1_500);
     expect(fake.databases.has("ghostly-fedimint-restored.db")).toBe(true);
   });
+
+  it("a recovery join that failed (the guardians not answering, the device offline) is tried again as a join, and recovers", async () => {
+    const w = await funded(1_500);
+    await w.stop();
+    const stored = await wrap<{ federations: { database: string }[] }>((await store(STORES.settings, "readonly")).get("fedimintWallet-testnet"));
+    await transact([STORES.settings], (s) => { s[STORES.settings].put({ ...stored, federations: stored.federations.map((f) => ({ ...f, database: "ghostly-fedimint-restored.db" })) }, "fedimintWallet-testnet"); });
+    const restored = await wallet();
+    fake.unreachable = true;
+    await restored.ensureReady();
+    expect(restored.view.federations[0]).toMatchObject({ status: "error" });
+    // The database the failed join made goes with it: left, every later try opened it, which fails on a database that
+    // never joined, every 30 s and at every start, and the federation's ecash never came back.
+    expect(fake.halfMade.has("ghostly-fedimint-restored.db")).toBe(false);
+    fake.unreachable = false;
+    await restored.ensureReady();
+    await restored.refresh();
+    expect(restored.view.federations[0]).toMatchObject({ status: "ready" });
+    expect(restored.view.balance, "the federation's recovery gave the ecash back").toBe(1_500);
+    await restored.stop();
+  });
 });

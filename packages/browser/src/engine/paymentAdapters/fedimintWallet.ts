@@ -159,7 +159,13 @@ export class FedimintWallet {
           // Restored from a profile backup (the records came, the client's files did not): joined again, recovering.
           const client = await this.gate.within((await sdk.exists(federation.database))
             ? sdk.open({ database: federation.database, mnemonic })
-            : sdk.join({ database: federation.database, mnemonic, invite: federation.invite, recover: true }), (c) => c.close());
+            // A join that fails (the guardians not answering, the device offline) leaves the database it made, which never
+            // joined: it goes, as `join` removes its own, so the next try joins again. Left, every later try opened it and
+            // failed, every 30 s and at each start, and the federation's ecash never came back.
+            : sdk.join({ database: federation.database, mnemonic, invite: federation.invite, recover: true }).catch(async (error: unknown) => {
+              await sdk.remove(federation.database).catch(() => {});
+              throw error;
+            }), (c) => c.close());
           if (client.federationId !== federation.id) { await client.close(); throw new Error("This federation's database belongs to another federation"); }
           this.attach(federation.id, client);
           return client;

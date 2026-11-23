@@ -150,6 +150,11 @@ export class FakeFedimintSdk {
   holdPayments = false;
   redeemFeeMsats = 0;
   unreachable = false;
+  /**
+   * Databases a join that failed left behind: the real client makes its database before it asks the guardians, and a
+   * join that fails then does not remove it. `exists` says it is there; `open` fails on it (it never joined).
+   */
+  readonly halfMade = new Set<string>();
 
   federation(info: Partial<Omit<FederationInfo, "federationId">> = {}): FakeFederation {
     const f = new FakeFederation({ name: "Test federation", guardians: [{ name: "g0", url: "ws://127.0.0.1:1" }], consensusVersion: "2.1", network: "regtest", modules: ["ln", "meta", "mint", "wallet"], ...info });
@@ -166,9 +171,9 @@ export class FakeFedimintSdk {
     const sdk: FedimintSdk = {
       preview: async (invite) => { if (this.unreachable) throw new Error("guardians did not answer"); const f = find(invite); return { federationId: f.id, ...f.info }; },
       join: async ({ database, mnemonic, invite, recover }) => {
-        if (this.unreachable) throw new Error("guardians did not answer");
+        if (this.databases.has(database) || this.halfMade.has(database)) throw new Error("database exists");
+        if (this.unreachable) { this.halfMade.add(database); throw new Error("guardians did not answer"); }
         const f = find(invite);
-        if (this.databases.has(database)) throw new Error("database exists");
         if (!recover && f.joined.get(mnemonic)) throw new Error("joined fresh twice with one mnemonic: its keys collide");
         f.joined.set(mnemonic, (f.joined.get(mnemonic) ?? 0) + 1);
         this.databases.set(database, { federation: f, mnemonic });
@@ -178,6 +183,7 @@ export class FakeFedimintSdk {
         return client;
       },
       open: async ({ database, mnemonic }) => {
+        if (this.halfMade.has(database)) throw new Error("this database never joined a federation");
         if (this.unreachable) throw new Error("guardians did not answer");
         const saved = this.databases.get(database);
         if (!saved) throw new Error("no such database");
@@ -191,8 +197,8 @@ export class FakeFedimintSdk {
         this.clients.push(client);
         return client;
       },
-      remove: async (database) => { this.removed.push(database); this.databases.delete(database); },
-      exists: async (database) => this.databases.has(database),
+      remove: async (database) => { this.removed.push(database); this.databases.delete(database); this.halfMade.delete(database); },
+      exists: async (database) => this.databases.has(database) || this.halfMade.has(database),
     };
     return async () => sdk;
   }
