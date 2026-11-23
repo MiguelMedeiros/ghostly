@@ -482,7 +482,8 @@ describe("viewer tabs", () => {
       const tabId = await openViewer(world, PEER, SERVICE, TAG, undefined, false);
       const served = await pauseRequest(world, tabId, { url });
       expect(served.params).toMatchObject({ responseCode: 200 });
-      expect(bodyText(served.params)).toBe("<h1>atlas</h1>");
+      // After the page's guards (`PAGE_GUARDS`), as any page of an app.
+      expect(bodyText(served.params)).toMatch(/<h1>atlas<\/h1>$/);
 
       engineControl().settings = { relayOnly: true };
       expect((await pauseRequest(world, tabId, { url })).params).toMatchObject({ responseCode: 403 });
