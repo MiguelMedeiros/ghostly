@@ -643,6 +643,21 @@ describe("the Tasks board on a phone", () => {
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
 
+  it("gives Group by, the tag filters, Clear finished and the column tabs 44 px targets, as the app's other phone controls", async () => {
+    viewport(375, 740);
+    profile([...rowsOfThree(), row("link-1", task({ id: "tagged", tags: ["web"] }))]);
+    await loaded();
+    const targets = [
+      ...["status", "bot", "chat"].map((g) => screen.getByTestId(`tasks-group-${g}`)),
+      ...screen.getAllByTestId("tasks-tag"),
+      screen.getByTestId("tasks-clear-finished"),
+    ];
+    // At least 44 × 44 where a tap lands, a short word ("Bot", "web") included; in px, as phoneTargetsPx pins (#8056).
+    for (const target of targets) expect(target, target.textContent!).toHaveClass("max-md:min-h-[44px]", "max-md:min-w-[44px]");
+    // The tabs are drawn 36 px tall, to leave a phone on its side room for a card: a tap lands on 44 px of them.
+    for (const tab of screen.getAllByTestId("tasks-tab")) expect(tab, tab.textContent!).toHaveClass("tap-target", "min-h-9");
+  });
+
   it("keeps the chosen tab filled in forced colors, where the accent's background is gone", async () => {
     viewport(375, 740);
     const { user } = profile(rowsOfThree());
