@@ -6,6 +6,7 @@ import { chat, expect, test, type Peer, type PeerOptions } from "../support/fixt
 import { HeadlessBot } from "../support/headless";
 import { budget } from "../support/perfBudget";
 import type { LocalRelay } from "../support/relay";
+import { smallTargets } from "../support/touchTargets";
 
 /**
  * The Tasks board (WISP 405 · Status Cards § The Tasks board): a headless bot posts tasks in two chats with a person on
@@ -401,6 +402,14 @@ test("richer task cards: a Review column for an open pull request, its checks, t
     await page.setViewportSize({ width: 375, height: 740 });
     await page.goto("/#/tasks");
     await expect(page.getByTestId("tasks-tab")).toHaveText(["Queued0", "Running2", "Blocked1", "Review0", "Done1", "Stopped0"]);
+    // Group by, the tag filters, Clear finished and the tabs were 36-37 px tall: each in view, where a tap lands on it.
+    const small: string[] = [];
+    for (const control of await page.locator("[data-testid^=tasks-group-], [data-testid=tasks-tag], [data-testid=tasks-clear-finished], [data-testid=tasks-tab]").all()) {
+      await control.evaluate((el) => { el.scrollIntoView({ block: "nearest", inline: "center" }); el.setAttribute("data-measured", ""); });
+      for (const target of await smallTargets(page, 44, "[data-measured]")) small.push(`${target.name} ${target.width}×${target.height} (${target.stops})`);
+      await control.evaluate((el) => el.removeAttribute("data-measured"));
+    }
+    expect(small, "the board's controls under 44 × 44 px on a phone").toEqual([]);
     await page.getByTestId("tasks-tab").nth(1).click();
     await page.locator('[data-testid="board-card"][data-card-id="rework"]').getByTestId("board-card-stack-toggle").click();
     await page.waitForTimeout(500);
