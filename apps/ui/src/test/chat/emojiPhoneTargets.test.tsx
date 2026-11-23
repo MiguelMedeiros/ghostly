@@ -68,6 +68,31 @@ describe("the emoji panel on a phone", () => {
     } finally { viewport(1024, 768); }
   });
 
+  it("opened from the keyboard, Escape gives the focus back to the smiley, not to the page", async () => {
+    const viewport = (width: number, height: number) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+    viewport(390, 844);
+    try {
+      const panel = open();
+      expect(within(panel).getByTestId("expression-tab-emoji")).toHaveFocus();
+      await userEvent.setup().keyboard("{Escape}");
+      expect(screen.queryByTestId("expression-panel")).toBeNull();
+      expect(screen.getByTestId("composer-expressions")).toHaveFocus();
+    } finally { viewport(1024, 768); }
+  });
+
+  it("the switch takes the focus once: a new place for the sheet leaves it where the person went", async () => {
+    const viewport = (width: number, height: number) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+    viewport(390, 844);
+    try {
+      const panel = open();
+      const search = within(panel).getByTestId("expression-search");
+      act(() => search.focus());
+      viewport(390, 600);
+      await act(async () => { window.dispatchEvent(new Event("resize")); await new Promise((r) => setTimeout(r, 50)); });
+      expect(search).toHaveFocus();
+    } finally { viewport(1024, 768); }
+  });
+
   it("the skin tone and the Emoji / GIF switch are thumb-sized", () => {
     const panel = open();
     expect(within(panel).getByTestId("emoji-skin")).toHaveClass("tap-target");
