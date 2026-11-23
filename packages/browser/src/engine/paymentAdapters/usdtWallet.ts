@@ -6,6 +6,7 @@ import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from './modeGa
 import { usdtMode } from './walletModes';
 import { walletKey } from './walletNetworks';
 import { viewNews } from './viewNews';
+import { AskBackoff } from '../askBackoff';
 import { STORES, store, transact, wrap } from '../../shared/idb';
 import type { UsdtAdapter, UsdtConfig } from './usdt';
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
@@ -27,6 +28,14 @@ export const TESTNET_USDT = {network:'sepolia',provider:USDT_PUBLIC_RPC.sepolia,
 export { usdtMode };
 /** A wallet with a device key opens by itself; one sealed with a password (older profiles) waits for it. */
 interface SavedWallet {config:UsdtConfig;seed:EncryptedSeed;deviceKey?:string}
+/** The balance is read every 8 s while the RPC answers; a wallet that could not connect tries again after 30 s. */
+const READ_MS=8000,CONNECT_MS=30000;
+/**
+ * An RPC that does not answer (down, rate-limiting, the device offline) is asked twice as late after each failure, up
+ * to this (`AskBackoff`, as a Lightning card's source): at the fixed pace it was about 1,500 failed requests an hour
+ * against the public RPC every new profile shares. An answer, and the app coming back (`wake`), go back to the pace.
+ */
+export const USDT_SLOW_MS=5*60_000;
 /** The defaults a new wallet of this network is made with, in one click. */
 export const usdtDefaults=(network:WalletNetwork)=>network==='testnet'?TESTNET_USDT:DEFAULT_USDT;
 /** The USDT wallet of one network: Mainnet's and Testnet's are both open at once, each under its own key. */
@@ -36,6 +45,10 @@ export class UsdtWallet {
   private epoch = 0;
   private timer?:ReturnType<typeof setTimeout>;
   private retry?:ReturnType<typeof setTimeout>;
+  /** What the waiting retry makes when it runs (`ready`'s `create`); undefined while none waits. */
+  private retrying?:boolean;
+  private readonly reads=new AskBackoff(READ_MS,USDT_SLOW_MS);
+  private readonly connects=new AskBackoff(CONNECT_MS,USDT_SLOW_MS);
   private readying?:Promise<void>;
   private stopped = false;
   private queue:Promise<unknown> = Promise.resolve();
@@ -60,14 +73,15 @@ export class UsdtWallet {
   private startReady(create:boolean):Promise<void> {return this.readying??=this.ready(create).finally(()=>{this.readying=undefined;});}
   private needsReady(create:boolean) {return !this.stopped&&(this.saved?!!this.saved.deviceKey&&!this.adapter:create);}
   private async ready(create:boolean) {
-    clearTimeout(this.retry);
+    clearTimeout(this.retry);this.retrying=undefined;
     try {
       if(!this.saved){if(create)await this.createDefault();}
       else if(this.saved.deviceKey && !this.adapter)await this.serial(()=>this.stopped?Promise.resolve():this.unlock());
+      this.connects.forget('rpc');
     } catch(error) {
       if(this.stopped||error instanceof ModeChanged)return;
       this.view={...this.view,error:`Connecting to Ethereum… ${error instanceof Error?error.message:''}`.trim()};this.changed();
-      this.retry=setTimeout(()=>void this.ensureReady(create),30000);
+      this.retrying=create;this.retry=setTimeout(()=>void this.ensureReady(create),this.connects.missed('rpc',Date.now()));
     }
   }
   private createDefault() {return this.serial(async()=>{if(!this.saved)await this.createNow({...usdtDefaults(this.network)});});}
@@ -124,15 +138,24 @@ export class UsdtWallet {
       this.view={configured:false,locked:true,balance:'0',gasBalance:'0'};this.changed();
     }).finally(()=>this.gate.resume());
   }
-  async lock() {++this.epoch;clearTimeout(this.timer);clearTimeout(this.retry);const adapter=this.adapter;this.adapter=undefined;this.view={...this.view,locked:true};this.changed();await adapter?.dispose();}
+  async lock() {++this.epoch;clearTimeout(this.timer);clearTimeout(this.retry);this.retrying=undefined;this.reads.forget('rpc');this.connects.forget('rpc');const adapter=this.adapter;this.adapter=undefined;this.view={...this.view,locked:true};this.changed();await adapter?.dispose();}
   /** Stopping ends it where it is: a wallet shutting down needs no balance. */
   async refresh() {
     clearTimeout(this.timer);const adapter=this.adapter;if(!adapter)return;
-    const before=this.view;
-    try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,read:true,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};}
-    catch(error) {if(error instanceof ModeChanged||adapter!==this.adapter)return;this.view={...this.view,error:'RPC unavailable. Balance may be stale.'};}
+    const before=this.view;let wait=READ_MS;
+    try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,read:true,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};this.reads.forget('rpc');}
+    catch(error) {if(error instanceof ModeChanged||adapter!==this.adapter)return;this.view={...this.view,error:'RPC unavailable. Balance may be stale.'};wait=this.reads.missed('rpc',Date.now());}
     // Every 8 s: a read that says what the view already did is no news for the wallet view (`changed(false)`).
-    this.changed(viewNews(before,this.view));if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),8000);
+    this.changed(viewNews(before,this.view));if(this.adapter){clearTimeout(this.timer);this.timer=setTimeout(()=>void this.refresh(),wait);}
+  }
+  /**
+   * The app is back (in front, online, the computer woke): a wallet whose last read or connect failed tries now, not
+   * at the end of its wait. One that reads fine keeps its pace.
+   */
+  wake() {
+    if(this.stopped)return;
+    if(this.adapter){if(this.view.error){this.reads.forget('rpc');void this.refresh();}return;}
+    if(this.retrying!==undefined&&!this.readying){const create=this.retrying;this.connects.forget('rpc');void this.ensureReady(create);}
   }
   /** Testnet on Sepolia: 1,000 TEST-USDT from Aave's faucet, paid with this wallet's own test ETH. */
   async getTestTokens():Promise<string> {const hash=await this.require().mintTestTokens();void this.refresh();return hash;}

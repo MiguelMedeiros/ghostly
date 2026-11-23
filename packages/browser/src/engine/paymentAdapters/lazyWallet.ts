@@ -130,12 +130,12 @@ export const lazySparkWallet = (network: WalletNetwork, changed: Changed) => {
 
 export const lazyUsdtWallet = (network: WalletNetwork, changed: Changed) => {
   const require = () => { throw new Error("Unlock your USDT wallet or wait for it to connect"); };
-  return lazyWallet<UsdtWallet, "network" | "adapter" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "require" | "target">({
+  return lazyWallet<UsdtWallet, "network" | "adapter" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "wake" | "require" | "target">({
     saved: savedUnder(walletKey("usdtWallet", network)),
     load: async () => new (await import("./usdtWallet")).UsdtWallet(network, changed),
     idle: {
       network, adapter: undefined, view: { configured: false, locked: true, automatic: false, balance: "0", gasBalance: "0" }, configured: false,
-      cutShort: () => {}, resume: () => {}, refresh: async () => {}, require, target: require,
+      cutShort: () => {}, resume: () => {}, refresh: async () => {}, wake: () => {}, require, target: require,
     },
     loads: { createDefaultNow: true, create: true, unlock: true, remove: true, lock: true, getTestTokens: true, reveal: true, exportBackup: true, restoreBackup: true },
   });
