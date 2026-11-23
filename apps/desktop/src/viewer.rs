@@ -1128,10 +1128,18 @@ pub fn respond<R: tauri::Runtime>(app: &AppHandle<R>, id: u64, response: Service
     }
 }
 
+/// The policy of Ghostly's own answers on the app's origin (`plain`): nothing loads from them. The app could frame
+/// one and fetch or load through it, under this policy instead of `SERVICE_CSP`. The web runner's `ownPolicy` in
+/// `apps/web/src/svc/worker.ts`.
+const OWN_ANSWER_CSP: &str =
+    "frame-ancestors 'self'; default-src 'none'; form-action 'none'; base-uri 'none'";
+
 fn plain(status: StatusCode, message: &str) -> Response<Vec<u8>> {
     Response::builder()
         .status(status)
         .header("content-type", "text/plain; charset=utf-8")
+        .header("content-security-policy", OWN_ANSWER_CSP)
+        .header("x-content-type-options", "nosniff")
         .body(message.as_bytes().to_vec())
         .expect("static response")
 }
@@ -2547,6 +2555,103 @@ mod routing_tests {
         assert_eq!(
             (bad_body.status(), bad_body.body().len()),
             (StatusCode::OK, 0)
+        );
+    }
+
+    /// Ghostly's own answers on the app's origin (not ready, too much waiting, too large, no answer, an answer it
+    /// could not make) let nothing load from them: the app could frame one and load through it, under its policy.
+    #[test]
+    fn ghostlys_own_answers_on_the_apps_origin_let_nothing_load_from_them() {
+        let own = |response: &Response<Vec<u8>>, what: &str| {
+            assert_eq!(
+                response.headers()["content-security-policy"],
+                "frame-ancestors 'self'; default-src 'none'; form-action 'none'; base-uri 'none'",
+                "{what}"
+            );
+            assert_eq!(
+                response.headers()["x-content-type-options"],
+                "nosniff",
+                "{what}"
+            );
+        };
+        let app = app();
+        let asked = requests(&app);
+        let url = format!("{SCHEME}://atlas.{PEER}.{TAG}/");
+        let served = |label: &str, body: &[u8]| {
+            tauri::async_runtime::block_on(handle(
+                app.handle().clone(),
+                label.into(),
+                request("POST", &url, body),
+            ))
+        };
+
+        // Not ready: a window with Hide my IP on whose rule list is not in.
+        open(
+            app.handle(),
+            PEER.into(),
+            "atlas".into(),
+            TAG.into(),
+            "Atlas".into(),
+            None,
+            Some(true),
+        )
+        .unwrap();
+        let not_ready = served("svc-0", b"");
+        assert_eq!(not_ready.status(), StatusCode::SERVICE_UNAVAILABLE);
+        own(&not_ready, "not ready");
+
+        bind(&app, "svc-1");
+        let too_large = served("svc-1", &vec![0u8; MAX_REQUEST_BODY_BYTES + 1]);
+        assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        own(&too_large, "too large");
+
+        let state = app.state::<ViewerState>();
+        let held = Room::take(&state, "svc-1", MAX_PENDING_BODY_BYTES).unwrap();
+        let waiting = served("svc-1", b"x");
+        assert_eq!(waiting.status(), StatusCode::SERVICE_UNAVAILABLE);
+        own(&waiting, "too many waiting");
+        drop(held);
+        assert!(asked.try_recv().is_err());
+
+        let timeout = served("svc-1", b"");
+        assert_eq!(timeout.status(), StatusCode::GATEWAY_TIMEOUT);
+        own(&timeout, "no answer");
+        asked.try_recv().unwrap();
+
+        // An answer the contact made so that it cannot be passed on.
+        let pending = tauri::async_runtime::spawn(handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &url, b""),
+        ));
+        let id = asked.recv_timeout(Duration::from_secs(5)).unwrap()["id"]
+            .as_u64()
+            .unwrap();
+        respond(
+            app.handle(),
+            id,
+            ServiceResponse {
+                status: 200,
+                headers: vec![("bad header".into(), "x".into())],
+                body_b64: String::new(),
+            },
+        );
+        let invalid = tauri::async_runtime::block_on(pending).unwrap();
+        assert_eq!(invalid.status(), StatusCode::BAD_GATEWAY);
+        own(&invalid, "invalid answer");
+
+        // Another origin in the window, or a window that shows no service.
+        let other = handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &format!("{SCHEME}://notes.{PEER}.{TAG}/"), b""),
+        );
+        own(&tauri::async_runtime::block_on(other), "another origin");
+        own(&served("svc-9", b""), "no service");
+        // And the one no test here can reach (`Ghostly is not running`), made the same way.
+        own(
+            &plain(StatusCode::BAD_GATEWAY, "Ghostly is not running."),
+            "not running",
         );
     }
 
