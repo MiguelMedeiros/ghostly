@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@ghostly/browser/inPageHost", () => ({ createInPageHost: (options: unknown) => options }));
 
 import { boundedIdentityFetch } from "@ghostly/browser/proofs/verify";
+import { atprotoReader } from "@ghostly/browser/profiles/readers";
 import { createDesktopHost } from "../../desktop/host";
 
 /*
@@ -54,6 +55,13 @@ describe("the Desktop host's identity reads", () => {
   it("refuse a redirect, as the page's fetch does", async () => {
     invoke.mockImplementation(async () => ({ status: 302, contentType: "", bodyB64: "" }));
     await expect(read()("https://contact.example/.well-known/did.json")).rejects.toThrow(/Redirect refused/);
+  });
+
+  it("keep an error answer's body, so an account that is gone reads as no profile, not a failed read", async () => {
+    invoke.mockImplementation(async () => ({ status: 400, contentType: "application/json", bodyB64: btoa('{"error":"AccountDeactivated"}') }));
+    const did = "did:plc:abcdefghijklmnopqrstuvwx";
+    await expect(atprotoReader.read(did, { fetch: read(), signal: AbortSignal.timeout(5_000) } as Parameters<typeof atprotoReader.read>[1]))
+      .resolves.toMatchObject({ found: false });
   });
 
   it("send nothing but a GET, and nothing once the read gave up", async () => {

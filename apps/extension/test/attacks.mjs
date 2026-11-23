@@ -202,6 +202,11 @@ try {
   check("image from another app is refused", out.img === "blocked" && !reached("evil-img"));
   check("another app cannot be framed", !reached("evil-iframe"));
   check("no extension APIs in the app", out.chrome === false);
+  // Before the navigation below, which takes the tab off Evil's page.
+  await evilTab.locator("#tap").click();
+  await evilTab.locator("#copied").filter({ hasText: /./ }).waitFor({ timeout: 10_000 });
+  const copied = await evilTab.locator("#copied").textContent();
+  check("a copy from a timer after the person's tap is refused", copied === "false", `execCommand("copy") gave ${copied}`);
   await evilTab.evaluate((url) => (location.href = `${url}/?from=evil-nav`), out.sibling).catch(() => {});
   await new Promise((resolve) => setTimeout(resolve, 5000));
   check("navigating the tab to another app is refused", !reached("evil-nav"));

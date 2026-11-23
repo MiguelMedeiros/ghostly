@@ -110,4 +110,23 @@ describe("a ringing call's kind", () => {
     expect(parseCallSignal(handed)).toMatchObject({ t: "o", ts: offerTs, v: 0 });
     expect(takeHandedCall(ID, handed)).toBe(false);
   });
+
+  it("before the first unlock, a call that turned into the other kind while the password was checked rings on, unlocked", async () => {
+    const hidden = renderApp(<Chat sessionId={ID} visible={false} onCallChange={() => {}} callLayer={null} holdForUnlock />);
+    audioOffer();
+    await act(async () => {});
+    send({ t: "o", u: "peer", p: "peerpeerpeerpeerpeerpeer", f: "cd".repeat(32), s: "actpass", m: ["a", "v"], c: [], ss: [1, 2], v: 1 });
+    await act(async () => {});
+    expect(seen.locked?.hasVideo).toBe(true);
+    // Not answered (the lock screen asks again): the chat goes with the lock, and the unlocked app opens its own.
+    act(() => { seen.locked!.ringOn!(); });
+    hidden.unmount();
+    seen.locked = null;
+    renderApp(<Chat sessionId={ID} visible onCallChange={() => {}} callLayer={null} />);
+    await act(async () => {});
+    expect(await screen.findByText("Incoming video call...")).toBeInTheDocument();
+    expect(seen.locked).toMatchObject({ hasVideo: true });
+    // Rung on, not answered: nothing was handed over.
+    expect(seen.accepted).toEqual([]);
+  });
 });

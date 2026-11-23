@@ -907,6 +907,8 @@ export class CommunitySession {
     return h;
   }
   private readonly hashes = new WeakMap<CommunityCommit, string>();
+  /** Whether I hold this commit (a member's `group-sync` head): then I hold everything that member had when it said it. */
+  holds(hash: string): boolean { return this.known.has(hash); }
   get epoch(): number { return this.top.e; }
   get roster(): Roster { return this.rosters.get(this.topHash)!; }
   get admin(): string | undefined { return rosterAdmin(this.roster); }

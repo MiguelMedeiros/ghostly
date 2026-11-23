@@ -13,6 +13,7 @@
     "noMatch": "No coinciden",
     "notPublished": "Tus otros dispositivos lo verán en cuanto este dispositivo llegue a la red.",
     "refused": "Otro dispositivo intentó usar este código. No recibió nada.",
+    "refusedFound": "Dos dispositivos usaron este código. Elige Coinciden solo si tu nuevo dispositivo muestra estos mismos dígitos. Si no muestra ninguno, elige No coinciden.",
     "scan": "Escanéalo con la cámara de tu teléfono.",
     "scanInfo": "En un ordenador, abre Ghostly y elige Añadir este dispositivo a otro perfil; luego escanea o pega el código. Sirve una vez, durante 10 minutos.",
     "title": "Añadir un dispositivo",
@@ -256,6 +257,8 @@
       "busy": "Otra cosa está cambiando tus dispositivos. Inténtalo de nuevo en un momento.",
       "failed": "Algo salió mal. No se cambió nada."
     },
+    "fetch": "Traerlos ahora",
+    "fetching": "Trayendo los archivos. Mantén Ghostly abierto en los dos dispositivos.",
     "go": "Quitar",
     "home": {
       "bark": "Una salida o un envío aún abiertos allí no se pueden terminar aquí.",
@@ -263,6 +266,8 @@
       "line": "{{wallet}} vive en {{device}}. Después de quitarlo, se abre aquí.",
       "usdt": "Los envíos quedan desactivados aquí hasta que confirmes su última transacción en la cadena."
     },
+    "later": "{{size}} de archivos grandes siguen solo en {{device}}.",
+    "laterNext": "Llegan cuando los dos dispositivos están encendidos. Si lo quitas antes, se pierden.",
     "lost": "Perdido o robado",
     "removing": "Quitando…",
     "text": "Ya no podrá tomar este perfil.",

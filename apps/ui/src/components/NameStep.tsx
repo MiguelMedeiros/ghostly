@@ -100,7 +100,7 @@ export function NameStep() {
         <p role="status" data-testid="name-step-full" className="sr-only">{full ? t("profile.nameStep.full", { count: OWN_NAME_LENGTH }) : ""}</p>
         <button type="submit" data-testid="name-step-save" className={primaryButton} disabled={!chosen} aria-describedby={chosen ? undefined : `${id}-why`}>{t("profile.nameStep.save")}</button>
         <button type="button" data-testid="name-step-skip" onClick={done}
-          className="mx-auto block min-h-10 px-2 text-sm text-text-secondary underline underline-offset-4 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded">
+          className="mx-auto block min-h-10 max-md:min-h-[44px] max-md:min-w-[44px] px-2 text-sm text-text-secondary underline underline-offset-4 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded">
           {t("profile.nameStep.skip")}
         </button>
       </form>

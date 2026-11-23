@@ -119,7 +119,7 @@ test("two people pay on the same network; a card of a network the contact has no
   await openPayments(alice.page);
   const card = paymentCard(alice.page, "cashu-testnet");
   await expect(card).toHaveAttribute("aria-disabled", "true");
-  await expect(card).toHaveAttribute("title", /Your contact has no Testnet Cashu wallet/);
+  await expect(card).toHaveAttribute("title", /Your contact has no Cashu \(Testnet\) wallet/);
   await closePayments(alice.page);
 
   // Bob makes a Testnet Cashu wallet: the chat is told, and the card meets his.

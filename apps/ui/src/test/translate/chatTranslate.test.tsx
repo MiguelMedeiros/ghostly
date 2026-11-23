@@ -78,7 +78,7 @@ describe("a chat's translation: On, Off or As in Settings", () => {
     expect(chatTranslateChoice(groupChat("g"))).toBe("settings");
   });
 
-  it("a deleted 1:1 chat takes its hand-set language with it (ghostly-agents#1809)", () => {
+  it("a deleted 1:1 chat takes its hand-set language with it", () => {
     saveSession(chat("b"));
     setChatLanguage("b", "it");
     expect(languageSetByHand("b")).toBe("it");

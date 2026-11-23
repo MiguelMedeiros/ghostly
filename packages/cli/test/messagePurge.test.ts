@@ -58,6 +58,7 @@ function fake() {
     chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessage: get,
     groupMessages: async () => [],
+    messagesByWireId: async () => [],
     forgetQuotesOf: async () => {},
     deleteMessage: ({ linkId, messageId }: { linkId: string; messageId: string }) => {
       setTimeout(() => { const tx = db.transaction("messages", "readwrite"); tx.objectStore("messages").delete([linkId, messageId]); }, 30);

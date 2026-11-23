@@ -91,23 +91,23 @@ const savedUnder = (key: string) => async () => await wrap<number>((await store(
 /** `changed(false)`: a balance read that found nothing new (see each wallet's constructor). */
 type Changed = (viewChanged?: boolean) => void;
 
-export const lazyArkWallet = (network: WalletNetwork, changed: Changed) => lazyWallet<ArkWallet, "network" | "adapter" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "require">({
+export const lazyArkWallet = (network: WalletNetwork, changed: Changed) => lazyWallet<ArkWallet, "network" | "adapter" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "wake" | "require">({
   saved: savedUnder(walletKey("arkWallet", network)),
   load: async () => new (await import("./arkWallet")).ArkWallet(network, changed),
   idle: {
     network, adapter: undefined, view: { configured: false, locked: true, automatic: false, balance: 0 }, configured: false,
-    cutShort: () => {}, resume: () => {}, refresh: async () => {},
+    cutShort: () => {}, resume: () => {}, refresh: async () => {}, wake: () => {},
     require: () => { throw new Error("Unlock your Ark wallet or wait for it to connect"); },
   },
   loads: { createDefaultNow: true, create: true, unlock: true, remove: true, lock: true, backup: true, exportBackup: true, restoreBackup: true, recover: true, target: true },
 });
 
-export const lazyBarkWallet = (network: WalletNetwork, changed: Changed) => lazyWallet<BarkWallet, "network" | "adapter" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "require">({
+export const lazyBarkWallet = (network: WalletNetwork, changed: Changed) => lazyWallet<BarkWallet, "network" | "adapter" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "wake" | "require">({
   saved: savedUnder(walletKey("barkWallet", network)),
   load: async () => new (await import("./barkWallet")).BarkWallet(network, changed),
   idle: {
     network, adapter: undefined, view: { configured: false, locked: true, balance: 0 }, configured: false,
-    cutShort: () => {}, resume: () => {}, refresh: async () => {},
+    cutShort: () => {}, resume: () => {}, refresh: async () => {}, wake: () => {},
     require: () => { throw new Error("Wait for your Bark wallet to connect"); },
   },
   loads: { createDefaultNow: true, create: true, remove: true, lock: true, board: true, target: true, backup: true, exportBackup: true, restoreBackup: true },
@@ -116,12 +116,12 @@ export const lazyBarkWallet = (network: WalletNetwork, changed: Changed) => lazy
 export const lazySparkWallet = (network: WalletNetwork, changed: Changed) => {
   const needsKey = network === "mainnet";
   const view = { configured: false, locked: true, balance: 0, network: sparkNetworkFor(network), ...(needsKey ? { needsKey, unavailable: SPARK_MAINNET_NEEDS_KEY } : {}) };
-  return lazyWallet<SparkWallet, "network" | "adapter" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "require" | "breezDatabase">({
+  return lazyWallet<SparkWallet, "network" | "adapter" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "wake" | "require" | "breezDatabase">({
     saved: savedUnder(walletKey("sparkWallet", network)),
     load: async () => new (await import("./sparkWallet")).SparkWallet(network, changed),
     idle: {
       network, adapter: undefined, view, configured: false,
-      cutShort: () => {}, resume: () => {}, refresh: async () => {}, breezDatabase: async () => undefined,
+      cutShort: () => {}, resume: () => {}, refresh: async () => {}, wake: () => {}, breezDatabase: async () => undefined,
       require: () => { throw new Error(view.unavailable ?? "Wait for your Spark wallet to connect"); },
     },
     loads: { create: true, remove: true, lock: true, target: true, backup: true, exportBackup: true, restoreBackup: true },
@@ -130,12 +130,12 @@ export const lazySparkWallet = (network: WalletNetwork, changed: Changed) => {
 
 export const lazyUsdtWallet = (network: WalletNetwork, changed: Changed) => {
   const require = () => { throw new Error("Unlock your USDT wallet or wait for it to connect"); };
-  return lazyWallet<UsdtWallet, "network" | "adapter" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "require" | "target">({
+  return lazyWallet<UsdtWallet, "network" | "adapter" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "wake" | "require" | "target">({
     saved: savedUnder(walletKey("usdtWallet", network)),
     load: async () => new (await import("./usdtWallet")).UsdtWallet(network, changed),
     idle: {
       network, adapter: undefined, view: { configured: false, locked: true, automatic: false, balance: "0", gasBalance: "0" }, configured: false,
-      cutShort: () => {}, resume: () => {}, refresh: async () => {}, require, target: require,
+      cutShort: () => {}, resume: () => {}, refresh: async () => {}, wake: () => {}, require, target: require,
     },
     loads: { createDefaultNow: true, create: true, unlock: true, remove: true, lock: true, getTestTokens: true, reveal: true, exportBackup: true, restoreBackup: true },
   });

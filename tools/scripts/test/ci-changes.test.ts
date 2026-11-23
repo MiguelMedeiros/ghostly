@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, queuedBehind, supersededBy, testedAs } from "../ci-changes.mjs";
+import { DRAFT_GATE, HOLD, PACKAGES_READ_FROM_SITE, QUEUE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, queuedBehind, supersededBy, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -632,6 +632,93 @@ describe("a ready pull request labelled queue", () => {
     expect(await queuedBehind({ pull: 7, sha, api: fake(["queue"], undefined).api })).toBe(0);
   });
 
+  // Leaving draft once its fast tier passed: the feeder adds `queue` on its next pass, and the train would cancel a full
+  // run planned before that.
+  describe("without `queue` yet, its fast tier green on this head", () => {
+    const repo = "o/r";
+    const own = 900;
+    const runsPath = `actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sha}&per_page=100`;
+    const draftRun = (over: object = {}) => ({
+      id: 899,
+      head_sha: sha,
+      status: "completed",
+      conclusion: "success",
+      path: ".github/workflows/ci.yml",
+      head_repository: { full_name: repo },
+      pull_requests: [{ number: 7 }],
+      html_url: "https://github.com/o/r/actions/runs/899",
+      ...over,
+    });
+    /** `reads`: the pull request as each read of it finds it. */
+    const waiting = (reads: { labels?: string[]; draft?: boolean; head?: string }[], { behind = 3, runs = [draftRun()], gate = "CI Success (draft)" } = {}) => {
+      const asked: string[] = [];
+      let settled = 0;
+      let read = 0;
+      const api = async (path: string) => {
+        asked.push(path);
+        if (path === "pulls/7") {
+          const pr = reads[Math.min(read++, reads.length - 1)];
+          return { labels: (pr.labels ?? []).map((name) => ({ name })), draft: pr.draft ?? false, head: { sha: pr.head ?? sha }, base: { ref: "dev" } };
+        }
+        if (path === `compare/dev...${sha}`) return { behind_by: behind };
+        if (path === runsPath) return { workflow_runs: runs };
+        const job = path.match(/^actions\/runs\/(\d+)\/jobs\?per_page=100$/);
+        if (job) return { jobs: [{ name: gate, conclusion: "success" }] };
+        throw new Error(path);
+      };
+      const settle = async () => {
+        settled++;
+      };
+      return { asked, settled: () => settled, ask: () => queuedBehind({ pull: 7, sha, api, run: own, repo, settle, polls: 4 }) };
+    };
+
+    it("names the labels and the gate as the merge train does", async () => {
+      const train = await import("../merge-train.mjs");
+      expect([QUEUE, HOLD, DRAFT_GATE]).toEqual([train.LABEL.queue, train.HOLD, train.DRAFT_GATE]);
+    });
+
+    it("plans the fast tier when the feeder adds `queue` while it waits", async () => {
+      const { ask, asked, settled } = waiting([{}, {}, { labels: ["queue"] }]);
+      expect(await ask()).toBe(3);
+      expect(settled()).toBe(2);
+      expect(asked.slice(0, 4)).toEqual(["pulls/7", `compare/dev...${sha}`, runsPath, "actions/runs/899/jobs?per_page=100"]);
+    });
+
+    it("runs everything when `queue` does not come in time", async () => {
+      const { ask, settled } = waiting([{}]);
+      expect(await ask()).toBe(0);
+      expect(settled()).toBe(4);
+    });
+
+    it("stops waiting, and runs everything, on `queue:hold`, a draft again or another head", async () => {
+      for (const then of [{ labels: ["queue:hold"] }, { draft: true }, { head: "7".repeat(40) }]) {
+        const { ask, settled } = waiting([{}, then, { labels: ["queue"] }]);
+        expect(await ask()).toBe(0);
+        expect(settled()).toBe(1);
+      }
+    });
+
+    it("does not wait at the base's tip, held, or without a green fast tier of this pull request on this head", async () => {
+      for (const [reads, opts] of [
+        [[{}], { behind: 0 }],
+        [[{ labels: ["queue:hold"] }], {}],
+        [[{ labels: ["queue:priority", "queue:hold"] }], {}],
+        [[{}], { runs: [] }],
+        [[{}], { gate: "CI Success" }],
+        [[{}], { runs: [draftRun({ conclusion: "failure" })] }],
+        [[{}], { runs: [draftRun({ status: "in_progress", conclusion: null })] }],
+        [[{}], { runs: [draftRun({ id: own })] }],
+        [[{}], { runs: [draftRun({ pull_requests: [{ number: 8 }] })] }],
+        [[{}], { runs: [draftRun({ head_repository: { full_name: "fork/r" } })] }],
+        [[{}], { runs: [draftRun({ path: ".github/workflows/other.yml" })] }],
+      ] as const) {
+        const { ask, settled } = waiting([...reads, { labels: ["queue"] }], opts);
+        expect(await ask(), JSON.stringify([reads, opts])).toBe(0);
+        expect(settled()).toBe(0);
+      }
+    });
+  });
+
   it("names the queue and the batch in its notice, not leaving draft", () => {
     const notice = plan(["apps/website/app/page.tsx"], { draft: true, queued: true }).why.find((w) => w.startsWith("Queued"));
     expect(notice).toBe(
@@ -671,7 +758,7 @@ describe("the notice of a green fast tier", () => {
 
   const gate = (draft: string, leftDraft: string, queued = "") => {
     // The fast tier: lint and the affected tests passed, every other job skipped as its gate said.
-    const skipped = ["FRONTEND_TESTS", "FRONTEND_BUILD", "PACKAGES_TESTS", "CLI_ARM64", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"].map((j) => [j, "skipped"]);
+    const skipped = ["FRONTEND_TESTS", "FRONTEND_BUILD", "PACKAGES_TESTS", "INTEGRATION_TESTS", "CLI_ARM64", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"].map((j) => [j, "skipped"]);
     const off = ["RUST", "WEBSITE_GATE", "WEBSITE_E2E_GATE", "APP", "PACKAGES"].map((g) => [g, "false"]);
     const ok = { ...Object.fromEntries([...skipped, ...off]), CHANGES: "success", FRONTEND_CHECKS: "success", AFFECTED: "success", LINT: "true", AFFECTED_GATE: "true" };
     const run = bash(script("ci-success", "Check all jobs passed"), { ...ok, DRAFT: draft, LEFT_DRAFT: leftDraft, QUEUED: queued, FULL: "false", TESTED: "false" });
@@ -722,7 +809,7 @@ describe("the errors of a red CI Success", () => {
   const script = body.split(/\n(?! {10}| *\n)/)[0].replace(/^ {10}/gm, "");
   /** The full tier on a ready pull request with app changes: every job ran and passed, but for `results`. */
   const gate = (results: Record<string, string>) => {
-    const jobs = ["FRONTEND_CHECKS", "FRONTEND_TESTS", "PACKAGES_TESTS", "CLI_ARM64", "FRONTEND_BUILD", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"];
+    const jobs = ["FRONTEND_CHECKS", "FRONTEND_TESTS", "PACKAGES_TESTS", "INTEGRATION_TESTS", "CLI_ARM64", "FRONTEND_BUILD", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"];
     const plan = { CHANGES: "success", DRAFT: "false", TESTED: "false", FULL: "true", AFFECTED_GATE: "false", AFFECTED: "skipped", LINT: "true", PACKAGES: "true", RUST: "true", WEBSITE_GATE: "true", WEBSITE_E2E_GATE: "true", APP: "true" };
     const run = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", ...plan, ...Object.fromEntries(jobs.map((j) => [j, "success"])), ...results } });
     return { status: run.status, errors: run.stdout.split("\n").filter((l) => l.startsWith("::error::")) };
@@ -732,14 +819,40 @@ describe("the errors of a red CI Success", () => {
     expect(gate({})).toEqual({ status: 0, errors: [] });
     expect(gate({ TAURI: "failure", WEBSITE_E2E: "skipped" })).toEqual({
       status: 1,
-      errors: ["::error::Tauri Backend ended failure", "::error::Website browser checks was skipped, but this change needs it"],
+      errors: ["::error::Tauri Backend ended failure", "::error::Website browser checks (1/4 to 4/4) was skipped, but this change needs it"],
     });
+    // The package tests that start real peers run in their own job: a run that skipped it did not test the packages.
+    // Its two runners share one result, so the error names their range.
+    expect(gate({ INTEGRATION_TESTS: "skipped" })).toEqual({ status: 1, errors: ["::error::Integration tests (1/2 to 2/2) was skipped, but this change needs it"] });
+    expect(gate({ INTEGRATION_TESTS: "failure" })).toEqual({ status: 1, errors: ["::error::Integration tests (1/2 to 2/2): one or more shards ended failure"] });
   });
 
   it("names the range of the draft's unit test groups, since their one result does not say which failed", () => {
     const draft = { DRAFT: "true", FULL: "false", AFFECTED_GATE: "true", FRONTEND_TESTS: "skipped", FRONTEND_BUILD: "skipped" };
     expect(gate({ ...draft, AFFECTED: "failure" })).toEqual({ status: 1, errors: ["::error::Affected unit tests (draft 1/4 to 4/4): one or more groups ended failure"] });
     expect(gate({ ...draft, AFFECTED: "skipped" })).toEqual({ status: 1, errors: ["::error::Affected unit tests (draft 1/4 to 4/4) was skipped, but this change needs it"] });
+  });
+
+  it("names each job as the run page does, and a matrix by its range", () => {
+    // `check "<name>" "$VAR" ...`, and the job whose result VAR holds (`VAR: ${{ needs.<job>.result }}`).
+    const checks = [...script.matchAll(/^check "([^"]+)" "\$(\w+)"/gm)];
+    expect(checks.length).toBeGreaterThan(10);
+    for (const [, name, env] of checks) {
+      const id = new RegExp(`^ {10}${env}: \\$\\{\\{ needs\\.([\\w-]+)\\.result \\}\\}$`, "m").exec(job("ci-success"))?.[1] ?? "";
+      const shown = /^ {4}name: (.+)$/m.exec(job(id))?.[1] ?? "";
+      const matrix = /\$\{\{ matrix\.(\w+) \}\}\/(\d+)/.exec(shown);
+      if (!matrix) {
+        expect(shown.startsWith(name), `${name} is not the start of ${shown}`).toBe(true);
+        continue;
+      }
+      const [, key, count] = matrix;
+      expect(job(id)).toMatch(new RegExp(`^ {8}${key}: \\[${Array.from({ length: Number(count) }, (_, i) => i + 1).join(", ")}\\]$`, "m"));
+      const range = shown.replace(matrix[0], `1/${count} to ${count}/${count}`);
+      expect(name).toBe(range);
+      // The gate is the draft's for the draft's groups, the full tier's for the rest.
+      const draft = key === "group" ? { DRAFT: "true", FULL: "false", AFFECTED_GATE: "true", FRONTEND_TESTS: "skipped", FRONTEND_BUILD: "skipped" } : {};
+      expect(gate({ ...draft, [env]: "failure" }).errors).toEqual([`::error::${range}: one or more ${key}s ended failure`]);
+    }
   });
 
   it("blames Changed paths, not the plan, when that job did not pass", () => {

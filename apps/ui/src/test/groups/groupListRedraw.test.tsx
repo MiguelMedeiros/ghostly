@@ -26,16 +26,18 @@ const links = () => Array.from({ length: 30 }, (_, i) => linkView({ id: `link-${
 const member = (i: number, patch: Partial<GroupMemberView> = {}): GroupMemberView =>
   ({ key: key(100 + i), role: i === 0 ? "admin" : "member", me: i === 0, nick: `Member ${i}`, online: true, missing: 0, ...patch });
 
-interface Change { typing?: boolean; offline?: boolean; edge?: "open" | "connecting"; size?: number; nick?: string; said?: boolean }
+interface Change { typing?: boolean; offline?: boolean; edge?: "open" | "connecting"; size?: number; nick?: string; said?: boolean; otherNick?: string; admin?: boolean }
 /** Five groups of 12, every one a new object as each of the engine's states brings them; the change is on the third. */
 const groups = (change: Change = {}) => Array.from({ length: 5 }, (_, g) => {
-  const { typing, offline, edge, size = 12, nick, said } = g === 2 ? change : {};
+  const { typing, offline, edge, size = 12, nick, said, otherNick, admin } = g === 2 ? change : {};
   return groupView({
     id: `g-${g}`, name: `Group ${g}`, status: "active", lastMessageAt: NOW - (said ? 10_000 : 60_000), myKey: key(100),
     lastReaction: { emoji: "👍", snippet: "hi", mine: false, by: key(101), at: NOW - 30_000 },
     ...(typing && { typing: [{ key: key(101) }] }),
     members: Array.from({ length: size }, (_, i) => member(i, {
       ...(i === 1 && nick && { nick }),
+      ...(i === 4 && otherNick && { nick: otherNick }),
+      ...(i === 4 && admin && { role: "admin" as const }),
       ...(i === 5 && offline && { online: false, missing: 3 }),
       ...(i > 0 && { edge: { linkId: `e-${i}`, state: i === 3 && edge ? edge : "open", lastSeenAt: NOW - 1000, ...(i === 3 && edge === "connecting" && { attempt: 2, retryAt: NOW + 5000 }) } }),
     })),
@@ -52,6 +54,8 @@ describe("the chat list on a group change it does not show", () => {
     ["a member typing", { typing: true }],
     ["a member going away", { offline: true }],
     ["an edge reconnecting", { edge: "connecting" }],
+    // The list keeps no copy of the roster (a community has hundreds): the count, and the names its reaction line says.
+    ["a member made admin", { admin: true }],
   ])("is not drawn again for %s", (_, change) => {
     let draws = 0;
     renderApp(<Profiler id="list" onRender={() => { draws++; }}><UpdateProvider><Sidebar /></UpdateProvider></Profiler>);
@@ -75,5 +79,16 @@ describe("the chat list on a group change it does not show", () => {
     expect(row()).toHaveTextContent("12 members");
     act(() => fakeEngine.update({ groups: groups({ said: true, size: 13 }) }));
     expect(row()).toHaveTextContent("13 members");
+  });
+
+  it("tells the reaction's author apart by their key's end once another member takes their name", () => {
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+    const row = () => screen.getAllByTestId("group-row")[2];
+    expect(row()).toHaveTextContent("Member 1 reacted");
+    act(() => fakeEngine.update({ groups: groups({ otherNick: "member 1" }) }));
+    expect(row()).not.toHaveTextContent("Member 1 reacted");
+    expect(row()).toHaveTextContent(`(…${key(101).slice(-6)})`);
+    act(() => fakeEngine.update({ groups: groups() }));
+    expect(row()).toHaveTextContent("Member 1 reacted");
   });
 });

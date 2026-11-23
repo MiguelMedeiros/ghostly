@@ -1,8 +1,8 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { CueChat } from "../lib/cues";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { MessageBubble, sameMessageRow } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
@@ -86,7 +86,7 @@ import { groupMemberOfLink, groupPayCaption, groupPayTwin } from "@ghostly/brows
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
-import { working } from "../lib/focus";
+import { focusLost, working } from "../lib/focus";
 import { isolate } from "../lib/ownStatus";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { Spinner } from "../components/wallet/ui";
@@ -385,6 +385,19 @@ function withoutTyping(group: GroupView | undefined): GroupView | undefined {
 }
 
 /**
+ * Of the 1:1 chats, the ones the page reads: those of the group's members who are contacts (`memberLinks`), each by
+ * what names and pictures its member. Every chat of the profile was copied and compared on each engine state (0.3 ms a
+ * state at 500 chats, 1 ms at 2,000), and one with nobody of the group in it drew the whole page.
+ */
+function memberChats(state: EngineState | null, groupId: string) {
+  if (!state) return undefined;
+  const chats = state.groups.find(g => g.id === groupId)?.memberLinks ?? {};
+  const found: Pick<LinkView, "id" | "peerPubKeyZ32" | "peerAvatar">[] = [];
+  for (const link of state.links) if (Object.prototype.hasOwnProperty.call(chats, link.id)) found.push({ id: link.id, peerPubKeyZ32: link.peerPubKeyZ32, peerAvatar: link.peerAvatar });
+  return found;
+}
+
+/**
  * Who is typing in the open group while it lasts, in place of `children` (the member count), as a 1:1 chat's header
  * does. Read here, not by the page: each start and stop draws this line, not the page with its rows.
  */
@@ -415,8 +428,8 @@ export function GroupChat() {
   const rosterGroup = useEngineValue(state => withoutTyping(state?.groups.find(g => g.id === groupId)));
   // An extension tab that lost its peer (the Reconnecting notice): who is reachable is the last thing it was told.
   const peerLost = useEngineReconnecting();
-  // Of the 1:1 chats, what names and pictures members who are contacts: not each link's whole state.
-  const links = useEngineValue(state => state?.links.map(({ id, peerPubKeyZ32, peerAvatar }) => ({ id, peerPubKeyZ32, peerAvatar })));
+  // Of the 1:1 chats, what names and pictures members who are contacts: theirs alone, not each link's whole state.
+  const links = useEngineValue(state => memberChats(state, groupId));
   // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
   const faceOf = useContactFaces();
   // A member's nickname from that contact's chat, read only when a member is a contact and parsed again only when the
@@ -484,6 +497,9 @@ export function GroupChat() {
   // is opened.
   const rotatingRef = useRef(new Set<string>());
   const [rotating, setRotating] = useState<ReadonlySet<string>>(() => new Set());
+  /** The group whose last Rotate keys is done, said once by its live line; another group opened forgets it. */
+  const [rotated, setRotated] = useState<string | null>(null);
+  if (rotated && rotated !== groupId) setRotated(null);
   const [showMute, setShowMute] = useState(false);
   const [showTranslate, setShowTranslate] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
@@ -503,6 +519,9 @@ export function GroupChat() {
   const [shareShown, setShareShown] = useState(false);
   if (sharing && rosterGroup?.entryLink && !shareShown) setShareShown(true);
   const closeShare = () => { setSharing(""); setShareShown(false); };
+  // Out of the group under it (removed, forked, lost): no link of mine to hand out, while the link is still on for the others.
+  // It closes, as the members panel drops its link, and the page's notice says why; not "the admin turned the link off".
+  if (sharing && rosterGroup?.status && rosterGroup.status !== "active") closeShare();
   useEffect(() => {
     if ((location.state as { share?: string } | null)?.share !== "created") return;
     setSharing("created");
@@ -518,8 +537,8 @@ export function GroupChat() {
   const setError = (problem: Problem | null) => { if (openGroupId.current === groupId) setRefused(problem && { groupId, problem }); };
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
   // Where the Share dialog gives the focus back: Share, or the ⋮ once the link went off and took Share with it (or
-  // Share is a row of ⋮, on the narrowest phone).
-  const shareBack = useMemo(() => ({ get current() { return shareRef.current ?? optionsRef.current; } }), []);
+  // Share is a row of ⋮, on the narrowest phone). Out of the group under it, the line that says why comes before the ⋮.
+  const shareBack = useMemo(() => ({ get current() { return shareRef.current ?? noticeRef.current ?? optionsRef.current; } }), []);
   // At 320px the back button, the picture, the connection, Share and ⋮ left the name about 70px ("Clube d…" for every
   // "Clube de …"): there Share is a row of ⋮, and the name has half again as much room, as a 1:1 chat's has.
   const narrow = useNarrowPhone();
@@ -884,9 +903,12 @@ export function GroupChat() {
     const id = groupId;
     if (rotatingRef.current.has(id)) return;
     const mark = (on: boolean) => { if (on) rotatingRef.current.add(id); else rotatingRef.current.delete(id); setRotating(new Set(rotatingRef.current)); };
-    mark(true);
-    void act(() => engine.call("rotateGroup", { groupId: id })).finally(() => mark(false));
+    mark(true); setRotated(null);
+    void act(async () => { await engine.call("rotateGroup", { groupId: id }); setRotated(id); }).finally(() => mark(false));
   };
+  // The menu closes at the press and the timeline's event line is not read out: this one says it started and that it is
+  // done. A refusal is the notice's.
+  const rotateLine = rotating.has(groupId) ? t("group.menu.rotating") : rotated === groupId ? t("group.menu.rotated") : "";
   // Knocking again, Try again goes: the focus it had goes to Cancel joining beside it, not to the page.
   const tryAgain = (pressed: HTMLElement) => void act(async () => {
     await engine.call("acceptGroupInvitation", { groupId });
@@ -958,7 +980,7 @@ export function GroupChat() {
               {!invited && <TranslateMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowTranslate(true); }} />}
               {!invited && <FolderMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowFolders(true); }} />}
               {!noTimeline && !invited && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
-              {group.isAdmin && <MenuItem testId="group-rotate" busy={rotating.has(groupId)} onClick={rotate}>{t("group.menu.rotate")}</MenuItem>}
+              {group.isAdmin && <MenuItem testId="group-rotate" busy={rotating.has(groupId)} onClick={rotate}>{rotating.has(groupId) ? t("group.menu.rotating") : t("group.menu.rotate")}</MenuItem>}
               {!invited && <MenuSeparator />}
               {group.status === "active" && <MenuItem danger testId="group-leave" onClick={() => { closeMenu(); setConfirmLeave(true); }}>{t("group.menu.leave")}</MenuItem>}
               <MenuItem danger testId="group-forget" onClick={() => { closeMenu(); setConfirmForget(true); }}>{t("group.menu.forget")}</MenuItem>
@@ -980,7 +1002,10 @@ export function GroupChat() {
       {connecting && !error &&<div role="status" data-testid="group-connecting" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
       </div>}
-      {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
+      {/* There from the start, so its words are read when they come. Shown while the rotation goes (the row saying so is in
+          a closed menu); once done, the timeline's event line shows it. */}
+      <p role="status" data-testid="group-rotate-live" className={rotating.has(groupId) ? "m-0 px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border" : "sr-only"}>{rotateLine}</p>
+      <ManageHere groupId={group.id} shown={!!group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community")} focusAfter={headingRef} />
       {group.entryJammed && group.isAdmin && group.status === "active" && <LinkJammed groupId={group.id} onReplaced={() => setSharing("share")} />}
       {/* Joiners the door let in whose side never came up, many lately: real ones may not get in. A new link, asked as
           every other New link is, and its share sheet opens on the new one. */}
@@ -1160,27 +1185,39 @@ function LinkJammed({ groupId, onReplaced }: { groupId: string; onReplaced(): vo
 
 /**
  * "Manage groups from this device" (WISP 06 § Forced takeover): after a forced takeover or a restore this device signs no
- * commit and takes no door duty in the group until the person turns it on here, having read what that risks.
+ * commit and takes no door duty in the group until the person turns it on here, having read what that risks. Turned on,
+ * the line goes with the Confirm that had the focus: it goes to `focusAfter` (the group's name) rather than the page,
+ * unless it went elsewhere meanwhile.
  */
-function ManageHere({ groupId }: { groupId: string }) {
+function ManageHere({ groupId, shown, focusAfter }: { groupId: string; shown: boolean; focusAfter: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   // Turn on and Cancel each take the other's place: the focus they had goes across, not to the page.
   const turnOn = useRef<HTMLButtonElement>(null), cancel = useRef<HTMLButtonElement>(null);
-  const pressed = useRef(false);
+  const pressed = useRef(false), confirmed = useRef(false);
   useEffect(() => {
     if (!pressed.current) return;
     pressed.current = false;
     (asking ? cancel : turnOn).current?.focus({ preventScroll: true });
   }, [asking]);
+  useLayoutEffect(() => {
+    if (shown) return;
+    // Gone (here or from another device): shown again later, it starts from Turn on.
+    setAsking(false); setProblem(null);
+    if (!confirmed.current) return;
+    confirmed.current = false;
+    if (focusLost()) focusAfter.current?.focus();
+  }, [shown, focusAfter]);
   const ask = (on: boolean) => { pressed.current = true; setProblem(null); setAsking(on); };
   const confirm = () => {
     if (busy) return;
     setBusy(true); setProblem(null);
-    void engine.call("setGroupManage", { groupId, on: true }).catch(e => setProblem(problemText(e, t))).finally(() => setBusy(false));
+    confirmed.current = true;
+    void engine.call("setGroupManage", { groupId, on: true }).catch(e => { confirmed.current = false; setProblem(problemText(e, t)); }).finally(() => setBusy(false));
   };
+  if (!shown) return null;
   return (
     <div role="status" data-testid="group-manage-off" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">

@@ -13,6 +13,7 @@
     "noMatch": "Ils ne correspondent pas",
     "notPublished": "Vos autres appareils le verront dès que cet appareil atteindra le réseau.",
     "refused": "Un autre appareil a essayé ce code. Il n’a rien reçu.",
+    "refusedFound": "Deux appareils ont utilisé ce code. Choisissez Ils correspondent seulement si votre nouvel appareil affiche ces mêmes chiffres. S’il n’en affiche aucun, choisissez Ils ne correspondent pas.",
     "scan": "Scannez ceci avec l’appareil photo de votre téléphone.",
     "scanInfo": "Sur un ordinateur, ouvrez Ghostly et choisissez Ajouter cet appareil à un autre profil, puis scannez ou collez le code. Il marche une fois, pendant 10 minutes.",
     "title": "Ajouter un appareil",
@@ -256,6 +257,8 @@
       "busy": "Autre chose modifie vos appareils. Réessayez dans un instant.",
       "failed": "Un problème est survenu. Rien n’a été modifié."
     },
+    "fetch": "Les récupérer maintenant",
+    "fetching": "Récupération des fichiers. Gardez Ghostly ouvert sur les deux appareils.",
     "go": "Retirer",
     "home": {
       "bark": "Une sortie ou un envoi encore en cours là-bas ne peut pas être terminé ici.",
@@ -263,6 +266,8 @@
       "line": "{{wallet}} vit sur {{device}}. Après le retrait, il s’ouvre ici.",
       "usdt": "L’envoi reste désactivé ici jusqu’à ce que vous confirmiez sa dernière transaction sur la chaîne."
     },
+    "later": "{{size}} de fichiers volumineux sont encore uniquement sur {{device}}.",
+    "laterNext": "Ils arrivent quand les deux appareils sont allumés. Si vous le retirez avant, ils sont perdus.",
     "lost": "Perdu ou volé",
     "removing": "Retrait…",
     "text": "Il ne pourra plus prendre ce profil.",

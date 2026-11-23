@@ -23,7 +23,7 @@ const extension=()=> {
   const value=(globalThis as unknown as {chrome?:ExtensionNotifications}).chrome;
   return value?.runtime?.id && value.permissions ? value : undefined;
 };
-const native=()=>"__TAURI_INTERNALS__" in window;
+const native=()=>typeof window!=="undefined" && "__TAURI_INTERNALS__" in window;
 const platform=()=>(navigator as Navigator&{userAgentData?:{platform?:string}}).userAgentData?.platform||navigator.platform||navigator.userAgent;
 /**
  * The system settings where the native app's notifications are allowed again, when the app can open them: the Android

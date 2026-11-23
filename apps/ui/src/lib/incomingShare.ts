@@ -230,19 +230,42 @@ const LINK_AFTER = new RegExp(`[\\s${LINK_STOP_CHARS}]`);
  * Any website can post a share, of megabytes: only the first `MAX_LINK_LOOKS` places it turns up are read, each up to
  * `MAX_LINK_TAIL` characters past it (a word longer than that is not taken for it), so the text is never read once per
  * place. Past those, the link goes in once more, which says nothing wrong.
+ * A web address is the same one read as a URL: a site's root with or without its "/", the scheme and host in any case
+ * ("HTTPS://A.EXAMPLE" carries "https://a.example/"); its path's case is the page's own. Anything else is as typed.
  */
 function carriesLink(text: string, url: string): boolean {
+  const web = webAddress(url) !== null;
+  const stem = web ? url.replace(/^(https?:\/\/[^/?#]+)\/$/i, "$1") : url;
+  // Looked for as a plain string, never a RegExp of the link: a link has any length, and a RegExp's source does not.
+  const within = web ? foldCase(text) : text;
+  const sought = web ? foldCase(stem) : stem;
   const word = new RegExp(`[^\\s${LINK_STOP_CHARS}]{0,${url.length + MAX_LINK_TAIL}}`, "y");
-  const own = linkEnd(url);
-  let looks = 0;
-  for (let at = text.indexOf(url); at >= 0 && looks < MAX_LINK_LOOKS; at = text.indexOf(url, at + 1), looks += 1) {
+  const address = (link: string) => webAddress(link) ?? link;
+  const own = address(linkEnd(url));
+  for (let at = within.indexOf(sought), looks = 0; at >= 0 && looks < MAX_LINK_LOOKS; at = within.indexOf(sought, at + 1), looks += 1) {
     if (at > 0 && !LINK_BEFORE.test(text[at - 1]!)) continue;
     word.lastIndex = at;
-    const found = word.exec(text)![0];
-    if (!LINK_AFTER.test(text[at + found.length] ?? " ")) continue;
-    if (linkEnd(found) === own) return true;
+    const link = word.exec(text)![0];
+    if (!LINK_AFTER.test(text[at + link.length] ?? " ")) continue;
+    if (address(linkEnd(link)) === own) return true;
   }
   return false;
+}
+
+/** `text` in lower case, each character at its place (one whose lower case is longer, as "İ", is kept as it is). */
+function foldCase(text: string): string {
+  const lower = text.toLowerCase();
+  if (lower.length === text.length) return lower;
+  return Array.from(text, (char) => {
+    const folded = char.toLowerCase();
+    return folded.length === char.length ? folded : char;
+  }).join("");
+}
+
+/** A web address as the browser reads it ("HTTPS://X.EXAMPLE" is "https://x.example/"), or nothing when it is none. */
+function webAddress(link: string): string | null {
+  if (!/^https?:\/\//i.test(link)) return null;
+  try { return new URL(link).href; } catch { return null; }
 }
 
 /**

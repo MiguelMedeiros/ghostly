@@ -153,7 +153,9 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(await screen.findByTestId("device-add-digits", {}, { timeout: 3_000 })).toHaveTextContent("482 913");
     // The name is the new device's own claim; the digits are the check.
     expect(screen.getByTestId("device-add-status")).toHaveTextContent("Found Phone. Check that it shows the same digits.");
-    expect(screen.getByTestId("device-add-refused")).toHaveTextContent("Another device tried to use this code. It got nothing.");
+    // Either device may be the one that got nothing, the person's own one too: the new device itself is the check.
+    expect(screen.getByTestId("device-add-refused")).toHaveTextContent("Two devices used this code. Choose They match only if your new device shows these same digits. If it shows none, choose They don't match.");
+    expect(screen.getByTestId("device-add")).not.toHaveTextContent("It got nothing");
     await user.click(screen.getByTestId("device-add-match"));
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
   }, 20_000);
@@ -199,10 +201,12 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     // Urgent, the code step's one warning: an alert, said over whatever else is being read.
     expect(saying.map((region) => region.getAttribute("role"))).toEqual(["alert"]);
     expect(before).toContain(saying[0]);
-    // Still said once the other device is found, in the same line (no second announcement of it).
+    // Once a device is found, the same line says what to check on the new device (no second alert line).
     view = { role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web", refused: 1 };
     await screen.findByTestId("device-add-digits", {}, { timeout: 3_000 });
-    expect(live().filter((region) => region.textContent?.includes(refused))).toEqual(saying);
+    const check = "Two devices used this code. Choose They match only if your new device shows these same digits. If it shows none, choose They don't match.";
+    expect(live().filter((region) => region.textContent?.includes(check))).toEqual(saying);
+    expect(screen.getByTestId("device-add-refused")).toHaveTextContent(check);
   }, 20_000);
 
   it("the focus stays in the dialog when Next and They match go away with their step", async () => {
