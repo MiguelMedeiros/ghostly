@@ -45,7 +45,8 @@ function classLists(file: string): string[] {
  */
 const ACCENT = /(?:^|\s)!?bg-accent(?=\s|$)/;
 const ON_ACCENT = /(?:^|\s)!?(?:text-on-accent|text-panel-header)(?=\s|$)/;
-const FILLED: { name: string; file: string; pick?: RegExp; count?: number; disables: boolean }[] = [
+/** `disables` per class list, in source order, where a file has answers of both kinds. */
+const FILLED: { name: string; file: string; pick?: RegExp; count?: number; disables: boolean | boolean[] }[] = [
   { name: "Forward's Send", file: "components/chat/ForwardDialog.tsx", disables: true },
   { name: "the selection's Forward", file: "hooks/useForwarding.tsx", disables: true },
   { name: "Network's Save", file: "components/NetworkSettings.tsx", disables: false },
@@ -64,14 +65,14 @@ const FILLED: { name: string; file: string; pick?: RegExp; count?: number; disab
   { name: "a page's Try again", file: "components/MenuPage.tsx", disables: false },
   { name: "an unavailable profile's answers", file: "components/ProfileUnavailable.tsx", disables: false },
   { name: "a Lightning address's answers", file: "components/wallet/LightningAddressPay.tsx", disables: true },
-  { name: "Paste, Open chat and Join", file: "components/JoinDialog.tsx", count: 3, disables: false },
+  { name: "Paste, Open chat and Join", file: "components/JoinDialog.tsx", count: 3, disables: [false, false, true] },
   { name: "Send's Scan", file: "components/wallet/SendScan.tsx", disables: false },
   { name: "a chat card's button", file: "components/chat/EntityCardFrame.tsx", disables: true },
   { name: "an invoice's buttons", file: "components/InvoiceBubble.tsx", disables: true },
   { name: "a payment's buttons", file: "components/PaymentBubble.tsx", disables: true },
   { name: "a money format's buttons", file: "components/MoneyFormatsBubble.tsx", disables: true },
   { name: "real money's Send", file: "components/ConfirmRealMoney.tsx", disables: false },
-  { name: "a payment review's Approve", file: "components/PaymentReview.tsx", disables: false },
+  { name: "a payment review's Approve", file: "components/PaymentReview.tsx", disables: true },
 ];
 
 describe("a dialog's filled answer in forced colors", () => {
@@ -90,11 +91,12 @@ describe("an accent-filled button in forced colors", () => {
   it.each(FILLED)("$name ($file) has a ButtonText border in forced colors only", ({ file, pick, count = 1, disables }) => {
     const found = classLists(file).filter((classes) => ACCENT.test(classes) && ON_ACCENT.test(classes) && (!pick || pick.test(classes)));
     expect(found, file).toHaveLength(count);
-    for (const classes of found) {
+    found.forEach((classes, i) => {
       const names = classes.split(/\s+/);
       for (const name of EDGE) expect(names, classes).toContain(name);
-      if (disables) expect(names, classes).toContain(DISABLED_EDGE);
+      if (Array.isArray(disables) ? disables[i] : disables) expect(names, classes).toContain(DISABLED_EDGE);
+      else expect(names, classes).not.toContain(DISABLED_EDGE);
       expect(names.filter((n) => /^(?:[a-z-]+:)*border(-|$)/.test(n) && !n.startsWith("forced-colors:")), classes).toEqual([]);
-    }
+    });
   });
 });
