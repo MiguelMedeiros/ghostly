@@ -130,7 +130,8 @@ test("a page that still believes Hide my IP from contacts is off gets a tab that
 
     // Another tab of the same profile turns Hide my IP from contacts on.
     const settings = await b.context.newPage();
-    await settings.goto(`${new URL(b.page.url()).origin}/app.html#/settings/network`);
+    // The extension's own page: a `chrome-extension:` URL has no origin to Node (`"null"`), which led to the web app.
+    await settings.goto(b.page.url().replace(/#.*$/, "#/settings/network"));
     await settings.getByPlaceholder("turn:turn.example.org:3478").fill(CLOSED_TURN);
     await settings.getByPlaceholder("Username").fill("ghost");
     await settings.getByPlaceholder("Credential").fill("s3cret-boo");

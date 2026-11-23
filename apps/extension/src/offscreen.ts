@@ -200,8 +200,8 @@ async function handleHttpRequest(message: HttpRequest): Promise<HttpRequestReply
   }
 }
 
-/** Hide my IP from contacts is on in this peer's settings now. */
-const hidesIp = (peer: EngineServer): boolean => peer.node.getState().settings.relayOnly === true;
+/** Hide my IP from contacts is on in this peer's settings now: its settings alone, not `getState`'s every chat. */
+const hidesIp = (peer: EngineServer): boolean => peer.node.getSettings().relayOnly === true;
 
 /**
  * The name the contact gave the service they share, as the chat shows it now. None once they took it back: the tab
