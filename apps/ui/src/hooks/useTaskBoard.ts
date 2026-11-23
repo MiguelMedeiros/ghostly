@@ -194,7 +194,8 @@ type SenderChats = { links: Parameters<typeof cardSenders>[0]; groups: Parameter
 /**
  * What `cardSenders` reads for these rows, and only that: their chats, their groups with the members who sent a card
  * there, and those members' chats with me. The way to the board is drawn for every profile; it read every chat and
- * every member of every group at each engine state, 2.4-3.9 ms a state in three groups of 2,000 with no card at all.
+ * every member of every group at each engine state, with no card at all: 0.8 ms a state with 200 chats and five
+ * communities of 256, 2.5 ms with 500 chats and twenty.
  */
 function senderChatsOf(state: EngineState | null, rows: readonly CardIndexRow[]): SenderChats {
   const chats = new Set<string>(), authors = new Map<string, Set<string>>();
