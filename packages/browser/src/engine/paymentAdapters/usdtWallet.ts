@@ -138,7 +138,7 @@ export class UsdtWallet {
       this.view={configured:false,locked:true,balance:'0',gasBalance:'0'};this.changed();
     }).finally(()=>this.gate.resume());
   }
-  async lock() {++this.epoch;clearTimeout(this.timer);clearTimeout(this.retry);this.retrying=undefined;this.reads.forget('rpc');const adapter=this.adapter;this.adapter=undefined;this.view={...this.view,locked:true};this.changed();await adapter?.dispose();}
+  async lock() {++this.epoch;clearTimeout(this.timer);clearTimeout(this.retry);this.retrying=undefined;this.reads.forget('rpc');this.connects.forget('rpc');const adapter=this.adapter;this.adapter=undefined;this.view={...this.view,locked:true};this.changed();await adapter?.dispose();}
   /** Stopping ends it where it is: a wallet shutting down needs no balance. */
   async refresh() {
     clearTimeout(this.timer);const adapter=this.adapter;if(!adapter)return;
