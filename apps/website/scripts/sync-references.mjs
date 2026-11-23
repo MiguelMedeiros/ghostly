@@ -11,7 +11,7 @@ import { roadmapCandidates } from "./roadmap-candidates.mjs";
 import { roadmapTracks } from "./roadmap-tracks.mjs";
 import { siteFields } from "./wisp-header.mjs";
 import { readChanges, withRevisions } from "./wisp-changes.mjs";
-import { missingDocLinks } from "./doc-links.mjs";
+import { missingDocLinks, privateRefs } from "./doc-links.mjs";
 import { writeLlms } from "./llms.mjs";
 import { agentPromptJson } from "./agent-prompt.mjs";
 import { README, expectedReadme } from "./wisp-index.mjs";
@@ -144,6 +144,9 @@ const entries = paths.map((sourcePath) => {
   // A relative link to a Markdown file that is not there would open a GitHub page that does not exist.
   const missing = missingDocLinks(body, sourcePath, root);
   if (missing.length) throw new Error(`${sourcePath}: ${missing.length} link(s) to a file that does not exist as published: ${missing.join(", ")}`);
+  // Nor an issue of the private tracker, which no reader can open.
+  const unopenable = privateRefs(body);
+  if (unopenable.length) throw new Error(`${sourcePath}: cites the private tracker, which a reader cannot open: ${unopenable.join(", ")}`);
   writeFileSync(resolve(destination, file), body);
   return {
     file,

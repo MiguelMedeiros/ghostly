@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { missingDocLinks } from "./doc-links.mjs";
+import { missingDocLinks, privateRefs } from "./doc-links.mjs";
+
+const repo = fileURLToPath(new URL("../../../", import.meta.url));
 
 test("a published document's relative .md links each name a file of the repository", () => {
   const root = mkdtempSync(join(tmpdir(), "doc-links-"));
@@ -20,4 +23,24 @@ test("a published document's relative .md links each name a file of the reposito
   ].join("\n");
   assert.deepEqual(missingDocLinks(body, "docs/wisps/400-chat.md", root), ["../../503-group-files.md", "404-nothing.md#part"]);
   assert.deepEqual(missingDocLinks("[up](wisps/503-group-files.md)", "docs/PROTOCOL.md", root), []);
+});
+
+test("a reference to the private tracker is found, a public pull request's is not", () => {
+  const body = [
+    "nothing reached it (ghostly-agents#1), held for a day (agents#2), and `GHOSTLY-AGENTS#3` in code.",
+    "See MiguelMedeiros/ghostly-agents#4. Fixed in ghostly#5 and MiguelMedeiros/ghostly#6; user-agents#7 and my_agents#8 are not ours.",
+  ].join("\n");
+  assert.deepEqual(privateRefs(body), ["ghostly-agents#1", "agents#2", "GHOSTLY-AGENTS#3", "ghostly-agents#4"]);
+});
+
+test("no document the site publishes, revision logs included, cites the private tracker", () => {
+  // What scripts/sync-references.mjs publishes: every WISP, its change files (the revision log), and the other docs.
+  const wisps = join(repo, "docs/wisps");
+  const files = [
+    ...readdirSync(wisps).filter((name) => name.endsWith(".md")).map((name) => join(wisps, name)),
+    ...readdirSync(join(wisps, "changes"), { recursive: true }).filter((name) => String(name).endsWith(".md")).map((name) => join(wisps, "changes", String(name))),
+    ...["PROTOCOL.md", "SDK.md", "USDT-INTEGRATION.md", "DHT-DELIVERY.md"].map((name) => join(repo, "docs", name)),
+  ];
+  const found = files.flatMap((file) => privateRefs(readFileSync(file, "utf8")).map((ref) => `${file.slice(repo.length)}: ${ref}`));
+  assert.deepEqual(found, []);
 });

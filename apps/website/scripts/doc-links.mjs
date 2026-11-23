@@ -13,3 +13,11 @@ export function missingDocLinks(body, sourcePath, root) {
     .filter((url) => !/^(?:[a-z][a-z\d+.-]*:|\/|#)/i.test(url))
     .filter((url) => /\.md$/i.test(url.split("#")[0]) && !existsSync(resolve(from, url.split("#")[0])));
 }
+
+/**
+ * The references in `body` to the project's private tracker (`ghostly-agents#12`, `agents#12`): a reader of the site
+ * cannot open one, and the page would name the tracker. Code too: a span or a block is published as well.
+ */
+export function privateRefs(body) {
+  return [...body.matchAll(/(?<![\w-])(?:ghostly-)?agents#\d+/gi)].map((m) => m[0]);
+}
