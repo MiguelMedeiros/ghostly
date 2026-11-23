@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { nodeFedimintSdk } from "../src/runtime/fedimint";
+// covers: wallet.fedimint.backup
 
 describe("a profile's Fedimint databases on Node", () => {
   it("one is there when its file holds something, not there when it is empty or missing", async () => {
