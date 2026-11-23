@@ -16,17 +16,19 @@
 // Vitest selects exactly that part.
 //
 //   node tools/scripts/test-shards.mjs --plan 4 [--app]   # print the 4 shards and check every file is in exactly one
-//   node tools/scripts/test-shards.mjs --integration 1 1  # the integration tests, twoPeers first and alone
+//   node tools/scripts/test-shards.mjs --integration 1 2  # half the integration tests, twoPeers first and alone
 //   node tools/scripts/test-shards.mjs --record a.json …  # tools/scripts/test-durations.json from Vitest JSON reports
 //
-// CI's shards upload their JSON reports (artifacts "packages-test-reports-<shard>" and "app-test-reports-<shard>"):
+// CI's shards upload their JSON reports (artifacts "packages-test-reports-<shard>", "app-test-reports-<shard>" and
+// "integration-test-reports-<shard>"):
 // download them all and --record them after adding a slow test file; reports of several runs record each file's median.
 // --plan and shard 1 warn when over a tenth of the files have no time, and with --report-dir each shard warns, after
 // its run, of a file that took far more than its record (see slowWarnings).
 //
 // The package tests that start real peers, daemons or a DHT (tools/scripts/integration-tests.json, about 40% of the
 // packages' time and most of their flakes) are left out of the shards (GHOSTLY_INTEGRATION=0, tools/vitest.shared.ts):
-// with --integration this runs only those, on one runner, as CI's Integration tests job (--integration 1 1).
+// with --integration this runs only those, as CI's Integration tests job does on two runners (--integration 1 2 and
+// 2 2) and the nightly on one (--integration 1 1).
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
