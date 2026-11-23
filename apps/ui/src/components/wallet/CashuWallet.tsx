@@ -288,14 +288,14 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
             {/* A Testnet wallet's whole balance is test sats; a test mint's sats never count in a Mainnet one. */}
             {testMint && !testnet && <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(testShown, t.language) })}</span>}
             {!!state.setAside && (
-              <span className="mt-1 flex items-center gap-1.5 text-xs text-text-muted" data-testid="wallet-set-aside">
+              <span className="mt-1 flex items-center gap-1.5 text-xs text-text-muted max-md:min-h-[44px]" data-testid="wallet-set-aside">
                 {t("wallet.cashu.setAside", { amount: formatAmount(state.setAside, t.language), unit })}
                 <InfoButton open={setAsideInfo} onToggle={() => setSetAsideInfo(!setAsideInfo)} controls={`${infoId}-set-aside`} testId="wallet-set-aside-info" />
               </span>
             )}
             {!!state.setAside && setAsideInfo && <span id={`${infoId}-set-aside`} className="mt-1 block text-xs text-text-secondary" data-testid="wallet-set-aside-text">{t("wallet.cashu.setAsideInfo")}</span>}
             {!!state.unconfirmed && (
-              <span className="mt-1 flex items-center gap-1.5 text-xs text-warn-ink" data-testid="wallet-unconfirmed">
+              <span className="mt-1 flex items-center gap-1.5 text-xs text-warn-ink max-md:min-h-[44px]" data-testid="wallet-unconfirmed">
                 {t("wallet.cashu.unconfirmed", { amount: formatAmount(state.unconfirmed, t.language), unit })}
                 <InfoButton open={unconfirmedInfo} onToggle={() => setUnconfirmedInfo(!unconfirmedInfo)} controls={`${infoId}-unconfirmed`} testId="wallet-unconfirmed-info" />
               </span>

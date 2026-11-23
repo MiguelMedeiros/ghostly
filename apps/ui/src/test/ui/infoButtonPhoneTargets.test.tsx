@@ -38,13 +38,17 @@ describe("an ⓘ on a phone", () => {
     expect(screen.getByTestId("profile-unavailable-info")).toHaveClass("before:absolute", PHONE_44);
   });
 
-  it("the wallet's set-aside and unconfirmed lines: a tap lands in 44 px, and each names the text it opens", () => {
+  it("the wallet's set-aside and unconfirmed lines: a tap lands in 44 px, and each names the text it opens", async () => {
     const state = networkState(walletView({ mode: "testnet", mints: [mint(TEST_MINTS[0], 5_000)], balance: 5_000, setAside: 6, unconfirmed: 3 }) as WalletState, "testnet");
-    renderApp(<CashuWallet wallet={servicesPlatform!.wallet} state={state} rail="cashu" onOpenCashu={() => {}} />);
-    for (const id of ["wallet-set-aside-info", "wallet-unconfirmed-info"]) {
-      const info = screen.getByTestId(id);
-      expect(info, id).toHaveClass("before:absolute", PHONE_44);
-      expect(info, id).toHaveAttribute("aria-controls");
+    const { user } = renderApp(<CashuWallet wallet={servicesPlatform!.wallet} state={state} rail="cashu" onOpenCashu={() => {}} />);
+    for (const line of ["wallet-set-aside", "wallet-unconfirmed"]) {
+      const info = screen.getByTestId(`${line}-info`);
+      expect(info, line).toHaveClass("before:absolute", PHONE_44);
+      // The two lines sit one under the other: 20 px tall, their ⓘ areas would overlap by 20 px and the lower ⓘ would
+      // take the band. Each line holds its own ⓘ's 44 px.
+      expect(screen.getByTestId(line), line).toHaveClass("max-md:min-h-[44px]");
+      await user.click(info);
+      expect(screen.getByTestId(`${line}-text`), line).toHaveAttribute("id", info.getAttribute("aria-controls"));
     }
   });
 
@@ -55,7 +59,7 @@ describe("an ⓘ on a phone", () => {
     const info = screen.getByTestId("chat-tasks-info");
     expect(info).toHaveClass("tap-target");
     // 32 px boxes 4 px apart: grown to 44 px, the ⓘ's area would take 6 px of the ×'s. 12 px apart on a phone, it ends
-    // where the × begins.
+    // 6 px before the ×, the room the × needs to grow to 44 px.
     expect(info.parentElement).toHaveClass("gap-1");
     expect(info).toHaveClass("max-md:me-2");
   });
