@@ -78,6 +78,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   useTabTrap(rootRef, theater);
   const videoRef = useRef<HTMLVideoElement>(null);
   const fullRef = useRef<HTMLButtonElement>(null);
+  const acceptRef = useRef<HTMLButtonElement>(null);
   useChosenSpeaker(videoRef, phase === "playing" ? src : null);
   const srcRef = useRef<string | null>(null);
   /** The source playing: a blob URL, or a file the platform streams (released when it stops). */
@@ -376,6 +377,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                 <>
                   {/* Not turned off by a room shown less than its size: that room may be old, and the engine reads it again. */}
                   <button
+                    ref={acceptRef}
                     type="button"
                     data-testid="video-accept"
                     onClick={() => act("accept")}
@@ -428,7 +430,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : withName(t("chat.media.wantsToSend", { name: NAME, size: formatFileSize(transfer.room, t) }), peerName)}
         </p>
       )}
-      {offered && !group && (heldRoom || noRoom) && <div className="px-1"><FilesStillComing except={file.id} open={heldRoom} /></div>}
+      {offered && !group && (heldRoom || noRoom) && <div className="px-1"><FilesStillComing except={file.id} open={heldRoom} accept={acceptRef} /></div>}
       {(status || canRetry || stuck) && (!offered || reason) && (
         <div className="flex items-center gap-2 mt-1 px-1">
           {canRetry ? (
