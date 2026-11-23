@@ -159,6 +159,22 @@ describe("the integration tests", () => {
     expect(integrationLeft([unit("cli", [a])], [a, b], [b])).toEqual([]);
     expect(integrationLeft([unit("cli", [a]), unit(b, [b], true)], [a, b], [])).toEqual([]);
   });
+
+  it("warn of a slow or unrecorded file without shards, naming the one artifact their reports upload as", () => {
+    // ci.yml's Integration tests run on one runner (--integration 1 1) and upload "integration-test-reports": there
+    // is no shard to be uneven, and no "integration-test-reports-*".
+    const dir = mkdtempSync(join(tmpdir(), "test-shards-"));
+    const file = "packages/cli/test/twoPeers.test.ts";
+    const report = join(dir, "twoPeers.json");
+    writeFileSync(report, JSON.stringify({ testResults: [{ name: join(repo, file), status: "passed", startTime: 1000, endTime: 1000 + 300_000 }] }));
+    const [slow] = slowWarnings([report], { [file]: 100 }, "integration");
+    const stale = staleWarning([unit("@ghostly/cli", ["new1", "new2"])], {}, "integration");
+    for (const warning of [slow, stale]) {
+      expect(warning).toContain("the integration run orders its packages by guessed times");
+      expect(warning).toContain("integration-test-reports artifact ");
+      expect(warning).not.toMatch(/shards are uneven|integration-test-reports-/);
+    }
+  });
 });
 
 describe("the app shards", () => {

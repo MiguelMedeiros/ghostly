@@ -188,14 +188,26 @@ function units(app, integration = false) {
  * shards drift apart as slow new files pile up), or null. As a GitHub annotation, it shows on the CI run.
  * @param {{ files: string[] }[]} units
  * @param {Record<string, number>} seconds
- * @param {"packages" | "app"} suite
+ * @param {"packages" | "app" | "integration"} suite
  */
 export function staleWarning(units, seconds, suite = "packages") {
   const files = units.flatMap((u) => u.files);
   const missing = files.filter((f) => !(f in seconds)).sort();
   if (missing.length * 10 <= files.length) return null;
   const named = missing.slice(0, 10).join(", ") + (missing.length > 10 ? ` and ${missing.length - 10} more` : "");
-  return `::warning::${missing.length} of the ${files.length} test files have no time in tools/scripts/test-durations.json (${named}), so the ${suite} shards are uneven: download the ${suite}-test-reports-* artifacts of a green run and node tools/scripts/test-shards.mjs --record them.`;
+  const { effect, artifacts } = timesFor(suite);
+  return `::warning::${missing.length} of the ${files.length} test files have no time in tools/scripts/test-durations.json (${named}), so ${effect}: download the ${artifacts} of a green run and node tools/scripts/test-shards.mjs --record ${suite === "integration" ? "its reports" : "them"}.`;
+}
+
+/**
+ * What a suite's recorded times are for, and the CI artifacts its reports upload as. The shards split by them; the
+ * integration tests run on one runner (ci.yml's Integration tests, --integration 1 1), where they only order its
+ * packages, and their reports are one artifact, "integration-test-reports".
+ * @param {"packages" | "app" | "integration"} suite
+ */
+function timesFor(suite) {
+  if (suite === "integration") return { effect: "the integration run orders its packages by guessed times", artifacts: "integration-test-reports artifact" };
+  return { effect: `the ${suite} shards are uneven`, artifacts: `${suite}-test-reports-* artifacts` };
 }
 
 /**
@@ -231,13 +243,13 @@ export const SLOW = 30;
  * this names them on the run of the PR that adds them, when their author can --record them.
  * @param {string[]} reportFiles
  * @param {Record<string, number>} seconds
- * @param {"packages" | "app"} suite
+ * @param {"packages" | "app" | "integration"} suite
  */
 export function slowWarnings(reportFiles, seconds, suite = "packages") {
   return Object.entries(reportTimes(reportFiles))
     .filter(([file, took]) => (file in seconds ? took > 2 * seconds[file] && took > seconds[file] + SLOW : took > SLOW))
     .sort(([a], [b]) => (a < b ? -1 : 1))
-    .map(([file, took]) => `::warning file=${file}::${file} took ${took} s, but tools/scripts/test-durations.json ${file in seconds ? `has ${seconds[file]} s for it` : "has no time for it (it counts as a typical file)"}, so the ${suite} shards are uneven: --record this run's ${suite}-test-reports-* artifacts (node tools/scripts/test-shards.mjs --record).`);
+    .map(([file, took]) => `::warning file=${file}::${file} took ${took} s, but tools/scripts/test-durations.json ${file in seconds ? `has ${seconds[file]} s for it` : "has no time for it (it counts as a typical file)"}, so ${timesFor(suite).effect}: --record this run's ${timesFor(suite).artifacts} (node tools/scripts/test-shards.mjs --record).`);
 }
 
 const describe = (shards) => shards.map((s, i) => `  ${i + 1}: about ${Math.round(s.load)} s of test time: ${s.units.map((u) => (u.alone ? u.id : `${u.id} (${u.files.length} file${u.files.length === 1 ? "" : "s"})`)).join(", ") || "nothing"}`).join("\n");
