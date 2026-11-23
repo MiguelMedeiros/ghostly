@@ -335,7 +335,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       {problem && <Notice problem={problem} testId="connection-failure" className="mt-1.5 px-1" />}
       {paired && online && !dht && directBlocked && <DirectBlockedHint />}
       {online && clockOffMs !== undefined && <ClockOffHint ms={clockOffMs} />}
-      {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2">
+      {/* min-w-0: a fieldset is never narrower than its content by default, so a long one-line "In use" mark (Arabic at
+          a larger text size) made the rows wider than the panel, and the panel cut off their radios and Fallback. */}
+      {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2 min-w-0">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
         {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined} relayOnly={relayOnly}
           onChoose={choice => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: choice }))} />}
