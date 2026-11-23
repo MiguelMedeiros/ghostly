@@ -33,6 +33,12 @@ describe("how Ghostly Desktop asks a Lightning address service", () => {
     await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(invoke as never, page(opaque)) })).rejects.toThrow(/HTTP 404/);
   });
 
+  it("says the service's own reason for a refusal it answers with an error status, as the web does", async () => {
+    // Rust keeps a short error body (`MAX_ERROR_BODY`, apps/desktop/src/hold_fetch.rs): a 400 with LUD-06's refusal.
+    const invoke = rust({ status: 400, contentType: "application/json", bodyB64: b64('{"status":"ERROR","reason":"Amount too small"}') });
+    await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(invoke as never, page(opaque)) })).rejects.toThrow("ln.example.com refused: Amount too small");
+  });
+
   it("asks a service that redirects again from Rust, which checks each hop, and reads its answer", async () => {
     const invoke = rust({ status: 302, contentType: "", bodyB64: "" }, { url: "https://pay.example.net/y", contentType: "application/json", bodyB64: b64('{"ok":2}') });
     await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(invoke as never, page(opaque)) })).resolves.toEqual({ ok: 2 });
