@@ -20,7 +20,7 @@ function networkList(value: string): string[] {
  */
 function requestAmount(value: string | undefined, method: unknown): number | string {
   if (method !== "usdt") return sats(value);
-  if (!/^\d+(\.\d+)?$/.test(value ?? "") || !/[1-9]/.test(value!)) throw new CliError("usage", `<amount> with --method usdt takes USDT above 0 (5 or 0.25), not ${shownValue(value)}`);
+  if (!/^\d+(\.\d+)?$/.test(value ?? "") || !/[1-9]/.test(value!)) throw new CliError("usage", `<sats> with --method usdt is USDT above 0 (5 or 0.25), not ${shownValue(value)}`);
   return value!;
 }
 

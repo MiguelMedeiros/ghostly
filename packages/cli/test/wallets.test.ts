@@ -458,7 +458,8 @@ describe("wallets", () => {
     // More decimals than the token has is the person's value, refused before the engine, as the composer refuses it.
     const calls = node.requestPayment.mock.calls.length;
     await expect(request(["Alice", "0.0000001", "--method", "usdt"])).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/6 decimal places/) });
-    for (const typed of ["0", "0.0", "x", "1e3", ".5"]) expect(() => request(["Alice", typed, "--method", "usdt"]), typed).toThrow(/<amount> with --method usdt takes USDT above 0/);
+    // Named as the usage line names it (`chat request <chat> <sats>`): before, "<amount> with --method usdt …".
+    for (const typed of ["0", "0.0", "x", "1e3", ".5"]) expect(() => request(["Alice", typed, "--method", "usdt"]), typed).toThrow(/^<sats> with --method usdt is USDT above 0/);
     expect(node.requestPayment).toHaveBeenCalledTimes(calls);
     // `payment list` says the decimals of a token amount; a sats one carries none.
     const listed = await callApi(ctx, "payment.list", {}) as { payments: { id: string; amount: number; unit: string; decimals?: number }[] };
