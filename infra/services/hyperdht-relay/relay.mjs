@@ -1140,9 +1140,10 @@ export async function startRelay(options = {}) {
         setTimeout(() => { paused = false; ws._socket?.resume() }, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
       }
     }
-    ws.on('message', data => spend(data.length ?? data.byteLength ?? 0))
-    // A control frame from a client is its payload and 6 bytes (header and mask), so an empty one still costs.
-    const CONTROL_FRAME_BYTES = 6
+    // Each frame from a client costs its payload and 64 bytes: the relay's work on a frame (parsing it, and for a message
+    // the protocol's decode and answer) does not shrink with its payload, so tiny ones are bounded as bytes are.
+    const FRAME_BYTES = 64
+    ws.on('message', data => spend((data.length ?? data.byteLength ?? 0) + FRAME_BYTES))
     // At most one pong waits to be written: a ping that comes meanwhile is kept, the last one only, and answered once
     // it is (RFC 6455 5.5.3 lets a pong answer only the most recent ping). Each pong waiting cost the process about
     // 700 bytes, and one client sent a million pings a second. The payload is copied: it is a view into the chunk the
@@ -1159,7 +1160,7 @@ export async function startRelay(options = {}) {
       })
     }
     ws.on('ping', data => {
-      spend(data.length + CONTROL_FRAME_BYTES)
+      spend(data.length + FRAME_BYTES)
       if (dropped) return
       if (ponging) nextPing = Buffer.from(data)
       else pong(Buffer.from(data))
@@ -1167,7 +1168,7 @@ export async function startRelay(options = {}) {
     // A peer that has gone without closing (a sleeping laptop, a dead route) still holds its slot: one that has not
     // answered the last ping by the next is dropped.
     let answered = true
-    ws.on('pong', data => { spend(data.length + CONTROL_FRAME_BYTES); answered = true })
+    ws.on('pong', data => { spend(data.length + FRAME_BYTES); answered = true })
     const ping = setInterval(() => {
       if (!answered) return drop('no pong')
       answered = false
