@@ -167,6 +167,24 @@ describe("the Cashu wallet reporting its own invoices and melts", () => {
   });
 });
 
+describe("a pending melt that fails with a fee the mint kept", () => {
+  it("writes the fee on the card's journal entry; a paid one, or one that cost nothing, carries none", async () => {
+    const { lightning } = await ready();
+    const lost = fakeInvoice(5, hash()), free = fakeInvoice(6, hash()), paid = fakeInvoice(7, hash());
+    const hashOf = (invoice: string) => decodeBolt11(invoice)!.paymentHash!;
+    const melt = { providerId: CASHU_MINT_SOURCE, selfSettled: true };
+    for (const invoice of [lost, free, paid]) await journal(op({ ...melt, paymentHash: hashOf(invoice), invoice }));
+    await lightning.reportPaymentResolved(lost, false, { fee: 1 });
+    await lightning.reportPaymentResolved(free, false, { fee: 0 });
+    await lightning.reportPaymentResolved(paid, true, { fee: 3 });
+    expect(await opOf(lightning, hashOf(lost))).toMatchObject({ state: "failed", fee: 1 });
+    expect((await opOf(lightning, hashOf(free)))?.fee).toBeUndefined();
+    expect((await opOf(lightning, hashOf(paid)))?.fee).toBeUndefined();
+    // The view the app reads (`pendingPayEnd`) carries it too.
+    expect(lightning.view.recent.find((o) => o.paymentHash === hashOf(lost))).toMatchObject({ state: "failed", fee: 1 });
+  });
+});
+
 describe("quoting an invoice to pay", () => {
   it("refuses what is not a payable invoice: garbage, no amount, expired", async () => {
     const { lightning } = await ready();

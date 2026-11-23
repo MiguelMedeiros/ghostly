@@ -176,12 +176,13 @@ export function holdsLess(rail:WalletRail,s:WalletState|null|undefined,amount:nu
  * when Pay was answered. A Cashu card's melt `quote` is paid once it is on a payment row; failed once it is on a fee row,
  * or once what was set aside since (`held`) is all back with no row of it (a failure that cost no fee writes none).
  * Another payment still set aside only makes that later, never wrong. A Lightning card's invoice is read in its journal,
- * by its `hash`. Shared by the Cashu card's Send and a Lightning address's Pay.
+ * by its `hash`, with the fee a failed one cost when its source says it (the mints do). Shared by the Cashu card's Send
+ * and a Lightning address's Pay.
  */
 export function pendingPayEnd(sent:{quote?:string;hash?:string;held?:boolean},s:WalletState|null|undefined):{paid:boolean;fee:number}|undefined {
  if(sent.hash){
   const op=s?.lightning?.recent.find(o=>o.direction==='out'&&o.paymentHash===sent.hash);
-  return op?.state==='paid'?{paid:true,fee:0}:op?.state==='failed'?{paid:false,fee:0}:undefined;
+  return op?.state==='paid'?{paid:true,fee:0}:op?.state==='failed'?{paid:false,fee:op.fee??0}:undefined;
  }
  if(!sent.quote||!s)return undefined;
  const row=s.history.find(tx=>tx.quote===sent.quote&&(tx.kind==='lightning-out'||tx.kind==='fee'));

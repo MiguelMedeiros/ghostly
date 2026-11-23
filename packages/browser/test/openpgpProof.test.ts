@@ -58,6 +58,24 @@ describe('OpenPGP proof: refused', () => {
     const tampered = read('alice-clearsign.asc').replace('test vector', 'test vectoR');
     await expect(preparePgpEvidence({ statement: statement.replace('test vector', 'test vectoR'), signature: tampered, publicKey: read('alice.pub.asc') }, { now: NOW })).rejects.toThrow(/not over the Ghostly statement/);
   });
+  it('a statement file saved with a byte order mark or as UTF-16 says so, and is still refused', async () => {
+    const { privateKey, publicKey } = await openpgp.generateKey({ type: 'curve25519', userIDs: [{ name: 'Win Dows' }], format: 'object' });
+    const detached = async (file: Uint8Array) => openpgp.sign({ message: await openpgp.createMessage({ binary: file }), signingKeys: privateKey, detached: true });
+    const clearsigned = async (text: string) => openpgp.sign({ message: await openpgp.createCleartextMessage({ text: `${String.fromCharCode(0xfeff)}${text}` }), signingKeys: privateKey });
+    const prepare = (signature: string) => preparePgpEvidence({ statement, signature, publicKey: publicKey.armor() });
+    const bom = (text: string) => new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(text)]);
+    const utf16 = (text: string, le: boolean) => new Uint8Array([...le ? [0xff, 0xfe] : [0xfe, 0xff], ...Array.from(text).flatMap(c => le ? [c.charCodeAt(0) & 0xff, c.charCodeAt(0) >> 8] : [c.charCodeAt(0) >> 8, c.charCodeAt(0) & 0xff])]);
+    const encoding = 'The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again';
+    // Notepad's "UTF-8 with BOM", Windows PowerShell's Out-File -Encoding utf8 and its `>` (UTF-16 LE), Notepad's "UTF-16 BE".
+    for (const file of [bom(statement), bom(`${statement}\r\n`), utf16(statement, true), utf16(`${statement}\r\n`, true), utf16(statement, false), utf16(`${statement}\n`, false)])
+      await expect(prepare(await detached(file))).rejects.toThrow(encoding);
+    // gpg --clearsign of such a file: the signed text starts with U+FEFF.
+    await expect(prepare(await clearsigned(statement))).rejects.toThrow(encoding);
+    // Another statement saved the same way is still not over the Ghostly statement.
+    const other = statement.replace('test vector', 'other vector');
+    await expect(prepare(await detached(bom(other)))).rejects.toThrow(/not over the Ghostly statement/);
+    await expect(prepare(await clearsigned(other))).rejects.toThrow(/different text/);
+  });
   it('a signature by another key than the one given', () => refuse('bob-clearsign', 'alice', /another key/));
   it('a key that expired (and the same signature while it was valid is fine)', async () => {
     await refuse('expired-clearsign', 'expired', /expired on 2026-06-01/, Date.UTC(2026, 6, 1) / 1000);
