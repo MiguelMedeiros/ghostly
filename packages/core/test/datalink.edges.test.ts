@@ -1103,3 +1103,54 @@ describe("DataLink says what each attempt showed about direct connections (direc
     expect(b.dl.state).toBe("answering");
   });
 });
+
+describe("DataLink.answerAgain: an answer or a crossing offer that never went out", () => {
+  const stalling = (pc: FakePeerConnection) => { pc.stalls = true; pc.iceGatheringState = "gathering"; };
+  const published = (side: ReturnType<typeof link>) => side.options.publishSignal.mock.calls.map(([s]) => s).filter((s): s is string => s !== null);
+  const gatherOut = () => vi.advanceTimersByTimeAsync(GATHER_STALL_MS * GATHER_ATTEMPTS);
+
+  it("makes an answer that found no candidate again while the offer stands, at most REANSWERS times", async () => {
+    const b = link("bbbb", "aaaa", stalling, { offerStanding: () => true });
+    const answering = b.dl.handleSignal(JSON.stringify(offerFrom()), seen(NOW - 1_000));
+    await gatherOut(); await answering;
+    expect(b.dl.state).toBe("idle");
+    for (let i = 1; i <= REANSWERS; i++) {
+      expect(b.dl.answerAgain()).toBe(true);
+      expect(b.dl.state).toBe("answering");
+      await gatherOut();
+      expect(b.dl.state).toBe("idle");
+    }
+    expect(b.dl.answerAgain()).toBe(false);
+    expect(b.pcs).toHaveLength(GATHER_ATTEMPTS * (REANSWERS + 1));
+    expect(published(b)).toEqual([]);
+  });
+
+  it("does not answer again an offer the peer withdrew, nor one too close to the end of its attempt", async () => {
+    let standing = false;
+    const b = link("bbbb", "aaaa", stalling, { offerStanding: () => standing });
+    const answering = b.dl.handleSignal(JSON.stringify(offerFrom()), seen(NOW - 1_000));
+    await gatherOut(); await answering;
+    expect(b.dl.answerAgain()).toBe(false);
+    standing = true;
+    await vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS - 15_000 - GATHER_STALL_MS * GATHER_ATTEMPTS);
+    expect(b.dl.answerAgain()).toBe(false);
+    expect(b.pcs).toHaveLength(GATHER_ATTEMPTS);
+  });
+
+  it("the lower key answers the crossing offer it set aside once its own offer never went out", async () => {
+    const offer = offerFrom({ ts: NOW + 1 });
+    let made = 0;
+    const a = link("aaaa", "bbbb", pc => { if (++made <= GATHER_ATTEMPTS) stalling(pc); }, { offerStanding: ts => ts === offer.ts });
+    const connecting = a.dl.connect();
+    await vi.advanceTimersByTimeAsync(1);
+    await a.dl.handleSignal(JSON.stringify(offer), seen(NOW));
+    expect(a.dl.state).toBe("offering");
+    await gatherOut(); await connecting;
+    expect(a.dl.state).toBe("idle");
+    expect(published(a)).toEqual([]);
+    expect(a.dl.answerAgain()).toBe(true);
+    await vi.advanceTimersByTimeAsync(GATHER_STALL_MS);
+    expect(a.dl.state).toBe("connecting");
+    expect(parseRtcSignal(a.lastSignal())).toMatchObject({ t: "a", o: offer.ts });
+  });
+});
