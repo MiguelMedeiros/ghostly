@@ -1086,7 +1086,7 @@ jobs:
           check "Frontend builds" "$FRONTEND_BUILD" "$FULL"
           check "Affected unit tests (draft 1/4 to 4/4)" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"
           check "Frontend tests (packages)" "$PACKAGES_TESTS" "$PACKAGES"
-          check "Integration tests" "$INTEGRATION_TESTS" "$PACKAGES"
+          check "Integration tests (1/2 to 2/2)" "$INTEGRATION_TESTS" "$PACKAGES" "one or more shards"
           check "CLI on Linux ARM64" "$CLI_ARM64" "$PACKAGES"
           check "Tauri Backend" "$TAURI" "$RUST"
           check "Website" "$WEBSITE" "$WEBSITE_GATE"

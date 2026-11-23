@@ -822,7 +822,9 @@ describe("the errors of a red CI Success", () => {
       errors: ["::error::Tauri Backend ended failure", "::error::Website browser checks was skipped, but this change needs it"],
     });
     // The package tests that start real peers run in their own job: a run that skipped it did not test the packages.
-    expect(gate({ INTEGRATION_TESTS: "skipped" })).toEqual({ status: 1, errors: ["::error::Integration tests was skipped, but this change needs it"] });
+    // Its two runners share one result, so the error names their range.
+    expect(gate({ INTEGRATION_TESTS: "skipped" })).toEqual({ status: 1, errors: ["::error::Integration tests (1/2 to 2/2) was skipped, but this change needs it"] });
+    expect(gate({ INTEGRATION_TESTS: "failure" })).toEqual({ status: 1, errors: ["::error::Integration tests (1/2 to 2/2): one or more shards ended failure"] });
   });
 
   it("names the range of the draft's unit test groups, since their one result does not say which failed", () => {
