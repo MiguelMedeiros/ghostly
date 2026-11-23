@@ -64,7 +64,7 @@ import { heldOriginal, messageSnippet, quoteFor, replyIndexer, replyTarget, sent
 import { useKeptEdit } from "../lib/keptEdits";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
-import { replySnippet, type RoutineCard } from "@ghostly/core";
+import { DHT_EDIT_FITS, DHT_TEXT_FITS, replySnippet, type RoutineCard } from "@ghostly/core";
 import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
 import { CallOverlay } from "../components/CallOverlay";
@@ -148,7 +148,7 @@ import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
-import { refusalLine, useDhtOnly } from "../lib/delivery";
+import { dhtOverLine, refusalLine } from "../lib/delivery";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -229,8 +229,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         : null,
     [session, sharedNick],
   );
-  // Whose choice keeps this chat on DHT only, if anyone's: what a refusal of a text too long for the DHT says to do.
-  const dhtOnly = useDhtOnly(params?.peerPubKeyB64);
 
   const {
     messages,
@@ -1325,14 +1323,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           const error = await sendMessage(text, answering ? { ...options, replyTo: answering.id } : options);
           if (!error && answering) replied(answering);
           // The engine says why in English: said here in the app's language (lib/errorText.ts), as a group's composer does.
-          return error && refusalLine(error, t, dhtOnly);
+          // A text the DHT packet cannot carry in a chat on DHT only, as the count said it before Send (lib/delivery.ts).
+          return error && refusalLine(error, t, deliveryPeer, false);
         }}
         reply={replyBar}
         translation={composerTranslation}
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), preview: editing.preview, onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
-            .then(result => ({ error: result.error && refusalLine(result.error, t, dhtOnly) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
+            .then(result => ({ error: result.error && refusalLine(result.error, t, deliveryPeer, true) }), (e: unknown) => ({ error: e instanceof Error ? problemLine(e, t) : t("chat.editFailed") }))).error } : undefined}
         onEditLast={paired && chatLink ? () => {
           const last = [...messages].reverse().find(editableText);
           if (last) { setReplyingTo(null); setEditing(last); }
@@ -1342,8 +1341,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         // The composer sends one at a time itself, and an Enter pressed meanwhile goes next.
         disabled={paired && (!!chatStop || engine.state?.settings.online === false)}
         disabledPlaceholder={t("chat.disabledPlaceholder")}
-        // The DHT carries a few hundred characters; the direct link has room for long invoices and ecash tokens.
-        softBytes={paired && !chatLive ? deliveryPeer?.dhtDelivery?.maxTextBytes ?? 256 : undefined}
+        // The DHT carries a few hundred characters, fewer for an edit; the direct link has room for long invoices and ecash tokens.
+        softBytes={paired && !chatLive ? editing ? DHT_EDIT_FITS : DHT_TEXT_FITS : undefined}
+        softTitle={paired && !chatLive ? dhtOverLine(t, deliveryPeer, !!editing) : undefined}
         maxLength={paired ? 16_384 : platform?.getPeer(params.peerPubKeyB64)?.dataLink === "open" ? 4000 : undefined}
         // The engine's limit is 16 KiB of UTF-8, not characters: "é" counts two, an emoji four.
         textBytes={paired ? 16_384 : undefined}

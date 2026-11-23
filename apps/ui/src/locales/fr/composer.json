@@ -21,6 +21,13 @@
   "charactersLeft": "Caractères restants : {{count}}",
   "chooseFiles": "Choisir des fichiers",
   "closeCamera": "Fermer l'appareil photo",
+  "dhtFits": {
+    "both": "Trop long pour la DHT, qui porte environ {{fits}} octets. Votre contact et vous gardez cette discussion en DHT seule : raccourcissez-le, ou changez-le tous les deux depuis l'icône de connexion.",
+    "contact": "Trop long pour la DHT, qui porte environ {{fits}} octets. La discussion de votre contact est en DHT seule : raccourcissez-le, ou attendez qu'il autorise à nouveau la liaison directe.",
+    "editLive": "Trop long pour la DHT en tant que modification, qui porte environ {{fits}} octets : elle part dès que la liaison directe est là.",
+    "held": "Plus long que ce que porte la DHT (environ {{fits}} octets) : il est gardé pour votre contact jusqu'à ce qu'il soit en ligne.",
+    "you": "Trop long pour la DHT, qui porte environ {{fits}} octets. Cette discussion est en DHT seule : raccourcissez-le, ou changez-le depuis l'icône de connexion."
+  },
   "dhtTooLong": "Trop long pour la DHT ({{bytes}} sur {{max}} octets). Raccourcissez ou passez en direct ; le brouillon est gardé.",
   "document": "Document",
   "dropFiles": "Déposez pour envoyer",
@@ -56,7 +63,6 @@
   "identity": "Identité",
   "identityShared": "{{count}} partagée(s) dans cette discussion",
   "media": "Photos et vidéos",
-  "nearSoft": "Environ {{bytes}} octets tiennent dans la DHT une fois scellés : raccourcissez-le pour l'y envoyer",
   "noEmoji": "Aucun emoji trouvé",
   "noGifs": "Aucun GIF trouvé",
   "overSoft": "Au-delà des {{bytes}} octets que porte la DHT : il part dès que la liaison directe est là",

@@ -1,11 +1,12 @@
 import { useSyncExternalStore } from "react";
-import { DHT_PACKET_BUDGET, MESSAGE_PACED } from "@ghostly/core";
+import { DHT_EDIT_FITS, DHT_PACKET_BUDGET, DHT_TEXT_FITS, MESSAGE_PACED } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NotSent } from "@ghostly/browser/engine/outbox";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { useOnline } from "../hooks/useOnline";
 import { rawError } from "./errorText";
-import { problemLine, sentences } from "./problemText";
+import type { PeerLinkState } from "./platform";
+import { problemLine } from "./problemText";
 import type { ChatMessage } from "./types";
 
 export type Delivery = NonNullable<ChatMessage["delivery"]>;
@@ -63,14 +64,37 @@ function waitsFor(delivery: Delivery, error?: string) {
     : undefined;
 }
 
+type DhtLink = Pick<PeerLinkState, "deliveryMode" | "textDelivery" | "dhtDelivery"> | null | undefined;
+
 /**
- * A send or an edit the engine refused, as one line (`problemLine`). A text the DHT packet cannot carry (core
- * `DHT_PACKET_BUDGET`) in a chat on DHT only says what ends DHT only: "once you're connected peer to peer" never comes
- * there until the side that chose it leaves it.
+ * What the engine does with a text, or an edit, past what the DHT packet carries (engine/node.ts sendChatText,
+ * editMessage), said on the composer's count before Send and in place of its refusal (`refusalLine`) after it. A text
+ * goes held where both sides allow it, and waits for live with no DHT to carry it. On the DHT, in a chat on DHT only
+ * by choice (either side's: `dhtByChoice`) a text within 256 bytes and an edit are refused, and a longer text waits for
+ * a live connection that chat never makes: either way the next step is to shorten it or end DHT only, by whose choice
+ * keeps it. In a chat that goes live, a text or an edit that long waits for live.
  */
-export function refusalLine(cause: unknown, t: Translate, dhtOnly: DhtOnlyBy | undefined): string {
-  if (!dhtOnly || rawError(cause) !== DHT_PACKET_BUDGET) return problemLine(cause, t);
-  return sentences(t("errors.chat.dhtTooLong"), t(dhtOnly === "you" ? "errors.chat.dhtTooLongYouNext" : "errors.chat.dhtTooLongContactNext"), t);
+export function dhtOverLine(t: Translate, link: DhtLink, edit: boolean): string {
+  const fits = edit ? DHT_EDIT_FITS : DHT_TEXT_FITS;
+  const mine = link?.deliveryMode === "dht", theirs = link?.dhtDelivery?.peerMode === "dht";
+  if (!edit && link?.textDelivery === "hold") return t("composer.dhtFits.held", { fits });
+  if (!edit && link?.textDelivery !== "dht") return t("composer.overSoft", { bytes: fits });
+  if (mine && theirs) return t("composer.dhtFits.both", { fits });
+  if (mine) return t("composer.dhtFits.you", { fits });
+  if (theirs) return t("composer.dhtFits.contact", { fits });
+  return edit ? t("composer.dhtFits.editLive", { fits }) : t("composer.overSoft", { bytes: fits });
+}
+
+/**
+ * A send or an edit the engine refused, as one line (`problemLine`). A text or an edit the DHT packet cannot carry
+ * (core `DHT_PACKET_BUDGET`), refused only in a chat on DHT only, says it as the composer's count said it before Send
+ * (`dhtOverLine`): about how much fits, and what ends DHT only. "Once you're connected peer to peer" never comes there
+ * until the side(s) that chose it leave it.
+ */
+export function refusalLine(cause: unknown, t: Translate, link: DhtLink, edit: boolean): string {
+  const dhtOnly = link?.deliveryMode === "dht" || link?.dhtDelivery?.peerMode === "dht";
+  // Refused, it went to the DHT whatever the view said a moment before (held, or no DHT yet).
+  return dhtOnly && rawError(cause) === DHT_PACKET_BUDGET ? dhtOverLine(t, { ...link, textDelivery: "dht" }, edit) : problemLine(cause, t);
 }
 
 /**

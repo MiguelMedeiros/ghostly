@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, COMMUNITY_LIMITS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, GROUP_EDIT_TEXT_BYTES, GROUP_LIMITS, inviteLink, LIMITS, MENTION_EVERYONE, MENTION_LIMITS, normalizeRelayUrl, ownInviteRefusal, parseLinkPreview, relayUrlProblem, replySnippet, STATUS_CARD_LIMITS, statusCardBytes, TYPING_KINDS, type GroupMention, type LinkPreview, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, COMMUNITY_LIMITS, DHT_EDIT_FITS, DHT_PACKET_BUDGET, DHT_TEXT_FITS, decodeCommunityLink, decodeGroupEntryLink, GROUP_EDIT_TEXT_BYTES, GROUP_LIMITS, inviteLink, LIMITS, MENTION_EVERYONE, MENTION_LIMITS, normalizeRelayUrl, ownInviteRefusal, parseLinkPreview, relayUrlProblem, replySnippet, STATUS_CARD_LIMITS, statusCardBytes, TYPING_KINDS, type GroupMention, type LinkPreview, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
@@ -1601,14 +1601,6 @@ function deleteNotMine(ctx: ApiContext, target: { linkId: string; group: boolean
   const deleted = !target.group && node(ctx).deletedIdsOf(target.linkId).includes(ref);
   return noMessage(ref, place, deleted ? { tail: ": it was deleted already" } : {});
 }
-
-/**
- * About the longest ASCII text, and edit, the DHT packet carries once sealed and signed: within the 256 bytes, the
- * envelope's authentication (and an edit's element) takes the rest. The edge moves by a byte or two with the chat (the
- * envelope's sequence, the edit's number), so the words say "about"; `dhtPacketBudget.test.ts` sends both sizes on two
- * paired daemons.
- */
-const DHT_TEXT_FITS = 248, DHT_EDIT_FITS = 214;
 
 /**
  * The engine's refusal of a text or an edit within 256 bytes that the DHT packet cannot carry (`DHT_PACKET_BUDGET`,
