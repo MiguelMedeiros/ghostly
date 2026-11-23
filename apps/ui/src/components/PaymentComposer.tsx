@@ -101,7 +101,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   // while a file moves.
   const [peer] = usePlatformValue(() => [servicesPlatform?.getPeer(chat ?? ""), wallet?.getState()] as const);
   const who = contact || t("payments.composer.yourContact");
-  const networkName = (card: InstanceCard) => `${card.network === "testnet" ? "Testnet" : "Mainnet"} ${card.name}`;
+  // "Cashu (Testnet)", in the language's own order ("Cashu（Testnet）"), as the Accept sheet names a card.
+  const networkName = (card: InstanceCard) => t("payments.accept.cardNetwork", { card: card.name, network: card.network === "testnet" ? "Testnet" : "Mainnet" });
   /**
    * Why a card cannot be used in this chat: not set up, off here, off for the contact, or no wallet of its network
    * there. `contact`: it is the contact's side that says no (the card's face says "Not accepted", else "Off here").

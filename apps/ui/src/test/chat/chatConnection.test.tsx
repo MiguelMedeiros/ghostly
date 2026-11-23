@@ -1397,6 +1397,17 @@ describe("a relayed transport", () => {
     expect(within(panel).getByTestId("connection-summary")).toHaveTextContent("never what they say");
   });
 
+  it.each([
+    ["ja", "relay.example、relay.two.example のリレー経由"],
+    ["ar", "عبر المرحّل relay.example وrelay.two.example"],
+  ] as const)("names its relays on the panel's Path as the language lists them, each host its own <bdi> (%s)", async (language, said) => {
+    const view = renderApp(<ChatConnection peerKey="peer" />, { language });
+    act(() => view.engine.update({ links: [linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRelayed: { relays: ["relay.example", "relay.two.example"] } })] }));
+    await view.user.click(screen.getByTestId("connection-options"));
+    expect(screen.getByTestId("connection-relayed").textContent).toBe(said);
+    expect([...screen.getByTestId("connection-relayed").querySelectorAll("bdi")].map((b) => b.textContent)).toEqual(["relay.example", "relay.two.example"]);
+  });
+
   it("when not in use, says it goes through a relay", async () => {
     const view = renderApp(<ChatConnection peerKey="peer" />);
     act(() => view.engine.update({ links: [linkView({ ...web, pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open" })] }));

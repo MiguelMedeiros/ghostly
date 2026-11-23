@@ -437,14 +437,23 @@ describe("a card that cannot be used here", () => {
   it("says a way of paying is off in this chat, naming the card's network", () => {
     rememberNetwork("peer", "testnet");
     open({ link: { paymentMethods: { ...ALL_ON, bark: false } } });
-    expect(card("bark-testnet")).toHaveAttribute("title", "Testnet Bark is off in this chat");
+    expect(card("bark-testnet")).toHaveAttribute("title", "Bark (Testnet) is off in this chat");
     expect(within(card("bark-testnet")).getByText("Off here")).toBeInTheDocument();
   });
 
   it("says a card is off when this chat takes its way of paying on the other network only", () => {
     open({ link: { paymentNetworks: { ...Object.fromEntries(Object.keys(ALL_ON).map((m) => [m, ["mainnet", "testnet"]])), cashu: ["testnet"] } as LinkView["paymentNetworks"] } });
-    expect(card("cashu-mainnet")).toHaveAttribute("title", "Mainnet Cashu is off in this chat");
+    expect(card("cashu-mainnet")).toHaveAttribute("title", "Cashu (Mainnet) is off in this chat");
     expect(card("lightning-mainnet")).not.toHaveAttribute("aria-disabled");
+  });
+
+  it.each([
+    ["ja", "Bark（Testnet） はこのチャットではオフです"],
+    ["ar", "Bark (Testnet) متوقف في هذه المحادثة"],
+  ] as const)("names the card that is off in %s's own order, not as \"Testnet Bark\"", (language, reason) => {
+    rememberNetwork("peer", "testnet");
+    open({ link: { paymentMethods: { ...ALL_ON, bark: false } }, language });
+    expect(card("bark-testnet")).toHaveAttribute("title", reason);
   });
 
   it("says the contact does not accept a way of paying", () => {
@@ -469,11 +478,20 @@ describe("a card that cannot be used here", () => {
       rememberNetwork("peer", "testnet");
       const { user } = open({ wallet: testCashu(), link: { dataLink: "open", capabilities: { files: true, payments: true, methods: ALL_ON, networks: theirs } } });
       expect(card("cashu-testnet")).toHaveAttribute("aria-disabled", "true");
-      expect(card("cashu-testnet")).toHaveAttribute("title", "Your contact has no Testnet Cashu wallet");
+      expect(card("cashu-testnet")).toHaveAttribute("title", "Your contact has no Cashu (Testnet) wallet");
       expect(within(card("cashu-testnet")).getByText("Not accepted")).toBeInTheDocument();
       await user.click(card("cashu-testnet"));
-      expect(screen.getByText("Your contact has no Testnet Cashu wallet", { selector: "p" })).toBeInTheDocument();
+      expect(screen.getByText("Your contact has no Cashu (Testnet) wallet", { selector: "p" })).toBeInTheDocument();
       expect(screen.getByTestId("payment-use")).toBeDisabled();
+    });
+
+    it.each([
+      ["ja", "連絡先は Cashu（Testnet） ウォレットを持っていません"],
+      ["ar", "لا تملك جهة اتصالك محفظة Cashu (Testnet)"],
+    ] as const)("names the card the contact lacks in %s's own order, not as \"Testnet Cashu\"", (language, reason) => {
+      rememberNetwork("peer", "testnet");
+      open({ wallet: testCashu(), link: { dataLink: "open", capabilities: { files: true, payments: true, methods: ALL_ON, networks: theirs } }, language });
+      expect(card("cashu-testnet")).toHaveAttribute("title", reason);
     });
 
     it("still offers the card the contact has a wallet for", () => {

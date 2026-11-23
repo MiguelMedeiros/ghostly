@@ -1291,13 +1291,13 @@ describe("the network said in words wherever money moves", () => {
     const TOKEN = "cashuB" + "o".repeat(40);
     const REQUEST = "creqA" + "o".repeat(40);
     const LOCAL_MINT = "http://127.0.0.1:3338";
-    const ecashMessage = (text: string, inspection: CashuInspection) => {
+    const ecashMessage = (text: string, inspection: CashuInspection, language?: "ja" | "ar") => {
       fakeEngine.setState({ links: [linkView()], wallet: both() });
       fakeEngine.on("walletInspectCashu", () => ({ inspection }));
-      return renderApp(<MessageBubble message={{ id: "m1", text, sender: "peer", timestamp: Date.now(), status: "delivered" } as never} peerPubKey="peer" />);
+      return renderApp(<MessageBubble message={{ id: "m1", text, sender: "peer", timestamp: Date.now(), status: "delivered" } as never} peerPubKey="peer" />, { language });
     };
     const token = (mint: string, accepted = true) => ecashMessage(TOKEN, { kind: "token", amount: 1_000, unit: "sat", mint, accepted });
-    const request = (mints: string[]) => ecashMessage(REQUEST, { kind: "request", amount: 1_000, unit: "sat", mints });
+    const request = (mints: string[], language?: "ja" | "ar") => ecashMessage(REQUEST, { kind: "request", amount: 1_000, unit: "sat", mints }, language);
 
     it.each([
       ["the public test mint", TEST_MINT],
@@ -1358,6 +1358,15 @@ describe("the network said in words wherever money moves", () => {
       const card = await screen.findByTestId("cashu-request-bubble");
       expect(within(card).queryByTestId("token-network")).not.toBeInTheDocument();
       expect(card).not.toHaveTextContent("test sats");
+    });
+
+    it.each([
+      ["ja", "ミント：⁨mint.one.example⁩、⁨mint.two.example⁩"],
+      ["ar", "دور السك: ⁨mint.one.example⁩ و⁨mint.two.example⁩"],
+    ] as const)("a request names its mints as the language lists them, each host isolated (%s)", async (language, said) => {
+      request(["https://mint.one.example", "https://mint.two.example"], language);
+      const card = await screen.findByTestId("cashu-request-bubble");
+      expect(within(card).getByText(said).textContent).toBe(said);
     });
   });
 });

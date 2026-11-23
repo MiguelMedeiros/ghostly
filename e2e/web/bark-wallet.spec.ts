@@ -109,7 +109,7 @@ test.describe("on Second's signet server", { tag: "@network" }, () => {
     await chatPayments(alice.page, { bark: false });
     await (await composerRow(bob.page, "payment-button")).click();
     await expect(card(bob)).toBeDisabled({ timeout: 60_000 });
-    // Soft: the reason is wrong today (it says she has no Testnet Bark wallet), and what follows still runs.
+    // Soft: the reason is wrong today (it says she has no Bark (Testnet) wallet), and what follows still runs.
     await expect.soft(card(bob)).toHaveAttribute("title", /does not accept Bark/);
     await expect(paymentCard(bob.page, "arkade-testnet"), "Arkade is its own way of paying, still allowed").toBeEnabled();
     // Bob's Accept side says what Alice has off.
