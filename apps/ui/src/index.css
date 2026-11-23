@@ -7,8 +7,10 @@
    every keystroke in proportion to the chat's length. */
 @source not "./test";
 
-/* A short window: a phone on its side (320-500px high), where rows that stay put leave a list no room. */
-@custom-variant short (@media (max-height: 500px));
+/* A short window: a phone on its side (320-500px high), where rows that stay put leave a list no room. In em, which a
+   media query takes from the browser's text size: those rows grow with it, and at 200% a 667px phone held them and left
+   the Tasks board 31px. 500px at the default 16px. */
+@custom-variant short (@media (max-height: 31.25em));
 
 @theme {
   /* Tailwind's breakpoints in px, as the app's own media queries and its JS layout queries are (`MOBILE_QUERY` is
@@ -1121,7 +1123,7 @@ html[data-standalone="true"] {
    chat's header and the field took it all, and the field went under the keyboard. The pinned bar goes behind the
    keyboard, as the tab bar does, and the reply or edit bar says who and what on one line. So does the offline or
    reconnecting line under the header (`chat-banner`): with a reply the list was 0px tall and the field 6px under the
-   keyboard at 667×375. */
+   keyboard at 667×375. A call's "couldn't connect" note is one too: alone it put the field 28-48px under. */
 @media (pointer: coarse) and (max-height: 500px) {
   html[data-keyboard="true"] .pinned-bar,
   html[data-keyboard="true"] .chat-banner { display: none; }

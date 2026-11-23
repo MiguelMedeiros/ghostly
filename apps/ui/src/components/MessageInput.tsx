@@ -689,6 +689,7 @@ export function MessageInput({
     if (err) showToast(err);
     setShowPanel(false);
     if (!phone) textareaRef.current?.focus();
+    else if (panelByKey) panelButtonRef.current?.focus();
   };
 
   // A share of mine tapped in the chat's timeline: the picker, on that card.
@@ -798,8 +799,8 @@ export function MessageInput({
     closeAll();
     setAttached((was) => [...(was ?? []), ...files]);
     const leftOut = left && [
-      left.pastLimit.length ? t("errors.files.pastLimit", { count: String(PLATFORM_PASTE_FILES), names: someNames(left.pastLimit) }) : "",
-      left.leftOut.length ? t("errors.files.leftOut", { names: someNames(left.leftOut) }) : "",
+      left.pastLimit.length ? t("errors.files.pastLimit", { count: String(PLATFORM_PASTE_FILES), names: someNames(left.pastLimit, t) }) : "",
+      left.leftOut.length ? t("errors.files.leftOut", { names: someNames(left.leftOut, t) }) : "",
     ].filter(Boolean).join(" ");
     if (leftOut) showToast(leftOut);
     return true;
@@ -1290,8 +1291,9 @@ export function MessageInput({
           onClose={() => {
             setShowPanel(false);
             const at = document.activeElement;
-            if (phone || (at && at !== document.body && !at.closest("[data-testid='expression-panel']"))) return;
-            if (panelByKey) panelButtonRef.current?.focus(); else textareaRef.current?.focus();
+            if (at && at !== document.body && !at.closest("[data-testid='expression-panel']")) return;
+            // Opened from the keyboard, the smiley takes it back: a button, so no on-screen keyboard on a phone either.
+            if (panelByKey) panelButtonRef.current?.focus(); else if (!phone) textareaRef.current?.focus();
           }}
         />
       )}

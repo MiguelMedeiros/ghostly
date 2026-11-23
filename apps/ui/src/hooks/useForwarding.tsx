@@ -106,7 +106,7 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
       </button>
       <span data-testid="select-count" className="flex-1 text-sm text-text-primary" aria-live="polite">{t("chat.forward.selected", { count: String(count) })}</span>
       <button type="button" data-testid="select-forward" onClick={() => setForwarding(chosen())} disabled={!count}
-        className="inline-flex items-center gap-2 min-h-10 rounded-lg bg-accent px-4 text-sm font-medium text-on-accent hover:bg-accent-hover disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
+        className="inline-flex items-center gap-2 min-h-10 rounded-lg bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] px-4 text-sm font-medium text-on-accent hover:bg-accent-hover disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="m15 14 5-5-5-5" /><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5 5.5 5.5 0 0 0 9.5 20H13" /></svg>
         {t("chat.forward.forward")}
       </button>

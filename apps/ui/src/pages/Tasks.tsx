@@ -162,6 +162,8 @@ export function Tasks() {
   const statusWord = (status: TaskStatus) => t(`cards.task.status.${status}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `statusWord` follows `t`
   const model = useMemo(() => boardModel(board.tasks, { grouping, filter, tag, now, older, clearedAt, statusWord }), [board.tasks, grouping, filter, tag, now, older, clearedAt, t]);
+  // A chosen tag no task on the board carries now (Clear finished took its last one) has no pill to unpick it: it goes.
+  if (tag && !model.tags.includes(tag)) setTag(undefined);
   // Clear finished goes with the tasks it clears: its focus would drop to the page, and the next Tab start from the top.
   // The next control in its row (Tasks/Routines, or Group by) takes it.
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -221,9 +223,9 @@ export function Tasks() {
     cancelAnimationFrame(settleFrame.current);
     settleFrame.current = requestAnimationFrame(() => settleAt(scroller));
   };
-  // A short screen (a phone on its side): the rows above the board scroll away with the page, and the board below them
-  // is the page's whole height. A list scrolled while those rows still show moves the page first, so the rows go before
-  // the cards do; a pull past a list's top brings them back.
+  // A short screen (a phone on its side, or upright at a large text size): the rows above the board scroll away with
+  // the page, and the board below them is the page's whole height. A list scrolled while those rows still show moves the
+  // page first, so the rows go before the cards do; a pull past a list's top brings them back.
   const fold = (event: UIEvent<HTMLDivElement>) => {
     const scroller = event.currentTarget;
     const list = event.target as HTMLElement;
@@ -283,7 +285,7 @@ export function Tasks() {
             )}
             {showing === "tasks" && (
               <>
-                <div role="radiogroup" aria-label={t("cards.board.groupBy.label")} className="flex items-center gap-1" onKeyDown={(e) => radioGroupKeys(e, { choose: true })}>
+                <div role="radiogroup" aria-label={t("cards.board.groupBy.label")} className="flex flex-wrap items-center gap-1" onKeyDown={(e) => radioGroupKeys(e, { choose: true })}>
                   <span aria-hidden="true" className="text-xs text-text-muted">{t("cards.board.groupBy.label")}</span>
                   {GROUPINGS.map((g) => (
                     <button key={g} type="button" role="radio" aria-checked={grouping === g} tabIndex={grouping === g ? 0 : -1} data-testid={`tasks-group-${g}`} onClick={() => { setGrouping(g); toTab(0, false); }} className={pill(grouping === g)}>
