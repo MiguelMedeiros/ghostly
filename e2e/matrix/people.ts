@@ -56,6 +56,28 @@ const CALL_BUTTON = `
   const rtc = typeof RTCPeerConnection !== "undefined";
   return { disabled: !button || button.disabled || button.getAttribute("aria-disabled") === "true", title: button?.getAttribute("title") ?? null, rtc, calls: rtc || "__TAURI_INTERNALS__" in window };`;
 
+/**
+ * What a Desktop `say` that never sent finds on the page: the message box (how many match, its words, whether it is
+ * off), where the focus is, the chat's connection label, the dialogs open, and the page's last lines (a send refused
+ * shows its reason there, the words back in the box).
+ */
+const SEND_STATE = `
+  const boxes = [...document.querySelectorAll(arguments[0])];
+  const box = boxes[0];
+  const active = document.activeElement;
+  const text = document.body.innerText;
+  return {
+    boxes: boxes.length,
+    value: box ? box.value : null,
+    disabled: box ? box.disabled : null,
+    focused: active ? active.tagName + (active.getAttribute("placeholder") ? " " + active.getAttribute("placeholder") : "") + (active.getAttribute("aria-label") ? " " + active.getAttribute("aria-label") : "") : null,
+    connection: document.querySelector('[data-testid="connection-options"]')?.getAttribute("aria-label") ?? null,
+    dialogs: [...document.querySelectorAll('[role=dialog], dialog[open]')].map((d) => d.getAttribute("aria-label") || d.innerText.slice(0, 80)),
+    hash: location.hash,
+    visibility: document.visibilityState,
+    lastLines: text.slice(-400),
+  };`;
+
 /* ---------- the browser clients ---------- */
 
 export function webPerson(actor: Actor): Person {
@@ -228,11 +250,25 @@ export async function desktopPerson(name: string, options: {
       // Enter sends it and empties the box. A failed call may still have pressed it: Enter again only when the box still
       // holds the text a while later, so the text never goes twice.
       const left = () => run<string | null>(`return document.querySelector(arguments[0])?.value ?? null;`, box);
+      let pressed: unknown = null;
       await expect(async () => {
         if (await left() !== text) return;
-        await app().type(box, "\uE007").catch(() => {});
+        await app().type(box, "\uE007").then(() => { pressed = null; }, (error: unknown) => { pressed = error; });
         await expect.poll(left, { timeout: 10_000 }).not.toBe(text);
-      }, `${name} sends “${text}”`).toPass({ timeout: 60_000 });
+      }, `${name} sends “${text}”`).toPass({ timeout: 60_000 }).catch(async (error: Error) => {
+        // Seen once on Omarchy (compat.spec.ts, the first text over the DHT) with nothing said of why: what the page
+        // shows now, read in one script and bounded, since a page that stopped answering is an answer too. The link and
+        // pkarr lines are in the apps' ghostly.log, which the spec attaches.
+        const state = await Promise.race([
+          run<unknown>(SEND_STATE, box).catch((failure: Error) => `no answer: ${failure.name}: ${failure.message}`),
+          new Promise<string>((done) => setTimeout(() => done("no answer in 10 s"), 10_000).unref()),
+        ]);
+        const enter = pressed instanceof Error ? `${pressed.name}: ${pressed.message}` : "no error";
+        const said = error.message;
+        error.message += `\n\nThe last Enter: ${enter}\n${name}'s page: ${JSON.stringify(state, null, 2)}`;
+        error.stack = error.stack?.replace(said, error.message);
+        throw error;
+      });
     },
     shows: (text) => run<boolean>(`
       const pane = document.querySelector(".chat-wallpaper");

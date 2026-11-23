@@ -26,10 +26,15 @@ try { launch = readFileSync(state, "utf8").split("\\n").filter(Boolean).length +
 appendFileSync(state, port + " " + nativePort + "\\n");
 const lost = (process.env.FAKE_DRIVER_LOSES ?? "").split(",").includes(String(launch));
 const unanswered = (process.env.FAKE_DRIVER_HANGS ?? "").split(",").filter(Boolean);
+const failing = (process.env.FAKE_DRIVER_FAILS ?? "").split(",").filter(Boolean);
 if (lost) process.stderr.write("FATAL: Unable to listen for HTTP server at host 127.0.0.1 and port " + nativePort + ".\\n");
 createServer((request, response) => {
   if (lost) return request.socket.destroy();
   if (unanswered.some((call) => request.method + " " + request.url === call)) return;
+  if (failing.some((call) => request.method + " " + request.url === call)) {
+    response.statusCode = 500;
+    return response.end(JSON.stringify({ value: { error: "unknown error", message: "", stacktrace: "" } }));
+  }
   const answer = (value) => response.end(JSON.stringify({ value }));
   if (request.method === "POST" && request.url === "/session") return answer({ sessionId: "s" + launch });
   if (request.method === "POST" && request.url === "/session/s" + launch + "/execute/sync") return answer(true);
@@ -88,6 +93,24 @@ describe.skipIf(process.platform === "win32")("a WebDriver request with no answe
     const { app, stop } = await openDesktop({ binary: "/nonexistent/ghostly", home: join(dir, "home"), answerMs: 500 });
     try {
       await expect(app.text('[title="New chat"]')).rejects.toThrow(/^POST http:\/\/127\.0\.0\.1:\d+\/session\/s1\/element: no answer in 0\.5 s$/);
+    } finally {
+      await stop();
+    }
+  }, 15_000);
+});
+
+/*
+ * A command the driver fails with an empty message, as WebKitWebDriver does now and then (`unknown error`, message "").
+ * Only the message was kept, so a Desktop e2e step that kept failing so (compat.spec.ts's first text on Omarchy) ended
+ * with an error that said nothing at all.
+ */
+describe.skipIf(process.platform === "win32")("a WebDriver error with no message", () => {
+  it("says the driver's error", async () => {
+    vi.stubEnv("FAKE_DRIVER_FAILS", "POST /session/s1/element");
+
+    const { app, stop } = await openDesktop({ binary: "/nonexistent/ghostly", home: join(dir, "home") });
+    try {
+      await expect(app.text('[title="New chat"]')).rejects.toThrow(/^POST http:\/\/127\.0\.0\.1:\d+\/session\/s1\/element: unknown error$/);
     } finally {
       await stop();
     }
