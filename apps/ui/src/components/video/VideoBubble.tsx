@@ -2,12 +2,12 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useTabTrap } from "../../hooks/useDismiss";
+import { useFileActions } from "../../hooks/useFileActions";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
 import { formatFileSize } from "../../lib/format";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../../lib/fileStatus";
-import type { FileAction } from "../../lib/platform";
 import { onCallWindowShown, windowFilled } from "../../lib/serviceWindows";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
@@ -18,7 +18,6 @@ import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry"
 import { useT } from "../../contexts/I18nContext";
 import { NAME, withName } from "../apps/aroundName";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
-import { roomHeld } from "../../lib/filesComing";
 import { FilesStillComing } from "../chat/FilesStillComing";
 import { ownDirection } from "../../lib/ownDirection";
 
@@ -63,9 +62,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
    */
   const [theater, setTheater] = useState(false);
   const canTheater = typeof document !== "undefined" && !document.fullscreenEnabled && !!platform?.fullscreenWindow;
-  const [actionError, setActionError] = useState("");
-  // Accept refused for the files still coming: which ones, from which chat, show under the offer (FileBubble).
-  const [heldRoom, setHeldRoom] = useState(false);
+  // Accept refused for the files still coming (`heldRoom`): which ones, from which chat, show under the offer (FileBubble).
+  const { act, actionError, setActionError, heldRoom, acceptRef } = useFileActions(platform, file.id);
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
@@ -73,7 +71,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
 
   const rootRef = useRef<HTMLDivElement>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
-  useFocusKept(bubbleRef);
+  // A Cancel in the list of files still coming, or the ⓘ, gone with the refusal: the focus goes to Accept.
+  useFocusKept(bubbleRef, () => acceptRef.current);
   // Filling the window, it is over everything: Tab goes round its own controls, not to the chat under it.
   useTabTrap(rootRef, theater);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -249,11 +248,6 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   // Sent now: "It plays once it has been sent" is over, and the play button is back.
   useEffect(() => { if (ready) setProblem((was) => (was === "not-yet" ? null : was)); }, [ready]);
 
-  const act =(action: FileAction) => {
-    setActionError("");
-    setHeldRoom(false);
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => { setActionError(problemLine(error, t)); setHeldRoom(roomHeld(error)); });
-  };
   const save = () => {
     if (!platform) return;
     setActionError("");
@@ -376,6 +370,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                 <>
                   {/* Not turned off by a room shown less than its size: that room may be old, and the engine reads it again. */}
                   <button
+                    ref={acceptRef}
                     type="button"
                     data-testid="video-accept"
                     onClick={() => act("accept")}
