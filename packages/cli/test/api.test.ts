@@ -1452,6 +1452,31 @@ describe("the engine passthrough", () => {
     expect(engine.forwardMessages).toHaveBeenCalledTimes(3);
     expect(engine.sendFile).toHaveBeenCalledOnce();
   });
+
+  it("reads a forwarded file's name and type, which the engine sends again, as file send reads them", async () => {
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const file = (name: string, mime: string) => ({ file: { id: "f", name, size: 1, mime } });
+    const { ctx, node } = fake([
+      msg("m_named", 5, { text: "", ...file(seed, "text/plain") }),
+      msg("m_typed", 6, { text: "", ...file("a.bin", "application/nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5") }),
+      msg("m_file", 7, { text: "", ...file("a.txt", "text/plain") }),
+    ]);
+    Object.assign(node, { forwardMessages: vi.fn(async () => ({ results: [{ messageIds: ["me:1:0"], sent: [], error: null }] })) });
+    const engine = node as unknown as Record<"forwardMessages", ReturnType<typeof vi.fn>>;
+    for (const id of ["m_named", "m_typed"]) {
+      await expect(callApi(ctx, "chat.forward", { chat: "Alice", messages: [id], to: ["Bob"] }), id).rejects.toMatchObject({ code: "confirm", details: { messageId: id } });
+      await expect(callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: [id], to: ["chat-two"] } }), id).rejects.toMatchObject({ code: "confirm" });
+    }
+    expect(engine.forwardMessages).not.toHaveBeenCalled();
+    // A plain file goes as it did; with force, the others go too.
+    await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["m_file"], to: ["Bob"] });
+    await callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: ["m_file"], to: ["chat-two"] } });
+    for (const id of ["m_named", "m_typed"]) {
+      await callApi(ctx, "chat.forward", { chat: "Alice", messages: [id], to: ["Bob"], force: true });
+      await callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: [id], to: ["chat-two"] }, force: true });
+    }
+    expect(engine.forwardMessages).toHaveBeenCalledTimes(6);
+  });
 });
 
 describe("groups", () => {
