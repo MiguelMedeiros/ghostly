@@ -1,9 +1,10 @@
 import { act, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { NostrSocialSettings } from "@ghostly/browser/nostr/types";
+import type { NostrOwnView, NostrSocialSettings } from "@ghostly/browser/nostr/types";
 import { NostrSection } from "../../components/nostr/NostrSection";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
+import { now } from "./views";
 
 // covers: nostr.social.profile, nostr.social.publish
 
@@ -74,4 +75,15 @@ describe("Identities → Nostr relays", () => {
     await user.click(screen.getByTestId("nostr-auto-load"));
     expect(fakeEngine.callsTo("updateSettings")).toEqual([{ settings: { nostr: { publish: true } } }, { settings: { nostr: { autoLoadProfiles: true } } }]);
   });
+});
+
+// The person's own profile says the relays it came from as the language lists them, each isolated: not "a, b".
+it.each([
+  ["ja", "プロフィール: ⁨relay.damus.io⁩、⁨nos.lol⁩ から "],
+  ["ar", "الملف من ⁨relay.damus.io⁩ و⁨nos.lol⁩ "],
+] as const)("Identities → Nostr in %s names the relays the profile came from the way the language lists them", (language, text) => {
+  renderApp(<NostrSection />, { language });
+  const own: NostrOwnView = { subject: "a".repeat(64), npub: "npub1own", profile: { fetchedAt: now(), relays: DEFAULTS.split("\n"), stale: false, found: true, profile: { name: "Me", hasPicture: false, eventAt: now(), eventId: "e1" } } };
+  act(() => fakeEngine.update({ nostr: { ...nostr(), own: [own] } }));
+  expect(screen.getByTestId("nostr-own").textContent).toContain(text);
 });

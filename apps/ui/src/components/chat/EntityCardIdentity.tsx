@@ -10,6 +10,7 @@ import { identityStanding } from "./identityStanding";
 import { useT, type Translate } from "../../contexts/I18nContext";
 import { problemLine } from "../../lib/problemText";
 import { localProvider } from "../../lib/providerWords";
+import { namesText } from "../../lib/listText";
 
 const fetchForCard = boundedIdentityFetch({ online: () => globalThis.navigator?.onLine !== false });
 const host = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
@@ -31,7 +32,7 @@ function stateWords(t: Translate, state: BadgeState, named: string): string {
  * picture link's would). The other lookups ask only this device or fixed relays.
  */
 function lookupOf(t: Translate, provider: "pubky" | "did", subject: string, hideIp: boolean): { offline: boolean; hidden?: boolean; where: string } {
-  if (provider === "pubky") return { offline: false, where: t("chat.entity.lookupPubky", { relays: PUBKY_RELAYS.map(host).join(", ") }) };
+  if (provider === "pubky") return { offline: false, where: t("chat.entity.lookupPubky", { relays: namesText(PUBKY_RELAYS.map(host), t) }) };
   const { method, id } = parseDid(subject);
   if (method === "key" || method === "jwk") return { offline: true, where: t("chat.entity.lookupLocal") };
   if (method === "dht") return { offline: false, where: t("chat.entity.lookupDht") };

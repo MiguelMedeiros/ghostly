@@ -68,7 +68,7 @@ test("the chat's payment cards: flip through them, turn one over, and back to th
   await card("bitcoin").hover();
   await expect(card("bitcoin")).toHaveAttribute("aria-checked", "true");
   await expect(card("bitcoin")).toBeDisabled();
-  await expect(card("bitcoin")).toHaveAttribute("title", /Your contact has no Testnet Bitcoin wallet/);
+  await expect(card("bitcoin")).toHaveAttribute("title", /Your contact has no Bitcoin \(Testnet\) wallet/);
   await expect(page.getByTestId("payment-use")).toBeDisabled();
   await card("bitcoin").click({ force: true });
   await expect(composer).toHaveAttribute("data-side", "cards");
