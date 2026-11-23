@@ -615,6 +615,19 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       }, { timeout: 10_000 });
     }, 15_000);
 
+    it("a chat opened again while every one is busy keeps one retry, not one more per opening", async () => {
+      const rows = [...older().slice(0, 8), row({ ...paired(), id: "chat-y" })];
+      const { node, linkOf } = await nativeStarted(...rows);
+      for (const r of rows.slice(0, 8)) linkOf(r.id).canReleaseEndpoint.mockReturnValue(false);
+      for (let i = 0; i < 3; i++) {
+        node.setOnScreen(["chat-y"], "chat-y");
+        await node["nativeQueue"];
+      }
+      const tries = vi.spyOn(node as never as { ensureNativeEndpoints(linkId: string): Promise<void> }, "ensureNativeEndpoints");
+      await new Promise((resolve) => setTimeout(resolve, 3_500));
+      expect(tries.mock.calls.filter(([id]) => id === "chat-y")).toHaveLength(1);
+    }, 15_000);
+
     describe("every listener carrying a live session (a Linux Desktop or a CLI bot talking to more contacts than that)", () => {
       type Holder = Recorded & { registerEndpoint: ReturnType<typeof vi.fn>; releaseEndpoint: ReturnType<typeof vi.fn>; canReleaseEndpoint: ReturnType<typeof vi.fn>;
         yieldEndpoint: ReturnType<typeof vi.fn>; lastActivityAt: number; callOn: boolean };
