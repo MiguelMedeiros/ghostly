@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { PREVIEWABLE_IMAGE, previewable, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
+import { useFileActions } from "../hooks/useFileActions";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
@@ -7,7 +8,6 @@ import { downloadFile } from "../lib/fileDownload";
 import { canRetryFile, failedReason, fileHeld, filePercent, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction, statusSize } from "../lib/fileStatus";
 import { knownPictureSize, MAX_EDGE, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
 import { forgetPicture, readPicture, type HeldPicture } from "../lib/pictureReads";
-import type { FileAction } from "../lib/platform";
 import { AvatarViewer } from "./AvatarViewer";
 import { Highlight } from "./chat/ChatSearch";
 import { FORCED_EDGE, RoundRetry, WhyButton, WhyText } from "./chat/RoundRetry";
@@ -15,7 +15,6 @@ import { useT } from "../contexts/I18nContext";
 import { NAME, SECOND_NAME, withNames } from "./apps/aroundName";
 import type { ChatFile } from "../lib/types";
 import { problemLine, saveProblemLine } from "../lib/problemText";
-import { roomHeld } from "../lib/filesComing";
 import { FilesStillComing } from "./chat/FilesStillComing";
 
 /** A press this long is the message's long press (`LONG_PRESS_MS` in MessageBubble.tsx), not a tap. */
@@ -38,9 +37,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const [found, setFound] = useState<{ id: string; size: ImageMeta } | null>(null);
   /** The preview as it loaded, or that it could not be shown, for this URL. */
   const [loaded, setLoaded] = useState<{ url: string; ok: boolean } | null>(null);
-  const [actionError, setActionError] = useState("");
-  // Accept refused for the files still coming: which ones, from which chat, show under the offer.
-  const [heldRoom, setHeldRoom] = useState(false);
+  // Accept refused for the files still coming (`heldRoom`): which ones, from which chat, show under the offer.
+  const { act, actionError, setActionError, heldRoom, acceptRef } = useFileActions(platform, file.id);
   /** A resend or a request asked for, until the transfer answers by moving on. */
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
@@ -57,8 +55,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const [viewing, setViewing] = useState(false);
   const opener = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  const acceptRef = useRef<HTMLButtonElement>(null);
-  useFocusKept(rootRef);
+  // A Cancel in the list of files still coming, or the ⓘ, gone with the refusal: the focus goes to Accept.
+  useFocusKept(rootRef, () => acceptRef.current);
   /** When a finger (or a pen) went down on the picture: held as long as a long press, its tap opens nothing. */
   const pressedAt = useRef<number | null>(null);
   useEffect(() => {
@@ -137,11 +135,6 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   // kept for the run (lib/pictureReads.ts), so the chat opened again shows it without reading it.
   useEffect(() => () => { preview?.release(); }, [preview]);
 
-  const act = (action: FileAction) => {
-    setActionError("");
-    setHeldRoom(false);
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => { setActionError(problemLine(error, t)); setHeldRoom(roomHeld(error)); });
-  };
   /** The same path as Download in the message's menu: the system's save dialog where there is one, else a download. */
   const save = () => {
     if (!platform) return;
