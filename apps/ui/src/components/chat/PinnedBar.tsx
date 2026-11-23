@@ -49,7 +49,7 @@ export function PinnedBar({ pin, index, onUnpin, returnFocus, appCards = false }
     <div data-testid="pinned-bar" onFocus={e => { held.current = e.target as HTMLElement; }} onBlur={onBlur} className="pinned-bar shrink-0 border-b border-border bg-panel-header px-3 py-1 max-md:px-2">
       <div className="flex items-center gap-1">
         <button type="button" data-testid="pinned-open" data-state={state} onClick={open} disabled={!original}
-          className="min-w-0 flex-1 flex items-center gap-2 rounded px-1 py-0.5 text-start enabled:cursor-pointer enabled:hover:bg-surface-hover">
+          className="tap-target min-w-0 flex-1 flex items-center gap-2 rounded px-1 py-0.5 text-start enabled:cursor-pointer enabled:hover:bg-surface-hover">
           <span className="shrink-0 text-accent"><PinIcon active size={15} /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-[11px] font-medium text-accent">{t("chat.pinned.bar")}</span>
