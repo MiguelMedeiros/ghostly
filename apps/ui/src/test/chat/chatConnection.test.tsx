@@ -1631,6 +1631,14 @@ describe("ChatConnection on a phone: every button of the panel is a 44 px target
     expect(screen.getByTestId("connection-history-more")).toHaveClass(TALL);
   });
 
+  it("Details keeps 4 px from Reconnect above it and from a key or Verify first under it", () => {
+    // Touching 44 px targets at a fractional y: the browser gave Reconnect their shared pixel row, and Details measured
+    // 56 × 43 in Arabic (e2e/web/phone-touch-targets.spec.ts). A margin may grow with the text size: rem is fine.
+    banner({ dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" });
+    expect(screen.getByTestId("connection-reconnect")).toBeInTheDocument();
+    expect(screen.getByTestId("connection-details-summary")).toHaveClass("max-md:my-1");
+  });
+
   it("Verify, 40 px wide in Arabic and 2 characters in ja/zh, then The codes match", async () => {
     const { user } = banner({ peerParticipationKey: "saved", pairing: ready({ code: "4821 0937", peerKey: "peer" }) });
     expect(screen.getByTestId("pair-verify")).toHaveClass(TALL, WIDE);

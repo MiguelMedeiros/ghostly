@@ -354,8 +354,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
         {!dht && !peerLost &&link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !liveOff && !ready && !awaitingJoin && online && link && <FocusSafeButton className={`-mx-1 min-h-9 rounded-md px-2 max-md:min-h-[44px] text-accent hover:bg-surface-hover disabled:opacity-40 aria-disabled:opacity-40 ${focus}`} disabled={busy}
           ref={reconnectRef} aria-disabled={dialing || undefined} data-testid="connection-reconnect"
           onClick={() => void reconnect(link.id)}>{t(dialing ? "connection.panel.reconnecting" : "connection.panel.reconnect")}</FocusSafeButton>}
+        {/* my-1 on a phone: Reconnect above and a key or Verify first in the open Details are 44 px too, and touching at
+            a fractional y the browser gave their shared pixel row to one of them (Details 56 × 43 in Arabic). */}
         <details className="text-[11px]" data-testid="connection-details">
-          <summary data-testid="connection-details-summary" className={`w-fit cursor-pointer rounded-md px-1 py-2 max-md:min-h-[44px] max-md:min-w-[44px] max-md:py-[12px] text-text-secondary ${focus}`}>{t("connection.panel.details")}</summary>
+          <summary data-testid="connection-details-summary" className={`w-fit cursor-pointer rounded-md px-1 py-2 max-md:my-1 max-md:min-h-[44px] max-md:min-w-[44px] max-md:py-[12px] text-text-secondary ${focus}`}>{t("connection.panel.details")}</summary>
           <div className="space-y-2 px-1 pb-2">
             {wait && waitText && <div data-testid="connection-waiting" data-reason={wait.reason} data-transport={wait.transport} className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
               <p className="font-medium text-text-primary">{waitText.label}</p>
