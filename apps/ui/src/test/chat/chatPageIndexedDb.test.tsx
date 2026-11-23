@@ -168,10 +168,11 @@ describe("a chat's Tech Info", () => {
     it("has its values that copy a thumb's height, at least 24 px", async () => {
       // The session id's row was 230 x 16 px on a phone on its side.
       await techInfo("on");
-      // The session id and both keys (the connection panel's keys have the same title).
+      // The session id and both keys, and the connection panel's keys (the same title): those are 44 px, as the
+      // panel's other buttons on a phone.
       const copies = screen.getAllByTitle("Click to copy");
       expect(copies.length).toBeGreaterThan(0);
-      for (const copy of copies) expect(copy.className.split(/\s+/)).toContain("max-md:min-h-6");
+      for (const copy of copies) expect(copy.className.split(/\s+/)).toContain(copy.dataset.testid?.startsWith("connection-key-") ? "max-md:min-h-[44px]" : "max-md:min-h-6");
     });
   });
 });
