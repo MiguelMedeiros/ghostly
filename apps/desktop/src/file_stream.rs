@@ -43,6 +43,12 @@ pub const PLAY_MARGIN: u64 = 500 * 1024 * 1024;
 pub const NO_ROOM_TO_PLAY: &str = "no_room_to_play";
 
 /// The types a file is served as: what `<video>` and `<audio>` play. Anything else goes out as opaque bytes.
+///
+/// The same set as the apps' `PLAYABLE_VIDEO` and `PLAYABLE_AUDIO` (packages/core/src/video.ts, voice.ts), which give
+/// a file its player; packages/core/test/desktopMediaTypes.test.ts keeps the two together. A file goes out as the type
+/// it came with (`audio/x-wav` stays `audio/x-wav`), never renamed to a canonical one: the page chose to show a player
+/// from `canPlayType` of that very type, and the Blob the web app and `bytes: true` play carries it too
+/// (`safeBlobType`), so both ways hand WebKit the same type.
 const MEDIA_TYPES: &[&str] = &[
     "video/mp4",
     "video/webm",
@@ -51,12 +57,17 @@ const MEDIA_TYPES: &[&str] = &[
     "video/x-m4v",
     "audio/webm",
     "audio/ogg",
+    "audio/opus",
     "audio/mp4",
     "audio/mpeg",
+    "audio/mp3",
     "audio/aac",
     "audio/wav",
+    "audio/x-wav",
+    "audio/wave",
     "audio/x-m4a",
     "audio/flac",
+    "audio/x-flac",
 ];
 
 struct Grant {
@@ -998,6 +1009,28 @@ mod tests {
             StatusCode::METHOD_NOT_ALLOWED
         );
         fs_cleanup(dir);
+    }
+
+    #[test]
+    fn every_type_the_apps_play_is_served_as_itself() {
+        for mime in MEDIA_TYPES {
+            assert_eq!(media_type(mime), *mime);
+        }
+        // What Android's pickers and other systems call a WAV, an MP3, an Opus or a FLAC.
+        for mime in [
+            "audio/opus",
+            "audio/mp3",
+            "audio/x-wav",
+            "audio/wave",
+            "audio/x-flac",
+        ] {
+            assert_eq!(media_type(mime), mime);
+        }
+        assert_eq!(media_type("Audio/X-WAV; rate=8000"), "audio/x-wav");
+        assert_eq!(media_type("audio/ogg; codecs=opus"), "audio/ogg");
+        for other in ["audio/x-aiff", "video/x-matroska", "audio/", ""] {
+            assert_eq!(media_type(other), "application/octet-stream", "{other}");
+        }
     }
 
     #[test]
