@@ -31,6 +31,7 @@ import { Notice } from "./ui/Notice";
 import { SecretGuardDialog } from "./SecretGuardDialog";
 import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { fillNames } from "../lib/fillNodes";
+import { isolate } from "../lib/ownStatus";
 import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 interface PaymentComposerProps {
@@ -301,9 +302,11 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         // Fedimint, but no federation in common: their request carries an invoice of their federation instead.
         clearInterval(timer);
         setAsking(null);
+        // A Notice's title is a string: the name goes in it between FSI and PDI, as the sheet's <bdi>s keep it.
+        const name = isolate(who);
         setError(answer.invoice
-          ? { tone: "error", title: t("payments.composer.error.noFederationInvoice", { name: who }), next: t("payments.composer.error.noFederationInvoiceNext") }
-          : { tone: "error", title: t("payments.composer.error.noFederation", { name: who }), next: t("payments.composer.error.noFederationNext") });
+          ? { tone: "error", title: t("payments.composer.error.noFederationInvoice", { name }), next: t("payments.composer.error.noFederationInvoiceNext") }
+          : { tone: "error", title: t("payments.composer.error.noFederation", { name }), next: t("payments.composer.error.noFederationNext") });
       } else if (answer?.target && context && bound) {
         clearInterval(timer);
         const token = answer.target.method === "usdt";

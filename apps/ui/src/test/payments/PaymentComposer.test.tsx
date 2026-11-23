@@ -1467,6 +1467,24 @@ describe("the payment sheet's names, each in its own direction", () => {
     expect(isolated(one(".composer-sheet-who"))).toEqual(["محمد 🚀"]);
     expect(one(".composer-sheet-who")).toHaveTextContent("with محمد 🚀");
   });
+
+  // The error is a Notice's title, a string: the name goes in it between FSI and PDI, "Bob!" read "!Bob" in Arabic.
+  it.each([["no invoice", undefined], ["an invoice of their federation", "lnbcrt1theirs"]])("no federation in common (%s)", async (_, invoice) => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      rememberRail("peer", "fedimint:testnet");
+      const fed = { federations: [{ id: "ab".repeat(32), name: "Fed", guardians: [], consensusVersion: "2.1", network: "regtest" as const, modules: [], joinedAt: 1, invite: "fed11qq", balance: 2_000, status: "ready" as const, lightning: true }], balance: 2_000, history: [] };
+      const { user, engine } = open(everyWallet({ fedimint: fed }), "ar", "Bob!");
+      engine.on("askToPay", () => ({ askId: "ask-1" }));
+      await user.click(screen.getByTestId("payment-use"));
+      await user.type(amount(), "3");
+      await user.click(send());
+      await waitFor(() => expect(engine.callsTo("askToPay")).toHaveLength(1));
+      act(() => engine.update({ payments: { "req-1": paymentView({ id: "req-1", kind: "request", direction: "in", ask: "ask-1", amount: 3, target: undefined, federations: ["cd".repeat(32)], invoice }) } }));
+      act(() => { vi.advanceTimersByTime(400); });
+      expect(await screen.findByRole("alert")).toHaveTextContent("⁨Bob!⁩");
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 // covers: payments.chat.cards, payments.chat.review, payments.cashu.send, payments.cashu.request, payments.mainnet-confirm
