@@ -380,6 +380,22 @@ describe("a Lightning address or LNURL the mint leaves pending reads as waiting,
       expect(screen.queryByTestId("lnurl-failed-next")).toBeNull();
     });
 
+    it("through the default Lightning card (the mints): the fee the mint kept on its journal's failed payment is said", async () => {
+      const hash = decodeBolt11(REGTEST_INVOICE)!.paymentHash!;
+      const failed = { ...stateOf({ balance: 4_999, history: [out("fee", 1, "melt-q")] } as Partial<WalletState>), lightning: { mode: "testnet", providerId: "cashu-mint", status: "ready", offered: [], recent: [{ direction: "out", paymentHash: hash, invoice: REGTEST_INVOICE, amount: 5, createdAt: Date.now(), state: "failed", fee: 1 }] } } as never;
+      fakeEngine.setState({ wallet: stateOf({ setAside: 6 } as Partial<WalletState>) });
+      const wallet: WalletPlatform = Object.assign(Object.create(servicesPlatform!.wallet.forNetwork("testnet")), { ...methods("alice@example.com", false, "cashu-mint"), lightningAddressInvoice: async () => ({ invoice: REGTEST_INVOICE, note: "Paid alice@example.com" }) });
+      const { user, engine } = renderApp(<LightningAddressPay wallet={wallet} text="alice@example.com" />);
+      await user.click(screen.getByTestId("lnurl-lookup"));
+      await user.type(await screen.findByTestId("lnurl-amount"), "5");
+      await user.click(screen.getByTestId("lnurl-invoice"));
+      await user.click(await screen.findByTestId("lnurl-pay"));
+      expect(await screen.findByTestId("lnurl-pending")).toHaveTextContent("The payment is still pending at the mint.");
+      act(() => engine.setState({ wallet: failed }));
+      expect(await screen.findByTestId("lnurl-failed-title")).toHaveTextContent("The payment failed: the payee was not paid.");
+      expect(screen.getByTestId("lnurl-failed-next")).toHaveTextContent("What was set aside for it is back in your balance, less 1 test sat the mint kept as a fee (in the history).");
+    });
+
     it("through a Lightning card: paid in its journal, it stays paid once 20 newer entries push it out", async () => {
       const hash = decodeBolt11(REGTEST_INVOICE)!.paymentHash!;
       const withRecent = (recent: unknown[]) => { const s = stateOf({}); return { ...s, lightning: { mode: "testnet", providerId: "lnd", status: "ready", offered: [], recent } } as never; };

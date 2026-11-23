@@ -15,6 +15,9 @@ import { offeredIn } from "../src/engine/paymentAdapters/providers/registry";
 import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { GhostlyNode } from "../src/engine/node";
+import { TEST_MINT } from "../src/shared/mints";
+import type { WalletEvents } from "../src/engine/wallet";
+import type { PendingMelt } from "../src/shared/types";
 // covers: wallet.lightning.sources, wallet.lightning.provider-contract, wallet.lightning.cashu-mint.receive, wallet.lightning.cashu-mint.pay, wallet.onchain.sources, payments.chat.reconcile
 
 const settings = async () => wrap<unknown[]>((await store(STORES.settings, "readonly")).getAll());
@@ -364,6 +367,26 @@ describe("the engine", () => {
     // The flat fields are Mainnet's, for a caller naming no network.
     expect(node.getState().wallet).toMatchObject({ lightning: { mode: "mainnet", providerId: CASHU_MINT_SOURCE }, bitcoin: { status: "none" } });
     expect(node.getState().wallet.networks?.testnet.bitcoin).toMatchObject({ status: "none" });
+    await node.shutdown();
+  });
+
+  it("a Lightning card through the mints: a pending payment that fails with a fee the mint kept has that fee on its entry", async () => {
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false, providers: { lightning: [cashuMint], onchain: [] } });
+    vi.spyOn(node["wallet"], "view").mockImplementation(async () => ({ mints: [], balance: 0, history: [], feesPaid: 0 }));
+    vi.spyOn(node["wallet"], "quoteInvoice").mockResolvedValue({ quote: "melt-q", mint: TEST_MINT, amount: 5, feeReserve: 1 });
+    // The mint leaves the melt pending.
+    vi.spyOn(node["wallet"], "payQuote").mockResolvedValue(false);
+    await node["lightnings"].testnet.start();
+    const invoice = fakeInvoice(5, crypto.getRandomValues(new Uint8Array(32)));
+    const quote = await node.walletQuoteInvoice({ invoice, network: "testnet" });
+    expect(await node.walletPayQuote({ quote: quote.quote, mint: quote.mint })).toEqual({ paid: false });
+    const entry = () => node.getState().wallet.networks?.testnet.lightning?.recent.find((o) => o.direction === "out");
+    await vi.waitFor(() => expect(entry()).toMatchObject({ state: "pending", providerId: CASHU_MINT_SOURCE }));
+
+    // The mint fails it and keeps 1 sat: the Cashu wallet booked its fee row and tells the engine, with the fee.
+    const melt: PendingMelt = { quote: "melt-q", mint: TEST_MINT, request: invoice, amount: 5, secrets: [], outlay: 6, outputs: [], createdAt: 0 };
+    (node["wallet"] as unknown as { events: WalletEvents }).events.onMeltResolved(melt, false, 1);
+    await vi.waitFor(() => expect(entry()).toMatchObject({ state: "failed", fee: 1 }));
     await node.shutdown();
   });
 });

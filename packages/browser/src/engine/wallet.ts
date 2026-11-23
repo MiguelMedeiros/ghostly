@@ -308,8 +308,11 @@ export interface WalletEvents {
   onTestMintNeeded(mint: string): Promise<void>;
   /** An invoice of ours was paid and its ecash is in the wallet. */
   onQuotePaid(quote: StoredQuote): void;
-  /** A Lightning payment the mint had left pending settled, one way or the other. */
-  onMeltResolved(melt: PendingMelt, paid: boolean): void;
+  /**
+   * A Lightning payment the mint had left pending settled, one way or the other. `fee`: what a failed one cost, kept by
+   * the mint (booked as a `fee` row under the melt quote); absent when it cost nothing.
+   */
+  onMeltResolved(melt: PendingMelt, paid: boolean, fee?: number): void;
   /**
    * A swap the mint had not answered is settled, after the call that made it was over: `done`, what it brought is in
    * the wallet with its records; otherwise the mint never made it, and what it held is free again.
@@ -1996,9 +1999,11 @@ export class CashuWallet {
         return current ? this.settleMelt(current) : null;
       });
       if (outcome === "paid" || outcome === "unpaid") {
-        this.takeFailedFee(melt.quote);
+        const fee = this.takeFailedFee(melt.quote);
         this.spentAway.delete(melt.quote);
-        this.events.onMeltResolved(melt, outcome === "paid");
+        // The fee goes with it: a Lightning card through the mints says it, as the Cashu card does from its fee row.
+        if (fee > 0) this.events.onMeltResolved(melt, false, fee);
+        else this.events.onMeltResolved(melt, outcome === "paid");
         this.events.onChange();
       }
     } catch (error) {
