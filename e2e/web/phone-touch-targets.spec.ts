@@ -198,6 +198,70 @@ test.describe("on a phone a system line that wraps", () => {
   });
 });
 
+/**
+ * What a message's ⋮ opens shows only once it is chosen, so the screens above never reach it: the Delete question's
+ * Cancel and Delete were 40 px tall, the reply and edit bars' × 36 px wide, the pinned message 42 px tall, the details'
+ * × 28 px and its Copy as JSON 26 px tall, the select bar's Cancel 34 px and its Forward 41 px tall, the Forward dialog's
+ * Cancel and Send 41 px tall. The details' copy values stay 24 px tall rows in a dense list, so only its × and Copy as
+ * JSON are measured there.
+ */
+test("on a phone a message's Delete question, reply and edit bars, pin, details, select bar and Forward are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:chat.paired.delete-message", "@feature:chat.replies", "@feature:chat.edit", "@feature:chat.pins", "@feature:chat.paired.message-details", "@feature:chat.forward"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(4 * 60_000);
+  const alice = await peer("alice", { mobile: true, viewport: { width: 375, height: 667 } });
+  const bob = await peer("bob");
+  await link(alice, bob);
+  await connect(alice, bob);
+  await say(bob, "theirs on a small screen");
+  await say(alice, "mine on a small screen");
+  await expect(chat(alice).getByText("theirs on a small screen")).toBeVisible();
+  const { page } = alice;
+  const small: string[] = [];
+  const measure = async (state: string, controls?: string) => {
+    for (const target of await smallTargets(page, 44, controls)) small.push(`${state}: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+    await page.screenshot({ path: testInfo.outputPath(`${state.replace(/\W+/g, "-")}.png`) });
+  };
+  const choose = async (text: string, item: string) => {
+    await chat(alice).locator("[data-message-row]").filter({ hasText: text }).last().getByTestId("message-options").click();
+    await page.getByTestId("message-menu").getByTestId(item).click();
+  };
+
+  await choose("theirs on a small screen", "message-delete");
+  await expect(page.getByTestId("message-delete-confirm")).toBeVisible();
+  await measure("Delete question", "[data-testid=message-delete-menu] button");
+  await page.keyboard.press("Escape");
+
+  await choose("theirs on a small screen", "message-reply");
+  await expect(page.getByTestId("composer-reply")).toBeVisible();
+  await measure("reply bar", "[data-testid=composer-reply-cancel]");
+  await page.getByTestId("composer-reply-cancel").click();
+
+  await choose("mine on a small screen", "message-edit");
+  await expect(page.getByTestId("composer-edit")).toBeVisible();
+  await measure("edit bar", "[data-testid=composer-edit-cancel]");
+  await page.getByTestId("composer-edit-cancel").click();
+
+  await choose("theirs on a small screen", "message-pin");
+  await expect(page.getByTestId("pinned-bar")).toBeVisible();
+  await measure("pinned bar", "[data-testid=pinned-bar] button");
+
+  await choose("theirs on a small screen", "message-details");
+  await expect(page.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes");
+  await measure("details", "[data-testid=message-details-close], [data-testid=message-details-copy-all]");
+  await page.getByTestId("message-details-close").click();
+  await expect(page.getByTestId("message-details")).toHaveCount(0);
+
+  await choose("theirs on a small screen", "message-select-start");
+  await expect(page.getByTestId("select-forward")).toBeEnabled();
+  await measure("select bar", "[data-testid=select-bar] button");
+
+  await page.getByTestId("select-forward").click();
+  await page.getByTestId("forward-target").first().click();
+  await expect(page.getByTestId("forward-send")).toBeEnabled();
+  await measure("Forward dialog", "[data-testid=forward-dialog] button");
+
+  expect(small, "a message's controls under 44 × 44 px on a phone").toEqual([]);
+});
+
 test.describe("the voice recorder on a phone", () => {
   /**
    * The hands-free recorder's bar shows only while it records, so the screens above never reach it: its bin, Pause /
