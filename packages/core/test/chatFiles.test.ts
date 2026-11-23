@@ -1281,6 +1281,23 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect([...w.b.records.values()].filter((r) => r.state === "asking")).toHaveLength(16);
   });
 
+  it("with 16 offers waiting for an answer, a file taken without asking still comes; one that would be asked about is refused", async () => {
+    // A few videos the person has not answered yet, then a photo: the photo was refused as one too many waiting,
+    // though nothing waited for an answer on it.
+    const w = wire();
+    w.b.decide = async (info) => (info.size > 100 ? "ask" : "accept");
+    w.attach();
+    for (let i = 0; i < 16; i++) send(w, file(`big-${String(i).padStart(4, "0")}`, 1000));
+    await until(() => [...w.b.records.values()].filter((r) => r.state === "asking").length === 16);
+    send(w, file("photo-0001", 50));
+    send(w, file("big-0016", 1000));
+    await until(() => ["done", "failed"].includes(state(w.a, "out", "photo-0001")!) && state(w.a, "out", "big-0016") === "failed");
+    expect(w.a.records.get("out:photo-0001")).toMatchObject({ state: "done" });
+    expect(w.a.records.get("out:big-0016")?.error).toContain("too many files");
+    expect(state(w.b, "in", "photo-0001")).toBe("done");
+    expect([...w.b.records.values()].filter((r) => r.state === "asking")).toHaveLength(16);
+  });
+
   it("a contact's files not finished here are counted, not only their bytes: past the limit an offer of 0 bytes is refused", async () => {
     // Every offer of 0 bytes was taken (only bytes were counted): 2,500 of them were 2,500 messages and records here.
     const w = wire();

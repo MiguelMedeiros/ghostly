@@ -9,7 +9,7 @@
 | Implementation | 1:1 calls, with screen sharing from inside a call, in every chat: compatibility chats (`_call`) and the chat session (`calls/1`, live only) |
 | Summary | Voice, video and screen sharing, coordinated apart from the data stream. |
 | Availability | Available |
-| Notes | In every chat while it is live, the Linux desktop included (with media of its own, its webview having no WebRTC; no screen sharing there yet). The microphone and camera, and the speaker where the engine allows it, are chosen in Settings and switched during a call. The CLI calls with voice only. Not in groups. |
+| Notes | In every chat while it is live, the Linux desktop included (with media of its own, its webview having no WebRTC; no screen sharing there yet). The microphone and camera, and the speaker where the engine allows it, are chosen in Settings and switched during a call. The CLI calls with voice only. Group calls: WISP 602. |
 | Feature | [Calls](https://ghostly.tools/#next) |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
@@ -30,7 +30,7 @@ Media transport is negotiated for its actual properties, not assumed to work bec
 
 ## Compatibility, privacy and open decisions
 
-The implemented profile depends conditionally on 101. Other media adapters, group calls, SFU topology, congestion policy and end-to-end media encryption through a forwarding service require separate validation within this draft/900. Do not equate group transport encryption to end-to-end encryption against the forwarding node. No group media guarantee is made here.
+The implemented profile depends conditionally on 101. Group calls through a forwarding node, and their end-to-end encryption, are [602](602-group-calls.md); other media adapters, SFU topology and congestion policy require separate validation. Do not equate group transport encryption to end-to-end encryption against the forwarding node. No group media guarantee is made here.
 
 ## Conformance
 

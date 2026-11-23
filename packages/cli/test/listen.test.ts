@@ -1,5 +1,5 @@
 import { createPrivateKey } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
@@ -637,6 +637,43 @@ describe("listen with an allowlist and --turns", () => {
     expect(readFileSync(got, "utf8").trim().split("\n").map((line) => (JSON.parse(line) as { messageId: string }).messageId)).toEqual([ok, asked]);
     // The hook's GHOSTLY_EVENT_ID is the turn's id, so it holds no id a sender gave either.
     expect(readFileSync(got + ".ids", "utf8").trim().split("\n")).toEqual([`agent.turn:message.received:c1:${ok}`, `agent.turn:group.message:g1:${asked}`]);
+  });
+
+  it("what the allowlist or --turns drops is not held behind a slow hook: other chats and groups never pause the feed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const cursor = join(dir, "cursor"), gate = join(dir, "gate"), got = join(dir, "got");
+    const peerOf = vi.fn(async (chat: string) => ({ c2: OTHER_KEY, c3: KEY })[chat] ?? null);
+    const handle = eventHandler({
+      types: [], turns: true, cursor, print: false, write: () => true, exec: `while [ ! -f '${gate}' ]; do sleep 0.05; done; cat >> '${got}'`,
+      allow: new Allowlist(new Set(["c1"]), new Set([KEY]), new Set(["g1"]), peerOf),
+    });
+    let paused = 0;
+    const feed = new Feed(handle, undefined, () => paused++, () => {});
+    // A chat whose contact key is not known yet goes through the lookup in the chain; once known, it is decided as it comes.
+    writeFileSync(gate, "");
+    feed.take(received("c1", "first", "one"));
+    feed.take(received("c3", "keyed", "hi"));
+    feed.take(received("c2", "learn", "x"));
+    await handle.idle();
+    expect(peerOf.mock.calls.map(([chat]) => chat)).toEqual(["c3", "c2"]);
+    rmSync(gate);
+    // The allowed chat's turn holds the hook.
+    feed.take(received("c1", "second", "two"));
+    expect(handle.behind()).toBe(1);
+    let last!: GhostlyEvent;
+    try {
+      // A group not on --group, a chat not on --from (its key known, not listed), and what is no turn: more than the bound.
+      for (let i = 0; i < MAX_BEHIND + 500; i++) {
+        feed.take([groupMessage("g2", `g${i}`, "@me", { mentioned: true }), received("c2", `c${i}`, "spam"), groupMessage("g1", `n${i}`, "no mention")][i % 3]);
+      }
+      feed.take(last = received("c1", "third", "three"));
+      // Before, each of them was counted: the feed paused at MAX_BEHIND, and the connection was dropped after PAUSE_HOLD_MS.
+      expect(paused).toBe(0);
+      expect(handle.behind()).toBe(2);
+    } finally { writeFileSync(gate, ""); }
+    await vi.waitFor(() => expect(readFileSync(cursor, "utf8").trim()).toBe(String(last.seq)));
+    const ids = readFileSync(got, "utf8").trim().split("\n").map((line) => (JSON.parse(line) as { untrusted: { messageId: string } }).untrusted.messageId);
+    expect(ids).toEqual(["first", "keyed", "second", "third"]);
   });
 
   it("a step that throws is said on stderr; the cursor moves on and later events are still handled", async () => {

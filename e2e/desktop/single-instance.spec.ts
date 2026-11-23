@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { desktopBinary, desktopHome, expect, homeEnv, openDesktop, privateBus, test } from "../support/desktop";
+import { attachDesktopLogs, desktopBinary, desktopHome, expect, homeEnv, openDesktop, privateBus, test } from "../support/desktop";
 import { desktopTestNetworkEnv } from "../../packages/cli/test/support/network";
 
 /**
@@ -29,7 +29,7 @@ test("a second launch on the same profile hands over to the running app and exit
   const running: ChildProcess[] = [];
   try {
     const env = { DBUS_SESSION_BUS_ADDRESS: bus!.address, GHOSTLY_PROFILE: "single" };
-    const { app, stop } = await openDesktop({ home: home.dir, profile: "single", env });
+    const { app, stop, output } = await openDesktop({ home: home.dir, profile: "single", env });
     try {
       await expect.poll(() => app.text('[title="New chat"]'), { timeout: 90_000 }).not.toBeNull();
 
@@ -45,12 +45,16 @@ test("a second launch on the same profile hands over to the running app and exit
       const other = launch({ ...homeEnv(home.dir), ...env, GHOSTLY_PROFILE: "single-other" });
       running.push(other.app);
       expect(await within(other.exited, 20_000), "another profile keeps running").toBeNull();
+    } catch (error) {
+      await test.info().attach("driver output", { body: output(), contentType: "text/plain" });
+      throw error;
     } finally {
       await stop();
     }
   } finally {
     for (const app of running) if (app.exitCode === null) app.kill("SIGKILL");
     bus!.stop();
+    attachDesktopLogs("single", home.dir);
     home.remove();
   }
 });

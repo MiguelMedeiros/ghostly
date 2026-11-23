@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -25,7 +25,7 @@ import { kept } from "../lib/apps/kept";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
 import { appErrorText, appErrorView, appStoreProblemText } from "../lib/apps/errors";
 import { date } from "../lib/identities";
-import { listText } from "../lib/listText";
+import { listParts } from "../lib/listText";
 
 /*
  * Apps (WISP 1200 § Discovery, § Stores, § Updates), a page beside the chat list as Wallets and Identities are: the
@@ -150,6 +150,16 @@ const BuiltInRow = memo(function BuiltInRow({ app, busy, onOpen, onRemove }: { a
   );
 });
 
+/**
+ * A line naming apps ("It lists apps you installed: Chess!, Notes (beta)."): each title keeps its own direction, the
+ * language's "and" between them. Shared with the sentence, "Chess!" read "!Chess" in Arabic, and an Arabic title took
+ * an English line's commas and period into its run.
+ */
+function withTitles(text: string, titles: readonly string[], t: Translate) {
+  return text.split(NAME).flatMap((part, i) => [i > 0 && listParts(titles, t).map((piece, j) =>
+    piece.item ? <bdi key={`title-${i}-${j}`}>{piece.text}</bdi> : <Fragment key={`and-${i}-${j}`}>{piece.text}</Fragment>), part]);
+}
+
 /** How many listings a store's block shows at a time: a page a phone draws in a frame or two. */
 const LISTING_PAGE = 50;
 
@@ -173,8 +183,20 @@ const ListingRow = memo(function ListingRow({ listing, app, removed, storeName, 
   onInstall: (listing: AppListing) => void;
 }) {
   const { t } = useI18n();
+  // Install goes when the store takes that version down or the app is installed in another tab: its focus would drop
+  // to the page. The ref's cleanup runs while the button is still there; the row, which now says why, takes the focus,
+  // never taken from where the person went meanwhile.
+  const row = useRef<HTMLLIElement>(null);
+  const installHadFocus = useRef(false);
+  const installRef = useCallback((button: HTMLButtonElement) => () => { installHadFocus.current = document.activeElement === button; }, []);
+  useLayoutEffect(() => {
+    if (!installHadFocus.current) return;
+    installHadFocus.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body) row.current?.focus({ preventScroll: true });
+  });
   return (
-    <li tabIndex={focusable ? -1 : undefined} data-testid="app-listing" data-ref={listing.ref}
+    <li ref={row} tabIndex={focusable || app || removed ? -1 : undefined} data-testid="app-listing" data-ref={listing.ref}
       className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
       {/* Install (or Installed) goes under the name when both don't fit, rather than leaving it a letter. */}
       <span className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
@@ -190,7 +212,7 @@ const ListingRow = memo(function ListingRow({ listing, app, removed, storeName, 
         </span>
       </span>
       {app ? <span className="ms-auto text-xs text-text-muted">{t("apps.store.installed")}</span>
-        : !removed && <Button data-testid="app-listing-install" className="ms-auto" aria-label={t("apps.install.installNamed", { title: listing.title })} onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
+        : !removed && <Button ref={installRef} data-testid="app-listing-install" className="ms-auto" aria-label={t("apps.install.installNamed", { title: listing.title })} onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
     </li>
   );
 });
@@ -329,12 +351,12 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
             <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{withName(t("apps.store.removeTitle", { name: NAME }), storeName)}</p>
             {takenDown.length > 0 && (
               <p data-testid="app-store-remove-taken-down" className="text-xs text-danger-ink">
-                {t(takenDown.length === 1 ? "apps.store.removeTakenDownOne" : "apps.store.removeTakenDown", { titles: listText(takenDown.map((a) => a.title), t) })}
+                {withTitles(t(takenDown.length === 1 ? "apps.store.removeTakenDownOne" : "apps.store.removeTakenDown", { titles: NAME }), takenDown.map((a) => a.title), t)}
               </p>
             )}
             {(vouched.length > 0 || !takenDown.length) && (
-              <p className="text-xs text-text-secondary">
-                {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
+              <p data-testid="app-store-remove-listed" className="text-xs text-text-secondary">
+                {vouched.length ? withTitles(t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: NAME }), vouched, t) : t("apps.store.removeNone")}
               </p>
             )}
             <div className="flex flex-wrap justify-end gap-2">

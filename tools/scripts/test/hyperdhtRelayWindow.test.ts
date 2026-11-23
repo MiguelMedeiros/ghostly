@@ -72,17 +72,25 @@ it("keeps the keep-alives of a relay full to its own limits moving", async () =>
 
 /**
  * Every client shares the relay's one node and its window: on dht-rpc's default (80 requests per 750 ms tick) 256 listens
- * asked for at once, as 16 apps re-listening after a restart, came up 80 per tick, the last after about 10 s.
+ * asked for at once, as 16 apps re-listening after a restart, came up 80 per tick, the last after about 20 s, requests
+ * waiting in the node's queue at nearly every look. Its ticks are wall-clock, so a loaded host does not hide that; on the
+ * relay's window they wait at none of the looks unloaded and about one in eight at 30% of a CPU (5 to 6 s then).
  */
-it("brings 256 listens asked for at once up within about 2 s", async () => {
+it("brings 256 listens asked for at once up without waiting in the node's queue", async () => {
   const relay = await startRelay({ testnet: 8 });
+  let looks = 0;
+  let waiting = 0;
+  const sampling = setInterval(() => { looks++; if (relay.dht.io._pending.length > 0) waiting++; }, 20);
   try {
     const { clients, ms } = await listening(relay, 16, 16);
+    clearInterval(sampling);
     expect(relay.dht.listening.size).toBe(256);
-    expect(ms).toBeLessThan(2_000);
+    expect(waiting).toBeLessThanOrEqual(looks / 2);
+    expect(ms).toBeLessThan(10_000);
     expect(relay.dht.io.congestion._maxWindow).toBe(relayWindow(DEFAULT_LIMITS));
     for (const { socket } of clients) socket.close();
   } finally {
+    clearInterval(sampling);
     await relay.close();
   }
 }, 60_000);

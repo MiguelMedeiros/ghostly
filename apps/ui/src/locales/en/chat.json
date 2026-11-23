@@ -61,15 +61,19 @@
       "sent": "Sent. No receipt yet.",
       "sentGroup": "Sent to the group. Groups have no receipts.",
       "waiting": "Sends by itself when your contact is online.",
+      "waitingBehind": "Sends by itself after the messages before it.",
       "waitingLiveContact": "Files need a live connection. Your contact's chat is on DHT only: it goes when they allow live again.",
-      "waitingLiveYou": "Files need a live connection. This chat is on DHT only: change it from the connection icon."
+      "waitingLiveYou": "Files need a live connection. This chat is on DHT only: change it from the connection icon.",
+      "waitingPaced": "Your contact takes a limited number of texts at a time. Sends by itself once they can take more."
     },
     "offline": "You are offline",
     "retry": "Not sent. Send again",
     "sending": "Sending",
     "sent": "Sent",
     "waiting": "Waiting for your contact to be online",
-    "waitingLive": "Waiting for a live connection"
+    "waitingBehind": "Waiting for the messages before it",
+    "waitingLive": "Waiting for a live connection",
+    "waitingPaced": "Waiting for your contact to take more texts"
   },
   "disabledPlaceholder": "Message…",
   "edit": {

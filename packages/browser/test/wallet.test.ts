@@ -415,7 +415,8 @@ describe("Lightning out: melts", () => {
     expect(balance()).toBe(106);
     // Its melt quote: the screen that left it pending reads from it how the payment ended.
     expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "fee", amount: 0, fee: 2, quote: "m1" }]);
-    expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), false);
+    // The fee goes with the news: a Lightning card through the mints says it, as the Cashu card does from that row.
+    expect(events.onMeltResolved).toHaveBeenCalledWith(expect.objectContaining({ quote: "m1" }), false, 2);
   });
 
   it("refuses to pay an invoice that is already in flight", async () => {

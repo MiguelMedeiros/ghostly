@@ -3,7 +3,7 @@ import { closeSync, existsSync, constants as fsConstants, fstatSync, lstatSync, 
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
-  APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppHash, isAppLine, isAppUrl, readAppBundle,
+  APP_STATEMENT_LIMITS, APP_STORE_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppHash, isAppLine, isAppUrl, readAppBundle,
   readAppRevocations, readAppStore, repeatedJsonKey, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
@@ -191,6 +191,12 @@ function readBundleFile(path: string): Uint8Array {
 /** A file of an app's folder (its `ghostly-app.json`, its `ghostly-revoke.json`, a file to bundle): no larger than a bundle. */
 const readFolderFile = (path: string) =>
   readLocalFile(path, APP_BUNDLE_LIMITS.bundleBytes, (bytes) => refused(`${path} is larger than a bundle may be`, { reason: "too-large", detail: `${bytes} bytes` }));
+
+/** A store's file (the index to sign, the signed index or signature already in --out): no larger than an index may be. */
+function readStoreFile(path: string): Uint8Array {
+  if (statSync(path).isDirectory()) throw new CliError("bad_request", `${path} is a folder: name a file`);
+  return readLocalFile(path, APP_STORE_LIMITS.indexBytes, (bytes) => refused(`${path} is larger than a store index may be`, { reason: "too-large", detail: `${bytes} bytes` }));
+}
 
 /**
  * A file's bytes, at most `limit` of them. A regular file only: a device or a FIFO (or a link to one) says size 0 and
@@ -725,7 +731,7 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const keyPath = userPath(keyArg);
   const outDir = userPath(outArg ?? dirname(indexPath));
   let text: string, value: unknown;
-  try { text = readFileSync(indexPath, "utf8"); value = JSON.parse(text); } catch (error) {
+  try { text = Buffer.from(readStoreFile(indexPath)).toString("utf8"); value = JSON.parse(text); } catch (error) {
     if (error instanceof SyntaxError) throw new CliError("bad_request", `${indexPath} is not JSON: ${error.message}`);
     throw localFileError(error, indexPath) ?? error;
   }
@@ -745,8 +751,8 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   // A pair there that does not read as a signed index (one of the two missing, or damaged) is not written over, as
   // `app publish` does not write over a bundle it cannot read: its sequence and key are not known, so neither is a rollback.
   let unread: CliError | null = null;
-  const heldIndex = existsSync(indexOut) ? new Uint8Array(readFileSync(indexOut)) : null;
-  const heldSig = existsSync(sigOut) ? new Uint8Array(readFileSync(sigOut)) : null;
+  const heldIndex = existsSync(indexOut) ? readStoreFile(indexOut) : null;
+  const heldSig = existsSync(sigOut) ? readStoreFile(sigOut) : null;
   if (heldIndex || heldSig) {
     const read = !heldIndex ? { ok: false as const, reason: "missing-file", detail: `no ${STORE_INDEX_FILE}` }
       : !heldSig ? { ok: false as const, reason: "bad-signature-statement", detail: `no ${STORE_SIG_FILE}` }

@@ -138,8 +138,12 @@ export function CallOverlay({
     () => (phone
       ? touch ? { x: window.innerWidth - 280, y: window.innerHeight - 272, w: 264, h: 168 } : { x: window.innerWidth - 206, y: window.innerHeight - 240, w: 190, h: 136 }
       : { x: window.innerWidth - 364, y: window.innerHeight - 316, w: 340, h: 220 }),
-    { enabled: mini, minWidth: touch ? 264 : 190, minHeight: touch ? 168 : 128 },
+    // With a phone's keyboard up the window keeps to what it leaves: above the message field, or a one-line bar over
+    // the chat's header (`compact`) where there is no room for it (a phone on its side). It covered the field's end and
+    // its Send, or stood behind the keyboard with Mute and End call.
+    { enabled: mini, minWidth: touch ? 264 : 190, minHeight: touch ? 168 : 128, keyboard: touch },
   );
+  const compact = mini && miniWindow.compact;
 
   // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call. Not in
   // the small window: the chat beside it is in use. Either way, what had the focus (the button that started the call)
@@ -260,6 +264,7 @@ export function CallOverlay({
       {...miniWindow.boxProps}
       data-testid="call-window"
       data-mini={mini}
+      data-compact={compact || undefined}
       {...(mini ? {} : { role: "dialog", "aria-modal": true, "aria-label": peerName, tabIndex: -1 })}
       className={
         mini
@@ -267,7 +272,9 @@ export function CallOverlay({
           : `fixed inset-0 ${stack} bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center focus:outline-none`
       }
     >
-      {mini && <Grips handleProps={miniWindow.handleProps} />}
+      {mini && !compact && <Grips handleProps={miniWindow.handleProps} />}
+      {/* The one-line bar's who (index.css): the contact's picture or avatar, which says it otherwise, has no room there. */}
+      {compact && <p dir="auto" className="call-compact-name min-w-0 truncate text-text-primary text-sm font-medium">{peerName}</p>}
       {/* Shrink to a floating window, or back to the whole screen */}
       <button
         onClick={() => (pinned ? onReturnToChat?.() : setMini(!mini))}
@@ -399,7 +406,7 @@ export function CallOverlay({
         {/* Mute */}
         <button
           onClick={onToggleMute}
-          className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+          className={`call-compact-keep w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
             isMuted
               ? "bg-danger/30 text-danger"
               : "bg-white/10 text-white hover:bg-white/20"
@@ -513,7 +520,7 @@ export function CallOverlay({
         {/* Hang up */}
         <button
           onClick={onHangUp}
-          className="w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer"
+          className="call-compact-keep w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer"
           data-testid="call-hang-up"
           title={t("calls.end")}
         >
@@ -630,7 +637,7 @@ export function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
       <span className="call-notice-words min-w-0 break-words">{fillNames(t(NOTICE_TEXT[notice.type]), { name })}</span>
       {notice.type === "back" && (
         <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
-          className="tap-target shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
+          className="tap-target shrink-0 rounded-full bg-accent forced-colors:border forced-colors:border-[color:ButtonText] text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
           {t("calls.devices.switchBack")}
         </button>
       )}

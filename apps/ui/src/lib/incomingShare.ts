@@ -236,13 +236,13 @@ const LINK_AFTER = new RegExp(`[\\s${LINK_STOP_CHARS}]`);
 function carriesLink(text: string, url: string): boolean {
   const web = webAddress(url) !== null;
   const stem = web ? url.replace(/^(https?:\/\/[^/?#]+)\/$/i, "$1") : url;
-  const place = new RegExp(stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), web ? "gi" : "g");
+  // Looked for as a plain string, never a RegExp of the link: a link has any length, and a RegExp's source does not.
+  const within = web ? foldCase(text) : text;
+  const sought = web ? foldCase(stem) : stem;
   const word = new RegExp(`[^\\s${LINK_STOP_CHARS}]{0,${url.length + MAX_LINK_TAIL}}`, "y");
   const address = (link: string) => webAddress(link) ?? link;
   const own = address(linkEnd(url));
-  let looks = 0;
-  for (let found = place.exec(text); found && looks < MAX_LINK_LOOKS; place.lastIndex = found.index + 1, found = place.exec(text), looks += 1) {
-    const at = found.index;
+  for (let at = within.indexOf(sought), looks = 0; at >= 0 && looks < MAX_LINK_LOOKS; at = within.indexOf(sought, at + 1), looks += 1) {
     if (at > 0 && !LINK_BEFORE.test(text[at - 1]!)) continue;
     word.lastIndex = at;
     const link = word.exec(text)![0];
@@ -250,6 +250,16 @@ function carriesLink(text: string, url: string): boolean {
     if (address(linkEnd(link)) === own) return true;
   }
   return false;
+}
+
+/** `text` in lower case, each character at its place (one whose lower case is longer, as "İ", is kept as it is). */
+function foldCase(text: string): string {
+  const lower = text.toLowerCase();
+  if (lower.length === text.length) return lower;
+  return Array.from(text, (char) => {
+    const folded = char.toLowerCase();
+    return folded.length === char.length ? folded : char;
+  }).join("");
 }
 
 /** A web address as the browser reads it ("HTTPS://X.EXAMPLE" is "https://x.example/"), or nothing when it is none. */

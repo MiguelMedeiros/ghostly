@@ -1,0 +1,1 @@
+Group calls in communities ([602](../../602-group-calls.md)) are built since release 1.12, so the open decisions no longer list group calls as a capability of their own; calls in private groups stay open. No rule changes.

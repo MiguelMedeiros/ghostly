@@ -17,6 +17,7 @@ What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.m
 - Your own Iroh relays in the same place, used by the web app, the extension and Desktop alike, so a browser and a Desktop on a self-hosted relay find each other.
 - Private groups of up to 32 (through hubs past 16) and communities of up to 256, joined by a link.
 - Files, pictures, videos and voice messages in groups, up to 100 MiB a file: everyone sees them at once, and each member's app fetches them from a member who has them. Voice messages and files up to 8 MiB download by themselves; larger ones on **Download** (Settings → Data & storage → Download automatically in groups).
+- Group calls in communities, through the node the admin names, sealed end to end when the group asks; not from Linux Desktop or the CLI yet, and private groups have no calls.
 
 More: [Chat](CHAT.md).
 

@@ -5,7 +5,7 @@ import { PaymentComposer } from "./PaymentComposer";
 import { ComposerIdentityPicker, useSharedIdentityCount } from "./identities/ComposerIdentities";
 import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
-import type { LinkPreview, TypingKind, VoiceMeta } from "@ghostly/core";
+import { sanitizeFileName, type LinkPreview, type TypingKind, type VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { NAME, withName } from "./apps/aroundName";
 import { isolate } from "../lib/ownStatus";
@@ -26,7 +26,7 @@ import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { useEngineValue } from "../lib/engineState";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, PLATFORM_PASTE_FILES, platformDroppedFiles, platformPastedFiles, someNames, type PlatformFiles } from "../lib/pastedFiles";
 import { keepEditWords, keptEditWords } from "../lib/keptEdits";
 import { keepShareFor, onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight, useFieldFitsView } from "./composer/fieldHeight";
@@ -220,9 +220,10 @@ export function MessageInput({
   const [toastAction, setToastAction] = useState<{ label: string; run: () => void } | null>(null);
   /**
    * `caption`: the guard asks about a pasted file's caption, not the draft; `translated`: about the translation shown;
-   * `translate`: about the draft, before it is translated (what Send anyway does then).
+   * `translate`: about the draft, before it is translated (what Send anyway does then); `files`: about a picked file's
+   * name; `sheet`: about a name in the sheet, which sends with this caption.
    */
-  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean; translate?: () => void } | null>(null);
+  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean; translate?: () => void; files?: File[]; sheet?: string } | null>(null);
   /** The draft the guard was answered Send for before Translate: its translation does not ask again. */
   const guardedDraft = useRef<string | null>(null);
   /** Files pasted or dropped here, waiting on the sheet for Send. */
@@ -689,6 +690,7 @@ export function MessageInput({
     if (err) showToast(err);
     setShowPanel(false);
     if (!phone) textareaRef.current?.focus();
+    else if (panelByKey) panelButtonRef.current?.focus();
   };
 
   // A share of mine tapped in the chat's timeline: the picker, on that card.
@@ -778,14 +780,25 @@ export function MessageInput({
     }
   };
 
+  /**
+   * A file's name reaches the contact as a message's text does: the first that looks like a secret, read as it goes
+   * (`sanitizeFileName`: a key split by a `:` the name loses is whole), as the CLI's `file send` reads it.
+   */
+  const secretName = (files: File[]) => files.reduce<SecretFinding | null>((found, file) => found ?? findSecret(sanitizeFileName(file.name)), null);
+
   const sendFiles = (files: FileList | null, input: HTMLInputElement) => {
     const chosen = [...(files ?? [])];
     input.value = "";
+    const found = secretName(chosen);
+    if (found) { setSecret({ finding: found, files: chosen }); return; }
     void sendChosen(chosen);
   };
 
-  /** Files pasted or dropped: to the sheet, or the reason they cannot go. False where files have no place here. */
-  const offerFiles = (files: File[]): boolean => {
+  /**
+   * Files pasted or dropped: to the sheet, or the reason they cannot go. False where files have no place here. `left`:
+   * the paste's or drop's files the platform left out, said beside the sheet.
+   */
+  const offerFiles = (files: File[], left?: Omit<PlatformFiles, "files">): boolean => {
     // An edit is text only: files wait until it ends.
     if (disabled || !files.length || edit) return false;
     // Where files cannot go, the reason is said: also in a group, which has no way to send one at all (no
@@ -794,6 +807,11 @@ export function MessageInput({
     if (!onSendFile) return false;
     closeAll();
     setAttached((was) => [...(was ?? []), ...files]);
+    const leftOut = left && [
+      left.pastLimit.length ? t("errors.files.pastLimit", { count: String(PLATFORM_PASTE_FILES), names: someNames(left.pastLimit, t) }) : "",
+      left.leftOut.length ? t("errors.files.leftOut", { names: someNames(left.leftOut, t) }) : "",
+    ].filter(Boolean).join(" ");
+    if (leftOut) showToast(leftOut);
     return true;
   };
   const offerRef = useRef(offerFiles); offerRef.current = offerFiles;
@@ -811,14 +829,14 @@ export function MessageInput({
    * A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said, and so
    * is a read that ends where files cannot go any more (an edit began meanwhile).
    */
-  const offerHeld = (held: Promise<File[]>) => {
+  const offerHeld = (held: Promise<PlatformFiles>) => {
     // Up to 256 MB read in steps: the line says so until the sheet, or the reason there is none, takes its place.
     setDropsReading((was) => was + 1);
     const ended = () => setDropsReading((was) => was - 1);
-    held.then((files) => {
+    held.then(({ files, ...left }) => {
       ended();
       if (!files.length) showToast(t("errors.files.dropUnreadable"));
-      else if (!offerRef.current(files)) showToast(t("errors.files.dropLate"));
+      else if (!offerRef.current(files, left)) showToast(t("errors.files.dropLate"));
     },
       (error: unknown) => { ended(); showToast(problemLine(error, t)); });
   };
@@ -848,10 +866,10 @@ export function MessageInput({
     const ended = () => { readingRef.current = false; setReading(false); };
     // Copied files the platform could not read either are said, not dropped in silence; an empty clipboard stays quiet.
     const named = pasteNamesFiles(data);
-    read.then((found) => {
+    read.then(({ files: found, ...left }) => {
       ended();
       // Read to its end where files cannot go any more (an edit began meanwhile): said, as a paste never read is.
-      if (found.length) { if (!offerRef.current(found)) showToast(t("errors.files.pasteLate")); }
+      if (found.length) { if (!offerRef.current(found, left)) showToast(t("errors.files.pasteLate")); }
       else if (picture && plain) { if (!insertRef.current(plain)) showToast(t("errors.files.pasteUnreadable")); }
       else if (named || picture) showToast(t("errors.files.pasteUnreadable"));
     }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
@@ -885,8 +903,11 @@ export function MessageInput({
     if (err) showToast(err);
   };
 
-  const sendAttached = async (caption: string) => {
+  const sendAttached = async (caption: string, confirmed = false) => {
     const files = attached ?? [];
+    // Asked with the sheet still open: Cancel keeps its files and caption.
+    const found = confirmed ? null : secretName(files);
+    if (found) { setSecret({ finding: found, sheet: caption }); return; }
     setAttached(null);
     if (await sendChosen(files)) await sendCaption(caption);
   };
@@ -1282,8 +1303,9 @@ export function MessageInput({
           onClose={() => {
             setShowPanel(false);
             const at = document.activeElement;
-            if (phone || (at && at !== document.body && !at.closest("[data-testid='expression-panel']"))) return;
-            if (panelByKey) panelButtonRef.current?.focus(); else textareaRef.current?.focus();
+            if (at && at !== document.body && !at.closest("[data-testid='expression-panel']")) return;
+            // Opened from the keyboard, the smiley takes it back: a button, so no on-screen keyboard on a phone either.
+            if (panelByKey) panelButtonRef.current?.focus(); else if (!phone) textareaRef.current?.focus();
           }}
         />
       )}
@@ -1291,7 +1313,9 @@ export function MessageInput({
         <SecretGuardDialog finding={secret.finding} recipient={recipient ?? payments?.contact ?? identities?.contact}
           onCancel={() => setSecret(null)} onConfirm={() => {
             setSecret(null);
-            if (secret.caption !== undefined) void sendCaption(secret.caption, true);
+            if (secret.files) void sendChosen(secret.files);
+            else if (secret.sheet !== undefined) void sendAttached(secret.sheet, true);
+            else if (secret.caption !== undefined) void sendCaption(secret.caption, true);
             else if (secret.translate) secret.translate();
             else if (secret.translated) void sendTranslation(true);
             else void handleSubmit(true);
