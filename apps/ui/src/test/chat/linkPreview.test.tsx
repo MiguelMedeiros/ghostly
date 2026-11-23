@@ -332,8 +332,24 @@ describe("a link preview in a message", () => {
     expect(screen.getByTestId("link-preview-card")).toHaveAttribute("href", "https://news.example/a");
   });
 
+  // The sender makes a card only for a link the bubble draws, with the address it opens; an older app or another
+  // client sends one for an address in code, or read from a [text](url) link shorter than it opens.
+  it("is not drawn for an address the bubble does not draw as a link with that same address", () => {
+    for (const [text, u] of [
+      ["`https://news.example/x`", "https://news.example/x%60"],
+      ["`see https://news.example/story here`", "https://news.example/story"],
+      ["```\nhttps://news.example/story\n```", "https://news.example/story"],
+      ["[DC](https://en.wikipedia.org/wiki/Washington,_D.C.)", "https://en.wikipedia.org/wiki/Washington,_D.C"],
+      ["||[the ending](https://news.example/ending.)||", "https://news.example/ending"],
+    ]) {
+      const view = renderApp(<MessageBubble message={{ id: "m15", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u, t: "Ghosts are real" } }} />);
+      expect(screen.queryByTestId("link-preview-card"), text).toBeNull();
+      view.unmount();
+    }
+  });
+
   it("is drawn for a link outside a spoiler, even when the spoiler holds it too", () => {
-    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "`see https://news.example/story here`"]) {
+    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "[the story](https://news.example/story)"]) {
       const view = renderApp(<MessageBubble message={{ id: "m12", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/story", t: "Ghosts are real" } }} />);
       expect(screen.getByTestId("link-preview-card"), text).toHaveTextContent("Ghosts are real");
       view.unmount();
