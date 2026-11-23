@@ -146,9 +146,12 @@ function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
  * A change only the admin makes, refused to a member who is not, before the member it names is looked up, in the
  * words a private group's engine says it. Before, `group admin <g> Ana` told a plain member to use Ana's key and
  * `group remove <g> <a name nobody has>` that there is no such member, and only the key given did the engine refuse
- * it: a community's in words alone, "Only the admin can do that".
+ * it: a community's in words alone, "Only the admin can do that". A profile out of the group (removed, or the admin of
+ * a group that forked: `isAdmin` is false for both) is told why first, as `group call` tells it.
  */
 function adminOnly(group: GroupView, refusal: string): void {
+  const out = outOf(group);
+  if (out) throw new CliError("refused", out);
   if (!group.isAdmin) throw new CliError("refused", refusal);
 }
 

@@ -490,6 +490,28 @@ describe("an admin-only command from a member who is not the admin", () => {
       expect(engine).not.toHaveBeenCalled();
     }
   });
+
+  // `isAdmin` is false too for a profile out of the group: a member removed, or the admin of a group that forked. Those
+  // are told why, as the engine said it before, never that only the admin can do it.
+  it("out of the group, the admin too, is told why, not that only the admin can", async () => {
+    for (const profile of ["mesh", "community"] as const) {
+      for (const [status, statusReason, admin] of [
+        ["removed", "You were removed from this group", false],
+        ["forked", "The admin signed two different changes after epoch 4. Membership changes are halted; the admin must re-form the group.", true],
+      ] as const) {
+        const { ctx, node } = fake();
+        const engine = vi.fn(async () => { throw new Error("Only the admin can do that"); });
+        Object.assign(node, { removeGroupMember: engine, makeGroupAdmin: engine, rotateGroup: engine, setGroupHub: engine });
+        const members = group.members.map((m) => ({ ...m, role: (m.me ? admin : m.key === "anakey") ? "admin" : "member" }));
+        node.getState = () => ({ links: [], groups: [{ ...group, profile, status, statusReason, isAdmin: false, members }], settings: {}, transport: {} }) as unknown as EngineState;
+        const methods = [["group.remove", { member: "nobody" }], ["group.admin", { member: "Ana" }], ["group.rotate", {}], ...(profile === "mesh" ? [["group.hub", { member: "Ana", role: "pin" }]] as const : [])] as const;
+        for (const [method, params] of methods) {
+          await expect(callApi(ctx, method, { group: "Crew", ...params }), `${profile} ${status} ${method}`).rejects.toMatchObject({ code: "refused", message: statusReason });
+        }
+        expect(engine).not.toHaveBeenCalled();
+      }
+    }
+  });
 });
 
 describe("group call", () => {
