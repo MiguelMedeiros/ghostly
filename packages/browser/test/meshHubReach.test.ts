@@ -25,7 +25,9 @@ async function adminOf20() {
   const [hub, mallory, ...members] = keys;
   const edges = new Map<string, string>([[hub, "e-hub"]]);
   const sent: { to: string; frame: { t: string; k: string[]; l?: string[] } }[] = [];
-  const host = { edges: () => edges, linkReady: () => true, sendOnLink: (id: string, frame: never) => { sent.push({ to: id, frame }); } } as unknown as GroupsHost;
+  // Edges still opening (or gone down): every other edge is up.
+  const down = new Set<string>();
+  const host = { edges: () => edges, linkReady: (id: string) => !down.has(id), sendOnLink: (id: string, frame: never) => { sent.push({ to: id, frame }); } } as unknown as GroupsHost;
   const group: StoredGroup = { id: session.groupId, createdAt: NOW, state: session.state } as unknown as StoredGroup;
   let saves = 0;
   const mesh = new MeshHubs(host, { stored: () => group, save: () => { saves++; } });
@@ -34,7 +36,7 @@ async function adminOf20() {
   Object.assign(live, { beacon: [{ key: hub, ts: NOW, load: 18, since: NOW - 60_000 }], firstRead: true, epochRead: true, myHubs: [hub] });
   const wanted = (now = NOW) => [...mesh.wanted(session.groupId, session, group, now) ?? new Set(session.others)].sort();
   const reach = (from: string, k: string[], l?: string[], now = NOW) => mesh.reached(session.groupId, session, from, { t: "group-reach", g: session.groupId, k, ...(l && { l }) }, now);
-  return { session, group, mesh, live, hub, mallory, members, edges, sent, wanted, reach, saves: () => saves };
+  return { session, group, mesh, live, hub, mallory, members, edges, down, sent, wanted, reach, saves: () => saves };
 }
 
 describe("a private group's `group-reach` is taken from its hubs, and only about their own edges", () => {
@@ -136,5 +138,29 @@ describe("stand-ins for the members no hub reaches (`u`, WISP 902 · Group Mesh 
     const standing = session.roster.map(([key]) => key).filter(key => key !== hub && !lost.includes(key));
     const mine = standInDuty(lost, standing).get(session.myKey) ?? [];
     expect(wanted(NOW + 20_000)).toEqual([hub, ...mine].sort());
+  });
+});
+
+describe("a member that picks its hubs keeps the edges it had until they reach those members", () => {
+  it("an edge that is up closes only once a hub whose edge is up says it reaches that member", async () => {
+    const { session, hub, members: [a, b, opening], edges, down, wanted, reach } = await adminOf20();
+    // The group just grew past 16 members: the full mesh's edges, one of them still opening.
+    for (const [key, id] of [[a, "e-a"], [b, "e-b"], [opening, "e-opening"]]) edges.set(key, id);
+    down.add("e-opening");
+    expect(wanted()).toEqual([hub, a, b].sort());
+    // The hub's edge is up and it reaches `a`: that one closes, `b` waits.
+    reach(hub, [session.myKey, a]);
+    expect(wanted()).toEqual([hub, b].sort());
+    reach(hub, [session.myKey, a, b], undefined, NOW + 5_000);
+    expect(wanted(NOW + 5_000)).toEqual([hub]);
+  });
+
+  it("a hub's word counts only while its edge to me is up", async () => {
+    const { session, hub, members: [a], edges, down, wanted, reach } = await adminOf20();
+    edges.set(a, "e-a");
+    reach(hub, [session.myKey, a]);
+    expect(wanted()).toEqual([hub]);
+    down.add("e-hub");
+    expect(wanted()).toEqual([hub, a].sort());
   });
 });
