@@ -145,7 +145,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
             className="w-full min-h-10 px-3 rounded-lg bg-surface-alt border border-field-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent focus:ring-2 focus:ring-focus-ring" />
           <div className="flex items-center justify-end gap-2">
             <button type="button" data-testid="attachment-cancel" onClick={onCancel} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>
-            <button type="button" data-testid="attachment-send" onClick={send} className={`${button} bg-accent text-on-accent hover:bg-accent-hover`}>
+            <button type="button" data-testid="attachment-send" onClick={send} className={`${button} bg-accent forced-colors:border forced-colors:border-[color:ButtonText] text-on-accent hover:bg-accent-hover`}>
               {files.length > 1 ? t("composer.sendCount", { count: String(files.length) }) : t("composer.send")}
             </button>
           </div>

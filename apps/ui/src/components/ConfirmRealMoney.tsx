@@ -45,7 +45,7 @@ export function ConfirmRealMoney({ what, busy, onSend, onBack }: { what: string;
       <div className="flex gap-2 flex-wrap">
         {/* Busy, not disabled, while it sends: a disabled button drops the keys to the page, and they stay there when the
             payment is refused. A press while busy does nothing. */}
-        <button className={`${button} !bg-accent !text-on-accent data-[loading]:opacity-80 data-[loading]:cursor-progress`} data-testid="review-confirm-send"
+        <button className={`${button} !bg-accent forced-colors:border forced-colors:border-[color:ButtonText] !text-on-accent data-[loading]:opacity-80 data-[loading]:cursor-progress`} data-testid="review-confirm-send"
           {...(busy ? { "aria-disabled": true, "aria-busy": true, "data-loading": true } : {})} onClick={() => { if (busy) return; playCue("realmoney"); onSend(); }}>{t("payments.confirmReal.send")}</button>
         <FocusSafeButton ref={back} className={button} data-testid="review-confirm-back" disabled={busy} onClick={() => { backed.current = true; onBack(); }}>{t("common.back")}</FocusSafeButton>
       </div>
