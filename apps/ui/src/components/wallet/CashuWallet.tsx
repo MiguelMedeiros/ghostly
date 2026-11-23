@@ -109,7 +109,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
    * The last payment's end, shown in Send's place until Done: paid, or on its way. One the mint left pending reads as
    * waiting (never as paid, it may still come back) and says what happens next.
    */
-  const [sent, setSent] = useState<{ line: string; next?: string; paid: boolean; quote?: string; hash?: string; held?: boolean } | null>(null);
+  const [sent, setSent] = useState<{ line: string; next?: string; paid: boolean; quote?: string; hash?: string; held?: boolean; ended?: { paid: boolean; fee: number } } | null>(null);
   /** Real money: Pay opens the second step, and only it pays. */
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState("");
@@ -162,11 +162,14 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
     setSent(paid ? { line: t("wallet.cashu.paid"), paid } : viaMint ? { line: t("wallet.cashu.pendingMint"), next: t("wallet.cashu.pendingMintNext"), paid, ...follow } : { line: t("wallet.lightning.pending"), paid, ...follow });
   }, "pay");
   // A payment left pending is followed while its result shows (`pendingPayEnd`): the result line was what the mint said
-  // when Pay was answered.
+  // when Pay was answered. Once it ended it stays so: its History row or journal entry may later leave the newest ones the
+  // view keeps.
+  const ended = !sent || sent.paid ? undefined : sent.ended ?? pendingPayEnd(sent, state);
   useEffect(() => {
-    if (sent?.quote && !sent.held && state.setAside) setSent({ ...sent, held: true });
-  }, [sent, state.setAside]);
-  const ended = !sent || sent.paid ? undefined : pendingPayEnd(sent, state);
+    if (!sent || sent.ended) return;
+    if (ended) setSent({ ...sent, ended });
+    else if (sent.quote && !sent.held && state.setAside) setSent({ ...sent, held: true });
+  }, [sent, ended, state.setAside]);
   const result = !sent || !ended ? sent
     : ended.paid ? { line: t("wallet.cashu.paid"), paid: true }
     : { line: t("wallet.cashu.payFailed"), next: !viaMint ? undefined : ended.fee > 0 ? t("wallet.cashu.payFailedFee", { amount: formatAmount(ended.fee, t.language), unit: unitFor(t, unit, ended.fee) }) : t("wallet.cashu.payFailedBack"), paid: false, failed: true };

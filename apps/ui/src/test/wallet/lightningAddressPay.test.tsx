@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { decodeBolt11 } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
@@ -330,11 +330,16 @@ describe("a Lightning address or LNURL the mint leaves pending reads as waiting,
     it("paid at the mint: the line turns into the paid one", async () => {
       const engine = await pendingOnCashuCard();
       // Another payment is not this one: only its own quote settles it.
-      engine.setState({ wallet: stateOf({ setAside: 6, history: [out("lightning-out", 0, "q-other")] } as Partial<WalletState>) });
+      act(() => engine.setState({ wallet: stateOf({ setAside: 6, history: [out("lightning-out", 0, "q-other")] } as Partial<WalletState>) }));
       expect(screen.getByTestId("lnurl-pending")).toBeInTheDocument();
       engine.setState({ wallet: stateOf({ balance: 4_995, history: [out("lightning-out", 0)] }) });
       expect(await screen.findByTestId("lnurl-paid")).toHaveTextContent("Paid 5 test sats to alice@example.com");
       expect(screen.queryByTestId("lnurl-pending")).toBeNull();
+      // The view keeps the newest 100 History rows: once newer ones push this payment's row out, it still reads as paid.
+      const newer = Array.from({ length: 100 }, (_, i) => ({ id: `in-${i}`, timestamp: Date.now() + i, mint: TEST_MINT, kind: "lightning-in" as const, amount: 1, fee: 0, quote: `q-in-${i}` }));
+      act(() => engine.setState({ wallet: stateOf({ balance: 5_095, history: newer }) }));
+      expect(screen.getByTestId("lnurl-paid")).toBeInTheDocument();
+      expect(screen.queryByTestId("lnurl-failed")).toBeNull();
     });
 
     it("failed at the mint: it says the payee was not paid and the sats are back", async () => {
@@ -373,6 +378,25 @@ describe("a Lightning address or LNURL the mint leaves pending reads as waiting,
       expect(await screen.findByTestId("lnurl-failed-title")).toHaveTextContent("The payment failed: the payee was not paid.");
       // A node's failure says nothing of a set-aside: that is the mints' word.
       expect(screen.queryByTestId("lnurl-failed-next")).toBeNull();
+    });
+
+    it("through a Lightning card: paid in its journal, it stays paid once 20 newer entries push it out", async () => {
+      const hash = decodeBolt11(REGTEST_INVOICE)!.paymentHash!;
+      const withRecent = (recent: unknown[]) => { const s = stateOf({}); return { ...s, lightning: { mode: "testnet", providerId: "lnd", status: "ready", offered: [], recent } } as never; };
+      fakeEngine.setState({ wallet: stateOf({}) });
+      const wallet: WalletPlatform = Object.assign(Object.create(servicesPlatform!.wallet.forNetwork("testnet")), { ...methods("alice@example.com", false, "lnd"), lightningAddressInvoice: async () => ({ invoice: REGTEST_INVOICE, note: "Paid alice@example.com" }) });
+      const { user, engine } = renderApp(<LightningAddressPay wallet={wallet} text="alice@example.com" />);
+      await user.click(screen.getByTestId("lnurl-lookup"));
+      await user.type(await screen.findByTestId("lnurl-amount"), "5");
+      await user.click(screen.getByTestId("lnurl-invoice"));
+      await user.click(await screen.findByTestId("lnurl-pay"));
+      expect(await screen.findByTestId("lnurl-pending")).toBeInTheDocument();
+      engine.setState({ wallet: withRecent([{ direction: "out", paymentHash: hash, invoice: REGTEST_INVOICE, amount: 5, createdAt: Date.now(), state: "paid" }]) });
+      expect(await screen.findByTestId("lnurl-paid")).toBeInTheDocument();
+      // The journal the view keeps is its newest 20 entries.
+      act(() => engine.setState({ wallet: withRecent(Array.from({ length: 20 }, (_, i) => ({ direction: "in", paymentHash: `h-${i}`, amount: 1, createdAt: Date.now() + i, state: "paid" }))) }));
+      expect(screen.getByTestId("lnurl-paid")).toBeInTheDocument();
+      expect(screen.queryByTestId("lnurl-pending")).toBeNull();
     });
   });
 });

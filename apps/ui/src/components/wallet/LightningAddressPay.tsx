@@ -35,7 +35,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const [quote, setQuote] = useState<Quote | null>(null);
   const [outcome, setOutcome] = useState<"paid" | "pending" | null>(null);
   /** What a payment left pending is followed by (`pendingPayEnd`): the mints' melt quote, or the paying card's invoice. */
-  const [follow, setFollow] = useState<{ quote?: string; hash?: string; held?: boolean } | null>(null);
+  const [follow, setFollow] = useState<{ quote?: string; hash?: string; held?: boolean; ended?: { paid: boolean; fee: number } } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   /** Real money: Pay opens the second step, and only it pays. A wallet naming no network is Mainnet's. */
@@ -51,10 +51,13 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   // Drawn again with each wallet state, as the Cashu card is: a payment left pending ends here once its wallet says.
   useWalletPlatform();
   const setAside = wallet.getState()?.setAside;
+  // Once it ended it stays so: its History row or journal entry may later leave the newest ones the view keeps.
+  const ended = outcome === "pending" && follow ? follow.ended ?? pendingPayEnd(follow, wallet.getState()) : undefined;
   useEffect(() => {
-    if (follow?.quote && !follow.held && setAside) setFollow({ ...follow, held: true });
-  }, [follow, setAside]);
-  const ended = outcome === "pending" && follow ? pendingPayEnd(follow, wallet.getState()) : undefined;
+    if (!follow || follow.ended) return;
+    if (ended) setFollow({ ...follow, ended });
+    else if (follow.quote && !follow.held && setAside) setFollow({ ...follow, held: true });
+  }, [follow, ended, setAside]);
   const shown = ended ? (ended.paid ? "paid" : "failed") : outcome;
   const sourceName = (source?: string) => (via === "cashu" || !source || source === CASHU_MINT_SOURCE ? t("wallet.lightning.cashuMints") : source === ln?.providerId ? ln.alias ?? ln.label ?? source : source);
 
