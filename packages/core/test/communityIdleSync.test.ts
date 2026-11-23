@@ -246,6 +246,25 @@ describe("a hub answering a member's sync", { timeout: 120_000 }, () => {
     expect(syncs(await answer(sync))).toHaveLength(1);
   });
 
+  it("let in after the member, does not ask back for the secrets and frames of epochs from before it, which it never reads", async () => {
+    const net = new Net();
+    const alice = net.create(), bob = await net.admit(alice);
+    await net.settle();
+    await say(net, alice, "before Carol", 1_000);
+    await say(net, bob, "before Carol too", 1_001);
+    const carol = await net.admit(alice);
+    await net.settle();
+    await say(net, carol, "hello", 1_002);
+    // Carol's app is Bob's hub: his sync names the epochs before her.
+    const sync = bob.session.syncFrame();
+    const { answer } = hubOf(carol.session.state, bob.session.myKey);
+    expect(syncs(await answer(sync))).toHaveLength(1);
+    for (let i = 0; i < 4; i++) expect(syncs(await answer(sync))).toHaveLength(0);
+    // A frame Bob says since, under an epoch Carol reads, is still asked for.
+    await say(net, bob, "after Carol", 1_003);
+    expect(syncs(await answer(bob.session.syncFrame()))).toHaveLength(1);
+  });
+
   it("asks when it is waiting on a secret or a commit itself", async () => {
     const net = new Net();
     const alice = net.create(), bob = await net.admit(alice);

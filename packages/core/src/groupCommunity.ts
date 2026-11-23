@@ -2849,15 +2849,28 @@ export class CommunitySession {
   private holdsNothingNew(frame: CommunitySyncFrame): boolean {
     if (frame.h !== this.topHash || frame.mt !== groupMetaTag(this.state.meta) || this.needsCatchUp) return false;
     if (this.state.entry.key && !this.state.entry.seedB64) return false;
+    // What I can never hold is not lacked: a commit I know and do not read (from before I was let in).
+    const out = this.outEpoch(this.myKey);
+    const unread = (hash: string) => !this.readsAt(hash, this.myKey, out);
     const mine = new Set(Object.keys(this.state.secrets).map(shortHash));
-    if (Array.isArray(frame.secrets) && frame.secrets.some(x => typeof x !== "string" || !mine.has(x))) return false;
+    const window = new Map(this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => { const h = this.hashOf(c); return [shortHash(h), h]; }));
+    if (Array.isArray(frame.secrets) && frame.secrets.some(x => typeof x !== "string" || (!mine.has(x) && !(window.has(x) && unread(window.get(x)!))))) return false;
     const lasting = new Map(Object.values(this.state.lasting ?? {}).map(f => [`${f.s} ${seenKey(f.e, f.h)}`, f.n]));
     const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
+    const unreadKeys = new Map<string, boolean>();
+    const unreadKey = (key: string): boolean => {
+      let is = unreadKeys.get(key);
+      if (is === undefined) {
+        const [e, h16] = key.split(":"), found = h16 ? this.commitByShort(Number(e), h16) : undefined;
+        unreadKeys.set(key, is = !!found && unread(found.hash));
+      }
+      return is;
+    };
     for (const [sender, byKey] of Object.entries(have)) {
       if (!byKey || typeof byKey !== "object") return false;
       for (const [key, high] of Object.entries(byKey)) {
         const held = Math.max(this.state.seen[sender]?.[key]?.high ?? -1, lasting.get(`${sender} ${key}`) ?? -1);
-        if (typeof high !== "number" || high > held) return false;
+        if (typeof high !== "number" || (high > held && !unreadKey(key))) return false;
       }
     }
     // A gap in what I have of a sender under a commit my store still holds frames of (`haveOf` would ask for it).
