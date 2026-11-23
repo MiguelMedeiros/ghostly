@@ -34,6 +34,9 @@ const TYPES: Record<string, string> = {
   ".zip": "application/zip", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
   ".aac": "audio/aac", ".flac": "audio/flac", ".oga": "audio/ogg", ".weba": "audio/webm",
   ".webm": "audio/webm", ".mp4": "video/mp4", ".mov": "video/quicktime",
+  // As a browser's file picker types them: an .m4v or .ogv plays in the contact's app, not a file to download, and a
+  // WMA's refusal (its tags are not removed) is an audio file's, not a video's.
+  ".m4v": "video/x-m4v", ".ogv": "video/ogg", ".wma": "audio/x-ms-wma",
 };
 
 /** A voice note in an .mp4 is its sound in an MP4 box, as an .m4a: sent as audio/mp4, not as a video. */
