@@ -360,11 +360,18 @@ export const WALLET_SETTINGS_FIELDS = ["mints", "mintsInitialized", "walletSetup
  * emptied, the profile's records of the settings store are deleted and the `settings` record keeps only its wallet
  * fields. The wallets (proofs, payments, quotes, history, payment journal, wallet records) stay: ecash is money, and
  * nothing else holds a copy of it. The caller stops the peer first, or it may write back what was just deleted.
+ * `database`: another peer database of the profile than the one this page runs on (a fork a handoff kept), opened as
+ * stored and closed after; the caller checks it is there, since opening it by name would make it.
  */
-export async function clearProfileStores(): Promise<void> {
+export async function clearProfileStores(database?: string): Promise<void> {
   if (typeof indexedDB === "undefined") return;
-  const db = await openDb();
+  const db = database ? await wrap(indexedDB.open(database)) : await openDb();
+  try { await clearStoresOf(db); } finally { if (database) db.close(); }
+}
+
+async function clearStoresOf(db: IDBDatabase): Promise<void> {
   const names = [...PROFILE_STORES, STORES.settings].filter((name) => db.objectStoreNames.contains(name));
+  if (!names.length) return;
   const tx = db.transaction(names, "readwrite");
   for (const name of names) if (name !== STORES.settings) tx.objectStore(name).clear();
   if (names.includes(STORES.settings)) {

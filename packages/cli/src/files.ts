@@ -294,8 +294,10 @@ export function fitName(name: string, mark = ""): string {
   if (!mark && fits(name)) return name;
   const extension = /\.[^.\s]{1,15}$/u.exec(name)?.[0] ?? "";
   const stem = [...name.slice(0, name.length - extension.length)];
-  while (stem.length && !fits(stem.join("").trimEnd() + mark + extension)) stem.pop();
-  return (stem.join("").trimEnd() || "file") + mark + extension;
+  // A cut that ends the name in a dot loses it too, as `sanitizeFileName` drops them: Windows would name the file without it.
+  const end = (chars: string[]) => chars.join("").replace(/[\s.]+$/u, "");
+  while (stem.length && !fits(end(stem) + mark + extension)) stem.pop();
+  return (end(stem) || "file") + mark + extension;
 }
 
 /**
@@ -442,6 +444,8 @@ export const FILE_METHODS: Record<string, Method> = {
     // the file's own without --name, read once cleaned (a key split by a `:` or a line break the cleaning drops is whole).
     const name = sanitizeFileName(str(params, "name") ?? basename(path));
     guardText(name, bool(params, "force"), "file's name", "send it");
+    // Its type too, which the contact's app shows, as it goes out (`sendFile` reads `file.mime`).
+    guardText(mimeOf(path, str(params, "mime"), params.voice !== undefined), bool(params, "force"), "file's type", "send it");
     const target = chatOrGroupOf(ctx, params);
     let info;
     try { info = await stat(path); } catch { throw new CliError("not_found", `No file ${path}`); }

@@ -13,6 +13,7 @@
     "noMatch": "Não são iguais",
     "notPublished": "Seus outros dispositivos o veem assim que este dispositivo alcançar a rede.",
     "refused": "Outro dispositivo tentou usar este código. Não recebeu nada.",
+    "refusedFound": "Dois dispositivos usaram este código. Escolha São iguais só se o seu novo dispositivo mostrar estes mesmos dígitos. Se ele não mostrar nenhum, escolha Não são iguais.",
     "scan": "Escaneie com a câmera do seu celular.",
     "scanInfo": "Num computador, abra o Ghostly e escolha Adicionar este dispositivo a outro perfil; depois escaneie ou cole o código. Ele vale uma vez, por 10 minutos.",
     "title": "Adicionar um dispositivo",

@@ -85,6 +85,19 @@ describe("a share into the app", () => {
       expect(shareText(share({ text, url: "https://a.example/p" }))).toBe(text);
     });
 
+    it("a link of any length is looked for in the text as it is (any website can post one)", () => {
+      const web = `https://a.example/${"p".repeat(40_000)}`;
+      expect(shareText(share({ url: web }))).toBe(web);
+      expect(shareText(share({ text: "Look", url: web }))).toBe(`Look\n${web}`);
+      expect(shareText(share({ text: `Look ${web.replace("https://a.example", "HTTPS://A.EXAMPLE")}.`, url: web })))
+        .toBe(`Look ${web.replace("https://a.example", "HTTPS://A.EXAMPLE")}.`);
+      // A letter whose lower case is longer, before the link, does not move where it is found.
+      expect(shareText(share({ text: "İSTANBUL HTTPS://A.EXAMPLE/p", url: "https://a.example/p" }))).toBe("İSTANBUL HTTPS://A.EXAMPLE/p");
+      const plain = "(".repeat(40_000);
+      expect(shareText(share({ text: `see ${plain}`, url: plain }))).toBe(`see ${plain}`);
+      expect(sharePreview(share({ text: "Look", url: web }))).toBe(`Look\n${web.slice(0, 2043)}…`);
+    });
+
     it("the picker previews the start of a long text, never half a character, and the draft gets it whole", () => {
       expect(sharePreview(share({ text: "Look", url: "https://a.example" }))).toBe("Look\nhttps://a.example");
       // A pair astride the preview's end is left out whole.
