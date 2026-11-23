@@ -165,7 +165,7 @@ export function SendScan({ onText, disabled = false, scanOnOpen = false, childre
         {scanning ? <button ref={stopButton} type="button" onClick={stop} className={`${tile} border border-border text-text-secondary`} data-testid="wallet-send-scan-stop">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M6 6l12 12M18 6L6 18"/></svg>
           {t("common.cancel")}
-        </button> : <button ref={scanButton} type="button" aria-disabled={off || asking || undefined} onClick={() => { if (!off && !asking) void scan(); }} className={`${tile} bg-accent text-on-accent`} data-testid="wallet-send-camera">
+        </button> : <button ref={scanButton} type="button" aria-disabled={off || asking || undefined} onClick={() => { if (!off && !asking) void scan(); }} className={`${tile} bg-accent forced-colors:border forced-colors:border-[color:ButtonText] text-on-accent`} data-testid="wallet-send-camera">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><path d="M14 14h3v3h-3z"/></svg>
           {t("wallet.send.scan")}
         </button>}
