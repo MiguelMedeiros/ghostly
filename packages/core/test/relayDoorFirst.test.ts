@@ -150,7 +150,8 @@ describe("relay transport: a community door's reads while its edges watch member
     setLinkTraceSink((line) => { const l = JSON.parse(line); if (l.step === "read.held") held.set(l.me, (held.get(l.me) ?? 0) + 1); });
     const { traffic } = door();
     for (let t = 0; t < 10 * 60_000; t += 500) { if (t) await vi.advanceTimersByTimeAsync(500); await traffic(t); }
-    expect(held.size).toBeGreaterThan(0);
+    // Now 50 lines in the 10 minutes: the four members that left, watched and held all run, one a minute each.
+    expect([...held.values()].filter((times) => times >= 9)).toHaveLength(4);
     for (const times of held.values()) expect(times).toBeLessThanOrEqual(11);
   });
 });
