@@ -6,9 +6,9 @@ import type { GroupMemberView } from "@ghostly/browser/shared/types";
 // covers: chat.paired.send, groups.send
 
 /*
- * The composer's translation sent from the chat pages (wiring 3, ghostly-agents#1808): a translation sent through the
- * preview keeps its original on this device, under the id the engine stored the message with, in a 1:1 chat and in a
- * group. And a preview left open when the chat's translation goes away is closed (ghostly-agents#1812).
+ * The composer's translation sent from the chat pages: a translation sent through the preview keeps its original on
+ * this device, under the id the engine stored the message with, in a 1:1 chat and in a group. And a preview left open
+ * when the chat's translation goes away is closed.
  */
 
 /** The runtime: writes the words in capitals and says which pair it was asked for. */
@@ -82,7 +82,7 @@ describe("a translation sent from a chat page keeps its original on this device"
   });
 });
 
-describe("a preview left open when the chat's translation goes away (ghostly-agents#1812)", () => {
+describe("a preview left open when the chat's translation goes away", () => {
   it("closes, and Enter sends the draft as typed", async () => {
     const onSend = vi.fn(async () => null);
     const { user, rerender } = renderApp(<MessageInput onSend={onSend} translation={{ language: "it" }} />);

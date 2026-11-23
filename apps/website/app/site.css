@@ -1335,7 +1335,7 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
   animation-duration: 3s;
 }
 /* Asleep, it floats twice more and rests, as the footer's sleeper does (#2809): looped, a sleeping ghost beside a
-   still pointer restyled the page 8 times a second for as long as the reader stayed (agents#1115). Its own name, so
+   still pointer restyled the page 8 times a second for as long as the reader stayed. Its own name, so
    the doze starts afresh each time it falls asleep, and ends where the float starts. */
 .pet[data-mood="sleeping"] .pet-body {
   animation: pet-doze 6s ease-in-out 2 both;
