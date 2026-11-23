@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { followPlatformDrags, guardFileDrops, PLATFORM_PASTE_MAX, resetPlatformDrags } from "../../lib/pastedFiles";
+import type { Language } from "../../lib/settings";
 import type { ClipboardFile, ClipboardFiles } from "@ghostly/browser/host";
 import { renderApp } from "../render";
 
@@ -169,7 +170,7 @@ describe("files dragged in from another app that the webview names by address on
     expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
     const open = await screen.findByTestId("attachment-sheet");
     expect(within(open).getByText("p1.jpg")).toBeInTheDocument();
-    expect(await within(open).findByRole("alert")).toHaveTextContent("Not added: Photos. Folders, and files that cannot be read, are left out.");
+    expect(await within(open).findByRole("alert")).toHaveTextContent("Not added: ⁨Photos⁩. Folders, and files that cannot be read, are left out.");
   });
 
   it("a drop the platform read only some files of names the ones it left out: past the most one drop brings, and not files", async () => {
@@ -180,8 +181,25 @@ describe("files dragged in from another app that the webview names by address on
     const open = await screen.findByTestId("attachment-sheet");
     expect(within(open).getByText("p1.txt")).toBeInTheDocument();
     const said = await within(open).findByRole("alert");
-    expect(said).toHaveTextContent("Only the first 32 files were added. Left out: p33.txt, p34.txt. Add the rest with + → Document.");
-    expect(said).toHaveTextContent("Not added: Photos. Folders, and files that cannot be read, are left out.");
+    expect(said).toHaveTextContent("Only the first 32 files were added. Left out: ⁨p33.txt⁩, ⁨p34.txt⁩. Add the rest with + → Document.");
+    expect(said).toHaveTextContent("Not added: ⁨Photos⁩. Folders, and files that cannot be read, are left out.");
+  });
+
+  it("the names it left out are listed as the language does, each isolated: Arabic keeps a name's own order, Japanese joins with 、", async () => {
+    const isolated = (names: string[], join: string) => names.map((name) => `⁨${name}⁩`).join(join);
+    const cases: [Language, string][] = [["ar", " و"], ["ja", "、"]];
+    for (const [language, join] of cases) {
+      resetPlatformDrags();
+      over = followPlatformDrags(read);
+      read.mockResolvedValueOnce(Object.assign([held("p1.txt", "1")], { pastLimit: ["p33.txt", "صورة.png"], leftOut: ["تقرير.pdf", "صورة.png", "notes.txt"] }));
+      const { unmount } = renderApp(column(), { language });
+      act(() => over(true));
+      expect(fireEvent.drop(screen.getByTestId("messages"), named())).toBe(false);
+      const said = await within(await screen.findByTestId("attachment-sheet")).findByRole("alert");
+      expect(said.textContent).toContain(isolated(["p33.txt", "صورة.png"], join));
+      expect(said.textContent).toContain(isolated(["تقرير.pdf", "صورة.png", "notes.txt"], join));
+      unmount();
+    }
   });
 
   it("a drop with no file to send (a folder) says so; the next drag is a link again once the drop is over", async () => {
