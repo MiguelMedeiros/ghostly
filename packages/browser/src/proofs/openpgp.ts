@@ -1,5 +1,6 @@
 import { fromBase64Url, toBase64Url, utf8Encode } from '@ghostly/core';
 import type * as OpenPGP from 'openpgp';
+import { windowsStatementFiles } from './statementFile';
 
 /**
  * OpenPGP identity proofs (RFC 9580, and the RFC 4880 v4 keys people actually have).
@@ -172,6 +173,8 @@ function secondsOf(date: Date | number | null | typeof Infinity): number | null 
 }
 const hexOf = (bytes: Uint8Array) => Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
 const nowSeconds = () => Math.floor(Date.now() / 1000);
+const BOM = String.fromCharCode(0xfeff);
+const FILE_ENCODING = 'The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again';
 /** Clearsigned text as it is hashed: trailing whitespace dropped, no final newline. */
 export function canonicalStatement(statement: string): string {
   return statement.replace(/\r\n?/g, '\n').split('\n').map(l => l.replace(/[ \t]+$/, '')).join('\n').replace(/\n+$/, '');
@@ -430,13 +433,18 @@ async function verifyPacket(pgp: Pgp, key: OpenPGP.PublicKey, sig: OpenPGP.Signa
   const text = canonicalStatement(statement);
   const packets = new pgp.PacketList<OpenPGP.AnyPacket>(); packets.push(sig);
   const detached = new pgp.Signature(packets as OpenPGP.PacketList<OpenPGP.SignaturePacket>);
-  let verified = false;
-  for (const candidate of [text, `${text}\n`, `${text}\r\n`]) {
-    const message = await pgp.createMessage({ binary: utf8Encode(candidate) });
+  const signs = async (bytes: Uint8Array) => {
+    const message = await pgp.createMessage({ binary: bytes });
     const result = await pgp.verify({ message, signature: detached, verificationKeys: key, date: new Date(Math.max(now, signedAt) * 1000), config: cfg });
-    if (result.signatures.length === 1 && await result.signatures[0].verified.then(() => true, () => false)) { verified = true; break; }
+    return result.signatures.length === 1 && await result.signatures[0].verified.then(() => true, () => false);
+  };
+  let verified = false;
+  for (const candidate of [text, `${text}\n`, `${text}\r\n`]) if (await signs(utf8Encode(candidate))) { verified = true; break; }
+  if (!verified) {
+    // The file route on Windows: recognised only, to say what to change (a contact's app would not accept it either).
+    for (const file of windowsStatementFiles(text)) if (await signs(file)) throw new PgpProofError(FILE_ENCODING);
+    throw new PgpProofError('This signature is not over the Ghostly statement (it signs other text, or it was changed).');
   }
-  if (!verified) throw new PgpProofError('This signature is not over the Ghostly statement (it signs other text, or it was changed).');
   return { info: { ...await keyInfo(key, signer, algorithm, at, cfg), signedAt }, signer };
 }
 
@@ -460,8 +468,10 @@ export async function preparePgpEvidence(input: { statement: string; signature: 
     let cleartext: OpenPGP.CleartextMessage;
     try { cleartext = await pgp.readCleartextMessage({ cleartextMessage: block, config: config(pgp) }); }
     catch (e) { throw new PgpProofError(`Could not read this signed text: ${message(e)}`); }
-    if (canonicalStatement(cleartext.getText()) !== canonicalStatement(input.statement))
-      throw new PgpProofError('This signs different text. Sign exactly the statement shown, without editing it.');
+    const signed = canonicalStatement(cleartext.getText()), wanted = canonicalStatement(input.statement);
+    // A statement file saved with a byte order mark: gpg signs it as the text's first character.
+    if (signed === `${BOM}${wanted}`) throw new PgpProofError(FILE_ENCODING);
+    if (signed !== wanted) throw new PgpProofError('This signs different text. Sign exactly the statement shown, without editing it.');
     // Typed as private in OpenPGP.js's declarations, public at runtime.
     const packets = (cleartext as unknown as { signature: OpenPGP.Signature }).signature.packets;
     if (packets.length !== 1 || !(packets[0] instanceof pgp.SignaturePacket)) throw new PgpProofError('Sign with one key only: this signature has several signers.');
