@@ -4,6 +4,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useBackCloses } from "../../hooks/useDismiss";
 import { FOLDER_NAME_MAX, folderName } from "../../lib/chatFolders";
 import { draftDirection } from "../../lib/documentLanguage";
+import { isolate } from "../../lib/ownStatus";
 
 const DIALOG = "m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60";
 const QUIET = "min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent";
@@ -52,7 +53,7 @@ export function FolderNameDialog({ name = "", onClose, onSave, returnFocus }: { 
   </dialog>, document.body);
 }
 
-/** Asks before a folder is deleted, and says what becomes of its chats. */
+/** Asks before a folder is deleted, and says what becomes of its chats. The name is isolated, as "Work!" reads "!Work" in an Arabic title. */
 export function DeleteFolderDialog({ name, onClose, onConfirm, returnFocus }: { name: string; onClose(): void; onConfirm(): void; returnFocus?: RefObject<HTMLElement | null> }) {
   const { t } = useI18n();
   const id = useId();
@@ -62,7 +63,7 @@ export function DeleteFolderDialog({ name, onClose, onConfirm, returnFocus }: { 
   useBackCloses(onClose);
   useEffect(() => cancel.current?.focus(), []);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`} data-testid="folder-delete-dialog" className={DIALOG}>
-    <h2 id={`${id}-title`} className="break-words text-base font-semibold">{t("sidebar.folder.deleteTitle", { name })}</h2>
+    <h2 id={`${id}-title`} className="break-words text-base font-semibold">{t("sidebar.folder.deleteTitle", { name: isolate(name) })}</h2>
     <p id={`${id}-body`} className="mt-2 text-sm text-text-muted">{t("sidebar.folder.deleteBody")}</p>
     <div className="mt-5 flex flex-wrap justify-end gap-2">
       <button ref={cancel} onClick={onClose} className={QUIET}>{t("common.cancel")}</button>
