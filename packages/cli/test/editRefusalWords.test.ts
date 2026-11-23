@@ -25,6 +25,7 @@ function fake(answer: { error: string | null; refused?: boolean; missing?: boole
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
+    messagesByWireId: vi.fn(async (linkId: string, wireId: string) => rows.filter((m) => m.linkId === linkId && m.wireId === wireId)),
     editMessage: vi.fn(async () => answer),
     groupTaken: vi.fn(() => 1),
     removeMessage: vi.fn(async () => ({ error: null })),

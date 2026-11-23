@@ -51,7 +51,7 @@ for (const rest of RESTS) {
 }
 
 // Before the pointer has moved it has nowhere to go: it used to glide for about 5 s at every page load toward a
-// pointer it had never seen (agents#3546), 45-60 frames a second on every page of a desktop visit.
+// pointer it had never seen, 45-60 frames a second on every page of a desktop visit.
 test("the pointer ghost asks for no frames until the pointer first moves", async ({ page }) => {
   await page.clock.install();
   await page.goto("/cli");
@@ -71,7 +71,7 @@ test("the pointer ghost asks for no frames until the pointer first moves", async
 });
 
 // Asleep, its float and z's looped forever: 8 style recalcs a second beside a still pointer, and at the top of every
-// page where it sleeps at its start spot (agents#1115). They play a few times and rest, as the footer's sleeper does.
+// page where it sleeps at its start spot. They play a few times and rest, as the footer's sleeper does.
 test("the sleeping pointer ghost floats and breathes its z's a few times, then rests", async ({ page }) => {
   await page.clock.install();
   await page.goto("/cli");
