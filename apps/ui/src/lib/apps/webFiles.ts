@@ -340,7 +340,9 @@ export function sheet(parts: { title: string; note?: string; secondary: string; 
     secondary.setAttribute("data-testid", "app-files-cancel");
     const primary = document.createElement("button");
     primary.type = "button";
-    primary.className = "rounded bg-accent px-3 py-1.5 text-sm font-medium text-on-accent hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+    // The sheet is on Ghostly's own page, so its classes are the app's: in forced colors the accent fill is gone, and
+    // the first button keeps a ButtonText edge (GrayText while it is off) so it doesn't read as bare text beside Cancel.
+    primary.className = "rounded bg-accent px-3 py-1.5 text-sm font-medium text-on-accent hover:opacity-90 forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
     primary.textContent = parts.primary;
     primary.setAttribute("data-testid", "app-files-choose");
     row.append(secondary, primary);
