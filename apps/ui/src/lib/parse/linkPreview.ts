@@ -169,26 +169,19 @@ function bubbleLinks(text: string): { shown: Set<string>; hidden: Set<string> } 
   return { shown, hidden };
 }
 
-/**
- * Whether a link of `text` (as `linksIn` reads it) shows only inside a spoiler, or as a link whose words hold one: the
- * bubble keeps it covered, so no card may say where it goes. A link the text shows outside a spoiler as well is not.
- */
-function spoiledLinks(text: string): (link: string) => boolean {
-  if (!text.includes("||")) return () => false;
-  const { shown, hidden } = bubbleLinks(text);
-  return (link) => hidden.has(link) && !shown.has(link);
-}
-
 const hasSpoiler = (segments: Segment[]): boolean =>
   segments.some((s) => s.type === "span" && (s.style === "spoiler" || hasSpoiler(s.children)));
 
 /**
- * A received preview, if it is of a link the text shows outside a spoiler. An older app makes one for a link only a
- * spoiler shows, and one for "~~https://a.example/x~~" that opens /x~~, another page than the bubble's link.
+ * A received preview, if it is of a link the bubble draws outside a spoiler, with the address it opens: the one rule
+ * `previewableLink` makes cards by. An older app or another client sends one for a link only a spoiler shows, for
+ * "~~https://a.example/x~~" that opens /x~~, for an address in code, or for "[DC](https://…/Washington,_D.C.)" read
+ * one dot short: each card would tell what a spoiler hides, or open another page than the bubble's link.
  */
 export function shownPreview(text: string, preview: LinkPreview | undefined): LinkPreview | undefined {
   if (!preview) return undefined;
-  const hidden = spoiledLinks(text);
   const links = linksIn(text).filter((link) => canonicalUrl(link) === preview.u);
-  return links.length && !links.every(hidden) ? preview : undefined;
+  if (!links.length) return undefined;
+  const { shown } = bubbleLinks(text);
+  return links.some((link) => shown.has(link)) ? preview : undefined;
 }
