@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -78,6 +78,17 @@ describe("file save marks a received file as downloaded", () => {
     // Off NTFS (this test's Linux) the stream is a file named after it: what was written is still what Windows reads.
     expect(readFileSync(`${saved.path}:Zone.Identifier`, "utf8")).toBe("[ZoneTransfer]\r\nZoneId=3\r\n");
     expect(readFileSync(saved.path, "utf8")).toBe("#!/bin/sh\necho boo\n");
+  });
+
+  it("on Windows: a name that ends in dots or spaces is saved, answered and marked without them, as Windows names the file", async () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    await fileStore.put({ id: "chat-one-in-dots", linkId: "chat-one", createdAt: 1, direction: "in", blob: new Blob(["MZ"]),
+      metadata: { name: "a.exe . .", size: 2, mime: "application/octet-stream", timestamp: 1 } } as never);
+    const folder = mkdtempSync(join(dir, "dots-"));
+    const saved = await callApi(world(), "file.save", { file: "chat-one-in-dots", dir: folder }) as { path: string };
+    expect(saved.path).toBe(join(folder, "a.exe"));
+    expect(readdirSync(folder).sort()).toEqual(["a.exe", "a.exe:Zone.Identifier"]);
+    expect(readFileSync(`${saved.path}:Zone.Identifier`, "utf8")).toBe("[ZoneTransfer]\r\nZoneId=3\r\n");
   });
 
   it("a file sent from here is marked too, as Desktop marks every save", async () => {
