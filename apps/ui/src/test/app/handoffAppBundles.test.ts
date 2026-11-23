@@ -169,6 +169,78 @@ describe("a move hands over the installed apps' bundles", () => {
     expect(hashed).toEqual([`app-${older.digest}`]);
   });
 
+  it("the giver keeps the hash of a bundle it read whole on its app's record, so the next move does not read it again", async () => {
+    // Apps installed before records kept the hash (every released build) got it only when they updated: until then, each
+    // Move and each reload read and hashed every bundle whole again.
+    const [installed, waiting] = [bundle(15), bundle(16)];
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    for (const held of [installed, waiting]) await space.append(`app-${held.digest}`, 0, held.bytes);
+    const chess = app("chess", installed.digest, "opfs", { digest: waiting.digest, bytes: "opfs" });
+    await profileDatabase(giver, [], [{ ...chess, manifest: installed.manifest, pending: { ...chess.pending, manifest: waiting.manifest } }]);
+    const hashed: string[] = [];
+    const digest = opfs.store.forSpace!(giver).digest;
+    const forSpace = opfs.store.forSpace!;
+    vi.spyOn(opfs.store, "forSpace").mockImplementation((other: string) => ({ ...forSpace(other), digest: async (id: string) => { hashed.push(id); return digest(id); } }));
+    const expected = [
+      { id: `app-${installed.digest}`, size: installed.bytes.length, sha256: installed.sha256 },
+      { id: `app-${waiting.digest}`, size: waiting.bytes.length, sha256: waiting.sha256 },
+    ];
+
+    expect(await handoffProfileHost("1.10.2", "web").source(giver).files()).toEqual(expected);
+    expect(hashed).toHaveLength(2);
+    expect(await handoffProfileHost("1.10.2", "web").source(giver).files()).toEqual(expected);
+
+    expect(hashed).toHaveLength(2);
+    const record = (await allOf(giver, "apps") as { ref: string; sha256?: string; pending?: { sha256?: string } }[]).find(({ ref }) => ref === "chess");
+    expect([record!.sha256, record!.pending?.sha256]).toEqual([installed.sha256, waiting.sha256]);
+  });
+
+  it("the giver keeps no hash of a bundle cut short, nor over a record that changed while it read", async () => {
+    const [cut, replaced, next] = [bundle(17), bundle(18), bundle(19)];
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    await space.append(`app-${cut.digest}`, 0, cut.bytes.subarray(0, 9));
+    await space.append(`app-${replaced.digest}`, 0, replaced.bytes);
+    await profileDatabase(giver, [], [{ ...app("todo", cut.digest, "opfs"), manifest: cut.manifest }, { ...app("chess", replaced.digest, "opfs"), manifest: replaced.manifest }]);
+    const digest = opfs.store.forSpace!(giver).digest;
+    const forSpace = opfs.store.forSpace!;
+    // An update installed while the bundle was read: its record names another version, whose hash this is not.
+    vi.spyOn(opfs.store, "forSpace").mockImplementation((other: string) => ({ ...forSpace(other), digest: async (id: string) => {
+      if (id === `app-${replaced.digest}`) await profileDatabase(giver, [], [{ ...app("chess", next.digest, "opfs"), manifest: next.manifest }]);
+      return digest(id);
+    } }));
+
+    await handoffProfileHost("1.10.2", "web").source(giver).files();
+
+    const records = await allOf(giver, "apps") as { ref: string; digest: string; sha256?: string }[];
+    expect(records.filter(({ ref }) => ref === "chess" || ref === "todo").map(({ ref, digest: at, sha256: kept }) => ({ ref, at, kept }))).toEqual([
+      { ref: "chess", at: next.digest, kept: undefined },
+      { ref: "todo", at: cut.digest, kept: undefined },
+    ]);
+  });
+
+  it("the giver keeps no hash over a record whose version got its hash, or moved to other storage, while it read", async () => {
+    const [hashed, moved] = [bundle(20), bundle(21)];
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    for (const held of [hashed, moved]) await space.append(`app-${held.digest}`, 0, held.bytes);
+    await profileDatabase(giver, [], [{ ...app("chess", hashed.digest, "opfs"), manifest: hashed.manifest }, { ...app("todo", moved.digest, "opfs"), manifest: moved.manifest }]);
+    const forSpace = opfs.store.forSpace!;
+    // The engine wrote the file again meanwhile and put the hash it checked on the record (or put the same version in
+    // other storage); this read saw the file mid-write, so its hash is not the file's.
+    vi.spyOn(opfs.store, "forSpace").mockImplementation((other: string) => ({ ...forSpace(other), digest: async (id: string) => {
+      if (id === `app-${hashed.digest}`) await profileDatabase(giver, [], [{ ...app("chess", hashed.digest, "opfs"), manifest: hashed.manifest, sha256: hashed.sha256 }]);
+      if (id === `app-${moved.digest}`) await profileDatabase(giver, [], [{ ...app("todo", moved.digest, "native"), manifest: moved.manifest }]);
+      return digestText(sha256(Uint8Array.of(1, 2, 3)));
+    } }));
+
+    await handoffProfileHost("1.10.2", "web").source(giver).files();
+
+    const records = await allOf(giver, "apps") as { ref: string; bytes: string; sha256?: string }[];
+    expect(records.filter(({ ref }) => ref === "chess" || ref === "todo").map(({ ref, bytes, sha256: kept }) => ({ ref, bytes, kept }))).toEqual([
+      { ref: "chess", bytes: "opfs", kept: hashed.sha256 },
+      { ref: "todo", bytes: "native", kept: undefined },
+    ]);
+  });
+
   it("the giver hashes a bundle whose file is shorter than its record's whole bundle, not offering the kept hash", async () => {
     // A rewrite of the file cut short (the tab closed mid-write) leaves part of it under a record that kept the whole
     // file's hash: offered under it, the taker found it damaged and cancelled the move at every Move.

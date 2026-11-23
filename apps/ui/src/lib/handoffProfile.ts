@@ -44,16 +44,34 @@ const BUNDLE_ID = /^app-[A-Za-z0-9_-]{43}$/;
 const lengthOf = (manifest: unknown): number | undefined => {
   try { return bundleLength(manifest as AppManifest); } catch { return undefined; }
 };
+const hashOf = (version?: AppVersion): string | undefined => typeof version?.sha256 === "string" && DIGEST.test(version.sha256) ? version.sha256 : undefined;
 /**
- * Each bundle a record names, with its whole file's hash and length where the record kept the hash when the file was
- * written: the hash is the file's only while the file has that length (a rewrite cut short leaves a shorter one).
+ * Each bundle a record names, with its whole bundle's length by its manifest and the whole file's hash where the record
+ * kept it when the file was written: the hash is the file's only while the file has that length (a rewrite cut short
+ * leaves a shorter one).
  */
-const bundlesOf = (app: AppRecord): { id: string; kind: unknown; sha256?: string; length?: number }[] => [app, ...(app.pending ? [app.pending] : [])]
+const bundlesOf = (app: AppRecord): { id: string; ref: string; digest: string; kind: unknown; sha256?: string; length?: number }[] => [app, ...(app.pending ? [app.pending] : [])]
   .filter((version): version is AppVersion & { digest: string } => typeof version.digest === "string" && DIGEST.test(version.digest))
   .map((version) => {
-    const length = typeof version.sha256 === "string" && DIGEST.test(version.sha256) ? lengthOf(version.manifest) : undefined;
-    return { id: bundleId(version.digest), kind: version.bytes, ...(length !== undefined && { sha256: version.sha256 as string, length }) };
+    const length = lengthOf(version.manifest), sha = hashOf(version);
+    return { id: bundleId(version.digest), ref: app.ref, digest: version.digest, kind: version.bytes, ...(length !== undefined && { length }), ...(sha && { sha256: sha }) };
   });
+
+/**
+ * A bundle's whole file's hash, read here, kept on its app's record as the engine keeps it when it writes the file, for
+ * the version (installed or waiting) still held there as read: one changed since (another version installed, its files
+ * written again) is left as it is. Kept for nothing: a write that fails leaves the record as it was.
+ */
+async function keepBundleHash(db: IDBDatabase, ref: string, digest: string, kind: unknown, sha: string): Promise<void> {
+  const tx = db.transaction("apps", "readwrite"), records = tx.objectStore("apps"), read = records.get(ref);
+  read.onsuccess = () => {
+    const app = read.result as AppRecord | undefined;
+    const holds = (version?: AppVersion) => !!version && version.digest === digest && version.bytes === kind && !hashOf(version);
+    if (holds(app)) records.put({ ...app, sha256: sha });
+    else if (holds(app?.pending)) records.put({ ...app, pending: { ...app!.pending, sha256: sha } });
+  };
+  await new Promise<void>((resolve) => { tx.oncomplete = tx.onabort = tx.onerror = () => resolve(); });
+}
 const FILE_KINDS: readonly FileBytesKind[] = ["opfs", "native", "idb"];
 
 /** The installed apps' records of a profile's database, none where it has no store for them yet. */
@@ -138,7 +156,10 @@ const isStaged = (file: Partial<HandoffFile>): file is Pick<HandoffFile, "size" 
 const RESTORE_FILES = 200, RESTORE_BYTES = 32 * 1024 * 1024;
 const spaceOf = (database: string): string => (database === "ghostly" ? "" : database.replace(/^ghostly_/, ""));
 
-/** The peer database opened as it is stored (no version, so nothing migrates); only read-only transactions on it. */
+/**
+ * The peer database opened as it is stored (no version, so nothing migrates); only read-only transactions on it, but
+ * for the hash of an app's bundle kept on its record (`keepBundleHash`).
+ */
 async function openAsStored(database: string): Promise<IDBDatabase> {
   if (!(await databaseExists(database))) throw new Error("The profile's database is not on this device");
   return wrap(indexedDB.open(database));
@@ -184,13 +205,19 @@ function profileSource(database: string): HandoffSource {
     // The apps' bundles, where their records say they are: one not here (it needs its files on this device too) is not.
     // Its hash is the one its record kept when the engine wrote and checked it (else read and hashed once): read whole
     // here, 20 bundles of 16 MiB held the offer back 1.8 s, at every Move and again after a reload (bug hunt, 2026-11-14).
-    for (const { id, kind, sha256, length } of (await appRecords(peer)).flatMap(bundlesOf)) {
+    // One whose record has none (an app installed by a build that did not keep it, not updated since) keeps the hash read
+    // here when the file is its whole bundle's length: else it was read whole again at each Move until the app updated.
+    for (const { id, ref, digest, kind, sha256, length } of (await appRecords(peer)).flatMap(bundlesOf)) {
       if (found.has(id) || !FILE_KINDS.includes(kind as FileBytesKind)) continue;
       const store = (await fileBytesOf(kind as FileBytesKind).catch(() => null))?.forSpace?.(database);
       const size = store ? await store.size(id).catch(() => null) : null;
       if (!store || !size) continue;
       const kept = size === length ? sha256 : undefined;
-      const sha = digests.get(id) ?? kept ?? await store.digest(id).catch(() => undefined);
+      let sha = digests.get(id) ?? kept;
+      if (!sha) {
+        sha = await store.digest(id).catch(() => undefined);
+        if (sha && size === length && !sha256) await keepBundleHash(peer, ref, digest, kind, sha).catch(() => {});
+      }
       if (!sha) continue;
       digests.set(id, sha);
       found.set(id, { file: { id, size, sha256: sha }, source: { size, read: (offset, length) => store.read(id, offset, length) } });
