@@ -161,6 +161,8 @@ export function Tasks() {
   const statusWord = (status: TaskStatus) => t(`cards.task.status.${status}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `statusWord` follows `t`
   const model = useMemo(() => boardModel(board.tasks, { grouping, filter, tag, now, older, clearedAt, statusWord }), [board.tasks, grouping, filter, tag, now, older, clearedAt, t]);
+  // A chosen tag no task on the board carries now (Clear finished took its last one) has no pill to unpick it: it goes.
+  if (tag && !model.tags.includes(tag)) setTag(undefined);
   const clearFinished = () => { const at = Date.now(); writeClearedAt(at); setClearedAt(at); };
   const routines = useMemo(() => sortRoutines(board.routines), [board.routines]);
   const nameOf = (group: BoardGroup) => group.label ?? t(`cards.board.column.${group.id as BoardColumn}`);
