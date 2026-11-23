@@ -39,7 +39,10 @@ test("no document the site publishes, revision logs included, cites the private 
   const files = [
     ...readdirSync(wisps).filter((name) => name.endsWith(".md")).map((name) => join(wisps, name)),
     ...readdirSync(join(wisps, "changes"), { recursive: true }).filter((name) => String(name).endsWith(".md")).map((name) => join(wisps, "changes", String(name))),
-    ...["PROTOCOL.md", "SDK.md", "USDT-INTEGRATION.md", "DHT-DELIVERY.md"].map((name) => join(repo, "docs", name)),
+    join(repo, "docs/PROTOCOL.md"),
+    join(repo, "docs/SDK.md"),
+    join(repo, "docs/USDT-INTEGRATION.md"),
+    join(repo, "docs/DHT-DELIVERY.md"),
   ];
   const found = files.flatMap((file) => privateRefs(readFileSync(file, "utf8")).map((ref) => `${file.slice(repo.length)}: ${ref}`));
   assert.deepEqual(found, []);
