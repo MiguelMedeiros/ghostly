@@ -93,8 +93,17 @@ function isolated(headers: HeadersInit): Headers {
   return out;
 }
 
+/**
+ * The policy of an answer of the worker's own, with nothing to run or load. Such a page is on the app's origin, and an
+ * app's page that frames it could reach anywhere through its window (its `fetch`, an image of its document) under no
+ * policy but the page's own: never past Ghostly's viewer policy, nor past Hide my IP from contacts.
+ */
+function ownPolicy(): string {
+  return `${frameAncestors()}; default-src 'none'; form-action 'none'; base-uri 'none'`;
+}
+
 function plain(status: number, text: string): Response {
-  return new Response(text, { status, headers: isolated({ "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "content-security-policy": frameAncestors() }) });
+  return new Response(text, { status, headers: isolated({ "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": ownPolicy() }) });
 }
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -119,7 +128,7 @@ export function said(status: number, text: string, lang?: string, dir?: string):
  */
 function failed(status: number, text: string, lang?: string, dir?: string): Response {
   const kept = answerStatus(status);
-  if (NULL_BODY.has(kept)) return new Response(null, { status: kept, headers: isolated({ "cache-control": "no-store", "content-security-policy": frameAncestors() }) });
+  if (NULL_BODY.has(kept)) return new Response(null, { status: kept, headers: isolated({ "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": ownPolicy() }) });
   return said(kept, text, lang, dir);
 }
 
