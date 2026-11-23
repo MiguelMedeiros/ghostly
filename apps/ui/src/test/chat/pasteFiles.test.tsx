@@ -1,5 +1,6 @@
 import { act, createEvent, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PLAYABLE_AUDIO, PLAYABLE_VIDEO } from "@ghostly/core";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
 import { guardFileDrops, pastedFiles, pastedImageName, pasteIsPictureOnly, PLATFORM_PASTE_MAX } from "../../lib/pastedFiles";
@@ -243,6 +244,30 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     expect(onSendFile.mock.calls.map(([f]) => [f.name, f.type, f.size])).toEqual([["scan.pdf", "application/pdf", 4], ["notes", "", 1]]);
   });
 
+  it("copied audio and video files go with a type the contact's app plays, as + → Document picks them", async () => {
+    // Before, these went with no type, so as bytes to download; and a WMA was refused in a video's words.
+    const names = ["take.flac", "take.aac", "take.oga", "take.weba", "clip.m4v", "clip.ogv"];
+    fakeEngine.readClipboardFiles = vi.fn(async () => [...names, "song.wma"].map((name) => held(name, [1])));
+    const { user } = composer();
+    paste(field(), {});
+    await user.click(await screen.findByTestId("attachment-send"));
+    await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(names.length + 1));
+    const types = Object.fromEntries(onSendFile.mock.calls.map(([f]) => [f.name, f.type]));
+    for (const name of names) expect(PLAYABLE_AUDIO.test(types[name]!) || PLAYABLE_VIDEO.test(types[name]!), `${name}: ${types[name]}`).toBe(true);
+    expect(types["song.wma"]).toBe("audio/x-ms-wma");
+  });
+
+  it("a paste the platform brought only some files of names the ones it left out", async () => {
+    const names = Array.from({ length: 12 }, (_, i) => `p${33 + i}.txt`);
+    fakeEngine.readClipboardFiles = vi.fn(async () => Object.assign([held("p1.txt", [1])], { pastLimit: names }));
+    composer();
+    paste(field(), {});
+    const open = await screen.findByTestId("attachment-sheet");
+    // The first ten names, then the rest unnamed: the line stays one to read.
+    expect(await within(open).findByRole("alert")).toHaveTextContent(
+      `Only the first 32 files were added. Left out: ${names.slice(0, 10).map((name) => `⁨${name}⁩`).join(", ")}, …. Add the rest with + → Document.`);
+  });
+
   it("text, or files the paste already showed, never ask the platform", async () => {
     fakeEngine.readClipboardFiles = vi.fn(async () => []);
     composer();
@@ -393,6 +418,13 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     }
     await user.click(screen.getByTestId("composer-toast-action"));
     expect(pick).toHaveBeenCalledTimes(1);
+  });
+
+  // The card's × is 32 px; on a phone a thumb gets 44 (`.tap-target`, index.css) without the card growing.
+  it("the card's × is a thumb's size on a phone", async () => {
+    composer();
+    expect(paste(field(), { types: ["Files"] })).toBe(false);
+    expect(within(await screen.findByRole("alert")).getByRole("button", { name: "Close" })).toHaveClass("tap-target", "h-8", "w-8");
   });
 
   it("files the browser kept, where files cannot go, say why instead; where they have no place, the paste is left alone", async () => {

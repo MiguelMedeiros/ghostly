@@ -501,6 +501,21 @@ describe("the standby screen", () => {
     expect(bdi?.textContent).toBe("Club!");
   });
 
+  it("wraps a device's name longer than its row, never cuts it", async () => {
+    // At 200 % text on a 320 px phone "Chrome, Windows" was wider than its column and showed as "Chrome, Win…".
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP, status: device.key === DESKTOP ? "live" as const : undefined })) }));
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    const [mac] = await screen.findAllByTestId("device-standby-link");
+    const name = within(mac).getByText("MacBook");
+    expect(name).not.toHaveClass("truncate");
+    expect(name).toHaveClass("break-words");
+    // The column keeps the name's one-line width in the row's line breaking (flex-auto, not flex-1): Check connection
+    // goes below it first, and only a name wider than the whole row wraps.
+    expect(name.parentElement).toHaveClass("min-w-0", "flex-auto");
+  });
+
   it("on a phone Check connection is 44 px tall, as the screen's other buttons are", async () => {
     fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP, status: device.key === DESKTOP ? "live" as const : undefined })) }));
     fakeEngine.on("deviceHandoffView", () => null);

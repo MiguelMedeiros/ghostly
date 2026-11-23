@@ -95,7 +95,8 @@ describe("a voice recording when the app locks", () => {
     expect(screen.queryByTestId("voice-confirm")).toBeNull();
     fireEvent.change(field, { target: { value: "right" } });
     fireEvent.submit(field.form!);
-    await vi.waitFor(() => expect(screen.queryByLabelText("Ghostly is locked")).toBeNull());
+    // The password is checked for real (PBKDF2, 600,000 rounds): more than waitFor's 1 s on a busy runner.
+    await vi.waitFor(() => expect(screen.queryByLabelText("Ghostly is locked")).toBeNull(), { timeout: 10_000 });
     expect(onSendFile).not.toHaveBeenCalled();
     expect(screen.getByTestId("voice-record")).toHaveAttribute("data-mode", "idle");
   });

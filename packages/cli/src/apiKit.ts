@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, sanitizeDisplayText, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import { replyRef } from "@ghostly/browser/shared/replies";
@@ -45,6 +46,17 @@ export interface CallScope {
 }
 
 export type Method = (ctx: ApiContext, params: Params, call?: CallScope) => Promise<unknown>;
+
+/**
+ * The scope of the call running now (`callApi`), however deep: a wait still open when its client's connection closes
+ * ends at once (`waits.ts`, `waitForState`), where it kept its listener or its reads to its own timeout, up to a day,
+ * with nobody to answer. Not a context per connection: the CLI keeps state per daemon keyed by its one `ApiContext`
+ * (card pacing, the invite's mark, holds), which one per connection split.
+ */
+const calls = new AsyncLocalStorage<CallScope>();
+export const inCall = <T>(call: CallScope | undefined, run: () => T): T => (call ? calls.run(call, run) : run());
+/** The connection of the call running now went away (`CallScope.gone`): its wait only stops. */
+export const callGone = (): AbortSignal | undefined => calls.getStore()?.gone;
 
 export const node = (ctx: ApiContext): GhostlyNode => ctx.runtime.server.node;
 export const state = (ctx: ApiContext): EngineState => node(ctx).getState();
@@ -319,6 +331,21 @@ export function findOwnNamedChat(links: readonly LinkView[], ref: string, groups
   return chat.link;
 }
 
+/**
+ * `findOwnNamedChat` for each chat a grant names (`call auto` / `group auto on --from`), each chat once: a ref given twice
+ * is read once, and a chat named by its id and its label too is kept once: 50,000 copies of one ref from a script were
+ * each resolved (8 s of the daemon's thread), and `call auto` kept them all.
+ */
+export function findOwnNamedChats(links: readonly LinkView[], refs: readonly string[], groups: readonly GroupView[] = [], onlyChat?: string): LinkView[] {
+  const unique = new Set(refs);
+  const chats = new Map<string, LinkView>();
+  for (const ref of unique) {
+    const link = findOwnNamedChat(links, ref, groups, onlyChat);
+    if (!chats.has(link.id)) chats.set(link.id, link);
+  }
+  return [...chats.values()];
+}
+
 /** `findOwnNamedChat`'s refusal: `ref` found `chat` only by what its contact chose. */
 export function namedByThem(ref: string, chat: { chat: string; name: string | null; contact: string | undefined }): CliError {
   return new CliError("bad_request", `${JSON.stringify(ref)} names a chat only by what its contact chose (a prefix of its id, its own name): use the chat's id, its contact's key or a label given here (ghostly chat rename <chat> <name>)`, chat);
@@ -394,12 +421,16 @@ const ON_A_MESSAGE: ReadonlySet<string> = new Set(["chat.react", "chat.pin", "ch
 
 /**
  * Whether the chat may have the message `ref` names: by its row's id, or by an id both sides know it by (its wire id,
- * the one a reaction or a pin names), as each call of `ON_A_MESSAGE` looks for it. The chat is read whole only when the
- * row's id finds nothing.
+ * the one a reaction or a pin names), as each call of `ON_A_MESSAGE` looks for it. A text and a contact's file are kept
+ * under their wire id (`me_<wire id>`, `peer_<wire id>`), so those rows are read alone first, as the engine's own
+ * lookup by wire id does. The chat is read whole only when none of them is the message (a payment, a file of mine, a
+ * mistyped id): a wire id read it whole here and again as the chat started, 0.45 s more at 100,000 messages.
  */
 async function mayHaveMessage(ctx: ApiContext, linkId: string, ref: string): Promise<boolean> {
   if (await node(ctx).getMessage(linkId, ref)) return true;
-  return (await node(ctx).getMessages(linkId)).some((m) => m.wireId === ref || replyRef(m, false) === ref);
+  const named = (m: StoredMessage | undefined) => !!m && (m.wireId === ref || replyRef(m, false) === ref);
+  for (const id of [`me_${ref}`, `peer_${ref}`]) if (named(await node(ctx).getMessage(linkId, id))) return true;
+  return (await node(ctx).getMessages(linkId)).some(named);
 }
 
 /**
@@ -597,15 +628,15 @@ export function notInYetError(group: GroupView, ref: string, error: CliError, de
 export const groupById = (ctx: ApiContext, id: string): GroupView | undefined => node(ctx).groupView(id);
 
 /**
- * A message of a chat or a group (`group:<id>`) named by its id here, read as one row; only a name that is no such
- * row's key (the id both sides know, `wireId`) reads the whole history. `keep`: only a message it accepts (mine, or
- * someone else's). The history is synchronous work on the daemon's one thread, about 120 ms at 10,000 messages.
+ * A message of a chat or a group (`group:<id>`) named by its id here, read as one row, else by the id both sides know
+ * (`wireId`), read by rows alone too (`messagesByWireId`). `keep`: only a message it accepts (mine, or someone else's).
+ * A wire id, an id the chat lacks or another's message read the whole history before: 0.7-0.8 s held on the daemon's
+ * one thread at 100,000 messages.
  */
 export async function messageOf(ctx: ApiContext, linkId: string, ref: string, keep: (message: StoredMessage) => boolean = () => true): Promise<StoredMessage | undefined> {
   const found = await node(ctx).getMessage(linkId, ref);
   if (found && keep(found)) return found;
-  const all = linkId.startsWith("group:") ? await node(ctx).groupMessages({ groupId: linkId.slice("group:".length) }) : await node(ctx).getMessages(linkId);
-  return all.find((m) => keep(m) && m.wireId === ref);
+  return (await node(ctx).messagesByWireId(linkId, ref)).find(keep);
 }
 
 // ---------- waiting ----------
@@ -622,9 +653,14 @@ export async function messageOf(ctx: ApiContext, linkId: string, ref: string, ke
 export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string, stopping?: AbortSignal): Promise<T> {
   const now = check(state(ctx));
   if (now !== undefined) return Promise.resolve(now);
+  const closed = callGone();
   return new Promise<T>((resolve, reject) => {
-    const end = (error: unknown) => { clearTimeout(timer); off(); stopping?.removeEventListener("abort", stopped); if (error) reject(error); };
+    const end = (error: unknown) => {
+      clearTimeout(timer); off(); stopping?.removeEventListener("abort", stopped); closed?.removeEventListener("abort", gone);
+      if (error) reject(error);
+    };
     const stopped = () => end(new CliError("timeout", `The daemon stopped before the wait ended, waiting for ${what}`, { reason: "daemon-stopped" }));
+    const gone = () => end(connectionClosed());
     const timer = setTimeout(() => end(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)), ms);
     const off = ctx.hub.onState((next) => {
       let value: T | undefined;
@@ -633,8 +669,15 @@ export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => 
       end(null);
       resolve(value);
     });
-    if (stopping?.aborted) stopped();
-    else stopping?.addEventListener("abort", stopped, { once: true });
+    if (closed?.aborted) gone();
+    else if (stopping?.aborted) stopped();
+    else {
+      stopping?.addEventListener("abort", stopped, { once: true });
+      closed?.addEventListener("abort", gone, { once: true });
+    }
   });
 }
+
+/** How a wait ends whose client's connection closed (`callGone`): nobody reads it, the wait only stops. */
+export const connectionClosed = () => new CliError("interrupted", "The connection closed before the wait ended");
 

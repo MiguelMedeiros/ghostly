@@ -21,6 +21,8 @@ function fake() {
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
+    messagesByWireId: vi.fn(async (linkId: string, wireId: string) => rows.filter((m) => m.linkId === linkId && m.wireId === wireId)),
+    deletedIdsOf: () => [],
     deleteMessage: vi.fn(() => ({ everyone: false })),
     removeMessage: vi.fn(async ({ linkId }: { linkId: string }) => ({ error: null as string | null, ...(linkId.startsWith("group:") && { e: 1 }) })),
     removalPending: vi.fn(() => true),
@@ -124,6 +126,17 @@ describe("delete --everyone", () => {
     node.removeMessage.mockResolvedValueOnce({ error: "A payment, a request or a notice cannot be deleted for everyone", refused: true } as never);
     await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "me_1", everyone: true })).rejects.toMatchObject({ code: "refused" });
     expect(node.deleteMessage).not.toHaveBeenCalled();
+  });
+
+  it("a message named by the id both sides know, one not there, or another member's, is read by rows alone: never the whole chat or group", async () => {
+    // A wire id, a missing id or another member's message read the whole history (0.7-0.8 s at 100,000 messages).
+    const { ctx, node, whole } = fake();
+    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "W1", everyone: true })).toMatchObject({ messageId: "me_1" });
+    expect(node.messagesByWireId).toHaveBeenCalledWith("chat-one", "W1");
+    await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "nope", everyone: true })).rejects.toMatchObject({ code: "not_found", message: 'No message "nope" in this chat (ghostly chat history Alice)' });
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "nope", everyone: true })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "k:0:1" })).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/another member's message/) });
+    expect(whole()).toBe(0);
   });
 });
 

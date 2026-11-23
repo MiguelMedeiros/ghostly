@@ -338,6 +338,33 @@ describe("hubs in a private group past 16 members", () => {
     for (let i = 0; i < 600 && (await leaver.store.getGroups()).some(g => g.id === id); i++) await world.run(500, 500);
     expect((await leaver.store.getGroups()).some(g => g.id === id)).toBe(false);
   }, 300_000);
+
+  it("a member's leave said again while the admin's app stays closed is not passed round by the hubs every 30 s", async () => {
+    const b = await build(20, { hubs: [2, 5] });
+    const { world, id, admin, peers } = b;
+    await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    await world.run(150_000);
+    const leaver = peers[13], leaverKey = keyOf(b, leaver);
+    let fromLeaver = 0, passedOn = 0;
+    world.drop = (from, _to, frame) => {
+      if (frame.t === "group-bye") { if (from === leaver) fromLeaver++; else passedOn++; }
+      return false;
+    };
+    admin.online = false;
+    await leaver.groups.leave(id);
+    await world.run(10 * 60_000);
+    // Each hub passes it on to the 17 other members it keeps edges with: once at Leave, and on the first re-say.
+    expect(passedOn).toBeGreaterThan(0);
+    fromLeaver = 0; passedOn = 0;
+    // From then on the admin is away an hour: the leaver says it again now and then, not twice a minute.
+    await world.run(60 * 60_000);
+    expect(fromLeaver, `passed on ${passedOn}`).toBeLessThanOrEqual(3 * 2);
+    expect(passedOn).toBeLessThanOrEqual(3 * 2 * 17);
+    world.drop = null;
+    world.reopen(admin);
+    // Back, the admin still hears it and takes the member out.
+    await world.until(() => !view(b, admin).members.some(m => m.key === leaverKey), 5 * 60_000, 500);
+  }, 300_000);
 });
 
 /**

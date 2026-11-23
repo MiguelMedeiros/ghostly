@@ -11,7 +11,7 @@ import { FieldGrid, InputGroup } from "../layout";
 import { NostrPublishDialog } from "./NostrPublishDialog";
 import { problemLine } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
-import { listText } from "../../lib/listText";
+import { listText, namesText } from "../../lib/listText";
 
 
 /**
@@ -92,7 +92,7 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
           <p className="text-sm text-text-primary break-words" data-testid="nostr-own-name">{p?.name ?? (view.profile ? t("identities.nostr.noProfile") : t("identities.nostr.yourKey"))}</p>
           <p className="text-xs text-text-muted font-mono break-all" title={view.npub}>{short}</p>
           {view.profile && <p className="text-[11px] text-text-muted">{(() => {
-            const from = { relays: view.profile.relays.map(r => r.replace(/^wss?:\/\//, "")).join(", "), time: ago(view.profile.fetchedAt) };
+            const from = { relays: namesText(view.profile.relays.map(r => r.replace(/^wss?:\/\//, "")), t), time: ago(view.profile.fetchedAt) };
             return view.profile.stale ? t("identities.nostr.profileStaleFrom", from) : t("identities.nostr.profileFrom", from);
           })()}</p>}
           {view.follows && <p className="text-xs text-text-muted" data-testid="nostr-own-follows">{(() => {

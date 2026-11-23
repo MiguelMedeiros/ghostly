@@ -13,6 +13,7 @@
     "noMatch": "They don't match",
     "notPublished": "Your other devices see it once this device reaches the network.",
     "refused": "Another device tried to use this code. It got nothing.",
+    "refusedFound": "Two devices used this code. Choose They match only if your new device shows these same digits. If it shows none, choose They don't match.",
     "scan": "Scan this with your phone's camera.",
     "scanInfo": "On a computer, open Ghostly and choose Add this device to another profile, then scan or paste the code. It works once, for 10 minutes.",
     "title": "Add a device",
@@ -256,6 +257,8 @@
       "busy": "Something else is changing your devices. Try again in a moment.",
       "failed": "Something went wrong. Nothing was changed."
     },
+    "fetch": "Get them now",
+    "fetching": "Getting them. Keep Ghostly open on both devices.",
     "go": "Remove",
     "home": {
       "bark": "An exit or a send still open there can't be finished here.",
@@ -263,6 +266,8 @@
       "line": "{{wallet}} lives on {{device}}. After removal it opens here instead.",
       "usdt": "Sending stays off here until you confirm its last transaction on chain."
     },
+    "later": "{{size}} of large files are still only on {{device}}.",
+    "laterNext": "They come over when both devices are on. If you remove it first, they're lost.",
     "lost": "Lost or stolen",
     "removing": "Removing…",
     "text": "It can no longer take this profile.",

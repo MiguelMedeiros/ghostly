@@ -1,5 +1,5 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
-import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, FILE_INDEX, GROUP_LIGHT_RANGE, GROUP_LIVE_RANGE, STORES, fileStore, groupLightKey, groupLiveKey, store, wrap, committed, openDb } from "../shared/idb";
+import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, FILE_INDEX, FRAME_INDEX, GROUP_LIGHT_RANGE, GROUP_LIVE_RANGE, STORES, fileStore, groupLightKey, groupLiveKey, store, wrap, committed, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
 import { withoutFrame } from "../shared/messageChanges";
 import type { GroupLight, GroupLive, MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
@@ -302,6 +302,16 @@ export const db = {
    */
   async getFileMessages(linkId: string): Promise<StoredMessage[]> {
     const index = (await store(STORES.messages, "readonly")).index(FILE_INDEX);
+    const messages = await wrap<StoredMessage[]>(index.getAll(IDBKeyRange.bound([linkId], [linkId, []])));
+    return messages.sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  },
+  /**
+   * A group's rows that hold the frame their message came in (`StoredMessage.frame`), by time (then id), as
+   * `getMessages` has them. Reads the frame index only (`FRAME_INDEX`): a group keeps the frames of its newest messages
+   * alone (`GROUP_LIMITS.relay`), so 50,000 rows cost the few hundred that hold one.
+   */
+  async getFramedMessages(linkId: string): Promise<StoredMessage[]> {
+    const index = (await store(STORES.messages, "readonly")).index(FRAME_INDEX);
     const messages = await wrap<StoredMessage[]>(index.getAll(IDBKeyRange.bound([linkId], [linkId, []])));
     return messages.sort((a, b) => a.timestamp - b.timestamp || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   },

@@ -30,9 +30,9 @@ export function DeleteChatDialog({name, onClose, onConfirm, title, body, confirm
     <h2 id={`${id}-title`} className="break-words text-base font-semibold">{title ?? t("common.deleteChatTitle")}</h2>
     {!title && <p className="mt-2 break-words text-sm font-medium">{name}</p>}
     <p id={`${id}-body`} className="mt-2 text-sm text-text-muted">{callOn ? t("common.deleteChatCallOn") : body ?? t("common.deleteChatLocal")}</p>
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex flex-wrap justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
-      <button ref={confirm} onClick={onConfirm} disabled={callOn} className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-50 disabled:hover:bg-danger/15">{confirmLabel ?? t("sidebar.deleteChat")}</button>
+      <button ref={confirm} onClick={onConfirm} disabled={callOn} className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-50 disabled:hover:bg-danger/15">{confirmLabel ?? t("sidebar.deleteChat")}</button>
     </div>
   </dialog>,document.body);
 }

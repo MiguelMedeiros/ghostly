@@ -708,6 +708,36 @@ describe("a provider's lines and their English keys", () => {
       expect(step).not.toHaveTextContent(/Your own Core Lightning node|Node id|WebSocket address/);
     });
 
+    it("the source in French: the providers' word labels in the select, the source row, Use and the saved notice; names as they are", async () => {
+      const onSet = vi.fn(async () => {});
+      const { user } = renderApp(<SourcePicker kind="lightning" view={sourceView({ offered: offered("lightning", "mainnet"), providerId: "cashu-mint", label: "Cashu mints", isDefault: true, custodial: true, status: "ready", network: "bitcoin" })} onSet={onSet} />, { language: "fr" });
+      expect(screen.getByTestId("lightning-source-current")).toHaveTextContent(/^Mints Cashu/);
+      const labels = (await optionsOf(user, screen.getByTestId("lightning-source-select"))).map((o) => o.label);
+      expect(labels).toEqual(["Mints Cashu", "Fedimint", "Breez (Spark)", "Nostr Wallet Connect", "Core Lightning", "Portefeuille du navigateur (WebLN)", "Nœud LND"]);
+      await user.keyboard("{Escape}");
+      await choose(user, screen.getByTestId("lightning-source-select"), "lnd");
+      expect(screen.getByTestId("provider-save")).toHaveTextContent(/^Utiliser Nœud LND$/);
+      await choose(user, screen.getByTestId("lightning-source-select"), "webln");
+      await user.click(screen.getByTestId("provider-save"));
+      expect(await screen.findByTestId("lightning-source-saved")).toHaveTextContent(/^Portefeuille du navigateur \(WebLN\) est maintenant votre source Lightning\.$/);
+      expect(onSet).toHaveBeenCalledWith("webln", {});
+    });
+
+    it("a saved LND node, in Portuguese, is named Nó LND", () => {
+      renderApp(<SourcePicker kind="lightning" view={sourceView({ offered: offered("lightning", "mainnet"), providerId: "lnd", label: "LND node", status: "ready", network: "bitcoin" })} onSet={vi.fn(async () => {})} />, { language: "pt" });
+      expect(screen.getByTestId("lightning-source-current")).toHaveTextContent(/^Nó LND/);
+      expect(screen.getByTestId("lightning-source-current")).not.toHaveTextContent("LND node");
+    });
+
+    it("New's Lightning providers in Portuguese: Carteira do navegador (WebLN), Nó LND", async () => {
+      const offers = [{ type: "lightning", network: "testnet", available: true, needs: "provider", providers: offered("lightning", "testnet").filter((d) => d.id !== "cashu-mint") }] as never;
+      const { user } = renderApp(<NewWalletDialog wallet={{} as never} offers={offers} onClose={() => {}} onCreated={() => {}} />, { language: "pt" });
+      await user.click(screen.getByTestId("new-wallet-type-lightning"));
+      const labels = (await optionsOf(user, await screen.findByTestId("new-wallet-provider-select"))).map((o) => o.label);
+      expect(labels).toEqual(expect.arrayContaining(["Carteira do navegador (WebLN)", "Nó LND", "Core Lightning"]));
+      expect(labels).not.toEqual(expect.arrayContaining(["LND node"]));
+    });
+
     it("a plugin provider, without keys of its own, keeps its English lines", async () => {
       const { user } = renderApp(<SourcePicker kind="lightning" view={sourceView({ mode: "testnet", offered: [plugin] })} onSet={vi.fn(async () => {})} />, { language: "pt" });
       await choose(user, screen.getByTestId("lightning-source-select"), "acme-node");
@@ -715,6 +745,7 @@ describe("a provider's lines and their English keys", () => {
       expect(config).toHaveTextContent("An Acme node over its API. Your node holds the sats.");
       expect(within(config).getByRole("textbox", { name: "Acme address" })).toHaveAttribute("placeholder", "https://acme.local");
       expect(config).toHaveTextContent("Where the Acme node listens.");
+      expect(screen.getByRole("button", { name: "Usar Acme node" })).toBeInTheDocument();
     });
   });
 
@@ -731,7 +762,7 @@ describe("a provider's lines and their English keys", () => {
       expect(keys.length).toBeGreaterThan(30);
       const lines = new Set(BUILT_IN.flatMap((id) => {
         const d = descriptor(id), base = `wallet.source.providers.${id}`;
-        return [`${base}.description`, ...d.fields.flatMap((f) => [
+        return [`${base}.label`, `${base}.description`, ...d.fields.flatMap((f) => [
           `${base}.fields.${f.name}.label`, `${base}.fields.${f.name}.help`, `${base}.fields.${f.name}.placeholder`,
           ...(f.options ?? []).map((o) => `${base}.fields.${f.name}.options.${o.value.replace(/[^A-Za-z0-9]+/g, "_")}`),
           ...(f.suggestions ?? []).map((s) => `${base}.fields.${f.name}.suggestions.${s.value.replace(/[^A-Za-z0-9]+/g, "_")}`),

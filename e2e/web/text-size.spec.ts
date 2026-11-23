@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { setClipboard } from "../support/clipboard";
 import { DEVICE_SET_PASSWORD } from "../support/devices";
 import { expect, test } from "../support/fixtures";
+import { injectNostrSigner } from "../support/nostrSigner";
 
 /**
  * The browser's own text size (Chrome's Settings → Font size, a user style sheet) reaches the smallest text too: the
@@ -287,5 +288,42 @@ test("a phone at a larger text size: Settings' sections (their names and what th
     const kinds = page.getByTestId("add-identity").locator('[data-testid^="add-identity-card-"]');
     await expect(kinds.first()).toBeVisible();
     expect(await cutNames(kinds, 'span[dir="auto"]'), `${language}: the identity kinds`).toEqual([]);
+  }
+});
+
+/** The buttons past the screen's sides, as "words: left..right". */
+function offScreen(buttons: Locator): Promise<string[]> {
+  return buttons.evaluateAll((buttons) => buttons
+    .map((button) => ({ button, box: button.getBoundingClientRect() }))
+    .filter(({ box }) => box.width > 1 && (box.left < 0 || box.right > window.innerWidth))
+    .map(({ button, box }) => `${button.textContent!.trim()}: ${Math.round(box.left)}..${Math.round(box.right)}`));
+}
+
+test("a phone at 150% and 200% text size: a button's long label wraps inside the screen (Identities' Edit profile, Load my profile and follows, New identity's Sign with…)", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:proofs.page"] }, async ({ peer }) => {
+  // The shared Button kept its label on one line: in Japanese at 24px "Load my profile and follows" ran from 48 to 497 px
+  // on a 375 px screen, and New identity's "Sign with Browser extension (NIP-07)" from -33 to 359.
+  const alice = await peer("text-size-buttons", { mobile: true, viewport: PHONE });
+  await injectNostrSigner(alice);
+  const { page } = alice;
+  await page.getByTestId("mobile-tab-identities").click();
+  await page.getByTestId("identities-new").click();
+  await page.getByTestId("add-identity").getByTestId("add-identity-nostr").click();
+  await page.getByTestId("add-identity").getByTestId("add-identity-start").click();
+  await expect(page.getByTestId("identity-proof")).toHaveCount(1);
+  for (const px of [24, 32]) {
+    await textSize(page, px);
+    for (const language of ["fr", "ja", "ar"]) {
+      await useLanguage(page, language);
+      await page.getByTestId("mobile-tab-identities").click();
+      await expect(page.getByTestId("identity-ghostly-edit")).toBeVisible();
+      await expect(page.getByTestId("nostr-own-load")).toBeVisible();
+      expect.soft(await offScreen(page.getByTestId("identities-page").getByRole("button")), `${language} at ${px}px: Identities`).toEqual([]);
+      await page.getByTestId("identities-new").click();
+      const add = page.getByTestId("add-identity");
+      await add.getByTestId("add-identity-nostr").click();
+      await expect(add.getByTestId("add-identity-start")).toBeVisible();
+      expect.soft(await offScreen(add.getByRole("button")), `${language} at ${px}px: New identity`).toEqual([]);
+      expect.soft(await add.evaluate((sheet) => sheet.scrollWidth - sheet.clientWidth), `${language} at ${px}px: New identity scrolls sideways`).toBeLessThanOrEqual(0);
+    }
   }
 });

@@ -351,7 +351,8 @@ function Links() {
 /**
  * One of those devices. Check connection is there only while its link is connected: when the link drops under the
  * keyboard focus, the focus goes to this line, which now says Not connected, not to the page. The name keeps its
- * width (only one longer than the row is cut): on a narrow phone the button goes to a line of its own instead.
+ * width: on a narrow phone the button goes to a line of its own instead, and a name longer than the row (a large text
+ * size) wraps, never cut.
  */
 function LinkRow({ device, answer, onCheck }: { device: DeviceSetView["devices"][number]; answer?: string; onCheck(): void }) {
   const { t } = useI18n();
@@ -361,8 +362,8 @@ function LinkRow({ device, answer, onCheck }: { device: DeviceSetView["devices"]
   return (
     <li ref={row} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center gap-3 px-4 py-3">
       <DeviceGlyph name={device.name} active={device.active} />
-      <div className="max-w-full flex-1">
-        <p dir="auto" className="truncate text-text-primary">{device.name}</p>
+      <div className="min-w-0 max-w-full flex-auto">
+        <p dir="auto" className="break-words text-text-primary">{device.name}</p>
         <p className="text-xs text-text-muted">
           {device.active ? `${t("devices.section.active")} · ` : ""}
           <span className="inline-flex items-center gap-1">

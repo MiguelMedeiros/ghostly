@@ -84,7 +84,7 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
           </div>
         </div>
         <button type="button" data-testid="message-details-close" onClick={onClose} aria-label={t("chat.message.detailsClose")} title={t("chat.message.detailsClose")}
-          className="shrink-0 p-1.5 -me-1.5 rounded-full text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer">
+          className="tap-target shrink-0 p-1.5 -me-1.5 rounded-full text-text-muted hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
         </button>
       </div>
@@ -105,7 +105,7 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
       <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-border shrink-0">
         <p data-testid="message-details-keys-hint" className="m-0 text-[11px] text-text-muted">{t("chat.message.keysHint")}</p>
         <button type="button" data-testid="message-details-copy-all" onClick={copyAll}
-          className="shrink-0 px-2.5 py-1 rounded border border-border bg-surface-hover text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
+          className="tap-target shrink-0 px-2.5 py-1 rounded border border-border bg-surface-hover text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
           {copiedAll ? t("chat.message.copied") : t("chat.message.copyJson")}
         </button>
       </div>

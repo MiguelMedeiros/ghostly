@@ -425,17 +425,58 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
         if (name === "paste" || ((name === "copy" || name === "cut") && !tapping())) return false;
         const args = [name];
         for (let i = 1; i < arguments.length; i++) args[i] = arguments[i];
-        return apply(run, this, args);
+        try { return apply(run, this, args); } finally { sweep(); }
       };
       define(proto, "execCommand", { value: guarded, writable: false, enumerable: exec.enumerable, configurable: false });
+      const trim = text.prototype.trim;
+      const jar = describe(proto, "cookie");
+      if (jar && jar.configurable === true && typeof jar.set === "function") {
+        const put = jar.set;
+        const hostOnly = function cookie(value) {
+          const line = text(value);
+          let at = apply(index, line, [";"]);
+          let kept = at < 0 ? line : apply(slice, line, [0, at]);
+          while (at >= 0) {
+            const next = apply(index, line, [";", at + 1]);
+            const part = next < 0 ? apply(slice, line, [at + 1]) : apply(slice, line, [at + 1, next]);
+            const named = apply(index, part, ["="]);
+            if (apply(lower, apply(trim, named < 0 ? part : apply(slice, part, [0, named]), []), []) !== "domain") kept += ";" + part;
+            at = next;
+          }
+          return apply(put, this, [kept]);
+        };
+        define(proto, "cookie", { get: jar.get, set: hostOnly, enumerable: jar.enumerable, configurable: false });
+      }
+      const store = w.CookieStore && w.CookieStore.prototype;
+      const fields = ["name", "value", "expires", "path", "sameSite", "partitioned", "maxAge"];
+      const changes = ["set", "delete"];
+      for (let i = 0; store && i < changes.length; i++) {
+        const real = store[changes[i]];
+        if (typeof real !== "function") continue;
+        const ownHost = function (options) {
+          const args = [];
+          for (let j = 0; j < arguments.length; j++) args[j] = arguments[j];
+          if (options !== null && (typeof options === "object" || typeof options === "function")) {
+            const given = { __proto__: null };
+            for (let f = 0; f < fields.length; f++) {
+              const found = options[fields[f]];
+              if (found !== undefined) given[fields[f]] = found;
+            }
+            args[0] = given;
+          }
+          return apply(real, this, args);
+        };
+        define(ownHost, "name", { value: changes[i] });
+        define(store, changes[i], { value: ownHost, writable: false, enumerable: true, configurable: false });
+      }
       const types = w.trustedTypes;
       if (types && !types.defaultPolicy) {
         try {
           let rules = null;
           const rule = (kind) => (input, type, sink) => {
             if (kind === "createScript" && sink === "Location href") return null;
-            if (passing || rules === null) return input;
-            return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+            if (passing || rules === null || !rules[kind]) return input;
+            return apply(rules[kind], undefined, [input, type, sink]);
           };
           const members = ["createHTML", "createScript", "createScriptURL"];
           const create = types.createPolicy;
@@ -567,6 +608,31 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           try { define(owner, name, found); } catch (e) {}
         }
       }
+      const inserts = [
+        [w.Node, ["appendChild", "insertBefore", "replaceChild"]],
+        [w.Element, ["append", "prepend", "before", "after", "replaceWith", "replaceChildren", "insertAdjacentElement", "insertAdjacentHTML", "setHTMLUnsafe", "setHTML", "innerHTML", "outerHTML"]],
+        [w.CharacterData, ["before", "after", "replaceWith"]],
+        [w.DocumentType, ["before", "after", "replaceWith"]],
+        [w.Document, ["append", "prepend", "replaceChildren", "write", "writeln", "body"]],
+        [w.Range, ["insertNode", "surroundContents"]],
+        [w.HTMLTableElement, ["caption", "tHead", "tFoot"]],
+        [w.HTMLSelectElement, ["add"]],
+        [w.HTMLOptionsCollection, ["add"]],
+      ];
+      for (let k = 0; k < inserts.length; k++) {
+        const owner = inserts[k][0] && inserts[k][0].prototype;
+        const names = inserts[k][1];
+        for (let n = 0; n < names.length; n++) {
+          const found = owner && describe(owner, names[n]);
+          const key = found && found.set ? "set" : "value";
+          if (!found || typeof found[key] !== "function") continue;
+          const real = found[key];
+          found[key] = function () {
+            try { return apply(real, this, arguments); } finally { sweep(); }
+          };
+          try { define(owner, names[n], found); } catch (e) {}
+        }
+      }
       const inShadow = w.DocumentFragment.prototype.querySelectorAll;
       if (attachShadow) {
         elements.attachShadow = function () {
@@ -577,6 +643,112 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
       }
     }
     if (!watched) watch(home, proto.querySelectorAll);
+  } catch (e) {}
+})(window)"#;
+
+/// Nor does any keep it off the async Clipboard API: WebKit lets `navigator.clipboard.writeText` and `write` write the
+/// system clipboard from a timer seconds after a tap in the page, and `readText` and `read` read it, whatever the
+/// `clipboard-write=()` and `clipboard-read=()` the window is sent (`PERMISSIONS_POLICY`). This runs in every frame of
+/// the window after the guards, whatever the setting, and in each frame of the page's it reaches: a write only while
+/// the person's own input in that frame is being dispatched (`CLIPBOARD_GUARD`'s test for a copy), never a read. The
+/// web needs none: there the browser keeps the app's frames off the API.
+const ASYNC_CLIPBOARD_GUARD: &str = r#"(function noAsyncClipboard(w) {
+  "use strict";
+  try {
+    const apply = w.Reflect.apply;
+    const describe = w.Object.getOwnPropertyDescriptor;
+    const define = w.Object.defineProperty;
+    const board = w.Clipboard && w.Clipboard.prototype;
+    if (!board || describe(board, "ghostlyAsyncClipboard")) return;
+    define(board, "ghostlyAsyncClipboard", { value: true });
+    const listen = w.EventTarget.prototype.addEventListener;
+    const phase = describe(w.Event.prototype, "eventPhase").get;
+    const stamp = describe(w.Event.prototype, "timeStamp").get;
+    const clock = w.performance;
+    const tick = clock && clock.now;
+    const time = () => { try { return apply(tick, clock, []); } catch (e) { return NaN; } };
+    let tap = null;
+    let trusted = null;
+    let tapped = NaN;
+    const seen = (event) => {
+      try {
+        const found = describe(event, "isTrusted");
+        if (!found || !found.get || apply(found.get, event, []) !== true) return;
+        let at = time();
+        try {
+          const given = apply(stamp, event, []);
+          if (given >= 0 && given < at) at = given;
+        } catch (e) {}
+        tap = event;
+        trusted = found.get;
+        tapped = at;
+      } catch (e) {}
+    };
+    const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
+    for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
+    const tapping = () => {
+      try { return tap !== null && apply(trusted, tap, []) === true && apply(phase, tap, []) !== 0 && time() - tapped <= 1000; } catch (e) { return false; }
+    };
+    const Refused = w.DOMException;
+    const Promised = w.Promise;
+    const reject = Promised.reject;
+    const refuse = () => apply(reject, Promised, [new Refused("The app may not use the clipboard here", "NotAllowedError")]);
+    const calls = [["write", true], ["writeText", true], ["read", false], ["readText", false]];
+    for (let i = 0; i < calls.length; i++) {
+      const name = calls[i][0];
+      const writes = calls[i][1];
+      const found = describe(board, name);
+      if (!found || typeof found.value !== "function") continue;
+      const real = found.value;
+      const guarded = function () {
+        if (!writes || !tapping()) return refuse();
+        return apply(real, this, arguments);
+      };
+      define(guarded, "name", { value: name });
+      define(board, name, { value: guarded, writable: false, enumerable: found.enumerable, configurable: false });
+    }
+    const shut = (inner) => {
+      try { if (inner && inner !== w) noAsyncClipboard(inner); } catch (e) {}
+    };
+    const count = describe(w, "length").get;
+    const view = describe(w.Document.prototype, "defaultView").get;
+    const sweep = () => {
+      try { for (let i = apply(count, w, []); i-- > 0;) shut(w[i]); } catch (e) {}
+    };
+    const kinds = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
+    const reads = ["contentWindow", "contentDocument", "getSVGDocument"];
+    for (let k = 0; k < kinds.length; k++) {
+      const owner = w[kinds[k]] && w[kinds[k]].prototype;
+      for (let r = 0; r < reads.length; r++) {
+        const name = reads[r];
+        const found = owner && describe(owner, name);
+        const key = found && found.get ? "get" : "value";
+        if (!found || typeof found[key] !== "function") continue;
+        const read = found[key];
+        found[key] = function () {
+          const got = apply(read, this, arguments);
+          try { shut(name === "contentWindow" ? got : apply(view, got, [])); } catch (e) {}
+          return got;
+        };
+        try { define(owner, name, found); } catch (e) {}
+      }
+    }
+    const Observer = w.MutationObserver;
+    const observe = Observer.prototype.observe;
+    const watch = (root) => {
+      apply(observe, new Observer(sweep), [root, { subtree: true, childList: true }]);
+      apply(listen, root, ["load", sweep, true]);
+    };
+    const attachShadow = w.Element.prototype.attachShadow;
+    if (attachShadow) {
+      w.Element.prototype.attachShadow = function () {
+        const root = apply(attachShadow, this, arguments);
+        try { watch(root); } catch (e) {}
+        return root;
+      };
+    }
+    watch(w.document);
+    sweep();
   } catch (e) {}
 })(window)"#;
 
@@ -940,12 +1112,12 @@ pub fn open<R: tauri::Runtime>(
 }
 
 /// The scripts the app's every frame runs before its own code, in this order: the clipboard guard always, then the
-/// WebRTC guard with Hide my IP from contacts on (the web runner's order).
+/// WebRTC guard with Hide my IP from contacts on (the web runner's order), then the Desktop's async clipboard guard.
 fn frame_guards(relay_only: bool) -> Vec<&'static str> {
     if relay_only {
-        vec![CLIPBOARD_GUARD, SERVICE_GUARD]
+        vec![CLIPBOARD_GUARD, SERVICE_GUARD, ASYNC_CLIPBOARD_GUARD]
     } else {
-        vec![CLIPBOARD_GUARD]
+        vec![CLIPBOARD_GUARD, ASYNC_CLIPBOARD_GUARD]
     }
 }
 
@@ -1022,10 +1194,18 @@ pub fn respond<R: tauri::Runtime>(app: &AppHandle<R>, id: u64, response: Service
     }
 }
 
+/// The policy of Ghostly's own answers on the app's origin (`plain`): nothing loads from them. The app could frame
+/// one and fetch or load through it, under this policy instead of `SERVICE_CSP`. The web runner's `ownPolicy` in
+/// `apps/web/src/svc/worker.ts`.
+const OWN_ANSWER_CSP: &str =
+    "frame-ancestors 'self'; default-src 'none'; form-action 'none'; base-uri 'none'";
+
 fn plain(status: StatusCode, message: &str) -> Response<Vec<u8>> {
     Response::builder()
         .status(status)
         .header("content-type", "text/plain; charset=utf-8")
+        .header("content-security-policy", OWN_ANSWER_CSP)
+        .header("x-content-type-options", "nosniff")
         .body(message.as_bytes().to_vec())
         .expect("static response")
 }
@@ -2164,8 +2344,32 @@ mod routing_tests {
     /// after it with Hide my IP on: the order the web runner puts them in a page.
     #[test]
     fn every_frame_runs_the_clipboard_guard_first() {
-        assert_eq!(frame_guards(false), vec![CLIPBOARD_GUARD]);
-        assert_eq!(frame_guards(true), vec![CLIPBOARD_GUARD, SERVICE_GUARD]);
+        assert_eq!(
+            frame_guards(false),
+            vec![CLIPBOARD_GUARD, ASYNC_CLIPBOARD_GUARD]
+        );
+        assert_eq!(
+            frame_guards(true),
+            vec![CLIPBOARD_GUARD, SERVICE_GUARD, ASYNC_CLIPBOARD_GUARD]
+        );
+    }
+
+    /// Every frame of the window, whatever the setting, also runs the Desktop's own guard of the async Clipboard API
+    /// after the others: its two writes go through only in the person's tap, its two reads never.
+    #[test]
+    fn every_frame_keeps_the_async_clipboard_to_a_tap() {
+        for relay_only in [false, true] {
+            assert_eq!(
+                frame_guards(relay_only).last(),
+                Some(&ASYNC_CLIPBOARD_GUARD)
+            );
+        }
+        assert!(ASYNC_CLIPBOARD_GUARD.starts_with("(function noAsyncClipboard(w) {"));
+        assert!(ASYNC_CLIPBOARD_GUARD.contains(
+            r#"const calls = [["write", true], ["writeText", true], ["read", false], ["readText", false]];"#
+        ));
+        assert!(ASYNC_CLIPBOARD_GUARD.contains("if (!writes || !tapping()) return refuse();"));
+        assert!(ASYNC_CLIPBOARD_GUARD.contains("configurable: false"));
     }
 
     /// The clipboard guard is the web runner's, word for word.
@@ -2417,6 +2621,103 @@ mod routing_tests {
         assert_eq!(
             (bad_body.status(), bad_body.body().len()),
             (StatusCode::OK, 0)
+        );
+    }
+
+    /// Ghostly's own answers on the app's origin (not ready, too much waiting, too large, no answer, an answer it
+    /// could not make) let nothing load from them: the app could frame one and load through it, under its policy.
+    #[test]
+    fn ghostlys_own_answers_on_the_apps_origin_let_nothing_load_from_them() {
+        let own = |response: &Response<Vec<u8>>, what: &str| {
+            assert_eq!(
+                response.headers()["content-security-policy"],
+                "frame-ancestors 'self'; default-src 'none'; form-action 'none'; base-uri 'none'",
+                "{what}"
+            );
+            assert_eq!(
+                response.headers()["x-content-type-options"],
+                "nosniff",
+                "{what}"
+            );
+        };
+        let app = app();
+        let asked = requests(&app);
+        let url = format!("{SCHEME}://atlas.{PEER}.{TAG}/");
+        let served = |label: &str, body: &[u8]| {
+            tauri::async_runtime::block_on(handle(
+                app.handle().clone(),
+                label.into(),
+                request("POST", &url, body),
+            ))
+        };
+
+        // Not ready: a window with Hide my IP on whose rule list is not in.
+        open(
+            app.handle(),
+            PEER.into(),
+            "atlas".into(),
+            TAG.into(),
+            "Atlas".into(),
+            None,
+            Some(true),
+        )
+        .unwrap();
+        let not_ready = served("svc-0", b"");
+        assert_eq!(not_ready.status(), StatusCode::SERVICE_UNAVAILABLE);
+        own(&not_ready, "not ready");
+
+        bind(&app, "svc-1");
+        let too_large = served("svc-1", &vec![0u8; MAX_REQUEST_BODY_BYTES + 1]);
+        assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        own(&too_large, "too large");
+
+        let state = app.state::<ViewerState>();
+        let held = Room::take(&state, "svc-1", MAX_PENDING_BODY_BYTES).unwrap();
+        let waiting = served("svc-1", b"x");
+        assert_eq!(waiting.status(), StatusCode::SERVICE_UNAVAILABLE);
+        own(&waiting, "too many waiting");
+        drop(held);
+        assert!(asked.try_recv().is_err());
+
+        let timeout = served("svc-1", b"");
+        assert_eq!(timeout.status(), StatusCode::GATEWAY_TIMEOUT);
+        own(&timeout, "no answer");
+        asked.try_recv().unwrap();
+
+        // An answer the contact made so that it cannot be passed on.
+        let pending = tauri::async_runtime::spawn(handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &url, b""),
+        ));
+        let id = asked.recv_timeout(Duration::from_secs(5)).unwrap()["id"]
+            .as_u64()
+            .unwrap();
+        respond(
+            app.handle(),
+            id,
+            ServiceResponse {
+                status: 200,
+                headers: vec![("bad header".into(), "x".into())],
+                body_b64: String::new(),
+            },
+        );
+        let invalid = tauri::async_runtime::block_on(pending).unwrap();
+        assert_eq!(invalid.status(), StatusCode::BAD_GATEWAY);
+        own(&invalid, "invalid answer");
+
+        // Another origin in the window, or a window that shows no service.
+        let other = handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &format!("{SCHEME}://notes.{PEER}.{TAG}/"), b""),
+        );
+        own(&tauri::async_runtime::block_on(other), "another origin");
+        own(&served("svc-9", b""), "no service");
+        // And the one no test here can reach (`Ghostly is not running`), made the same way.
+        own(
+            &plain(StatusCode::BAD_GATEWAY, "Ghostly is not running."),
+            "not running",
         );
     }
 

@@ -492,6 +492,8 @@ async function streamOpus(stream: OpusStream, sink: SoundSink): Promise<void> {
       const length = Math.min(decoded.samplesDecoded, left);
       left -= length;
       if (!sink.push(decoded.channelData, length)) return;
+      // The daemon's other work goes on between batches: a 14-minute note decoded in one turn held it 2.2 s.
+      await new Promise((resolve) => setImmediate(resolve));
     }
   } finally {
     decoder.free();
@@ -500,8 +502,11 @@ async function streamOpus(stream: OpusStream, sink: SoundSink): Promise<void> {
 
 // ---------- MP3 ----------
 
-/** MP3 bytes handed to the decoder at a time: about 16 s of a 128 kbit/s file. */
-const MP3_PIECE = 256 * 1024;
+/**
+ * MP3 bytes handed to the decoder at a time, each in a turn of its own (a read between them): about 1 s of a 128 kbit/s
+ * file, 16 s of a voice note's 8 kbit/s. At 256 KiB, a 8 kbit/s piece was over four minutes, decoded in one turn.
+ */
+const MP3_PIECE = 16 * 1024;
 
 /** The MP3 in `pieces`, decoded one at a time (the decoder copies each in before the next is asked for). */
 async function streamMp3(pieces: Iterable<Uint8Array> | AsyncIterable<Uint8Array>, sink: SoundSink): Promise<void> {

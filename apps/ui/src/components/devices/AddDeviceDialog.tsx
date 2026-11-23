@@ -197,8 +197,10 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     : view.step === "confirm" ? <>{fillNames(t("devices.add.found"), { device: view.device })} <span dir="ltr">{view.digits.split("").join(" ")}</span></>
     : view.step === "done" ? fillNames(t("devices.add.done"), { device: view.device }) : "";
   // Another device tried the code: the one warning of the code step, said at once from a line of its own that is there
-  // from the code on, like the one above. The notice under the code shows it.
-  const urgent = view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused ? t("devices.add.refused") : "";
+  // from the code on, like the one above. The notice under the code shows it. Once a device is found it may be either
+  // of the two, the person's own one too: the line then says to check the new device itself, not which one got nothing.
+  const urgent = view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused
+    ? t(view.step === "confirm" ? "devices.add.refusedFound" : "devices.add.refused") : "";
 
   // From They match until the device is added or the enrollment failed, × and Escape do nothing: the grant may have gone
   // out, and closing would cancel it, leaving "Not finished" on both devices. The engine ends the step on its own.
@@ -233,7 +235,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
           <FocusSafeButton type="button" data-testid="device-add-match" disabled={busy} onClick={() => void confirm(true)} className={primaryButton}>{t("devices.add.match")}</FocusSafeButton>
         </div>
       </>}
-      {view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused && <Notice tone="warning" testId="device-add-refused">{t("devices.add.refused")}</Notice>}
+      {urgent && <Notice tone="warning" testId="device-add-refused">{urgent}</Notice>}
       {view?.role === "inviter" && view.step === "adding" && <Status testId="device-add-adding" step="adding">{fillNames(t("devices.add.adding"), { device: view.device })}</Status>}
       {view?.role === "inviter" && view.step === "done" && <>
         <p data-testid="device-add-done" className="text-text-primary">{fillNames(t("devices.add.done"), { device: view.device })}</p>

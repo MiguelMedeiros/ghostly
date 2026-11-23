@@ -198,7 +198,10 @@
       "noFee": "手数料なし",
       "none": "まだありません",
       "note": {
+        "notSent": "送信されなかった支払い",
+        "paidRequest": "連絡先のリクエストへの支払い",
         "paymentFailed": "Lightning の支払いが失敗しました",
+        "paymentFailedFor": "支払いに失敗しました：{{note}}",
         "requestPaid": "Lightning で支払われたリクエスト",
         "testCoins": "テストミントからのテストコイン"
       }
@@ -703,7 +706,8 @@
               "bip84": "ネイティブ SegWit (BIP84, bc1q…)"
             }
           }
-        }
+        },
+        "label": "BDK ウォレット"
       },
       "bitcoind": {
         "description": "自分の Bitcoin Core ノード上のウォレットに、その RPC で接続します。鍵はノードが持ち、署名します。デスクトップアプリが必要です。",
@@ -730,7 +734,8 @@
         "description": "Breez SDK を使った、Spark 上のセルフカストディの Lightning ウォレット。リカバリーフレーズはこの端末に封印され、sats はあなたが持ちます。"
       },
       "cashu-mint": {
-        "description": "インボイスは Cashu の残高へ支払われ、そこから支払われます。sats は mint が保管します。"
+        "description": "インボイスは Cashu の残高へ支払われ、そこから支払われます。sats は mint が保管します。",
+        "label": "Cashu ミント"
       },
       "core-lightning": {
         "description": "自分の Core Lightning ノードに、rune を使って Commando で接続します。sats はノードが持ちます。Web アプリからは wss:// でのみ接続できます。",
@@ -767,7 +772,8 @@
             "help": "LND の REST ポート（restlisten、既定は 8080）。ブラウザーでは、ノードが restcors でこのアプリを許可し、ブラウザーが信頼する証明書を持っている必要があります。デスクトップアプリではどちらも不要です。",
             "label": "REST アドレス"
           }
-        }
+        },
+        "label": "LND ノード"
       },
       "nwc": {
         "description": "NWC URI で接続するウォレット（Alby Hub、ノードの NWC サービス、ホスト型ウォレット）。sats はそのウォレットが持ち、手数料の上限もウォレットが決めます。カストディアルかどうかはウォレット次第です。",
@@ -779,7 +785,8 @@
         }
       },
       "webln": {
-        "description": "このブラウザー内の Lightning ウォレット（Alby など）。sats はそのウォレットが持ち、支払う前にあなたに確認します。"
+        "description": "このブラウザー内の Lightning ウォレット（Alby など）。sats はそのウォレットが持ち、支払う前にあなたに確認します。",
+        "label": "ブラウザーのウォレット（WebLN）"
       }
     },
     "reconfigured": "{{name}} はそのサーバーを使うようになりました。",

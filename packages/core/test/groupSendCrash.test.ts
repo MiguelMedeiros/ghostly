@@ -174,6 +174,27 @@ describe("a private group's text when the sender's app is killed mid-send", { ti
     expect(heldBy(mesh, bob, app.session.myKey).get(probeId)).toEqual(["probe"]);
   });
 
+  it("a row an older app left behind, read once: a later start that reads no row still numbers above it", async () => {
+    const { mesh, bob, disk } = await group();
+    const app = open(mesh, disk);
+    expect(await app.session.sendText("one")).toHaveProperty("id");
+    await app.settle();
+    const before = clone(disk.state);
+    expect(await app.session.sendText("residue")).toHaveProperty("id");
+    disk.state = before;
+    for (const other of app.session.others) mesh.setEdge(app.session.myKey, other, false);
+    // A start reads the rows (`ownRows`) and sends nothing: what they hold is saved with the state.
+    const read = open(mesh, disk);
+    read.session.ownRows([...disk.rows.keys()].map(id => { const [, e, n] = id.split(":"); return { epoch: Number(e), seq: Number(n) }; }));
+    await read.session.flush();
+    for (const other of read.session.others) mesh.setEdge(read.session.myKey, other, false);
+    // The next start reads none of them.
+    const { app: later, probeId } = await reopen(mesh, disk, "probe");
+    expect([...disk.rows.values()]).toEqual(["one", "residue", "probe"]);
+    expect(heldBy(mesh, bob, app.session.myKey).get(probeId)).toEqual(["probe"]);
+    expect(later.session.rowsRead).toBe(true);
+  });
+
   it("a row whose store fails: not sent, never said later, and the next text goes as usual", async () => {
     const { mesh, bob, disk } = await group();
     let fail = true;

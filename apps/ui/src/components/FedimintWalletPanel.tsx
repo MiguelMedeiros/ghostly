@@ -10,7 +10,7 @@ import { useI18n, type Translate } from "../contexts/I18nContext";
 import { NAME, withName } from "./apps/aroundName";
 import { satsIn, unitFor } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
-import { fillNodes } from "../lib/fillNodes";
+import { fillNodes, listNodes } from "../lib/fillNodes";
 import { listText } from "../lib/listText";
 import { problemText } from "../lib/problemText";
 import { focusLost } from "../lib/focus";
@@ -55,7 +55,7 @@ function FederationFacts({ info, testId }: { info: Pick<FederationInfo, "federat
     <dt className="text-text-muted">{t("wallet.fedimint.facts.id")}</dt><dd className="font-mono text-text-secondary break-all">{info.federationId}</dd>
     <dt className="text-text-muted">{t("wallet.panel.network")}</dt><dd className="text-text-secondary" data-testid={`${testId}-network`}>{info.network ?? t("wallet.fedimint.facts.unknown")}</dd>
     <dt className="text-text-muted">{t("wallet.fedimint.facts.guardians")}</dt><dd className="text-text-secondary" data-testid={`${testId}-guardians`}>{t("wallet.fedimint.facts.guardianList", { count: info.guardians.length, names: listText(info.guardians.map((g) => g.name), t) })}</dd>
-    <dt className="text-text-muted">{t("wallet.fedimint.facts.consensus")}</dt><dd className="text-text-secondary">{t("wallet.fedimint.facts.consensusValue", { version: info.consensusVersion, modules: info.modules.join(", ") })}</dd>
+    <dt className="text-text-muted">{t("wallet.fedimint.facts.consensus")}</dt><dd className="text-text-secondary">{fillNodes(t("wallet.fedimint.facts.consensusValue", { version: info.consensusVersion }), { modules: listNodes(info.modules, t) })}</dd>
     {info.welcome && <><dt className="text-text-muted">{t("wallet.fedimint.facts.says")}</dt><dd className="text-text-secondary">{info.welcome}</dd></>}
   </dl>;
 }

@@ -6,6 +6,7 @@ import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { groupLinkUrl, groupPath, groupStatusText } from "../../lib/groups";
 import { useEngineValue } from "../../lib/engineState";
 import { showJoinNotice } from "../../lib/joinNotice";
+import { isolate } from "../../lib/ownStatus";
 import { NO_ROOM_FOR_CHAT, ensureSession } from "../../lib/storage";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteShareText, readInvite, type JoinOutcome } from "../../lib/url";
 import { CardIcon, EntityCardFrame, cardButton, cardQuiet } from "./EntityCardFrame";
@@ -14,10 +15,13 @@ import { problemLine, problemText, type Problem } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 
 
-/** Who the card says handed the invite over: the contact who sent it (by name, when known), or you. */
+/**
+ * Who the card says handed the invite over: the contact who sent it (by name, when known), or you. The name is isolated
+ * (FSI…PDI): the contact sets it, and raw in an Arabic line "C++" would be drawn "++C".
+ */
 function fromLine(t: Translate, mine: boolean, from: string | undefined): string {
   if (mine) return t("chat.entity.youSent");
-  return from ? t("chat.entity.fromName", { name: from }) : t("chat.entity.fromContact");
+  return from ? t("chat.entity.fromName", { name: isolate(from) }) : t("chat.entity.fromContact");
 }
 
 /** What joining would do in this profile now: read from stored chats only, nothing on the network. */

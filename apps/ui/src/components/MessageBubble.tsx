@@ -811,7 +811,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
                 type="button"
                 data-menu-item
                 onClick={() => setConfirm(null)}
-                className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer max-md:min-h-11 max-md:px-4"
               >
                 {t("common.cancel")}
               </button>
@@ -827,7 +827,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
                   confirmed();
                 }}
                 // Filled, as the other destructive confirmations: red on a pink fill read at 3.98:1 in the light theme.
-                className="px-2 py-0.5 rounded border border-danger-fill bg-danger-fill text-white text-xs font-bold hover:bg-danger-fill/90 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                className="px-2 py-0.5 rounded border border-danger-fill bg-danger-fill text-white text-xs font-bold hover:bg-danger-fill/90 transition-colors cursor-pointer max-md:min-h-11 max-md:px-4"
               >
                 {t("common.delete")}
               </button>

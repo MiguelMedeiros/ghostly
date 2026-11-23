@@ -21,7 +21,7 @@ import { useEffect } from "react";
 /**
  * The finale's gradient words are watched one by one: the section's `data-inview` holds while its download panel is
  * on screen, a screen below the title, and their background-position loop then cost the end of the home 70 ms a
- * second (agents#1056).
+ * second.
  */
 const LOOPS = "svg.ghost:not(svg svg), svg.stage, .particles, .footer-sleeper, .text-gradient-animated, .act-field-drift, .pet";
 

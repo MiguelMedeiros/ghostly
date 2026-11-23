@@ -30,7 +30,7 @@ export function OpenFailureNotice() {
           className="toast-card pointer-events-auto flex items-start gap-2.5 w-full max-w-sm rounded-xl border border-border bg-sidebar-bg px-4 py-3 shadow-2xl animate-fade-in">
           <Notice problem={problem} testId="open-failure" className="min-w-0 flex-1 text-sm" />
           <button type="button" onClick={() => { hold(); setProblem(null); }} aria-label={t("common.close")} data-testid="open-failure-close"
-            className="-me-1.5 -mt-1 grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-lg leading-none text-text-muted hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+            className="tap-target -me-1.5 -mt-1 max-md:ms-2 grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-lg leading-none text-text-muted hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             ×
           </button>
         </div>

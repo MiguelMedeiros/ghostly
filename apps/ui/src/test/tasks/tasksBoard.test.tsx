@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readStatusCard, statusCardText, type RoutineCard, type TaskCard } from "@ghostly/core";
@@ -251,6 +251,22 @@ describe("the Tasks board", () => {
     expect(within(column("done")).getByTestId("board-column-older")).toHaveTextContent("Hide older");
   });
 
+  it("Clear finished that takes the chosen tag's last task drops the tag, so the tasks still standing show", async () => {
+    // The tag stayed chosen with its pill gone: "No tasks match", no cards, and nothing on screen to unpick it.
+    const { user } = profile([
+      row("link-1", task({ id: "relay", status: "running", tags: ["core"] })),
+      row("link-1", task({ id: "done", status: "done", tags: ["old"] })),
+    ]);
+    await loaded();
+    await user.click(within(screen.getByTestId("tasks-tags")).getByRole("button", { name: "old" }));
+    expect(cardIds("done")).toEqual(["done"]);
+    expect(cardIds("running")).toEqual([]);
+    await user.click(screen.getByTestId("tasks-clear-finished"));
+    expect(screen.queryByTestId("tasks-no-match")).not.toBeInTheDocument();
+    expect(cardIds("running")).toEqual(["relay"]);
+    expect(within(screen.getByTestId("tasks-tags")).getByRole("button", { name: "core" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("Clear finished hides the done, failed and cancelled tasks on this device, for good after a reload; a bot's update brings one back", async () => {
     const finished = () => [
       row("link-1", task({ id: "relay", status: "running" })),
@@ -280,6 +296,42 @@ describe("the Tasks board", () => {
     again.set([...finished().slice(0, 2), back]);
     act(() => again.engine.messages("group:g1", [{ linkId: "group:g1", id: back.id, text: statusCardText(rerun), sender: "peer", timestamp: back.timestamp, via: "datalink", card: rerun, edit: { seq: 1, at, history: [] } } as StoredMessage]));
     await waitFor(() => expect(cardIds("running").sort()).toEqual(["failed", "relay"]));
+  });
+
+  it("Clear finished, gone under the keyboard, hands the focus to the next control in its row, not to the page", async () => {
+    const { user } = profile([row("link-1", task({ id: "relay", status: "running" })), row("link-1", task({ id: "done", status: "done" }))]);
+    await loaded();
+    screen.getByTestId("tasks-clear-finished").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("tasks-clear-finished")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tasks-group-status")).toHaveFocus();
+  });
+
+  it("with Group by on Bot, Clear finished hands the focus to the chosen option, not the first one", async () => {
+    const { user } = profile([row("link-1", task({ id: "relay", status: "running" })), row("link-1", task({ id: "done", status: "done" }))]);
+    await loaded();
+    await user.click(screen.getByTestId("tasks-group-bot"));
+    screen.getByTestId("tasks-clear-finished").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("tasks-group-bot")).toHaveFocus();
+  });
+
+  it("Clear finished leaves the focus where it is when it was not lost (a click from the filter)", async () => {
+    const { user } = profile([row("link-1", task({ id: "relay", status: "running" })), row("link-1", task({ id: "done", status: "done" }))]);
+    await loaded();
+    await user.click(screen.getByTestId("tasks-filter"));
+    fireEvent.click(screen.getByTestId("tasks-clear-finished"));
+    expect(screen.queryByTestId("tasks-clear-finished")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tasks-filter")).toHaveFocus();
+  });
+
+  it("with routines too, Clear finished hands the focus to the Tasks/Routines switch after it", async () => {
+    const { user } = profile([row("link-1", task({ id: "done", status: "done" })), row("link-1", routine())]);
+    await loaded();
+    screen.getByTestId("tasks-clear-finished").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("tasks-clear-finished")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tasks-view-tasks")).toHaveFocus();
   });
 
   it("with hundreds of cards, draws fifty a column and more on Show more", async () => {
@@ -627,6 +679,21 @@ describe("the Tasks board on a phone", () => {
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
 
+  it("gives Group by, the tag filters, Clear finished and the column tabs 44 px targets, as the app's other phone controls", async () => {
+    viewport(375, 740);
+    profile([...rowsOfThree(), row("link-1", task({ id: "tagged", tags: ["web"] }))]);
+    await loaded();
+    const targets = [
+      ...["status", "bot", "chat"].map((g) => screen.getByTestId(`tasks-group-${g}`)),
+      ...screen.getAllByTestId("tasks-tag"),
+      screen.getByTestId("tasks-clear-finished"),
+    ];
+    // At least 44 × 44 where a tap lands, a short word ("Bot", "web") included; in px, as phoneTargetsPx pins (#8056).
+    for (const target of targets) expect(target, target.textContent!).toHaveClass("max-md:min-h-[44px]", "max-md:min-w-[44px]");
+    // The tabs are drawn 36 px tall, to leave a phone on its side room for a card: a tap lands on 44 px of them.
+    for (const tab of screen.getAllByTestId("tasks-tab")) expect(tab, tab.textContent!).toHaveClass("tap-target", "min-h-9");
+  });
+
   it("keeps the chosen tab filled in forced colors, where the accent's background is gone", async () => {
     viewport(375, 740);
     const { user } = profile(rowsOfThree());
@@ -833,5 +900,36 @@ describe("the way to the board, above the chat list", () => {
     rows = [next];
     changes([], [sent.id]);
     await waitFor(() => expect(reads()).toBe(3));
+  });
+
+  it("reads, at each engine state, only the chats, groups and members its cards name, not every chat and every member", async () => {
+    // A profile in a large group with no card and many chats with no bot, beside a bot that posts in its chat and in a
+    // group. Each read of a member list or a contact's identities is counted.
+    const read = { members: 0, identities: 0 };
+    const counted = <T extends object>(view: T, field: keyof typeof read, value: unknown): T =>
+      Object.defineProperty(view, field, { enumerable: true, configurable: true, get: () => { read[field]++; return value; } });
+    const large = counted(groupView({ id: "large", name: "Large", status: "active" }), "members",
+      Array.from({ length: 300 }, (_, i) => ({ key: `large-member-${i}`, me: i === 0, nick: `Member ${i}` })));
+    const crew = groupView({ id: "g1", name: "Sala de Máquinas", status: "active", memberLinks: { "link-1": "hermes-key" },
+      members: [{ key: "me-key", me: true, nick: "Me" }, { key: "hermes-key", me: false, nick: "Hermes One" }] as never });
+    const links = [linkView({ id: "link-1", peerPubKeyZ32: PEER, peerNick: "Coordinator" }),
+      ...Array.from({ length: 50 }, (_, i) => counted(linkView({ id: `link-other-${i}`, peerPubKeyZ32: `other${i}` }), "identities", undefined))];
+    fakeEngine.on("statusCardIndex", () => [
+      row("link-1", task({ id: "relay" })),
+      row("group:g1", task({ id: "relay" }), { member: "hermes-key" }),
+      row("group:g1", task({ id: "docs", status: "queued" }), { member: "hermes-key" }),
+    ]);
+    const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
+    act(() => engine.update({ links, groups: [large, crew] }));
+    // Hermes in the group is the Coordinator of the 1:1 chat: its relay task in both is one, beside the docs task.
+    await waitFor(() => expect(screen.getByTestId("sidebar-tasks")).toHaveAccessibleName("Tasks, 2 active"));
+    read.members = 0;
+    read.identities = 0;
+
+    // The engine sends its whole state anew on every change (up to 20 a second while a file moves): nothing on the
+    // board changed, and the large group's members and the other chats' identities are not read for it.
+    for (let i = 0; i < 20; i++) act(() => engine.update({ links: [...links], groups: [large, crew] }));
+    expect(read).toEqual({ members: 0, identities: 0 });
+    expect(screen.getByTestId("sidebar-tasks")).toHaveAccessibleName("Tasks, 2 active");
   });
 });

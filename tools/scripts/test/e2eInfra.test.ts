@@ -20,6 +20,56 @@ describe("the e2e stack (e2e/infra)", () => {
   });
 });
 
+describe("room for e2e:full's own stack (e2e/infra/free.mjs)", () => {
+  /** A clock the waits move on: each sleep advances it, nothing really waits. */
+  function clock() {
+    let t = 0;
+    return { now: () => t, sleep: async (ms: number) => { t += ms; } };
+  }
+
+  it("waits while another checkout's stack runs, never taking it down, then downs its own and waits for the ports", async () => {
+    const { waitForRoom } = await import("../../../e2e/infra/free.mjs");
+    const time = clock(), said: string[] = [], events: string[] = [];
+    // Another checkout's stack for a minute, then its ports for half a minute more (Docker letting go of them).
+    const others = () => (time.now() < 60_000 ? ["ghostly-e2e-arkd (/home/x/wt/other/e2e/infra)"] : []);
+    const held = async () => (time.now() < 90_000 ? [47010] : []);
+    const down = () => { events.push(`down at ${time.now() / 1000}s`); };
+    expect(await waitForRoom({ others, held, down, log: (m: string) => said.push(m), every: 15_000, ...time })).toBeNull();
+    expect(events).toEqual(["down at 60s"]);
+    expect(time.now()).toBe(90_000);
+    expect(said).toEqual([
+      "waiting (up to 20 min): another ghostly-e2e stack runs: ghostly-e2e-arkd (/home/x/wt/other/e2e/infra)",
+      "waiting (up to 20 min): 127.0.0.1:47010 held by something else",
+    ]);
+  });
+
+  it("gives up after the bound and says why, without a down while the other stack runs", async () => {
+    const { waitForRoom } = await import("../../../e2e/infra/free.mjs");
+    const time = clock(), events: string[] = [];
+    const down = () => { events.push("down"); };
+    const busy = await waitForRoom({ others: () => ["ghostly-e2e-arkd (/elsewhere/e2e/infra)"], held: async () => [], down, log: () => {}, ...time });
+    expect(busy).toBe("gave up after 20 min waiting for room: another ghostly-e2e stack runs: ghostly-e2e-arkd (/elsewhere/e2e/infra)");
+    expect(events).toEqual([]);
+    const ports = await waitForRoom({ others: () => [], held: async () => [47010, 47011], down, log: () => {}, timeoutMs: 60_000, ...clock() });
+    expect(ports).toBe("gave up after 1 min waiting for room: 127.0.0.1:47010,47011 held by something else");
+    expect(events).toEqual(["down"]);
+  });
+
+  it("finds a port something listens on, and only that one", async () => {
+    const { heldPorts } = await import("../../../e2e/infra/free.mjs");
+    const { createServer } = await import("node:net");
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    try {
+      expect(await heldPorts([port])).toEqual([port]);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+    expect(await heldPorts([port])).toEqual([]);
+  });
+});
+
 describe("the HyperDHT relay (e2e/infra/env.mjs)", () => {
   it("is ready once its own HyperDHT node is reachable, not merely when it answers", async () => {
     const { hyperdhtRelayReady } = await import("../../../e2e/infra/env.mjs");

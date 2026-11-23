@@ -218,4 +218,4 @@ From 1.2, in private groups and communities ([WISP 503 Group Files](wisps/503-gr
 - A file that cannot come yet says why: "Asking a member who has it…", "Nobody you are connected to has this file yet" (it comes by itself when one is online), "Not with your connections yet" (a group of more than 16 on hubs, where none of your connections has it and the sender is not one of them: it comes once one of them downloads it), "Busy, trying again soon", or "Arrived damaged" with **Ask again**. One that stops mid-way goes on from what already came.
 - Forward and Share to list groups for files too.
 - An app from before 1.2 shows a line that names the file and says to update. Hubs carry the announcement, never the bytes.
-- No calls in groups.
+- From 1.12 a community can also hold group calls through the node its admin names ([WISP 602 Group Calls](wisps/602-group-calls.md)), joined from the web app, the extension, Android and the desktop app on macOS and Windows; not from the desktop app on Linux or the CLI yet.
