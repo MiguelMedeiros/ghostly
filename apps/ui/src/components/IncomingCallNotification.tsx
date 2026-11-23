@@ -78,7 +78,8 @@ export function IncomingCallNotification({
     return () => {
       if (document.activeElement && document.activeElement !== document.body) return;
       let back = before;
-      while (back && !back.isConnected) back = focusBackOf.get(back) ?? null;
+      // The target may be a button inside a card gone (the user had tabbed to it): the card that held it has the entry.
+      while (back && !back.isConnected) back = focusBackOf.get(back.closest<HTMLElement>(".incoming-call") ?? back) ?? null;
       back?.focus({ preventScroll: true });
     };
   }, []);

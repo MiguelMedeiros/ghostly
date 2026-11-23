@@ -57,4 +57,28 @@ describe("the focus after a ringing card goes", () => {
     expect(input).toHaveFocus();
     input.remove();
   });
+
+  it("focus on the first card's Decline when the second rings: back to the composer", async () => {
+    const input = composer();
+    const a = renderApp(card("Casper"));
+    await a.user.tab();
+    expect(a.getByRole("button", { name: /decline/i })).toHaveFocus();
+    const b = renderApp(card("Wendy"));
+    await act(async () => a.unmount());
+    await act(async () => b.unmount());
+    expect(input).toHaveFocus();
+    input.remove();
+  });
+
+  it("three cards, the first two end, the third is declined: back to the composer", async () => {
+    const input = composer();
+    const a = renderApp(card("Casper"));
+    const b = renderApp(card("Wendy"));
+    const c = renderApp(card("Stretch"));
+    await act(async () => a.unmount());
+    await act(async () => b.unmount());
+    await act(async () => c.unmount());
+    expect(input).toHaveFocus();
+    input.remove();
+  });
 });
