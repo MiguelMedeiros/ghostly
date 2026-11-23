@@ -393,7 +393,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
                 {comparing && canCompare && !link?.peerVerified && <div className="rounded-lg bg-surface-hover p-3">
                   <code data-testid="pair-code" className="block select-all break-words text-sm tracking-widest text-text-primary">{pair?.code}</code>
                   <p className="mt-1">{t("connection.panel.compare")}</p>
-                  <FocusSafeButton data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent px-3 text-panel-header ${focus}`}
+                  <FocusSafeButton data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent px-3 text-panel-header forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] ${focus}`}
                     onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</FocusSafeButton>
                   {verifyError && <Notice problem={problemText(verifyError, t)} tone="warning" testId="pair-verify-error" className="mt-1.5" />}
                 </div>}

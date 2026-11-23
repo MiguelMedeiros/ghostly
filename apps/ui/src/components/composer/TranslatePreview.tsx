@@ -76,12 +76,12 @@ export function TranslatePreview({ state, stale, disabled, onEdit, onChoose, onA
       )}
       <div className="flex flex-wrap items-center gap-2">
         {stale ? (
-          <button type="button" data-testid="translate-again" onClick={onAgain} disabled={disabled} className={`${button} bg-accent text-on-accent hover:bg-accent-hover`}>
+          <button type="button" data-testid="translate-again" onClick={onAgain} disabled={disabled} className={`${button} bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText]`}>
             {t("composer.translate.again")}
           </button>
         ) : (
           <button type="button" data-testid="translate-send" onClick={onSendTranslation} disabled={disabled || !ready || !state.text.trim()}
-            className={`${button} bg-accent text-on-accent hover:bg-accent-hover`}>
+            className={`${button} bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText]`}>
             {t("composer.translate.sendTranslation")}
           </button>
         )}

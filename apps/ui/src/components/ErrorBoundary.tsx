@@ -23,7 +23,7 @@ function ErrorScreen() {
       <div className="space-y-3">
         <p className="text-text-primary">{t("errors.generic")}</p>
         <button type="button" onClick={() => { history.replaceState(null, "", "#/"); location.reload(); }}
-          className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer">{t("errors.startAgain")}</button>
+          className="px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer">{t("errors.startAgain")}</button>
       </div>
     </div>
   );

@@ -255,7 +255,7 @@ export function LockScreen() {
           <button
             type="submit"
             disabled={!password || isUnlocking || waitSeconds > 0}
-            className="w-full bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed text-on-accent py-3 px-4 rounded-xl font-medium transition-colors"
+            className="w-full bg-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] disabled:opacity-50 disabled:cursor-not-allowed text-on-accent py-3 px-4 rounded-xl font-medium transition-colors"
           >
             {isUnlocking ? (
               <span className="flex items-center justify-center gap-2">

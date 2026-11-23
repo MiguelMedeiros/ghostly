@@ -81,7 +81,7 @@ export function CameraCapture({ onSend, onClose }: { onSend: (file: File) => voi
         <div className="shrink-0 flex items-center justify-center gap-3 p-3">
           {photo ? <>
             <button type="button" data-testid="camera-retake" onClick={() => setPhoto(null)} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("composer.retake")}</button>
-            <button type="button" data-testid="camera-send" onClick={send} className={`${button} bg-accent text-on-accent hover:bg-accent-hover`}>{t("composer.sendPhoto")}</button>
+            <button type="button" data-testid="camera-send" onClick={send} className={`${button} bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText]`}>{t("composer.sendPhoto")}</button>
           </> : (
             <button type="button" data-testid="camera-shutter" onClick={shoot} disabled={failed} aria-label={t("composer.takePhoto")} title={t("composer.takePhoto")}
               className="w-14 h-14 rounded-full border-4 border-text-primary/80 bg-transparent cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center">

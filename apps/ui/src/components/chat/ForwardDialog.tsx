@@ -176,7 +176,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
           left Enter doing nothing. A press then is ignored by `send`. */}
       <button type="button" data-testid="forward-send" onClick={() => void send()} disabled={!chosen.length}
         aria-disabled={busy || undefined} aria-busy={busy || undefined}
-        className="min-h-10 rounded-lg bg-accent px-4 text-sm font-medium text-on-accent hover:bg-accent-hover disabled:opacity-50 aria-disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent cursor-pointer disabled:cursor-default aria-disabled:cursor-default">
+        className="min-h-10 rounded-lg bg-accent px-4 text-sm font-medium text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] disabled:opacity-50 aria-disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent cursor-pointer disabled:cursor-default aria-disabled:cursor-default">
         {t("chat.forward.send")}
       </button>
     </div>

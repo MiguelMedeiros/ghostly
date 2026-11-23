@@ -24,7 +24,7 @@ export function ProfileGate({ children }: { children: ReactNode }) {
   return failure ? <ProfileUnavailable failure={failure} /> : <>{children}</>;
 }
 
-const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover cursor-pointer aria-disabled:opacity-60 aria-disabled:cursor-progress";
+const BUTTON = "px-4 py-2 rounded-lg text-sm font-semibold bg-accent text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer aria-disabled:opacity-60 aria-disabled:cursor-progress";
 const QUIET = "px-3 py-1.5 rounded-lg text-sm text-text-secondary border border-border hover:bg-surface-hover cursor-pointer";
 
 /**

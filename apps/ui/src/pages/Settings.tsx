@@ -911,7 +911,7 @@ export function Settings() {
             </> : undefined}
             hint={update.lastCheckedAt ? t("updates.lastChecked", { when: formatAt(update.lastCheckedAt, { timeStyle: "medium" }, t.language) }) : undefined}>
             {update.update && update.update.apply === "manual" ? (
-              <a {...externalLinkProps(update.downloadUrl)} className="px-4 py-2 min-h-10 inline-flex items-center rounded-lg text-sm transition-colors bg-accent hover:bg-accent-hover text-on-accent font-semibold">
+              <a {...externalLinkProps(update.downloadUrl)} className="px-4 py-2 min-h-10 inline-flex items-center rounded-lg text-sm transition-colors bg-accent hover:bg-accent-hover text-on-accent font-semibold forced-colors:border forced-colors:border-[color:ButtonText]">
                 {t("updates.download")}
               </a>
             ) : update.update ? (

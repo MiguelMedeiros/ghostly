@@ -630,7 +630,7 @@ export function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
       <span className="call-notice-words min-w-0 break-words">{fillNames(t(NOTICE_TEXT[notice.type]), { name })}</span>
       {notice.type === "back" && (
         <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
-          className="tap-target shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
+          className="tap-target shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText]">
           {t("calls.devices.switchBack")}
         </button>
       )}
