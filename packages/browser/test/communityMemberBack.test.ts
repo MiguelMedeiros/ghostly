@@ -41,8 +41,9 @@ describe("a community member back within minutes", { timeout: 60_000 }, () => {
 
   // Both apps closed (two phones put away), and one opened again first: a hub alone now, started with no memory of the
   // member it had. The other, opened a moment later (their edge from the last run still kept) or once that edge has
-  // closed, steps up as a hub too.
-  for (const first of ["member", "admin"] as const) for (const later of [6_000, 90_000]) it(`gets the lines said while both apps were closed within seconds, the ${first}'s app back first, the other ${later / 1000} s after`, async () => {
+  // closed, steps up as a hub too. Closed together half a minute: the other's beacon entry is still fresh at the first
+  // reading, though its app is closed too.
+  for (const closed of [110_000, 20_000, 40_000]) for (const first of ["member", "admin"] as const) for (const later of [6_000, 90_000]) it(`gets the lines said while both apps were closed ${closed / 1000} s within seconds, the ${first}'s app back first, the other ${later / 1000} s after`, async () => {
     const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
     const alice = world.add("alice"), bob = world.add("bob");
     const id = await alice.groups.create("Check");
@@ -52,7 +53,7 @@ describe("a community member back within minutes", { timeout: 60_000 }, () => {
     await world.run(3 * 60_000);
     const [early, late] = first === "member" ? [bob, alice] : [alice, bob];
     alice.online = false; bob.online = false;
-    await world.run(110_000);
+    await world.run(closed);
     await world.restart(early);
     await world.run(later - 3_000);
     await early.groups.send(id, "said while you were away");
