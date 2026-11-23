@@ -98,8 +98,9 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
       const result = await wallet.testCoins({ type: rail, network, ...(wallet.lightningCard ? { card: wallet.lightningCard } : {}) });
       // The engine names its unit in English; sats are said in the app's language, a token by its symbol.
       const unit = result.unit === "test sats" ? satsIn(t, "testnet", result.amount) : result.unit === "sats" ? satsIn(t, "mainnet", result.amount) : result.unit;
-      // "+10,000" in its own left-to-right run (Signed): a bare "+" in a right-to-left line goes after the number.
-      setGot(fillNodes(t(result.pending ? "wallet.testCoins.gotPending" : "wallet.testCoins.got", { unit }), { amount: <Signed sign="+" amount={formatAmount(result.amount, t.language)} /> }));
+      // "+10,000" in its own left-to-right run (Signed): a bare "+" in a right-to-left line goes after the number. The
+      // amount goes in as a node, so `count` says which form the words around it take ("il arrive", "ils arrivent").
+      setGot(fillNodes(t(result.pending ? "wallet.testCoins.gotPending" : "wallet.testCoins.got", { unit, count: result.amount }), { amount: <Signed sign="+" amount={formatAmount(result.amount, t.language)} /> }));
     } catch (e) {
       setError(problemText(e, t));
     } finally { setAsking(false); }

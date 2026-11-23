@@ -191,6 +191,8 @@ export function invoiceNetwork(invoice: string): WalletNetwork | null {
   return /^ln(tb|tbs|sb)/.test(lower) ? "testnet" : null;
 }
 
+/** An amount of sats as `pay`'s refusals say it: "1 sat", "2 sats". */
+const satsText = (n: number) => `${n} ${n === 1 ? "sat" : "sats"}`;
 const isInvoice = (text: string) => /^(lightning:)?ln(bc|tb|tbs|sb|bcrt)[0-9a-z]+$/i.test(text.trim());
 const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.trim()) || /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(text.trim());
 
@@ -471,7 +473,7 @@ const WALLETS: Record<string, Method> = {
       // Asked before the address's server hears of the payment (and its comment).
       if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
       const view = await node(ctx).lnurlResolve({ text, network: n });
-      if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${view.maxSat} sats`);
+      if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${satsText(view.maxSat)}`);
       const got = await node(ctx).lnurlInvoice({ id: view.id, amount, ...(comment ? { comment } : {}), network: n });
       invoice = got.invoice; note = got.note;
     }
@@ -480,9 +482,9 @@ const WALLETS: Record<string, Method> = {
     const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
     // With an invoice, --amount is what the payer expects it to ask: the invoice's writer never decides past it.
     const expected = isInvoice(text) ? num(params, "amount", 0, { min: 1 }) : 0;
-    if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${quote.amount} sats, not the ${expected} given with --amount`);
+    if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${satsText(quote.amount)}, not the ${expected} given with --amount`);
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
-    if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
+    if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${satsText(quote.feeReserve)}, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
     const source = (quote as { source?: string }).source ?? quote.mint;
     return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: paid.paid, ...(!paid.paid && { note: notPaidYet(ctx, n, source, quote.amount, quote.feeReserve) }) };
