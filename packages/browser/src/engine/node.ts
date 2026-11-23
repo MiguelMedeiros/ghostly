@@ -3018,7 +3018,8 @@ export class GhostlyNode implements EngineImplementation {
     this.clock.close();
     this.clockOff?.();
     if (this.relayRetry) clearTimeout(this.relayRetry);
-    if (this.activeSlotRetry) clearTimeout(this.activeSlotRetry);
+    for (const timer of this.activeSlotRetries.values()) clearTimeout(timer);
+    this.activeSlotRetries.clear();
     for (const timer of this.resumeTimers.values()) clearTimeout(timer);
     this.resumeTimers.clear();
     this.resumeLine?.clear();
@@ -10638,15 +10639,19 @@ export class GhostlyNode implements EngineImplementation {
       ? resumeHere(this.transportLogOf(live), this.transportsHere(), stored.peerTransports ?? live.caps?.peer?.transports) : {};
   }
 
-  /** The chat on screen found every native slot busy: it tries again in a moment, while it stays on screen. */
-  private activeSlotRetry: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * A chat on screen found every native slot busy: it tries again in a moment, while it stays on screen. One timer per
+   * chat: two tabs on two chats each count (`setOnScreen`), and one chat's retry no longer takes the other's away.
+   */
+  private readonly activeSlotRetries = new Map<string, ReturnType<typeof setTimeout>>();
   private retryActiveSlot(linkId: string): void {
-    if (this.activeSlotRetry) clearTimeout(this.activeSlotRetry);
+    clearTimeout(this.activeSlotRetries.get(linkId));
+    this.activeSlotRetries.delete(linkId);
     if (this.shuttingDown) return;
-    this.activeSlotRetry = setTimeout(() => {
-      this.activeSlotRetry = null;
+    this.activeSlotRetries.set(linkId, setTimeout(() => {
+      this.activeSlotRetries.delete(linkId);
       if (this.onScreen.has(linkId) && !this.shuttingDown) void this.ensureNativeEndpoints(linkId);
-    }, ACTIVE_SLOT_RETRY_MS);
+    }, ACTIVE_SLOT_RETRY_MS));
   }
 
   /** Group links waiting for a free native slot (`ensureNativeEndpoints`), by link id. */

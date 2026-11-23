@@ -596,6 +596,25 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       expect(holders.filter((h) => h.releaseEndpoint.mock.calls.length > 0)).toEqual([holders[3]]);
     }, 15_000);
 
+    it("two chats on screen in two tabs each get one as soon as one is free, when every one was busy as they opened", async () => {
+      // The extension's tabs each count (`setOnScreen`): the second chat that found no slot took the first's retry away.
+      const rows = [...older().slice(0, 8), row({ ...paired(), id: "chat-y" }), row({ ...paired(), id: "chat-z" })];
+      const { node, linkOf } = await nativeStarted(...rows);
+      const holders = rows.slice(0, 8).map((r) => linkOf(r.id));
+      for (const holder of holders) holder.canReleaseEndpoint.mockReturnValue(false);
+      node.setOnScreen(["chat-y"], "chat-y");
+      await node["nativeQueue"];
+      node.setOnScreen(["chat-y", "chat-z"], "chat-z");
+      await node["nativeQueue"];
+      for (const id of ["chat-y", "chat-z"]) expect(node.getState().links.find((l) => l.id === id)?.transportErrors?.["iroh/1"]).toMatch(/slots are in use/);
+      holders[3].canReleaseEndpoint.mockReturnValue(true);
+      holders[5].canReleaseEndpoint.mockReturnValue(true);
+      await vi.waitFor(() => {
+        expect(linkOf("chat-y").registerEndpoint).toHaveBeenCalled();
+        expect(linkOf("chat-z").registerEndpoint).toHaveBeenCalled();
+      }, { timeout: 10_000 });
+    }, 15_000);
+
     describe("every listener carrying a live session (a Linux Desktop or a CLI bot talking to more contacts than that)", () => {
       type Holder = Recorded & { registerEndpoint: ReturnType<typeof vi.fn>; releaseEndpoint: ReturnType<typeof vi.fn>; canReleaseEndpoint: ReturnType<typeof vi.fn>;
         yieldEndpoint: ReturnType<typeof vi.fn>; lastActivityAt: number; callOn: boolean };
