@@ -314,6 +314,80 @@ describe("Receive's invoice past its expiry", () => {
 });
 
 // covers: wallet.cashu.receive-lightning
+describe("Receive's New amount hands the keys to the amount", () => {
+  /**
+   * New amount (on the invoice, or on the line of an expired one) takes the button pressed away: the amount comes back
+   * with the focus, as it does after Done, never with the focus on the page. Also when Receive was the card's opening tab
+   * (the page loaded, the card picked by the arrow keys), where nothing had asked the amount for the focus before.
+   */
+  afterEach(() => { vi.restoreAllMocks(); });
+  const MINT = TEST_MINTS[0];
+  type Rail = "cashu" | "lightning";
+  const state = networkState(walletView({ mints: [mint(MINT, 5_000)], balance: 5_000, history: [], mode: "testnet",
+    lightning: lightningSource({ mode: "testnet", providerId: "nwc", label: "NWC", status: "ready", balance: 5_000 }) }) as WalletState, "testnet");
+  const walletExpiringIn = (ms: number | null): WalletPlatform => Object.assign(Object.create(servicesPlatform!.wallet), {
+    receiveLightning: async () => ({ quote: "our-quote", invoice: REGTEST_INVOICE, paymentHash: "our-hash", expiresAt: ms === null ? null : Date.now() + ms, source: "cashu-mint" }),
+  });
+  const amount = () => screen.getByTestId("wallet-receive-amount");
+  const newAmount = () => screen.getByRole("button", { name: "New amount" });
+
+  /** The card as the page shows it; the amount typed and Create invoice pressed from the keyboard. */
+  async function showInvoice(rail: Rail, { expiresIn = null, focusAmount = false, viaTab = false }: { expiresIn?: number | null; focusAmount?: boolean; viaTab?: boolean } = {}) {
+    const view = renderApp(<CashuWallet wallet={walletExpiringIn(expiresIn)} state={state} rail={rail} focusAmount={focusAmount} onOpenCashu={() => {}} />);
+    if (viaTab) {
+      await view.user.click(screen.getByRole("tab", { name: "Send" }));
+      await view.user.click(screen.getByRole("tab", { name: "Receive" }));
+    }
+    if (focusAmount || viaTab) expect(amount()).toHaveFocus();
+    else amount().focus();
+    await view.user.keyboard("1000{Enter}");
+    await waitFor(() => expect(screen.getByTestId("wallet-invoice")).toBeInTheDocument());
+    await waitFor(() => expect(document.activeElement?.textContent).toMatch(/^Invoice for/));
+    return view;
+  }
+
+  for (const rail of ["cashu", "lightning"] as const) {
+    it(`on the invoice, with Receive the ${rail} card's opening tab`, async () => {
+      const view = await showInvoice(rail);
+      newAmount().focus();
+      await view.user.keyboard("{Enter}");
+      expect(screen.queryByTestId("wallet-invoice")).not.toBeInTheDocument();
+      expect(amount()).toHaveFocus();
+    });
+
+    it(`on an expired invoice, with Receive the ${rail} card's opening tab`, async () => {
+      // Long enough for the invoice's line to take the focus first on a loaded runner (see the expiry tests above).
+      const view = await showInvoice(rail, { expiresIn: 1_500 });
+      await waitFor(() => expect(screen.getByTestId("wallet-invoice-expired")).toBeInTheDocument(), { timeout: 5_000 });
+      await waitFor(() => expect(newAmount()).toHaveFocus());
+      await view.user.keyboard("{Enter}");
+      expect(screen.queryByTestId("wallet-invoice-expired")).not.toBeInTheDocument();
+      expect(amount()).toHaveFocus();
+    });
+  }
+
+  it("on the invoice of a card chosen from the deck, and after Receive was chosen as a tab", async () => {
+    let view = await showInvoice("cashu", { focusAmount: true });
+    newAmount().focus();
+    await view.user.keyboard("{Enter}");
+    expect(amount()).toHaveFocus();
+    view.unmount();
+
+    view = await showInvoice("lightning", { viaTab: true });
+    newAmount().focus();
+    await view.user.keyboard("{Enter}");
+    expect(amount()).toHaveFocus();
+  });
+
+  it("on a touch-only screen too, as Done does: the person pressed it to type an amount", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ media: query, matches: query === "(any-pointer: coarse)", onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }));
+    const view = await showInvoice("cashu");
+    await view.user.click(newAmount());
+    expect(amount()).toHaveFocus();
+  });
+});
+
+// covers: wallet.cashu.receive-lightning
 describe("Receive's invoice on screen", () => {
   /**
    * agents#2447: the engine asks less and less about an open invoice nobody looks at. While Receive shows one, it says so
