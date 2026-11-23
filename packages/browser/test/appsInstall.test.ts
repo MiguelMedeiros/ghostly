@@ -1228,6 +1228,31 @@ describe("an app installed from a store updates only to the version that store l
     await expect(again.acceptUpdate({ ref: u2.ref })).rejects.toThrow(/^no-update/);
   });
 
+  it("a screen whose Install would end the pin names the store it leaves; one that keeps it names none", async () => {
+    const { store, v1 } = await fromStore();
+    const leaving = { leavesStore: { key: keyOf(STORE_KEY), name: "Test store" } };
+    // The same version by URL leaves the record as it is: still pinned.
+    expect(await store.preview({ url: HEAD })).not.toHaveProperty("leavesStore");
+    expect(await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).not.toHaveProperty("leavesStore");
+    // A newer version by URL, or a contact's card of it: Install unpins the app, and the screen says from which store.
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    net.put(HEAD, v2.bytes);
+    expect(await store.preview({ url: HEAD })).toMatchObject({ install: "update", ...leaving });
+    expect(await store.preview({ card: { ref: v2.ref, url: HEAD, sequence: 2, digest: v2.digest } })).toMatchObject({ install: "update", ...leaving });
+    // Another store's listing of the same version moves the pin to that store: this one's review ends too.
+    const pinned2 = `https://cdn.jsdelivr.net/gh/ana/chess@${"b".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned2, v1.bytes);
+    await net.putStore(await storeFiles({ by: OTHER_STORE, name: "Other store", apps: [listing(v1, [pinned2])] }), OTHER_STORE_URL);
+    await store.addStore({ url: OTHER_STORE_URL });
+    expect(await store.preview({ store: keyOf(OTHER_STORE), ref: v1.ref })).toMatchObject({ install: "same", ...leaving });
+    // Installed as the screen said: no longer pinned.
+    await store.preview({ url: HEAD });
+    await store.install({ digest: v2.digest, grant: ["chat"] });
+    expect(await pinnedTo()).toBeUndefined();
+    net.put(HEAD, (await bundle({ sequence: 3, sources: [HEAD] })).bytes);
+    expect(await store.preview({ url: HEAD }), "an app pinned to no store leaves none").not.toHaveProperty("leavesStore");
+  });
+
   it("the version installed, taken again from a store's listing, pins it to that store", async () => {
     const u1 = await bundle({ sources: [HEAD] });
     net.put(HEAD, u1.bytes);

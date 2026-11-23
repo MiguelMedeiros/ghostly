@@ -155,7 +155,8 @@
     "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added vouches for its publisher. Compare this key with the publisher's own.",
     "update": "Update",
     "webkit": "In this browser, an app can still contact other servers.",
-    "webkitInfo": "Safari and every iPhone or iPad browser let apps open connections Ghostly cannot block. Those servers learn your IP address. The desktop app blocks them."
+    "webkitInfo": "Safari and every iPhone or iPad browser let apps open connections Ghostly cannot block. Those servers learn your IP address. The desktop app blocks them.",
+    "leavesStore": "{{title}} now takes updates only once {{name}} lists them. Installing this version ends that: its updates then come from its publisher's links."
   },
   "page": {
     "add": "Add",

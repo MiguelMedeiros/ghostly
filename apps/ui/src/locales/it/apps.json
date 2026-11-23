@@ -155,7 +155,8 @@
     "unknownPublisherInfo": "Chiunque può firmare un'app con una chiave nuova. Solo uno store che hai aggiunto può garantire il suo editore. Confronta la chiave con quella pubblicata dall'editore.",
     "update": "Aggiorna",
     "webkit": "In questo browser, un'app può comunque contattare altri server.",
-    "webkitInfo": "Safari e ogni browser su iPhone o iPad lasciano che un'app apra connessioni che Ghostly non può bloccare. Quei server vedono il tuo indirizzo IP. L'app desktop le blocca."
+    "webkitInfo": "Safari e ogni browser su iPhone o iPad lasciano che un'app apra connessioni che Ghostly non può bloccare. Quei server vedono il tuo indirizzo IP. L'app desktop le blocca.",
+    "leavesStore": "{{title}} ora riceve aggiornamenti solo dopo che {{name}} li elenca. Installare questa versione pone fine a questo: i suoi aggiornamenti arriveranno dai link del suo editore."
   },
   "page": {
     "add": "Aggiungi",

@@ -155,7 +155,8 @@
     "unknownPublisherInfo": "Qualquer pessoa pode assinar um app com uma chave nova. Só uma loja que você adicionou pode garantir o publicador dele. Compare a chave com a que o publicador divulga.",
     "update": "Atualizar",
     "webkit": "Neste navegador, um app ainda pode contatar outros servidores.",
-    "webkitInfo": "O Safari e qualquer navegador no iPhone ou iPad deixam um app abrir conexões que o Ghostly não consegue bloquear. Esses servidores ficam sabendo do seu endereço IP. O app para desktop as bloqueia."
+    "webkitInfo": "O Safari e qualquer navegador no iPhone ou iPad deixam um app abrir conexões que o Ghostly não consegue bloquear. Esses servidores ficam sabendo do seu endereço IP. O app para desktop as bloqueia.",
+    "leavesStore": "{{title}} hoje só recebe atualizações depois que {{name}} as lista. Instalar esta versão encerra isso: as atualizações passam a vir dos links do publicador."
   },
   "page": {
     "add": "Adicionar",

@@ -317,6 +317,12 @@ export interface AppPreview {
   run: AppRunStatus;
   listedBy: AppListedBy[];
   unknownPublisher: boolean;
+  /**
+   * The store the installed app takes its updates from (`InstalledApp.store`), when Install here ends that: a newer
+   * version by URL or card unpins it, another store's listing pins it to that store (WISP 1200 § Updates and rollback).
+   * The screen says so, as removing the store does. `name` is absent while no index of the store was read.
+   */
+  leavesStore?: { key: string; name?: string };
   /** Read from the bundle this build carries (a built-in app): no server was asked for it, `from` notwithstanding. */
   carried?: true;
   /** This screen's bundle and source, for `install`: Install on it installs from where it said, whatever screen opened since. */
@@ -1956,12 +1962,18 @@ export class Apps {
     if (!this.sweep) this.sweepStaged();
 
     const listedBy = this.listedBy(version, stores);
+    // As `install` writes the record: an update not from the pinned store drops the pin, the same version from another
+    // store moves it there; the same version by URL or card leaves the record as it is.
+    const pin = installed?.store;
+    const leaves = pin !== undefined && fromStore !== pin && (install === "update" || (install === "same" && fromStore !== undefined));
+    const leftName = leaves ? stores.find((s) => s.key === pin)?.index?.name : undefined;
     return {
       digest, ref: version.ref, publisher: manifest.publisher, fingerprint: appFingerprint(manifest.publisher), manifest, from,
       icon: bundle.files.get("icon.png")?.slice() ?? null,
       install, asks,
       run: this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
+      ...(leaves && { leavesStore: { key: pin, ...(leftName !== undefined && { name: leftName }) } }),
       ...(carried && { carried: true as const }),
       stage,
     };
