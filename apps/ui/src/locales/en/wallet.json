@@ -198,7 +198,10 @@
       "noFee": "no fee",
       "none": "Nothing yet",
       "note": {
+        "notSent": "A payment was not sent",
+        "paidRequest": "Paid a contact's request",
         "paymentFailed": "A Lightning payment failed",
+        "paymentFailedFor": "Payment failed: {{note}}",
         "requestPaid": "Request paid over Lightning",
         "testCoins": "Test coins from the test mint"
       }
