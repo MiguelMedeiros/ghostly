@@ -45,6 +45,17 @@ describe("a message arriving in a long chat", () => {
     expect(loadSession("chat-1")!.messages).toHaveLength(COUNT + 2);
   });
 
+  it("is told new from the ids that came, not from a set of every id the chat holds", () => {
+    const held = longChat();
+    const add = vi.spyOn(Set.prototype, "add");
+    addMessages("chat-1", [theirs(COUNT)], false, held);
+    const added = add.mock.calls.length;
+    vi.restoreAllMocks();
+    // It was the chat's 5,000 ids, one by one, for one row.
+    expect(added).toBeLessThan(10);
+    expect(loadSession("chat-1")!.messages).toHaveLength(COUNT + 1);
+  });
+
   it("one that was held up on its way still sorts in among the read ones, and the unread count starts from it", () => {
     const held = longChat();
     const late = theirs(COUNT, T + 10.5 * 1000);
@@ -131,6 +142,97 @@ describe("a contact who rings and hangs up over and over", () => {
     expect(again.getUnreadCount(again.loadSession("chat")!)).toBe(1);
     again.addMessage("chat", { id: "peer_new", text: "there?", sender: "peer", timestamp: NOW + N + (CALLS + 1) * 10 });
     expect(again.getUnreadCount(again.loadSession("chat")!)).toBe(2);
+  });
+});
+
+// covers: chat.paired.storage
+describe("a long chat read back after a message came", () => {
+  /*
+   * A long chat's stored copy holds its last rows; this page keeps the rest and puts them back on each read. A message
+   * that came wrote the copy, and the chat list's read after it looked at every older row and merged them all with the
+   * copy's, for a copy that was just the last rows of that same list. They go before it as they are.
+   */
+
+  const NOW = 1_800_000_000_000;
+  const N = 3_000;
+  const storage = () => import("../../lib/storage");
+
+  /** A paired chat of N messages the engine keeps, stored by this page, and a message that came. */
+  async function longChat() {
+    const { addMessage, saveSession, setEngineMessages } = await storage();
+    const history: ChatMessage[] = Array.from({ length: N }, (_, i) => ({ id: `peer_${i}`, text: `message ${i}`, sender: "peer", timestamp: NOW + i }));
+    setEngineMessages("chat", new Set([...history.map((m) => m.id), "peer_new"]));
+    saveSession({ id: "chat", profile: "paired-chat/1", mySeedB64: "seed", peerPubKeyB64: "p".repeat(52), encKeyB64: "enc", messages: history, createdAt: NOW });
+    addMessage("chat", { id: "peer_new", text: "back?", sender: "peer", timestamp: NOW + N });
+    return history;
+  }
+
+  /** Counts each look at the id of a row the stored copy left out. */
+  function watchOlder(history: ChatMessage[], stored: number) {
+    let looks = 0;
+    for (const row of history.slice(0, history.length - stored)) {
+      const id = row.id;
+      Object.defineProperty(row, "id", { enumerable: true, get: () => (looks++, id) });
+    }
+    return () => looks;
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.resetModules();
+  });
+
+  it("puts the rows its stored copy left out before it without looking at each", async () => {
+    const { loadSession, STORED_MESSAGES } = await storage();
+    const history = await longChat();
+    const stored = JSON.parse(localStorage.getItem("ghostly_chat")!) as ChatSession;
+    expect(stored.messages.length).toBeLessThanOrEqual(STORED_MESSAGES);
+    const looks = watchOlder(history, stored.messages.length - 1);
+    const chat = loadSession("chat")!;
+    // It was every one of them, and a merge of all.
+    expect(looks()).toBe(0);
+    expect(chat.older).toBeUndefined();
+    expect(chat.messages).toHaveLength(N + 1);
+    expect(chat.messages.map((m) => m.id)).toEqual([...history.map((m) => m.id), "peer_new"]);
+  });
+
+  it("leaves out an older row deleted since, here or by another page of the app", async () => {
+    const { loadSession } = await storage();
+    await longChat();
+    // Another page deleted one: its stored copy names it, this page's rows still have it.
+    const raw = JSON.parse(localStorage.getItem("ghostly_chat")!) as ChatSession;
+    localStorage.setItem("ghostly_chat", JSON.stringify({ ...raw, deletedIds: ["peer_5"] }));
+    const chat = loadSession("chat")!;
+    expect(chat.messages).toHaveLength(N);
+    expect(chat.messages.some((m) => m.id === "peer_5")).toBe(false);
+    expect(chat.messages[chat.messages.length - 1]!.id).toBe("peer_new");
+  });
+
+  it("still merges a stored copy that is not the last rows of what this page holds", async () => {
+    const { loadSession } = await storage();
+    await longChat();
+    // Another page wrote a row this one has not seen, among the stored copy's.
+    const raw = JSON.parse(localStorage.getItem("ghostly_chat")!) as ChatSession;
+    const other: ChatMessage = { id: "peer_other", text: "from the other page", sender: "peer", timestamp: NOW + N - 50.5 };
+    const messages = [...raw.messages, other].sort((a, b) => a.timestamp - b.timestamp);
+    localStorage.setItem("ghostly_chat", JSON.stringify({ ...raw, messages }));
+    const chat = loadSession("chat")!;
+    expect(chat.messages).toHaveLength(N + 2);
+    const at = chat.messages.findIndex((m) => m.id === "peer_other");
+    expect(chat.messages[at - 1]!.id).toBe(`peer_${N - 51}`);
+    expect(chat.messages[at + 1]!.id).toBe(`peer_${N - 50}`);
+  });
+
+  it("puts a stored row another page moved back in time in its place among the older ones", async () => {
+    const { loadSession } = await storage();
+    await longChat();
+    // A received row given an earlier place since (engine/arrival.ts), by another page: the stored copy's first.
+    const raw = JSON.parse(localStorage.getItem("ghostly_chat")!) as ChatSession;
+    const [first, ...rest] = raw.messages;
+    localStorage.setItem("ghostly_chat", JSON.stringify({ ...raw, messages: [{ ...first, timestamp: NOW + 10.5 }, ...rest] }));
+    const chat = loadSession("chat")!;
+    expect(chat.messages).toHaveLength(N + 1);
+    expect(chat.messages[11]!.id).toBe(first.id);
   });
 });
 
