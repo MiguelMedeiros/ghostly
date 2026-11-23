@@ -26,4 +26,27 @@ describe("an identity card's badge", () => {
     expect([...badge.querySelectorAll("bdi")].map((bdi) => bdi.textContent)).toEqual(["~Bob!"]);
     if (language === "en") expect(badge).toHaveTextContent("Proved by ~Bob!");
   });
+
+  // Each state's own words, with the contact's name or, for a chat with none, "a contact".
+  const NOW_S = Date.now() / 1000;
+  const STATES = [
+    ["verified", {}, "Proved by", "أثبته"],
+    ["expiring", { expiresAt: NOW_S + 3600 }, "Proved by", "أثبته"],
+    ["revoked", { status: "revoked" }, "Revoked by", "ألغاه"],
+    ["failed", { status: "unconfirmed" }, "Check failed for", "فشل التحقق لـ"],
+    ["expired", { status: "expired", expiresAt: NOW_S - 10 }, "Proof expired from", "انتهت صلاحية إثبات"],
+  ] as const;
+  it.each(STATES.flatMap(([state, proof, en, ar]) => [
+    [state, "en", true, proof, `${en} ~Bob!`], [state, "en", false, proof, `${en} a contact`],
+    [state, "ar", true, proof, `${ar} ~Bob!`], [state, "ar", false, proof, `${ar} جهة اتصال`],
+  ] as const))("says %s in %s (named: %s)", async (state, language, named, proof, words) => {
+    const chat = ensureSession({ seedB64: "s", peerPubKeyB64: "peer", encKeyB64: "k" });
+    if (named) updateSessionLabel(chat, "Bob!");
+    const { engine } = renderApp(<MessageBubble message={{ id: "m1", text: DID_KEY, sender: "peer", timestamp: 1_700_000_000_000 }} peerNick="x" peerPubKey="peer" />, { language });
+    act(() => engine.update({ links: [linkView({ peerPubKeyZ32: "peer", identities: { support: true, shared: [], received: [receivedView({ provider: "did", subject: DID_KEY, ...proof })] } })] }));
+    await waitFor(() => expect(screen.getByTestId("entity-identity")).toHaveAttribute("data-standing", state));
+    const badge = screen.getByTestId("entity-identity-badge");
+    expect(badge.textContent).toBe(words);
+    expect([...badge.querySelectorAll("bdi")].map((bdi) => bdi.textContent)).toEqual(named ? ["~Bob!"] : []);
+  });
 });

@@ -64,11 +64,17 @@ const ticked = () => screen.getAllByRole("switch").filter((c) => c.getAttribute(
 describe("Pay and Accept", () => {
   it("has Pay and Accept in its head, and opens on Pay", () => {
     open();
-    expect(screen.getByRole("tablist", { name: "Payments with Alice" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "Payments with \u2068Alice\u2069" })).toBeInTheDocument();
     expect(mode("pay")).toHaveAttribute("aria-selected", "true");
     expect(mode("accept")).toHaveAttribute("aria-selected", "false");
     expect(composer()).toHaveAttribute("data-mode", "pay");
     expect(screen.getByRole("radiogroup", { name: "Pay with" })).toBeInTheDocument();
+  });
+
+  // The contact's name is their own words, isolated as on the sheet's other lines: in Arabic "Bob!" read "!Bob".
+  it("names the contact in its own direction in the tabs' label, in Arabic too", () => {
+    open({ language: "ar" });
+    expect(mode("pay").closest("[role=tablist]")).toHaveAttribute("aria-label", "المدفوعات مع \u2068Alice\u2069");
   });
 
   it("shows on Pay only the cards this chat has on; Accept keeps every card, the one off unticked", async () => {
