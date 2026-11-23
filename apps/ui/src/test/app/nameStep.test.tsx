@@ -96,6 +96,14 @@ describe("What should people call you?", () => {
     expect(nameStepPending(), "asked once").toBe(false);
   });
 
+  it("Skip is a 44 px target on a phone, as Continue and × are, in px as phoneTargetsPx pins", async () => {
+    askNameIn("");
+    renderApp(<NameStep />);
+    await settle();
+    // happy-dom lays nothing out: at 320 px it measured 40 px tall, and 42-44 px wide in the shorter words (ar, en, zh).
+    expect(await screen.findByTestId("name-step-skip")).toHaveClass("max-md:min-h-[44px]", "max-md:min-w-[44px]");
+  });
+
   it("Skip keeps today's default: no name, and it is not asked again", async () => {
     askNameIn("");
     const { user, unmount } = renderApp(<NameStep />);
