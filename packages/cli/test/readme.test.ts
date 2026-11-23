@@ -56,6 +56,13 @@ describe("the README's command table", () => {
     expect(commands.filter((c) => !documented.has(c))).toEqual([]);
     expect([...documented].filter((c) => !commands.includes(c))).toEqual([]);
   });
+
+  it("shows every option of pay's usage on its row", async () => {
+    // Found in a bug hunt: the row left out --card, --comment and --force, which `ghostly help pay` shows.
+    const { COMMANDS } = await import("../src/commands/index");
+    const row = rows.find((r) => named(r).includes("pay"))!;
+    for (const option of COMMANDS.pay.usage.match(/--[a-z-]+/g)!) expect(row, option).toContain(`[${option}`);
+  });
 });
 
 /**
