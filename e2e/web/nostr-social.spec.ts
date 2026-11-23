@@ -90,7 +90,7 @@ test("a contact's profile, follows and notes load only on request from the perso
   await expect(card.getByTestId("nostr-profile-about")).toHaveText("Just here for the ghosts.");
   await expect(card.getByTestId("nostr-profile-nip05")).toContainText("alice@example.com");
   await expect(card.getByTestId("nostr-profile-avatar")).toBeVisible();
-  await expect(card.getByTestId("nostr-profile-source")).toContainText("from ⁨relay.ghostly.test⁩");
+  await expect(card.getByTestId("nostr-profile-source")).toContainText("from \u2068relay.ghostly.test\u2069");
   await expect(card.getByTestId("nostr-profile-source")).toContainText("Self-described");
   await expect(back).toContainText("Nostr · Alice in Chains");
   expect(pictureFetches).toBe(1);
@@ -135,7 +135,7 @@ test("a contact's profile, follows and notes load only on request from the perso
   await expect(publish.getByTestId("nostr-publish-notice")).toContainText(NOSTR_TEST_RELAY);
   expect(relay.published).toEqual([]);
   await publish.getByTestId("nostr-publish-confirm").click();
-  await expect(publish.getByTestId("nostr-publish-result")).toContainText(`Published to ⁨${NOSTR_TEST_RELAY}⁩`);
+  await expect(publish.getByTestId("nostr-publish-result")).toContainText(`Published to \u2068${NOSTR_TEST_RELAY}\u2069`);
   await publish.getByTestId("nostr-publish-close").click();
   expect(relay.published).toHaveLength(1);
   expect(relay.published[0]).toMatchObject({ by: "bob", event: { kind: 1, pubkey: b.pubkey, content: "Hello from Ghostly" } });
