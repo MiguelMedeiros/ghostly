@@ -83,6 +83,18 @@ describe("a restored profile's name field", () => {
     await waitFor(() => expect(screen.getByTestId("profile-name")).toHaveFocus());
   });
 
+  it("a tap on the tag's x on a touch screen does not put the focus in the name field (no keyboard)", async () => {
+    const real = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+      ? ({ ...real(query), matches: query === "(any-pointer: coarse)" } as MediaQueryList) : real(query));
+    restoredWorkInUse();
+    const { user } = renderApp(<Profile />, { language: "en" });
+    await user.click(screen.getByTestId("profile-restored-remove"));
+    // A text field would raise the on-screen keyboard: the picture control beside it raises none.
+    await waitFor(() => expect(screen.getByTestId("profile-avatar-input")).toHaveFocus());
+    expect(screen.getByTestId("profile-name")).not.toHaveFocus();
+  });
+
   it("a registry an earlier build left with the translated word in the name and no mark is read as restored", () => {
     localStorage.setItem(registryKey(), JSON.stringify({ version: 1, active: WORK, profiles: [{ id: "", name: "Personal", createdAt: 0 }, { id: WORK, name: "Old work (restaurado)", createdAt: 1 }] }));
     renderApp(<Profile />, { language: "en" });
