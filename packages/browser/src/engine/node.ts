@@ -4258,8 +4258,9 @@ export class GhostlyNode implements EngineImplementation {
     if (params.network) for (const failed of this.nativeFailed.values()) { failed.at = 0; failed.wait = 0; }
     for (const live of this.links.values()) live.link?.wake({ network: params.network });
     this.hold.wake();
-    // An Ark, Bark or Spark wallet whose server stopped answering reads (or connects) now, not at the end of its wait.
-    for (const network of WALLET_NETWORKS) for (const wallets of [this.arkWallets, this.barkWallets, this.sparkWallets]) wallets[network].wake();
+    // An Ark, Bark or Spark wallet whose server stopped answering reads (or connects) now, not at the end of its wait;
+    // a Fedimint federation waiting to be opened (joined) again is tried now.
+    for (const network of WALLET_NETWORKS) for (const wallets of [this.arkWallets, this.barkWallets, this.sparkWallets, this.fedimintWallets]) wallets[network].wake();
     // A wallet source that could not be reached at start-up (no network yet, a server asleep) tries again.
     for (const network of WALLET_NETWORKS) { this.lightnings[network].wake(); this.bitcoins[network].sources.wake(); this.usdtWallets[network].wake(); }
   }
@@ -7479,7 +7480,8 @@ export class GhostlyNode implements EngineImplementation {
     return result;
   }
   fedimintLeave(params: { federation: string }) { return (this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet).leave(params.federation); }
-  async fedimintRefresh(params?: { network?: WalletNetwork }) { for (const network of params?.network ? [params.network] : WALLET_NETWORKS) await this.fedimintWallets[network].refresh(); }
+  /** Asked to read again: a federation waiting to be opened again is tried now too. */
+  async fedimintRefresh(params?: { network?: WalletNetwork }) { for (const network of params?.network ? [params.network] : WALLET_NETWORKS) { this.fedimintWallets[network].wake(); await this.fedimintWallets[network].refresh(); } }
   /** `confirmedReal`: notes of a Mainnet federation are real money, handed over as text; without it they are refused. */
   async fedimintSpendNotes(params: { federation: string; amount: number; confirmedReal?: boolean }) {
     const wallet = this.fedimintOf(params.federation) ?? this.fedimintWallets.mainnet;

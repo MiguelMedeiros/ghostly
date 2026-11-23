@@ -144,7 +144,7 @@ export const lazyUsdtWallet = (network: WalletNetwork, changed: Changed) => {
 /** `sdk`: the Fedimint SDK to use instead of the real one (a test's), read when a federation opens. */
 export const lazyFedimintWallet = (network: WalletNetwork, events: FedimintEvents, sdk: () => (() => Promise<FedimintSdk>) | undefined) => {
   const notJoined = (): never => { throw new Error(`You have not joined this federation in your ${networkLabel(network)} Fedimint wallet`); };
-  return lazyWallet<FedimintWallet, "network" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "client" | "federation" | "ready" | "requestFederations" | "invoiceFederation" | "spendState" | "target" | "inspectNotes" | "checkReceives">({
+  return lazyWallet<FedimintWallet, "network" | "view" | "configured" | "cutShort" | "resume" | "refresh" | "wake" | "client" | "federation" | "ready" | "requestFederations" | "invoiceFederation" | "spendState" | "target" | "inspectNotes" | "checkReceives">({
     saved: savedUnder(`fedimintWallet-${network}`),
     load: async () => {
       const [{ FedimintWallet }, { loadFedimintSdk }] = await Promise.all([import("./fedimintWallet"), import("./fedimintSdk")]);
@@ -152,7 +152,7 @@ export const lazyFedimintWallet = (network: WalletNetwork, events: FedimintEvent
     },
     idle: {
       network, view: { federations: [], balance: 0, history: [] }, configured: false,
-      cutShort: () => {}, resume: () => {}, refresh: async () => {}, checkReceives: async () => {}, inspectNotes: async () => null,
+      cutShort: () => {}, resume: () => {}, refresh: async () => {}, wake: () => {}, checkReceives: async () => {}, inspectNotes: async () => null,
       client: notJoined, spendState: notJoined, federation: () => undefined, ready: () => [], requestFederations: () => [], invoiceFederation: () => undefined,
       target: () => { throw new Error("You have not joined this federation in this wallet"); },
     },
