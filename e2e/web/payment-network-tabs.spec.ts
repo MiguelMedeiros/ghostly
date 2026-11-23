@@ -40,7 +40,7 @@ test("the payment sheet's Mainnet | Testnet tabs: one network's cards on Pay and
   await expect(page.getByTestId("payment-tab-mainnet")).toBeFocused();
   await expect(page.getByTestId("payment-tab-mainnet")).toHaveAttribute("aria-selected", "true");
   await expect(sheet.locator(testnetCards)).toHaveCount(0);
-  await expect(paymentCard(page, "cashu-mainnet")).toHaveAttribute("title", /Your contact has no Mainnet Cashu wallet/, { timeout: 60_000 });
+  await expect(paymentCard(page, "cashu-mainnet")).toHaveAttribute("title", /Your contact has no Cashu \(Mainnet\) wallet/, { timeout: 60_000 });
   await page.screenshot({ path: testInfo.outputPath("sheet-mainnet-desktop.png"), animations: "disabled" });
 
   // Test sats on the Testnet card: the deck trap, the card clicked before the amount.
