@@ -135,7 +135,7 @@ test("a contact's profile, follows and notes load only on request from the perso
   await expect(publish.getByTestId("nostr-publish-notice")).toContainText(NOSTR_TEST_RELAY);
   expect(relay.published).toEqual([]);
   await publish.getByTestId("nostr-publish-confirm").click();
-  await expect(publish.getByTestId("nostr-publish-result")).toContainText(`Published to ${NOSTR_TEST_RELAY}`);
+  await expect(publish.getByTestId("nostr-publish-result")).toContainText(`Published to ⁨${NOSTR_TEST_RELAY}⁩`);
   await publish.getByTestId("nostr-publish-close").click();
   expect(relay.published).toHaveLength(1);
   expect(relay.published[0]).toMatchObject({ by: "bob", event: { kind: 1, pubkey: b.pubkey, content: "Hello from Ghostly" } });
