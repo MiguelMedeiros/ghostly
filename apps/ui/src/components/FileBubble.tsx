@@ -57,6 +57,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const [viewing, setViewing] = useState(false);
   const opener = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const acceptRef = useRef<HTMLButtonElement>(null);
   useFocusKept(rootRef);
   /** When a finger (or a pen) went down on the picture: held as long as a long press, its tap opens nothing. */
   const pressedAt = useRef<number | null>(null);
@@ -291,11 +292,11 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           <div className="flex gap-2">
             {/* Not turned off when the room shown is less than its size: that room may be old, and Accept reads it again
                 (the engine refuses one that does not fit, and says so under the bubble). */}
-            <button type="button" className={`${answerButton} bg-accent text-on-accent disabled:opacity-50`}
+            <button ref={acceptRef} type="button" className={`${answerButton} bg-accent text-on-accent disabled:opacity-50`}
               data-testid="file-accept" onClick={() => act("accept")}>{t("chat.file.accept")}</button>
             <button type="button" className={`${answerButton} bg-black/20 text-inherit`} data-testid="file-decline" onClick={() => act("decline")}>{t("chat.file.decline")}</button>
           </div>
-          {(heldRoom || (typeof transfer.room === "number" && transfer.room < file.size)) && <FilesStillComing except={file.id} open={heldRoom} />}
+          {(heldRoom || (typeof transfer.room === "number" && transfer.room < file.size)) && <FilesStillComing except={file.id} open={heldRoom} accept={acceptRef} />}
         </div>
       )}
       {(controls && !offered && !group && (canPause || pausedHere || canCancel)) && (
