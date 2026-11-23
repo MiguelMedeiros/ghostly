@@ -114,7 +114,7 @@
     "maxFee": "Lo máximo que aceptas en comisiones",
     "maxFeeInput": "Comisión máxima en {{unit}}",
     "newAddress": "Nueva dirección",
-    "notConnected": "{{label}} no está conectado",
+    "notConnected": "Sin conexión con {{label}}",
     "notConnectedDefault": "La fuente Bitcoin no está conectada",
     "nothingYet": "Nada todavía",
     "refresh": "Actualizar",

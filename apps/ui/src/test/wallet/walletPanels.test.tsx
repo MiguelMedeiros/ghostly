@@ -59,10 +59,10 @@ describe("choosing a source from the wallet cards", () => {
   it("the Bitcoin card names a BDK wallet in Portuguese while it connects, and when it is not connected", () => {
     const bitcoin = (status: "connecting" | "error") => ({ ...sourceView({ mode: "testnet", offered: offered("onchain", "testnet"), providerId: "bdk", label: "BDK wallet", status, network: "signet" }), history: [] });
     const { unmount } = renderApp(<BitcoinWalletPanel wallet={wallet} state={walletView({ mode: "testnet", bitcoin: bitcoin("connecting") }) as WalletState} />, { language: "pt" });
-    expect(screen.getByTestId("bitcoin-connecting")).toHaveTextContent("Conectando a Carteira BDK…");
+    expect(screen.getByTestId("bitcoin-connecting")).toHaveTextContent("Conectando com Carteira BDK…");
     unmount();
     renderApp(<BitcoinWalletPanel wallet={wallet} state={walletView({ mode: "testnet", bitcoin: bitcoin("error") }) as WalletState} />, { language: "pt" });
-    expect(screen.getByTestId("bitcoin-connecting")).toHaveTextContent("Carteira BDK não está conectado");
+    expect(screen.getByTestId("bitcoin-connecting")).toHaveTextContent("Sem conexão com Carteira BDK");
   });
 
   it("the Bitcoin card's Remove sends bitcoinClearSource", async () => {
