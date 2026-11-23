@@ -13,6 +13,7 @@
     "noMatch": "Ils ne correspondent pas",
     "notPublished": "Vos autres appareils le verront dès que cet appareil atteindra le réseau.",
     "refused": "Un autre appareil a essayé ce code. Il n’a rien reçu.",
+    "refusedFound": "Deux appareils ont utilisé ce code. Choisissez Ils correspondent seulement si votre nouvel appareil affiche ces mêmes chiffres. S’il n’en affiche aucun, choisissez Ils ne correspondent pas.",
     "scan": "Scannez ceci avec l’appareil photo de votre téléphone.",
     "scanInfo": "Sur un ordinateur, ouvrez Ghostly et choisissez Ajouter cet appareil à un autre profil, puis scannez ou collez le code. Il marche une fois, pendant 10 minutes.",
     "title": "Ajouter un appareil",
