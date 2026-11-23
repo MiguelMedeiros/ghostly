@@ -13,6 +13,7 @@
     "noMatch": "They don't match",
     "notPublished": "Your other devices see it once this device reaches the network.",
     "refused": "Another device tried to use this code. It got nothing.",
+    "refusedFound": "Two devices used this code. Choose They match only if your new device shows these same digits. If it shows none, choose They don't match.",
     "scan": "Scan this with your phone's camera.",
     "scanInfo": "On a computer, open Ghostly and choose Add this device to another profile, then scan or paste the code. It works once, for 10 minutes.",
     "title": "Add a device",
