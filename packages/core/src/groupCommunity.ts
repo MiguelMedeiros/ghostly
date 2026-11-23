@@ -289,6 +289,14 @@ export function leaveStands(leave: Pick<CommunityCommit, "g" | "s" | "ls" | "ls3
   }
   return true;
 }
+/** Whether a leave's `ls3` is its member's, for the admission it is in after `before` (newest first): not just a signature's shape. */
+function leave3Holds(leave: { g: string; s: string; ls3: string }, before: Iterable<CommunityCommit>): boolean {
+  for (const c of before) {
+    if ((c.k === "add" && c.s === leave.s) || (c.k === "create" && c.by === leave.s))
+      return SIG.test(leave.ls3) && verify(fromBase64Url(leave.ls3), leaveStatement3(leave.g, leave.s, communityCommitHash(c)), publicKeyFromZ32(leave.s));
+  }
+  return false;
+}
 
 /** The secret of an epoch that adds, re-roles or re-links: from the previous one and the commit. */
 export function derivedSecret(previous: Uint8Array, untaggedHash: string): Uint8Array {
@@ -739,6 +747,11 @@ function isMessageFrame(v: unknown): v is CommunityMessageFrame {
 function messageFields(f: CommunityMessageFrame): CommunityMessageFrame {
   const { t, v, g, e, h, s, n, ts, nn, c, sig } = f;
   return { t, v, g, e, h, s, n, ts, nn, c, sig };
+}
+/** A metadata frame's own fields alone (as `messageFields`); null when it is not one. */
+function metaFields(raw: unknown): GroupMetaFrame | null {
+  const parsed = parseGroupMetaFrame(raw);
+  return parsed && { t: "group-meta", v: 2, ...parsed.statement, k: parsed.k, nn: parsed.nn, c: parsed.c };
 }
 
 /**
@@ -2518,13 +2531,17 @@ export class CommunitySession {
   private receiveLeave(frame: Record<string, unknown>): boolean {
     const s = frame.s, ls = frame.ls;
     if (typeof s !== "string" || !MEMBER_KEY.test(s) || typeof ls !== "string" || !SIG.test(ls) || !rosterHas(this.roster, s)) return false;
-    const ls3 = typeof frame.ls3 === "string" && SIG.test(frame.ls3) ? frame.ls3 : undefined;
+    const shaped = typeof frame.ls3 === "string" && SIG.test(frame.ls3) ? frame.ls3 : undefined;
     // One request a member; the one that names the admission takes the place of one that does not (a hub from before passes on `ls` alone).
     let held = this.state.pendingLeaves.find(r => r.s === s);
     // A request kept from an earlier admission of this member (someone else committed it) is not one for this admission.
     if (held && !leaveStands({ g: this.id, ...held }, this.ancestry(this.topHash))) { this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== held); held = undefined; }
-    if (held && (held.ls3 || !ls3)) return false;
+    if (held && (held.ls3 || !shaped)) return false;
     if (!verify(fromBase64Url(ls), leaveStatement(this.id, s), publicKeyFromZ32(s))) return false;
+    // Kept, and handed on, only when it is the member's for this admission: one of a signature's shape alone would
+    // take the place of the member's own.
+    const ls3 = shaped && leave3Holds({ g: this.id, s, ls3: shaped }, this.ancestry(this.topHash)) ? shaped : undefined;
+    if (held && !ls3) return false;
     if (!leaveStands({ g: this.id, s, ls, ls3 }, this.ancestry(this.topHash))) return false;
     this.state.pendingLeaves = [...this.state.pendingLeaves.filter(r => r !== held), { s, ls, ...(ls3 ? { ls3 } : {}) }].slice(-COMMUNITY_LIMITS.pendingLeaves);
     this.persistSoon();
@@ -2532,14 +2549,38 @@ export class CommunitySession {
   }
 
   /**
-   * What a hub hands on of a frame it took (`handle` said it was new): as it came, without the live mark of whoever
-   * handed it to me, and with mine when it came live here (WISP 903 § Relaying, revision 2026-11-03). Hand it on at
-   * once: the mark says it is passed on as it came.
+   * What a hub hands on of a frame it took (`handle` said it was new): its own fields as it came, without the live mark
+   * of whoever handed it to me, and with mine when it came live here (WISP 903 § Relaying, revision 2026-11-03). Hand it
+   * on at once: the mark says it is passed on as it came.
    */
   passOn(frame: object): object {
-    if (!isMessageFrame(frame)) return frame;
-    const fields = messageFields(frame);
-    return this.cameLive.has(frame) ? { ...fields, lv: this.myKey } : fields;
+    if (isMessageFrame(frame)) {
+      const fields = messageFields(frame);
+      return this.cameLive.has(frame) ? { ...fields, lv: this.myKey } : fields;
+    }
+    // Any other frame, as `handle` checked and kept it: its own fields alone. Whatever else came beside them is outside
+    // every signature (and a commit's hash), so the first copy to reach a hub would be the one every hub floods.
+    const f = frame as Record<string, unknown>;
+    switch (f.t) {
+      case "group-commit": {
+        const commit = parseCommit(f.commit);
+        return commit ? { t: "group-commit", v: 2, g: this.id, commit } : frame;
+      }
+      case "group-meta": return metaFields(f) ?? frame;
+      case "group-leave": {
+        const { s, ls } = f;
+        if (typeof s !== "string" || !MEMBER_KEY.test(s) || typeof ls !== "string" || !SIG.test(ls)) return frame;
+        const ls3 = typeof f.ls3 === "string" && leave3Holds({ g: this.id, s, ls3: f.ls3 }, this.ancestry(this.topHash)) ? f.ls3 : undefined;
+        return { t: "group-leave", v: 2, g: this.id, s, ls, ...(ls3 ? { ls3 } : {}) };
+      }
+      case "group-left": {
+        const { h, hi, sig } = f;
+        if (typeof h !== "string" || typeof sig !== "string" || !isObject(hi)) return frame;
+        return { t: "group-left", v: 2, g: this.id, h, hi: Object.fromEntries(Object.entries(hi)), sig };
+      }
+      case "group-secret": case "group-entry": return routedCommunityFrame(f) ?? frame;
+      default: return frame;
+    }
   }
 
   /** `waited`: it waited for a commit or a secret (`replayWaiting`), so it is not live. */
@@ -2995,7 +3036,9 @@ export class CommunitySession {
    * whether it was new, so a hub relays it. One naming what I do not have yet waits for the chain. Just after the admin
    * role moved to me, the former admin's is signed again as mine (`takesOver`).
    */
-  private async receiveMeta(from: string, raw: unknown): Promise<boolean> {
+  private async receiveMeta(from: string, input: unknown): Promise<boolean> {
+    // What waits, and is handed on once its commit comes, is the frame's own fields alone (`metaFields`).
+    const raw = metaFields(input);
     const frame = parseGroupMetaFrame(raw);
     if (!frame || frame.statement.g !== this.id || typeof frame.k !== "string" || !this.isRecentMember(from)) return false;
     const s = frame.statement, taking = this.takesOver(s);
