@@ -222,6 +222,12 @@ function Shell({ titleId, describedBy, onClose, children, testId, box }: { title
 /** What "Version {{version}}" gets in place of the version (a private-use character), to put the version there in its own direction. */
 const VERSION_SLOT = "";
 
+/** A line with a version in it ("Version {{version}} is ready."): the version in its own direction, as in the header. */
+function withVersion(text: string, version: string) {
+  const [before = "", after = ""] = text.split(VERSION_SLOT);
+  return <>{before}<bdi dir="ltr">{version}</bdi>{after}</>;
+}
+
 function Head({ titleId, title, version, tagline, icon, installed }: { titleId: string; title: string; version?: string; tagline?: string; icon?: Uint8Array | null; installed?: InstalledAppView }) {
   const { t } = useI18n();
   const [before = "", after = ""] = version ? t("apps.app.version", { version: VERSION_SLOT }).split(VERSION_SLOT) : [];
@@ -560,7 +566,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       <Permissions asks={app.permissions} update={false} />
       {app.pending && (
         <div className="bg-surface rounded-xl px-4 py-3 space-y-3" data-testid="app-update">
-          <p className="text-sm text-text-primary">{t("apps.app.updateWaits", { version: app.pending.version })}</p>
+          <p className="text-sm text-text-primary">{withVersion(t("apps.app.updateWaits", { version: VERSION_SLOT }), app.pending.version)}</p>
           {/* An update that no longer adds a permission to the version installed meanwhile has nothing to list. */}
           {app.pending.added.length > 0 && <Permissions asks={app.pending.added} update />}
           {/* Update grants only the update listed here: another one found since is refused, and the list read again shows it. */}
