@@ -20,7 +20,7 @@ import { openAppSettings, useCameraRefusal } from "../desktop/androidCameraRefus
 import { AppsGlyph, CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon, TranslateIcon } from "./composer/icons";
 import type { ComposerServices } from "./composer/servicesRow";
 import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";
-import type { GroupMention } from "@ghostly/core";
+import { dhtTextBytes, type GroupMention } from "@ghostly/core";
 import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
@@ -60,10 +60,12 @@ interface MessageInputProps {
   maxLength?: number;
   maxBytes?: number;
   /**
-   * What the DHT carries while the chat is not live: past it the counter turns amber and the text is still
-   * sent, waiting for a live connection (or held) instead of being refused.
+   * What the DHT carries while the chat is not live, counted as its packet counts a text (`dhtTextBytes`, escaped): past
+   * it the counter turns amber, and its title says what becomes of a text that long (`softTitle`; else that it waits
+   * for a live connection).
    */
   softBytes?: number;
+  softTitle?: string;
   /**
    * The most UTF-8 bytes a message may have (the engine's 16 KiB): the counter near the end counts bytes then, not
    * characters, and a longer text stays in the field with why. An accented letter takes two, most CJK three, an emoji four.
@@ -151,11 +153,6 @@ const TOAST_DURATION = 5_000;
 const PROGRESS_EVERY_MS = 250;
 /** The pause in the typing after which the draft is written (and the secret guard reads it). */
 const DRAFT_SAVE_PAUSE = 400;
-/**
- * What a text's envelope takes of the DHT's bytes once sealed: about 248 of the 256 fit (the CLI's `DHT_TEXT_FITS`). The
- * edge moves by a byte or two with the chat's sequence, so the composer's count says "about".
- */
-const DHT_SEAL_BYTES = 8;
 
 /** The same file on disk, picked again: a picker gives a new File each time. */
 
@@ -172,6 +169,7 @@ export function MessageInput({
   maxLength = DEFAULT_MAX,
   maxBytes,
   softBytes,
+  softTitle,
   textBytes,
   onSendFile,
   payments,
@@ -1044,19 +1042,17 @@ export function MessageInput({
 
   const bytes = maxBytes || softBytes || textBytes ? new TextEncoder().encode(text.trim()).length : 0;
   const remaining = maxBytes ? maxBytes - bytes : textBytes ? textBytes - bytes : maxLength - text.length;
-  const overSoft = !!softBytes && bytes > softBytes;
-  // Within the DHT's 256 bytes, but past what its packet carries once sealed (about 248, core dhtDelivery.ts
-  // `DHT_PACKET_BUDGET`): it does not go there either, so it reads amber as one past 256 does.
-  const nearSoft = !!softBytes && !overSoft && bytes > softBytes - DHT_SEAL_BYTES;
+  // The DHT's count is on what its packet carries: a new line, a quote or a backslash takes one more byte there.
+  const packetBytes = softBytes ? dhtTextBytes(text) : 0;
+  const overSoft = !!softBytes && packetBytes > softBytes;
   // Near the limit that refuses, its count wins over the DHT's (past 16 KiB is past 256 B too).
   const nearHard = remaining < 100 && (!softBytes || !!maxBytes || !!textBytes);
-  const dhtCounted = !!softBytes && !maxBytes && !nearHard && bytes > softBytes - 60;
+  const dhtCounted = !!softBytes && !maxBytes && !nearHard && packetBytes > softBytes - 60;
   // What the count's colour says, in words the field carries (its description) and a screen reader hears once as it
   // changes: a `title` on the count reaches only a mouse.
-  const countState = dhtCounted ? (overSoft ? "overSoft" : nearSoft ? "nearSoft" : null)
+  const countState = dhtCounted ? (overSoft ? "overSoft" : null)
     : nearHard && remaining < 50 ? (remaining < 0 ? "over" : "left") : null;
-  const countNote = countState === "overSoft" ? t("composer.overSoft", { bytes: softBytes! })
-    : countState === "nearSoft" ? t("composer.nearSoft", { bytes: softBytes! - DHT_SEAL_BYTES })
+  const countNote = countState === "overSoft" ? softTitle ?? t("composer.overSoft", { bytes: softBytes! })
     : countState === "left" ? t(maxBytes || textBytes ? "composer.bytesLeft" : "composer.charactersLeft", { count: remaining })
     : countState !== "over" ? undefined
     : maxBytes ? t("composer.dhtTooLong", { bytes, max: maxBytes })
@@ -1212,8 +1208,8 @@ export function MessageInput({
             {countNote && <span id={countNoteId} className="sr-only">{countNote}</span>}
             {dhtCounted && (
               <span data-testid="dht-byte-count" title={countNote}
-                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft || nearSoft ? "text-warn-ink" : "text-text-muted"}`}>
-                {bytes} / {softBytes} B
+                className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-warn-ink" : "text-text-muted"}`}>
+                {packetBytes} / {softBytes} B
               </span>
             )}
             {nearHard && (

@@ -21,6 +21,13 @@
   "charactersLeft": "剩余字符：{{count}}",
   "chooseFiles": "选择文件",
   "closeCamera": "关闭相机",
+  "dhtFits": {
+    "both": "对 DHT 来说太长（DHT 约可承载 {{fits}} 字节）。你和联系人都将此聊天设为仅 DHT：请缩短，或双方都通过连接图标更改。",
+    "contact": "对 DHT 来说太长（DHT 约可承载 {{fits}} 字节）。联系人的聊天为仅 DHT：请缩短，或等对方重新允许直连。",
+    "editLive": "作为编辑对 DHT 来说太长（DHT 约可承载 {{fits}} 字节）：直连后发送。",
+    "held": "超过 DHT 可承载的量（约 {{fits}} 字节）：为联系人保存，直到对方上线。",
+    "you": "对 DHT 来说太长（DHT 约可承载 {{fits}} 字节）。此聊天为仅 DHT：请缩短，或通过连接图标更改。"
+  },
   "dhtTooLong": "对 DHT 来说太长（{{bytes}}/{{max}} 字节）。请缩短或改用实时连接；草稿会保留。",
   "document": "文档",
   "dropFiles": "拖放到此处发送",
@@ -56,7 +63,6 @@
   "identity": "身份",
   "identityShared": "此聊天中已分享 {{count}} 个",
   "media": "照片和视频",
-  "nearSoft": "封装后 DHT 约可承载 {{bytes}} 字节：缩短后即可经由 DHT 发送",
   "noEmoji": "未找到表情",
   "noGifs": "未找到 GIF",
   "overSoft": "超过 DHT 可承载的 {{bytes}} 字节：直连后发送",
