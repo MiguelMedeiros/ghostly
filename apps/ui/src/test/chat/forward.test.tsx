@@ -493,6 +493,22 @@ describe("the Forward to… picker", () => {
     expect(fakeEngine.callsTo("forwardMessages")).toHaveLength(1);
   });
 
+  it("asks before forwarding a file whose name or type looks like a key, as sending it from the composer would", async () => {
+    const NSEC = "nsec1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqstywftw";
+    expect(forwardSecret([message({ text: "", file: { ...PICTURE, name: `${NSEC}.txt`, mime: "text/plain" } })])).toMatchObject({ kind: "nsec" });
+    expect(forwardSecret([message({ text: "", file: { ...PICTURE, name: `nsec1:${NSEC.slice(5)}.txt` } })])).toMatchObject({ kind: "nsec" });
+    expect(forwardSecret([message({ text: "", file: { ...PICTURE, mime: `text/${NSEC}` } })])).toMatchObject({ kind: "nsec" });
+    expect(forwardSecret([message({ text: SEED, file: PICTURE })])).toMatchObject({ kind: "mnemonic" });
+    expect(forwardSecret([message({ text: "", file: PICTURE })])).toBeNull();
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error: null })) }));
+    const { user } = open([message({ text: "", file: { ...PICTURE, name: `${NSEC}.txt` } })]);
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("secret-guard")).toHaveAttribute("data-kind", "nsec");
+    await user.click(screen.getByTestId("secret-guard-cancel"));
+    expect(fakeEngine.callsTo("forwardMessages")).toEqual([]);
+  });
+
   // The guard is the picker's child in React's tree (portalled out of it): React handed the guard's cancel to the
   // picker's too, and one Escape closed both, the chosen chats with them.
   it("Escape on the seed question closes only the question: the picker stays with its chats chosen", async () => {
