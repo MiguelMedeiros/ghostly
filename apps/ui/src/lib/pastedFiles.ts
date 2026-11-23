@@ -20,6 +20,9 @@ const TYPES: Record<string, string> = {
   ...Object.fromEntries(Object.entries(IMAGE_EXTENSIONS).map(([type, ext]) => [ext, type])), jpeg: "image/jpeg", tif: "image/tiff",
   pdf: "application/pdf", txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json", zip: "application/zip",
   mp3: "audio/mpeg", m4a: "audio/mp4", ogg: "audio/ogg", opus: "audio/ogg", wav: "audio/wav", mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
+  // As the webview's file picker types them: each plays in the contact's app, not a file to download, and a WMA's
+  // refusal (its tags are not removed) is an audio file's, not a video's.
+  flac: "audio/flac", aac: "audio/aac", oga: "audio/ogg", weba: "audio/webm", m4v: "video/x-m4v", ogv: "video/ogg", wma: "audio/x-ms-wma",
 };
 
 /** The most a paste read by the platform brings into the page, all its files together: more goes through + → Document. */
