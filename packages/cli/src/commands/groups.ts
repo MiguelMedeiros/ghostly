@@ -75,11 +75,12 @@ export const commands: Record<string, Command> = {
     options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { group }) => ({ group, yes: options.yes === true }),
   },
   "group link": {
-    method: "group.link", usage: "group link <group> [--off] [--reset]", summary: "Print the group's link (anyone who has it can join); --reset: a new one, the old one stops working; --off", args: ["group"],
+    method: "group.link", usage: "group link <group> [--off] [--reset]", summary: "Print the group's link (anyone who has it can join), turning a private group's on; --reset: a new one, the old one stops working (a community's link that is off: on again); --off", args: ["group"],
     options: { off: { type: "boolean", description: "Turn the link off" }, reset: { type: "boolean", description: "Replace it: the old link stops working" } },
     params: ({ options }, a) => {
       if (options.off === true && options.reset === true) throw new CliError("usage", "--off turns the link off: not with --reset");
-      return { group: a.group, on: options.off !== true, reset: options.reset === true };
+      // `on` only with --off: left out, a community's link the admin turned off stays off (groupAdmin.ts).
+      return { group: a.group, ...(options.off === true ? { on: false } : {}), reset: options.reset === true };
     },
   },
   "group list": { method: "group.list", usage: "group list [--show-secret]", summary: "Groups, invitations and auto-join", options: showSecret, params: ({ options }) => secret(options) },

@@ -218,6 +218,11 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     // the group's link" answered what it had not asked. Said as the app says it (`group.link.offMember`).
     if (group.profile === "community" && !group.isAdmin && !group.entryLink && !reset)
       throw new CliError("refused", "The admin turned the link off: nobody can join with it, and the link shared before will not work again. Only the admin can make a new one.");
+    // A community's link is on from its creation, so one that is off was turned off: a look at it (`on` left out) made a
+    // new link and let people in again, without a word. Only --reset, or `on: true`, turns it on again, as the app's own
+    // "Turn on the link" button does. A private group starts with none, and is turned on this way.
+    if (group.profile === "community" && group.isAdmin && !group.entryLink && !reset && params.on === undefined)
+      throw new CliError("refused", `The link is off: nobody can join with it, and the link shared before will not work again. ghostly group link ${group.id} --reset makes a new one to share (reset: true over the socket)`);
     const { link } = await node(ctx).enableGroupLink({ groupId: group.id, ...(reset ? { reset: true } : {}) });
     return withUrl(group.id, link);
   },

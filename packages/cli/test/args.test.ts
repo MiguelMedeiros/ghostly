@@ -634,7 +634,7 @@ describe("the argument parser", () => {
     expect(params("task send", ["bob", "--title", "t", "--progress", "10"]).card).toMatchObject({ progress: 10 });
     expect(params("usage send", ["bob", "--used", "1", "--limit", "2"]).card).toMatchObject({ used: 1, limit: 2 });
     expect(params("usage send", ["bob", "--left", "5"]).card).toMatchObject({ left: 5 });
-    expect(params("group link", ["g1", "--reset"])).toEqual({ group: "g1", on: true, reset: true });
+    expect(params("group link", ["g1", "--reset"])).toEqual({ group: "g1", reset: true });
     expect(params("group link", ["g1", "--off"])).toEqual({ group: "g1", on: false, reset: false });
     for (const role of ["pin", "exclude", "auto"]) expect(params("group hub", ["g1", "m1", `--${role}`])).toMatchObject({ role });
     expect(params("group hub", ["g1", "m1"])).toMatchObject({ role: "auto" });

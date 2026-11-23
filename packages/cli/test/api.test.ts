@@ -126,7 +126,8 @@ describe("chats", () => {
     Object.assign(node, { createGroup: vi.fn(async () => ({ groupId: "g2" })), enableGroupLink: vi.fn(async () => ({ link: token })), disableGroupLink: vi.fn(async () => undefined) });
     const url = `https://app.ghostly.tools/#/join/${token}`;
     expect(await callApi(ctx, "group.create", { name: "Club", profile: "community" })).toEqual({ group: "g2", link: token, url });
-    expect(await callApi(ctx, "group.link", { group: "g1" })).toEqual({ group: "g1", link: token, url });
+    // Turned on in so many words: this community's link is off, and a look at it leaves it off (groups.test.ts).
+    expect(await callApi(ctx, "group.link", { group: "g1", on: true })).toEqual({ group: "g1", link: token, url });
     expect(await callApi(ctx, "group.link", { group: "g1", reset: true })).toEqual({ group: "g1", link: token, url });
     // No link, no address: a private group made without one, a link turned off.
     expect(await callApi(ctx, "group.link", { group: "g1", on: false })).toEqual({ group: "g1", link: null });
