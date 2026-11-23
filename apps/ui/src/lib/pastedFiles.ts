@@ -6,6 +6,8 @@
  */
 import { IMAGE_LIMITS, imageSize, previewable } from "@ghostly/core";
 import type { ClipboardFile, ClipboardFiles } from "@ghostly/browser/host";
+import type { Translate } from "../locales/translate";
+import { listText } from "./listText";
 import { servicesPlatform } from "./platform";
 
 const IMAGE_EXTENSIONS: Record<string, string> = {
@@ -27,9 +29,12 @@ export const PLATFORM_PASTE_FILES = 32;
 /** How many names of files left out a line says; the rest is "…". */
 const NAMES_SAID = 10;
 
-/** File names for a line: the first few, then "…". */
-export function someNames(names: string[]): string {
-  return [...names.slice(0, NAMES_SAID), ...(names.length > NAMES_SAID ? ["…"] : [])].join(", ");
+/**
+ * File names for a line: the first few, then "…", listed as the language lists them ("a.pdf、b.png"), each isolated:
+ * an Arabic name beside a Latin one keeps its own order.
+ */
+export function someNames(names: string[], t: Translate): string {
+  return listText([...names.slice(0, NAMES_SAID).map((name) => `⁨${name}⁩`), ...(names.length > NAMES_SAID ? ["…"] : [])], t);
 }
 const READ_STEP = 16 * 1024 * 1024;
 const TOO_LARGE_TO_PASTE = "That is too large to paste. Send it with + → Document.";
