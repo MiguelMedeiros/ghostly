@@ -82,7 +82,7 @@ const InstalledRow = memo(function InstalledRow({ app, onDetails, onOpen }: { ap
   return (
     // Open goes under the name when both don't fit (a large text size on a phone), as in a built-in app's row.
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
-      <button ref={details} type="button" onClick={() => onDetails(app.ref)} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      <button ref={details} type="button" onClick={() => onDetails(app.ref)} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] max-md:min-h-11 text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         aria-label={t("apps.page.details", { title: shown })}>
         <AppIcon installed={app} />
         <span className="min-w-0">
@@ -317,7 +317,7 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
     <div data-testid="app-store" data-key={store.key}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
         <button type="button" aria-expanded={open} onClick={toggle} disabled={!read}
-          className="flex-[1_1_12rem] min-w-0 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          className="flex-[1_1_12rem] min-w-0 max-md:min-h-11 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <span className="flex items-center gap-1.5">
             {/* Its link wraps whole: cut, a phone showed only its host, and the owner, repository and file that tell two
                 stores apart were the part cut. */}
@@ -371,7 +371,7 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
         <div className="border-t border-border px-4 py-2">
           <input type="search" data-testid="app-store-filter" value={filter} dir={draftDirection(filter)} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); setAdded(null); }}
             placeholder={t("apps.store.filter")} aria-label={t("apps.store.filter")}
-            className="w-full rounded-lg border-none bg-search-bg px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
+            className="w-full max-md:min-h-11 rounded-lg border-none bg-search-bg px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
           <SearchStatus testId="app-store-found" text={!filter.trim() ? "" : matching.length ? t("apps.store.count", { count: matching.length }) : t("apps.store.noMatch")} />
         </div>
       )}
@@ -386,7 +386,7 @@ const StoreBlock = memo(function StoreBlock({ store, alone, installed, onInstall
           {matching.length > limit && (
             <li>
               <button type="button" data-testid="app-store-more" onClick={() => { setAdded(limit); setLimit(limit + LISTING_PAGE); }}
-                className="w-full cursor-pointer px-4 py-2.5 text-xs font-medium text-accent hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                className="w-full max-md:min-h-11 cursor-pointer px-4 py-2.5 text-xs font-medium text-accent hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
                 {t("apps.store.showMore", { count: matching.length - limit })}
               </button>
             </li>
