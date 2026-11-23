@@ -713,7 +713,8 @@
               "bip84": "SegWit natif (BIP84, bc1q…)"
             }
           }
-        }
+        },
+        "label": "Portefeuille BDK"
       },
       "bitcoind": {
         "description": "Un portefeuille sur votre propre nœud Bitcoin Core, par son RPC. Votre nœud détient les clés et signe. Nécessite l'app de bureau.",
@@ -740,7 +741,8 @@
         "description": "Un portefeuille Lightning autonome sur Spark, via le SDK Breez. Sa phrase de récupération est scellée sur cet appareil ; vous détenez les sats."
       },
       "cashu-mint": {
-        "description": "Les factures sont payées vers votre solde Cashu, et depuis celui-ci. Les mints détiennent les sats."
+        "description": "Les factures sont payées vers votre solde Cashu, et depuis celui-ci. Les mints détiennent les sats.",
+        "label": "Mints Cashu"
       },
       "core-lightning": {
         "description": "Votre propre nœud Core Lightning, via Commando avec une rune. Votre nœud détient les sats. L'app web ne l'atteint que par wss://.",
@@ -777,7 +779,8 @@
             "help": "Le port REST de LND (restlisten, 8080 par défaut). Dans un navigateur, le nœud doit autoriser cette app avec restcors et avoir un certificat auquel le navigateur fait confiance ; l'app de bureau n'a besoin d'aucun des deux.",
             "label": "Adresse REST"
           }
-        }
+        },
+        "label": "Nœud LND"
       },
       "nwc": {
         "description": "Un portefeuille que vous connectez avec son URI NWC (Alby Hub, le service NWC d'un nœud, un portefeuille hébergé). Ce portefeuille détient les sats et fixe sa propre limite de frais : custodial ou non, cela dépend du portefeuille.",
@@ -789,7 +792,8 @@
         }
       },
       "webln": {
-        "description": "Un portefeuille Lightning dans ce navigateur (Alby et d'autres). Ce portefeuille détient les sats et vous demande avant de payer."
+        "description": "Un portefeuille Lightning dans ce navigateur (Alby et d'autres). Ce portefeuille détient les sats et vous demande avant de payer.",
+        "label": "Portefeuille du navigateur (WebLN)"
       }
     },
     "reconfigured": "{{name}} utilise maintenant ce serveur.",

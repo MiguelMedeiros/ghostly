@@ -715,7 +715,8 @@
               "bip84": "SegWit nativo (BIP84, bc1q…)"
             }
           }
-        }
+        },
+        "label": "Carteira BDK"
       },
       "bitcoind": {
         "description": "Uma carteira no seu próprio nó Bitcoin Core, pelo RPC dele. Seu nó guarda as chaves e assina. Precisa do app para desktop.",
@@ -742,7 +743,8 @@
         "description": "Uma carteira Lightning autocustodial na Spark, pelo SDK da Breez. A frase de recuperação fica selada neste dispositivo; você guarda os sats."
       },
       "cashu-mint": {
-        "description": "As faturas são pagas para o seu saldo Cashu, e a partir dele. Os mints guardam os sats."
+        "description": "As faturas são pagas para o seu saldo Cashu, e a partir dele. Os mints guardam os sats.",
+        "label": "Mints Cashu"
       },
       "core-lightning": {
         "description": "Seu próprio nó Core Lightning, pelo Commando com uma rune. Seu nó guarda os sats. O app web só o alcança por wss://.",
@@ -779,7 +781,8 @@
             "help": "A porta REST do LND (restlisten, 8080 por padrão). Num navegador, o nó deve permitir este app com restcors e ter um certificado em que o navegador confie; o app para desktop não precisa de nenhum dos dois.",
             "label": "Endereço REST"
           }
-        }
+        },
+        "label": "Nó LND"
       },
       "nwc": {
         "description": "Uma carteira que você conecta pela URI NWC dela (Alby Hub, o serviço NWC de um nó, uma carteira hospedada). Essa carteira guarda os sats e define o próprio limite de taxa: ser custodial ou não depende da carteira.",
@@ -791,7 +794,8 @@
         }
       },
       "webln": {
-        "description": "Uma carteira Lightning neste navegador (Alby e outras). Essa carteira guarda os sats e pergunta a você antes de pagar."
+        "description": "Uma carteira Lightning neste navegador (Alby e outras). Essa carteira guarda os sats e pergunta a você antes de pagar.",
+        "label": "Carteira do navegador (WebLN)"
       }
     },
     "reconfigured": "{{name}} agora usa esse servidor.",
