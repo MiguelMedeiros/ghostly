@@ -29,14 +29,15 @@ const STATE_WORDS = { verified: "chat.entity.provedBy", expiring: "chat.entity.p
  * a did:web someone else chose with Hide my IP on (its server would learn this device's address, as a contact's
  * picture link's would). The other lookups ask only this device or fixed relays.
  */
-function lookupOf(t: Translate, provider: "pubky" | "did", subject: string, hideIp: boolean): { offline: boolean; hidden?: boolean; where: string } {
+function lookupOf(t: Translate, provider: "pubky" | "did", subject: string, hideIp: boolean): { offline: boolean; hidden?: boolean; where: ReactNode } {
   if (provider === "pubky") return { offline: false, where: t("chat.entity.lookupPubky", { relays: namesText(PUBKY_RELAYS.map(host), t) }) };
   const { method, id } = parseDid(subject);
   if (method === "key" || method === "jwk") return { offline: true, where: t("chat.entity.lookupLocal") };
   if (method === "dht") return { offline: false, where: t("chat.entity.lookupDht") };
   const server = id.split(":")[0].replace(/%3a/gi, ":");
-  if (hideIp) return { offline: false, hidden: true, where: t("chat.entity.lookupWebHiddenIp", { host: server }) };
-  return { offline: false, where: t("chat.entity.lookupWeb", { host: server }) };
+  // The host its writer chose, its own <bdi> as the badge's name: a port or a dot at its edge stays on its side in Arabic.
+  if (hideIp) return { offline: false, hidden: true, where: fillNames(t("chat.entity.lookupWebHiddenIp"), { host: server }) };
+  return { offline: false, where: fillNames(t("chat.entity.lookupWeb"), { host: server }) };
 }
 
 type Lookup = { status: "idle" } | { status: "loading" } | { status: "ok"; facts: readonly { label: string; value: string }[] } | { status: "error"; error: string };

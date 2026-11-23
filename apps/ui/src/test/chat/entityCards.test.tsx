@@ -524,6 +524,16 @@ describe("identity cards", () => {
     expect(screen.getByTestId("entity-identity-where").textContent).toContain(text);
   });
 
+  // The server is whoever wrote the DID's choice: its own <bdi>, or in Arabic a port at its edge ("example.com:8443")
+  // takes the sentence's direction and reads on the other side of the name.
+  it.each([[false], [true]])("in Arabic, keeps a did:web's server in its own direction (Hide my IP on: %s)", (hideIp) => {
+    const { engine } = bubble("did:web:example.com%3A8443", { language: "ar" });
+    if (hideIp) act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: true } }));
+    const where = screen.getByTestId("entity-identity-where");
+    expect([...where.querySelectorAll("bdi")].map(bdi => bdi.textContent)).toEqual(["example.com:8443"]);
+    expect(where.textContent).not.toContain("{{");
+  });
+
   it("with Hide my IP on, offers no lookup of a did:web someone else chose, and asks its server nothing", async () => {
     const asked: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async input => { asked.push(String(input)); throw new TypeError("offline in tests"); });
