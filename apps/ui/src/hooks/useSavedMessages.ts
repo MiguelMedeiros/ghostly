@@ -49,8 +49,57 @@ function soon(): void {
 const chatIds = (state: EngineState | null) => new Set([...state?.links.map((l) => l.id) ?? [], ...state?.groups.map((g) => `group:${g.id}`) ?? []]);
 const sameIds = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((id) => b.has(id));
 
+/**
+ * One list of the state (its chats, or its groups) as held: its ids in the order they came, and each id with the last
+ * check that saw it (`seen`), so that an id met twice in one check shows.
+ */
+type HeldIds = { order: string[]; seen: Map<string, number> };
+const holdIds = (list: readonly { id: string }[] = []): HeldIds => ({ order: list.map((x) => x.id), seen: new Map(list.map((x) => [x.id, 0])) });
+
+/**
+ * Whether `list` has the held ids, building nothing: the same ids in the same order (the chats, which the engine
+ * orders by when they were made), or else as many ids, each one held and none twice (the groups, which a message moves
+ * up the list). False says only that they may differ.
+ */
+function sameList(list: readonly { id: string }[], held: HeldIds, check: number): boolean {
+  const { order, seen } = held;
+  if (list.length !== order.length) return false;
+  let i = 0;
+  while (i < list.length && list[i].id === order[i]) i++;
+  if (i === list.length) return true;
+  if (list.length !== seen.size) return false;
+  for (let j = 0; j < list.length; j++) {
+    const id = list[j].id, last = seen.get(id);
+    if (last === undefined || last === check) return false;
+    seen.set(id, check);
+  }
+  // The same ids in a new order: the next state, likely in this one, is told by the order alone.
+  for (let j = 0; j < list.length; j++) order[j] = list[j].id;
+  return true;
+}
+
+/**
+ * Holds the chats and groups of `state` and tells whether a later state's differ (holding those instead): what
+ * `chatIds` + `sameIds` say, without building anything when they are the same. Each engine state comes here (up to
+ * 20 a second while a file moves) and a chat or group comes or goes rarely, so a state is first checked against the ids
+ * held (`sameList`); only when that fails are the sets built and compared.
+ */
+export function chatsChange(state: EngineState | null): (next: EngineState | null) => boolean {
+  let ids = chatIds(state), links = holdIds(state?.links), groups = holdIds(state?.groups), check = 0;
+  return (next) => {
+    check++;
+    if (sameList(next?.links ?? [], links, check) && sameList(next?.groups ?? [], groups, check)) return false;
+    const now = chatIds(next);
+    links = holdIds(next?.links);
+    groups = holdIds(next?.groups);
+    if (sameIds(now, ids)) return false;
+    ids = now;
+    return true;
+  };
+}
+
 function start(): () => void {
-  let ids = chatIds(engine.state);
+  const changed = chatsChange(engine.state);
   const offMessages = engine.onMessages((linkId: string, messages: StoredMessage[], changes?: ListChanges) => {
     // Only a chat with a saved message: an edit there shows in the list, a delete takes it out.
     const here = rows.filter((s) => s.message.linkId === linkId);
@@ -69,10 +118,7 @@ function start(): () => void {
     if (here.some((s) => (whole || now.has(s.message.id)) && differs(s, now.get(s.message.id)))) soon();
   });
   const offState = engine.subscribe(() => {
-    const next = chatIds(engine.state);
-    if (sameIds(next, ids)) return;
-    ids = next;
-    soon();
+    if (changed(engine.state)) soon();
   });
   read();
   return () => {
