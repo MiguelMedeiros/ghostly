@@ -89,7 +89,7 @@ function ConfirmRemove({ name, from, returnFocus, onClose, onConfirm }: { name: 
       <InfoButton open={info} onToggle={() => setInfo(!info)} controls={`${id}-info`} testId={`group-call-remove-${from}-info`} className="mt-0.5" />
     </div>
     {info && <p id={`${id}-info`} data-testid={`group-call-remove-${from}-info-text`} className="mt-2 border-s-2 border-border ps-2 text-xs text-text-secondary">{t(keys.info)}</p>}
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex flex-wrap justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button onClick={onConfirm} data-testid={`group-call-remove-${from}-confirm`}
         className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-danger">{t(keys.confirm)}</button>
