@@ -237,6 +237,16 @@ function stored(session: ChatSession): ChatSession {
  */
 function withWhole(session: ChatSession, list = whole.get(session.id)): ChatSession {
   if (!session.older || !list) return session;
+  // As this page stores a long chat, its copy is the list's last rows, after all of the others: the list's other rows
+  // then go before it as they are, with no set of their ids, no look at each, no merge (a message arriving in a chat of
+  // thousands read it all again). One deleted since stays out all the same.
+  const tail = session.messages, from = list.length - tail.length;
+  if (from > 0 && tail.length && list[from - 1].timestamp <= tail[0].timestamp && tail.every((m, j) => m.id === list[from + j].id)) {
+    const deleted = session.deletedIds?.length ? new Set(session.deletedIds) : undefined;
+    const rest = list.slice(0, from);
+    const { older: _older, ...complete } = session;
+    return { ...complete, messages: (deleted ? rest.filter((m) => !deleted.has(m.id)) : rest).concat(tail) };
+  }
   const shown = new Set(session.messages.map((m) => m.id));
   for (const id of session.deletedIds ?? []) shown.add(id);
   const rest = list.filter((m) => !shown.has(m.id));
@@ -453,9 +463,13 @@ export function addMessages(
   if (!session) return null;
   if (complete) delete session.older;
 
-  const known = new Set(session.deletedIds);
-  for (const m of session.messages) known.add(m.id);
-  const fresh = messages.filter((m) => !known.has(m.id) && known.add(m.id));
+  // The ones it lacks, each id once: looked for among the session's rows by the few ids that came, not by a set of every
+  // id it holds (a message arriving in a chat of thousands was a set of all of them, for one row).
+  const deleted = new Set(session.deletedIds);
+  const wanted = new Map<string, ChatMessage>();
+  for (const m of messages) if (!deleted.has(m.id) && !wanted.has(m.id)) wanted.set(m.id, m);
+  for (let i = session.messages.length - 1; i >= 0 && wanted.size; i--) wanted.delete(session.messages[i]!.id);
+  const fresh = [...wanted.values()];
   if (!fresh.length) return session;
 
   // A history made whole again (after a reload) brings back older messages, not new ones: the chat keeps its place and
