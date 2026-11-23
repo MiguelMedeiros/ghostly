@@ -71,8 +71,8 @@ type Seen = { from: string; to: string; frame: Record<string, unknown> }[];
 
 const limits = GROUP_FILE_LIMITS as { -readonly [K in keyof typeof GROUP_FILE_LIMITS]: number };
 const saved = { ...limits };
-const elapsed = performance.now;
-afterEach(() => { Object.assign(limits, saved); performance.now = elapsed; });
+const elapsed = performance.now, wallClock = Date.now;
+afterEach(() => { Object.assign(limits, saved); performance.now = elapsed; Date.now = wallClock; });
 
 class FilesWorld {
   readonly world: CommunityWorld;
@@ -87,6 +87,9 @@ class FilesWorld {
     this.world = new CommunityWorld(undefined, network);
     // Time gone by, as every device's monotonic clock reads it: the world's, whatever a device's wall clock says (`clock`).
     performance.now = () => this.world.now;
+    // And the time a transfer's round trips are read on (`ChatFiles`): on the real clock, a test process paused under load
+    // between two steps (35 ms is enough) looked like a queue on the path, and a file then came at a slower pace.
+    Date.now = () => this.world.now;
     this.world.drop = (from, to, frame) => {
       this.seen.push({ from: from.name, to: to.name, frame });
       if (!this.hold?.(from, to, frame)) return false;
@@ -1834,8 +1837,10 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
 
   it("a member downloading at a good pace stays with its holder when its device's clock is set ahead mid-way", async () => {
     const t = new FilesWorld();
-    // Done in about 20 seconds at its pace, well within `wantWaitMs`.
-    const { bob, id, messageId, meta, step, offers } = await twoHolders(t, 768 * 1024, 1);
+    // Done in about 10 seconds at its pace, well within `wantWaitMs`: at `slowAfterMs` what is left of it comes within
+    // 30 s at the pace so far, its window still opening. (768 KiB was not: only the real clock's round trips, much
+    // shorter than the world's steps, opened the window at once, and a test process paused under load left it slow.)
+    const { bob, id, messageId, meta, step, offers } = await twoHolders(t, 384 * 1024, 1);
     for (let i = 0; i < 3; i++) await step();
     expect(offers()).toHaveLength(1);
     expect(t.done(bob, id, messageId)).toBe(false);
