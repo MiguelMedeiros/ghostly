@@ -189,9 +189,48 @@ function boardChats(): BoardChats {
   return chats;
 }
 
-/** Who sent a card, across the profile's chats and groups (`cardSenders`): the same function until a chat or a name changes. */
+type SenderChats = { links: Parameters<typeof cardSenders>[0]; groups: Parameters<typeof cardSenders>[1] };
+
+/**
+ * What `cardSenders` reads for these rows, and only that: their chats, their groups with the members who sent a card
+ * there, and those members' chats with me. The way to the board is drawn for every profile; it read every chat and
+ * every member of every group at each engine state, 2.4-3.9 ms a state in three groups of 2,000 with no card at all.
+ */
+function senderChatsOf(state: EngineState | null, rows: readonly CardIndexRow[]): SenderChats {
+  const chats = new Set<string>(), authors = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (!row.linkId.startsWith("group:")) { chats.add(row.linkId); continue; }
+    const sent = authors.get(row.linkId);
+    if (sent) sent.add(row.member ?? row.sender); else authors.set(row.linkId, new Set([row.member ?? row.sender]));
+  }
+  const groups: SenderChats["groups"][number][] = [];
+  for (const group of authors.size ? state?.groups ?? [] : []) {
+    const sent = authors.get(`group:${group.id}`);
+    if (!sent) continue;
+    const memberLinks = Object.fromEntries(Object.entries(group.memberLinks).filter(([, key]) => sent.has(key)));
+    for (const linkId of Object.keys(memberLinks)) chats.add(linkId);
+    const formerNames = group.formerNames && Object.fromEntries(Object.entries(group.formerNames).filter(([key]) => sent.has(key)));
+    groups.push({ id: group.id, memberLinks, ...(formerNames && { formerNames }), members: group.members.filter((m) => sent.has(m.key)).map((m) => ({ key: m.key, nick: m.nick })) });
+  }
+  const links = chats.size ? (state?.links ?? []).filter((l) => chats.has(l.id)).map((l) => ({ id: l.id, peerPubKeyZ32: l.peerPubKeyZ32, peerNick: l.peerNick })) : [];
+  return { links, groups };
+}
+
+let sendersFrom: { state: EngineState | null; rows: readonly CardIndexRow[] } | undefined;
+let senderChats: SenderChats = { links: [], groups: [] };
+/** `senderChatsOf` now: the same object until what it reads changes. */
+function senderChatsNow(rows: readonly CardIndexRow[]): SenderChats {
+  if (sendersFrom?.state === engine.state && sendersFrom.rows === rows) return senderChats;
+  sendersFrom = { state: engine.state, rows };
+  const next = senderChatsOf(engine.state, rows);
+  if (!sameValue(next, senderChats)) senderChats = next;
+  return senderChats;
+}
+
+/** Who sent a card, across the profile's chats and groups (`cardSenders`): the same function until a card's chat or sender changes. */
 export function useCardSenders(): (entry: Pick<BoardEntry, "linkId" | "author">) => CardSender {
-  const { links, groups } = useSyncExternalStore(subscribeEngine, boardChats);
+  const rows = useCardIndex();
+  const { links, groups } = useSyncExternalStore(subscribeEngine, () => senderChatsNow(rows));
   return useMemo(() => cardSenders(links, groups), [links, groups]);
 }
 
