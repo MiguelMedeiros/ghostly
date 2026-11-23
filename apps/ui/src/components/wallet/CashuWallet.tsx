@@ -310,7 +310,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
         ) : (
           <p className="text-text-primary" data-testid="wallet-balance">
             <bdi className="text-4xl font-semibold tabular-nums">{ln?.balance === undefined ? "—" : formatAmount(ln.balance, t.language)}</bdi>
-            <span className="text-text-muted text-sm ms-2">{t("wallet.lightning.balanceSource", { unit, source: sourceName ?? t("wallet.lightning.theSource") })}</span>
+            <span className="text-text-muted text-sm ms-2">{t("wallet.lightning.balanceSource", { unit: ln?.balance === undefined ? unit : unitFor(t, unit, ln.balance), source: sourceName ?? t("wallet.lightning.theSource") })}</span>
             {sharedLine}
             {ln?.status !== "ready" && <span className="block text-xs text-warn-ink mt-1" data-testid="lightning-source-state">{ln?.error ? problemLine(ln.error, t) : t("wallet.lightning.connecting")}</span>}
           </p>
