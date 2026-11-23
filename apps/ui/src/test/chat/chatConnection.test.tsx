@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { ChatConnection } from "../../components/ChatConnection";
@@ -1043,6 +1043,45 @@ describe("the connection panel, while a choice or button works", () => {
     await finish();
     expect(screen.getByTestId("pair-verify-error")).toBeInTheDocument();
     expect(confirm).toHaveFocus();
+  });
+
+  it("Verify hands the focus to The codes match, which took its place", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => engine.update({ links: [linkView({ availableTransports: all, peerParticipationKey: "saved", pairing: { status: "ready", transport: "webrtc/1", code: "4821 0937", peerKey: "peer" } as Pairing })] }));
+    await user.click(screen.getByTestId("connection-options"));
+    screen.getByTestId("pair-verify").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("pair-verify-confirm")).toHaveFocus();
+  });
+
+  it("The codes match, accepted, hands the focus to the line that now says the contact is verified", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    const view = (peerVerified: boolean) => linkView({ availableTransports: all, peerParticipationKey: "saved", peerVerified, pairing: { status: "ready", transport: "webrtc/1", code: "4821 0937", peerKey: "peer" } as Pairing });
+    act(() => engine.update({ links: [view(false)] }));
+    engine.on("confirmPair", () => { engine.update({ links: [view(true)] }); });
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByTestId("pair-verify"));
+    screen.getByTestId("pair-verify-confirm").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("pair-verify-confirm")).toBeNull());
+    expect(screen.getByTestId("pair-verified")).toHaveFocus();
+    expect(screen.getByTestId("connection-menu")).toHaveProperty("open", true);
+  });
+
+  it("The codes match, accepted after the focus moved on in the panel, leaves it there", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    const view = (peerVerified: boolean) => linkView({ availableTransports: all, peerParticipationKey: "saved", peerVerified, pairing: { status: "ready", transport: "webrtc/1", code: "4821 0937", peerKey: "peer" } as Pairing });
+    act(() => engine.update({ links: [view(false)] }));
+    const finish = held(engine, "confirmPair");
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByTestId("pair-verify"));
+    await user.click(screen.getByTestId("pair-verify-confirm"));
+    const elsewhere = screen.getByTestId("connection-options");
+    elsewhere.focus();
+    act(() => engine.update({ links: [view(true)] }));
+    await finish();
+    expect(screen.queryByTestId("pair-verify-confirm")).toBeNull();
+    expect(elsewhere).toHaveFocus();
   });
 
   it("leaves the focus where the person moved it meanwhile", async () => {

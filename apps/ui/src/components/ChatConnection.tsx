@@ -286,6 +286,16 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     reconnectLeft.current = false;
     if (root.current?.open && focusLost()) stateLine.current?.focus({ preventScroll: true });
   });
+  // Verify goes from under the focus as the code and The codes match take its place: that button takes it. The codes
+  // match, accepted, goes with the code: the line that now says the contact is verified takes it. A focus moved meanwhile stays.
+  const matchButton = useRef<HTMLButtonElement>(null), trustLine = useRef<HTMLSpanElement>(null);
+  const verifyLeft = useRef<"verify" | "match" | null>(null);
+  useLayoutEffect(() => {
+    const left = verifyLeft.current;
+    if (!left || (left === "verify" && !matchButton.current)) return;
+    verifyLeft.current = null;
+    if (root.current?.open && focusLost()) (left === "verify" ? matchButton : trustLine).current?.focus({ preventScroll: true });
+  });
   async function run(action: () => Promise<unknown>, fail = setError) {
     focusBack();
     dial.current++; setDialing(false);
@@ -384,17 +394,17 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             {(pinned || pair?.keyMismatch) && <div data-testid="pair-trust">
               {pair?.keyMismatch ? <p role="alert" className="text-danger">{t("connection.panel.keyMismatch")}</p> : <>
                 <div className="flex min-h-9 items-center justify-between gap-2">
-                  <span data-testid={link?.peerVerified ? "pair-verified" : undefined} className={`flex items-center gap-1.5 ${link?.peerVerified ? "text-accent" : "text-text-secondary"}`}>
+                  <span ref={trustLine} tabIndex={-1} data-testid={link?.peerVerified ? "pair-verified" : undefined} className={`flex items-center gap-1.5 outline-none ${link?.peerVerified ? "text-accent" : "text-text-secondary"}`}>
                     <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/>{link?.peerVerified && <path d="m8 12 3 3 5-6"/>}</svg>
                     {link?.peerVerified ? t("connection.panel.verified") : t("connection.panel.notVerified")}
                   </span>
-                  {!link?.peerVerified && canCompare && !comparing && <button data-testid="pair-verify" aria-label={t("connection.panel.verifyContact")} className={`min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover ${focus}`} onClick={()=>{setVerifyError("");setComparing(true);}}>{t("connection.panel.verify")}</button>}
+                  {!link?.peerVerified && canCompare && !comparing && <button data-testid="pair-verify" aria-label={t("connection.panel.verifyContact")} className={`min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover ${focus}`} onClick={()=>{setVerifyError("");verifyLeft.current="verify";setComparing(true);}}>{t("connection.panel.verify")}</button>}
                 </div>
                 {comparing && canCompare && !link?.peerVerified && <div className="rounded-lg bg-surface-hover p-3">
                   <code data-testid="pair-code" className="block select-all break-words text-sm tracking-widest text-text-primary">{pair?.code}</code>
                   <p className="mt-1">{t("connection.panel.compare")}</p>
-                  <FocusSafeButton data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] px-3 text-panel-header ${focus}`}
-                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</FocusSafeButton>
+                  <FocusSafeButton ref={matchButton} data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] px-3 text-panel-header ${focus}`}
+                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});verifyLeft.current="match";setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</FocusSafeButton>
                   {verifyError && <Notice problem={problemText(verifyError, t)} tone="warning" testId="pair-verify-error" className="mt-1.5" />}
                 </div>}
               </>}
