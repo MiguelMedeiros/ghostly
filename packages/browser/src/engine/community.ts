@@ -874,7 +874,8 @@ export class Communities {
     else fresh = await s.handle(from, raw) && f.t === "group-commit";
     // While I am still in, what moves the chain or says a leave goes on, once, to my other edges: a member whose only
     // edge is to me (I was its hub) reaches the group through me, its hand-on of the role and its leave too.
-    if (fresh && rosterHas(s.roster, s.myKey)) for (const [key, linkId] of this.host.edges(groupId)) if (key !== from) this.sendTo(linkId, f);
+    // Its own fields alone, as a hub hands on (`passOn`).
+    if (fresh && rosterHas(s.roster, s.myKey)) { const out = s.passOn(f); for (const [key, linkId] of this.host.edges(groupId)) if (key !== from) this.sendTo(linkId, out); }
     await this.leftMoved(groupId, this.now());
   }
 
