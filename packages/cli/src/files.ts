@@ -270,7 +270,10 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   if (result.error) {
     // Not announced: nothing is in the group, so the staged copy goes too.
     await removeStored(fileId).catch(() => {});
-    throw (replyTo && notHere(result.error, replyTo, { group: true, ref: str(params, "chat", true) })) || (result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error));
+    // Said as missing only for a message that is not there: one that is but cannot be replied to (an event, a payment
+    // note) keeps the engine's words.
+    const missing = replyTo && !await node(ctx).getMessage(`group:${group.id}`, replyTo) ? notHere(result.error, replyTo, { group: true, ref: str(params, "chat", true) }) : undefined;
+    throw missing || (result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error));
   }
   return { group: group.id, messageId: result.messageId ?? null, file: { id: fileId, name: file.name, size, mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
 }
@@ -482,7 +485,11 @@ export const FILE_METHODS: Record<string, Method> = {
       // so the staged copy goes too.
       await removeStored(file.id).catch(() => {});
       const said = error instanceof Error ? error.message : String(error);
-      throw (replyTo && notHere(said, replyTo, { group: false, ref: str(params, "chat", true) })) || new CliError("refused", said);
+      // Said as missing only for a message that is not there: one that is but cannot be replied to (an old app's text
+      // with no wire id) stays refused, with the engine's words. Only a row named by its own id can be refused while
+      // there (one found by its wire id has a reply ref), so one row is read, only on this path.
+      const missing = replyTo && !await node(ctx).getMessage(link.id, replyTo) ? notHere(said, replyTo, { group: false, ref: str(params, "chat", true) }) : undefined;
+      throw missing || new CliError("refused", said);
     }
     // The message's id, as a group's file and `send` answer it: what `message delete`, `react`, `pin` and `--reply` take.
     // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.

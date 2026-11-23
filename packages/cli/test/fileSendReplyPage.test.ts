@@ -31,15 +31,15 @@ beforeAll(async () => {
 
 const NOT_THERE = "That message is not in this chat, or cannot be replied to";
 
-function fake(missing = false) {
+/** `missing`: the engine refuses the reply; `there`: a row it refuses is in the chat (or group) all the same. */
+function fake(missing = false, there?: { id: string }) {
   const node = {
     chatView: chatViewOf,
     getState: () => ({ links: [link], groups: [group], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     messagePage: vi.fn(async () => ({ messages: [], more: true })),
     getMessages: vi.fn(async () => []),
     groupMessages: vi.fn(async () => []),
-    getMessage: vi.fn(async () => undefined),
-    sendFile: vi.fn(async (_: { file: MessageFile; replyTo?: string }) => { if (missing) throw new Error(NOT_THERE); }),
+    getMessage: vi.fn(async (_: string, id: string) => (there?.id === id ? there : undefined)),    sendFile: vi.fn(async (_: { file: MessageFile; replyTo?: string }) => { if (missing) throw new Error(NOT_THERE); }),
     groupFileCheck: vi.fn(() => ({ error: null })),
     sendGroupFile: vi.fn(async (_: { file: MessageFile; replyTo?: string }) => (missing ? { error: NOT_THERE } : { error: null, messageId: "mine:0:1" })),
   };
@@ -76,5 +76,18 @@ describe("file send --reply", () => {
     });
     expect(await fileStore.get(nowhere.node.sendGroupFile.mock.calls[0]![0].file.id)).toBeUndefined();
     expect(nowhere.reads()).toBe(0);
+  });
+
+  it("a message that is there but cannot be replied to keeps the engine's refusal, in a chat and in a group", async () => {
+    // An old app's text, stored by its time with no wire id: the engine's `replyFor` refuses it.
+    const chat = fake(true, { id: "peer_1700000000000" });
+    await expect(callApi(chat.ctx, "file.send", { chat: "Alice", path, reply: "peer_1700000000000" })).rejects.toMatchObject({ code: "refused", message: NOT_THERE });
+    expect(chat.node.getMessage).toHaveBeenCalledWith("chat-one", "peer_1700000000000");
+    expect(chat.reads()).toBe(0);
+    // A group's event line: the engine refuses it, said as before (`not_found` with the engine's words).
+    const inGroup = fake(true, { id: "k:0:3" });
+    await expect(callApi(inGroup.ctx, "file.send", { chat: "group:g1", path, reply: "k:0:3" })).rejects.toMatchObject({ code: "not_found", message: NOT_THERE });
+    expect(inGroup.node.getMessage).toHaveBeenCalledWith("group:g1", "k:0:3");
+    expect(inGroup.reads()).toBe(0);
   });
 });
