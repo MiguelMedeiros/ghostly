@@ -264,6 +264,25 @@ describe("Menu: one line per row", () => {
     expect(label.className).toMatch(/\btruncate\b/);
   });
 
+  it("in a phone's sheet a row with no hint wraps its label: it alone says what the row does", async () => {
+    // At 200 % text on a 320 px phone a device's ⋮ cut "Verifica la connes…" in Italian, and nothing showed the rest.
+    viewport(320, 568);
+    const { user } = renderApp(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const label = screen.getByTestId("short").querySelector<HTMLElement>("[data-menu-text]")!;
+    expect(label).toHaveTextContent("Refresh");
+    expect(label.className).not.toMatch(/\btruncate\b/);
+    expect(label.className).toMatch(/\bwhitespace-normal\b/);
+    expect(label.className).toMatch(/\bbreak-words\b/);
+  });
+
+  it("in a popover a row with no hint keeps its label on one line, the whole of it in its title when cut", async () => {
+    const { user } = renderApp(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const label = screen.getByTestId("short").querySelector<HTMLElement>("[data-menu-text]")!;
+    expect(label.className).toMatch(/\btruncate\b/);
+  });
+
   it("on a phone the sheet keeps Tab: Tab and Shift+Tab go round its rows, never to the page behind its backdrop", async () => {
     // From the last row Tab went on to the page under the backdrop (the chat's Back, its messages, the composer), the
     // sheet still open over it; Shift+Tab from the first row went to the composer, whose + opened a second sheet.
