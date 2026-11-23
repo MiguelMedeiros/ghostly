@@ -23,18 +23,26 @@ function job(text: string, name: string): string {
 
 type Run = { event_name: string; head_ref?: string; head_repo?: string; draft?: string };
 
-/** A job's `if:` as GitHub reads it, for these operators and functions (startsWith ignores case, as GitHub's does). */
-function evaluate(expr: string, run: Run, draftOutput = ""): boolean {
-  const body = expr.replace(/^\$\{\{(.*)\}\}$/, "$1").replace(/([!=])=/g, "$1==");
+/**
+ * A job's `if:` as GitHub reads it, for these operators and functions (startsWith ignores case, as GitHub's does). An
+ * `if:` with no status function gets GitHub's `success() &&` in front, and success() is false once any job before it,
+ * however far back, did not succeed: a skipped draft job skips every job after it that has no `!cancelled()`.
+ */
+function evaluate(expr: string, run: Run, draftOutput = "", needsResults: Record<string, string> = {}, before = true): boolean {
+  let body = expr.replace(/^\$\{\{(.*)\}\}$/, "$1").replace(/([!=])=/g, "$1==");
+  if (!/\b(success|failure|cancelled|always)\(/.test(body)) body = `success() && (${body})`;
   const github = {
     event_name: run.event_name,
     head_ref: run.head_ref ?? "",
     repository: "o/ghostly",
     event: { pull_request: { head: { repo: { full_name: run.head_repo ?? "" } } } },
   };
-  const needs = { draft: { outputs: { draft: draftOutput } } };
+  const needs: Record<string, { outputs?: Record<string, string>; result?: string }> = { draft: { outputs: { draft: draftOutput } } };
+  for (const [name, result] of Object.entries(needsResults)) needs[name] = { ...needs[name], result };
   const startsWith = (s: string, p: string) => s.toLowerCase().startsWith(p.toLowerCase());
-  return Boolean(new Function("github", "needs", "startsWith", "cancelled", `return (${body});`)(github, needs, startsWith, () => false));
+  return Boolean(
+    new Function("github", "needs", "startsWith", "cancelled", "success", `return (${body});`)(github, needs, startsWith, () => false, () => before),
+  );
 }
 
 describe.each([
@@ -50,6 +58,15 @@ describe.each([
   const builds = (run: Run) => {
     const draftRuns = evaluate(ifOf("draft"), run);
     return evaluate(ifOf(gated), run, draftRuns ? (run.draft ?? "false") : "");
+  };
+
+  /** Whether the job after the first one runs, given how the first one ended when it ran. */
+  const runsAfter = (run: Run, gatedResult = "success") => {
+    if (!after) throw new Error(`${file} has no job after ${gated}`);
+    const draftRuns = evaluate(ifOf("draft"), run);
+    const result = builds(run) ? gatedResult : "skipped";
+    const draft = draftRuns ? "success" : "skipped";
+    return evaluate(ifOf(after), run, draftRuns ? (run.draft ?? "false") : "", { draft, [gated]: result }, draft === "success" && result === "success");
   };
 
   it("runs again when a pull request leaves draft", () => {
@@ -87,5 +104,14 @@ describe.each([
       expect(evaluate(ifOf("draft"), { event_name }), event_name).toBe(false);
       expect(builds({ event_name }), event_name).toBe(true);
     }
+  });
+
+  it.runIf(after)("the job after it runs when it built, on a run by hand, on its schedule and on a ready pull request", () => {
+    for (const event_name of ["workflow_dispatch", "schedule"]) expect(runsAfter({ event_name }), event_name).toBe(true);
+    const pr = { event_name: "pull_request", head_ref: "issue-1-a-fix", head_repo: "o/ghostly" };
+    expect(runsAfter({ ...pr, draft: "false" })).toBe(true);
+    expect(runsAfter({ ...pr, draft: "true" })).toBe(false);
+    expect(runsAfter({ ...pr, head_ref: "batch/dev-20261113-0912", draft: "false" })).toBe(false);
+    expect(runsAfter({ event_name: "schedule" }, "failure")).toBe(false);
   });
 });
