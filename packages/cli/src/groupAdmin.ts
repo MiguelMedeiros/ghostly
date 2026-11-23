@@ -142,6 +142,16 @@ function joined(ctx: ApiContext, params: Params, twin?: string): GroupView {
   return group;
 }
 
+/**
+ * A change only the admin makes, refused to a member who is not, before the member it names is looked up, in the
+ * words a private group's engine says it. Before, `group admin <g> Ana` told a plain member to use Ana's key and
+ * `group remove <g> <a name nobody has>` that there is no such member, and only the key given did the engine refuse
+ * it: a community's in words alone, "Only the admin can do that".
+ */
+function adminOnly(group: GroupView, refusal: string): void {
+  if (!group.isAdmin) throw new CliError("refused", refusal);
+}
+
 /** The member `params.member` names in `group`, this profile's own name said to be it; by its key only for a grant. */
 const member = (ctx: ApiContext, group: GroupView, params: Params, grant = false) => findMember(group, str(params, "member", true), settingsOf(ctx).nick, grant, str(params, "group", true));
 
@@ -166,6 +176,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.remove"(ctx, params) {
     const group = joined(ctx, params);
+    adminOnly(group, "Only the admin can change the members of this group");
     const removed = member(ctx, group, params);
     await node(ctx).removeGroupMember({ groupId: group.id, key: removed.key });
     // While the link is on, whoever holds it joins (WISP 902 § Entry link), the member just removed too: said as the
@@ -176,6 +187,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.admin"(ctx, params) {
     const group = joined(ctx, params);
+    adminOnly(group, "Only the admin can hand the admin role over");
     await node(ctx).makeGroupAdmin({ groupId: group.id, key: member(ctx, group, params, true).key });
     return view(ctx, group.id, params);
   },
@@ -183,6 +195,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     const group = joined(ctx, params);
     // Refused here as `group call` refuses a private group: the engine's refusal came out as `engine`, read as a fault.
     if (group.profile === "community") throw new CliError("refused", `${group.name} is a community: it chooses its hubs by itself; group hub is for a private group past 16 members`);
+    adminOnly(group, "Only the admin can choose the group's hubs");
     const role = str(params, "role") ?? "auto";
     if (!["pin", "exclude", "auto"].includes(role)) throw new CliError("bad_request", "role is pin, exclude or auto");
     await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params, role === "pin").key, role: role === "auto" ? null : role as "pin" | "exclude" });
@@ -198,6 +211,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.rotate"(ctx, params) {
     const group = joined(ctx, params);
+    adminOnly(group, "Only the admin can renew the group's secret");
     await node(ctx).rotateGroup({ groupId: group.id });
     return view(ctx, group.id, params);
   },

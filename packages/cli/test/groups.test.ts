@@ -467,6 +467,31 @@ describe("group remove", () => {
   });
 });
 
+describe("an admin-only command from a member who is not the admin", () => {
+  // Found in a bug hunt: `group admin <g> Ana` told a plain member to use Ana's key, `group remove <g> <a name nobody
+  // has>` that there is no such member, and only then (the key given) did the engine refuse; a community's engine
+  // says just "Only the admin can do that" to remove, admin and rotate.
+  it("is refused before the member is looked up, in words that say what only the admin does", async () => {
+    for (const profile of ["mesh", "community"] as const) {
+      const { ctx, node } = fake();
+      const engine = vi.fn(async () => { throw new Error("Only the admin can do that"); });
+      Object.assign(node, { removeGroupMember: engine, makeGroupAdmin: engine, rotateGroup: engine, setGroupHub: engine });
+      const members = group.members.map((m) => ({ ...m, role: m.key === "anakey" ? "admin" : "member" }));
+      node.getState = () => ({ links: [], groups: [{ ...group, profile, isAdmin: false, members }], settings: {}, transport: {} }) as unknown as EngineState;
+      for (const [method, params, message] of [
+        ["group.remove", { member: "Ana" }, "Only the admin can change the members of this group"],
+        ["group.remove", { member: "nobody" }, "Only the admin can change the members of this group"],
+        ["group.admin", { member: "Ana" }, "Only the admin can hand the admin role over"],
+        ["group.admin", { member: "bokey" }, "Only the admin can hand the admin role over"],
+        ["group.rotate", {}, "Only the admin can renew the group's secret"],
+        ["group.hub", { member: "Ana", role: "pin" }, profile === "mesh" ? "Only the admin can choose the group's hubs"
+          : "Crew is a community: it chooses its hubs by itself; group hub is for a private group past 16 members"],
+      ] as const) await expect(callApi(ctx, method, { group: "Crew", ...params }), `${profile} ${method} ${JSON.stringify(params)}`).rejects.toMatchObject({ code: "refused", message });
+      expect(engine).not.toHaveBeenCalled();
+    }
+  });
+});
+
 describe("group call", () => {
   const SFU = "https://call.example.com";
   const thursday = { ...group, id: "g7", name: "Thursday", profile: "community", entryLink: undefined } as unknown as GroupView;

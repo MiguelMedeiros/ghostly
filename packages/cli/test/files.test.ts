@@ -112,7 +112,7 @@ describe("group administration", () => {
   });
 
   it("group admin, hub and remove say that this profile's own name is you", async () => {
-    const own = { id: "g1", name: "Dev room", members: [{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Ana", me: false }] } as unknown as GroupView;
+    const own = { id: "g1", name: "Dev room", isAdmin: true, members:[{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Ana", me: false }] } as unknown as GroupView;
     const node = { getState: () => ({ links: [], groups: [own], settings: { nick: "Bia" }, transport: {} }) as unknown as EngineState, groupView: groupViewOf, getSettings: () => ({ nick: "Bia" }), makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
     for (const method of ["group.admin", "group.hub", "group.remove"]) {
@@ -125,7 +125,7 @@ describe("group administration", () => {
   // key and no next step, where a chat or a group of one name lists its ids in `details.matches`.
   it("group remove, admin and hub name each member a ref names, with its key, and where the keys are listed", async () => {
     const one = "bwczjndx1xgfd7rqp8m5t3hsk4yzoeiaw6ncb9ruj1xgfd7rqp8o", two = "ps3z8pur1xgfd7rqp8m5t3hsk4yzoeiaw6ncb9ruj1xgfd7rqp8o";
-    const tea = { id: "g1", name: "Tea", members: [{ key: "595m389h77", me: true }, { key: one, nick: "Bia", me: false }, { key: two, nick: " Bia ", me: false }, { key: "zz9", me: false }] } as unknown as GroupView;
+    const tea = { id: "g1", name: "Tea", isAdmin: true, members: [{ key: "595m389h77", me: true }, { key: one, nick: "Bia", me: false }, { key: two, nick: " Bia ", me: false }, { key: "zz9", me: false }] } as unknown as GroupView;
     const node = { getState: () => ({ links: [], groups: [tea], settings: { nick: "Ana" }, transport: {} }) as unknown as EngineState, groupView: groupViewOf, getSettings: () => ({ nick: "Ana" }), makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
     const both = {
@@ -165,7 +165,7 @@ describe("group administration", () => {
   it("a member refusal in one of two groups of one name names the group as the command did, not by that name", async () => {
     const one = "bwczjndx1xgfd7rqp8m5t3hsk4yzoeiaw6ncb9ruj1xgfd7rqp8o", two = "ps3z8pur1xgfd7rqp8m5t3hsk4yzoeiaw6ncb9ruj1xgfd7rqp8o";
     const first = { id: "g1", name: "Tea", members: [{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Bo", me: false }] } as unknown as GroupView;
-    const second = { id: "g2", name: "Tea", members: [{ key: "595m389h77", me: true }, { key: one, nick: "Bia", me: false }, { key: two, nick: "Bia", me: false }] } as unknown as GroupView;
+    const second = { id: "g2", name: "Tea", isAdmin: true, members:[{ key: "595m389h77", me: true }, { key: one, nick: "Bia", me: false }, { key: two, nick: "Bia", me: false }] } as unknown as GroupView;
     const node = {
       getState: () => ({ links: [], groups: [first, second], settings: { nick: "Ana" }, transport: {} }) as unknown as EngineState, groupView: groupViewOf,
       getSettings: () => ({ nick: "Ana" }), makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn(), sendGroupMessage: vi.fn(), editMessage: vi.fn(), getMessage: vi.fn(),
@@ -225,7 +225,7 @@ describe("group administration", () => {
   // otherwise in the roster) took `group admin Crew Bob`, a grant, as `group invite` refuses a contact's own name.
   it("group admin and hub --pin take a member by key, never by the name it gave itself", async () => {
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
-    const crew = { id: "g1", name: "Crew", members: [{ key: "595m389h77", me: true }, { key: KEY, nick: "Bob", me: false }] } as unknown as GroupView;
+    const crew = { id: "g1", name: "Crew", isAdmin: true, members: [{ key: "595m389h77", me: true }, { key: KEY, nick: "Bob", me: false }] } as unknown as GroupView;
     const node = { getState: () => ({ links: [], groups: [crew], settings: {}, transport: {} }) as unknown as EngineState, groupView: groupViewOf, getSettings: () => ({}), makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
     for (const [method, extra] of [["group.admin", {}], ["group.hub", { role: "pin" }]] as const) {
