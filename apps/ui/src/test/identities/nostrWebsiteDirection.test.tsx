@@ -1,7 +1,8 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
 import { NostrContactCard } from "../../components/nostr/NostrContactCard";
+import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 import { now } from "./views";
 
@@ -27,5 +28,20 @@ describe("a contact's Nostr website", () => {
     expect(link).toHaveAttribute("href", "https://alice.example/");
     expect(link.firstElementChild?.tagName).toBe("BDI");
     expect(link).toHaveTextContent("https://alice.example/");
+  });
+});
+
+describe("a contact's Nostr relays", () => {
+  // The relays asked and the ones the profile came from, as the language lists them, each isolated: not "a, b".
+  it.each([
+    ["ja", "読み込むとリレー (⁨relay.one⁩、⁨relay.two⁩) に問い合わせ", "⁨relay.one⁩、⁨relay.two⁩ から "],
+    ["ar", "التحميل يسأل مرحّلاتك (⁨relay.one⁩ و⁨relay.two⁩)،", "من ⁨relay.one⁩ و⁨relay.two⁩ "],
+  ] as const)("in %s, are listed the way the language lists them, each name on its own", (language, asked, from) => {
+    const relays = ["wss://relay.one", "wss://relay.two"];
+    const card = view("https://alice.example/");
+    renderApp(<NostrContactCard linkId="link-1" view={{ ...card, profile: { ...card.profile!, relays } }} name="Alice" compact />, { language });
+    act(() => fakeEngine.update({ nostr: { own: [], settings: { relays, autoLoadProfiles: false, publish: false } } }));
+    expect(screen.getByTestId("nostr-contact-note").textContent).toContain(asked);
+    expect(screen.getByTestId("nostr-profile-source").textContent).toContain(from);
   });
 });

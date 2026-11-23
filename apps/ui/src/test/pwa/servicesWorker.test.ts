@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BRIDGE_PAGE, MAX_REQUEST_BYTES } from "../../../../web/src/svc/protocol";
+import { BRIDGE_PAGE, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES } from "../../../../web/src/svc/protocol";
 
 // covers: services.web-open
 describe("the services worker", () => {
@@ -123,7 +123,7 @@ describe("the services worker", () => {
         const response = await answer!;
         expect(response.status).toBe(403);
         expect(await response.text()).toBe("This app opens only inside Ghostly.");
-        expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'self' https://app.ghostly.example");
+        expect(response.headers.get("content-security-policy")).toMatch(/^frame-ancestors 'self' https:\/\/app\.ghostly\.example;/);
       }
       expect(bridge.postMessage).not.toHaveBeenCalled();
     });
@@ -198,6 +198,77 @@ describe("the services worker", () => {
         const guards = `<script>${CLIPBOARD_GUARD_SCRIPT}</script>${relayOnly ? `<script>${VIEWER_GUARD_SCRIPT}</script>` : ""}`;
         expect(await response.text(), query).toBe(`<!doctype html>${guards}<script>new RTCPeerConnection()</script>`);
       }
+    });
+  });
+
+  describe("an origin of its own, apart from another contact's app open at once", () => {
+    // The apps' origins share one site (the services host): with no `Origin-Agent-Cluster: ?1` a browser keys their
+    // agent cluster by site, where `document.domain` joins two of them and they may share a process.
+    it("every answer the worker makes asks for an agent cluster of this origin's own, whatever the contact sends", async () => {
+      const answers: [string, () => Promise<Response>][] = [
+        ["refused", () => fetchThrough({ mode: "navigate", destination: "document", referrer: "" })!],
+        ["go on", () => fetchThrough({ mode: "navigate", destination: "iframe", referrer: "" })!],
+        ["contact's", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            const port = transfer[0] as MessagePort;
+            port.postMessage({ type: "head", status: 200, headers: [["content-type", "text/html"], ["Origin-Agent-Cluster", "?0"]] });
+            port.postMessage({ type: "end" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+        ["error page", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            (transfer[0] as MessagePort).postMessage({ type: "error", status: 503, text: "Unreachable", lang: "en" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+        ["empty error", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            (transfer[0] as MessagePort).postMessage({ type: "error", status: 304, text: "Not modified" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+      ];
+      for (const [label, answer] of answers) {
+        expect((await answer()).headers.get("origin-agent-cluster"), label).toBe("?1");
+      }
+    });
+  });
+
+  describe("an answer the worker makes in place of the contact's", () => {
+    // Such a page is on the app's origin: the app's page may frame one and reach anywhere through its window (its
+    // `fetch`, an image of its document), under that page's policy alone.
+    it("lets nothing load or run from it, whichever answer it is", async () => {
+      const failing = (reply: unknown) => () => {
+        bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+          (transfer[0] as MessagePort).postMessage(reply);
+        });
+        return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+      };
+      const answers: [string, () => Promise<Response>][] = [
+        ["refused", () => fetchThrough({ mode: "navigate", destination: "document", referrer: "" })!],
+        ["no bridge", () => { clients = clients.filter((client) => client !== bridge); return fetchThrough({ mode: "cors", destination: "", referrer: `${ORIGIN}/` }, "app")!; }],
+        ["plain error", failing({ type: "error", status: 503, text: "Unreachable" })],
+        ["empty error", failing({ type: "error", status: 304, text: "Not modified" })],
+        ["failed", failing({ type: "head", status: 200, headers: null })],
+        ["timed out", () => {
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+          bridge.postMessage.mockImplementation(() => {});
+          const answer = fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+          return vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalled())
+            .then(() => vi.advanceTimersByTimeAsync(HEAD_TIMEOUT_MS))
+            .then(() => answer).finally(() => vi.useRealTimers());
+        }],
+      ];
+      const statuses: number[] = [];
+      for (const [label, answer] of answers) {
+        clients = [bridge, ...clients.filter((client) => client !== bridge)];
+        const response = await answer();
+        statuses.push(response.status);
+        expect(response.headers.get("content-security-policy"), label).toBe("frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; form-action 'none'; base-uri 'none'");
+        expect(response.headers.get("x-content-type-options"), label).toBe("nosniff");
+      }
+      expect(statuses).toEqual([403, 503, 503, 304, 502, 504]);
     });
   });
 
@@ -427,6 +498,7 @@ describe("a request body of a contact's app, where the browser's Request has no 
     expect(arrayBuffer).not.toHaveBeenCalled();
     expect(bridge.postMessage).not.toHaveBeenCalled();
     expect(refused.status).toBe(413);
+    expect(refused.headers.get("content-security-policy")).toMatch(/; default-src 'none'(;|$)/);
     expect(await refused.text()).toBe("The request body is too large.");
   });
 

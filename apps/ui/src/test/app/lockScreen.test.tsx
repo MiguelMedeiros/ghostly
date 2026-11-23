@@ -24,6 +24,9 @@ import { renderApp } from "../render";
  * goes where the last one taken for this profile was refused too.
  */
 
+/** The right password is checked for real (PBKDF2, 600,000 rounds): more than findBy's 1 s on a busy runner. */
+const UNLOCK_WAIT = { timeout: 10_000 };
+
 // covers: settings.lock.idle
 describe("Escape on the lock screen", () => {
   /** A dialog of the app's own (Send files, a new wallet, Add identity...): a plain modal that Escape closes. */
@@ -72,7 +75,7 @@ describe("Escape on the lock screen", () => {
 
     fireEvent.change(lockField(), { target: { value: "pw" } });
     await act(async () => { fireEvent.submit(lockField().closest("form")!); });
-    await screen.findByText("false");
+    await screen.findByText("false", undefined, UNLOCK_WAIT);
     expect(screen.getByRole("dialog", { name: "Send files" })).toBeInTheDocument();
     expect(screen.getByLabelText("Caption")).toHaveValue("for you");
   });
@@ -90,7 +93,7 @@ describe("Escape on the lock screen", () => {
 
     fireEvent.change(lockField(), { target: { value: "pw" } });
     await act(async () => { fireEvent.submit(lockField().closest("form")!); });
-    await screen.findByText("false");
+    await screen.findByText("false", undefined, UNLOCK_WAIT);
     expect(screen.getByLabelText("Caption")).toHaveValue("for you");
   });
 
@@ -512,7 +515,7 @@ describe("the lock screen goes over every layer of the app, and only the passwor
     const field = lockScreen().querySelector("input[type=password]")!;
     fireEvent.change(field, { target: { value: "pw" } });
     await act(async () => { fireEvent.submit(field.closest("form")!); });
-    await screen.findByText("false");
+    await screen.findByText("false", undefined, UNLOCK_WAIT);
     expect(screen.queryByLabelText(LOCKED)).not.toBeInTheDocument();
     expect(top()).toBe(other);
   });

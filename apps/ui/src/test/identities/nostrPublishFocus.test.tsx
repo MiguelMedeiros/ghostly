@@ -26,11 +26,11 @@ afterEach(() => { vi.mocked(signNostrDraft).mockReset(); vi.mocked(signNostrDraf
 
 const SEED = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
-function open(content: string, publish: () => Promise<NostrPublishResult>) {
+function open(content: string, publish: () => Promise<NostrPublishResult>, language?: "ja" | "ar") {
   fakeEngine.on("nostrDraft", async () => ({ draftId: "d1", subject: "npub1me", template: { kind: 1, created_at: 1, tags: [], content }, notice: "Sent to wss://relay.example.", summary: "Post a note", relays: ["wss://relay.example"] }) as NostrDraft);
   fakeEngine.on("nostrPublish", publish);
   const request: NostrDraftRequest = { subject: "npub1me", action: "note", content };
-  return renderApp(<NostrPublishDialog request={request} onClose={() => {}} />);
+  return renderApp(<NostrPublishDialog request={request} onClose={() => {}} />, { language });
 }
 
 const confirm = () => screen.getByTestId("nostr-publish-confirm");
@@ -67,6 +67,19 @@ describe("publishing on Nostr with the keys", () => {
     // The same live region, there since the dialog opened: one added along with its words is often not read.
     expect(status).not.toBeNull();
     expect(screen.getByRole("status")).toBe(status);
-    expect(status).toHaveTextContent("Published to wss://relay.example.");
+    expect(status).toHaveTextContent("Published to ⁨wss://relay.example⁩.");
+  });
+
+  // The relays as the language lists them, each isolated: an English ", " read as one long Latin run in an Arabic line.
+  it.each([
+    ["ja", "⁨wss://relay.one⁩、⁨wss://relay.two⁩ に公開しました。 ⁨wss://bad.one (blocked)⁩、⁨wss://bad.two (full)⁩ には受け付けられませんでした。"],
+    ["ar", "نُشر على ⁨wss://relay.one⁩ و⁨wss://relay.two⁩. لم يقبله ⁨wss://bad.one (blocked)⁩ و⁨wss://bad.two (full)⁩."],
+  ] as const)("in %s, names the relays that took the note and those that refused it the way the language lists them", async (language, text) => {
+    const result = { accepted: ["wss://relay.one", "wss://relay.two"], rejected: [{ relay: "wss://bad.one", reason: "blocked" }, { relay: "wss://bad.two", reason: "full" }] };
+    const { user } = open("good morning, nostr", async () => result as NostrPublishResult, language);
+    (await screen.findByTestId("nostr-publish-confirm")).focus();
+    await user.keyboard("{Enter}");
+    await screen.findByTestId("nostr-publish-result");
+    expect(screen.getByRole("status").textContent).toBe(text);
   });
 });

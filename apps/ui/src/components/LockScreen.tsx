@@ -34,6 +34,10 @@ export function LockScreen() {
   const errorId = useId();
   // A call ringing while locked (WISP 601 § Locked): who calls, Decline, and Answer, which asks for the password first.
   const call = isLocked ? ringing?.[0] ?? null : null;
+  // The kind each call last rang as. A chat that rang before the first unlock goes with the lock, its call off the list,
+  // maybe before the password check ends (an older hash replaced): what it last rang as still counts.
+  const rangAs = useRef(new Map<string, boolean>());
+  for (const c of ringing ?? []) rangAs.current.set(c.id, c.hasVideo);
   const [answering, setAnswering] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const screenRef = useRef<HTMLDialogElement>(null);
@@ -118,7 +122,10 @@ export function LockScreen() {
 
   // A call that starts ringing takes the focus to its card, not to Answer: an Enter typed into the password a moment
   // before must not answer. One that stops (hung up, missed, declined) leaves the plain lock screen, its field focused.
+  // So does a newer offer that turns the call into the other kind (useWebRTC): Answer pressed for an audio call is not
+  // carried over to a video one, the camera on once unlocked; the card asks again.
   const callId = call?.id;
+  const callVideo = call?.hasVideo;
   const hadCall = useRef(false);
   useEffect(() => {
     setAnswering(false);
@@ -131,7 +138,7 @@ export function LockScreen() {
       setError(false);
       inputRef.current?.focus();
     }
-  }, [callId]);
+  }, [callId, callVideo]);
 
   // Answer asks for the password right there, in the same field.
   useEffect(() => {
@@ -145,12 +152,15 @@ export function LockScreen() {
     setIsUnlocking(true);
     setError(false);
 
-    // The call Answer was pressed for. It answers through its chat, so one that ended meanwhile does nothing.
+    // The call Answer was pressed for. It answers through its chat, so one that ended meanwhile does nothing; one that
+    // turned into the other kind while the password was checked is not answered either: it rings on, asking again.
     const answer = answering ? call : null;
     const success = await unlock(password);
 
-    if (success) answer?.answer();
-    else {
+    if (success) {
+      if (answer && rangAs.current.get(answer.id) === answer.hasVideo) answer.answer();
+      else answer?.ringOn?.();
+    } else {
       setError(true);
       setPassword("");
       inputRef.current?.focus();
@@ -247,7 +257,7 @@ export function LockScreen() {
           <button
             type="submit"
             disabled={!password || isUnlocking || waitSeconds > 0}
-            className="w-full bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed text-on-accent py-3 px-4 rounded-xl font-medium transition-colors"
+            className="w-full bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed text-on-accent py-3 px-4 rounded-xl font-medium transition-colors"
           >
             {isUnlocking ? (
               <span className="flex items-center justify-center gap-2">

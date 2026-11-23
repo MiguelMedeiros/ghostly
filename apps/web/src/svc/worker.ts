@@ -6,7 +6,7 @@
  * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage, only a navigation
  * it could not place for the few seconds its own page takes to go on with it (`goOn`).
  */
-import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, workerRelayOnly, type ServiceRead, type ServiceReply, type ServiceRequestMessage } from "./protocol";
+import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, ORIGIN_AGENT_CLUSTER, answerStatus, fromView, isServiceHostname, parseServicesHost, workerRelayOnly, type ServiceRead, type ServiceReply, type ServiceRequestMessage } from "./protocol";
 import { WEBRTC_GUARD, guardViewerAnswer, type PageGuard } from "../../../../packages/core/src/viewerGuard";
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT } from "../../../../packages/core/src/clipboardGuard";
 import { viewerResponseHeaders, viewerServicePolicy } from "../../../../packages/core/src/http";
@@ -79,11 +79,31 @@ async function guarded(headers: unknown, body: AsyncIterable<Uint8Array>, destin
   }
   out.append("content-security-policy", viewerServicePolicy(relayOnly));
   out.append("content-security-policy", frameAncestors());
+  out.set("origin-agent-cluster", ORIGIN_AGENT_CLUSTER);
   return { headers: out, body: answer.body };
 }
 
+/**
+ * Every answer here asks for an agent cluster of this origin's own (`ORIGIN_AGENT_CLUSTER`), as the bridge's files do
+ * (nginx-services.conf): the contact's own header, `?0` above all, never takes its place.
+ */
+function isolated(headers: HeadersInit): Headers {
+  const out = new Headers(headers);
+  out.set("origin-agent-cluster", ORIGIN_AGENT_CLUSTER);
+  return out;
+}
+
+/**
+ * The policy of an answer of the worker's own, with nothing to run or load. Such a page is on the app's origin, and an
+ * app's page that frames it could reach anywhere through its window (its `fetch`, an image of its document) under no
+ * policy but the page's own: never past Ghostly's viewer policy, nor past Hide my IP from contacts.
+ */
+function ownPolicy(): string {
+  return `${frameAncestors()}; default-src 'none'; form-action 'none'; base-uri 'none'`;
+}
+
 function plain(status: number, text: string): Response {
-  return new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "content-security-policy": frameAncestors() } });
+  return new Response(text, { status, headers: isolated({ "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": ownPolicy() }) });
 }
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -99,7 +119,7 @@ export function said(status: number, text: string, lang?: string, dir?: string):
   const html = `<!doctype html><html${language}${direction}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(text)}</title>`
     + `<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font:15px/1.5 system-ui,sans-serif;text-align:center}p{max-width:32em;margin:0}</style>`
     + `</head><body><p>${escape(text)}</p></body></html>`;
-  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `${frameAncestors()}; default-src 'none'; style-src 'unsafe-inline'` } });
+  return new Response(html, { status, headers: isolated({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `${frameAncestors()}; default-src 'none'; style-src 'unsafe-inline'` }) });
 }
 
 /**
@@ -108,7 +128,7 @@ export function said(status: number, text: string, lang?: string, dir?: string):
  */
 function failed(status: number, text: string, lang?: string, dir?: string): Response {
   const kept = answerStatus(status);
-  if (NULL_BODY.has(kept)) return new Response(null, { status: kept, headers: { "cache-control": "no-store", "content-security-policy": frameAncestors() } });
+  if (NULL_BODY.has(kept)) return new Response(null, { status: kept, headers: isolated({ "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": ownPolicy() }) });
   return said(kept, text, lang, dir);
 }
 
@@ -161,7 +181,7 @@ async function goOn(request: Request): Promise<Response> {
   goHash ??= crypto.subtle.digest("SHA-256", new TextEncoder().encode(GO_SCRIPT))
     .then((digest) => `'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`);
   const html = `<!doctype html><meta charset="utf-8"><script data-go="${token}">${GO_SCRIPT}</script>`;
-  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "same-origin", "content-security-policy": `${frameAncestors()}; default-src 'none'; script-src ${await goHash}` } });
+  return new Response(html, { status: 200, headers: isolated({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "same-origin", "content-security-policy": `${frameAncestors()}; default-src 'none'; script-src ${await goHash}` }) });
 }
 
 /** The navigation a "go on" page asked for again (its token in the referrer, the same address): taken, once. */

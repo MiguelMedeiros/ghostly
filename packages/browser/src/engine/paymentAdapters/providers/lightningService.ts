@@ -363,11 +363,16 @@ export class LightningService {
    */
   private async showRecent() { if (await this.loadRecent().catch(() => false)) this.events.changed(); }
 
-  /** The Cashu wallet settled a melt it had left pending. */
-  async reportPaymentResolved(invoice: string, paid: boolean, context: { paymentId?: string; mint?: string } = {}) {
+  /**
+   * The Cashu wallet settled a melt it had left pending. `fee`: what a failed one cost, kept by the mint. Written on the
+   * entry so the card that paid it says it; the Cashu balance already lost it (the wallet's own `fee` row), and nothing
+   * adds it up from here.
+   */
+  async reportPaymentResolved(invoice: string, paid: boolean, context: { paymentId?: string; mint?: string; fee?: number } = {}) {
     const hash = decodeBolt11(invoice)?.paymentHash;
     const op = hash ? await this.get("out", hash) : undefined;
-    if (op) await this.put({ ...op, state: paid ? "paid" : "failed", settledAt: Date.now() });
+    const fee = !paid && context.fee && context.fee > 0 ? { fee: context.fee } : {};
+    if (op) await this.put({ ...op, state: paid ? "paid" : "failed", ...fee, settledAt: Date.now() });
     this.events.resolved({ paymentId: op?.paymentId ?? context.paymentId, providerId: op?.providerId ?? CASHU_MINT_SOURCE, mint: context.mint, invoice }, paid);
     await this.loadRecent(); this.events.changed();
   }

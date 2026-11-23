@@ -21,25 +21,64 @@ const IDLE_MS = 300;
 const root = mkdtempSync(join(tmpdir(), "ghostly-rtc-threads-"));
 const env = { ...isolatedNetworkEnv(), GHOSTLY_TEST_RTC_IDLE_MS: String(IDLE_MS) };
 const before: Record<string, string | undefined> = {};
+const hadRtc = "RTCPeerConnection" in globalThis;
 let polyfill: typeof RTCPeerConnection;
 let runtime: Runtime | undefined;
 const contacts: RTCPeerConnection[] = [];
+/** Every connection made here (the runtimes' and the contacts'), and whether it has said it is closed. */
+const made = new Map<RTCPeerConnection, boolean>();
+/** Each runtime's count (`vi.resetModules` gives each its own; the later ones count through the earlier ones too). */
+const counts: RtcThreads[] = [];
 
 beforeAll(async () => {
   for (const [key, value] of Object.entries(env)) { before[key] = process.env[key]; process.env[key] = value; }
   polyfill = (await import("node-datachannel/polyfill")).RTCPeerConnection as unknown as typeof RTCPeerConnection;
+  // The runtimes keep a RTCPeerConnection already there (`installWebRtc`): this one notes every connection they make.
+  if (!hadRtc) (globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection = class extends polyfill {
+    constructor(config?: RTCConfiguration) { super(config); note(this); }
+  };
 });
 
 afterEach(async () => {
-  for (const pc of contacts.splice(0)) pc.close();
-  await runtime?.close();
-  runtime = undefined;
+  expect(await closeAll()).toBe(true);
+  // Ended with every count's wait over and the threads gone, so node-datachannel's `cleanup()` never runs while this
+  // fork is exiting.
+  const waited = (count: RtcThreads) => count.idle && (count as unknown as { timer?: unknown }).timer === undefined;
+  expect(await until(() => counts.every(waited), IDLE_MS + 5_000)).toBe(true);
+  if (existsSync("/proc/self/task")) expect(await until(() => threads("SCTP timer") === 0, 5_000)).toBe(true);
+  counts.splice(0);
 });
 
 afterAll(() => {
+  if (!hadRtc) delete (globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection;
   for (const [key, value] of Object.entries(before)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
   rmSync(root, { recursive: true, force: true });
 });
+
+function note(pc: RTCPeerConnection): void {
+  made.set(pc, false);
+  pc.addEventListener("connectionstatechange", () => { if (pc.connectionState === "closed" && made.has(pc)) made.set(pc, true); });
+}
+
+/**
+ * Closes the contacts and the runtime, and lets the idle wait start only once every connection has said it is closed:
+ * node-datachannel's `cleanup()` resets each connection's state callback without a lock, so run while libdatachannel
+ * still had a close's state change queued it could crash the process (SIGSEGV on Linux ARM64). Once JS has the
+ * `closed` change, node-datachannel has let go of that connection. In the daemon the wait is a minute, long after.
+ * Whether every connection said so.
+ */
+async function closeAll(): Promise<boolean> {
+  const holds = counts.map((count) => count.opened());
+  try {
+    for (const pc of contacts.splice(0)) pc.close();
+    await runtime?.close();
+    runtime = undefined;
+    return await until(() => [...made.values()].every(Boolean), 5_000);
+  } finally {
+    made.clear();
+    for (const release of holds) release();
+  }
+}
 
 /** This process's threads named so (Linux names libdatachannel's). */
 function threads(name: string): number {
@@ -58,6 +97,7 @@ async function start(paths: ProfilePaths): Promise<Runtime> {
   vi.resetModules();
   runtime = await (await import("../src/runtime/engine")).startRuntime(paths);
   expect(runtime.webrtc).toBe(true);
+  counts.push((await import("../src/runtime/rtcThreads")).rtcThreads);
   return runtime;
 }
 
@@ -84,6 +124,7 @@ async function offerFromContact(node: Runtime["server"]["node"], linkId: string)
   link.dataLink.options.publishSignal = json => { const signal = parseRtcSignal(json); if (signal?.t === "a") answers.push(signal); };
   const contact = new polyfill({ iceServers: [] });
   contacts.push(contact);
+  note(contact);
   const channel = contact.createDataChannel(DATA_CHANNEL_LABEL, { negotiated: true, id: DATA_CHANNEL_ID, ordered: true });
   const opened = new Promise<boolean>(resolve => { channel.addEventListener("open", () => resolve(true)); setTimeout(() => resolve(false), 10_000); });
   await contact.setLocalDescription(await contact.createOffer());
@@ -100,10 +141,9 @@ describe("libdatachannel's threads", () => {
     const { linkId } = await first.server.node.createLink();
     expect(await offerFromContact(first.server.node, linkId)).toBe(true);
     expect(threads("SCTP timer")).toBe(1);
+    expect(counts[0]!.idle).toBe(false);
 
-    for (const pc of contacts.splice(0)) pc.close();
-    await first.close();
-    runtime = undefined;
+    expect(await closeAll()).toBe(true);
     // Kept for 100 times a second before.
     expect(await until(() => threads("SCTP timer") === 0, IDLE_MS + 5_000)).toBe(true);
 

@@ -8,8 +8,11 @@ import { ComposerIdentityPicker } from "../../components/identities/ComposerIden
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { IdentityMenuItem, IdentityStack } from "../../components/identities/ContactMarks";
 import { MakeAdminDialog } from "../../components/MakeAdminDialog";
+import { PeerServices } from "../../components/PeerServices";
 import { RemoveMemberDialog } from "../../components/RemoveMemberDialog";
 import type { PeerHoldState, PeerLinkState } from "../../lib/platform";
+import { hostErrorText, serviceAppWords, serviceFraming } from "../../lib/serviceWindows";
+import { translatorFor } from "../../locales";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { identitiesView, proofView, sharedView } from "../identities/views";
 import { renderApp } from "../render";
@@ -27,6 +30,9 @@ import { renderApp } from "../render";
 const NAME = "Ana (work)";
 /** The name between the isolate marks (U+2068 FSI, U+2069 PDI). */
 const ISOLATED = `\u2068${NAME}\u2069`;
+/** A contact's app, its name Latin with punctuation at its end: "Notes!" read "!Notes" in an Arabic line. */
+const APP = "Notes!";
+const APP_ISOLATED = `\u2068${APP}\u2069`;
 
 /** The <bdi> holding exactly this name inside the element, if any. */
 const isolated = (el: Element, name = NAME) => [...el.querySelectorAll("bdi")].some((bdi) => bdi.textContent === name);
@@ -106,6 +112,33 @@ describe("names a contact or a member chose, in Arabic, each isolated", () => {
     }
   });
 
+  it("a contact's app, named in the view it opens in: its notices, the host's error page and the view's name", () => {
+    const t = translatorFor("ar");
+    const words = serviceAppWords(APP, t);
+    expect(words.loading).toBe(`جارٍ فتح ${APP_ISOLATED} على جهاز جهة اتصالك…`);
+    for (const [line, said] of Object.entries(words)) expect(said, line).toContain(APP_ISOLATED);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(hostErrorText([["x-ghostly-error", "unreachable"]], APP, t)).toContain(`${APP_ISOLATED} لا يستجيب`);
+    expect(serviceFraming(APP, { nick: "Demo bot" }, "peer", t).label).toBe(`${APP_ISOLATED}، يشاركه ⁨Demo bot⁩`);
+  });
+
+  it("a contact's app on its Open buttons: the Shared services dialog's and the chat strip's", () => {
+    fakeEngine.features = { ...fakeEngine.features, openServices: true };
+    try {
+      const view = renderApp(<>
+        <PeerServices peerPubKey="peer" onManage={vi.fn()} />
+        <ChatServicesDialog peerPubKey="peer" name={NAME} onClose={vi.fn()} />
+      </>, { language: "ar" });
+      act(() => view.engine.update({ links: [paired({ sessionOffers: { mine: ["services/1"], peer: ["services/1"] },
+        capabilities: { files: true, payments: false, services: true }, peerServices: [{ id: "notes", type: "http", name: APP }] })] }));
+      const said = `فتح ${APP_ISOLATED}، يُقدَّم من جهاز جهة اتصالك`;
+      expect(screen.getByTestId("chat-service-open")).toHaveAttribute("aria-label", said);
+      expect(screen.getByTestId("open-service")).toHaveAttribute("title", said);
+    } finally {
+      fakeEngine.features = { ...fakeEngine.features, openServices: false };
+    }
+  });
+
   it("the chat's Hold dialog: its title, the line under it, what is held and what was refused", () => {
     const MB = 1024 * 1024;
     const hold: PeerHoldState = { enabled: true, peerAllows: true, storage: true, canHold: true, outstanding: 2, bytes: 1.5 * MB, maxBytes: 64 * MB, maxItems: 64, ttlMs: 7 * 86_400_000, refused: 3 };
@@ -147,6 +180,43 @@ describe("names a contact or a member chose, in Arabic, each isolated", () => {
     const note = back.querySelector(".id-card-back-note")!;
     expect(note).toHaveTextContent(`الإيقاف يُبلغ ${NAME}؛`);
     expect(isolated(note)).toBe(true);
+  });
+
+  it("the composer's identity cards: Shown to, the card's Not shared with and the line under the deck", () => {
+    const view = renderApp(<ComposerIdentityPicker peerKey="peer" contact={APP} initial="a" onClose={vi.fn()} />, { language: "ar" });
+    act(() => view.engine.update({ links: [paired()], identityProofs: [proofView({ id: "a" })] }));
+    const picker = screen.getByTestId("composer-identity-hint").closest(".identity-picker")!;
+    // Shown to (the sheet's head), the card's Not shared with and what the contact will see.
+    expect(picker.textContent!.split(APP_ISOLATED).length - 1).toBeGreaterThanOrEqual(3);
+    expect(screen.getByTestId("composer-identity-hint").textContent).toContain(APP_ISOLATED);
+    expect(picker.textContent!.split(APP_ISOLATED).join("")).not.toContain(APP);
+  });
+
+  it("the composer's identity card the contact's app cannot verify: why it cannot be shared", () => {
+    const view = renderApp(<ComposerIdentityPicker peerKey="peer" contact={APP} initial="a" onClose={vi.fn()} />, { language: "ar" });
+    act(() => view.engine.update({ links: [paired({ identities: identitiesView({ contactProviders: ["nostr"] }) })], identityProofs: [proofView({ id: "a" })] }));
+    const hint = screen.getByTestId("composer-identity-hint");
+    expect(hint).toHaveAttribute("data-blocked", "true");
+    expect(hint.textContent).toContain(APP_ISOLATED);
+  });
+
+  it("the composer's identity card turned over: Share with the contact", async () => {
+    const view = renderApp(<ComposerIdentityPicker peerKey="peer" contact={APP} initial="a" onClose={vi.fn()} />, { language: "ar" });
+    document.documentElement.dataset.reduceMotion = "true";
+    act(() => view.engine.update({ links: [paired()], identityProofs: [proofView({ id: "a" })] }));
+    await view.user.click(screen.getByTestId("composer-identity-use"));
+    await waitFor(() => expect(screen.getByTestId("composer-identity-share")).toHaveFocus());
+    expect(screen.getByTestId("composer-identity-share").textContent).toContain(APP_ISOLATED);
+  });
+
+  it("the composer's Ghostly card: the line under the deck and, turned over, who sees only it", async () => {
+    const view = renderApp(<ComposerIdentityPicker peerKey="peer" contact={APP} onClose={vi.fn()} />, { language: "ar" });
+    document.documentElement.dataset.reduceMotion = "true";
+    act(() => view.engine.update({ settings: { nick: "Ghost" }, links: [paired({ myPubKeyZ32: "yzk3gq8qpjb1g4mzr3ff3kr1j4c1b7dxy8dd3mkwqc9k7p3e1mio" })], identityProofs: [proofView({ id: "a" })] }));
+    expect(screen.getByTestId("composer-identity-hint").textContent).toContain(APP_ISOLATED);
+    await view.user.click(screen.getByTestId("composer-identity-ghostly"));
+    await waitFor(() => expect(screen.getByTestId("composer-identity-copy-key")).toHaveFocus());
+    expect(screen.getByTestId("composer-identity-status").textContent).toContain(APP_ISOLATED);
   });
 
   it("the composer's Ghostly card turned over: What the contact sees", async () => {

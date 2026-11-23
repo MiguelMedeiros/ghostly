@@ -190,6 +190,18 @@ describe("file transfer", () => {
     expect(sanitizeFileName("  report.pdf  ")).toBe("report.pdf");
   });
 
+  it("drops the dots and spaces a name ends in, as Windows does when it names the file", () => {
+    expect(sanitizeFileName("a.exe.")).toBe("a.exe");
+    expect(sanitizeFileName("a.exe . .")).toBe("a.exe");
+    expect(sanitizeFileName(`a.exe${String.fromCodePoint(0x200b)}.`)).toBe("a.exe");
+    // A name made of nothing else keeps the fallback; a device name still gets its _.
+    expect(sanitizeFileName("...")).toBe("file");
+    expect(sanitizeFileName(". . .")).toBe("file");
+    expect(sanitizeFileName("CON.")).toBe("_CON");
+    // A cut that leaves a dot at the end loses it too.
+    expect(sanitizeFileName(`${"r".repeat(199)}.${"x".repeat(20)}`)).toBe("r".repeat(199));
+  });
+
   it("removes invisible and direction-changing characters", () => {
     // Would read as "invoiceexe.pdf".
     expect(sanitizeFileName("invoice\u202Efdp.exe")).toBe("invoicefdp.exe");

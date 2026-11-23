@@ -107,7 +107,10 @@ test("a bot asks with Yes and No, the person taps Yes, and the bot hears it and 
 
 test("a question asked while the person's app was closed shows its buttons once the chat is live again", { tag: ["@feature:chat.buttons", "@feature:chat.buttons.wire", "@feature:headless.buttons"] }, async ({ peer, relay }) => {
   const url = await relay.listen();
-  const bot = new HeadlessBot();
+  // The bot's one relay gets about what the default relays allow a minute between them (30 + 60 + 5), not one relay's
+  // 30: the DHT floor's question, the restore and the press spend that 30 before the reload, and the bot's reads of the
+  // app coming back waited ~20 s for the minute to free (7 runs in 24 on 2 cores), once past 90 s on CI.
+  const bot = new HeadlessBot({ GHOSTLY_TEST_RELAY_REQUESTS_PER_MINUTE: "60" });
   try {
     await bot.start(url, "Shop");
     const person = await peer("buttons-away-person");
@@ -156,6 +159,10 @@ test("a question asked while the person's app was closed shows its buttons once 
     await expect(person.page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout: 90_000 });
     expect((await history()).edits).toBe(1);
     expect(bot.events.filter((e) => e.type === "message.edited" && e.messageId === question)).toHaveLength(0);
+  } catch (error) {
+    // The bot's side of a chat that never went live again: its link trace says what held its reads back.
+    await bot.attachLogs(test.info());
+    throw error;
   } finally {
     await bot.stop();
   }

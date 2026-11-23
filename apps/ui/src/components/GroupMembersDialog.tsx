@@ -64,6 +64,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const [removing, setRemoving] = useState<GroupMemberView | null>(null);
   /** The member whose Hand over admin was pressed: the one admin role leaves me for them, so it is asked first too. */
   const [promoting, setPromoting] = useState<GroupMemberView | null>(null);
+  /** What the dialog's live line says: whom the admin role went to. */
+  const [said, setSaid] = useState("");
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal();
@@ -181,7 +183,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
                 onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={e => { namingField.onCompositionEnd(e); namingKeys.inputProps.onCompositionEnd(e); }} onKeyDown={e => { if (namingKeys.composing(e)) return; if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
                 className="min-w-0 flex-1 rounded-md border border-field-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-focus-ring read-only:opacity-60 max-md:min-h-11" />
               <button type="submit" data-testid="group-rename-save" disabled={!groupName(naming)} aria-disabled={busy !== null || undefined}
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.rename.save")}</button>
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.rename.save")}</button>
               <button type="button" data-testid="group-rename-cancel" onClick={endNaming} className="rounded text-xs text-text-muted hover:text-text-primary max-md:min-h-11 max-md:px-3">{t("group.rename.cancel")}</button>
             </form>}
           {/* Who sees the new name, in words while the field is open: it was a tooltip on Rename, which a phone never shows. */}
@@ -230,7 +232,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
               : !link.groups ? <span className="text-xs text-text-muted">{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
               : <button disabled={!can} aria-disabled={busy !== null || undefined} onClick={() => invite(link.id)} data-testid="group-invite"
                 aria-label={t("group.members.inviteLabel", { name: isolate(contactName(link)) })}
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.inviteAction")}</button>}
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.inviteAction")}</button>}
           </li>;
         })}
       </ul>
@@ -241,7 +243,13 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     {removing && <RemoveMemberDialog name={memberName(removing, t, sameNamed(live.members))} linkOn={!!live.entryLink} returnFocus={list} onClose={() => setRemoving(null)}
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
     {promoting && <MakeAdminDialog name={memberName(promoting, t, sameNamed(live.members))} linkEnds={!!live.entryLink && live.profile !== "community"} returnFocus={list} onClose={() => setPromoting(null)}
-      onConfirm={() => { const key = promoting.key; setPromoting(null); void run(key, () => engine.call("makeGroupAdmin", { groupId: live.id, key })); }} />}
+      onConfirm={() => {
+        const key = promoting.key, name = memberName(promoting, t, sameNamed(live.members));
+        setPromoting(null); setSaid("");
+        void run(key, async () => { await engine.call("makeGroupAdmin", { groupId: live.id, key }); setSaid(t("group.event.admin", { name: isolate(name) })); });
+      }} />}
+    {/* The role handed over, said once: the focus goes to the list and the row's buttons go with the role, silently. */}
+    <p role="status" data-testid="group-members-live" className="sr-only">{said}</p>
     {secret && <SecretGuardDialog finding={secret} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void rename(true); }} />}
     {/* A community whose link is off says so here too: "anyone with the link can join" no longer holds, and a member has no link panel. */}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t(live.status === "active" && !live.entryLink ? "group.readNoteCommunityOff" : "group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>

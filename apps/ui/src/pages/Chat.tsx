@@ -90,6 +90,7 @@ import {
   loadShownSession,
   peerDisplayName,
   updateSessionLabel,
+  chatLabelOf,
 } from "../lib/storage";
 import { chatPath, inviteShareText } from "../lib/url";
 import { copySecret } from "../lib/shareLink";
@@ -106,6 +107,7 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { setChatFolder } from "../lib/chatFolders";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { useWakeCall } from "../hooks/useWakeCall";
+import { focusLost } from "../lib/focus";
 import { useOnline } from "../hooks/useOnline";
 import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
 import { useChatLink } from "../hooks/useChatLink";
@@ -658,9 +660,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   const saveLabel = () => {
     if (!sessionId) return;
-    const trimmed = labelDraft.trim();
-    updateSessionLabel(sessionId, trimmed);
-    setChatLabel(trimmed);
+    const label = chatLabelOf(labelDraft) ?? "";
+    updateSessionLabel(sessionId, label);
+    setChatLabel(label);
     setIsEditingLabel(false);
     window.dispatchEvent(new Event("session-updated"));
   };
@@ -756,6 +758,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
+  // Cancel takes the whole notice away, and the focus it had fell to the page: it goes back to the call button that
+  // started the wait, or to ⋮ when that was a row of its menu, unless it went elsewhere meanwhile.
+  const wokeFrom = useRef<Element | null>(null), wakeCancelled = useRef(false);
+  const cancelWake = () => { wakeCancelled.current = true; wakeCall.cancel(); };
+  useEffect(() => {
+    if (wakeCall.waking || !wakeCancelled.current) return;
+    wakeCancelled.current = false;
+    if (!visible || !focusLost()) return;
+    const from = wokeFrom.current;
+    (from instanceof HTMLElement && from.isConnected ? from : optionsRef.current)?.focus({ preventScroll: true });
+  }, [wakeCall.waking, visible]);
 
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
@@ -794,6 +807,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); handOverCall(sessionId, ringing.signal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
       : () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
     decline: webrtc.rejectCall,
+    // Not answered, the call turned into the other kind: the offer goes back the same way, and rings there.
+    ringOn: holdForUnlock
+      ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); nav.conversation(chatPath(sessionId)); }
+      : undefined,
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {
@@ -871,14 +888,18 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // The call buttons, in the header and (the video call on a phone) in the ⋮ menu: why they are off, and what they start.
   const callBlocked = webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
   const callBusy = webrtc.callState !== "idle" || wakeCall.waking;
-  const startCall = (withVideo: boolean) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo));
+  const startCall = (withVideo: boolean) => {
+    if (!(callsBlocked && canWakeForCall)) return webrtc.startCall(withVideo);
+    wokeFrom.current = document.activeElement;
+    void wakeCall.ring(withVideo);
+  };
   // Waking the contact for a call, or why it gave up. In the chat's column while it is on screen; elsewhere over whatever
   // is (`callLayer`), as a call's own window is, with its Cancel: the column is hidden then.
   const wakeNotice = (wakeCall.waking || wakeCall.gaveUp) && (
     <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
       className="top-notice flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
       <span>{fillNames(t(wakeCall.waking ? "calls.waking" : "calls.wakeGaveUp"), { name: shownName })}</span>
-      {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
+      {wakeCall.waking && <button type="button" onClick={cancelWake} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
     </div>
   );
   // A call could not use the microphone or camera (refused, or none there), or "Hide my IP from contacts" kept it from
@@ -1185,7 +1206,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {(webrtc.noPath || noPathShown) && !webrtc.mediaProblem && (
         <CallNoPathNotice iceServers={engine.state?.settings.iceServers} returnFocus={optionsRef} onClose={() => { webrtc.dismissNoPath(); setCallNoPath(sessionId, false); }} />
       )}
-      <ChatSearchBar search={search} />
+      <ChatSearchBar search={search} nameOf={m => nameOf(m.sender === "me" ? "me" : "peer") ?? shownName} appCards={appCards} />
       {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} appCards={appCards} />
 
@@ -1491,7 +1512,7 @@ function TechInfoDialog({ onClose, returnFocus, children }: { onClose: () => voi
           <button
             onClick={onClose}
             aria-label={t("common.close")}
-            className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded-full transition-colors"
+            className="tap-target p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded-full transition-colors"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />

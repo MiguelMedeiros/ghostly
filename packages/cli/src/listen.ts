@@ -68,6 +68,17 @@ export class Allowlist {
   constructor(private readonly chats: ReadonlySet<string>, private readonly keys: ReadonlySet<string>, private readonly groups: ReadonlySet<string>, private readonly peerOf: (chat: string) => Promise<string | null>) {}
 
   async allows(event: GhostlyEvent): Promise<boolean> {
+    const known = this.decided(event);
+    if (known !== undefined) return known;
+    // Kept once known: a chat's contact key does not change. One not paired yet is asked again next time.
+    const chat = event.chat as string;
+    const key = (await this.peerOf(chat).catch(() => null)) || undefined;
+    if (key) this.peers.set(chat, key);
+    return !!key && this.keys.has(key);
+  }
+
+  /** `allows` when it needs no lookup; undefined for a chat whose contact key is not known yet. */
+  decided(event: GhostlyEvent): boolean | undefined {
     if ("group" in event) return typeof event.group === "string" && this.groups.has(event.group);
     // A group's payment names a link (`group:<id>`, a community's `cpay:…`, a member's), never the group: its group says.
     const group = (event.payment as { group?: unknown } | undefined)?.group;
@@ -79,10 +90,8 @@ export class Allowlist {
     if (!this.keys.size) return false;
     // A removal carries the key: the chat is gone, so its lookup fails, and a replay holds no earlier event of it.
     if (event.type === "chat.removed" && typeof event.peer === "string") return this.keys.has(event.peer);
-    // Kept once known: a chat's contact key does not change. One not paired yet is asked again next time.
-    let key = this.peers.get(chat);
-    if (!key) { key = (await this.peerOf(chat).catch(() => null)) || undefined; if (key) this.peers.set(chat, key); }
-    return !!key && this.keys.has(key);
+    const key = this.peers.get(chat);
+    return key ? this.keys.has(key) : undefined;
   }
 }
 
@@ -283,7 +292,7 @@ export function startAt(since: number | undefined, cursor: string | undefined, s
 export function checkCursor(path: string | undefined): void {
   if (!path) return;
   const folder = dirname(resolve(path));
-  if (!statSync(folder).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);
+  if (!statSync(folder).isDirectory()) throw new CliError("not_found", `${folder} is a file, not a folder`);
   accessSync(folder, constants.W_OK | constants.X_OK);
 }
 
@@ -517,7 +526,11 @@ export function eventHandler(options: ListenOptions): EventHandler {
     // `events.gap` passes every `--type` and `--turns`, as it passes the allowlist: a bot on `message.received` is told
     // that messages were lost across a crash or a trim. Before, it was dropped and the cursor moved past it.
     const gap = type === "events.gap";
-    if (!gap && !matches(event, options.types)) { dropped = Math.max(dropped, seq); keepDropped(); return; }
+    // What the allowlist or --turns surely drops goes the same way: a group not on --group, a chat not on --from (but one whose
+    // contact key is still to be asked), what is no turn. Counted, a busy group it was never asked for filled the bound
+    // behind a slow hook, paused the feed, and could push an allowed chat's event out of the daemon's journal.
+    const passes = gap || (matches(event, options.types) && options.allow?.decided(event) !== false && !(options.turns && !toTurn(event)));
+    if (!passes) { dropped = Math.max(dropped, seq); keepDropped(); return; }
     behind++;
     chain = chain.then(async () => {
       if (stopped) return;

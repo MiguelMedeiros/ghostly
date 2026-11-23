@@ -12,6 +12,7 @@ import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGa
 import { RETIRE_READ_MS, arkMode } from "./walletModes";
 import { walletKey } from "./walletNetworks";
 import { viewNews } from "./viewNews";
+import { AskBackoff } from "../askBackoff";
 /** `read`: the balances were read once since this wallet opened (until then `balance` says nothing). */
 export interface ArkWalletView { configured:boolean; locked:boolean; read?:true; automatic?:boolean; network?:ArkConfig["network"]; provider?:string; address?:string; boardingAddress?:string; incoming?:number; balance:number; recoverable?:number; sweeping?:number; small?:number;
   /** When the first coin still spendable expires (ms), unless it is renewed first; absent with no coin or no expiry known (WISP 06 § Wallets that stay home). */
@@ -27,6 +28,14 @@ export const DEFAULT_ARK = {network:"bitcoin",provider:"https://arkade.computer"
 const checkProviders=(network:ArkConfig["network"],...urls:string[])=>{for(const provider of urls)validatePaymentTarget({method:"arkade",network,provider,asset:"BTC",unit:"sat",address:`${arkAddressPrefix(network)}configuration`,expiresAt:Date.now()+60000});};
 /** A Testnet Ark wallet starts on Mutinynet: a public test network with its own Ark server. */
 export const TESTNET_ARK = {network:"mutinynet",provider:"https://mutinynet.arkade.sh",explorer:"https://mutinynet.com/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
+/** The wallet is read every 10 s while its server answers; one that could not connect tries again after 30 s. */
+const READ_MS=10_000,CONNECT_MS=30_000;
+/**
+ * A server that does not answer (down, the device offline) is asked twice as late after each failed refresh or
+ * connect, up to this (`AskBackoff`, as a USDT wallet's RPC): at the fixed pace it was 360 refreshes an hour, each
+ * several failed requests. An answer, and the app coming back (`wake`), go back to the pace.
+ */
+export const ARK_SLOW_MS=5*60_000;
 /** The defaults a new wallet of this network is made with, in one click. */
 export const arkDefaults=(network:WalletNetwork)=>network==="testnet"?TESTNET_ARK:DEFAULT_ARK;
 /**
@@ -38,6 +47,10 @@ export class ArkWallet {
   private saved?:StoredArk;
   private timer?:ReturnType<typeof setTimeout>;
   private retry?:ReturnType<typeof setTimeout>;
+  /** What the waiting retry makes when it runs (`ready`'s `create`); undefined while none waits. */
+  private retrying?:boolean;
+  private readonly reads=new AskBackoff(READ_MS,ARK_SLOW_MS);
+  private readonly connects=new AskBackoff(CONNECT_MS,ARK_SLOW_MS);
   private readying?:Promise<void>;
   private stopped=false;
   private queue:Promise<unknown>=Promise.resolve();
@@ -63,15 +76,16 @@ export class ArkWallet {
   private startReady(create:boolean):Promise<void> {return this.readying??=this.ready(create).finally(()=>{this.readying=undefined;});}
   private needsReady(create:boolean) {return !this.stopped&&(this.saved?!!this.saved.deviceKey&&!this.adapter:create);}
   private async ready(create:boolean) {
-    clearTimeout(this.retry);
+    clearTimeout(this.retry);this.retrying=undefined;
     try {
       await requireTurn();
       if(!this.saved){if(create)await this.createDefault();}
       else if(this.saved.deviceKey && !this.adapter)await this.serial(()=>this.stopped?Promise.resolve():this.unlock());
+      this.connects.forget("server");
     } catch(error) {
       if(this.stopped||error instanceof ModeChanged)return;
       this.view={...this.view,error:`Connecting to Ark… ${error instanceof Error?error.message:""}`.trim()};this.changed();
-      this.retry=setTimeout(()=>void this.ensureReady(create),30000);
+      this.retrying=create;this.retry=setTimeout(()=>void this.ensureReady(create),this.connects.missed("server",Date.now()));
     }
   }
   private createDefault() {return this.serial(async()=>{if(!this.saved)await this.createNow({...arkDefaults(this.network)});});}
@@ -134,7 +148,7 @@ export class ArkWallet {
       this.view={configured:false,locked:true,balance:0};this.changed();
     }).finally(()=>this.gate.resume());
   }
-  async lock() {clearTimeout(this.timer);clearTimeout(this.retry);const adapter=this.adapter;this.adapter=undefined;this.view={...this.view,locked:true,address:undefined};this.changed();await adapter?.dispose();}
+  async lock() {clearTimeout(this.timer);clearTimeout(this.retry);this.retrying=undefined;this.reads.forget("server");const adapter=this.adapter;this.adapter=undefined;this.view={...this.view,locked:true,address:undefined};this.changed();await adapter?.dispose();}
   async backup(password?:string) {if(!this.saved)throw new Error("No Ark wallet to back up");return {mnemonic:await unsealSeed(this.saved.seed,this.saved.deviceKey??password??""),config:this.saved.config};}
   /** The backup file is always sealed with a password the person chooses, even for a wallet that opens by itself. */
   async exportBackup(password:string):Promise<string> {
@@ -194,7 +208,18 @@ export class ArkWallet {
       error:failed.length?`Could not read the ${failed.join(", ")} from the Ark provider. Last values may be stale.`:undefined};
     // Every 10 s: a read that says what the view already did is no news for the wallet view (`changed(false)`).
     this.changed(viewNews(before,this.view));
-    if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),10000);
+    const wait=failed.length?this.reads.missed("server",Date.now()):READ_MS;
+    if(!failed.length)this.reads.forget("server");
+    if(this.adapter){clearTimeout(this.timer);this.timer=setTimeout(()=>void this.refresh(),wait);}
+  }
+  /**
+   * The app is back (in front, online, the computer woke): a wallet whose last refresh or connect failed tries now,
+   * not at the end of its wait. One that reads fine keeps its pace.
+   */
+  wake() {
+    if(this.stopped)return;
+    if(this.adapter){if(this.view.error){this.reads.forget("server");void this.refresh();}return;}
+    if(this.retrying!==undefined&&!this.readying){const create=this.retrying;this.connects.forget("server");void this.ensureReady(create);}
   }
   /** Swept outputs back into the balance (refused while expired ones wait for the sweep); the next refresh shows them. */
   async recover():Promise<string> {const txid=await this.require().recover();await this.refresh();return txid;}

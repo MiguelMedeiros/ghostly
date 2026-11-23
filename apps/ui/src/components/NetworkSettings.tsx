@@ -124,7 +124,7 @@ export function NetworkSettings() {
   const reaches = relayOnly ? "relays" : network.kind;
 
   const refuse = (refused: Problems) => { focusFirst.current = true; setProblems(refused); };
-  // An edit of a refused field takes its error away; the others stay until the next Save.
+  // An edit of a refused field (its Reset too) takes its error away; the others stay until the next Save.
   const edited = (...names: FieldName[]) => {
     if (names.some((name) => problems[name])) setProblems((now) => Object.fromEntries(Object.entries(now).filter(([name]) => !names.includes(name as FieldName))));
   };
@@ -201,14 +201,14 @@ export function NetworkSettings() {
         <Switch label={t("network.readRelays")} checked={network.readRelays === true || relayOnly} disabled={relayOnly} busy={switching} onChange={(on) => void readRelays(on)} testId="network-read-relays" />
       </Row>}
       <Field testId="network-relays-field" label={t("network.relays")} htmlFor="network-relays" hint={t("network.relaysHint")} info={t(direct ? "network.relaysInfoDirect" : "network.relaysInfoWeb")}
-        trailing={<button onClick={() => setRelays(network.defaultRelays.join("\n"))} aria-label={t("network.resetRelays")} className={reset}>{t("network.reset")}</button>}>
+        trailing={<button onClick={() => { setRelays(network.defaultRelays.join("\n")); edited("relays"); }} aria-label={t("network.resetRelays")} className={reset}>{t("network.reset")}</button>}>
         <textarea id={FIELDS.relays} value={relays} onChange={(e) => { setRelays(e.target.value); edited("relays"); }} rows={2} {...exactText} dir="ltr" data-testid="network-relays"
           {...invalid("relays")} className={`${field} font-mono text-sm resize-y`} />
         {problemUnder("relays")}
       </Field>
 
       {network.iroh && <Field testId="network-iroh-field" label={t("network.iroh")} htmlFor="network-iroh-relays" hint={t("network.irohHint")} info={t(direct ? "network.irohInfoDirect" : "network.irohInfo")}
-        trailing={<button onClick={() => setIroh(network.iroh!.defaultRelays.join("\n"))} aria-label={t("network.resetIroh")} className={reset}>{t("network.reset")}</button>}>
+        trailing={<button onClick={() => { setIroh(network.iroh!.defaultRelays.join("\n")); edited("iroh"); }} aria-label={t("network.resetIroh")} className={reset}>{t("network.reset")}</button>}>
         <textarea id={FIELDS.iroh} value={iroh} onChange={(e) => { setIroh(e.target.value); edited("iroh"); }} rows={2} {...exactText} dir="ltr" data-testid="network-iroh-relays"
           {...invalid("iroh")} className={`${field} font-mono text-sm resize-y`} />
         {problemUnder("iroh")}
@@ -259,7 +259,7 @@ export function NetworkSettings() {
           <button
             onClick={() => void save()}
             data-testid="network-save"
-            className="tap-target px-4 py-2 min-h-10 bg-accent text-on-accent rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
+            className="tap-target px-4 py-2 min-h-10 bg-accent forced-colors:border forced-colors:border-[color:ButtonText] text-on-accent rounded-lg text-sm font-bold hover:bg-accent-hover transition-colors cursor-pointer"
           >
             {t("common.save")}
           </button>

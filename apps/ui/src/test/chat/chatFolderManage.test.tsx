@@ -126,7 +126,8 @@ describe("a folder's ⋮", () => {
     await user.click(options("Agents"));
     await user.click(screen.getByTestId("chat-folder-delete"));
     const dialog = screen.getByTestId("folder-delete-dialog");
-    expect(dialog).toHaveAccessibleName("Delete the folder “Agents”?");
+    // The name is isolated (FSI…PDI): "Work!" would read "!Work" in an Arabic title.
+    expect(dialog).toHaveAccessibleName("Delete the folder “\u2068Agents\u2069”?");
     expect(dialog).toHaveTextContent("Its chats are not deleted. They go back to the list, in no folder.");
     // Cancel first: nothing changes.
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));

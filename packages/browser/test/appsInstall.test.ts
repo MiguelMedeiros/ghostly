@@ -1228,6 +1228,43 @@ describe("an app installed from a store updates only to the version that store l
     await expect(again.acceptUpdate({ ref: u2.ref })).rejects.toThrow(/^no-update/);
   });
 
+  it("a screen whose Install would end the pin names the store it leaves; one that keeps it names none", async () => {
+    const { store, v1 } = await fromStore();
+    const leaving = { leavesStore: { key: keyOf(STORE_KEY), name: "Test store" } };
+    // The same version by URL leaves the record as it is: still pinned.
+    expect(await store.preview({ url: HEAD })).not.toHaveProperty("leavesStore");
+    expect(await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref })).not.toHaveProperty("leavesStore");
+    // A newer version by URL, or a contact's card of it: Install unpins the app, and the screen says from which store.
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    net.put(HEAD, v2.bytes);
+    // From then on its updates come from the publisher's links: no store to go to.
+    const byLink = await store.preview({ url: HEAD });
+    expect(byLink).toMatchObject({ install: "update" });
+    expect(byLink.leavesStore).toEqual(leaving.leavesStore);
+    expect((await store.preview({ card: { ref: v2.ref, url: HEAD, sequence: 2, digest: v2.digest } })).leavesStore).toEqual(leaving.leavesStore);
+    // Another store's listing moves the pin to that store, the same version or a newer one: this one's review ends, and
+    // the screen names where the updates then wait.
+    const pinned1 = `https://cdn.jsdelivr.net/gh/ana/chess@${"b".repeat(40)}/app.ghostlyapp`;
+    const pinned2 = `https://cdn.jsdelivr.net/gh/ana/chess@${"c".repeat(40)}/app.ghostlyapp`;
+    net.put(pinned1, v1.bytes);
+    net.put(pinned2, v2.bytes);
+    await net.putStore(await storeFiles({ by: OTHER_STORE, name: "Other store", apps: [listing(v1, [pinned1])] }), OTHER_STORE_URL);
+    await store.addStore({ url: OTHER_STORE_URL });
+    const toOther = { ...leaving.leavesStore, to: keyOf(OTHER_STORE) };
+    const same = await store.preview({ store: keyOf(OTHER_STORE), ref: v1.ref });
+    expect([same.install, same.leavesStore]).toEqual(["same", toOther]);
+    await net.putStore(await storeFiles({ by: OTHER_STORE, name: "Other store", sequence: 2, apps: [listing(v2, [pinned2])] }), OTHER_STORE_URL);
+    await store.refreshStores();
+    const newer = await store.preview({ store: keyOf(OTHER_STORE), ref: v1.ref });
+    expect([newer.install, newer.leavesStore]).toEqual(["update", toOther]);
+    // Installed from the link's screen, as it said: no longer pinned.
+    const screen = await store.preview({ url: HEAD });
+    await store.install({ stage: screen.stage, digest: v2.digest, grant: ["chat"] });
+    expect(await pinnedTo()).toBeUndefined();
+    net.put(HEAD, (await bundle({ sequence: 3, sources: [HEAD] })).bytes);
+    expect(await store.preview({ url: HEAD }), "an app pinned to no store leaves none").not.toHaveProperty("leavesStore");
+  });
+
   it("the version installed, taken again from a store's listing, pins it to that store", async () => {
     const u1 = await bundle({ sources: [HEAD] });
     net.put(HEAD, u1.bytes);
@@ -1914,5 +1951,37 @@ describe("while it runs (WISP 1200 § Takedowns: the app is stopped)", () => {
     await store.install({ digest: v1.digest, grant: ["chat"] });
     await store.checkUpdates();
     expect(checked).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the record keeps the hash of each bundle's whole file, as written (a device move hands the file over by it)", () => {
+  const hashOf = (bytes: Uint8Array) => toBase64Url(sha256(bytes));
+  type Row = { sha256?: string; pending?: { sha256?: string } };
+  const row = async () => (await appRows())[0] as Row;
+
+  it("at install, for an update waiting and once accepted, and when a restored app's files are fetched again", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    expect((await row()).sha256).toBe(hashOf(v1.bytes));
+
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    expect(await row()).toMatchObject({ sha256: hashOf(v1.bytes), pending: { sha256: hashOf(v2.bytes) } });
+
+    await store.acceptUpdate({ ref: v1.ref });
+    expect((await row()).sha256).toBe(hashOf(v2.bytes));
+
+    // A record from before the hash was kept, its files gone (a restored profile): fetched again, it keeps it.
+    const { sha256: _kept, ...older } = await row();
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put(older));
+    await (await fileBytes()).remove(`app-${v2.digest}`);
+    expect(await apps(net).fetchFiles({ ref: v1.ref })).toEqual({ status: "ok" });
+    expect((await row()).sha256).toBe(hashOf(v2.bytes));
   });
 });

@@ -83,6 +83,7 @@ tools, run Ghostly as an OS user of its own ([threat model](https://ghostly.tool
 | `profile set --name <name>`, `profile picture <jpeg>` | What contacts see |
 | `status set [text…] [--emoji <emoji>] [--availability available\|busy\|away\|dnd] [--until 2h]`, `status show`, `status clear` | The status paired contacts see: up to 60 characters, one emoji, an availability (`dnd`: Do not disturb), until a time. A daemon says it at once; without one it goes on each chat's next live session |
 | `profile backup --out <file>`, `profile restore <file> <name>` | A backup of the headless profile, encrypted with a passphrase (`--no-passphrase`: not encrypted, by explicit choice); the `group auto` and `call auto` settings and the chats' holds (`chat disconnect --hold`) travel with it |
+| `ghostly device` | None: a CLI profile is on this one device only. It cannot be added to another device, moved or taken over, and the app's Add a device cannot add it; to run it on another machine, back it up here, restore it there and stop using it here. `ghostly device …` says so as a usage error (exit 2) |
 
 Only one process opens a profile at a time.
 
@@ -101,7 +102,8 @@ While it runs, every command goes through its socket. With no daemon, a command 
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
 The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `ghostly-<hash>/` in `$XDG_RUNTIME_DIR`,
-else `/tmp/ghostly-<uid>-<hash>/`, when that path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
+else in the system temp folder (`$TMPDIR`, on macOS `/var/folders/…/T/`), else in `/tmp/ghostly-<uid>-<hash>/`, when that
+path is too long for a socket; the daemon removes that folder when it stops), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
 One JSON object per line each way:
 
 ```json
@@ -296,7 +298,10 @@ key), which every answer and event carries. What the CLI does when names meet:
 - A group you are in wins over an invitation with the same name or id prefix; an invitation is found by its id, and
   by a name or prefix none of your groups has.
 - A member's whole key is that member, whatever another member calls itself. A prefix or a name that fits two members
-  is refused.
+  is refused (exit 1, `bad_request`, `details.matches` with each one's `key` and `name`), naming them by name and key
+  prefix: use its key, which `ghostly group show <group>` lists. A ref no member answers to says so and points there
+  too (exit 3, `not_found`); your own name or key says it is you (exit 1, `bad_request`), in `--mention` as in `group
+  remove`.
 
 Safety rules the CLI enforces:
 
@@ -304,7 +309,7 @@ Safety rules the CLI enforces:
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
   `chat request`, the comment of `pay` to a Lightning address, the name of `group create` and `group rename`, the
-  name contacts see in `profile set`, `profile create --name` and `settings set nick`, a file's name in `file send`,
+  name contacts see in `profile set`, `profile create --name` and `settings set nick`, a file's name and type in `file send`,
   the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
   `forwardMessages`, `sendGroupFile` caption and file name, `sendFile`'s file name, payment memos of `sendPayment`,
   `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,
@@ -432,6 +437,10 @@ The audio contract, one Unix socket per call:
 - **From the call.** The contact's voice in 20 ms frames, as they are decoded.
 - **To the call.** Write any amount, at any pace: the CLI plays it at real time, and silence when there is nothing.
 - **Barge-in.** `ghostly call flush` drops what is queued, at once.
+- **Falling behind.** A program that stops reading finds at most 1 s of the contact's voice waiting when it reads
+  again, the system's socket buffer included; what comes meanwhile is dropped. `call pipe` keeps more on top for a
+  player that stops reading: its stdout pipe and its own buffers, about 260-350 KiB (some 3 s at 48 kHz, 16-20 s at
+  8 kHz).
 - **End.** The program reads EOF when the call ends; `call.ended` says why (`hangup`, `remote-hangup`, `missed`,
   `rejected`, `unanswered`, `crossed`, `failed`, `stopped`).
 - **Silence.** `call.stalled` says the contact's packets stopped for 5 s (its side may have died), `call.resumed` that

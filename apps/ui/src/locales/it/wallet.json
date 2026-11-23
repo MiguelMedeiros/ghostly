@@ -127,7 +127,9 @@
       "confirmed": "{{sign}}{{amount}} · {{count}} conf.",
       "unconfirmed": "{{sign}}{{amount}} · non confermata"
     },
-    "unconfirmed": "{{amount}} {{unit}} non confermati"
+    "unconfirmed": "{{amount}} {{unit}} non confermati",
+    "unconfirmed_one": "{{amount}} {{unit}} non confermato",
+    "unconfirmed_other": "{{amount}} {{unit}} non confermati"
   },
   "cards": {
     "amount": "{{amount}} {{unit}}",
@@ -198,7 +200,10 @@
       "noFee": "nessuna commissione",
       "none": "Ancora niente",
       "note": {
+        "notSent": "Un pagamento non è stato inviato",
+        "paidRequest": "Richiesta di un contatto pagata",
         "paymentFailed": "Un pagamento Lightning non è riuscito",
+        "paymentFailedFor": "Pagamento non riuscito: {{note}}",
         "requestPaid": "Richiesta pagata via Lightning",
         "testCoins": "Monete di prova dal mint di prova"
       }
@@ -221,8 +226,12 @@
     "pendingMintNext": "Si risolve da solo; non viene pagato nulla due volte. Finché il mint non risponde, l'importo risulta messo da parte sotto il saldo.",
     "primary": "Principale",
     "received": "⚡ {{amount}} {{unit}} ricevuti",
+    "received_one": "⚡ {{amount}} {{unit}} ricevuto",
+    "received_other": "⚡ {{amount}} {{unit}} ricevuti",
     "redeem": "Riscatta token ecash",
     "redeemed": "{{amount}} {{unit}} riscattati.",
+    "redeemed_one": "{{amount}} {{unit}} riscattato.",
+    "redeemed_other": "{{amount}} {{unit}} riscattati.",
     "remove": "Rimuovi",
     "removeLastMint": "È l’ultimo mint del portafoglio: rimuoverlo rimuove il portafoglio {{label}} e la sua carta Lightning.",
     "removeMint": "Rimuovi {{name}}",
@@ -232,6 +241,8 @@
     "removeMintQuestion": "Rimuovere {{name}}?",
     "setAside": "{{amount}} {{unit}} messi da parte",
     "setAsideInfo": "Messi da parte per un pagamento che il mint non ha ancora confermato. Escono con il pagamento o tornano nel saldo appena il mint risponde.",
+    "setAside_one": "{{amount}} {{unit}} messo da parte",
+    "setAside_other": "{{amount}} {{unit}} messi da parte",
     "settings": "Opzioni",
     "testBalance": "{{amount}} sats di prova (senza valore)",
     "testBalance_one": "{{amount}} sat di prova (senza valore)",
@@ -253,6 +264,8 @@
     },
     "unconfirmed": "{{amount}} {{unit}} non confermati",
     "unconfirmedInfo": "Il mint ha preso questi sats in uno scambio e non sa dire cosa ha dato in cambio. Il portafoglio continua a chiedere. Potrebbero non tornare.",
+    "unconfirmed_one": "{{amount}} {{unit}} non confermato",
+    "unconfirmed_other": "{{amount}} {{unit}} non confermati",
     "unreachable": "Non raggiungibile ora",
     "working": "In corso…"
   },
@@ -413,6 +426,8 @@
       "unknown": "esito sconosciuto"
     },
     "paidTo": "{{amount}} {{unit}} pagati a {{to}} ✓",
+    "paidTo_one": "{{amount}} {{unit}} pagato a {{to}} ✓",
+    "paidTo_other": "{{amount}} {{unit}} pagati a {{to}} ✓",
     "pastePlaceholder": "Incolla una fattura Lightning o un indirizzo Lightning",
     "pay": "Paga",
     "payTo": "Paga {{amount}} a {{to}}{{fees}}",
@@ -703,7 +718,8 @@
               "bip84": "SegWit nativo (BIP84, bc1q…)"
             }
           }
-        }
+        },
+        "label": "Portafoglio BDK"
       },
       "bitcoind": {
         "description": "Un portafoglio sul tuo nodo Bitcoin Core, tramite il suo RPC. Il tuo nodo custodisce le chiavi e firma. Richiede l'app desktop.",
@@ -730,7 +746,8 @@
         "description": "Un portafoglio Lightning in autocustodia su Spark, tramite l'SDK di Breez. La sua frase di recupero è sigillata su questo dispositivo; i sats li custodisci tu."
       },
       "cashu-mint": {
-        "description": "Le fatture sono pagate sul tuo saldo Cashu, e da esso. I mint custodiscono i sats."
+        "description": "Le fatture sono pagate sul tuo saldo Cashu, e da esso. I mint custodiscono i sats.",
+        "label": "Mint Cashu"
       },
       "core-lightning": {
         "description": "Il tuo nodo Core Lightning, tramite Commando con una rune. Il tuo nodo custodisce i sats. L'app web lo raggiunge solo tramite wss://.",
@@ -767,7 +784,8 @@
             "help": "La porta REST di LND (restlisten, 8080 di default). In un browser il nodo deve consentire questa app con restcors e avere un certificato di cui il browser si fida; l'app desktop non ha bisogno di nessuno dei due.",
             "label": "Indirizzo REST"
           }
-        }
+        },
+        "label": "Nodo LND"
       },
       "nwc": {
         "description": "Un portafoglio che colleghi con il suo URI NWC (Alby Hub, il servizio NWC di un nodo, un portafoglio ospitato). Quel portafoglio custodisce i sats e fissa il proprio limite di commissione: custodial o no dipende dal portafoglio.",
@@ -779,7 +797,8 @@
         }
       },
       "webln": {
-        "description": "Un portafoglio Lightning in questo browser (Alby e altri). Quel portafoglio custodisce i sats e ti chiede prima di pagare."
+        "description": "Un portafoglio Lightning in questo browser (Alby e altri). Quel portafoglio custodisce i sats e ti chiede prima di pagare.",
+        "label": "Portafoglio del browser (WebLN)"
       }
     },
     "reconfigured": "{{name}} ora usa quel server.",
@@ -896,7 +915,9 @@
     "uncounted": "{{count}} carte fuori dal totale",
     "uncounted_one": "{{count}} carta fuori dal totale",
     "unknown": "Non leggibile ora, fuori dal totale",
-    "waiting": "{{amount}} {{unit}} non ancora spendibili"
+    "waiting": "{{amount}} {{unit}} non ancora spendibili",
+    "waiting_one": "{{amount}} {{unit}} non ancora spendibile",
+    "waiting_other": "{{amount}} {{unit}} non ancora spendibili"
   },
   "ui": {
     "amountIn": "Importo in {{unit}}",

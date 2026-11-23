@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import { ChatFiles, FILE_LIMITS, GhostLink, REMOVED_TEXT, createIdentity, createLink, identityFromSeedB64, randomBytes, toBase64Url, type FileTransferRecord, type IncomingTarget, type OfferDecision } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
+import type { GroupFileDesk } from "../src/engine/groupFiles";
 import { db } from "../src/engine/db";
+import type { FileTransferView } from "../src/shared/types";
 import { STORES, fileStore } from "../src/shared/idb";
 import { knownErrorParts } from "../../../apps/ui/src/lib/errorText";
 import { fileBytes, registerFileBytes } from "../src/shared/fileBytes";
@@ -774,21 +776,28 @@ it("a file said on the floor and refused here for no room says so here, and arri
 
 it("a file said on the floor and refused here as one too many waiting says so, and arrives on the sender's Retry once the person answered them", async () => {
   const t = await setup();
-  await announce(t, "many-00001", 30_000);
+  // Large, so it is asked about too: only another file asked about is one too many.
+  const size = FILE_LIMITS.askAboveBytes + 1;
+  await announce(t, "many-00001", size);
   const fileId = (await db.getMessages(t.id)).find((m) => m.id === "peer_many-00001")!.file!.id;
   const asks = Array.from({ length: FILE_LIMITS.maxWaitingOffers }, (_, i) => `ask-${String(i).padStart(6, "0")}`);
   for (const id of asks) t.offer(id, FILE_LIMITS.askAboveBytes + 1);
   await vi.waitFor(async () => { for (const id of asks) expect((await t.incoming(id))?.transfer).toMatchObject({ stage: "asking" }); }, { timeout: 20_000 });
-  t.offer("many-00001", 30_000);
+  // A file taken without asking still comes while they wait: nothing waits for an answer on it.
+  t.offer("photo-0001", 30_000);
+  await vi.waitFor(async () => expect((await t.incoming("photo-0001"))?.transfer).toMatchObject({ state: "done" }), { timeout: 20_000 });
+  t.offer("many-00001", size);
   await vi.waitFor(() => expect(t.records.get("out:many-00001")).toMatchObject({ state: "failed", error: expect.stringContaining("too many files waiting") }), { timeout: 10_000 });
   await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Too many files are waiting here" }));
-  // The person declines the ones waiting; later the sender tries again, as told.
+  // The person declines the ones waiting; later the sender tries again, as told, and the person takes it.
   for (const id of asks) await t.node().fileAction({ linkId: t.id, fileId: (await t.incoming(id))!.fileId, action: "decline" });
   await vi.waitFor(() => { for (const id of asks) expect(t.records.get(`out:${id}`)?.state).toBe("declined"); }, { timeout: 10_000 });
   t.files.retry("many-00001");
-  await vi.waitFor(() => expect(t.records.get("out:many-00001")?.state).toBe("done"), { timeout: 20_000 });
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ stage: "asking" }), { timeout: 20_000 });
+  await t.node().fileAction({ linkId: t.id, fileId, action: "accept" });
+  await vi.waitFor(() => expect(t.records.get("out:many-00001")?.state).toBe("done"), { timeout: 60_000 });
   await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "done" }));
-}, 90_000);
+}, 120_000);
 
 it("a file said on the floor whose offer comes after its week ran out here still arrives, after a restart too", async () => {
   const t = await setup();
@@ -962,3 +971,24 @@ it("a received file IndexedDB has no room for says there is no room here, not to
   // What the app shows for it: no room here and its next step, the storage's words behind the ⓘ.
   expect(knownErrorParts(error)).toMatchObject({ title: "No room on this device", next: "Free some space, then ask for it again." });
 }, 60_000);
+
+/**
+ * The engine's 1:1 files and group files fill one room: an offer is decided beside the group files still coming
+ * (`GroupFileDesk.stillComing`), as a group file is beside the chats' files (`FileDesk.chatsComing`).
+ */
+it("an offer that fits only without the group files still coming is asked about, not taken", async () => {
+  const t = await setup();
+  const MiB = 1024 ** 2;
+  left = 30 * MiB;
+  const engine = t.node() as unknown as { groups: { files: GroupFileDesk } };
+  const coming = vi.spyOn(engine.groups.files, "stillComing").mockReturnValue(16 * MiB);
+  t.offer("beside-0001", 20 * MiB);
+  await vi.waitFor(() => expect(t.records.get("out:beside-0001")).toMatchObject({ state: "asking", waitingFor: "consent" }));
+  // The offer waiting shows the room left beside them, and again once they end (the group desk says so).
+  const views = (engine as unknown as { transfers: Map<string, FileTransferView> }).transfers;
+  const shown = () => [...views.values()].find(view => view.stage === "asking" && view.size === 20 * MiB)?.room;
+  await vi.waitFor(() => expect(shown()).toBe(14 * MiB));
+  coming.mockReturnValue(0);
+  (engine.groups.files as unknown as { deps: { comingChanged(): void } }).deps.comingChanged();
+  await vi.waitFor(() => expect(shown()).toBe(30 * MiB));
+}, 30_000);

@@ -33,10 +33,11 @@ export function CallNoPathNotice({ iceServers, onClose, returnFocus }: { iceServ
   // A 44 px tall hit area, as the ×'s, the look unchanged; 8 px to each side, so the two meet in the 16 px between them.
   const link = "relative rounded text-accent underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent before:absolute before:-inset-y-3 before:-inset-x-2 before:content-['']";
   // A line under the chat's header, as the offline one (OfflineBanner): it stays until closed, so it never sits over
-  // the header's back button, calls and ⋮, as an overlay at the top did on a phone.
+  // the header's back button, calls and ⋮, as an overlay at the top did on a phone. On a phone on its side it goes
+  // behind the keyboard while it is up, as the offline line does (`chat-banner`, index.css).
   return (
     <div ref={note} role="alert" data-testid="call-no-path"
-      className="shrink-0 flex items-start gap-3 border-b border-border bg-surface px-4 py-2 text-sm text-text-primary">
+      className="chat-banner shrink-0 flex items-start gap-3 border-b border-border bg-surface px-4 py-2 text-sm text-text-primary">
       <div className="min-w-0">
         <span className="block font-medium">{t("calls.noPath")}</span>
         <span className="block text-text-secondary">{t(turnSet ? "calls.noPathTurnSet" : "calls.noPathNext")}</span>

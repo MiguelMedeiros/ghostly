@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -35,10 +35,8 @@ const MB = 1024 * 1024;
 const desktop = () => { (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {}; };
 const t = (language: Language) => translateWith(locales[language], language);
 
-const renderSettings = (language?: Language) => renderApp(
-  <LockScreenProvider><UpdateProvider><Routes><Route path="/settings/:section?" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>,
-  { route: "/settings/appearance", language },
-);
+const tree = () => <LockScreenProvider><UpdateProvider><Routes><Route path="/settings/:section?" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>;
+const renderSettings = (language?: Language) => renderApp(tree(), { route: "/settings/appearance", language });
 
 beforeEach(() => { windowIs(false); });
 afterEach(() => {
@@ -159,6 +157,52 @@ describe("the switch, on Desktop with the flag", () => {
     expect(screen.getByTestId("settings-translate-pair")).toHaveTextContent("English → Portuguese");
   });
 
+  it("the focus of a Remove that went through goes to the Remove in its place, the last one, then the switch", async () => {
+    const all = [{ pair: "en-pt", bytes: 36.4 * MB }, { pair: "pt-en", bytes: 37 * MB }, { pair: "es-en", bytes: 37 * MB }];
+    models.translationStatus.mockResolvedValueOnce(status(all)).mockResolvedValueOnce(status(all.slice(1)))
+      .mockResolvedValueOnce(status(all.slice(1, 2))).mockResolvedValue(status([]));
+    const { user } = renderSettings();
+    await user.click(await screen.findByRole("button", { name: "Remove English → Portuguese" }));
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove Portuguese → English" })).toHaveFocus());
+    await user.click(screen.getByRole("button", { name: "Remove Spanish → English" }));
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove Portuguese → English" })).toHaveFocus());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("settings-translate-pair")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("settings-translate")).toHaveFocus());
+  });
+
+  it("a Remove in the middle hands the focus to the one after it; a focus put elsewhere stays there", async () => {
+    const all = [{ pair: "en-pt", bytes: 36.4 * MB }, { pair: "pt-en", bytes: 37 * MB }, { pair: "es-en", bytes: 37 * MB }];
+    models.translationStatus.mockResolvedValueOnce(status(all)).mockResolvedValueOnce(status([all[0], all[2]])).mockResolvedValue(status([all[2]]));
+    const { user } = renderSettings();
+    await user.click(await screen.findByRole("button", { name: "Remove Portuguese → English" }));
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove Spanish → English" })).toHaveFocus());
+
+    let done!: () => void;
+    models.removeTranslation.mockImplementationOnce(() => new Promise<void>((resolve) => { done = resolve; }));
+    await user.click(screen.getByRole("button", { name: "Remove English → Portuguese" }));
+    act(() => screen.getByTestId("settings-translate").focus());
+    await act(async () => { done(); });
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(1));
+    expect(screen.getByTestId("settings-translate")).toHaveFocus();
+  });
+
+  it("Try again keeps its landing when the section redraws while it reads", async () => {
+    let answer!: (value: Status) => void;
+    models.translationStatus.mockRejectedValueOnce(new Error("Not available on this platform"))
+      .mockImplementationOnce(() => new Promise<Status>((resolve) => { answer = resolve; }));
+    const { user, rerender } = renderSettings();
+    const failed = await screen.findByTestId("settings-translate-unread");
+    await user.click(within(failed).getByRole("button", { name: "Try again" }));
+    rerender(tree());
+    await act(async () => { answer(status([{ pair: "pt-en", bytes: 37 * MB }])); });
+    expect(await screen.findByTestId("settings-translate-pair")).toHaveTextContent("Portuguese → English");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove Portuguese → English" })).toHaveFocus());
+  });
+
   it("a Remove that fails keeps the line and says what to do; the error's own words are behind the ⓘ", async () => {
     models.translationStatus.mockResolvedValue(status([{ pair: "pt-en", bytes: 37 * MB }]));
     models.removeTranslation.mockRejectedValue(new Error("Permission denied (os error 13)"));
@@ -180,6 +224,7 @@ describe("the switch, on Desktop with the flag", () => {
     expect(failed).not.toHaveTextContent("Not available on this platform");
     await user.click(within(failed).getByRole("button", { name: "Try again" }));
     expect(await screen.findByTestId("settings-translate-pair")).toHaveTextContent("Portuguese → English");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove Portuguese → English" })).toHaveFocus());
   });
 });
 

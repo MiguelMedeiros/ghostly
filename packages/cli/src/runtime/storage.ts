@@ -53,6 +53,7 @@ interface RawRecord { key: Key; value: unknown }
 interface RawIndex {
   name: string; rawObjectStore: RawStore; initialize(transaction: unknown): void; keyPath: string | string[]; multiEntry: boolean; unique: boolean; initialized: boolean; deleted: boolean;
   records: RawRecordStore; storeRecord(record: RawRecord): void;
+  getAllValues(range: unknown, count: number | undefined, direction: string | undefined): unknown[];
 }
 interface RawNode { record: RawRecord; left: RawNode | undefined; right: RawNode | undefined; parent: RawNode | undefined; deleted: boolean; red: boolean }
 interface RawRecordStore {
@@ -148,6 +149,8 @@ const CLOSED = "__ghostly_closed__";
 const FOLLOWS = "__ghostly_journal__";
 /** The database an entry's first op names, with the entry's number (`seq`): SQLite's trees hold the entries up to theirs. */
 const SEQ = "__ghostly_entry__";
+/** How many times `peekStores` reads a store that a fold changed under it. */
+const PEEK_TRIES = 5;
 /** How long `close` waits for the transactions still running: one left open for good does not keep the process. */
 const CLOSE_WAIT_MS = 5_000;
 /** Records an export reads and serializes in one turn of the event loop, then writes: a few milliseconds' worth. */
@@ -1141,8 +1144,12 @@ const uncopied = new WeakSet<object>();
 /**
  * fake-indexeddb copies every value a read hands out (`structuredClone`), as it must for its tree, which keeps the
  * values. A store kept on disk read its values from rows.db just now (v8 made them), and copying them again made a
- * whole-chat read 1.6 times the cost of one in memory. Its `get` and `getAll`, and an index's (which read through the
- * store's `getValue`), hand those out as they are (`handOut`).
+ * whole-chat read 1.6 times the cost of one in memory. Its `get` and `getAll`, and an index's, hand those out as they
+ * are (`handOut`).
+ *
+ * An index's `getAll` read each record it names through the store's `getValue`, one rows.db read each: `file list` in
+ * a chat of 1,600 files held a daemon 155 ms. It takes the record keys off the index first, in its order and up to
+ * its count, then reads them all in a few (`SqlTree.getMany`), the transaction's own writes over rows.db as `get` has.
  */
 function readWithoutCopy(classes: RawClasses) {
   const storeProto = classes.ObjectStore.prototype as RawStore;
@@ -1162,6 +1169,18 @@ function readWithoutCopy(classes: RawClasses) {
       if (values.length >= most) break;
     }
     return values;
+  };
+  const indexProto = classes.Index.prototype as RawIndex;
+  const indexGetAllValues = indexProto.getAllValues;
+  indexProto.getAllValues = function (this: RawIndex, range, count, direction) {
+    const tree = this.rawObjectStore.records.records;
+    if (!(tree instanceof SqlTree)) return indexGetAllValues.call(this, range, count, direction);
+    const keys: Key[] = [], most = count || Infinity;
+    for (const entry of this.records.values(range, direction)) {
+      keys.push(entry.value);
+      if (keys.length >= most) break;
+    }
+    return tree.getMany(keys).map((record) => (record === undefined ? undefined : handOut(record.value)));
   };
 }
 
@@ -1280,6 +1299,58 @@ export function keyOrder(cmp: (a: Key, b: Key) => number): (a: Key, b: Key) => n
     return cmp(a, b);
   };
   return order;
+}
+
+/**
+ * A few small stores of the store in `dir`, read from its files without opening it and never written: the snapshot,
+ * then the whole entries of the journal after it. The process that holds the store (a daemon) may fold meanwhile: it
+ * renames a new snapshot in, then removes the journal, so a snapshot read before a fold and a journal read after it
+ * miss what the journal held. The two are read again until the snapshot is the same file before and after both reads,
+ * and the journal follows it. Only stores kept inline and their string keys; a store kept in rows.db reads as empty,
+ * and so does one the files do not have.
+ */
+export function peekStores(dir: string, db: string, names: string[]): Map<string, Map<string, unknown>> {
+  const snapshotPath = join(dir, SNAPSHOT);
+  /** Which file the snapshot is: a fold's rename puts another one (another inode) there. */
+  const which = () => { const found = statSync(snapshotPath, { throwIfNoEntry: false }); return found ? `${found.ino}:${found.size}:${found.mtimeMs}` : ""; };
+  for (let attempt = 1; ; attempt++) {
+    const found = new Map(names.map((name) => [name, new Map<string, unknown>()]));
+    const before = which();
+    const saved = before ? (deserialize(readFileSync(snapshotPath)) as Snapshot) : null;
+    for (const store of saved?.databases.find((one) => one.name === db)?.stores ?? []) {
+      const into = found.get(store.name);
+      if (!into || store.onDisk || store.rows) continue;
+      for (const [key, value] of store.records) if (typeof key === "string") into.set(key, value);
+    }
+    let journal: Buffer | null = null;
+    try { journal = readFileSync(join(dir, JOURNAL)); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const named = journal ? follows(journal) : undefined;
+    if (which() !== before) {
+      if (attempt < PEEK_TRIES) continue;
+      throw new Error("The store was folded again at each read");
+    }
+    // One that follows another snapshot is in this one already (its fold died before removing it), as an open reads it.
+    if (!journal || (named !== undefined && saved?.journal !== undefined && named !== saved.journal)) return found;
+    for (let offset = 0; offset + 4 <= journal.length;) {
+      const length = journal.readUInt32BE(offset);
+      if (offset + 4 + length > journal.length) break;
+      let ops: Op[];
+      try { ops = deserialize(journal.subarray(offset + 4, offset + 4 + length)) as Op[]; } catch { break; }
+      offset += 4 + length;
+      for (const op of ops) {
+        const into = op.db === db ? found.get(op.store) : undefined;
+        if (!into) continue;
+        if (op.kind === "clear") into.clear();
+        else if (op.kind === "put") { if (typeof op.key === "string") into.set(op.key, op.value); }
+        else {
+          const key = keyFromDisk(op.key);
+          if (key instanceof IDBKeyRange) { for (const held of [...into.keys()]) if (key.includes(held)) into.delete(held); }
+          else if (typeof key === "string") into.delete(key);
+        }
+      }
+    }
+    return found;
+  }
 }
 
 /**

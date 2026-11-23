@@ -964,31 +964,181 @@ describe("a run of the train", () => {
     expect(repo.pulls.get(1)!.open && repo.pulls.get(2)!.open).toBe(true);
   });
 
-  it("takes out a pull request that changes a workflow when GitHub refuses the batch's push for it, and boards the rest", async () => {
-    // The queue app's token has no `workflows` permission: GitHub refuses any push whose commits change a workflow, so
-    // every run failed and the whole line waited behind that one pull request.
+  /** The queue app's git: GitHub refuses any push whose commits hold one of `changing`'s (no `workflows` permission). */
+  const refuseWorkflows = (repo: ReturnType<typeof fakeRepo>, changing: number[]) => {
+    const tried: string[] = [];
+    const refused = (sha: string, branch: string) => new Error(`Command failed: git push -q --force origin ${sha}:refs/heads/${branch}\n ! [remote rejected]   ${sha} -> ${branch} (refusing to allow a GitHub App to create or update workflow \`.github/workflows/ci.yml\` without \`workflows\` permission)\nerror: failed to push some refs`);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      tried.push(branch);
+      if (sha.split(":")[1]?.split(",").some((n) => changing.includes(Number(n)))) throw refused(sha, branch);
+      return push(branch, sha);
+    };
+    const pushHead = repo.git.pushHead;
+    repo.git.pushHead = async (branch: string, sha: string, expected: string) => {
+      tried.push(branch);
+      return changing.some((n) => branch === `fix-${n}`) ? { ok: false, message: refused(sha, branch).message } : pushHead(branch, sha, expected);
+    };
+    return tried;
+  };
+
+  it("sends a pull request that changes a workflow and is behind dev to a coordinator, never into a batch's push", async () => {
+    // It boarded a batch with others, GitHub refused the batch's push, and it left the line with `queue:failed`: a
+    // coordinator found it by chance, updated its branch and landed it by hand.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { behind: true });
+    repo.add(13);
+    repo.files.set(12, [".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"]);
+    const tried = refuseWorkflows(repo, [12]);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([12]);
+    expect(r.log).toContain("HAND-MERGE #12 (changes a workflow, which this token may not push)");
+    expect(tried.filter((b) => b === "fix-12")).toEqual([]);
+    expect(repo.members()).toEqual([11, 13]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.handMerge]);
+    const said = repo.comments.get(12)!.map((c) => c.body);
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+    expect(said[0]).toMatch(/`queue:hand-merge`/);
+    expect(said[0]).toMatch(/`gh pr update-branch`[^.]*`gh pr merge --squash`[^.]*\(the train takes `queue:hand-merge` off\)\.$/);
+  });
+
+  it("lands a pull request that changes a workflow alone, with no push, when it is up to date with dev and green", async () => {
+    // Up to date and green it needs no push: GitHub's squash merge. In a batch it was pushed, and refused.
     const repo = fakeRepo();
     repo.add(11);
     repo.add(12);
     repo.add(13);
-    repo.files.set(12, [".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"]);
-    const push = repo.git.push;
-    repo.git.push = async (branch: string, sha: string) => {
-      if (sha.split(":")[1]?.split(",").includes("12")) {
-        throw new Error(`Command failed: git push -q --force origin ${sha}:refs/heads/${branch}\n ! [remote rejected]   ${sha} -> ${branch} (refusing to allow a GitHub App to create or update workflow \`.github/workflows/ci.yml\` without \`workflows\` permission)\nerror: failed to push some refs`);
-      }
-      return push(branch, sha);
-    };
+    repo.files.set(12, [".github/workflows/ci.yml"]);
+    const tried = refuseWorkflows(repo, [12]);
     const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(r.merged).toEqual([12]);
+    expect(repo.merges).toEqual(["squash #12"]);
+    expect(tried.filter((b) => b === "fix-12")).toEqual([]);
     expect(repo.members()).toEqual([11, 13]);
-    expect(r.dropped).toEqual([12]);
-    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
-    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
-    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
-    // Any other refusal is still the run's error.
+    expect(repo.pulls.get(12)!.labels).toEqual([]);
+  });
+
+  it("keeps a pull request that changes a workflow in line, out of the batch, while its own full CI runs on a head up to date with dev", async () => {
+    // The fast tier lets others board: a batch's full CI is their gate. This one lands only on its own.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { ci: running });
+    repo.drafts.set("h12", fastGreen);
+    repo.add(13);
+    repo.files.set(12, [".github/workflows/e2e-full.yml"]);
+    refuseWorkflows(repo, [12]);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.members()).toEqual([11, 13]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/Waiting: it changes a workflow \(\.github\/workflows\/e2e-full\.yml\)[^.]*never boards a batch: it lands alone once CI Success has passed/);
+  });
+
+  it("keeps a pull request that changes a workflow in line while its full CI has not started on a head up to date with dev", async () => {
+    // Its CI reads none (the fast tier green, no full run yet): it needs no update, only its own run, so no coordinator.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { ci: [] });
+    repo.drafts.set("h12", fastGreen);
+    repo.add(13);
+    repo.files.set(12, [".github/workflows/e2e-full.yml"]);
+    refuseWorkflows(repo, [12]);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.members()).toEqual([11, 13]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/Waiting: it changes a workflow \(\.github\/workflows\/e2e-full\.yml\)[^.]*never boards a batch: it lands alone once CI Success has passed on its last commit\. It keeps its place\.$/);
+  });
+
+  it("tells a pull request that changes a workflow, waiting on a green full run that does not count, what starts one that does", async () => {
+    // Its only full run ran before its base was changed: nothing the train does starts another, so the comment says how.
+    const repo = fakeRepo();
+    repo.add(12, { ci: [] });
+    const before = [...green];
+    repo.meta.set(before, { event: "pull_request", head_branch: "fix-12", created_at: "2026-10-07T23:00:00Z" });
+    repo.runs.set("h12", before);
+    repo.events.get(12)!.unshift({ event: "base_ref_changed", created_at: "2026-10-07T23:30:00Z" });
+    repo.drafts.set("h12", fastGreen);
+    repo.files.set(12, [".github/workflows/e2e-full.yml"]);
+    refuseWorkflows(repo, [12]);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(r.merged).toEqual([]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(
+      /Waiting: it changes a workflow \(\.github\/workflows\/e2e-full\.yml\)[^.]*it lands alone once CI Success has passed on its last commit, and no run there counts yet: its green CI run on its last commit ran before its base was changed; close and reopen it for a run against this base/,
+    );
+  });
+
+  it("adds to a waiting workflow pull request's reason the hint each run that cannot count already gives, and only that", () => {
+    const pr = (extra = {}) => ({ number: 1, ci: "none", fast: "success", draft: false, fork: false, workflows: [".github/workflows/e2e-full.yml"], ...extra });
+    const lands = "it changes a workflow (.github/workflows/e2e-full.yml), which the queue app may not push, so it never boards a batch: it lands alone once CI Success has passed on its last commit";
+    // No run yet (or one still going): today's words, unchanged.
+    expect(waiting(pr())).toBe(lands);
+    expect(waiting(pr({ ci: "pending", shared: [] }))).toBe(lands);
+    // Each reason a run does not count, in the words the same reason gives a pull request that changes no workflow.
+    const reasons = [{ shared: [{ number: 2, base: "epic/x" }] }, { crowded: true }, { retargeted: true }, { misplanned: true }];
+    for (const extra of reasons) {
+      const plain = waiting({ ...pr(extra), workflows: undefined, fast: "none" });
+      expect(plain).not.toMatch(/workflow|has not passed/);
+      expect(waiting(pr(extra))).toBe(`${lands}, and no run there counts yet: ${plain}`);
+    }
+    expect(waiting(pr({ cancelled: true }))).toBe(`${lands}, and no run there counts yet: its full run was cancelled; re-run CI on its last commit`);
+    // A run that does not count says more than a cancelled one newer than it: a re-run would not count either.
+    expect(waiting(pr({ cancelled: true, retargeted: true }))).toMatch(/counts yet: its green CI run on its last commit ran before its base was changed/);
+    // Green on its last commit: it waits for nothing, whatever an older run said.
+    for (const extra of [{}, ...reasons, { cancelled: true }]) expect(waiting(pr({ ci: "success", ...extra }))).toBeNull();
+    // Red stays red; a pull request that changes no workflow is told nothing new about a cancelled run.
+    expect(waiting(pr({ ci: "failure", cancelled: true }))).toMatch(/^CI Success is red/);
+    expect(waiting(pr({ cancelled: true, workflows: [], fast: "none" }))).toBe("CI Success has not passed on its last commit yet");
+    // Its position comment keeps its place for a re-run, as for a reason that needs no push.
+    expect(positionText("dev", { ...pr({ cancelled: true }), sha: "h1" }, 2, null)).toMatch(/re-run CI on its last commit\. It keeps its place\.$/);
+  });
+
+  it("lands a hand-merge pull request alone once a coordinator updated it and added queue again, and takes queue:hand-merge off", async () => {
+    const repo = fakeRepo();
+    repo.add(21, { behind: true });
+    repo.files.set(21, [".github/workflows/ci.yml"]);
+    const tried = refuseWorkflows(repo, [21]);
+    expect((await repo.run()).dropped).toEqual([21]);
+    expect(repo.pulls.get(21)!.labels).toEqual([LABEL.handMerge]);
+    // The coordinator's `gh pr update-branch` (a token that may push a workflow), CI green on that head, then `queue`.
+    Object.assign(repo.pulls.get(21)!, { sha: "h21u" });
+    repo.sitsOn.set("h21u", repo.tips.dev);
+    repo.runs.set("h21u", green);
+    repo.pushed.set("h21u", "2026-10-08T12:00:00Z");
+    repo.pulls.get(21)!.labels.push(LABEL.queue);
+    repo.events.get(21)!.push({ event: "labeled", label: { name: LABEL.queue }, created_at: "2026-10-09T00:00:00Z" });
+    const r = await repo.run();
+    expect(r.merged).toEqual([21]);
+    expect(repo.landed).toEqual(["#21"]);
+    expect(tried).toEqual([]);
+    expect(repo.pulls.get(21)!.labels).toEqual([]);
+  });
+
+  it("sends a pull request that changes a workflow into an epic to a coordinator, green and up to date too", async () => {
+    // An epic lands by a push (a fast-forward), which GitHub refuses for it as well.
+    const repo = fakeRepo();
+    repo.add(31, { base: "epic/x" });
+    repo.files.set(31, [".github/workflows/ci.yml"]);
+    const tried = refuseWorkflows(repo, [31]);
+    const r = await repo.run({ base: "epic/x" });
+    expect(r.dropped).toEqual([31]);
+    expect(tried).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(repo.pulls.get(31)!.labels).toEqual([LABEL.handMerge]);
+    expect(repo.comments.get(31)!.at(-1)!.body).toMatch(/cannot land it on `epic\/x`[^]*A coordinator lands it into `epic\/x` by hand/);
+  });
+
+  it("still takes the run's error for a batch's push refused for any other reason", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    repo.add(13);
     repo.git.push = async () => { throw new Error("Command failed: git push\nfatal: unable to access"); };
-    repo.add(14);
-    repo.batch()!.open = false;
     await expect(repo.run()).rejects.toThrow(/unable to access/);
   });
 
@@ -998,7 +1148,8 @@ describe("a run of the train", () => {
     const repo = fakeRepo();
     for (const n of [11, 12, 13, 14]) repo.add(n);
     repo.conflicts.add(13);
-    repo.files.set(12, [".github/workflows/ci.yml"]);
+    // One that lists a workflow never boards: here GitHub lists no files for it (3000 or more).
+    repo.files.set(12, null);
     const push = repo.git.push;
     repo.git.push = async (branch: string, sha: string) => {
       if (sha.split(":")[1]?.split(",").includes("12")) throw new Error("! [remote rejected] (refusing to allow a GitHub App to create or update workflow `.github/workflows/ci.yml` without `workflows` permission)");
@@ -1013,12 +1164,13 @@ describe("a run of the train", () => {
 
   it("takes out a pull request whose files GitHub does not list when the batch's push is refused for a workflow", async () => {
     // GitHub lists no files for a pull request of 3000 or more: every run threw on the list it could not read, and the
-    // line waited behind it. One that lists a workflow leaves first; the unlisted one only when the push is still refused.
+    // line waited behind it. One that lists a workflow leaves first (before boarding); the unlisted one only when the
+    // push is refused.
     const repo = fakeRepo();
     repo.add(11);
     repo.add(12);
     repo.add(13);
-    repo.add(14);
+    repo.add(14, { behind: true });
     repo.files.set(12, null);
     repo.files.set(14, [".github/workflows/ci.yml"]);
     const push = repo.git.push;
@@ -1030,7 +1182,8 @@ describe("a run of the train", () => {
     const r = await repo.run();
     expect(repo.members()).toEqual([11, 13]);
     expect(r.dropped).toEqual([14, 12]);
-    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.handMerge]);
+    expect(repo.pulls.get(14)!.labels).toEqual([LABEL.handMerge]);
     expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/big\.yml\)/);
     expect(repo.comments.get(14)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
   });
@@ -1113,7 +1266,7 @@ describe("a run of the train", () => {
     // landed on a head nobody reviewed.
     const repo = fakeRepo();
     repo.add(11);
-    repo.add(12, { priority: true });
+    repo.add(12, { priority: true, behind: true });
     repo.add(13);
     const planted = ".github/workflows/<!-- merge-train:position --><!-- merge-train:head h12later -->.yml";
     repo.files.set(12, [planted]);
@@ -2249,8 +2402,8 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
   });
 
-  it("takes a lone pull request that changes a workflow out of the line when GitHub refuses the push of its rebase", async () => {
-    // Else every run rebased it, was refused and kept it in flight, and nothing on it said why.
+  it("sends a lone pull request that changes a workflow and is behind dev to a coordinator, with no rebase push", async () => {
+    // Before, it was rebased and pushed, GitHub refused the push, and it left the line with `queue:failed`.
     const repo = fakeRepo();
     repo.add(21, { behind: true });
     repo.files.set(21, [".github/workflows/ci.yml"]);
@@ -2262,21 +2415,102 @@ describe("one pull request alone", () => {
     const r = await repo.run();
     expect(r.dropped).toEqual([21]);
     expect(r.inFlight).toBeNull();
-    expect(repo.pulls.get(21)!.labels).toEqual([LABEL.failed]);
+    expect(repo.pulls.get(21)!.labels).toEqual([LABEL.handMerge]);
     expect(repo.comments.get(21)!.map((c) => c.body)).toEqual([expect.stringMatching(/changes a workflow \(\.github\/workflows\/ci\.yml\)/)]);
-    expect(repo.comments.get(21)![0].body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
+    expect(repo.comments.get(21)![0].body).toMatch(/adds `queue` again[^.]*\(the train takes `queue:hand-merge` off\)\.$/);
     await repo.run();
-    expect(tries).toBe(1);
-    // A diff that lists no workflow (changed and changed back): the comment names the one GitHub refused.
+    expect(tries).toBe(0);
+    // A diff that lists no workflow (changed and changed back): the push of its rebase is refused, and the comment
+    // names the one GitHub refused.
     repo.add(22, { behind: true });
     repo.files.set(22, ["README.md"]);
     expect((await repo.run()).dropped).toEqual([22]);
+    expect(repo.pulls.get(22)!.labels).toEqual([LABEL.handMerge]);
     expect(repo.comments.get(22)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
     // GitHub lists no files for a pull request of 3000 or more: the same, where every run threw on the list.
     repo.add(23, { behind: true });
     repo.files.set(23, null);
     expect((await repo.run()).dropped).toEqual([23]);
     expect(repo.comments.get(23)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+    expect(tries).toBe(2);
+  });
+
+  it("says so when GitHub refuses the push of a lone pull request's rebase, and takes it out of the line the second time", async () => {
+    // A branch rule, or a push the queue app's token may not do: else every run rebased it again, and its comment waited
+    // for CI Success on a commit its branch never got.
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    // git names the commit it pushed, a new rebase at every run: still the same refusal.
+    let run = 0;
+    repo.git.pushHead = async () => ({ ok: false, message: `! [remote rejected] ${String(++run).repeat(40)} -> fix-11 (push declined due to repository rule violations)` });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.pulls.get(11)!.sha).toBe("h11");
+    const position = repo.comments.get(11)!.at(-1)!.body;
+    expect(position).toMatch(/GitHub refused the push of that rebase to its branch: ! \[remote rejected\] 1{40} -> fix-11 \(push declined due to repository rule violations\)\./);
+    expect(position).not.toMatch(/waiting for CI Success/);
+    const again = await repo.run();
+    expect(again.dropped).toEqual([11]);
+    expect(again.inFlight).toBeNull();
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/refused the push of its rebase onto `dev` twice \(! \[remote rejected\] .*rule violations\)\)/)]);
+  });
+
+  it("sends a lone pull request refused for a workflow to a coordinator even after GitHub refused its push for another rule", async () => {
+    // Two refusals in a row take it out with `queue:failed`, but a workflow refusal is the coordinator's lane.
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    let run = 0;
+    repo.git.pushHead = async () =>
+      ++run === 1
+        ? { ok: false, message: `! [remote rejected] ${"1".repeat(40)} -> fix-11 (push declined due to repository rule violations)` }
+        : { ok: false, message: `! [remote rejected] ${"2".repeat(40)} -> fix-11 (refusing to allow a GitHub App to create or update workflow \`.github/workflows/ci.yml\` without \`workflows\` permission)` };
+    expect((await repo.run()).dropped).toEqual([]);
+    expect((await repo.run()).dropped).toEqual([11]);
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.handMerge]);
+    expect(repo.comments.get(11)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+  });
+
+  it("keeps a lone pull request in line when its push fails for a reason that passes (network, GitHub's own error), run after run", async () => {
+    // GitHub's own failures come as `[remote rejected]` too: two in a row (an incident between runs) said a branch rule
+    // refused the push and dropped a good pull request.
+    for (const message of [
+      "fatal: unable to access 'https://github.com/o/r/': Could not resolve host: github.com",
+      "error: RPC failed; HTTP 500 curl 22 The requested URL returned error: 500",
+      `! [remote rejected] ${"a".repeat(40)} -> fix-11 (Internal Server Error)`,
+      `! [remote rejected] ${"a".repeat(40)} -> fix-11 (failure)`,
+      `! [remote rejected] ${"a".repeat(40)} -> fix-11 (failed to update ref)`,
+    ]) {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      repo.git.pushHead = async () => ({ ok: false, message });
+      for (let i = 0; i < 3; i++) expect((await repo.run()).dropped).toEqual([]);
+      expect(repo.pulls.get(11)!.labels).toContain(LABEL.queue);
+      expect(repo.comments.get(11)!.at(-1)!.body).not.toMatch(/refused/);
+    }
+  });
+
+  it("keeps its mark whole when GitHub's refusal holds `<!--` or `-->`, and reads it back at the next run", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    const message = "! [remote rejected] fix-11 -> fix-11 (pre-receive hook declined: <!-- merge-train:x --> no)";
+    repo.git.pushHead = async () => ({ ok: false, message });
+    await repo.run();
+    const position = repo.comments.get(11)!.at(-1)!.body;
+    const mark = position.match(/<!-- merge-train:alone (.*?) -->/)![1];
+    expect(JSON.parse(mark).refused).toBe(message);
+    expect(position).not.toContain("<!-- merge-train:x");
+    expect((await repo.run()).dropped).toEqual([11]);
+  });
+
+  it("leaves out of its comment any credentials in the URL of a refused push", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access 'https://x-access-token:secret@github.com/o/r/': The requested URL returned error: 403" });
+    await repo.run();
+    const position = repo.comments.get(11)!.at(-1)!.body;
+    expect(position).toContain("unable to access 'https://github.com/o/r/': The requested URL returned error: 403");
+    expect(position).not.toContain("secret");
   });
 
   it("gives a red pull request one more run on a fresh rebase, then queue:failed", async () => {
@@ -2765,6 +2999,22 @@ describe("a queue:priority pull request while CI Success on the base itself is r
     expect(readState(repo.batch()!.body)).toMatchObject({ baseSha: "s13" });
   });
 
+  it("says the base's CI is still running in the flying one's comment too, once dev's failed jobs are re-run", async () => {
+    const repo = await heldBatch();
+    repo.add(13, { priority: true, behind: true });
+    await repo.run();
+    expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/ahead of #9000, which the train holds while CI Success on `dev` itself is red/);
+    repo.runs.set("dev0", running); // someone re-ran dev's failed jobs, as the hold's help asks
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD #9000: .*itself is still running/);
+    expect(repo.alone(13)).toMatchObject({ past: 9000 });
+    expect(said(repo, 11)).toMatch(/CI Success on `dev` itself is still running/);
+    const flying = repo.comments.get(13)!.at(-1)!.body;
+    expect(flying).toMatch(/ahead of #9000, which the train holds while CI Success on `dev` itself is still running/);
+    // It is not held itself: still waiting for its own CI, with no hold of its own.
+    expect(flying).toMatch(/waiting for CI Success on /);
+    expect(flying).not.toMatch(/The train is on hold/);
+  });
+
   it("lands ahead of a held red lone pull request, which keeps its flight and is rebased onto the new tip", async () => {
     const repo = await heldLone();
     const held = repo.pulls.get(11)!.sha;
@@ -2983,6 +3233,29 @@ describe("a queue:priority pull request while CI Success on the base itself is r
     await lone.run({ now: Date.parse(at) + HOLD_HELP });
     expect(said(lone, 11)).toMatch(help);
   });
+
+  it("says why a priority pull request on a branch it may not push to cannot go ahead, instead of telling it to add the label", async () => {
+    const repo = await heldBatch();
+    const at = "2026-10-08T01:00:00Z";
+    repo.runs.set("dev0", [{ ...red[0], completed_at: "2026-10-08T00:50:00Z" }]);
+    repo.runs.set(repo.batch()!.sha, [{ ...red[0], completed_at: at }]);
+    repo.add(13, { priority: true }); // green on its own full run, at dev's tip: only its branch keeps it from going
+    repo.pulls.get(13)!.branch = "claude/security-auto-fix-1";
+    repo.add(14);
+    const advice = /give the pull request that fixes it `queue:priority`/;
+    const cannot = /It has `queue:priority`, but the train may not push to its branch, so it cannot go ahead of the held one alone: land it by hand, or open it again from a new branch\./;
+    const r = await repo.run({ now: Date.parse(at) + HOLD_HELP });
+    expect(r.inFlight).toBe(9000);
+    expect(repo.pushes).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(r.log.filter((l) => /#13/.test(l))).toEqual(["::warning::#13 has `queue:priority`, but the train may not push to its branch (claude/security-auto-fix-1), so it cannot go ahead of the held #9000 alone."]);
+    expect(said(repo, 13)).toMatch(/\*\*1st\*\*.*on hold.*re-run the failed jobs of CI on `dev` \(dev0\)\./);
+    expect(said(repo, 13)).toMatch(cannot);
+    expect(said(repo, 13)).not.toMatch(advice);
+    // The others keep the advice: a fix from a branch the train may push to still goes ahead.
+    expect(said(repo, 14)).toMatch(advice);
+    expect(said(repo, 14)).not.toMatch(cannot);
+  });
 });
 
 describe("a pull request on hold (queue:hold)", () => {
@@ -3184,9 +3457,9 @@ describe("a pull request with a review running (Review: in progress)", () => {
     expect(REVIEW_HOLD).toBe(90 * 60_000);
     expect(reviewHold([note("Review: in progress (head d06086e)")], sha, now)).toEqual({ since: start, until });
     expect(reviewHold([note(`**Review: in progress (head ${sha})**\nreviewer: hermes-one`)], sha, now)).toEqual({ since: start, until });
-    // A verdict after it ends it, on any head; an older verdict does not.
+    // A verdict after it ends it: approved on any head, changes needed on another head; an older verdict does not.
     expect(reviewHold([note("Review: in progress (head d06086e)"), note("Review: approved (head d06086e)", start + 60_000)], sha, now)).toBeNull();
-    expect(reviewHold([note("Review: in progress (head d06086e)"), note("Review: changes needed (head d06086e)", start + 60_000)], sha, now)).toBeNull();
+    expect(reviewHold([note("Review: in progress (head d06086e)"), note("Review: changes needed (head bc29edd)", start + 60_000)], sha, now)).toBeNull();
     expect(reviewHold([note("Review: changes needed (head 1111111)", start - 60_000), note("Review: in progress (head d06086e)")], sha, now)).toEqual({ since: start, until });
     // Another head (a push since), a head too short to tell, no head, or the bound passed: nothing held.
     expect(reviewHold([note("Review: in progress (head bc29edd)")], sha, now)).toBeNull();
@@ -3202,6 +3475,53 @@ describe("a pull request with a review running (Review: in progress)", () => {
     expect(reviewHold([note("Merge train: see\nReview: in progress (head d06086e)")], sha, now)).toBeNull();
   });
 
+  it("holds one with changes needed on its head with no time limit, until a later approved or a new head", () => {
+    const sha = "d06086e5a1b2c3d4e5f60718293a4b5c6d7e8f90";
+    const asked = [note("Review: in progress (head d06086e)"), note("**Review: changes needed (head d06086e)**", start + 60_000)];
+    expect(reviewHold(asked, sha, start + 2 * 60_000)).toEqual({ since: start + 60_000, until: null });
+    expect(reviewHold(asked, sha, start + REVIEW_HOLD + 60_000)).toEqual({ since: start + 60_000, until: null });
+    expect(reviewHold(asked, sha, start + 30 * 24 * 60 * 60_000)).toEqual({ since: start + 60_000, until: null });
+    expect(reviewHold([note("Review: changes needed (head d06086e)")], sha, start + REVIEW_HOLD * 10)).toEqual({ since: start, until: null });
+    // A later approved releases it; a new head (the fix pushed) does too, and so does changes needed on an older head.
+    expect(reviewHold([...asked, note("Review: approved (head d06086e)", start + 5 * 60_000)], sha, start + 6 * 60_000)).toBeNull();
+    expect(reviewHold(asked, "bc29edd5a1b2c3d4e5f60718293a4b5c6d7e8f90", start + 2 * 60_000)).toBeNull();
+    expect(reviewHold([note("Review: changes needed (head bc29edd)")], sha, start + 60_000)).toBeNull();
+    expect(reviewHold([note("Review: changes needed")], sha, start + 60_000)).toBeNull();
+    // A re-review on the head after it does not end it, even once its bound passed; only its approval does. An approval
+    // of another head does not either.
+    const again = [...asked, note("Review: in progress (head d06086e)", start + 5 * 60_000)];
+    expect(reviewHold(again, sha, start + 6 * 60_000)).toEqual({ since: start + 60_000, until: null });
+    expect(reviewHold(again, sha, start + 5 * 60_000 + 2 * REVIEW_HOLD)).toEqual({ since: start + 60_000, until: null });
+    expect(reviewHold([...again, note("Review: approved (head d06086e)", start + 20 * 60_000)], sha, start + 21 * 60_000)).toBeNull();
+    expect(reviewHold([...asked, note("Review: approved (head bc29edd)", start + 5 * 60_000)], sha, start + 6 * 60_000)).toEqual({ since: start + 60_000, until: null });
+    // Changes needed again after an approval holds it again.
+    expect(reviewHold([...asked, note("Review: approved (head d06086e)", start + 5 * 60_000), note("Review: changes needed (head d06086e)", start + 9 * 60_000)], sha, start + 10 * 60_000)).toEqual({ since: start + 9 * 60_000, until: null });
+    // Only a reviewer's verdict holds it.
+    expect(reviewHold([note("Review: changes needed (head d06086e)", start, "NONE")], sha, start + 60_000)).toBeNull();
+  });
+
+  it("says a held one boards on the train's next pass after the verdict, not once it is posted", () => {
+    expect(waiting({ review: { since: start, until: start + REVIEW_HOLD } })).toBe(
+      "a review is running on its head since 19:45 UTC (until 21:15 UTC at the latest): it boards on the train's next pass after the review's verdict is posted (up to about 30 minutes later), or after that time",
+    );
+    expect(waiting({ review: { since: start, until: null } })).toBe(
+      "a reviewer asked for changes on its head at 19:45 UTC: it waits for a later `Review: approved` on this head or a new head, and boards on the train's next pass after that (up to about 30 minutes later)",
+    );
+  });
+
+  it("never lands one with changes needed on its head, past REVIEW_HOLD; it lands after a later approved", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    review(repo, 11);
+    review(repo, 11, "Review: changes needed (head h11)", start + 20 * 60_000);
+    await repo.run({ now: start + REVIEW_HOLD + 60 * 60_000 });
+    expect(repo.merges).toEqual([]);
+    expect(said(repo, 11)).toMatch(/Waiting: a reviewer asked for changes on its head at 20:05 UTC/);
+    review(repo, 11, "Review: approved (head h11)", start + 3 * REVIEW_HOLD);
+    await repo.run({ now: start + 3 * REVIEW_HOLD + 60_000 });
+    expect(repo.landed).toEqual(["#11"]);
+  });
+
   it("never merges a lone one green at the tip while its review runs; it lands once the verdict is posted", async () => {
     const repo = fakeRepo();
     repo.add(11);
@@ -3209,7 +3529,7 @@ describe("a pull request with a review running (Review: in progress)", () => {
     const r = await repo.run({ now: start + 10 * 60_000 });
     expect(repo.merges).toEqual([]);
     expect(r.inFlight).toBeNull();
-    expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: a review is running on its head since 19:45 UTC \(until 21:15 UTC at the latest\): it boards once the review's verdict is posted, or at that time\. It keeps its place\.$/);
+    expect(said(repo, 11)).toMatch(/1st\*\*\. Waiting: a review is running on its head since 19:45 UTC \(until 21:15 UTC at the latest\): it boards on the train's next pass after the review's verdict is posted \(up to about 30 minutes later\), or after that time\. It keeps its place\.$/);
     review(repo, 11, "Review: approved (head h11)", start + 30 * 60_000);
     await repo.run({ now: start + 31 * 60_000 });
     expect(repo.landed).toEqual(["#11"]);
@@ -3236,6 +3556,31 @@ describe("a pull request with a review running (Review: in progress)", () => {
     review(fix, 11);
     await fix.run({ now: start + 10 * 60_000 });
     expect(fix.landed).toEqual(["#11"]);
+  });
+
+  it("holds a queue:priority one with changes needed on its head all the same: priority skips only a review running", async () => {
+    const sha = "d06086e5a1b2c3d4e5f60718293a4b5c6d7e8f90";
+    expect(reviewHold([note("Review: in progress (head d06086e)")], sha, start + 60_000, true)).toBeNull();
+    expect(reviewHold([note("Review: changes needed (head d06086e)")], sha, start + 60_000, true)).toEqual({ since: start, until: null });
+    const repo = fakeRepo();
+    repo.add(11, { priority: true });
+    review(repo, 11, "Review: changes needed (head h11)");
+    await repo.run({ now: start + REVIEW_HOLD + 60_000 });
+    expect(repo.merges).toEqual([]);
+    expect(said(repo, 11)).toMatch(/Waiting: a reviewer asked for changes on its head at 19:45 UTC/);
+    review(repo, 11, "Review: approved (head h11)", start + 2 * REVIEW_HOLD);
+    await repo.run({ now: start + 2 * REVIEW_HOLD + 60_000 });
+    expect(repo.landed).toEqual(["#11"]);
+  });
+
+  it("never lands one with changes needed on its head whose re-review never posts a verdict", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    review(repo, 11, "Review: changes needed (head h11)");
+    review(repo, 11, "Review: in progress (head h11)", start + 10 * 60_000);
+    await repo.run({ now: start + 10 * 60_000 + 2 * REVIEW_HOLD });
+    expect(repo.merges).toEqual([]);
+    expect(said(repo, 11)).toMatch(/Waiting: a reviewer asked for changes on its head at 19:45 UTC/);
   });
 
   it("never merges a lone one the train rebased and flies alone while its review runs: it waits in line and the others go", async () => {
@@ -3281,6 +3626,32 @@ describe("a pull request with a review running (Review: in progress)", () => {
     await repo.run({ now: start });
     expect(repo.merges).toEqual(["squash #11", "squash #12"]);
     expect(said(repo, b)).toMatch(/#13 changed or left the line \(#13 has a review running\)/);
+    expect(repo.pulls.get(13)!.merged).toBeUndefined();
+  });
+
+  it("stops a green batch's landing on dev at one a reviewer asked changes on since it boarded", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const b = (await repo.run({ now: start - 60 * 60_000 })).inFlight as number;
+    repo.settle();
+    review(repo, 12, "Review: changes needed (head h12)");
+    await repo.run({ now: start + REVIEW_HOLD + 5 * 60_000 });
+    expect(repo.merges).toEqual(["squash #11"]);
+    expect(said(repo, b)).toMatch(/#12 changed or left the line \(a reviewer asked for changes on #12\)/);
+    expect(said(repo, 12)).toMatch(/Waiting: a reviewer asked for changes on its head/);
+  });
+
+  it("stops the landing at a queue:priority one a reviewer asked changes on since it boarded, not at one whose review runs", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const b = (await repo.run({ now: start - 60 * 60_000 })).inFlight as number;
+    repo.settle();
+    for (const n of [12, 13]) repo.pulls.get(n)!.labels.push(LABEL.priority);
+    review(repo, 12);
+    review(repo, 13, "Review: changes needed (head h13)");
+    await repo.run({ now: start + 5 * 60_000 });
+    expect(repo.merges).toEqual(["squash #11", "squash #12"]);
+    expect(said(repo, b)).toMatch(/#13 changed or left the line \(a reviewer asked for changes on #13\)/);
     expect(repo.pulls.get(13)!.merged).toBeUndefined();
   });
 });
@@ -3389,7 +3760,7 @@ describe("CI on a commit", () => {
     expect(ciState([forged, run("CI Success", "completed", "failure", "2026-10-07T12:00:00Z", 6)])).toBe("failure");
   });
 
-  it("names the jobs that turned CI Success red: failed or timed out, the newest of each name, never the gate", () => {
+  it("names the jobs that turned CI Success red: failed, timed out or cancelled, the newest of each name, never the gate", () => {
     const failed = failedJobs([
       run("Frontend lint and types", "completed", "failure"),
       { ...run("CLI on Linux ARM64", "completed", "failure", "2026-10-07T10:00:00Z", 2), html_url: "https://example.test/job/2" },
@@ -3399,8 +3770,19 @@ describe("CI on a commit", () => {
       run("Web unit tests", "completed", "cancelled"),
       run("CI Success", "completed", "failure", "2026-10-07T10:00:00Z", 9),
     ]);
-    expect(failed).toEqual([{ name: "Frontend lint and types", url: null }, { name: "E2E", url: null }]);
+    expect(failed).toEqual([{ name: "Frontend lint and types", url: null }, { name: "E2E", url: null }, { name: "Web unit tests", url: null }]);
     expect(failedJobs([run("CI Success", "completed", "failure")])).toEqual([]);
+  });
+
+  it("names a job past its timeout-minutes: GitHub ends it cancelled, and CI Success says it ended cancelled", () => {
+    // ci.yml's matrices never fail fast, and its gate does not run in a cancelled run: next to a red gate, a cancelled
+    // job is one GitHub stopped at its time limit (e.g. Tauri Backend's 60 minutes).
+    const failed = failedJobs([
+      { ...run("Tauri Backend (apps/desktop)", "completed", "cancelled", "2026-10-07T10:00:00Z", 2), html_url: "https://example.test/job/2" },
+      run("Frontend lint and types", "completed", "failure", "2026-10-07T10:00:00Z", 3),
+      run("CI Success", "completed", "failure", "2026-10-07T11:00:00Z", 9),
+    ]);
+    expect(failed).toEqual([{ name: "Tauri Backend (apps/desktop)", url: "https://example.test/job/2" }, { name: "Frontend lint and types", url: null }]);
   });
 
   it("is CI's own run: the newest run of this repository's ci.yml on exactly that commit", () => {
@@ -3416,7 +3798,7 @@ describe("a green CI run planned for other files", () => {
     const yml = readFileSync(resolve(import.meta.dirname, "../../../.github/workflows/ci.yml"), "utf8");
     // Each job's name and condition: `  <id>:`, then `    name: ...` and, within its first lines, `    if: needs.changes.outputs.<gate> == 'true'`.
     const gated = [...yml.matchAll(/^ {2}[\w-]+:\n {4}name: (.+)\n(?: {4}.+\n){0,3}? {4}if: needs\.changes\.outputs\.(\w+) == 'true'$/gm)].map((m) => ({ name: m[1], gate: m[2] }));
-    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "lint", "packages", "packages", "rust", "website", "website_e2e"]);
+    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "lint", "packages", "packages", "packages", "rust", "website", "website_e2e"]);
     // The draft tier's job is skipped in every full run: it is no path gate.
     for (const { name, gate } of gated) expect([name, gateOf(name)]).toEqual([name, gate === "affected" ? undefined : gate]);
     expect(Object.keys(PLANNED_JOBS).filter((start) => !gated.some((j) => j.name.startsWith(start)))).toEqual([]);
@@ -3987,6 +4369,31 @@ describe("a cancelled CI run newer than one that ended on the same head", () => 
     expect(repo.comments.get(23)![0].body).toMatch(/Waiting: CI Success has not passed on its last commit yet/);
     expect(repo.comments.get(24)![0].body).toMatch(/Waiting: CI Success has not passed on its last commit yet/);
     expect(repo.landed).toEqual([]);
+  });
+
+  it("tells a pull request that changes a workflow, whose only full run was cancelled, to re-run CI", async () => {
+    const repo = fakeRepo();
+    repo.add(21);
+    repo.files.set(21, [".github/workflows/e2e-full.yml"]);
+    repo.drafts.set("h21", [job(501, "CI Success (draft)", "completed", "success")]);
+    const rest = layer({ h21: [wf(35, "h21", { conclusion: "cancelled" })] }, { 35: cutShort });
+    Object.assign(repo.gh, { ciJobs: rest.ciJobs });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(repo.comments.get(21)!.at(-1)!.body).toMatch(/it lands alone once CI Success has passed on its last commit, and no run there counts yet: its full run was cancelled; re-run CI on its last commit\. It keeps its place\.$/);
+    // Only a cancelled run that is the newest and leaves nothing to count says so.
+    const gh = layer(
+      { a: [wf(2, "a", { conclusion: "cancelled" })], b: [wf(4, "b", { conclusion: "cancelled" }), wf(3, "b")], c: [], d: [wf(5, "d", { status: "in_progress", conclusion: null })], e: [wf(7, "e"), wf(6, "e", { conclusion: "cancelled" })] },
+      { 2: cutShort, 3: greenForCore, 4: cutShort, 5: going, 6: cutShort, 7: greenForCore },
+    );
+    expect((await gh.ciJobs("a")).cancelled).toBe(true);
+    expect(ciState(await gh.ciJobs("b"))).toBe("success");
+    expect((await gh.ciJobs("b")).cancelled).toBeUndefined();
+    expect((await gh.ciJobs("c")).cancelled).toBeUndefined();
+    expect((await gh.ciJobs("d")).cancelled).toBeUndefined();
+    // A newer run that ran, green but not counted (`counts`), is what to fix, not the cancelled one under it.
+    expect((await gh.ciJobs("e", () => false)).cancelled).toBeUndefined();
   });
 
   it("decides by the newest run that ended or is still going: red over green, red under a cancelled one, pending over green", async () => {
@@ -4590,6 +4997,33 @@ describe("building a batch with git", () => {
       expect(await layer.landPull("epic/x", prs[1])).toEqual({ ok: true });
       expect(git(["rev-parse", "epic/x"])).toBe(prs[1].sha);
       expect(await layer.landPull("epic/x", prs[2])).toEqual({ ok: false, message: "git could not fetch the head of #3" });
+      layer.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("lands an epic's lone pull request only at the head it read, as dev's squash merge does", async () => {
+    const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
+    const origin = join(root, "origin");
+    const git = (args: string[], cwd = origin) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    try {
+      git(["init", "-q", "-b", "dev", "origin"], root);
+      git(["commit", "-q", "--allow-empty", "-m", "base"]);
+      git(["branch", "-q", "epic/x", "dev"]);
+      git(["checkout", "-q", "-b", "fix-1", "dev"]);
+      git(["commit", "-q", "--allow-empty", "-m", "fix 1"]);
+      git(["update-ref", "refs/pull/1/head", "HEAD"]);
+      const p = { number: 1, title: "fix: number 1", sha: git(["rev-parse", "HEAD"]), branch: "fix-1", fork: false };
+      // The author pushes once more after the train read the head (and its CI) and before it lands.
+      git(["commit", "-q", "--allow-empty", "-m", "fix 1, again"]);
+      git(["update-ref", "refs/pull/1/head", "HEAD"]);
+      const epic = git(["rev-parse", "epic/x"]);
+      git(["clone", "-q", "origin", "clone"], root);
+      const layer = gitLayer({ cwd: join(root, "clone") });
+      // Refused as GitHub refuses dev's squash merge of a moved head (409): the next run reads the new head.
+      expect(await layer.landPull("epic/x", p)).toMatchObject({ ok: false, status: 409 });
+      expect(git(["rev-parse", "epic/x"])).toBe(epic);
       layer.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

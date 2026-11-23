@@ -47,6 +47,7 @@ are in WISP 103, "Browser profile".
 | keys one client listens on | 16 | `GHOSTLY_RELAY_LISTENS` |
 | listens per client per minute, refused ones too (an app starts at most 8 on start or reconnect) | 60 | `GHOSTLY_RELAY_LISTENS_PER_MINUTE` |
 | dials per client per minute | 60 | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
+| listens and dials per address per minute, over all its clients, closed ones too | each per-client rate × clients from one address (960) | (the two above, `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS`) |
 | HyperDHT streams one client holds open (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_STREAMS` |
 | bytes waiting for a client that it has not read yet, with what it sent that its far peers have not taken yet (one stream past half of it is closed) | 8 MiB | `GHOSTLY_RELAY_QUEUED_BYTES` |
 | bytes waiting, both ways, over all clients (past it, the client holding the most is dropped) | 96 MiB | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
@@ -75,6 +76,7 @@ at most 5 a minute, then one count a minute while it goes on (`refused address (
 | `dropped no pong` | a client that had not answered the last ping by the next | `GHOSTLY_RELAY_PING_MS` |
 | `dropped listen rate`, `dropped listen limit` | a client past `listensPerMinute`, or past `listens` at once | `GHOSTLY_RELAY_LISTENS_PER_MINUTE`, `GHOSTLY_RELAY_LISTENS` |
 | `dropped dial limit` | a client past `connectsPerMinute` | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
+| `dropped address listen rate`, `dropped address dial limit` | a client whose address has started `listensPerMinute` (or `connectsPerMinute`) × `clientsPerAddress` in the last minute, over all its clients, closed ones too | `GHOSTLY_RELAY_LISTENS_PER_MINUTE`, `GHOSTLY_RELAY_CONNECTS_PER_MINUTE`, `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS` |
 | `dropped stream limit` | a client dialling past `streams` open | `GHOSTLY_RELAY_STREAMS` |
 | `dropped queue`, `closed far queue` | a client holding more than `queuedBytes` unread or untaken, or one of its streams half of it (closed, the client stays) | `GHOSTLY_RELAY_QUEUED_BYTES` |
 | `dropped queue total` | the client holding the most, while all of them hold more than `queuedTotalBytes` | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |

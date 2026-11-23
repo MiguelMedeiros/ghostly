@@ -14,7 +14,7 @@ export function databaseName(): string {
   return dbName;
 }
 /** The schema this build reads and writes. A database stored at a higher one is a newer build's: it is never opened. */
-export const DB_VERSION = 16;
+export const DB_VERSION = 17;
 
 /**
  * Why the profile's database did not open. `newer`: a newer Ghostly stored it (IndexedDB never opens a database below
@@ -132,6 +132,11 @@ function storedVersion(name: string): Promise<number | undefined> {
 export const CARD_INDEX = "byCardKind";
 /** The messages store's index of the messages that carry a file, by chat (`linkId`, `file.id`): what `db.getFileMessages` reads. */
 export const FILE_INDEX = "byLinkFile";
+/**
+ * The messages store's index of the rows that hold the frame their group message came in (`StoredMessage.frame`), by
+ * group (`linkId`, `frame.t`): what `db.getFramedMessages` reads.
+ */
+export const FRAME_INDEX = "byLinkFrame";
 /** The wallet history's index by (mint, time): what `newestWalletTx` reads. */
 export const WALLET_TX_INDEX = "byMintTime";
 
@@ -293,6 +298,9 @@ export function openDb(): Promise<IDBDatabase> {
       // v16: the messages that carry a file, by chat or group, so a chat's files are read without its texts (`file list`).
       // A message without a file has no such key and is not in it.
       if (!messages.indexNames.contains(FILE_INDEX)) messages.createIndex(FILE_INDEX, ["linkId", "file.id"]);
+      // v17: the rows of a group that hold the frame their message came in, so a group's start takes the frames it hands
+      // on without reading its whole history. A row without a frame (a 1:1 chat's, or one that gave it up) is not in it.
+      if (!messages.indexNames.contains(FRAME_INDEX)) messages.createIndex(FRAME_INDEX, ["linkId", "frame.t"]);
     };
     request.onsuccess = () => {
       // Opened after it was said to be blocked: nobody uses this connection, and it must not block the next open.
@@ -352,11 +360,18 @@ export const WALLET_SETTINGS_FIELDS = ["mints", "mintsInitialized", "walletSetup
  * emptied, the profile's records of the settings store are deleted and the `settings` record keeps only its wallet
  * fields. The wallets (proofs, payments, quotes, history, payment journal, wallet records) stay: ecash is money, and
  * nothing else holds a copy of it. The caller stops the peer first, or it may write back what was just deleted.
+ * `database`: another peer database of the profile than the one this page runs on (a fork a handoff kept), opened as
+ * stored and closed after; the caller checks it is there, since opening it by name would make it.
  */
-export async function clearProfileStores(): Promise<void> {
+export async function clearProfileStores(database?: string): Promise<void> {
   if (typeof indexedDB === "undefined") return;
-  const db = await openDb();
+  const db = database ? await wrap(indexedDB.open(database)) : await openDb();
+  try { await clearStoresOf(db); } finally { if (database) db.close(); }
+}
+
+async function clearStoresOf(db: IDBDatabase): Promise<void> {
   const names = [...PROFILE_STORES, STORES.settings].filter((name) => db.objectStoreNames.contains(name));
+  if (!names.length) return;
   const tx = db.transaction(names, "readwrite");
   for (const name of names) if (name !== STORES.settings) tx.objectStore(name).clear();
   if (names.includes(STORES.settings)) {

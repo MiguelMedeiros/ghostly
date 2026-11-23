@@ -3,6 +3,7 @@ import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
 import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, askPeer, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
 import servicesEn from "../../ui/src/locales/en/services.json";
+import { CLIPBOARD_GUARD_HASH, VIEWER_GUARD_CSP } from "@ghostly/core";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -327,7 +328,7 @@ describe("viewer tabs", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       postData: '{"name":"ç"}',
-    });
+    }, "XHR");
     expect(answer.method).toBe("Fetch.fulfillRequest");
     expect(answer.params).toMatchObject({ responseCode: 201, responseHeaders: [{ name: "content-type", value: "text/html" }, { name: "content-security-policy", value: expect.any(String) }, { name: "permissions-policy", value: expect.stringContaining("geolocation=()") }] });
     expect(bodyText(answer.params)).toBe("<h1>atlas</h1>");
@@ -348,10 +349,11 @@ describe("viewer tabs", () => {
     const url = `https://${SERVICE}.${PEER}.${TAG}.invalid/`;
 
     engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"]]);
-    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+    // A page also gets the guard's (viewerClipboard.test.ts), and a contact's policy that would refuse it its hash.
+    expect(policies((await pauseRequest(world, tabId, { url }, "Document")).params)).toEqual([`${VIEWER_GUARD_CSP}, ${policy}`]);
 
-    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
-    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([`default-src * http: ws:, img-src *, ${policy}`]);
+    engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"], ["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
+    expect(policies((await pauseRequest(world, tabId, { url }, "Document")).params)).toEqual([`default-src * http: ws: ${CLIPBOARD_GUARD_HASH}, img-src *, ${VIEWER_GUARD_CSP}, ${policy}`]);
 
     const offline = await httpError("offline", "offline");
     engineControl().respond = async () => {
@@ -389,7 +391,8 @@ describe("viewer tabs", () => {
     // What a tab shows goes through as before, and so does a redirect: its target is asked for as a page too.
     const served = (params: Record<string, unknown>, status = 200) => {
       expect(params.responseCode).toBe(status);
-      expect(bodyText(params)).toBe("#!/bin/sh\n");
+      // An HTML page with the clipboard guard first (viewerClipboard.test.ts).
+      expect(bodyText(params)).toMatch(/^(<script>[^]*<\/script>)?#!\/bin\/sh\n$/);
     };
     served(await page([["Content-Type", "text/html; charset=utf-8"]]));
     served(await page([["content-type", "text/plain"], ["content-disposition", "inline; filename=notes.txt"]]));
@@ -720,7 +723,7 @@ describe("viewer tabs", () => {
     const { default: ar } = await import("../../ui/src/locales/ar/services.json");
     // Arabic's chunk transformed once here, so the peer's own `loadLocale` is not slower than `pauseRequest` waits.
     await import("../../ui/src/locales/ar/index.ts");
-    const named = (text: string) => text.replace("{{app}}", "&#60;b&#62;Atlas&#60;/b&#62;");
+    const named = (text: string) => text.replace("{{app}}", "⁨&#60;b&#62;Atlas&#60;/b&#62;⁩");
 
     // The contact's machine answered in place of their app, which is not running there (docs/PROTOCOL.md "Host errors").
     engineControl().respond = async () =>
@@ -743,7 +746,7 @@ describe("viewer tabs", () => {
       okResponse("This peer does not share that service.\n", 404, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", "unknown-service"]]);
     const gone = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/` });
     expect(gone.params).toMatchObject({ responseCode: 404 });
-    expect(bodyText(gone.params)).toContain(">Atlas is no longer shared with you.<");
+    expect(bodyText(gone.params)).toContain(">⁨Atlas⁩ is no longer shared with you.<");
   });
 
   it("stops intercepting once the tab leaves the virtual origin, and only then", async () => {

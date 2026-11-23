@@ -4,7 +4,6 @@
     { "package": "glib", "id": "RUSTSEC-2024-0429", "until": "2026-12-31", "why": "Linux GTK stack pulled in by Tauri (webkit2gtk 4.1). Unsoundness in VariantStrIter, which we do not use. Goes away when Tauri moves to glib 0.20." },
     { "package": "glib", "id": "GHSA-wrw7-89jp-8q8g", "until": "2026-12-31", "why": "Same advisory as RUSTSEC-2024-0429." },
     { "package": "proc-macro-error", "id": "RUSTSEC-2024-0370", "until": "2026-12-31", "why": "Unmaintained, build-time only (via Tauri's GTK bindings)." },
-    { "package": "paste", "id": "RUSTSEC-2024-0436", "until": "2026-12-31", "why": "Unmaintained proc-macro, build-time only, via iroh -> netwatch -> netlink-packet-core. No known vulnerability." },
     { "package": "pin-utils", "id": "RUSTSEC-2026-0441", "until": "2026-12-31", "why": "Unmaintained, not vulnerable: its pin_mut! macro is in std (core::pin::pin!). Comes in only through hyper 1.x (via reqwest/hyper-rustls under iroh, iroh-relay, pkarr and tauri-plugin-updater, and hyper-util). Goes away when hyper drops it." },
     { "package": "zvariant", "id": "RUSTSEC-2026-0370", "until": "2026-11-30", "why": "Unmaintained, not vulnerable: merged into zbus 6.0.0 (2026-10-16). Linux D-Bus only, via zbus 5 in apps/desktop and in notify-rust, tauri-plugin-notification and tauri-plugin-single-instance, whose latest releases still require zbus 5. Move to zbus 6 when they do." },
     { "package": "zbus_names", "id": "RUSTSEC-2026-0371", "until": "2026-11-30", "why": "Same as RUSTSEC-2026-0370 (merged into zbus 6)." },

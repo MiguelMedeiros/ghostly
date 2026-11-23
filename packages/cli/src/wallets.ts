@@ -240,6 +240,9 @@ export function mintUrlShape(params: Params): string {
   return url;
 }
 
+/** A count of sats in a refusal: "1 sat", "2 sats". */
+const satsText = (n: number) => `${n} sat${n === 1 ? "" : "s"}`;
+
 /**
  * What `pay` says with `paid: false`: the payment is not known paid yet. The mint (or the card's source) holds it
  * pending, or its answer was lost; the engine keeps asking and never pays it twice. Before, the answer said `paid:
@@ -251,8 +254,9 @@ function notPaidYet(ctx: ApiContext, n: WalletNetwork, source: string, amount: n
   if (source !== CASHU_MINT_SOURCE) {
     return `Not paid yet: your Lightning source has not confirmed this payment (it is pending, or its answer was lost). It is asked again${running} and never paid twice: \`ghostly wallet list\` shows the card's balance once it settles.`;
   }
-  const sats = `${amount + feeReserve} ${n === "testnet" ? "test sats" : "sats"}`;
-  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} are set aside for it, out of the balance: they leave with the payment, or come back to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet history\` lists it once paid, and \`ghostly wallet list\` shows the balance.`;
+  const total = amount + feeReserve, one = total === 1;
+  const sats = `${total} ${n === "testnet" ? "test sat" : "sat"}${one ? " is" : "s are"}`;
+  return `Not paid yet: the mint has not settled this payment (it is pending, or its answer was lost). ${sats} set aside for it, out of the balance: ${one ? "it leaves with the payment, or comes back" : "they leave with the payment, or come back"} to the balance if the mint says it failed. It settles by itself: the wallet keeps asking the mint${running} and never pays it twice. \`ghostly wallet history\` lists it once paid, and \`ghostly wallet list\` shows the balance.`;
 }
 
 function badMintUrl(error: unknown): boolean {
@@ -470,7 +474,7 @@ const WALLETS: Record<string, Method> = {
       // Asked before the address's server hears of the payment (and its comment).
       if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
       const view = await node(ctx).lnurlResolve({ text, network: n });
-      if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${view.maxSat} sats`);
+      if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${satsText(view.maxSat)}`);
       const got = await node(ctx).lnurlInvoice({ id: view.id, amount, ...(comment ? { comment } : {}), network: n });
       invoice = got.invoice; note = got.note;
     }
@@ -479,9 +483,9 @@ const WALLETS: Record<string, Method> = {
     const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
     // With an invoice, --amount is what the payer expects it to ask: the invoice's writer never decides past it.
     const expected = isInvoice(text) ? num(params, "amount", 0, { min: 1 }) : 0;
-    if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${quote.amount} sats, not the ${expected} given with --amount`);
+    if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${satsText(quote.amount)}, not the ${expected} given with --amount`);
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
-    if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
+    if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${satsText(quote.feeReserve)}, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
     const source = (quote as { source?: string }).source ?? quote.mint;
     return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source, paid: paid.paid, ...(!paid.paid && { note: notPaidYet(ctx, n, source, quote.amount, quote.feeReserve) }) };

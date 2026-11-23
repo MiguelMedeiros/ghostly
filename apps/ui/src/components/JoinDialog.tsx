@@ -293,7 +293,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     </div>}
     {manual && <form className="mt-3" onSubmit={event => { event.preventDefault(); if (!busyRef.current) accept(input.trim()); }}>
       <textarea ref={manualInput} aria-label={onDevice ? t("devices.join.code") : t("join.invite")} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-invalid={error && input.trim() ? true : undefined} aria-describedby={error ? errorId : undefined} value={input} onChange={event => { setInput(event.target.value); setError(null); }} placeholder={onDevice ? t("devices.join.codePlaceholder") : t("join.placeholder")} rows={3} className="w-full resize-none rounded-lg bg-input-bg p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-accent" />
-      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><FocusSafeButton disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent text-panel-header`}>{onDevice ? t("devices.join.anotherButton") : t("join.submit")}</FocusSafeButton></div>
+      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(min(100%,7rem),1fr))] gap-3"><button type="button" onClick={close} className={`${button} border border-border`}>{t("common.cancel")}</button><FocusSafeButton disabled={!input.trim() || busy || starting || scanning} className={`${button} bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] text-panel-header`}>{onDevice ? t("devices.join.anotherButton") : t("join.submit")}</FocusSafeButton></div>
     </form>}
   </dialog>;
 }

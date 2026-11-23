@@ -6,7 +6,7 @@ import { useRun } from "../run";
 import { Select } from "../../ui/Select";
 import { PROVIDER_FORMS, type ProviderFormProps } from "./forms";
 import { changeableFields, sourceStatus } from "./sourceStatus";
-import { fieldText, providerText } from "./providerText";
+import { fieldText, providerLabel, providerText } from "./providerText";
 import { useI18n } from "../../../contexts/I18nContext";
 import { focusLost } from "../../../lib/focus";
 import { exactText } from "../../../lib/exactText";
@@ -137,15 +137,17 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
   const descriptor = found && providerText(t, found);
   const Form = descriptor ? PROVIDER_FORMS[descriptor.id] ?? ProviderConfigForm : null;
   const current = offered.find((d) => d.id === view.providerId);
+  // The source's name in the app's language ("Nœud LND"); a plugin's stays its own.
+  const name = view.providerId && view.label ? providerLabel(t, view.providerId, view.label) : view.label;
   const serverFields = onReconfigure ? changeableFields(view).map((f) => fieldText(t, view.providerId!, f)) : [];
   const failing = view.status === "error" || (view.status === "connecting" && !!view.failures);
   const submit = (values: Record<string, string>) => void run(async () => { setSaved(""); await onSet!(descriptor!.id, values); setChosen(""); handOff.current = true; setSaved(t(kind === "onchain" ? "wallet.source.savedOnchain" : "wallet.source.savedLightning", { name: descriptor!.label })); }, "set");
-  const reconfigure = (values: Record<string, string>) => void run(async () => { setSaved(""); await onReconfigure!(values); setServerOpen(false); setSaved(view.label ? t("wallet.source.reconfigured", { name: view.label }) : t("wallet.source.reconfiguredUnnamed")); }, "server");
+  const reconfigure = (values: Record<string, string>) => void run(async () => { setSaved(""); await onReconfigure!(values); setServerOpen(false); setSaved(name ? t("wallet.source.reconfigured", { name }) : t("wallet.source.reconfiguredUnnamed")); }, "server");
 
   return (
     <Section title={t("wallet.source.title")} testId={`${kind}-source`}>
       <Row testId={`${kind}-source-current`}
-        label={view.providerId ? <>{view.label ?? view.providerId}{view.isDefault && onSet && <span className="text-accent ms-2 text-[10px] uppercase tracking-wider">{t("wallet.source.default")}</span>}</> : t("wallet.source.none")}
+        label={view.providerId ? <>{name ?? view.providerId}{view.isDefault && onSet && <span className="text-accent ms-2 text-[10px] uppercase tracking-wider">{t("wallet.source.default")}</span>}</> : t("wallet.source.none")}
         hint={<span ref={status} tabIndex={-1} className="focus:outline-none" data-testid={`${kind}-source-status`}>{sourceStatus(t, view)}</span>}>
         {onRetry && failing && view.providerId && <Button disabled={busy} loading={running === "retry"} onClick={() => void run(onRetry, "retry")} data-testid={`${kind}-source-retry`}>{t("wallet.source.retry")}</Button>}
         {serverFields.length > 0 && !serverOpen && <Button ref={changeServer} disabled={busy} onClick={() => { setServerOpen(true); setSaved(""); }} data-testid={`${kind}-source-change-server`}>{t("wallet.source.changeServer")}</Button>}
@@ -169,7 +171,7 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
               onChange={(v) => { setChosen(v); setSaved(""); }}
               options={offered.map((d) => ({
                 value: d.id,
-                label: d.label,
+                label: providerLabel(t, d.id, d.label),
                 description: [d.custodial && t("wallet.source.custodial"), d.experimental && t("wallet.source.experimental"), d.id === view.providerId && t("wallet.source.inUse")].filter(Boolean).join(" · ") || undefined,
                 disabled: d.id === current?.id && view.status === "ready" && d.fields.length === 0,
               }))} />
