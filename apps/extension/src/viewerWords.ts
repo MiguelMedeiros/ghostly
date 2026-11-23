@@ -18,6 +18,12 @@ export const hostErrorShown = (headers: readonly (readonly [string, string])[], 
   shown((t) => hostErrorText(headers, app, t) ?? t("services.window.failed"));
 
 /**
+ * A contact's app refused because Hide my IP from contacts is on in the peer (offscreen.ts), whatever the page that
+ * opened the tab believed: said as the app says it when it opens no tab (errorText.ts `errors.relayOnly.appInExtension`).
+ */
+export const relayOnlyShown = (): Promise<ShownError> => shown((t) => t("errors.relayOnly.appInExtension"));
+
+/**
  * In the profile's language, as its pages keep it (settings.ts `settingsKey`, under the storage profile the peer set).
  * Read only: a profile with no settings yet is its first page's to set up, so English meanwhile.
  */
