@@ -198,7 +198,10 @@
       "noFee": "sin comisión",
       "none": "Nada todavía",
       "note": {
+        "notSent": "Un pago no se envió",
+        "paidRequest": "Solicitud de un contacto pagada",
         "paymentFailed": "Un pago Lightning falló",
+        "paymentFailedFor": "El pago falló: {{note}}",
         "requestPaid": "Solicitud pagada por Lightning",
         "testCoins": "Monedas de prueba del mint de prueba"
       }

@@ -121,6 +121,26 @@ describe("in Portuguese", () => {
     expect(rows[2]).toHaveTextContent("A Lightning payment failed");
   });
 
+  it("the Cashu history says the engine's other notes in Portuguese: a payment not sent, a failed one with its note, a contact's request paid", async () => {
+    const { engine, user } = renderApp(<Wallet />, { language: "pt" });
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 10_000)], balance: 10_000, history: [
+      { id: "split", timestamp: 4, mint: TEST_MINT, kind: "fee", amount: 0, fee: 1, note: "A payment was not sent" },
+      { id: "memo", timestamp: 3, mint: TEST_MINT, kind: "fee", amount: 0, fee: 1, note: "Payment failed: coffee (2)" },
+      { id: "request", timestamp: 2, mint: TEST_MINT, kind: "fee", amount: 0, fee: 1, note: "Payment failed: Paid a contact's request" },
+      { id: "paid", timestamp: 1, mint: TEST_MINT, kind: "lightning-out", amount: 5, fee: 0, note: "Paid a contact's request" },
+    ] }) });
+    await user.click(await screen.findByTestId("wallet-network-testnet"));
+    await user.click(await screen.findByTestId("wallet-history"));
+    const rows = await screen.findAllByTestId("wallet-tx");
+    expect(rows[0]).toHaveTextContent("Um pagamento não foi enviado");
+    // The payment's own note is as it was written, in its own direction.
+    expect(rows[1]).toHaveTextContent("O pagamento falhou: coffee (2)");
+    expect([...rows[1].querySelectorAll("bdi")].map((b) => b.textContent)).toContain("coffee (2)");
+    expect(rows[2]).toHaveTextContent("O pagamento falhou: Pedido de um contato pago");
+    expect(rows[3]).toHaveTextContent("Pedido de um contato pago");
+    for (const row of rows) expect(row).not.toHaveTextContent(/A payment was not sent|Payment failed|Paid a contact's request/);
+  });
+
   it("a wallet's decimal amount field takes the comma a phone's decimal key types, and shows it as typed", async () => {
     let meant = "";
     const Field = () => { const [value, setValue] = useState(""); meant = value; return <Amount value={value} onChange={setValue} unit="USDT" decimals={6} testId="amount" />; };

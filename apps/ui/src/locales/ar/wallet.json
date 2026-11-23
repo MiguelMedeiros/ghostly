@@ -219,7 +219,10 @@
       "noFee": "بلا رسوم",
       "none": "لا شيء بعد",
       "note": {
+        "notSent": "لم تُرسَل دفعة",
+        "paidRequest": "طلب جهة اتصال مدفوع",
         "paymentFailed": "فشلت دفعة Lightning",
+        "paymentFailedFor": "فشلت الدفعة: {{note}}",
         "requestPaid": "طلب مدفوع عبر Lightning",
         "testCoins": "عملات تجريبية من منفذ السكّ التجريبي"
       }
