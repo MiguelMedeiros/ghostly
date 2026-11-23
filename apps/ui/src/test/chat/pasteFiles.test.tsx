@@ -420,6 +420,13 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     expect(pick).toHaveBeenCalledTimes(1);
   });
 
+  // The card's × is 32 px; on a phone a thumb gets 44 (`.tap-target`, index.css) without the card growing.
+  it("the card's × is a thumb's size on a phone", async () => {
+    composer();
+    expect(paste(field(), { types: ["Files"] })).toBe(false);
+    expect(within(await screen.findByRole("alert")).getByRole("button", { name: "Close" })).toHaveClass("tap-target", "h-8", "w-8");
+  });
+
   it("files the browser kept, where files cannot go, say why instead; where they have no place, the paste is left alone", async () => {
     const { unmount } = composer({ fileUnavailable: "Update both peers to send files" });
     expect(paste(field(), { types: ["Files"] })).toBe(false);
