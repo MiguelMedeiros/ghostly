@@ -512,6 +512,10 @@ interface Outgoing {
   wake?: ReturnType<typeof setTimeout>;
   /** Chunks sent and not confirmed yet, in order: where each ended, when it went, and the chat's bytes in flight then. */
   sends: { end: number; at: number; flight: number; generation: number }[];
+  /** The contact holds no offer of it: paused before it was offered, or refused as one too many and waiting its turn. */
+  unoffered?: boolean;
+  /** Refused as one too many asked about there: offered again once fewer of this side's files wait for an answer there. */
+  waitsForAnswer?: boolean;
 }
 
 interface Incoming {
@@ -770,7 +774,7 @@ export class ChatFiles {
   private track(entry: Entry): void {
     if (!transferEnded(entry.record) && this.entries.get(key(entry.record.direction, entry.record.id)) === entry) this.unended.add(entry);
     else this.unended.delete(entry);
-    if (entry.out && this.unended.has(entry) && entry.record.state !== "queued") this.there.add(entry);
+    if (entry.out && this.unended.has(entry) && entry.record.state !== "queued" && !entry.out.unoffered) this.there.add(entry);
     else this.there.delete(entry);
   }
 
@@ -804,7 +808,8 @@ export class ChatFiles {
     this.sweep();
     for (const entry of this.entries.values()) {
       if (transferEnded(entry.record)) continue;
-      if (entry.record.direction === "out") { if (entry.record.state === "queued") this.offerIfRoom(entry); else this.announce(entry); }
+      // Paused here before the contact was offered it: it is offered once resumed.
+      if (entry.record.direction === "out") { if (entry.record.state === "queued") this.offerIfRoom(entry); else if (!entry.out!.unoffered) this.announce(entry); }
       else if (entry.record.state === "queued") this.startIncoming(entry);
       // The sender offers again on its own; one that does not (an older app, one stuck) is asked.
       else if (entry.record.state === "active") this.armNudge(entry);
@@ -915,24 +920,42 @@ export class ChatFiles {
     if (this.attached && this.there.size < this.offerLimit) this.announce(entry);
   }
 
-  /** One of this side's files there ended: the ones waiting for room go, in the order they were sent. */
+  /**
+   * One of this side's files there ended, or was answered: the ones waiting for room go, in the order they were sent.
+   * One refused as one too many asked about goes only once fewer of this side's wait for an answer there.
+   */
   private offerNext(): void {
     if (!this.attached) return;
+    let answers = FILE_LIMITS.maxWaitingOffers - this.askingThere();
     for (const entry of this.unended) {
       if (this.there.size >= this.offerLimit) return;
-      if (entry.out && entry.record.state === "queued") this.announce(entry);
+      if (!entry.out || entry.record.state !== "queued") continue;
+      if (entry.out.waitsForAnswer) { if (answers <= 0) continue; answers--; }
+      this.announce(entry);
     }
   }
 
+  /** This side's files there that wait for the person there to answer: the receiver takes `maxWaitingOffers` of them. */
+  private askingThere(except?: Entry): number {
+    let count = 0;
+    for (const entry of this.there) if (entry !== except && entry.record.state === "asking" && entry.record.waitingFor === "consent") count++;
+    return count;
+  }
+
   /**
-   * Refused as one too many there: it waits as `queued`, offered again once another of this side's files there ends, and
-   * no more than the others there are offered on this session. With none of them there, nothing would end: false, it fails.
+   * Refused as one too many there: it waits as `queued`, offered again once another of this side's files there ends.
+   * With `maxWaitingOffers` of them asked about there, it is that limit (a file to be asked about): it goes once one of
+   * those is answered, and the files taken without asking still go. Else it is the contact's unfinished files: no more
+   * than the others there are offered on this session. With none of them there, nothing would end: false, it fails.
    */
   private waitForRoom(entry: Entry): boolean {
     const { record } = entry, out = entry.out!;
     const others = this.there.size - (this.there.has(entry) ? 1 : 0);
     if (!others) return false;
-    this.offerLimit = Math.min(this.offerLimit, others);
+    // Narrowed for it, a photo after a video nobody answered waited for that answer, a week at most.
+    if (this.askingThere(entry) >= FILE_LIMITS.maxWaitingOffers) out.waitsForAnswer = true;
+    else this.offerLimit = Math.min(this.offerLimit, others);
+    out.unoffered = true;
     out.generation++; out.next = record.confirmed; out.block = undefined; clearTimeout(out.timer);
     this.moving.delete(entry); this.held.delete(entry);
     // Its sender's pause holds: resumed, it is offered again.
@@ -955,6 +978,7 @@ export class ChatFiles {
     out.next = record.confirmed;
     const paused = record.state === "paused" && record.pausedBy === "me";
     if (!this.send(this.offerFrame(record, paused))) return;
+    if (out.unoffered || out.waitsForAnswer) { out.unoffered = out.waitsForAnswer = undefined; this.track(entry); }
     // Every byte was confirmed: it stays so (`sentWhole`), the receiver answers with its check (`pf-done`) or its offset.
     // As `offered`, an empty file was one nobody had answered yet, and its Cancel left it cancelled here, kept there.
     if (!paused && record.state !== "offered" && record.state !== "verifying") { record.state = "offered"; record.pausedBy = undefined; this.changed(entry); }
@@ -1458,6 +1482,7 @@ export class ChatFiles {
         if (!isInt(frame.offset, record.file.size)) return;
         // Paused here before the person there answered: it stays so, and their side hears it is paused.
         if (record.state === "paused" && record.pausedBy === "me") { this.send(this.offerFrame(record, true)); return; }
+        const answered = record.state === "asking";
         out.generation++;
         record.confirmed = frame.offset;
         out.next = frame.offset;
@@ -1469,6 +1494,8 @@ export class ChatFiles {
         this.wakeHeld();
         if (record.confirmed === record.file.size) void this.sendSum(outgoing);
         else { this.armStall(outgoing); void this.pump(outgoing); }
+        // Answered there: one waiting for an answer to be given goes.
+        if (answered) this.offerNext();
         return;
       }
       case "pf-wait": {
@@ -1602,9 +1629,12 @@ export class ChatFiles {
     if (direction === "in" && record.state === "asking") return;
     // Arrived whole (offered again after a restart or a switch while it was checked there): paused, it could be cancelled.
     if (sentWhole(record)) return;
+    // Not offered yet (waiting its turn): it stays so, paused here alone, and is offered once resumed.
+    if (entry.out && record.state === "queued") entry.out.unoffered = true;
     record.state = "paused";
     record.pausedBy = "me";
-    if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; entry.out.block = undefined; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }
+    if (entry.out?.unoffered) entry.out.generation++;
+    else if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; entry.out.block = undefined; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }
     else { this.send({ t: "pf-wait", id, why: "paused" }); void this.checkpoint(entry); this.startNext(); }
     this.changed(entry);
     if (entry.out) this.wakeHeld();
@@ -1617,7 +1647,8 @@ export class ChatFiles {
     record.state = "queued";
     if (direction === "in") record.since = this.now();
     this.changed(entry);
-    if (direction === "out") { if (this.attached) this.announce(entry); }
+    // One the contact was never offered waits its turn, as when it was sent.
+    if (direction === "out") { if (entry.out!.unoffered) this.offerIfRoom(entry); else if (this.attached) this.announce(entry); }
     else this.startIncoming(entry);
   }
 
@@ -1658,7 +1689,9 @@ export class ChatFiles {
     if (transferEnded(record)) return false;
     if (record.state === "paused" && record.pausedBy === "me") { this.resume("out", id); return this.attached; }
     if (!this.attached) return false;
-    this.announce(entry);
+    // Not offered yet: it waits its turn, offered past the others it would be refused as one too many.
+    if (record.state === "queued") this.offerIfRoom(entry);
+    else this.announce(entry);
     return true;
   }
 
