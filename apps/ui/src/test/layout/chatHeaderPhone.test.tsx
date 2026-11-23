@@ -344,6 +344,8 @@ describe("a chat's Tech Info", () => {
     await user.click(options);
     await user.click(screen.getByTestId("chat-tech-info"));
     const dialog = screen.getByRole("dialog", { name: "Tech Info" });
+    // 32 px drawn; on a phone a thumb gets 44 (`.tap-target`, index.css) without the header growing.
+    expect(within(dialog).getByRole("button", { name: "Close" })).toHaveClass("tap-target");
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Tech Info" })).not.toBeInTheDocument();
     expect(options).toHaveFocus();
