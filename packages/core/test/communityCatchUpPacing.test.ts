@@ -10,7 +10,7 @@ import {
 /*
  * A member back in a busy community asks another for what it missed, and the answer is the commits from where it is,
  * their secrets, every stored frame it lacks (the store keeps 256), the link's seed, pending leaves and the picture:
- * 257 frames from a full store, four times the 64 an app before 2026-10-07 holds waiting on one session before it ends
+ * 258 frames from a full store, four times the 64 an app before 2026-10-07 holds waiting on one session before it ends
  * it. The answer goes a slice at a time, each once the member's app handled the last, as a private group's does
  * (groupCatchUpPacing.test.ts), with the same frames in the same order.
  */
@@ -138,13 +138,13 @@ function needsFirst(types: string[]): [number, number] {
 const slice = COMMUNITY_LIMITS.catchUpSlice;
 
 describe("a community member's catch-up answer goes a slice at a time", { timeout: 120_000 }, () => {
-  it("a member back after the store filled is handed 257 frames in one answer; with commits, more (measured)", async () => {
+  it("a member back after the store filled is handed 258 frames in one answer; with commits, more (measured)", async () => {
     const full = await awayCommunity(300);
     const one = await answer(full.alice, full.bob.session.myKey, full.sync);
-    // The 256 frames the store keeps and the link's seed: Bob, only behind, holds nothing Alice would ask back for.
+    // The 256 frames the store keeps, the link's seed and Alice's question back.
     expect(full.alice.session.state.store).toHaveLength(COMMUNITY_LIMITS.store);
-    expect(kinds(one.sent)).toEqual({ "group-msg": 256, "group-entry": 1 });
-    expect(one.sent).toHaveLength(257);
+    expect(kinds(one.sent)).toEqual({ "group-msg": 256, "group-entry": 1, "group-sync": 1 });
+    expect(one.sent).toHaveLength(258);
     // Twenty people let in and one removed while Bob was away: their commits and secrets come first.
     const busy = await awayCommunity(300, 20);
     const two = await answer(busy.alice, busy.bob.session.myKey, busy.sync);

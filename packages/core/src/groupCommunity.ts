@@ -136,6 +136,11 @@ export const COMMUNITY_LIMITS = {
  * frame of the answer keeps it open, since it goes a slice at a time. As a private group's.
  */
 const ANSWER_WINDOW_MS = 5_000;
+/**
+ * My answer to a member's sync asks back with my own at least this often, though its sync says it holds nothing I
+ * lack: the pending leaves it holds are in no sync, and its answer hands them on.
+ */
+const ASK_BACK_MS = 5 * 60_000;
 
 /**
  * After the admin role moved to me: how long I still take the statement of the admin I took it from (WISP 903
@@ -756,6 +761,8 @@ export class CommunitySession {
   private readonly cameLive = new WeakSet<object>();
   /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
+  /** Per member: when my answer to its sync last asked back with my own (`ASK_BACK_MS`). In memory only. */
+  private readonly askedBack = new Map<string, number>();
   /** Messages taken per author, a few a second (`MessagePace`). In memory only. */
   private messagePace = new Map<string, MessagePace>();
   /** The entry seed sealed to each member, for the seed it seals (`entryFrame`): every sync answer carries it. In memory only. */
@@ -2821,10 +2828,17 @@ export class CommunitySession {
     for (const request of this.state.pendingLeaves) if (rosterHas(this.roster, request.s)) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
     // Or here, those after every message.
     answer.push(...metas.map(m => m.frame));
-    // And where I am, so they can hand me what I lack (asked once in a while, not in a loop), unless their sync says
-    // they hold nothing I lack: a hub answered each member's 30 s sync with its own, ~5 KB at 48 members, twice
-    // what an idle edge carried, and the member's answer to it was its entry seed again.
-    if (!this.holdsNothingNew(frame)) ask();
+    // And where I am, so they can hand me what I lack (asked once in a while, not in a loop), when their sync says
+    // they hold something I lack; when they are behind (handed frames here), as they may hold more above a gap their
+    // sync stops below; and every `ASK_BACK_MS` anyway, as no sync names the pending leaves they hold. A hub answered
+    // each member's 30 s sync with its own, ~5 KB at 48 members, and the member's answer to it was the seed again.
+    const now = this.hooks.clock?.() ?? Date.now();
+    if (!this.holdsNothingNew(frame) || answer.some(f => f.t === "group-msg") || now - (this.askedBack.get(from) ?? -Infinity) >= ASK_BACK_MS) {
+      // Bounded: an entry older than `ASK_BACK_MS` says what no entry does.
+      if (this.askedBack.size >= this.roster.length) for (const [key, at] of this.askedBack) if (now - at >= ASK_BACK_MS) this.askedBack.delete(key);
+      this.askedBack.set(from, now);
+      ask();
+    }
     this.answers.handOut(from, answer);
   }
 
