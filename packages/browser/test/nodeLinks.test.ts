@@ -633,7 +633,7 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
       });
 
       it("a chat paired while every listener was in use takes one once a chat goes quiet, though it is not on screen", async () => {
-        // agents#1619: a CLI daemon's ninth chat, paired while eight chats used in the last two minutes held the listeners,
+        // A CLI daemon's ninth chat, paired while eight chats used in the last two minutes held the listeners,
         // stayed "waiting" for 10+ minutes: it was in use only while its invite was on screen, and its retries could take
         // only a free listener. Its error said it would take one once a chat went quiet.
         const { node, holders, nine } = await allLive([1, 1, 1, 1, 1, 1, 1, 1], { pairedPeerKey: undefined });
@@ -863,7 +863,7 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
           expect(views).not.toHaveBeenCalled();
         });
 
-        describe("both ends keep the same edge (ghostly-agents#1437)", () => {
+        describe("both ends keep the same edge", () => {
           type Edge = Holder;
           const irohSaid = (edge: Edge) => edge.options.events.onPacketTransports(["iroh/1"], { "iroh/1": { id: "cd".repeat(32), relay: "https://relay.test./", addresses: [] } } as never);
           /** An admin with these many chats live and three groups of two members each, made one after another. */
@@ -964,7 +964,7 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
             expect(onIroh()).toEqual([edgeIds[0]]);
           });
 
-          it("in a private group, the edge kept goes to the member admitted just before, not to the admin; a community keeps the admin's (ghostly-agents#1509)", async () => {
+          it("in a private group, the edge kept goes to the member admitted just before, not to the admin; a community keeps the admin's", async () => {
             // Without WebRTC, every member kept its edge to the admin: an admin with five chats live and four groups of six
             // had twenty to answer within its eight listeners, and members of the fourth group were left with no edge at all.
             const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
@@ -1846,7 +1846,7 @@ describe("an away contact", () => {
   });
 });
 
-describe("a 1:1 session that opens (agents#2468)", () => {
+describe("a 1:1 session that opens", () => {
   // Each open of a session read the chat's whole history three times beside what it sent: the outbox's look twice (the
   // link says it is open, and that it switched transport) and the edit queue's relearning, with nothing to send again.
   const WIRE_OLD = "o".repeat(22);
@@ -2761,7 +2761,7 @@ describe("private groups through the engine", () => {
       await vi.waitFor(() => expect(running("hyperdht/1")).toHaveLength(GROUP_NATIVE_SLOTS));
       expect(waiting()).toHaveLength(0);
       // Thirteen in all, each keeping its edge to its admin (its packet says it listens there): each is answered, past
-      // the twelve a group's other edges may hold (ghostly-agents#1437), on one transport each.
+      // the twelve a group's other edges may hold, on one transport each.
       await join(7);
       await vi.waitFor(() => expect(running("iroh/1")).toHaveLength(GROUP_IROH_WEB_SLOTS + 1));
       await node["nativeQueues"].get("hyperdht/1");

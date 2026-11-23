@@ -449,7 +449,7 @@ export function MessageInput({
   // The draft emptied (by hand, or given to an edit): nothing left to translate.
   useEffect(() => { if (!text.trim() || editKey) closeTranslation(); }, [text, editKey, closeTranslation]);
   // The chat's translation turned off, or its language changed, while a preview was open: that preview is closed, so
-  // Enter sends the draft again rather than wait on a translation nothing can make (ghostly-agents#1812).
+  // Enter sends the draft again rather than wait on a translation nothing can make.
   // A group's list is ordered by use and recomputed as messages arrive, so it is compared as a set, and an open preview
   // stays while the language it shows is still offered: a reorder or a new language must not drop a picked translation.
   const offered = translation ? (translation.language ? [translation.language] : [...(translation.languages ?? [])].sort()).join(",") : null;
