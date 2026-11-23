@@ -140,6 +140,30 @@ export const authorName = (group: FormerNamesOf & { formerNames?: GroupView["for
 };
 
 /**
+ * The members `authorName` reads to name `key`: `key`'s, and every other one whose name could be taken for it (its
+ * name's or, out of the roster, its former name's). `authorName` over these names `key` as over the whole roster, so
+ * the chat list keeps them, not a community's hundreds of members, of each group on every engine state.
+ */
+export function authorRoster<M extends Pick<GroupMemberView, "key" | "me" | "nick">>(members: readonly M[], key: string, formerNames?: GroupView["formerNames"]): M[] {
+  const author = members.find(m => m.key === key);
+  const name = author ? !author.me && author.nick : formerNames?.[key];
+  if (!name) return author ? [author] : [];
+  const form = knownNameForm(name);
+  return members.filter(m => m.key === key || (!m.me && m.nick && knownNameForm(m.nick) === form));
+}
+
+/** `sameNameForm` of names already read: `authorRoster` reads a whole roster's on every engine state. */
+const nameForms = new Map<string, string>();
+function knownNameForm(nick: string): string {
+  let form = nameForms.get(nick);
+  if (form === undefined) {
+    if (nameForms.size >= 10_000) nameForms.clear();
+    nameForms.set(nick, form = sameNameForm(nick));
+  }
+  return form;
+}
+
+/**
  * The name `key` went by when it was no longer in the roster. In a community, where anyone with the link comes in, it
  * is told apart by the end of its key where a member there shows it too. A private group's members come in only by
  * the admin's invitation, and one removed and invited again comes back with a new key under the same name: what she

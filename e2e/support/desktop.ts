@@ -106,7 +106,8 @@ class Driver {
     }
     if (!response.ok) {
       const failure = payload.value as { error?: string; message?: string } | undefined;
-      const error = new Error(failure?.message ?? failure?.error ?? `${method} ${url}: ${response.status}`);
+      // WebKitWebDriver now and then fails a command with an empty message (`unknown error`, ""): the call and the error say it.
+      const error = new Error(failure?.message || `${method} ${url}: ${failure?.error || response.status}`);
       error.name = failure?.error ?? "webdriver error";
       throw error;
     }

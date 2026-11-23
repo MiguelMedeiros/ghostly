@@ -45,7 +45,8 @@ describe("invite cards", () => {
     const { inviteCode } = createChatInvite();
     const { user } = bubble(`Here: ${inviteLink(inviteCode)} see you`);
     const card = screen.getByTestId("entity-invite");
-    expect(card).toHaveTextContent("From ~Alice");
+    // The contact's name is isolated (FSI…PDI), so "C++" or "Bob!" keep their punctuation in an Arabic line.
+    expect(card).toHaveTextContent("From ~\u2068Alice\u2069");
     // The text stays as it was, link and all.
     expect(screen.getByTestId("message-text")).toHaveTextContent(`Here: ${inviteLink(inviteCode)} see you`);
     expect(listSessions()).toHaveLength(0);

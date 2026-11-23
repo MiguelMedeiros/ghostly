@@ -182,6 +182,43 @@ describe("names a contact or a member chose, in Arabic, each isolated", () => {
     expect(isolated(note)).toBe(true);
   });
 
+  it("the composer's identity cards: Shown to, the card's Not shared with and the line under the deck", () => {
+    const view = renderApp(<ComposerIdentityPicker peerKey="peer" contact={APP} initial="a" onClose={vi.fn()} />, { language: "ar" });
+    act(() => view.engine.update({ links: [paired()], identityProofs: [proofView({ id: "a" })] }));
+    const picker = screen.getByTestId("composer-identity-hint").closest(".identity-picker")!;
+    // Shown to (the sheet's head), the card's Not shared with and what the contact will see.
+    expect(picker.textContent!.split(APP_ISOLATED).length - 1).toBeGreaterThanOrEqual(3);
+    expect(screen.getByTestId("composer-identity-hint").textContent).toContain(APP_ISOLATED);
+    expect(picker.textContent!.split(APP_ISOLATED).join("")).not.toContain(APP);
+  });
+
+  it("the composer's identity card the contact's app cannot verify: why it cannot be shared", () => {
+    const view = renderApp(<ComposerIdentityPicker peerKey="peer" contact={APP} initial="a" onClose={vi.fn()} />, { language: "ar" });
+    act(() => view.engine.update({ links: [paired({ identities: identitiesView({ contactProviders: ["nostr"] }) })], identityProofs: [proofView({ id: "a" })] }));
+    const hint = screen.getByTestId("composer-identity-hint");
+    expect(hint).toHaveAttribute("data-blocked", "true");
+    expect(hint.textContent).toContain(APP_ISOLATED);
+  });
+
+  it("the composer's identity card turned over: Share with the contact", async () => {
+    const view = renderApp(<ComposerIdentityPicker peerKey="peer" contact={APP} initial="a" onClose={vi.fn()} />, { language: "ar" });
+    document.documentElement.dataset.reduceMotion = "true";
+    act(() => view.engine.update({ links: [paired()], identityProofs: [proofView({ id: "a" })] }));
+    await view.user.click(screen.getByTestId("composer-identity-use"));
+    await waitFor(() => expect(screen.getByTestId("composer-identity-share")).toHaveFocus());
+    expect(screen.getByTestId("composer-identity-share").textContent).toContain(APP_ISOLATED);
+  });
+
+  it("the composer's Ghostly card: the line under the deck and, turned over, who sees only it", async () => {
+    const view = renderApp(<ComposerIdentityPicker peerKey="peer" contact={APP} onClose={vi.fn()} />, { language: "ar" });
+    document.documentElement.dataset.reduceMotion = "true";
+    act(() => view.engine.update({ settings: { nick: "Ghost" }, links: [paired({ myPubKeyZ32: "yzk3gq8qpjb1g4mzr3ff3kr1j4c1b7dxy8dd3mkwqc9k7p3e1mio" })], identityProofs: [proofView({ id: "a" })] }));
+    expect(screen.getByTestId("composer-identity-hint").textContent).toContain(APP_ISOLATED);
+    await view.user.click(screen.getByTestId("composer-identity-ghostly"));
+    await waitFor(() => expect(screen.getByTestId("composer-identity-copy-key")).toHaveFocus());
+    expect(screen.getByTestId("composer-identity-status").textContent).toContain(APP_ISOLATED);
+  });
+
   it("the composer's Ghostly card turned over: What the contact sees", async () => {
     const view = renderApp(<ComposerIdentityPicker peerKey="peer" contact={NAME} onClose={vi.fn()} />, { language: "ar" });
     document.documentElement.dataset.reduceMotion = "true";
