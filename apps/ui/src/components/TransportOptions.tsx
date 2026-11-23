@@ -109,12 +109,14 @@ function Option({ ref, label, hint, off, offShown = false, mark, icon, checked, 
       title={hint ? namedReason(label, hint) : undefined}
       className={`flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1 text-start text-xs transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover ${focus} disabled:cursor-default max-md:min-h-11 ${checked ? "text-text-primary" : "text-text-secondary"} ${disabled && !checked ? "opacity-60" : ""}`}>
       <span aria-hidden="true" className={`flex shrink-0 ${checked ? "text-accent" : ""}`}>{icon}</span>
-      <span className="flex min-w-0 flex-1 flex-col">
+      {/* With a mark the name keeps its width and the mark takes the rest, onto a second line when it must (a long
+          "In use · 34 ms" in Arabic at a larger text size): one line for both cut the name to "W…". */}
+      <span className={`flex min-w-0 flex-col ${mark ? "flex-[0_1_auto]" : "flex-1"}`}>
         <span className="truncate">{label}</span>
         {off && <span aria-hidden="true" className={`text-[11px] text-text-muted ${offShown ? "" : "md:hidden"}`}>{off}</span>}
       </span>
-      {mark && <span className={`flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] ${inUse ? "text-accent" : "text-text-muted"}`}>
-        {inUse && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent" />}{mark}
+      {mark && <span data-testid={`${testId}-mark`} className={`flex flex-1 basis-0 items-center justify-end gap-1 text-end text-[11px] ${inUse ? "text-accent" : "text-text-muted"}`}>
+        {inUse && <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />}{mark}
       </span>}
       <span aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${checked ? "border-accent" : "border-border"}`}>
         {checked && <span className="h-2 w-2 rounded-full bg-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight]" />}
