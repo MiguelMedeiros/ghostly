@@ -459,3 +459,56 @@ describe("a Lightning address or LNURL the mint leaves pending reads as waiting,
     }
   });
 });
+
+// covers: payments.lnurl.card, app.composer.secret-guard
+describe("a Lightning address's comment that looks like a secret is asked about before the service gets it", () => {
+  /**
+   * The comment (LUD-12) goes to the address's service with the invoice request, and from there to its owner, as a
+   * chat payment's memo goes to the contact: a seed or a private key in it is asked about first, as the memo is (the
+   * composer's SecretGuardDialog) and as the CLI's `pay --comment` is. It went with Get invoice, no question asked.
+   */
+  /** BIP39's test vector for entropy 0x7f repeated: it has never held anything. */
+  const SEED = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+  const info = { id: "addr-1", kind: "address", text: "alice@example.com", domain: "example.com", callbackDomain: "example.com", minSat: 1, maxSat: 100_000, description: "Alice", commentAllowed: 200 } as LightningAddressInfo;
+  const withComment = async (comment: string) => {
+    fakeEngine.setState({ wallet: walletView({ mode: "testnet", mints: [mint(TEST_MINT, 5_000)], balance: 5_000 }) });
+    const shown = renderApp(<LightningAddressPay wallet={servicesPlatform!.wallet.forNetwork("testnet")} text="alice@example.com" />);
+    shown.engine.on("lnurlResolve", () => info).on("lnurlInvoice", () => ({ invoice: "lnbc-invoice", note: "Paid alice@example.com" }))
+      .on("walletQuoteInvoice", () => ({ quote: "melt-1", mint: TEST_MINT, amount: 5, feeReserve: 1 }));
+    await shown.user.click(screen.getByTestId("lnurl-lookup"));
+    await shown.user.type(await screen.findByTestId("lnurl-amount"), "5");
+    await shown.user.click(screen.getByTestId("lnurl-comment"));
+    await shown.user.paste(comment);
+    screen.getByTestId("lnurl-invoice").focus();
+    await shown.user.keyboard("{Enter}");
+    return shown;
+  };
+
+  it("a seed: the guard asks with Cancel focused, nothing reaches the service, and Cancel keeps the comment", async () => {
+    const { user, engine } = await withComment(SEED);
+    const guard = await screen.findByTestId("secret-guard");
+    expect(guard).toHaveAttribute("data-kind", "mnemonic");
+    expect(screen.getByTestId("secret-guard-cancel")).toHaveFocus();
+    expect(engine.callsTo("lnurlInvoice")).toHaveLength(0);
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("secret-guard")).toBeNull();
+    expect(engine.callsTo("lnurlInvoice")).toHaveLength(0);
+    expect(screen.getByTestId("lnurl-comment")).toHaveValue(SEED);
+    expect(screen.getByTestId("lnurl-invoice")).toHaveFocus();
+  });
+
+  it("Send anyway goes on to the invoice, with the comment", async () => {
+    const { user, engine } = await withComment(SEED);
+    await user.click(await screen.findByTestId("secret-guard-send"));
+    expect(await screen.findByTestId("lnurl-pay")).toBeInTheDocument();
+    expect(engine.callsTo("lnurlInvoice")).toHaveLength(1);
+    expect(JSON.stringify(engine.callsTo("lnurlInvoice")[0])).toContain(SEED);
+  });
+
+  it("an ordinary comment asks nothing", async () => {
+    const { engine } = await withComment("for the coffee");
+    expect(await screen.findByTestId("lnurl-pay")).toBeInTheDocument();
+    expect(screen.queryByTestId("secret-guard")).toBeNull();
+    expect(engine.callsTo("lnurlInvoice")).toHaveLength(1);
+  });
+});
