@@ -636,8 +636,8 @@ describe("the Tasks board on a phone", () => {
       ...screen.getAllByTestId("tasks-tag"),
       screen.getByTestId("tasks-clear-finished"),
     ];
-    // At least 44 × 44 where a tap lands, a short word ("Bot", "web") included.
-    for (const target of targets) expect(target, target.textContent!).toHaveClass("max-md:min-h-11", "max-md:min-w-11");
+    // At least 44 × 44 where a tap lands, a short word ("Bot", "web") included; in px, as phoneTargetsPx pins (#8056).
+    for (const target of targets) expect(target, target.textContent!).toHaveClass("max-md:min-h-[44px]", "max-md:min-w-[44px]");
     // The tabs are drawn 36 px tall, to leave a phone on its side room for a card: a tap lands on 44 px of them.
     for (const tab of screen.getAllByTestId("tasks-tab")) expect(tab, tab.textContent!).toHaveClass("tap-target", "min-h-9");
   });

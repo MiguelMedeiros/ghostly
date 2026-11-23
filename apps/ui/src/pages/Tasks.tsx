@@ -239,7 +239,7 @@ export function Tasks() {
     model.active ? t("cards.panel.activeCount", { count: model.active }) : t("cards.panel.idle"),
     model.total === 1 ? t("cards.board.tasksOne") : t("cards.board.tasksMany", { count: model.total }),
   ].join(" · ");
-  const pill = (on: boolean) => `cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-11 max-md:min-w-11 ${on ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"}`;
+  const pill = (on: boolean) => `cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-[44px] max-md:min-w-[44px] ${on ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"}`;
 
   return (
     <div ref={pageRef} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-chat-bg" data-testid="tasks-page">
@@ -262,7 +262,7 @@ export function Tasks() {
             <p data-testid="tasks-summary" className="m-0 text-xs text-text-secondary">{summary}</p>
             {showing === "tasks" && model.finished > 0 && (
               <button type="button" data-testid="tasks-clear-finished" onClick={clearFinished} title={t("cards.board.clearFinishedHint")}
-                className="cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-11 max-md:min-w-11">
+                className="cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-[44px] max-md:min-w-[44px]">
                 {t("cards.board.clearFinished")}
               </button>
             )}
