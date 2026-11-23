@@ -84,7 +84,7 @@ function PageNotLoaded({ again, retried }: { again: () => Promise<void>; retried
           {/* `aria-disabled`, not `disabled`: a disabled button gives up the keyboard focus while the file is asked for. */}
           <button type="button" data-testid="page-not-loaded-retry" aria-disabled={busy || undefined} aria-busy={busy || undefined}
             onClick={(event) => void retry(event.currentTarget)}
-            className={`${button} bg-accent text-on-accent hover:bg-accent-hover`}>
+            className={`${button} bg-accent forced-colors:border forced-colors:border-[color:ButtonText] text-on-accent hover:bg-accent-hover`}>
             {t("app.pageNotLoaded.tryAgain")}
           </button>
           {failedAgain && (

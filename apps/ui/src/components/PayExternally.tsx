@@ -63,7 +63,7 @@ export function PayExternally({ uri, value, testId, note, onPaid, size = 144, ac
             iPhone app, the Desktop app's WebView) never takes Tab into a scrolling box by itself, Chromium does. */}
         <code tabIndex={0} className="block break-all select-all bg-black/20 rounded-lg p-2 text-[10px] text-inherit opacity-80 font-mono max-h-20 overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent" data-testid={testId}>{value}</code>
         <div className="flex flex-wrap gap-1.5">
-          <button type="button" className={`${button} bg-accent text-on-accent hover:bg-accent-hover`} data-testid={`${testId}-copy`} onClick={() => void copy()}>{copied ? t("payments.external.copied") : t("common.copy")}</button>
+          <button type="button" className={`${button} bg-accent forced-colors:border forced-colors:border-[color:ButtonText] text-on-accent hover:bg-accent-hover`} data-testid={`${testId}-copy`} onClick={() => void copy()}>{copied ? t("payments.external.copied") : t("common.copy")}</button>
           {/* Only a URI a wallet can open (`lightning:`, `bitcoin:`): a Spark address has no scheme wallets agree on. */}
           {/^[a-z][a-z0-9+.-]*:/i.test(uri) && <a
             className={`${button} bg-black/20 hover:bg-black/30 no-underline text-inherit inline-flex items-center`}
