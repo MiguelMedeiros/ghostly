@@ -15,6 +15,7 @@ import { problemText, type Problem } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { shownUrl } from "../../lib/parse/links";
 import { FocusSafeButton } from "../ui/FocusSafeButton";
+import { providerLabel } from "./providers/providerText";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -59,7 +60,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
     else if (follow.quote && !follow.held && setAside) setFollow({ ...follow, held: true });
   }, [follow, ended, setAside]);
   const shown = ended ? (ended.paid ? "paid" : "failed") : outcome;
-  const sourceName = (source?: string) => (via === "cashu" || !source || source === CASHU_MINT_SOURCE ? t("wallet.lightning.cashuMints") : source === ln?.providerId ? ln.alias ?? ln.label ?? source : source);
+  const sourceName = (source?: string) => (via === "cashu" || !source || source === CASHU_MINT_SOURCE ? t("wallet.lightning.cashuMints") : source === ln?.providerId ? ln.alias ?? (ln.label ? providerLabel(t, ln.providerId, ln.label) : source) : source);
 
   const run = async (task: () => Promise<void>) => {
     setError(null); setBusy(true);

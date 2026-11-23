@@ -706,7 +706,8 @@
               "bip84": "原生 SegWit (BIP84, bc1q…)"
             }
           }
-        }
+        },
+        "label": "BDK 钱包"
       },
       "bitcoind": {
         "description": "你自己的 Bitcoin Core 节点上的钱包，通过其 RPC 连接。密钥由你的节点持有并签名。需要桌面应用。",
@@ -733,7 +734,8 @@
         "description": "通过 Breez SDK 使用的 Spark 自托管 Lightning 钱包。其恢复短语密封在本设备上；sats 由你持有。"
       },
       "cashu-mint": {
-        "description": "发票款项存入你的 Cashu 余额，也从中支付。sats 由 mint 保管。"
+        "description": "发票款项存入你的 Cashu 余额，也从中支付。sats 由 mint 保管。",
+        "label": "Cashu 铸币厂"
       },
       "core-lightning": {
         "description": "你自己的 Core Lightning 节点，通过 Commando 和 rune 连接。sats 由你的节点持有。Web 应用只能通过 wss:// 访问它。",
@@ -770,7 +772,8 @@
             "help": "LND 的 REST 端口（restlisten，默认 8080）。在浏览器中，节点必须用 restcors 允许本应用，并拥有浏览器信任的证书；桌面应用两者都不需要。",
             "label": "REST 地址"
           }
-        }
+        },
+        "label": "LND 节点"
       },
       "nwc": {
         "description": "通过 NWC URI 连接的钱包（Alby Hub、节点的 NWC 服务、托管钱包）。sats 由该钱包持有，手续费上限也由它自己设定：是否托管取决于钱包。",
@@ -782,7 +785,8 @@
         }
       },
       "webln": {
-        "description": "本浏览器中的 Lightning 钱包（Alby 等）。sats 由该钱包持有，付款前它会先询问你。"
+        "description": "本浏览器中的 Lightning 钱包（Alby 等）。sats 由该钱包持有，付款前它会先询问你。",
+        "label": "浏览器钱包（WebLN）"
       }
     },
     "reconfigured": "{{name}} 现在使用该服务器。",
