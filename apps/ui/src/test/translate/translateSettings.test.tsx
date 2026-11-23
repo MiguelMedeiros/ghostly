@@ -159,6 +159,22 @@ describe("the switch, on Desktop with the flag", () => {
     expect(screen.getByTestId("settings-translate-pair")).toHaveTextContent("English → Portuguese");
   });
 
+  it("the focus of a Remove that went through goes to the Remove in its place, the last one, then the switch", async () => {
+    const all = [{ pair: "en-pt", bytes: 36.4 * MB }, { pair: "pt-en", bytes: 37 * MB }, { pair: "es-en", bytes: 37 * MB }];
+    models.translationStatus.mockResolvedValueOnce(status(all)).mockResolvedValueOnce(status(all.slice(1)))
+      .mockResolvedValueOnce(status(all.slice(1, 2))).mockResolvedValue(status([]));
+    const { user } = renderSettings();
+    await user.click(await screen.findByRole("button", { name: "Remove English → Portuguese" }));
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove Portuguese → English" })).toHaveFocus());
+    await user.click(screen.getByRole("button", { name: "Remove Spanish → English" }));
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(1));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove Portuguese → English" })).toHaveFocus());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("settings-translate-pair")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("settings-translate")).toHaveFocus());
+  });
+
   it("a Remove that fails keeps the line and says what to do; the error's own words are behind the ⓘ", async () => {
     models.translationStatus.mockResolvedValue(status([{ pair: "pt-en", bytes: 37 * MB }]));
     models.removeTranslation.mockRejectedValue(new Error("Permission denied (os error 13)"));
@@ -180,6 +196,7 @@ describe("the switch, on Desktop with the flag", () => {
     expect(failed).not.toHaveTextContent("Not available on this platform");
     await user.click(within(failed).getByRole("button", { name: "Try again" }));
     expect(await screen.findByTestId("settings-translate-pair")).toHaveTextContent("Portuguese → English");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove Portuguese → English" })).toHaveFocus());
   });
 });
 
