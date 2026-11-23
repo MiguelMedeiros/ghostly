@@ -218,6 +218,29 @@ describe("a move hands over the installed apps' bundles", () => {
     ]);
   });
 
+  it("the giver keeps no hash over a record whose version got its hash, or moved to other storage, while it read", async () => {
+    const [hashed, moved] = [bundle(20), bundle(21)];
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    for (const held of [hashed, moved]) await space.append(`app-${held.digest}`, 0, held.bytes);
+    await profileDatabase(giver, [], [{ ...app("chess", hashed.digest, "opfs"), manifest: hashed.manifest }, { ...app("todo", moved.digest, "opfs"), manifest: moved.manifest }]);
+    const forSpace = opfs.store.forSpace!;
+    // The engine wrote the file again meanwhile and put the hash it checked on the record (or put the same version in
+    // other storage); this read saw the file mid-write, so its hash is not the file's.
+    vi.spyOn(opfs.store, "forSpace").mockImplementation((other: string) => ({ ...forSpace(other), digest: async (id: string) => {
+      if (id === `app-${hashed.digest}`) await profileDatabase(giver, [], [{ ...app("chess", hashed.digest, "opfs"), manifest: hashed.manifest, sha256: hashed.sha256 }]);
+      if (id === `app-${moved.digest}`) await profileDatabase(giver, [], [{ ...app("todo", moved.digest, "native"), manifest: moved.manifest }]);
+      return digestText(sha256(Uint8Array.of(1, 2, 3)));
+    } }));
+
+    await handoffProfileHost("1.10.2", "web").source(giver).files();
+
+    const records = await allOf(giver, "apps") as { ref: string; bytes: string; sha256?: string }[];
+    expect(records.filter(({ ref }) => ref === "chess" || ref === "todo").map(({ ref, bytes, sha256: kept }) => ({ ref, bytes, kept }))).toEqual([
+      { ref: "chess", bytes: "opfs", kept: hashed.sha256 },
+      { ref: "todo", bytes: "native", kept: undefined },
+    ]);
+  });
+
   it("the giver hashes a bundle whose file is shorter than its record's whole bundle, not offering the kept hash", async () => {
     // A rewrite of the file cut short (the tab closed mid-write) leaves part of it under a record that kept the whole
     // file's hash: offered under it, the taker found it damaged and cancelled the move at every Move.
