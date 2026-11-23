@@ -8,7 +8,7 @@ import type { GroupMemberView } from "@ghostly/browser/shared/types";
 /*
  * Translate what I send on the chat pages, with the composer's translation as the pages give it
  * (useComposerTranslation): the draft detector reaches the composer, so a draft whose language it is sure of goes
- * translated at once, from that language, without the preview (ghostly-agents#1813).
+ * translated at once, from that language, without the preview.
  */
 
 /** The runtime: writes the words in capitals and says which pair it was asked for. */

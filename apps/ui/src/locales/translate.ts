@@ -71,7 +71,7 @@ function pluralRules(language: string): Intl.PluralRules {
  * The count a string is said for: its `count`, or its only number (`{{minutes}}`, an amount as written: "1.000" is a
  * thousand in Portuguese, not one). A string a language says otherwise
  * per count (Arabic's dual for 2, its singular after 11-99) has `<key>_<category>` beside it, picked by
- * Intl.PluralRules: one form for every count read "2 ملفات" and "32 ملفات" (agents#1614). Without such a key, the key.
+ * Intl.PluralRules: one form for every count read "2 ملفات" and "32 ملفات". Without such a key, the key.
  */
 function pluralForm(dict: unknown, key: string, language: Language | undefined, params?: Record<string, string | number>): string | undefined {
   if (!params) return undefined;
