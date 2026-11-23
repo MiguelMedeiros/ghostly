@@ -21,6 +21,15 @@ const until = async (done: () => boolean, ms: number) => {
   for (const end = Date.now() + ms; !done() && Date.now() < end;) await new Promise(resolve => setTimeout(resolve, 50));
 };
 
+/**
+ * Waits until the client was asked `count` times, then a little longer for any question past it. The relay holds a
+ * handshake before its question to the client has crossed the WebSocket, so under load `held` is there before `asked`.
+ */
+const askedReaches = async (asked: () => number, count: number) => {
+  await until(() => asked() >= count, 8000);
+  await new Promise(resolve => setTimeout(resolve, 300));
+};
+
 /** A custodial client of `relay` listening on a key of its own with `firewall`, and the relay's server for that key. */
 async function listener(relay: Relay, firewall: () => Promise<boolean>, sockets: WebSocket[]) {
   const socket = new WebSocket(relay.url);
@@ -62,6 +71,7 @@ async function unanswered(limits: Record<string, number>, count: number, run: (o
 
 it("denies a handshake the client never answers within handshakeMs", async () => {
   await unanswered({ handshakeMs: 2000 }, 6, async ({ asked, held, relay }) => {
+    await askedReaches(asked, 6);
     expect(asked()).toBe(6);
     // Denied after 2 s, then gone with HyperDHT's own 10 s clear of a denied handshake. Before, every one stayed, with its
     // Noise state and the far peer's request, until the client's listen closed.
@@ -74,6 +84,7 @@ it("denies a handshake the client never answers within handshakeMs", async () =>
 it("asks the client about at most a server's share of handshakes at once and denies the rest at once", async () => {
   await unanswered({ handshakes: 8 }, 12, async ({ asked, lines }) => {
     // A server's share is a quarter of `handshakes`, as for a client that runs its own handshakes (see crowded).
+    await askedReaches(asked, 2);
     expect(asked()).toBe(2);
     expect(lines).toContain("refused handshake listen share");
   });
@@ -103,6 +114,7 @@ it("asks the client about at most handshakes less a quarter at once over all its
     await until(() => held() >= 8, 8000);
     expect(held()).toBe(8);
     // Eight dials, two to each server: six wait on the client, the last two are denied without asking it.
+    await askedReaches(() => asked, 6);
     expect(asked).toBe(6);
     expect(lines).toContain("refused handshake incoming");
   } finally {
