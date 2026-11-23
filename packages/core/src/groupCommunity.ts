@@ -2821,9 +2821,39 @@ export class CommunitySession {
     for (const request of this.state.pendingLeaves) if (rosterHas(this.roster, request.s)) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
     // Or here, those after every message.
     answer.push(...metas.map(m => m.frame));
-    // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
-    ask();
+    // And where I am, so they can hand me what I lack (asked once in a while, not in a loop), unless their sync says
+    // they hold nothing I lack: a hub answered each member's 30 s sync with its own, ~5 KB at 48 members, twice
+    // what an idle edge carried, and the member's answer to it was its entry seed again.
+    if (!this.holdsNothingNew(frame)) ask();
     this.answers.handOut(from, answer);
+  }
+
+  /**
+   * Whether a member's sync says it holds nothing I lack: my tip, my group's picture and name, no secret I lack, no
+   * frame past what I have of each sender; and nothing missing here (a gap in a sender's frames, a secret, an entry seed).
+   */
+  private holdsNothingNew(frame: CommunitySyncFrame): boolean {
+    if (frame.h !== this.topHash || frame.mt !== groupMetaTag(this.state.meta) || this.needsCatchUp) return false;
+    if (this.state.entry.key && !this.state.entry.seedB64) return false;
+    const mine = new Set(Object.keys(this.state.secrets).map(shortHash));
+    if (Array.isArray(frame.secrets) && frame.secrets.some(x => typeof x !== "string" || !mine.has(x))) return false;
+    const lasting = new Map(Object.values(this.state.lasting ?? {}).map(f => [`${f.s} ${seenKey(f.e, f.h)}`, f.n]));
+    const have = frame.have && typeof frame.have === "object" ? frame.have as Record<string, Record<string, unknown>> : {};
+    for (const [sender, byKey] of Object.entries(have)) {
+      if (!byKey || typeof byKey !== "object") return false;
+      for (const [key, high] of Object.entries(byKey)) {
+        const held = Math.max(this.state.seen[sender]?.[key]?.high ?? -1, lasting.get(`${sender} ${key}`) ?? -1);
+        if (typeof high !== "number" || high > held) return false;
+      }
+    }
+    // A gap in what I have of a sender under a commit my store still holds frames of (`haveOf` would ask for it).
+    const recent = new Set(this.state.store.map(f => seenKey(f.e, f.h)));
+    for (const byKey of Object.values(this.state.seen)) for (const [key, entry] of Object.entries(byKey)) {
+      if (!recent.has(key)) continue;
+      const got = new Set(entry.window);
+      for (let n = Math.max(0, entry.high - COMMUNITY_LIMITS.replay + 1, (entry.floor ?? -1) + 1); n < entry.high; n++) if (!got.has(n)) return false;
+    }
+    return true;
   }
 
   /** The commits of a branch I do not follow, from where it leaves mine, and the secrets I hold of those `to` was in, onto `answer`. */
