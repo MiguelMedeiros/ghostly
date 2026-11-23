@@ -3,13 +3,13 @@ import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { NAME, withName } from "../apps/aroundName";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
+import { useFileActions } from "../../hooks/useFileActions";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
 import { formatFileSize } from "../../lib/format";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction } from "../../lib/fileStatus";
-import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
 import { audioFormat, canPlayAudio } from "../../lib/videoPlayer";
@@ -20,7 +20,6 @@ import { Highlight } from "../chat/ChatSearch";
 import { FORCED_EDGE, ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
-import { roomHeld } from "../../lib/filesComing";
 import { FilesStillComing } from "../chat/FilesStillComing";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
@@ -51,9 +50,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const [position, setPosition] = useState(remembered?.at ?? 0);
   const [duration, setDuration] = useState(remembered?.duration ?? 0);
   const [rate, setRate] = useState(voiceRate);
-  const [actionError, setActionError] = useState("");
-  // Accept refused for the files still coming: which ones, from which chat, show under the offer (FileBubble).
-  const [heldRoom, setHeldRoom] = useState(false);
+  // Accept refused for the files still coming (`heldRoom`): which ones, from which chat, show under the offer (FileBubble).
+  const { act, actionError, setActionError, heldRoom, acceptRef } = useFileActions(platform, file.id);
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
   const whyId = useId();
@@ -61,9 +59,9 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const audioRef = useRef<HTMLAudioElement>(null);
   useChosenSpeaker(audioRef, src);
   const playRef = useRef<HTMLButtonElement>(null);
-  const acceptRef = useRef<HTMLButtonElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  useFocusKept(rootRef);
+  // A Cancel in the list of files still coming, or the ⓘ, gone with the refusal: the focus goes to Accept.
+  useFocusKept(rootRef, () => acceptRef.current);
   const srcRef = useRef<string | null>(null);
   /** The source playing: a blob URL, or a file the platform streams (released when it stops). */
   const sourceRef = useRef<StoredMedia | null>(null);
@@ -225,11 +223,6 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   };
   mediaRef.current = { title: t("chat.audio.message"), play: () => void play(), pause, seekTo: seek };
 
-  const act = (action: FileAction) => {
-    setActionError("");
-    setHeldRoom(false);
-    void platform?.fileAction?.(file.id, action).catch((error: Error) => { setActionError(problemLine(error, t)); setHeldRoom(roomHeld(error)); });
-  };
   const save = () => {
     if (!platform) return;
     setActionError("");
