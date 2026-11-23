@@ -156,6 +156,8 @@ jobs:
   emulator:
     name: Emulator smoke test (API 35, x86_64)
     needs: apk
+    # Not GitHub's default success(): the draft job before apk is skipped on a run by hand, and that skips this too.
+    if: ${{ !cancelled() && needs.apk.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

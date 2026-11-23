@@ -157,6 +157,9 @@ jobs:
   e2e:
     name: Android e2e (API ${{ matrix.api-level }}, x86_64)
     needs: apk
+    # Not GitHub's default success(): the draft job before apk is skipped on the schedule and by hand, and that skips
+    # this too, with the run still green.
+    if: ${{ !cancelled() && needs.apk.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
