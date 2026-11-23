@@ -282,6 +282,24 @@ describe("the Tasks board", () => {
     await waitFor(() => expect(cardIds("running").sort()).toEqual(["failed", "relay"]));
   });
 
+  it("Clear finished, gone under the keyboard, hands the focus to the next control in its row, not to the page", async () => {
+    const { user } = profile([row("link-1", task({ id: "relay", status: "running" })), row("link-1", task({ id: "done", status: "done" }))]);
+    await loaded();
+    screen.getByTestId("tasks-clear-finished").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("tasks-clear-finished")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tasks-group-status")).toHaveFocus();
+  });
+
+  it("with routines too, Clear finished hands the focus to the Tasks/Routines switch after it", async () => {
+    const { user } = profile([row("link-1", task({ id: "done", status: "done" })), row("link-1", routine())]);
+    await loaded();
+    screen.getByTestId("tasks-clear-finished").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("tasks-clear-finished")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tasks-view-tasks")).toHaveFocus();
+  });
+
   it("with hundreds of cards, draws fifty a column and more on Show more", async () => {
     const many = Array.from({ length: 500 }, (_, i) => row("link-1", task({ id: `t${i}`, title: `Task ${i}`, status: i % 5 === 0 ? "queued" : "running" })));
     const { user } = profile(many);
