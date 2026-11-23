@@ -13,8 +13,9 @@ const GAP = 4;
 /** A field the on-screen keyboard types into. */
 const TYPED = "input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=file]), textarea, select, [contenteditable]:not([contenteditable=false])";
 /**
- * Whether the rows are in a phone's sheet. There a row's hint wraps: cut, the rest of it showed only in the row's
- * `title`, which a touch screen never shows (the French New menu at a larger text size).
+ * Whether the rows are in a phone's sheet. There a row's hint, and the label of a row with no hint, wrap: cut, the rest
+ * showed only in the row's `title`, which a touch screen never shows (the French New menu at a larger text size, an
+ * Italian device's Check connection at 200 % text on a 320 px phone).
  */
 const InSheet = createContext(false);
 
@@ -260,7 +261,10 @@ function titleIfCut(row: HTMLElement) {
 export function MenuItem({ icon, children, hint, onClick, danger, disabled, busy, title, testId, className = "", data, checked, radio }: {
   icon?: ReactNode;
   children: ReactNode;
-  /** A second, quieter line under the label; one line too in a popover, wrapped in a phone's sheet. */
+  /**
+   * A second, quieter line under the label; one line too in a popover, wrapped in a phone's sheet. A row with a hint
+   * keeps its label (a name) on one line; a row with none is an action, whose label wraps in a sheet as a hint does.
+   */
   hint?: ReactNode;
   onClick: () => void;
   danger?: boolean;
@@ -301,7 +305,7 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, busy
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
       {hint
         ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className={`block ${sheet ? "whitespace-normal break-words" : "truncate"} text-xs text-text-muted`}>{hint}</span></span>
-        : <span data-menu-text className="min-w-0 truncate">{children}</span>}
+        : <span data-menu-text className={`min-w-0 ${sheet ? "whitespace-normal break-words" : "truncate"}`}>{children}</span>}
     </button>
   );
 }

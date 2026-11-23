@@ -553,8 +553,13 @@ const ENTRY_RELEASE_MS = 2_000;
 const REMOVED_LINGER_MS = 15_000;
 /** How long the tombstone of a group I left waits for the admin to hear it. */
 const LEFT_KEPT_MS = 7 * 24 * 60 * 60_000;
-/** Meanwhile, my leave is said again this often on its edges up: the one said at Leave can be lost on the wire. */
+/**
+ * Meanwhile, my leave is said again on its edges up, first this long after Leave: the one said then can be lost on the
+ * wire. Each time after waits twice as long, up to `LEAVE_AGAIN_MAX_MS`: a hub passes on every copy that comes from
+ * its member to all its other edges, the whole time the admin is away.
+ */
 const LEAVE_AGAIN_MS = 30_000;
+const LEAVE_AGAIN_MAX_MS = 30 * 60_000;
 /**
  * A tombstone the role reached (a hand-over that crossed my leave) hands it on this long after: a leave its giver said
  * right after its `role` commit (an admin's leave does) is heard first, so the role does not go back to a leaver.
@@ -1559,8 +1564,8 @@ export class Groups {
   }
   /** Tombstones the role went on from, removed already, and when they go (`leaveConfirmed`). */
   private readonly passedOnUntil = new Map<string, number>();
-  /** Tombstones: when my leave was last said again (`LEAVE_AGAIN_MS`). */
-  private readonly leaveSaidAt = new Map<string, number>();
+  /** Tombstones: when my leave was last said again, and how long until the next time (`LEAVE_AGAIN_MS`). */
+  private readonly leaveSaidAt = new Map<string, { at: number; gap: number }>();
 
   async remove(groupId: string, key: string): Promise<void> {
     if (this.isCommunity(groupId)) return this.communities.remove(groupId, key);
@@ -2005,8 +2010,10 @@ export class Groups {
           if (session?.status === "left" && session.admin === session.myKey && now >= (this.handOnAt.get(group.id) ?? 0)) await this.handOn(group.id);
           // No commit took me out yet: my leave may have been lost on an edge that looked up (the network changing as I
           // left), and it is said again now and then on the edges up, not only when one opens.
-          else if (group.left.heard === undefined && !this.passedOnUntil.has(group.id) && now - Math.max(group.left.at, this.leaveSaidAt.get(group.id) ?? 0) >= LEAVE_AGAIN_MS) {
-            this.leaveSaidAt.set(group.id, now);
+          else if (group.left.heard === undefined && !this.passedOnUntil.has(group.id)) {
+            const said = this.leaveSaidAt.get(group.id), gap = said?.gap ?? LEAVE_AGAIN_MS;
+            if (now - Math.max(group.left.at, said?.at ?? 0) < gap) continue;
+            this.leaveSaidAt.set(group.id, { at: now, gap: Math.min(gap * 2, LEAVE_AGAIN_MAX_MS) });
             for (const [key, linkId] of this.host.edges(group.id)) if (this.host.linkReady(linkId)) this.sayLeft(group.id, key, linkId);
           }
           continue;

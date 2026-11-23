@@ -25,7 +25,7 @@ const preview = (patch: Partial<AppPreview> = {}): AppPreview => ({
     entry: "index.html", permissions: ["chat"], runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT", files: [] },
   ...patch,
 });
-const details = (app: InstalledAppView, language?: "pt") =>
+const details = (app: InstalledAppView, language?: "pt" | "ar") =>
   renderApp(<InstalledAppDialog app={app} onClose={() => {}} onOpen={() => {}} />, language && { language });
 
 afterEach(() => { vi.restoreAllMocks(); });
@@ -67,6 +67,15 @@ describe("a waiting update that adds no permission any more", () => {
       expect(within(update).getByTestId("app-update-accept")).toBeInTheDocument();
     });
   }
+
+  it("keeps a pre-release version in its own direction in Arabic, as the header does: \"1.4.0-beta+abc\" is not \"-1.4.0\"", () => {
+    details(installed({ pending: { sequence: 9, version: "1.4.0-beta+abc", added: [] } }), "ar");
+    const update = screen.getByTestId("app-update");
+    expect(update).toHaveTextContent("الإصدار 1.4.0-beta+abc جاهز.");
+    const version = update.querySelector("bdi");
+    expect(version).toHaveAttribute("dir", "ltr");
+    expect(version?.textContent).toBe("1.4.0-beta+abc");
+  });
 });
 
 describe("an installed app's removal says one verb on its button, its question and its confirm", () => {

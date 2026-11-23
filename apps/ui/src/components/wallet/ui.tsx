@@ -77,7 +77,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
 
 const BUTTON = {
   // A border in forced colors only: there the fill is gone, and the button would read as bare text beside the others.
-  primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold forced-colors:border forced-colors:border-[color:ButtonText]",
+  primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText]",
   secondary: "bg-surface-alt text-text-primary hover:bg-surface-hover border border-border",
   danger: "bg-transparent text-danger-ink hover:bg-danger/10 border border-border",
 } as const;
@@ -89,12 +89,14 @@ const BUTTON = {
  * An `aria-disabled` passed in is kept: the caller's own "off for now", whose press it ignores itself.
  * `disabled` that comes while it has the focus (another button's work, a field now unchanged) keeps it too, until the
  * focus leaves (FocusSafeButton).
+ * Its words stay on one line while they fit, and it never shrinks for its neighbours (it was `whitespace-nowrap`): one
+ * wider than its box (a long label, a phone at a larger text size) wraps them, and stays on the screen.
  */
 export function Button({ variant = "secondary", className = "", loading = false, disabled, onClick, children, ...props }: React.ComponentPropsWithRef<"button"> & { variant?: keyof typeof BUTTON; loading?: boolean }) {
   return (
     <FocusSafeButton type="button" {...props} disabled={disabled && !loading} aria-disabled={loading || props["aria-disabled"] || undefined} aria-busy={loading || undefined} data-loading={loading || undefined}
       onClick={(e) => { if (loading) e.preventDefault(); else onClick?.(e); }}
-      className={`px-4 py-2 min-h-10 max-md:min-h-11 whitespace-nowrap rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress ${BUTTON[variant]} ${className}`}>
+      className={`px-4 py-2 min-h-10 max-md:min-h-11 shrink-0 max-w-full break-words rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress ${BUTTON[variant]} ${className}`}>
       {loading ? <span className="inline-flex items-center gap-2"><Spinner />{children}</span> : children}
     </FocusSafeButton>
   );

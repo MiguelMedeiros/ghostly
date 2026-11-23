@@ -133,6 +133,16 @@ describe("the admin's menu on a member's tile", () => {
     await waitFor(() => expect(screen.queryByTestId("group-call-removed")).toBeNull());
   });
 
+  it("keeps the \"Removed\" chip 12 px after the top's ⓘ on a phone, the side the ⓘ's hit area grows by", async () => {
+    answerModerate(({ act }) => ({ ok: true, state: act === "state" ? { muted: {}, banned: [BO] } : EMPTY }));
+    adminView();
+    const chip = await screen.findByTestId("group-call-removed");
+    const row = screen.getByTestId("group-call-info").parentElement!;
+    // happy-dom lays nothing out: e2e/web/group-call-targets-phone.spec.ts measures the ⓘ.
+    expect(row.contains(chip)).toBe(true);
+    expect(row).toHaveClass("max-md:gap-3");
+  });
+
   it("asks before removing from the group, saying behind the ⓘ that the group gets a new key, and uses the group's remove", async () => {
     answerModerate(() => ({ ok: true, state: EMPTY }));
     fakeEngine.on("removeGroupMember", () => undefined);

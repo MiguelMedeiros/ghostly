@@ -25,6 +25,9 @@ use crate::link_preview::{is_public, PublicOnly};
 
 /// The largest held item: one bundle (`HOLD_LIMITS.maxBundleBytes`, packages/core/src/storeForward.ts).
 const MAX_BODY: usize = 8 * 1024 * 1024;
+/// The most of an error answer's body kept: room for a service to name the cause (a Lightning address service's
+/// `{"status":"ERROR","reason":…}`, Bluesky's `{"error":"AccountDeactivated"}`); the engine refuses a held item's unread.
+const MAX_ERROR_BODY: usize = 64 * 1024;
 /// Past the engine's own limit for the largest item (`holdFetchTimeoutMs`, packages/browser/src/engine/hold.ts).
 const TIMEOUT: Duration = Duration::from_secs(150);
 /// The request headers an identity read sends (`accept`; a Pubky homeserver's `pubky-host`); any other is dropped.
@@ -36,7 +39,7 @@ pub struct HoldResponse {
     pub status: u16,
     /// The answer's `Content-Type`, empty when it has none.
     pub content_type: String,
-    /// Empty for any status but 2xx: the engine refuses those without reading them.
+    /// For a status but 2xx, a short body only (`MAX_ERROR_BODY`), else empty.
     pub body_b64: String,
     /// The answer's `Retry-After`, empty when it has none (a call node's 429, WISP 602 § Moderation).
     pub retry_after: String,
@@ -141,21 +144,24 @@ async fn send(request: reqwest::RequestBuilder) -> Result<HoldResponse, String> 
     };
     let content_type = header(reqwest::header::CONTENT_TYPE);
     let retry_after = header(reqwest::header::RETRY_AFTER);
-    if !response.status().is_success() {
-        return Ok(HoldResponse {
-            status,
-            content_type,
-            body_b64: String::new(),
-            retry_after,
-        });
-    }
+    let success = response.status().is_success();
+    let limit = if success { MAX_BODY } else { MAX_ERROR_BODY };
     // Word for word what apps/ui/src/desktop/holdFetch.ts answers as an item past the largest, for the engine to refuse.
-    let too_large = || "The held item is too large".to_string();
-    if response
-        .content_length()
-        .is_some_and(|n| n > MAX_BODY as u64)
-    {
-        return Err(too_large());
+    // An error answer's body past its limit is only left out: the status says what happened.
+    let too_large = || {
+        if success {
+            Err("The held item is too large".to_string())
+        } else {
+            Ok(HoldResponse {
+                status,
+                content_type: content_type.clone(),
+                body_b64: String::new(),
+                retry_after: retry_after.clone(),
+            })
+        }
+    };
+    if response.content_length().is_some_and(|n| n > limit as u64) {
+        return too_large();
     }
     let mut body = Vec::new();
     while let Some(chunk) = response
@@ -163,8 +169,8 @@ async fn send(request: reqwest::RequestBuilder) -> Result<HoldResponse, String> 
         .await
         .map_err(|e| format!("Body: {}", reason(e)))?
     {
-        if body.len() + chunk.len() > MAX_BODY {
-            return Err(too_large());
+        if body.len() + chunk.len() > limit {
+            return too_large();
         }
         body.extend_from_slice(&chunk);
     }
@@ -327,6 +333,46 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error, "The held item is too large");
+    }
+
+    /// The issue: every error answer came back with no body, so a Lightning address service's refusal
+    /// (`{"status":"ERROR","reason":…}` with a 400, LUD-06) read as "did not answer with JSON", and Bluesky's
+    /// `{"error":"AccountDeactivated"}` as a failed read, where the web and the CLI read the cause.
+    #[tokio::test]
+    async fn an_error_answer_keeps_a_short_body_that_names_its_cause() {
+        let refusal: &[u8] = br#"{"status":"ERROR","reason":"Amount too small"}"#;
+        let (port, _) = serve(b"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 46\r\n\r\n{\"status\":\"ERROR\",\"reason\":\"Amount too small\"}").await;
+        let read = get(&build(Storage).unwrap(), at(port), vec![])
+            .await
+            .unwrap();
+        assert_eq!(read.status, 400);
+        assert_eq!(STANDARD.decode(read.body_b64).unwrap(), refusal);
+        let (port, _) = serve(b"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 46\r\n\r\n{\"status\":\"ERROR\",\"reason\":\"Amount too small\"}").await;
+        let posted = post_json(&build(Storage).unwrap(), at(port), "{}".into())
+            .await
+            .unwrap();
+        assert_eq!(STANDARD.decode(posted.body_b64).unwrap(), refusal);
+
+        // A long one is left out, and is no failure either: the status still says what happened. Said long, or found
+        // long as it comes.
+        let unsaid: &'static [u8] = [
+            &b"HTTP/1.1 500 Internal Server Error\r\nTransfer-Encoding: chunked\r\n\r\n10001\r\n"[..],
+            &[b'x'; 0x10001][..],
+            b"\r\n0\r\n\r\n",
+        ]
+        .concat()
+        .leak();
+        for answer in [
+            &b"HTTP/1.1 404 Not Found\r\nContent-Length: 9000000\r\n\r\n"[..],
+            unsaid,
+        ] {
+            let (port, _) = serve(answer).await;
+            let read = get(&build(Storage).unwrap(), at(port), vec![])
+                .await
+                .unwrap();
+            assert!(matches!(read.status, 404 | 500), "{}", read.status);
+            assert_eq!(read.body_b64, "");
+        }
     }
 
     #[tokio::test]

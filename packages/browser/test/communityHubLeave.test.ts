@@ -218,12 +218,19 @@ describe("a member with no edge up when the admin leaves", { timeout: 120_000 },
  * minutes (2026-10-03).
  */
 describe("the hubs a hub leaves behind", { timeout: 120_000 }, () => {
+  let restore: (() => void) | null = null;
+  afterEach(() => { restore?.(); restore = null; });
+
   it("count it out at once: no edge to it, and not in the beacon they write", async () => {
     const keyOf = (p: Peer, id: string) => p.groups.communities.session(id)!.myKey;
     // A group where the hub left behind does not commit the leave itself at once (the leaver's key is the lower one).
     let found: { world: CommunityWorld; id: string; admin: Peer; left: Peer } | undefined;
-    for (let tries = 0; tries < 12 && !found; tries++) {
-      const world = new CommunityWorld();
+    // From seeds, the same worlds every run: the admin and one more hub every time, but the admin's key the lower in
+    // about half of random ones only (973 of 2000), and 12 random tries all missed once on a GitHub runner.
+    for (let seed = 1; seed <= 12 && !found; seed++) {
+      restore?.();
+      const world = new CommunityWorld(undefined, null, seededRandom(seed));
+      restore = sameRun(world, seed);
       const { id, peers } = await settled(world, ["admin", "bob", "carol", "dave", "erin"]);
       const [admin, ...rest] = peers;
       const hubs = rest.filter(p => p.groups.communities.isHub(id));

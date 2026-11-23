@@ -1388,6 +1388,26 @@ describe("with the apps flag on", () => {
     expect(question).not.toHaveTextContent("updates or takedowns");
   });
 
+  it("a store's Remove in Arabic names each installed app in its own direction: \"Chess!\" is not \"!Chess\"", async () => {
+    const listing = (ref: string, title: string) => ({ ref, sequence: 1, digest: DIGEST, urls: [URL_], title, tagline: "" });
+    fakeEngine.on("appList", () => [installed({ title: "Chess!" }), installed({ ref: `${KEY}/notes`, name: "notes", title: "Notes (beta)" }),
+      installed({ ref: `${KEY}/snake`, name: "snake", title: "Snake", run: { status: "removed", by: [{ store: "s", name: "Hunt", reason: "spam", at: 1 }] } })])
+      .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+        name: "Hunt", kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
+        apps: [listing(REF, "Chess!"), listing(`${KEY}/notes`, "Notes (beta)")], removed: [{ ref: `${KEY}/snake`, digest: DIGEST, reason: "spam", at: 1 }] }])
+      .on("appCheckUpdates", () => []);
+    const { user } = renderApp(<Apps />, { route: "/apps", language: "ar" });
+    await user.click(await screen.findByTestId("app-store-remove"));
+    const question = screen.getByTestId("app-store-remove-question");
+    const titles = (el: Element) => [...el.querySelectorAll("bdi")].map((bdi) => bdi.textContent);
+    expect(titles(screen.getByTestId("app-store-remove-taken-down"))).toEqual(["Snake"]);
+    const listed = screen.getByTestId("app-store-remove-listed");
+    expect(titles(listed)).toEqual(["Chess!", "Notes (beta)"]);
+    // The language's own "and" between them, outside the titles, and the sentence around them as it was.
+    expect(listed).toHaveTextContent(/^يضم تطبيقات ثبّتها: Chess! و ?Notes \(beta\)\. /);
+    expect(question).toHaveTextContent("Hunt");
+  });
+
   it("a store that lists none of the installed apps says only how to get it back", async () => {
     fakeEngine.on("appList", () => []).on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json",
       preloaded: false, name: "Hunt", kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [], removed: [] }])

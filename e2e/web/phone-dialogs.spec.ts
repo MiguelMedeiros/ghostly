@@ -308,3 +308,83 @@ test("on a phone, a sheet narrower than the screen stands in its middle", { tag:
   await page.getByTestId("wallet-add").click();
   await centred(page.getByTestId("new-wallet"), 667);
 });
+
+test.describe("an iPhone held upright: a dialog that is not a <dialog>", () => {
+  // From 768px its layer ends where the keyboard starts; upright it stayed centred on the whole screen, which iOS keeps
+  // under the keyboard: Set status's Save (about 690px down) and Delete profile's Delete under a keyboard from 508px.
+  const NOTCH = { top: 47, bottom: 34, left: 0, right: 0 };
+  /** Where each one is: below the notch, above the keyboard, and a tap at its middle reaches it. */
+  const reach = async (parts: Record<string, Locator>) => {
+    const out: Record<string, string> = {};
+    for (const [name, locator] of Object.entries(parts)) {
+      out[name] = await locator.evaluate((element, [top, bottom]) => {
+        const box = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        const tappable = !!hit && (hit === element || element.contains(hit));
+        return box.top >= top - 1 && box.bottom <= bottom + 1 && tappable ? "in view" : `${Math.round(box.top)}..${Math.round(box.bottom)} of ${top}..${bottom}${tappable ? "" : ", not tappable"}`;
+      }, [NOTCH.top, VISIBLE] as const);
+    }
+    return out;
+  };
+
+  test("Set status and Delete profile keep their field and their button above the keyboard", { tag: ["@feature:app.mobile-layout", "@feature:chat.status.picker", "@feature:profiles.delete"] }, async ({ peer }) => {
+    const { page } = await peer("upright-dialogs", { mobile: true, viewport: PHONE });
+    await (await page.context().newCDPSession(page)).send("Emulation.setSafeAreaInsetsOverride", { insets: NOTCH });
+    await iosKeyboard(page);
+    await expect(page.getByTitle("New Chat").first()).toBeVisible();
+
+    // Set status: Settings → Switch profile → Set status, and its text typed with the keyboard up.
+    await page.getByTestId("mobile-tab-settings").click();
+    await page.getByTestId("settings-profile-switch").click();
+    await page.getByTestId("profile-switcher-status").click();
+    const status = page.getByTestId("status-picker");
+    const words = status.getByLabel("Status text");
+    await words.focus();
+    await keyboard(page, KEYBOARD);
+    await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+    await words.fill("on the train");
+    const save = status.getByRole("button", { name: "Save", exact: true });
+    await save.scrollIntoViewIfNeeded();
+    await expect.poll(() => reach({ panel: status, save, cancel: status.getByRole("button", { name: "Cancel", exact: true }) })).toEqual({ panel: "in view", save: "in view", cancel: "in view" });
+    await words.scrollIntoViewIfNeeded();
+    await expect.poll(() => reach({ words })).toEqual({ words: "in view" });
+    await test.info().attach("Set status, keyboard up", { body: await page.screenshot({ animations: "disabled" }), contentType: "image/png" });
+    // Back in the middle of the screen once the keyboard goes.
+    await keyboard(page, 0);
+    await expect.poll(async () => { const box = (await status.boundingBox())!; return box.y + box.height > VISIBLE; }).toBe(true);
+    await keyboard(page, KEYBOARD);
+    await save.scrollIntoViewIfNeeded();
+    await expect.poll(() => reach({ save })).toEqual({ save: "in view" });
+    await save.click();
+    await expect(status).toHaveCount(0);
+    await keyboard(page, 0);
+
+    // Delete profile: a second profile, then back to the first, since the one in use can't be deleted.
+    await page.getByTestId("settings-profile-switch").click();
+    await page.getByTestId("profile-switcher").getByTestId("profile-switcher-add").click();
+    await page.getByTestId("profile-new-name").fill("Work");
+    await page.getByTestId("profile-create").click();
+    await expect(page.getByTestId("profile-name")).toHaveValue("Work", { timeout: 30_000 });
+    await expect(page.getByTestId("profile-switch-splash")).toHaveCount(0, { timeout: 15_000 });
+    await page.goto("/#/profile");
+    await page.getByTestId("profile-row").filter({ hasText: "Personal" }).getByTestId("profile-switch").click();
+    await expect(page.getByTestId("mobile-tab-settings")).toHaveAccessibleName(/Personal/, { timeout: 30_000 });
+    await expect(page.getByTestId("profile-switch-splash")).toHaveCount(0, { timeout: 15_000 });
+    await page.goto("/#/profile");
+    await page.getByTestId("profile-row").filter({ hasText: "Work" }).getByTestId("profile-delete").click();
+    const dialog = page.getByTestId("delete-profile");
+    const typed = dialog.getByTestId("delete-profile-confirm");
+    await typed.focus();
+    await keyboard(page, KEYBOARD);
+    await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+    await typed.fill("Work");
+    const go = dialog.getByTestId("delete-profile-go");
+    await expect(go).toBeEnabled();
+    await go.scrollIntoViewIfNeeded();
+    await expect.poll(() => reach({ typed, go })).toEqual({ typed: "in view", go: "in view" });
+    await test.info().attach("Delete profile, keyboard up", { body: await page.screenshot({ animations: "disabled" }), contentType: "image/png" });
+    await go.click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId("profile-row")).toHaveCount(1);
+  });
+});

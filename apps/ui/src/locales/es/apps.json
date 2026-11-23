@@ -129,6 +129,8 @@
     "ipInfoOffline": "La app no tiene acceso a internet, pero su editor aún puede conocer tu dirección IP y cuándo la abres.",
     "ipLine": "Se descarga de {{host}}, que ve tu dirección IP.",
     "ipLineInstalled": "Su editor puede conocer tu dirección IP.",
+    "leavesStore": "{{title}} ahora solo recibe actualizaciones cuando {{name}} las lista. Instalar esta versión termina con eso: sus actualizaciones vendrán de los enlaces de su editor.",
+    "leavesStoreTo": "{{title}} ahora solo recibe actualizaciones cuando {{name}} las lista. Instalar esta versión desde aquí termina con eso: sus actualizaciones llegarán solo cuando esta tienda las liste.",
     "newPermissions": "Esta actualización también pide",
     "notListed": "No está en ninguna de tus tiendas",
     "perm": {

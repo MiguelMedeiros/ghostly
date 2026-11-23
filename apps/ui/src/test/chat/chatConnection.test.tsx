@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { ChatConnection } from "../../components/ChatConnection";
@@ -1045,6 +1045,45 @@ describe("the connection panel, while a choice or button works", () => {
     expect(confirm).toHaveFocus();
   });
 
+  it("Verify hands the focus to The codes match, which took its place", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => engine.update({ links: [linkView({ availableTransports: all, peerParticipationKey: "saved", pairing: { status: "ready", transport: "webrtc/1", code: "4821 0937", peerKey: "peer" } as Pairing })] }));
+    await user.click(screen.getByTestId("connection-options"));
+    screen.getByTestId("pair-verify").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("pair-verify-confirm")).toHaveFocus();
+  });
+
+  it("The codes match, accepted, hands the focus to the line that now says the contact is verified", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    const view = (peerVerified: boolean) => linkView({ availableTransports: all, peerParticipationKey: "saved", peerVerified, pairing: { status: "ready", transport: "webrtc/1", code: "4821 0937", peerKey: "peer" } as Pairing });
+    act(() => engine.update({ links: [view(false)] }));
+    engine.on("confirmPair", () => { engine.update({ links: [view(true)] }); });
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByTestId("pair-verify"));
+    screen.getByTestId("pair-verify-confirm").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("pair-verify-confirm")).toBeNull());
+    expect(screen.getByTestId("pair-verified")).toHaveFocus();
+    expect(screen.getByTestId("connection-menu")).toHaveProperty("open", true);
+  });
+
+  it("The codes match, accepted after the focus moved on in the panel, leaves it there", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    const view = (peerVerified: boolean) => linkView({ availableTransports: all, peerParticipationKey: "saved", peerVerified, pairing: { status: "ready", transport: "webrtc/1", code: "4821 0937", peerKey: "peer" } as Pairing });
+    act(() => engine.update({ links: [view(false)] }));
+    const finish = held(engine, "confirmPair");
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByTestId("pair-verify"));
+    await user.click(screen.getByTestId("pair-verify-confirm"));
+    const elsewhere = screen.getByTestId("connection-options");
+    elsewhere.focus();
+    act(() => engine.update({ links: [view(true)] }));
+    await finish();
+    expect(screen.queryByTestId("pair-verify-confirm")).toBeNull();
+    expect(elsewhere).toHaveFocus();
+  });
+
   it("leaves the focus where the person moved it meanwhile", async () => {
     const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
     act(() => engine.update({ links: [linkView({ availableTransports: all, transportAutomatic: false, preferredTransport: "webrtc/1", pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open" })] }));
@@ -1397,6 +1436,17 @@ describe("a relayed transport", () => {
     expect(within(panel).getByTestId("connection-summary")).toHaveTextContent("never what they say");
   });
 
+  it.each([
+    ["ja", "relay.example、relay.two.example のリレー経由"],
+    ["ar", "عبر المرحّل relay.example وrelay.two.example"],
+  ] as const)("names its relays on the panel's Path as the language lists them, each host its own <bdi> (%s)", async (language, said) => {
+    const view = renderApp(<ChatConnection peerKey="peer" />, { language });
+    act(() => view.engine.update({ links: [linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRelayed: { relays: ["relay.example", "relay.two.example"] } })] }));
+    await view.user.click(screen.getByTestId("connection-options"));
+    expect(screen.getByTestId("connection-relayed").textContent).toBe(said);
+    expect([...screen.getByTestId("connection-relayed").querySelectorAll("bdi")].map((b) => b.textContent)).toEqual(["relay.example", "relay.two.example"]);
+  });
+
   it("when not in use, says it goes through a relay", async () => {
     const view = renderApp(<ChatConnection peerKey="peer" />);
     act(() => view.engine.update({ links: [linkView({ ...web, pairing: { status: "ready", transport: "webrtc/1" } as Pairing, dataLink: "open" })] }));
@@ -1556,5 +1606,57 @@ describe("the connection Details of a contact with no name", () => {
   it("keeps the contact's name when there is one", () => {
     panel({ liveDialer: "contact", peerNick: "Bea" });
     expect(lines("connection-not-live").slice(1)).toEqual(["Bea's app connects to this one: this app answers.", "No attempt of Bea's has reached this app yet."]);
+  });
+});
+
+// On a phone the panel's own buttons kept the desktop's 36 px (Details 53 × 36, Verify 40-44 × 36, Connection history
+// 127 × 36) and the keys 40 px, while its transport rows are 44 px. happy-dom lays nothing out, so these pin the phone
+// floors, in px as phoneTargetsPx wants (#8056); e2e/web/phone-touch-targets.spec.ts measures them in Chromium.
+describe("ChatConnection on a phone: every button of the panel is a 44 px target", () => {
+  const TALL = "max-md:min-h-[44px]", WIDE = "max-md:min-w-[44px]";
+
+  it("Reconnect", () => {
+    banner({ dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" });
+    expect(screen.getByTestId("connection-reconnect")).toHaveClass(TALL);
+  });
+
+  it("Details and Connection history (and its Show all) are 44 px rows, and Details as wide in two characters (ja, zh)", async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ at: Date.now() - (25 - i) * 1_000, kind: i % 2 ? "down" as const : "live" as const, transport: "webrtc/1" as const }));
+    const { user } = banner({ pairing: ready(), transportHistory: many });
+    // A <summary> is a block: the 12 px above and below keep its words in the middle of the 44.
+    expect(screen.getByTestId("connection-details-summary")).toHaveClass(TALL, WIDE, "max-md:py-[12px]");
+    const history = screen.getByTestId("connection-history");
+    expect(history.querySelector("summary")).toHaveClass(TALL, "max-md:py-[12px]");
+    await user.click(within(history).getByText("Connection history (25)"));
+    expect(screen.getByTestId("connection-history-more")).toHaveClass(TALL);
+  });
+
+  it("Details keeps 4 px from Reconnect above it and from a key or Verify first under it", () => {
+    // Touching 44 px targets at a fractional y: the browser gave Reconnect their shared pixel row, and Details measured
+    // 56 × 43 in Arabic (e2e/web/phone-touch-targets.spec.ts). A margin may grow with the text size: rem is fine.
+    banner({ dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" });
+    expect(screen.getByTestId("connection-reconnect")).toBeInTheDocument();
+    expect(screen.getByTestId("connection-details-summary")).toHaveClass("max-md:my-1");
+  });
+
+  it("Verify, 40 px wide in Arabic and 2 characters in ja/zh, then The codes match", async () => {
+    const { user } = banner({ peerParticipationKey: "saved", pairing: ready({ code: "4821 0937", peerKey: "peer" }) });
+    expect(screen.getByTestId("pair-verify")).toHaveClass(TALL, WIDE);
+    await user.click(screen.getByTestId("pair-verify"));
+    expect(screen.getByTestId("pair-verify-confirm")).toHaveClass(TALL);
+  });
+
+  it("Use Automatic, while the chat waits for a transport the contact's app lacks", () => {
+    banner({ pairing: ready({ transport: "iroh/1" }), preferredTransport: "hyperdht/1", transportAutomatic: false,
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "contact-lacks", live: "iroh/1", failures: 0 } });
+    expect(screen.getByTestId("connection-waiting-automatic")).toHaveClass(TALL);
+  });
+
+  it("both keys, copied by a tap: 44 px tall, not the 40 px of their two lines, nor 24", () => {
+    banner({ pairing: ready() }, {}, { myKey: "mine" });
+    for (const id of ["connection-key-you", "connection-key-contact"]) {
+      expect(screen.getByTestId(id)).toHaveClass(TALL, WIDE);
+      expect(screen.getByTestId(id)).not.toHaveClass("max-md:min-h-6");
+    }
   });
 });

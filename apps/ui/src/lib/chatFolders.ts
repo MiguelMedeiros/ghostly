@@ -1,4 +1,5 @@
 import { useEffect, useReducer } from "react";
+import { stripHidden } from "@ghostly/core";
 import { getPrefix, movePinnedTo, pinnedOrder, type PinnedPlace } from "./storage";
 
 /*
@@ -86,9 +87,13 @@ function write(next: Stored): void {
   window.dispatchEvent(new Event(FOLDERS_EVENT));
 }
 
-/** A name as it is kept: trimmed, its inner spaces single, cut at FOLDER_NAME_MAX. Empty when there is nothing to keep. */
+/**
+ * A name as it is kept: without invisible or direction-changing characters (a lone PDI would close the isolate the
+ * name is put in early, and turn the line around it), trimmed, its inner spaces single, cut at FOLDER_NAME_MAX.
+ * Empty when there is nothing to keep.
+ */
 export function folderName(name: string): string {
-  return name.replace(/\s+/g, " ").trim().slice(0, FOLDER_NAME_MAX).trim();
+  return stripHidden(name.replace(/\s+/g, " ")).replace(/\s+/g, " ").trim().slice(0, FOLDER_NAME_MAX).trim();
 }
 
 const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 8) + Date.now().toString(36);

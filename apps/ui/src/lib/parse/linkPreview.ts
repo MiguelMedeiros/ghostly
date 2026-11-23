@@ -3,6 +3,7 @@ import { isLocalHost } from "../localHost";
 import { parseMessage } from "./blocks";
 import { findEntities } from "./entities";
 import { findLocation } from "./location";
+import { findSecret } from "./secrets";
 import type { Block, Segment } from "./types";
 
 /**
@@ -127,7 +128,8 @@ const IMAGE_LINK = /\.(gif|png|jpe?g|webp|svg|avif)(\?\S*)?$/i;
  * card comes from the code, and the page says nothing more), on a public host, and one the bubble draws as a link with
  * that same address, outside a spoiler: none in code, and none a card would read longer or shorter than the bubble
  * opens it ("[DC](https://…/Washington,_D.C.)"), or the card would open another page.
- * Not one a spoiler hides either (its card would say what the spoiler covers). Null when none.
+ * Not one a spoiler hides either (its card would say what the spoiler covers), nor one whose address holds a secret
+ * `findSecret` knows. Null when none.
  */
 export function previewableLink(text: string): string | null {
   // Read only once a link could get a card: the composer asks on every key, of drafts that may be long.
@@ -140,6 +142,9 @@ export function previewableLink(text: string): string | null {
     // A link still being typed ("https://exam") has no dot in its host yet, or a one-letter top-level name.
     if (!/\.[a-z]{2,}$/i.test(url.hostname) && !/^[\d.]+$/.test(url.hostname)) continue;
     if (!(drawn ??= bubbleLinks(text).shown).has(link)) continue;
+    // Its address holds what the composer asks about before a message goes (a token, a key): reading the page would
+    // hand it to the site before that question, and whatever the answer.
+    if (findSecret(link)) continue;
     return link;
   }
   return null;
@@ -169,26 +174,19 @@ function bubbleLinks(text: string): { shown: Set<string>; hidden: Set<string> } 
   return { shown, hidden };
 }
 
-/**
- * Whether a link of `text` (as `linksIn` reads it) shows only inside a spoiler, or as a link whose words hold one: the
- * bubble keeps it covered, so no card may say where it goes. A link the text shows outside a spoiler as well is not.
- */
-function spoiledLinks(text: string): (link: string) => boolean {
-  if (!text.includes("||")) return () => false;
-  const { shown, hidden } = bubbleLinks(text);
-  return (link) => hidden.has(link) && !shown.has(link);
-}
-
 const hasSpoiler = (segments: Segment[]): boolean =>
   segments.some((s) => s.type === "span" && (s.style === "spoiler" || hasSpoiler(s.children)));
 
 /**
- * A received preview, if it is of a link the text shows outside a spoiler. An older app makes one for a link only a
- * spoiler shows, and one for "~~https://a.example/x~~" that opens /x~~, another page than the bubble's link.
+ * A received preview, if it is of a link the bubble draws outside a spoiler, with the address it opens: the one rule
+ * `previewableLink` makes cards by. An older app or another client sends one for a link only a spoiler shows, for
+ * "~~https://a.example/x~~" that opens /x~~, for an address in code, or for "[DC](https://…/Washington,_D.C.)" read
+ * one dot short: each card would tell what a spoiler hides, or open another page than the bubble's link.
  */
 export function shownPreview(text: string, preview: LinkPreview | undefined): LinkPreview | undefined {
   if (!preview) return undefined;
-  const hidden = spoiledLinks(text);
   const links = linksIn(text).filter((link) => canonicalUrl(link) === preview.u);
-  return links.length && !links.every(hidden) ? preview : undefined;
+  if (!links.length) return undefined;
+  const { shown } = bubbleLinks(text);
+  return links.some((link) => shown.has(link)) ? preview : undefined;
 }

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useSettings } from "../../contexts/SettingsContext";
 import { removeTranslation, translationStatus, type TranslationPair } from "../../desktop/translate";
 import { languageName } from "../../lib/documentLanguage";
 import { rawError } from "../../lib/errorText";
+import { focusLost } from "../../lib/focus";
 import { forgetTranslations } from "../../lib/translateReceived";
 import { downloadedLanguages } from "../../lib/translateSettings";
 import { Row } from "../layout";
@@ -23,6 +24,7 @@ export function TranslateSettings() {
   const [unread, setUnread] = useState<unknown>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ pair: string; cause: unknown } | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   const read = useCallback(async () => {
     try {
@@ -37,12 +39,30 @@ export function TranslateSettings() {
   const { ask, question } = useTranslateDownload(read);
   const downloading = useTranslateDownloading();
 
-  const remove = async (pair: string) => {
+  // A Remove that went through, or a Try again that read the list, takes its row away and the focus with it: it goes to
+  // the Remove now at `land` (the one after the gone pair, else the last), or the switch when no pair is left. A list
+  // that could not be read hands it to its Try again. Nothing lands while the Remove or Try again still works: a draw in
+  // between (a download starting, a settings change) would use the landing up while the button still has the focus.
+  const land = useRef<number | null>(null);
+  const removeButtons = useRef<(HTMLButtonElement | null)[]>([]);
+  const retryButton = useRef<HTMLButtonElement>(null);
+  const toggle = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const at = land.current;
+    if (at === null || removing !== null || retrying) return;
+    land.current = null;
+    if (!focusLost()) return;
+    const buttons = removeButtons.current.filter((button) => button?.isConnected);
+    (retryButton.current ?? buttons[Math.min(at, buttons.length - 1)] ?? toggle.current)?.focus({ preventScroll: true });
+  });
+
+  const remove = async (pair: string, at: number) => {
     setRemoving(pair);
     setFailed(null);
     try {
       await removeTranslation(pair);
       forgetTranslations();
+      land.current = at;
       await read();
     } catch (cause) {
       setFailed({ pair, cause });
@@ -56,7 +76,7 @@ export function TranslateSettings() {
   return (
     <>
       <Row label={title} hint={t("settings.translate.hint")} info={t("settings.translate.info")} testId="settings-translate-row">
-        <Switch testId="settings-translate" label={title} checked={settings.translateMessages} onChange={(on) => {
+        <Switch ref={toggle} testId="settings-translate" label={title} checked={settings.translateMessages} onChange={(on) => {
           updateTranslateMessages(on);
           // Turned on: what the app's language is missing is asked before anything downloads, whatever other pairs are
           // here (a chat set to On brought its own). Nothing is asked when both ways are here.
@@ -68,16 +88,21 @@ export function TranslateSettings() {
       {unread !== null ? (
         <Row label={t("settings.translate.downloaded")} hint={<span role="status">{t("settings.translate.unread")}</span>} info={rawError(unread)}
           testId="settings-translate-unread">
-          <Button onClick={() => void read()}>{t("settings.languageRetry")}</Button>
+          <Button ref={retryButton} loading={retrying} onClick={() => {
+            land.current = 0;
+            setRetrying(true);
+            void read().finally(() => setRetrying(false));
+          }}>{t("settings.languageRetry")}</Button>
         </Row>
       ) : lines.length === 0 ? (
         settings.translateMessages && <Row label={t("settings.translate.none")} testId="settings-translate-none" />
-      ) : lines.map((line) => {
+      ) : lines.map((line, i) => {
         const lost = failed?.pair === line.pair ? failed.cause : null;
         return (
           <Row key={line.pair} label={line.label} value={line.size} testId="settings-translate-pair"
             hint={lost !== null ? <span role="status">{t("settings.translate.removeFailed")}</span> : undefined} info={lost !== null ? rawError(lost) : undefined}>
-            <Button loading={removing === line.pair} disabled={removing !== null} aria-label={t("settings.translate.removeLabel", { name: line.label })} onClick={() => void remove(line.pair)}>
+            <Button ref={(button) => { removeButtons.current[i] = button; }} loading={removing === line.pair} disabled={removing !== null}
+              aria-label={t("settings.translate.removeLabel", { name: line.label })} onClick={() => void remove(line.pair, i)}>
               {t("settings.translate.remove")}
             </Button>
           </Row>

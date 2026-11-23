@@ -810,7 +810,7 @@ const METHODS: Record<string, Method> = {
       chosen.push(message);
     }
     if (!bool(params, "force")) for (const message of chosen) {
-      const secret = message.file ? null : secretIn([message.text, ...previewTexts(message.preview)]);
+      const secret = secretIn(forwardedTexts(message));
       if (secret) throw new CliError("confirm", `A message looks like ${secretWords(secret)}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
     }
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
@@ -1390,11 +1390,16 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
     const linkId = args.linkId;
     texts = typeof linkId === "string" && linkId && ids.length <= FORWARD_MESSAGES ? await Promise.all(ids.map(async (id) => {
       const message = await node(ctx).getMessage(linkId, id);
-      return message && !message.file ? [message.text, ...previewTexts(message.preview)] : null;
+      return message ? forwardedTexts(message) : null;
     })) : [];
   }
   const secret = secretIn(texts);
   if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; call ${method} with --force if you mean to`, { kind: secret.kind });
+}
+
+/** What a forward sends again: a text with its preview's card, or a file's name and type (the engine sends no caption). */
+function forwardedTexts(message: StoredMessage): (string | undefined)[] {
+  return message.file ? [message.file.name, message.file.mime] : [message.text, ...previewTexts(message.preview)];
 }
 
 /** What a link preview's card shows the contact besides the link: its title, description and site. */
@@ -1633,7 +1638,7 @@ function dhtTooLong(ctx: ApiContext, asked: LinkView, error: string, kind: "text
  * replied to") for the message `id`, said as `noMessage` says it, with that reason kept; undefined for any other error.
  * The engine says "chat" in a group for a reply and a save: `place` says which it is.
  */
-function notHere(error: string, id: string, place: RefPlace): CliError | undefined {
+export function notHere(error: string, id: string, place: RefPlace): CliError | undefined {
   const said = /^That message is not in this (?:chat|group)(?:, or (.+))?$/.exec(error);
   return said ? noMessage(id, place, said[1] ? { tail: `, or it ${said[1]}` } : {}) : undefined;
 }

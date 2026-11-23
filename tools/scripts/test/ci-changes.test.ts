@@ -819,16 +819,40 @@ describe("the errors of a red CI Success", () => {
     expect(gate({})).toEqual({ status: 0, errors: [] });
     expect(gate({ TAURI: "failure", WEBSITE_E2E: "skipped" })).toEqual({
       status: 1,
-      errors: ["::error::Tauri Backend ended failure", "::error::Website browser checks was skipped, but this change needs it"],
+      errors: ["::error::Tauri Backend ended failure", "::error::Website browser checks (1/4 to 4/4) was skipped, but this change needs it"],
     });
     // The package tests that start real peers run in their own job: a run that skipped it did not test the packages.
-    expect(gate({ INTEGRATION_TESTS: "skipped" })).toEqual({ status: 1, errors: ["::error::Integration tests was skipped, but this change needs it"] });
+    // Its two runners share one result, so the error names their range.
+    expect(gate({ INTEGRATION_TESTS: "skipped" })).toEqual({ status: 1, errors: ["::error::Integration tests (1/2 to 2/2) was skipped, but this change needs it"] });
+    expect(gate({ INTEGRATION_TESTS: "failure" })).toEqual({ status: 1, errors: ["::error::Integration tests (1/2 to 2/2): one or more shards ended failure"] });
   });
 
   it("names the range of the draft's unit test groups, since their one result does not say which failed", () => {
     const draft = { DRAFT: "true", FULL: "false", AFFECTED_GATE: "true", FRONTEND_TESTS: "skipped", FRONTEND_BUILD: "skipped" };
     expect(gate({ ...draft, AFFECTED: "failure" })).toEqual({ status: 1, errors: ["::error::Affected unit tests (draft 1/4 to 4/4): one or more groups ended failure"] });
     expect(gate({ ...draft, AFFECTED: "skipped" })).toEqual({ status: 1, errors: ["::error::Affected unit tests (draft 1/4 to 4/4) was skipped, but this change needs it"] });
+  });
+
+  it("names each job as the run page does, and a matrix by its range", () => {
+    // `check "<name>" "$VAR" ...`, and the job whose result VAR holds (`VAR: ${{ needs.<job>.result }}`).
+    const checks = [...script.matchAll(/^check "([^"]+)" "\$(\w+)"/gm)];
+    expect(checks.length).toBeGreaterThan(10);
+    for (const [, name, env] of checks) {
+      const id = new RegExp(`^ {10}${env}: \\$\\{\\{ needs\\.([\\w-]+)\\.result \\}\\}$`, "m").exec(job("ci-success"))?.[1] ?? "";
+      const shown = /^ {4}name: (.+)$/m.exec(job(id))?.[1] ?? "";
+      const matrix = /\$\{\{ matrix\.(\w+) \}\}\/(\d+)/.exec(shown);
+      if (!matrix) {
+        expect(shown.startsWith(name), `${name} is not the start of ${shown}`).toBe(true);
+        continue;
+      }
+      const [, key, count] = matrix;
+      expect(job(id)).toMatch(new RegExp(`^ {8}${key}: \\[${Array.from({ length: Number(count) }, (_, i) => i + 1).join(", ")}\\]$`, "m"));
+      const range = shown.replace(matrix[0], `1/${count} to ${count}/${count}`);
+      expect(name).toBe(range);
+      // The gate is the draft's for the draft's groups, the full tier's for the rest.
+      const draft = key === "group" ? { DRAFT: "true", FULL: "false", AFFECTED_GATE: "true", FRONTEND_TESTS: "skipped", FRONTEND_BUILD: "skipped" } : {};
+      expect(gate({ ...draft, [env]: "failure" }).errors).toEqual([`::error::${range}: one or more ${key}s ended failure`]);
+    }
   });
 
   it("blames Changed paths, not the plan, when that job did not pass", () => {

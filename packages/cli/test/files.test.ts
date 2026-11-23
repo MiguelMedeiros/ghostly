@@ -65,6 +65,8 @@ describe("the Node file store", () => {
     // A mark goes before the extension, and the stem makes room for it.
     expect(fitName(`${"文".repeat(83)}.txt`, " (2)")).toBe(`${"文".repeat(82)} (2).txt`);
     expect(fitName("report.pdf", " (12)")).toBe("report (12).pdf");
+    // A cut that leaves a dot at the end loses it, as Windows would drop it from the name.
+    expect(fitName(`${"文".repeat(84)}.${"文".repeat(20)}`)).toBe("文".repeat(84));
   });
 
   it("saves a file under a name no tool takes for an option: a leading dash gets a _ first", () => {

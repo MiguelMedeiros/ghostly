@@ -1,4 +1,4 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, concatBytes, fromBase64, guardViewerAnswer, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
 import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerPage, type ViewerReply, type ViewerTaken } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
@@ -469,6 +469,41 @@ const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRe
 const sandboxed = (policy: string) => `${policy}; sandbox allow-scripts allow-same-origin allow-forms`;
 
 /**
+ * What each page of the app runs first, as on the web (apps/web/src/svc/worker.ts): the clipboard guard. No policy or
+ * sandbox flag keeps a page off `execCommand("copy")`, which Chromium lets write for seconds after a tap. The WebRTC
+ * guard is not needed: no tab opens while Hide my IP from contacts is on.
+ */
+const PAGE_GUARDS = [{ script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH }];
+
+/**
+ * The `destination` `guardViewerAnswer` reads, from the kind DevTools gives a request (it hands over no
+ * `Sec-Fetch-Dest`): `Document` is the tab's page or a frame's. `Other` is an `<object>` or `<embed>`, a worker's own
+ * script, a favicon: a page, unless its one type is a script's, which a browser never shows as one (a worker's, then).
+ * Null when DevTools said nothing: a page.
+ */
+function destinationOf(resourceType: string | undefined, headers: [string, string][]): string | null {
+  if (resourceType === undefined || resourceType === "Document") return null;
+  if (resourceType !== "Other") return resourceType.toLowerCase();
+  const types = headers.filter(([name]) => name.toLowerCase() === "content-type").map(([, value]) => value);
+  const script = types.length === 1 && /^(text|application)\/(x-)?(java|ecma)script$/i.test(types[0].split(";")[0].trim());
+  return script ? "worker" : null;
+}
+
+/** A contact's answer as the tab gets it: each page with the guards first (`guardViewerAnswer`), Ghostly's policy last. */
+async function viewerAnswer(headers: [string, string][], bodyB64: string, resourceType: string | undefined): Promise<{ headers: { name: string; value: string }[]; body: string }> {
+  const own = viewerResponseHeaders(headers);
+  const body = (async function* () { yield fromBase64(bodyB64); })();
+  const answer = await guardViewerAnswer(own, body, destinationOf(resourceType, own), PAGE_GUARDS);
+  const parts: Uint8Array[] = [];
+  for await (const part of answer.body) parts.push(part);
+  return {
+    // Ghostly's policy is the header's last one, after the contact's.
+    headers: withViewerPolicy(answer.headers).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value })),
+    body: toBase64(concatBytes(...parts)),
+  };
+}
+
+/**
  * Least time between two links a viewer tab opens outside, and the most it opens (counted while this worker runs): as
  * the web view (`openOutside` in apps/web/src/svc/opener.ts) and Desktop's viewer window, so an app that asks on every
  * tap does not fill the browser with tabs.
@@ -805,12 +840,12 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   }
 
   if (reply.ok) {
+    const answer = await viewerAnswer(reply.headers, reply.bodyB64, paused.resourceType);
     await devtools(tabId, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      // Ghostly's policy is the header's last one, after the contact's.
-      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers)).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value })),
-      body: reply.bodyB64,
+      responseHeaders: answer.headers,
+      body: answer.body,
     }, binding);
     return;
   }

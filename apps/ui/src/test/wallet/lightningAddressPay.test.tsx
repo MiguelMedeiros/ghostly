@@ -380,6 +380,22 @@ describe("a Lightning address or LNURL the mint leaves pending reads as waiting,
       expect(screen.queryByTestId("lnurl-failed-next")).toBeNull();
     });
 
+    it("through the default Lightning card (the mints): the fee the mint kept on its journal's failed payment is said", async () => {
+      const hash = decodeBolt11(REGTEST_INVOICE)!.paymentHash!;
+      const failed = { ...stateOf({ balance: 4_999, history: [out("fee", 1, "melt-q")] } as Partial<WalletState>), lightning: { mode: "testnet", providerId: "cashu-mint", status: "ready", offered: [], recent: [{ direction: "out", paymentHash: hash, invoice: REGTEST_INVOICE, amount: 5, createdAt: Date.now(), state: "failed", fee: 1 }] } } as never;
+      fakeEngine.setState({ wallet: stateOf({ setAside: 6 } as Partial<WalletState>) });
+      const wallet: WalletPlatform = Object.assign(Object.create(servicesPlatform!.wallet.forNetwork("testnet")), { ...methods("alice@example.com", false, "cashu-mint"), lightningAddressInvoice: async () => ({ invoice: REGTEST_INVOICE, note: "Paid alice@example.com" }) });
+      const { user, engine } = renderApp(<LightningAddressPay wallet={wallet} text="alice@example.com" />);
+      await user.click(screen.getByTestId("lnurl-lookup"));
+      await user.type(await screen.findByTestId("lnurl-amount"), "5");
+      await user.click(screen.getByTestId("lnurl-invoice"));
+      await user.click(await screen.findByTestId("lnurl-pay"));
+      expect(await screen.findByTestId("lnurl-pending")).toHaveTextContent("The payment is still pending at the mint.");
+      act(() => engine.setState({ wallet: failed }));
+      expect(await screen.findByTestId("lnurl-failed-title")).toHaveTextContent("The payment failed: the payee was not paid.");
+      expect(screen.getByTestId("lnurl-failed-next")).toHaveTextContent("What was set aside for it is back in your balance, less 1 test sat the mint kept as a fee (in the history).");
+    });
+
     it("through a Lightning card: paid in its journal, it stays paid once 20 newer entries push it out", async () => {
       const hash = decodeBolt11(REGTEST_INVOICE)!.paymentHash!;
       const withRecent = (recent: unknown[]) => { const s = stateOf({}); return { ...s, lightning: { mode: "testnet", providerId: "lnd", status: "ready", offered: [], recent } } as never; };
@@ -398,5 +414,101 @@ describe("a Lightning address or LNURL the mint leaves pending reads as waiting,
       expect(screen.getByTestId("lnurl-paid")).toBeInTheDocument();
       expect(screen.queryByTestId("lnurl-pending")).toBeNull();
     });
+  });
+
+  describe("the service's words for a paid invoice show only once it is paid", () => {
+    /**
+     * What a service leaves after a payment (a LUD-09 success action: its thanks, or a link to a receipt or a download) is
+     * for a payment that went. It showed under the waiting line, and under "the payee was not paid" once it failed.
+     */
+    const stateOf = (patch: Partial<WalletState>) => walletView({ mode: "testnet", mints: [mint(TEST_MINT, 5_000)], balance: 5_000, ...patch });
+    const pendingWith = async (successAction: { tag: "message"; message: string } | { tag: "url"; description: string; url: string }) => {
+      fakeEngine.setState({ wallet: stateOf({ setAside: 6 } as Partial<WalletState>) });
+      const wallet: WalletPlatform = Object.assign(Object.create(servicesPlatform!.wallet.forNetwork("testnet")), {
+        ...methods("alice@example.com", false),
+        lightningAddressInvoice: async () => ({ invoice: "lnbcrt-x", note: "Paid alice@example.com", successAction }),
+      });
+      const { user, engine } = renderApp(<LightningAddressPay wallet={wallet} text="alice@example.com" via="cashu" />);
+      await user.click(screen.getByTestId("lnurl-lookup"));
+      await user.type(await screen.findByTestId("lnurl-amount"), "5");
+      await user.click(screen.getByTestId("lnurl-invoice"));
+      await user.click(await screen.findByTestId("lnurl-pay"));
+      return { engine, done: await screen.findByTestId("lnurl-done") };
+    };
+
+    for (const action of [{ tag: "message", message: "Thanks for the coffee" }, { tag: "url", description: "Your receipt", url: "https://example.com/receipt" }] as const) {
+      it(`a ${action.tag}: not while pending, not once failed`, async () => {
+        const { engine, done } = await pendingWith(action);
+        expect(screen.getByTestId("lnurl-pending")).toBeInTheDocument();
+        expect(done.textContent).not.toMatch(/Thanks for the coffee|Your receipt/);
+        expect(done.querySelector("a")).toBeNull();
+        engine.setState({ wallet: stateOf({}) });
+        expect(await screen.findByTestId("lnurl-failed")).toBeInTheDocument();
+        expect(screen.getByTestId("lnurl-done").textContent).not.toMatch(/Thanks for the coffee|Your receipt/);
+        expect(screen.getByTestId("lnurl-done").querySelector("a")).toBeNull();
+      });
+
+      it(`a ${action.tag}: shown once the pending payment is paid`, async () => {
+        const { engine } = await pendingWith(action);
+        engine.setState({ wallet: stateOf({ balance: 4_995, history: [{ id: "out-q-2", timestamp: Date.now(), mint: TEST_MINT, kind: "lightning-out", amount: 5, fee: 0, quote: "q-2" }] } as Partial<WalletState>) });
+        expect(await screen.findByTestId("lnurl-paid")).toBeInTheDocument();
+        const done = screen.getByTestId("lnurl-done");
+        if (action.tag === "message") expect(screen.getByTestId("lnurl-success")).toHaveTextContent("example.com says: Thanks for the coffee");
+        else expect(done.querySelector("a")).toHaveTextContent("https://example.com/receipt");
+      });
+    }
+  });
+});
+
+// covers: payments.lnurl.card, app.composer.secret-guard
+describe("a Lightning address's comment that looks like a secret is asked about before the service gets it", () => {
+  /**
+   * The comment (LUD-12) goes to the address's service with the invoice request, and from there to its owner, as a
+   * chat payment's memo goes to the contact: a seed or a private key in it is asked about first, as the memo is (the
+   * composer's SecretGuardDialog) and as the CLI's `pay --comment` is. It went with Get invoice, no question asked.
+   */
+  /** BIP39's test vector for entropy 0x7f repeated: it has never held anything. */
+  const SEED = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+  const info = { id: "addr-1", kind: "address", text: "alice@example.com", domain: "example.com", callbackDomain: "example.com", minSat: 1, maxSat: 100_000, description: "Alice", commentAllowed: 200 } as LightningAddressInfo;
+  const withComment = async (comment: string) => {
+    fakeEngine.setState({ wallet: walletView({ mode: "testnet", mints: [mint(TEST_MINT, 5_000)], balance: 5_000 }) });
+    const shown = renderApp(<LightningAddressPay wallet={servicesPlatform!.wallet.forNetwork("testnet")} text="alice@example.com" />);
+    shown.engine.on("lnurlResolve", () => info).on("lnurlInvoice", () => ({ invoice: "lnbc-invoice", note: "Paid alice@example.com" }))
+      .on("walletQuoteInvoice", () => ({ quote: "melt-1", mint: TEST_MINT, amount: 5, feeReserve: 1 }));
+    await shown.user.click(screen.getByTestId("lnurl-lookup"));
+    await shown.user.type(await screen.findByTestId("lnurl-amount"), "5");
+    await shown.user.click(screen.getByTestId("lnurl-comment"));
+    await shown.user.paste(comment);
+    screen.getByTestId("lnurl-invoice").focus();
+    await shown.user.keyboard("{Enter}");
+    return shown;
+  };
+
+  it("a seed: the guard asks with Cancel focused, nothing reaches the service, and Cancel keeps the comment", async () => {
+    const { user, engine } = await withComment(SEED);
+    const guard = await screen.findByTestId("secret-guard");
+    expect(guard).toHaveAttribute("data-kind", "mnemonic");
+    expect(screen.getByTestId("secret-guard-cancel")).toHaveFocus();
+    expect(engine.callsTo("lnurlInvoice")).toHaveLength(0);
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("secret-guard")).toBeNull();
+    expect(engine.callsTo("lnurlInvoice")).toHaveLength(0);
+    expect(screen.getByTestId("lnurl-comment")).toHaveValue(SEED);
+    expect(screen.getByTestId("lnurl-invoice")).toHaveFocus();
+  });
+
+  it("Send anyway goes on to the invoice, with the comment", async () => {
+    const { user, engine } = await withComment(SEED);
+    await user.click(await screen.findByTestId("secret-guard-send"));
+    expect(await screen.findByTestId("lnurl-pay")).toBeInTheDocument();
+    expect(engine.callsTo("lnurlInvoice")).toHaveLength(1);
+    expect(JSON.stringify(engine.callsTo("lnurlInvoice")[0])).toContain(SEED);
+  });
+
+  it("an ordinary comment asks nothing", async () => {
+    const { engine } = await withComment("for the coffee");
+    expect(await screen.findByTestId("lnurl-pay")).toBeInTheDocument();
+    expect(screen.queryByTestId("secret-guard")).toBeNull();
+    expect(engine.callsTo("lnurlInvoice")).toHaveLength(1);
   });
 });

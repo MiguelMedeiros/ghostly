@@ -5,7 +5,7 @@ import { PaymentComposer } from "./PaymentComposer";
 import { ComposerIdentityPicker, useSharedIdentityCount } from "./identities/ComposerIdentities";
 import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
-import type { LinkPreview, TypingKind, VoiceMeta } from "@ghostly/core";
+import { sanitizeFileName, type LinkPreview, type TypingKind, type VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { NAME, withName } from "./apps/aroundName";
 import { isolate } from "../lib/ownStatus";
@@ -220,9 +220,10 @@ export function MessageInput({
   const [toastAction, setToastAction] = useState<{ label: string; run: () => void } | null>(null);
   /**
    * `caption`: the guard asks about a pasted file's caption, not the draft; `translated`: about the translation shown;
-   * `translate`: about the draft, before it is translated (what Send anyway does then).
+   * `translate`: about the draft, before it is translated (what Send anyway does then); `files`: about a picked file's
+   * name; `sheet`: about a name in the sheet, which sends with this caption.
    */
-  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean; translate?: () => void } | null>(null);
+  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean; translate?: () => void; files?: File[]; sheet?: string } | null>(null);
   /** The draft the guard was answered Send for before Translate: its translation does not ask again. */
   const guardedDraft = useRef<string | null>(null);
   /** Files pasted or dropped here, waiting on the sheet for Send. */
@@ -448,7 +449,7 @@ export function MessageInput({
   // The draft emptied (by hand, or given to an edit): nothing left to translate.
   useEffect(() => { if (!text.trim() || editKey) closeTranslation(); }, [text, editKey, closeTranslation]);
   // The chat's translation turned off, or its language changed, while a preview was open: that preview is closed, so
-  // Enter sends the draft again rather than wait on a translation nothing can make (ghostly-agents#1812).
+  // Enter sends the draft again rather than wait on a translation nothing can make.
   // A group's list is ordered by use and recomputed as messages arrive, so it is compared as a set, and an open preview
   // stays while the language it shows is still offered: a reorder or a new language must not drop a picked translation.
   const offered = translation ? (translation.language ? [translation.language] : [...(translation.languages ?? [])].sort()).join(",") : null;
@@ -689,6 +690,7 @@ export function MessageInput({
     if (err) showToast(err);
     setShowPanel(false);
     if (!phone) textareaRef.current?.focus();
+    else if (panelByKey) panelButtonRef.current?.focus();
   };
 
   // A share of mine tapped in the chat's timeline: the picker, on that card.
@@ -778,9 +780,17 @@ export function MessageInput({
     }
   };
 
+  /**
+   * A file's name reaches the contact as a message's text does: the first that looks like a secret, read as it goes
+   * (`sanitizeFileName`: a key split by a `:` the name loses is whole), as the CLI's `file send` reads it.
+   */
+  const secretName = (files: File[]) => files.reduce<SecretFinding | null>((found, file) => found ?? findSecret(sanitizeFileName(file.name)), null);
+
   const sendFiles = (files: FileList | null, input: HTMLInputElement) => {
     const chosen = [...(files ?? [])];
     input.value = "";
+    const found = secretName(chosen);
+    if (found) { setSecret({ finding: found, files: chosen }); return; }
     void sendChosen(chosen);
   };
 
@@ -893,8 +903,11 @@ export function MessageInput({
     if (err) showToast(err);
   };
 
-  const sendAttached = async (caption: string) => {
+  const sendAttached = async (caption: string, confirmed = false) => {
     const files = attached ?? [];
+    // Asked with the sheet still open: Cancel keeps its files and caption.
+    const found = confirmed ? null : secretName(files);
+    if (found) { setSecret({ finding: found, sheet: caption }); return; }
     setAttached(null);
     if (await sendChosen(files)) await sendCaption(caption);
   };
@@ -1092,7 +1105,7 @@ export function MessageInput({
         type="button"
         onClick={hideToast}
         aria-label={t("common.close")}
-        className="-me-2 -my-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="tap-target -me-2 -my-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         &times;
       </button>
@@ -1290,8 +1303,9 @@ export function MessageInput({
           onClose={() => {
             setShowPanel(false);
             const at = document.activeElement;
-            if (phone || (at && at !== document.body && !at.closest("[data-testid='expression-panel']"))) return;
-            if (panelByKey) panelButtonRef.current?.focus(); else textareaRef.current?.focus();
+            if (at && at !== document.body && !at.closest("[data-testid='expression-panel']")) return;
+            // Opened from the keyboard, the smiley takes it back: a button, so no on-screen keyboard on a phone either.
+            if (panelByKey) panelButtonRef.current?.focus(); else if (!phone) textareaRef.current?.focus();
           }}
         />
       )}
@@ -1299,7 +1313,9 @@ export function MessageInput({
         <SecretGuardDialog finding={secret.finding} recipient={recipient ?? payments?.contact ?? identities?.contact}
           onCancel={() => setSecret(null)} onConfirm={() => {
             setSecret(null);
-            if (secret.caption !== undefined) void sendCaption(secret.caption, true);
+            if (secret.files) void sendChosen(secret.files);
+            else if (secret.sheet !== undefined) void sendAttached(secret.sheet, true);
+            else if (secret.caption !== undefined) void sendCaption(secret.caption, true);
             else if (secret.translate) secret.translate();
             else if (secret.translated) void sendTranslation(true);
             else void handleSubmit(true);

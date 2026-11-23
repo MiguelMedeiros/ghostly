@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from "@playwright/test";
 import { copyInvite } from "../support/clipboard";
 import { chat, expect, openProfilePage, test } from "../support/fixtures";
+import { smallTargets } from "../support/touchTargets";
 
 /*
  * A new profile asks once "What should people call you?" (apps/ui/src/components/NameStep.tsx): the field empty, and
@@ -56,6 +57,9 @@ test("on a phone, Skip keeps the anonymous label and is not asked again", { tag:
   await expect(step).toBeVisible();
   await expect(page.getByTestId("name-step-input")).toHaveValue("");
   await shot(page, "phone");
+  // Its controls are 44 px targets, as the app's other phone controls: Skip was a 40 px tall text button.
+  const small = (await smallTargets(page, 44, "[data-testid=name-step] button")).map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`);
+  expect(small).toEqual([]);
   await page.getByTestId("name-step-skip").click();
   await expect(step).toBeHidden();
   await expect(page.getByTestId("sidebar-new-chat")).toBeFocused();

@@ -521,6 +521,14 @@ describe("the connection icon while pairing (the header's only connection elemen
     expect(screen.getByTestId("connection-menu")).not.toHaveAttribute("open");
   });
 
+  // It kept the desktop's 36 px on a phone, under the transport rows' 44: in px, as phoneTargetsPx wants (#8056).
+  it("Show pairing progress is a 44 px target on a phone", async () => {
+    const { engine, user } = renderApp(<Pairing inviter onShow={() => {}} />);
+    show(published, engine);
+    await user.click(icon());
+    expect(screen.getByTestId("connection-show-pairing")).toHaveClass("max-md:min-h-[44px]");
+  });
+
   it("goes back to the plain icon once live", () => {
     const { engine } = renderApp(<Pairing inviter />);
     for (const link of [published, knocked, connecting, live]) show(link, engine);

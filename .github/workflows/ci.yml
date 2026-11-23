@@ -339,14 +339,20 @@ jobs:
   # packages' time, and most of their flakes). The shards above and the draft tier leave them out (GHOSTLY_INTEGRATION=0,
   # tools/vitest.shared.ts); they run here, on one runner, wherever the shards run: a batch, a ready pull request at its
   # base's tip (a queued one behind it rides its batch's run), a merge group. Nightly on dev in e2e-full.yml. The CLI's
-  # two-peer story (about 2 minutes of designed waits, one test after another) runs first, with nothing beside it.
+  # two-peer story (about 2 minutes of designed waits, one test after another) runs first on runner 1, with nothing
+  # beside it. On one runner the job took about 9.5 minutes, the slowest of the run; on two, about 5.5 and 4.
   integration-tests:
-    name: Integration tests
+    name: Integration tests (${{ matrix.shard }}/2)
     needs: changes
     if: needs.changes.outputs.packages == 'true'
     runs-on: ubuntu-24.04
     # A daemon that never exits would otherwise hold the runner for 6 hours.
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # The 2 below and in the name must match this list.
+        shard: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -357,15 +363,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Integration tests (tools/scripts/integration-tests.json)
-        run: node tools/scripts/test-shards.mjs --integration 1 1 --report-dir "$RUNNER_TEMP/test-reports"
+      - name: Integration tests (tools/scripts/integration-tests.json, runner ${{ matrix.shard }} of 2)
+        run: node tools/scripts/test-shards.mjs --integration ${{ matrix.shard }} 2 --report-dir "$RUNNER_TEMP/test-reports"
 
       # Each file's time, for `node tools/scripts/test-shards.mjs --record` after a test file gets slower.
       - name: Keep the test times
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: integration-test-reports
+          name: integration-test-reports-${{ matrix.shard }}
           path: ${{ runner.temp }}/test-reports
           retention-days: 14
           if-no-files-found: ignore
@@ -1076,15 +1082,15 @@ jobs:
             failed=1
           }
           check "Frontend lint and types" "$FRONTEND_CHECKS" "$LINT"
-          check "Frontend tests (app)" "$FRONTEND_TESTS" "$FULL"
+          check "Frontend tests (app) 1/3 to 3/3" "$FRONTEND_TESTS" "$FULL" "one or more shards"
           check "Frontend builds" "$FRONTEND_BUILD" "$FULL"
           check "Affected unit tests (draft 1/4 to 4/4)" "$AFFECTED" "$AFFECTED_GATE" "one or more groups"
-          check "Frontend tests (packages)" "$PACKAGES_TESTS" "$PACKAGES"
-          check "Integration tests" "$INTEGRATION_TESTS" "$PACKAGES"
+          check "Frontend tests (packages 1/4 to 4/4)" "$PACKAGES_TESTS" "$PACKAGES" "one or more shards"
+          check "Integration tests (1/2 to 2/2)" "$INTEGRATION_TESTS" "$PACKAGES" "one or more shards"
           check "CLI on Linux ARM64" "$CLI_ARM64" "$PACKAGES"
           check "Tauri Backend" "$TAURI" "$RUST"
           check "Website" "$WEBSITE" "$WEBSITE_GATE"
-          check "Website browser checks" "$WEBSITE_E2E" "$WEBSITE_E2E_GATE"
+          check "Website browser checks (1/4 to 4/4)" "$WEBSITE_E2E" "$WEBSITE_E2E_GATE" "one or more shards"
           check "Desktop media" "$DESKTOP_MEDIA" "$APP"
           check "Desktop on macOS" "$DESKTOP_MACOS" "$APP"
           summary="draft=$DRAFT tested=$TESTED changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS integration-tests=$INTEGRATION_TESTS affected-tests=$AFFECTED cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"

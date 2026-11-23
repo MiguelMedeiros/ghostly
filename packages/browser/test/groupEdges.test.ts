@@ -98,7 +98,7 @@ describe("edgeView: how a group's edge to one member is doing", () => {
   });
 });
 
-describe("keptMeshPeer: the edge each member of a private group keeps while it is not on screen (ghostly-agents#1509)", () => {
+describe("keptMeshPeer: the edge each member of a private group keeps while it is not on screen", () => {
   /** A roster of `n` members in admission order, the creator first: keys that do not sort the way they were admitted. */
   const roster = (n: number) => Array.from({ length: n }, (_, i) => `k${String.fromCharCode(122 - i)}${i}`);
   /** Every edge kept, as "a|b" with the two keys sorted, and the members on each. */

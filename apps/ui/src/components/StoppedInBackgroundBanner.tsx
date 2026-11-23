@@ -19,11 +19,11 @@ export function StoppedInBackgroundBanner() {
         <span className="text-text-muted"> · {t("settings.stayConnectedStoppedNext")}</span>
       </p>
       <button type="button" data-testid="stopped-in-background-settings" onClick={() => { dismissStoppedInBackground(); void openAppSettings(); }}
-        className="shrink-0 text-xs font-semibold text-accent hover:underline cursor-pointer">
+        className="tap-target shrink-0 text-xs font-semibold text-accent hover:underline cursor-pointer">
         {t("settings.noticesOpenSettings")}
       </button>
       <button type="button" data-testid="stopped-in-background-dismiss" aria-label={t("common.close")} title={t("common.close")} onClick={dismissStoppedInBackground}
-        className="shrink-0 grid place-items-center w-5 h-5 rounded text-text-muted hover:text-text-primary cursor-pointer">
+        className="tap-target max-md:ms-1 shrink-0 grid place-items-center w-5 h-5 rounded text-text-muted hover:text-text-primary cursor-pointer">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
       </button>
     </div>

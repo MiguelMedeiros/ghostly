@@ -114,7 +114,7 @@
     "maxFee": "Lo máximo que aceptas en comisiones",
     "maxFeeInput": "Comisión máxima en {{unit}}",
     "newAddress": "Nueva dirección",
-    "notConnected": "{{label}} no está conectado",
+    "notConnected": "Sin conexión con {{label}}",
     "notConnectedDefault": "La fuente Bitcoin no está conectada",
     "nothingYet": "Nada todavía",
     "refresh": "Actualizar",
@@ -198,7 +198,10 @@
       "noFee": "sin comisión",
       "none": "Nada todavía",
       "note": {
+        "notSent": "Un pago no se envió",
+        "paidRequest": "Solicitud de un contacto pagada",
         "paymentFailed": "Un pago Lightning falló",
+        "paymentFailedFor": "El pago falló: {{note}}",
         "requestPaid": "Solicitud pagada por Lightning",
         "testCoins": "Monedas de prueba del mint de prueba"
       }
@@ -221,6 +224,8 @@
     "pendingMintNext": "Se resuelve solo; no se paga nada otra vez. Hasta que el mint responda, el importe aparece como apartado bajo el saldo.",
     "primary": "Principal",
     "received": "⚡ {{amount}} {{unit}} recibidos",
+    "received_one": "⚡ {{amount}} {{unit}} recibido",
+    "received_other": "⚡ {{amount}} {{unit}} recibidos",
     "redeem": "Canjear token ecash",
     "redeemed": "{{amount}} {{unit}} canjeados.",
     "redeemed_one": "{{amount}} {{unit}} canjeado.",
@@ -417,6 +422,8 @@
       "unknown": "resultado desconocido"
     },
     "paidTo": "{{amount}} {{unit}} pagados a {{to}} ✓",
+    "paidTo_one": "{{amount}} {{unit}} pagado a {{to}} ✓",
+    "paidTo_other": "{{amount}} {{unit}} pagados a {{to}} ✓",
     "pastePlaceholder": "Pega una factura Lightning o una dirección Lightning",
     "pay": "Pagar",
     "payTo": "Pagar {{amount}} a {{to}}{{fees}}",
@@ -707,7 +714,8 @@
               "bip84": "SegWit nativo (BIP84, bc1q…)"
             }
           }
-        }
+        },
+        "label": "Billetera BDK"
       },
       "bitcoind": {
         "description": "Una billetera en tu propio nodo Bitcoin Core, por su RPC. Tu nodo guarda las claves y firma. Necesita la app de escritorio.",
@@ -734,7 +742,8 @@
         "description": "Una billetera Lightning autocustodiada en Spark, mediante el SDK de Breez. Su frase de recuperación queda sellada en este dispositivo; tú guardas los sats."
       },
       "cashu-mint": {
-        "description": "Las facturas se pagan a tu saldo Cashu, y desde él. Los mints guardan los sats."
+        "description": "Las facturas se pagan a tu saldo Cashu, y desde él. Los mints guardan los sats.",
+        "label": "Mints Cashu"
       },
       "core-lightning": {
         "description": "Tu propio nodo Core Lightning, por Commando con una rune. Tu nodo guarda los sats. La app web solo lo alcanza por wss://.",
@@ -771,7 +780,8 @@
             "help": "El puerto REST de LND (restlisten, 8080 por defecto). En un navegador, el nodo debe permitir esta app con restcors y tener un certificado en el que el navegador confíe; la app de escritorio no necesita ninguno de los dos.",
             "label": "Dirección REST"
           }
-        }
+        },
+        "label": "Nodo LND"
       },
       "nwc": {
         "description": "Una billetera que conectas con su URI NWC (Alby Hub, el servicio NWC de un nodo, una billetera alojada). Esa billetera guarda los sats y fija su propio límite de comisión: que sea custodial o no depende de la billetera.",
@@ -783,7 +793,8 @@
         }
       },
       "webln": {
-        "description": "Una billetera Lightning en este navegador (Alby y otras). Esa billetera guarda los sats y te pregunta antes de pagar."
+        "description": "Una billetera Lightning en este navegador (Alby y otras). Esa billetera guarda los sats y te pregunta antes de pagar.",
+        "label": "Billetera del navegador (WebLN)"
       }
     },
     "reconfigured": "{{name}} usa ahora ese servidor.",
@@ -900,7 +911,9 @@
     "uncounted": "{{count}} tarjetas fuera del total",
     "uncounted_one": "{{count}} tarjeta fuera del total",
     "unknown": "No se pudo leer ahora, fuera del total",
-    "waiting": "{{amount}} {{unit}} aún no disponibles"
+    "waiting": "{{amount}} {{unit}} aún no disponibles",
+    "waiting_one": "{{amount}} {{unit}} aún no disponible",
+    "waiting_other": "{{amount}} {{unit}} aún no disponibles"
   },
   "ui": {
     "amountIn": "Cantidad en {{unit}}",
