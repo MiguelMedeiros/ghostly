@@ -1334,7 +1334,7 @@ export class GhostlyNode implements EngineImplementation {
     onChange: () => this.walletChanged(),
     // The mints settle their own invoices and payments; the Lightning journal learns it from here.
     onQuotePaid: (quote) => void this.lightnings[mintNetwork(quote.mint)].reportInvoicePaid(quote.invoice, { paymentId: quote.paymentId, mint: quote.mint }),
-    onMeltResolved: (melt, paid) => void this.lightnings[mintNetwork(melt.mint)].reportPaymentResolved(melt.request, paid, { paymentId: melt.paymentId, mint: melt.mint }),
+    onMeltResolved: (melt, paid, fee) => void this.lightnings[mintNetwork(melt.mint)].reportPaymentResolved(melt.request, paid, { paymentId: melt.paymentId, mint: melt.mint, fee }),
     onTestMintNeeded: async (mint) => void (await this.walletAddMint({ url: mint })),
     // A redeem finished after its call was over: the chat it belongs to learns of it, and ecash of ours that came
     // back this way ends its review as any ecash taken back does. The wallet waits for this before it lets the swap go.
