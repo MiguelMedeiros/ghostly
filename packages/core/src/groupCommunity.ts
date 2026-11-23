@@ -805,9 +805,10 @@ export class CommunitySession {
   /**
    * After the admin role moved to me (`metaFollowsChain`): whom from, until when I take their statement, and the last
    * one of theirs I signed again (what I held then, until one of theirs comes). `vouched`: the latest of theirs another
-   * member's sync said it holds; `held`: the latest of theirs no other member has shown it holds yet. In memory only.
+   * member's sync said it holds; `held`: the latest of theirs no other member has shown it holds yet; `members`: the
+   * roster while they were still the admin, the only members whose word vouches for theirs. In memory only.
    */
-  private takeover: { from: string; until: number; base: GroupMeta | undefined; vouched?: { e: number; r: number }; held?: { from: string; raw: unknown; s: GroupMetaStatement } } | undefined;
+  private takeover: { from: string; until: number; base: GroupMeta | undefined; members: Roster | undefined; vouched?: { e: number; r: number }; held?: { from: string; raw: unknown; s: GroupMetaStatement } } | undefined;
   /** The store's frames the app holds with their messages (`storeKey` → message id): in memory here, not in what is saved. */
   private readonly onRows = new Map<string, string>();
   /** The oldest epoch whose seen marks are kept, as of the last `pruneSeen`. In memory only. */
@@ -3081,11 +3082,19 @@ export class CommunitySession {
   /**
    * Whether a statement I would take (`takesOver`) was on its way when the role moved, as far as I can tell: a member
    * other than its signer handed it to me (a hub's relay included), or said in a sync it holds that one or a later one
-   * under the same commit. The former admin alone could sign new ones after the hand-over, each taken for the whole group.
+   * under the same commit. The former admin alone could sign new ones after the hand-over, each taken for the whole group;
+   * so could a member let in since (in a community anyone with the link joins), so only one already in when the role
+   * moved vouches.
    */
   private vouches(from: string, s: GroupMetaStatement): boolean {
     const v = this.takeover?.vouched;
-    return from !== s.by || (!!v && v.e === s.e && v.r >= s.r);
+    return (from !== s.by && this.vouchesFrom(from)) || (!!v && v.e === s.e && v.r >= s.r);
+  }
+
+  /** Whether a member other than the admin before me was in the roster while they were still the admin (`takeover.members`). */
+  private vouchesFrom(key: string): boolean {
+    const t = this.takeover;
+    return !!t && key !== t.from && rosterHas(t.members ?? [], key);
   }
 
   /** The former admin's statement nobody else has shown it holds: the latest is kept until a sync does (`vouch`). */
@@ -3100,7 +3109,7 @@ export class CommunitySession {
    */
   private async vouch(from: string, tag: unknown): Promise<void> {
     const t = this.takeover, v = parseGroupMetaTag(tag), commit = v ? this.state.chain[v.e] : undefined;
-    if (!t || !v || !commit || from === t.from || rosterAdmin(this.rosterAt(this.hashOf(commit)) ?? []) !== t.from) return;
+    if (!t || !v || !commit || !this.vouchesFrom(from) || rosterAdmin(this.rosterAt(this.hashOf(commit)) ?? []) !== t.from) return;
     if (t.vouched && !groupMetaNewer(v, t.vouched)) return;
     t.vouched = v;
     const held = t.held;
@@ -3151,6 +3160,15 @@ export class CommunitySession {
     return moved === undefined || s.ts > this.state.chain[moved].ts ? s.by : undefined;
   }
 
+  /** The roster after the last commit of my main branch under which `admin` was the admin. */
+  private rosterWhileAdmin(admin: string): Roster | undefined {
+    for (let i = this.state.chain.length - 1; i >= 0; i--) {
+      const roster = this.rosterAt(this.hashOf(this.state.chain[i]));
+      if (roster && rosterAdmin(roster) === admin) return roster;
+    }
+    return undefined;
+  }
+
   /**
    * After the chain or my secrets moved: the waiting statement, and, if I became the admin, or my statement's commit
    * went with a branch that lost a fork, the name and picture signed again as mine under the main branch.
@@ -3160,7 +3178,7 @@ export class CommunitySession {
       // The role moved to me: what the admin before me signed may still be on its way (`takesOver`).
       const from = this.adminSeen;
       this.takeover = this.isAdmin && from && from !== this.myKey
-        ? { from, until: (this.hooks.clock?.() ?? Date.now()) + COMMUNITY_TAKEOVER_META_MS, base: this.state.meta } : undefined;
+        ? { from, until: (this.hooks.clock?.() ?? Date.now()) + COMMUNITY_TAKEOVER_META_MS, base: this.state.meta, members: this.rosterWhileAdmin(from) } : undefined;
       this.adminSeen = this.admin;
     }
     const { admin, other } = this.pendingMeta;
