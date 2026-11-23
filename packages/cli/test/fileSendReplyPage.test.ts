@@ -39,7 +39,8 @@ function fake(missing = false, there?: { id: string }) {
     messagePage: vi.fn(async () => ({ messages: [], more: true })),
     getMessages: vi.fn(async () => []),
     groupMessages: vi.fn(async () => []),
-    getMessage: vi.fn(async (_: string, id: string) => (there?.id === id ? there : undefined)),    sendFile: vi.fn(async (_: { file: MessageFile; replyTo?: string }) => { if (missing) throw new Error(NOT_THERE); }),
+    getMessage: vi.fn(async (_: string, id: string) => (there?.id === id ? there : undefined)),
+    sendFile: vi.fn(async (_: { file: MessageFile; replyTo?: string }) => { if (missing) throw new Error(NOT_THERE); }),
     groupFileCheck: vi.fn(() => ({ error: null })),
     sendGroupFile: vi.fn(async (_: { file: MessageFile; replyTo?: string }) => (missing ? { error: NOT_THERE } : { error: null, messageId: "mine:0:1" })),
   };
