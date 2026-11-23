@@ -158,6 +158,7 @@
     "published": "{{time}}に公開しました。アプリの実行中は1時間ごとに再公開します。",
     "publishing": "公開しています…",
     "qrTitle": "あなたのDIDのQRコード",
+    "refreshFailed": "{{time}}に公開しました。前回の再公開は届きませんでした。数分後に再試行します。",
     "showQr": "QRコードを表示",
     "title": "公開DID",
     "updating": "変更を公開しています…",

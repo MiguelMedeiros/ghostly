@@ -158,6 +158,7 @@
     "published": "已于 {{time}} 发布。应用运行期间每小时重新发布一次。",
     "publishing": "正在发布…",
     "qrTitle": "你的 DID 的二维码",
+    "refreshFailed": "已于 {{time}} 发布。上次刷新未能发出,几分钟后重试。",
     "showQr": "显示二维码",
     "title": "公开 DID",
     "updating": "正在发布更改…",
