@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lobbyKeys } from "@ghostly/core";
+import { beaconKeys, lobbyKeys } from "@ghostly/core";
 import { CommunityWorld, RELAY_NETWORK, seededRandom, type Peer } from "./communityWorld";
 // covers: groups.community.catch-up
 
@@ -41,8 +41,9 @@ describe("a community member back within minutes", { timeout: 60_000 }, () => {
 
   // Both apps closed (two phones put away), and one opened again first: a hub alone now, started with no memory of the
   // member it had. The other, opened a moment later (their edge from the last run still kept) or once that edge has
-  // closed, steps up as a hub too.
-  for (const first of ["member", "admin"] as const) for (const later of [6_000, 90_000]) it(`gets the lines said while both apps were closed within seconds, the ${first}'s app back first, the other ${later / 1000} s after`, async () => {
+  // closed, steps up as a hub too. Closed together half a minute: the other's beacon entry is still fresh at the first
+  // reading, though its app is closed too.
+  for (const closed of [110_000, 20_000, 40_000]) for (const first of ["member", "admin"] as const) for (const later of [6_000, 90_000]) it(`gets the lines said while both apps were closed ${closed / 1000} s within seconds, the ${first}'s app back first, the other ${later / 1000} s after`, async () => {
     const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
     const alice = world.add("alice"), bob = world.add("bob");
     const id = await alice.groups.create("Check");
@@ -52,7 +53,7 @@ describe("a community member back within minutes", { timeout: 60_000 }, () => {
     await world.run(3 * 60_000);
     const [early, late] = first === "member" ? [bob, alice] : [alice, bob];
     alice.online = false; bob.online = false;
-    await world.run(110_000);
+    await world.run(closed);
     await world.restart(early);
     await world.run(later - 3_000);
     await early.groups.send(id, "said while you were away");
@@ -63,6 +64,153 @@ describe("a community member back within minutes", { timeout: 60_000 }, () => {
     // every half minute, alone): 27 s, and 61 s once the kept edge had closed (27.6 s on the web build, 3 runs). Now
     // 5-13 s, the most of it the beacon's 10 s reading.
     expect(took).toBeLessThanOrEqual(15_000);
+  });
+
+  // One app restarts while the other runs on (a page reloaded, a phone woken), in a few communities: their edge comes up as
+  // links reopen, and nobody is coming back to look for. Its lobbies were read every 6 s for two minutes after each start
+  // (60 reads in 3 communities, against 12), and an app reloaded every half minute never left that pace.
+  it("an app restarted while the other ran on reads its lobbies at the idle pace, a restart every half minute too", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    const alice = world.add("alice"), bob = world.add("bob");
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const id = await alice.groups.create(`Check ${i}`);
+      const link = await alice.groups.enableLink(id);
+      await bob.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+      await world.until(() => world.member(bob, id), 10 * 60_000);
+      ids.push(id);
+    }
+    await world.run(3 * 60_000);
+    const lobbies = new Set(ids.map(id => { const s = alice.groups.communities.session(id)!; return lobbyKeys(s.state.rv, id, s.myKey).identity.pubKeyZ32; }));
+    let reads = 0;
+    world.onPkarr = (p, op, key) => { if (p === alice && op === "resolve" && lobbies.has(key)) reads++; };
+    alice.online = false;
+    await world.run(100_000);
+    await world.restart(alice);
+    await world.run(2 * 60_000);
+    expect(ids.every(id => alice.groups.communities.isHub(id))).toBe(true);
+    // Every half minute: 4 or 5 reads each.
+    expect(reads).toBeLessThanOrEqual(5 * ids.length);
+    reads = 0;
+    for (let i = 0; i < 4; i++) { await world.restart(alice); await world.run(30_000); }
+    expect(reads).toBeLessThanOrEqual(8 * ids.length);
+  });
+
+  // Its edges of the last run go to members, never listed in the beacon: another hub listed fresh says the community runs.
+  it("a hub restarted while its members ran on reads its lobby at the idle pace, a restart every half minute too", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    const alice = world.add("alice"), others = ["bob", "carol", "dave"].map(n => world.add(n));
+    const id = await alice.groups.create("Check");
+    const link = await alice.groups.enableLink(id);
+    for (const p of others) {
+      await p.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+      await world.until(() => world.member(p, id), 10 * 60_000);
+    }
+    await world.run(4 * 60_000);
+    expect(others.some(p => !p.groups.communities.isHub(id))).toBe(true);
+    const s = alice.groups.communities.session(id)!, lobby = lobbyKeys(s.state.rv, id, s.myKey).identity.pubKeyZ32;
+    let reads = 0;
+    world.onPkarr = (p, op, key) => { if (p === alice && op === "resolve" && key === lobby) reads++; };
+    // 40 reads before: every 6 s for as long as the restarts went on.
+    for (let i = 0; i < 8; i++) { await world.restart(alice); await world.run(30_000); }
+    expect(reads).toBeLessThanOrEqual(16);
+  });
+
+  // Their edge held down a while (the relays slow), the other's entry moving says its app runs: it closing later is no
+  // restart of mine to look fast for.
+  it("an app restarted while the other ran on, their edge held down, does not read fast once that app closes later", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    const alice = world.add("alice"), bob = world.add("bob");
+    const id = await alice.groups.create("Check");
+    const link = await alice.groups.enableLink(id);
+    await bob.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await world.until(() => world.member(bob, id), 10 * 60_000);
+    await world.run(3 * 60_000);
+    const s = alice.groups.communities.session(id)!, lobby = lobbyKeys(s.state.rv, id, s.myKey).identity.pubKeyZ32;
+    world.holdEdge = (a, b) => (a === alice && b === bob) || (a === bob && b === alice);
+    await world.restart(alice);
+    await world.run(2 * 60_000);
+    bob.online = false;
+    const reads: number[] = [];
+    world.onPkarr = (p, op, key) => { if (p === alice && op === "resolve" && key === lobby) reads.push(world.now); };
+    await world.run(3 * 60_000);
+    // Every half minute: 6 reads. 22 before, every 6 s from when its entry turned stale.
+    expect(reads.length).toBeLessThanOrEqual(8);
+  });
+
+  // Closed together 20 s: the other's entry is still fresh at the first reading. The window starts at the reading that
+  // finds it stale (a beacon's half minute and a half since it moved), or, the readings failing, once it would be gone
+  // from the door (`beaconFreshMs`).
+  for (const failing of [false, true]) it(`an app back first after both were closed a moment reads its lobby fast once the other's entry is stale${failing ? ", its beacon reads failing" : ""}`, async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    const alice = world.add("alice"), bob = world.add("bob");
+    const id = await alice.groups.create("Check");
+    const link = await alice.groups.enableLink(id);
+    await bob.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await world.until(() => world.member(bob, id), 10 * 60_000);
+    await world.run(3 * 60_000);
+    const s = alice.groups.communities.session(id)!, lobby = lobbyKeys(s.state.rv, id, s.myKey).identity.pubKeyZ32;
+    const beacon = beaconKeys(s.state.rv, id).identity.pubKeyZ32;
+    alice.online = false; bob.online = false;
+    await world.run(20_000);
+    const back = world.now, reads: number[] = [];
+    world.onPkarr = (p, op, key) => { if (p === alice && op === "resolve" && key === lobby) reads.push(world.now - back); };
+    await world.restart(alice);
+    await world.run(5_000);
+    if (failing) world.failRead = (p, key) => p === alice && key === beacon;
+    await world.run(2 * 60_000);
+    const within = (from: number, to: number) => reads.filter(at => at >= from && at < to).length;
+    // Every 6 s from the second reading (31 s), not from 61 s; with the readings failing, from 71 s and not every half
+    // minute on.
+    if (failing) expect(within(65_000, 125_000)).toBeGreaterThanOrEqual(8);
+    else expect(within(0, 65_000)).toBeGreaterThanOrEqual(6);
+  });
+
+  it("an app back first after both were closed reads its lobby fast two minutes, then at the idle pace", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    const alice = world.add("alice"), bob = world.add("bob");
+    const id = await alice.groups.create("Check");
+    const link = await alice.groups.enableLink(id);
+    await bob.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await world.until(() => world.member(bob, id), 10 * 60_000);
+    await world.run(3 * 60_000);
+    const s = alice.groups.communities.session(id)!, lobby = lobbyKeys(s.state.rv, id, s.myKey).identity.pubKeyZ32;
+    const reads: number[] = [];
+    world.onPkarr = (p, op, key) => { if (p === alice && op === "resolve" && key === lobby) reads.push(world.now); };
+    alice.online = false; bob.online = false;
+    await world.run(110_000);
+    const back = world.now;
+    await world.restart(alice);
+    await world.run(5 * 60_000);
+    const within = (from: number, to: number) => reads.filter(at => at >= back + from && at < back + to).length;
+    expect(within(0, 110_000)).toBeGreaterThanOrEqual(12);
+    expect(within(3 * 60_000, 5 * 60_000)).toBeLessThanOrEqual(5);
+  });
+
+  // The beacon unread a while after the restart (a phone woken with no network, the relays refusing the read): the window
+  // starts at its first reading all the same, the edges of the last run gone by then (`RESTORED_EDGE_MS`).
+  it("an app back first after both were closed reads its lobby fast once its beacon read, though that came 70 s late", async () => {
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    const alice = world.add("alice"), bob = world.add("bob");
+    const id = await alice.groups.create("Check");
+    const link = await alice.groups.enableLink(id);
+    await bob.groups.joinByLink(`https://app.ghostly.tools/#/join/${link}`);
+    await world.until(() => world.member(bob, id), 10 * 60_000);
+    await world.run(3 * 60_000);
+    const s = alice.groups.communities.session(id)!, lobby = lobbyKeys(s.state.rv, id, s.myKey).identity.pubKeyZ32;
+    const beacon = beaconKeys(s.state.rv, id).identity.pubKeyZ32;
+    alice.online = false; bob.online = false;
+    await world.run(110_000);
+    world.failRead = (p, key) => p === alice && key === beacon;
+    await world.restart(alice);
+    await world.run(70_000);
+    world.failRead = null;
+    await world.until(() => alice.groups.communities.isHub(id), 60_000);
+    const reads: number[] = [];
+    world.onPkarr = (p, op, key) => { if (p === alice && op === "resolve" && key === lobby) reads.push(world.now); };
+    await world.run(60_000);
+    // Every 6 s, not every half minute.
+    expect(reads.length).toBeGreaterThanOrEqual(7);
   });
 
   it("a hub reads its lobby fast only a while after it dropped a member", async () => {
