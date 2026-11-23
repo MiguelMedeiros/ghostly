@@ -1873,11 +1873,14 @@ export class Communities {
     // read its lobbies 50 times a minute, against a budget of 20, and an app reloaded every half minute never left the
     // window (bug hunt 1118, 2026-11-17). Nor is an entry's age enough: one closed with mine half a minute ago is still
     // listed when I am back, and the window waits until a reading finds it stale (else that app, back later, waited 61 s),
-    // or until it would be gone from the door, the readings failing.
+    // or until it would be gone from the door, the readings failing. A member is never listed: its key counts only while
+    // no other hub is listed fresh (one is, and the community runs: that hub's own key decides), else a hub whose edges
+    // went to members started the window on every restart all the same.
     if (live.restartKeys && live.beaconKnown) {
+      const hubUp = this.hubs(live).some(h => h.key !== s.myKey && live.beaconAt - h.ts < COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5);
       for (const [key, first] of live.restartKeys) {
         const id = existing.get(key), ts = live.beacon.find(h => h.key === key)?.ts;
-        if ((id && this.host.linkReady(id, 2)) || (first && ts !== undefined && ts > first)) live.restartKeys.delete(key);
+        if ((id && this.host.linkReady(id, 2)) || (first && ts !== undefined && ts > first) || (ts === undefined && hubUp)) live.restartKeys.delete(key);
         else if (ts === undefined || live.beaconAt - ts >= COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5 || now - ts >= COMMUNITY_TOPOLOGY.beaconFreshMs) { live.restartedUntil = now + MEMBER_BACK_MS; live.restartKeys.delete(key); }
         else if (!first) live.restartKeys.set(key, ts);
       }
