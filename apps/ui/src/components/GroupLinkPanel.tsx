@@ -100,7 +100,7 @@ function LinkPanel({ group, large }: { group: GroupView; large: boolean }) {
     {!large && <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>}
     <p className="mt-1 text-sm text-text-muted">{group.isAdmin ? t("group.link.off") : t("group.link.offMember")}</p>
     {group.isAdmin && <button ref={enableButton} disabled={full} aria-disabled={busy || undefined} onClick={() => { if (!busy) void run(() => engine.call("enableGroupLink", { groupId: group.id }), true); }} data-testid="group-link-enable"
-      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>}
+      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] disabled:opacity-40 aria-disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>}
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;
 

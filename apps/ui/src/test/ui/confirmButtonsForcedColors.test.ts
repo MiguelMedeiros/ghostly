@@ -23,11 +23,13 @@ const ANSWERS: { name: string; file: string; fill: RegExp; disables: boolean }[]
   { name: "Delete folder", file: "components/chat/ChatFolderDialogs.tsx", fill: /(?:^|\s)bg-danger\/15(?=\s|$)/, disables: false },
   { name: "a folder's Save / Create", file: "components/chat/ChatFolderDialogs.tsx", fill: /(?:^|\s)bg-accent(?=\s|$)/, disables: true },
   { name: "Delete profile", file: "components/DeleteProfileDialog.tsx", fill: /(?:^|\s)bg-danger-fill(?=\s|$)/, disables: true },
+  { name: "Leave / Forget group", file: "components/LeaveGroupDialog.tsx", fill: /(?:^|\s)bg-danger\/15(?=\s|$)/, disables: true },
+  { name: "a device screen's red button", file: "components/devices/DeviceDialog.tsx", fill: /(?:^|\s)bg-danger-fill(?=\s|$)/, disables: true },
 ];
 
 /** Every class list a file spells out: string literals, and template literals without their `${…}` parts. */
 function classLists(file: string): string[] {
-  const source = ts.createSourceFile(file, readFileSync(join(SRC, file), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const source = ts.createSourceFile(file, readFileSync(join(SRC, file), "utf8"), ts.ScriptTarget.Latest, true, file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const out: string[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) out.push(node.text);
@@ -73,6 +75,15 @@ const FILLED: { name: string; file: string; pick?: RegExp; count?: number; disab
   { name: "a money format's buttons", file: "components/MoneyFormatsBubble.tsx", disables: true },
   { name: "real money's Send", file: "components/ConfirmRealMoney.tsx", disables: false },
   { name: "a payment review's Approve", file: "components/PaymentReview.tsx", disables: true },
+  { name: "the group link's Turn on and Share", file: "components/GroupLinkPanel.tsx", count: 2, disables: [true, false] },
+  { name: "a group's rename Save and Invite", file: "components/GroupMembersDialog.tsx", count: 2, disables: true },
+  { name: "New group's Create", file: "components/NewGroupDialog.tsx", disables: true },
+  { name: "a device dialog's and a full-screen notice's main button", file: "components/devices/DeviceDialog.tsx", count: 2, disables: [true, false] },
+  { name: "a page's header action", file: "components/layout/PageAction.tsx", disables: true },
+  { name: "the voice record button", file: "components/voice/VoiceRecorderButton.tsx", disables: true },
+  { name: "the wallet's primary Button", file: "components/wallet/ui.tsx", pick: /(?:^|\s)font-semibold(?=\s|$)/, disables: true },
+  // Built in the DOM on Ghostly's own page (an app's file sheet), so it takes the app's classes; off for a moment after it shows.
+  { name: "an app file sheet's first button", file: "lib/apps/webFiles.ts", disables: true },
 ];
 
 describe("a dialog's filled answer in forced colors", () => {
