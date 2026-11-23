@@ -17,10 +17,14 @@ const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME,
 const stored = (i: number): StoredMessage =>
   ({ linkId: "group:group-1", id: `g${i}`, text: `Message ${i}`, sender: "peer", member: i % 2 ? ANA : BO, timestamp: 1_700_000_000_000 + i * 60_000, via: "datalink" });
 /** The group, its contact's link and another chat's, each a new object as every state of the engine brings them. */
-const state = (patch: { nick?: string; transfer?: number } = {}) => ({
+const state = (patch: { nick?: string; transfer?: number; anaPicture?: string; cyPicture?: string; dee?: boolean } = {}) => ({
   groups: [groupView({ status: "active", epoch: 1, memberLinks: { "link-ana": ANA },
     members: [member({ key: ME, me: true }), member({ key: ANA, nick: patch.nick ?? "Ana" }), member({ key: BO, nick: "Bo" })] })],
-  links: [linkView({ id: "link-ana", peerPubKeyZ32: ANA, profile: "paired-chat/1" } as never), linkView({ id: "link-cy", peerPubKeyZ32: "cy".padEnd(52, "y"), profile: "paired-chat/1" } as never)],
+  links: [
+    linkView({ id: "link-ana", peerPubKeyZ32: ANA, profile: "paired-chat/1", ...(patch.anaPicture && { peerAvatar: patch.anaPicture }) } as never),
+    linkView({ id: "link-cy", peerPubKeyZ32: "cy".padEnd(52, "y"), profile: "paired-chat/1", ...(patch.cyPicture && { peerAvatar: patch.cyPicture }) } as never),
+    ...(patch.dee ? [linkView({ id: "link-dee", peerPubKeyZ32: "dee".padEnd(52, "y"), profile: "paired-chat/1" } as never)] : []),
+  ],
   ...(patch.transfer !== undefined && { transfers: { [`t${patch.transfer}`]: { bytes: patch.transfer } } }),
 });
 
@@ -47,5 +51,32 @@ describe("an engine state that changes nothing of an open group", () => {
     act(() => fakeEngine.update(state({ nick: "Ana Lima" }) as never));
     expect(draws).toBeGreaterThan(0);
     expect(document.body.textContent).toContain("Ana Lima");
+  });
+
+  // The page reads only the chats of the group's members who are contacts (`memberLinks`): every chat of the profile was
+  // copied and compared on each state, and one that has nothing to do with the group drew the whole page.
+  it("draws nothing for a chat with no member of the group in it, and shows a member's new picture", async () => {
+    const history = Array.from({ length: 40 }, (_, i) => stored(i));
+    fakeEngine.on("groupMessages", () => history).on("updateSettings", () => undefined).on("setGroupTyping", () => undefined).update(state() as never);
+    let draws = 0;
+    renderApp(
+      <Profiler id="group" onRender={() => { draws++; }}>
+        <Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>
+      </Profiler>,
+      { route: "/group/group-1" },
+    );
+    await screen.findByText("Message 39");
+    await act(() => new Promise<void>((done) => setTimeout(done, 300)));
+
+    draws = 0;
+    act(() => fakeEngine.update(state({ cyPicture: "data:image/png;base64,Q3k=" }) as never));
+    act(() => fakeEngine.update(state({ cyPicture: "data:image/png;base64,Q3k=", dee: true }) as never));
+    expect(draws).toBe(0);
+
+    // Ana is in the group and a contact: her chat's picture is her messages' picture.
+    const anaPicture = "data:image/png;base64,QW5h";
+    act(() => fakeEngine.update(state({ cyPicture: "data:image/png;base64,Q3k=", dee: true, anaPicture }) as never));
+    expect(draws).toBeGreaterThan(0);
+    expect([...document.querySelectorAll("img")].some((img) => img.getAttribute("src") === anaPicture)).toBe(true);
   });
 });
