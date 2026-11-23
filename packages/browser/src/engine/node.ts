@@ -470,7 +470,7 @@ interface LiveLink {
    * A chat paired in this run (`pinPeer`) that has not gone live since: when it was paired. It takes a held native
    * listener as a chat in use does (`ensureNativeEndpoints`), for `PAIRED_TAKES_MS`: it was in use only while its
    * invite was on screen, and a CLI daemon's chat stopped being on screen once paired, so it never took one as the
-   * chats holding them went quiet (agents#1619).
+   * chats holding them went quiet.
    */
   pairedAt?: number;
   /** When this chat last took a native listener from an idle live session (`ensureNativeEndpoints`), by transport. */
@@ -941,7 +941,7 @@ export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi
   // Presence and a set status: a settings write and a word on live sessions (none in limited mode), as typing.
   "setPresence", "setOwnStatus", "clearOwnStatus", "getOwnStatus",
   // Saved messages are marks on this device only, a settings record (`engine/saved.ts`): nothing is sent. Refused,
-  // the Saved page stayed blank with no word and Save did nothing (agents#1694).
+  // the Saved page stayed blank with no word and Save did nothing.
   "savedMessages", "saveMessage",
   // A restored copy whose read found a tombstone: only the person can start it as a profile of its own.
   "deviceRestoreStartOwn",
@@ -971,8 +971,7 @@ function refusingWhileLimited(transport: PkarrTransport, limited: () => boolean)
 
 /**
  * My key in an active group, and who is in it, from its one view. A received reaction, edit or pin reads it per frame:
- * built from every group's sorted views, a 256-frame catch-up in 10 communities of 256 took 11 s, not 1.1 s
- * (agents#1700).
+ * built from every group's sorted views, a 256-frame catch-up in 10 communities of 256 took 11 s, not 1.1 s.
  */
 function membershipOf(group: GroupView | undefined): { me: string; members: ReadonlySet<string> } | undefined {
   return group?.status === "active" && group.myKey ? { me: group.myKey, members: new Set(group.members.map(m => m.key)) } : undefined;
@@ -2061,7 +2060,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async forgetGroupMessage(chat: string, id: string, row?: StoredMessage): Promise<void> {
     const groupId = chat.slice("group:".length);
-    // The group's unread, "@" and place in the list as they were without it (agents#1645): read only for a message
+    // The group's unread, "@" and place in the list as they were without it: read only for a message
     // that moved one of them (`Groups.movedMarks`), as removals go at the pace of edits.
     const moved = row ?? (this.groups.movedMarks(groupId, id) ? await db.getMessage(chat, id) : undefined);
     await this.groups.removed(groupId, id);
@@ -4283,7 +4282,7 @@ export class GhostlyNode implements EngineImplementation {
       return { error: `Message too large for DHT (${bytes} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`, refused: true };
     // Limited mode starts no link (it dials nothing): a chat's text waits as it does for a contact away, and goes once
     // the check works (`leaveLimited` starts the links, the live link sends what waits). Refused as "You are offline",
-    // it contradicted the banner's "Messages you write wait until then" (agents#1721). A compatibility chat, which
+    // it contradicted the banner's "Messages you write wait until then". A compatibility chat, which
     // keeps no waiting text, says the real reason.
     const waitsForCheck = !!live && !live.link && this.limitedMode && !!live.stored.profile;
     if (live && !live.link && this.limitedMode && !live.stored.profile) return { error: LIMITED_MODE_ERROR };
@@ -4643,7 +4642,7 @@ export class GhostlyNode implements EngineImplementation {
       // Under an id a payment, request or refusal line takes (`payments.ts`: the frame's time, `_refused` after it,
       // `spent_` and a token's digest): never forgotten, here or not yet, or a contact could hide the line of a payment
       // or request it sends next, or the line that says I refused one, which carries no `paymentId` for `canRemove` to
-      // read. A removal never takes those (agents#1587). No text or file has such an id.
+      // read. A removal never takes those. No text or file has such an id.
       if (PAYMENT_LINE_ID.test(edit.id)) return true;
       if (!message || canRemove(message)) await this.forgetMessage(linkId, id, ref && (message ?? true));
       return true;
@@ -5108,7 +5107,7 @@ export class GhostlyNode implements EngineImplementation {
     // meanwhile (`Outbox.cancel`, which also keeps it from going from now on): then it may be out, and its removal goes.
     const going = this.outboxes.get(linkId)?.cancel(messageId) ?? false;
     // A waiting file of mine whose offer went on the DHT floor may be in the contact's chat (its bubble waits there for
-    // the bytes): it left, and its removal goes, or the contact kept it as "Cancelled by the sender" (agents#5945). So
+    // the bytes): it left, and its removal goes, or the contact kept it as "Cancelled by the sender". So
     // may one whose offer is being said there now (a relay publication of seconds): its row says so only once it is done.
     const onFloor = !!message.file && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen" || this.floorSaying.has(message.file.id));
     if (!wireId || (message.delivery === "waiting" && !going && !onFloor)) { await this.forgetMessage(linkId, messageId, message); return { error: null }; }
@@ -5144,7 +5143,7 @@ export class GhostlyNode implements EngineImplementation {
    * Writes a chat's `removals` and `deletedIds` to its row, merged with any other change of them not written yet: one
    * write of the row for what a burst changed, not one per change. The row carries up to 500 removals on their way and
    * the last 500 deleted ids, rewritten whole each time: a CLI daemon deleting 300 messages for everyone wrote 19.5 MB of
-   * journal and synced it 1,207 times, a removal and its id written apart, then each receipt again (agents#1572). The
+   * journal and synced it 1,207 times, a removal and its id written apart, then each receipt again. The
    * values are `live.stored`'s at the time of the call, so the newest of each field wins. `relaxed` (no disk sync of its
    * own, `db.patchLink`) holds only while every change merged into the write is.
    */
@@ -5508,7 +5507,7 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * A text of mine, or a file's offer, deleted here leaves the DHT floor (`withdrawDht`). With no link running (the
    * profile offline, the chat not started yet), the floor's saved state lets go of it instead: kept there, the next
-   * start published it again to the away contact, and `--purge` left its words in the chat's row (agents#6005). Its
+   * start published it again to the away contact, and `--purge` left its words in the chat's row. Its
    * envelope may still be on the relays: the chat's next link puts its first one out at once (`floorReplace`).
    */
   private async withdrawFromFloor(live: LiveLink, floorId: string): Promise<void> {
@@ -6208,7 +6207,7 @@ export class GhostlyNode implements EngineImplementation {
           }
           if (groupId) {
             // Past the group's pace (8 files a minute) the file is refused before its bytes are copied: the rest waits
-            // for Send again, which sends only what did not go (agents#1082).
+            // for Send again, which sends only what did not go.
             const check = this.groups.fileCheck(groupId);
             if (check.error) { note(check.error); continue; }
             // A new announcement by me (WISP 503 § Forwards), my own copy its first holder.
@@ -6547,7 +6546,7 @@ export class GhostlyNode implements EngineImplementation {
   private appRangeAsked(linkId: string, task: AppRangeTask): void {
     // The chat's asks its session no longer serves leave this table: an answer to one sends nothing. One that still holds
     // a place waits in `appRangesStopped` for the page's answer to give it back; one that holds none (this side's app
-    // closed, the link went) waits for nothing, or a page that never answers it left it here for good (agents#1698).
+    // closed, the link went) waits for nothing, or a page that never answers it left it here for good.
     const link = this.links.get(linkId)?.link;
     for (const [key, held] of this.appRanges) if (key.startsWith(`${linkId} `) && !(held.live && link?.holdsAppRange(held))) {
       this.appRanges.delete(key);
@@ -9058,7 +9057,7 @@ export class GhostlyNode implements EngineImplementation {
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(id); throw error; }
     if (this.networkOn) this.startLink(id);
-    // A member a hub just let in, or the hub that let it in: nothing reaches it until this edge is up (agents#1740).
+    // A member a hub just let in, or the hub that let it in: nothing reaches it until this edge is up.
     if (expectPeer) this.links.get(id)?.link?.expectPeer(true);
     return id;
   }
@@ -9591,7 +9590,7 @@ export class GhostlyNode implements EngineImplementation {
         onDhtDelivery: view => {
           // Every read of the mailbox says so, whatever it found: the outbox looks again only when the view changed (a
           // receipt cleared `pendingUntil`, the contact's mode, an error gone). Looked at on each read, waiting texts read
-          // the chat's whole history every 4-30 s for up to their 7 days: 11.7% of a core for 30 away contacts (agents#1776).
+          // the chat's whole history every 4-30 s for up to their 7 days: 11.7% of a core for 30 away contacts.
           // Their own backoff timers and a receipt (`Outbox.received`) still look.
           const viewed = JSON.stringify(view);
           if (stored.profile && !stored.group && viewed !== dhtFlushed) {
@@ -10208,7 +10207,7 @@ export class GhostlyNode implements EngineImplementation {
    * A group's edge the member keeps (WISP 902 § Transports): its packet, read in this run, says its app holds a native
    * listener there that this app runs too (`_tr`; an app publishes a native transport there only while it listens).
    * Each side picks the one edge it keeps on its own (`groupEdgesByRank`), and a member's pick is not this side's: this
-   * side keeps that edge too, or the member's listener meets none here (ghostly-agents#1437: the admin, its four group
+   * side keeps that edge too, or the member's listener meets none here (the admin, its four group
    * listeners taken by two other groups, answered "no slot" to the edge its third group's member kept to it).
    */
   private chosenByPeer(live: LiveLink, key?: NativeTransport): boolean {
