@@ -78,7 +78,8 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
   // stays, it is what it can spend, and a line says whose balance it is.
   const sharedLine = sharedWith ? <span className="block text-xs text-text-muted mt-1" data-testid="wallet-shared-balance">{withName(t("wallet.cards.sameBalance", { name: NAME }), sharedWith)}</span> : null;
   const [action, setAction] = useState<Action>("receive");
-  // The amount takes the focus when the person chose this wallet (`focusAmount`), chose Receive here or pressed Done.
+  // The amount takes the focus when the person chose this wallet (`focusAmount`), chose Receive here, or pressed Done or
+  // New amount.
   const [actionChosen, setActionChosen] = useState(false);
   const { busy, running, error, failed, setError, run } = useRun();
   const [amount, setAmount] = useState("");
@@ -268,6 +269,9 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
     if (invoicePaid && (!document.activeElement || document.activeElement === document.body)) doneButton.current?.focus();
   }, [invoicePaid]);
 
+  // New amount (on the invoice, or on an expired one) takes away the button pressed: the keys go to the amount, as Done's do.
+  const newAmount = () => { setInvoice(null); setActionChosen(true); };
+
   const choose = (next: Action) => { setAction(next); setActionChosen(true); setSendOpened(next === "send"); setError(""); setNotice(""); setCopied(false); setInvoice(null); setQuote(null); setQuoted(null); setConfirming(false); setSent(null); };
 
   return (
@@ -328,13 +332,13 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
             ) : invoice && invoiceExpired ? (
               <div className="space-y-3">
                 <Notice tone="error" testId="wallet-invoice-expired">{t("wallet.cashu.invoiceExpired")}</Notice>
-                <Button ref={expiredNew} onClick={() => setInvoice(null)}>{t("wallet.cashu.newAmount")}</Button>
+                <Button ref={expiredNew} onClick={newAmount}>{t("wallet.cashu.newAmount")}</Button>
               </div>
             ) : invoice ? (
               <div className="space-y-3">
                 <p ref={invoiceLine} tabIndex={-1} className="text-text-primary text-sm focus:outline-none">{fillNodes(t("wallet.cashu.invoiceFor"), { amount: <b>{sats(Number(amount))}</b> })}</p>
                 <Address value={invoice} uri={paymentUri({ kind: "lightning", invoice })} testId="wallet-invoice" note={testnet && viaMint ? t("wallet.cashu.testMintInvoice") : t("wallet.lightning.waiting")}
-                  actions={<button type="button" className="px-3 py-1.5 min-h-9 max-md:min-h-11 rounded-lg text-xs font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer" onClick={() => setInvoice(null)}>{t("wallet.cashu.newAmount")}</button>} />
+                  actions={<button type="button" className="px-3 py-1.5 min-h-9 max-md:min-h-11 rounded-lg text-xs font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer" onClick={newAmount}>{t("wallet.cashu.newAmount")}</button>} />
               </div>
             ) : (
               <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { const created = await wallet.receiveLightning(Number(amount), rail === "cashu" ? "cashu" : undefined); setInvoiceQuote(created.quote); setInvoiceExpiresAt(created.expiresAt); setPaymentHash(created.paymentHash); setInvoice(created.invoice); }, "invoice"); }}>
