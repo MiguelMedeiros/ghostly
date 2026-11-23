@@ -1028,6 +1028,44 @@ describe("a call that wakes a contact who is away", () => {
   });
 
   /**
+   * Cancel took the whole notice away with it, and the keyboard focus it had fell to the page: the next Tab started
+   * from the top. It goes back to the call button that started the wait, or to ⋮ when that was a row of its menu.
+   */
+  describe("cancelling the wait from the keyboard", () => {
+    it.each([
+      ["the voice call", "call-audio"],
+      ["the video call", "call-video"],
+    ])("gives the focus back to %s button", async (_name, pressed) => {
+      saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
+      const { user, engine } = renderApp(<Chat sessionId="chat-1" onCallChange={vi.fn()} callLayer={null} visible />);
+      engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("wakeForCall", () => true);
+      act(() => engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "connecting" }, dataLink: "idle", peerWakes: true } as never)] }));
+
+      await user.click(await screen.findByTestId(pressed));
+      const cancel = await screen.findByTestId("wake-call-cancel");
+      cancel.focus();
+      await user.keyboard("{Enter}");
+      expect(screen.queryByTestId("wake-call")).toBeNull();
+      expect(document.activeElement).toBe(screen.getByTestId(pressed));
+    });
+
+    it("leaves the focus alone when it went elsewhere meanwhile", async () => {
+      saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
+      const { user, engine } = renderApp(<Chat sessionId="chat-1" onCallChange={vi.fn()} callLayer={null} visible />);
+      engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("wakeForCall", () => true);
+      act(() => engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "connecting" }, dataLink: "idle", peerWakes: true } as never)] }));
+
+      await user.click(await screen.findByTestId("call-audio"));
+      // The focus is on ⋮, and a click on Cancel that does not take it (a touch, a screen reader's tap) keeps it there.
+      const options = screen.getByTestId("chat-options");
+      options.focus();
+      act(() => screen.getByTestId("wake-call-cancel").click());
+      expect(screen.queryByTestId("wake-call")).toBeNull();
+      expect(document.activeElement).toBe(options);
+    });
+  });
+
+  /**
    * With Ghostly offline (its own switch) no wake-up can go out: the engine refuses it at once. The call buttons said
    * nothing of it, and a press put up "Ana did not open Ghostly." as if the contact had been woken and stayed away.
    */
