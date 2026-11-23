@@ -718,7 +718,8 @@
               "bip84": "SegWit nativo (BIP84, bc1q…)"
             }
           }
-        }
+        },
+        "label": "Portafoglio BDK"
       },
       "bitcoind": {
         "description": "Un portafoglio sul tuo nodo Bitcoin Core, tramite il suo RPC. Il tuo nodo custodisce le chiavi e firma. Richiede l'app desktop.",
@@ -745,7 +746,8 @@
         "description": "Un portafoglio Lightning in autocustodia su Spark, tramite l'SDK di Breez. La sua frase di recupero è sigillata su questo dispositivo; i sats li custodisci tu."
       },
       "cashu-mint": {
-        "description": "Le fatture sono pagate sul tuo saldo Cashu, e da esso. I mint custodiscono i sats."
+        "description": "Le fatture sono pagate sul tuo saldo Cashu, e da esso. I mint custodiscono i sats.",
+        "label": "Mint Cashu"
       },
       "core-lightning": {
         "description": "Il tuo nodo Core Lightning, tramite Commando con una rune. Il tuo nodo custodisce i sats. L'app web lo raggiunge solo tramite wss://.",
@@ -782,7 +784,8 @@
             "help": "La porta REST di LND (restlisten, 8080 di default). In un browser il nodo deve consentire questa app con restcors e avere un certificato di cui il browser si fida; l'app desktop non ha bisogno di nessuno dei due.",
             "label": "Indirizzo REST"
           }
-        }
+        },
+        "label": "Nodo LND"
       },
       "nwc": {
         "description": "Un portafoglio che colleghi con il suo URI NWC (Alby Hub, il servizio NWC di un nodo, un portafoglio ospitato). Quel portafoglio custodisce i sats e fissa il proprio limite di commissione: custodial o no dipende dal portafoglio.",
@@ -794,7 +797,8 @@
         }
       },
       "webln": {
-        "description": "Un portafoglio Lightning in questo browser (Alby e altri). Quel portafoglio custodisce i sats e ti chiede prima di pagare."
+        "description": "Un portafoglio Lightning in questo browser (Alby e altri). Quel portafoglio custodisce i sats e ti chiede prima di pagare.",
+        "label": "Portafoglio del browser (WebLN)"
       }
     },
     "reconfigured": "{{name}} ora usa quel server.",

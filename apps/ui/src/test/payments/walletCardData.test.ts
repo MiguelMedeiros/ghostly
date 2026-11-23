@@ -4,6 +4,8 @@ import { cardId, networkState, parseCardId, satsUnit, spendable, walletCard, wal
 import { WALLET_RAILS } from "../../components/walletCardTypes";
 import type { WalletNetwork, WalletState } from "../../lib/platform";
 import { walletView } from "../fakeEngine";
+import { translateWith } from "../../locales/translate";
+import { LOCALES } from "../i18n/locales";
 import { arkReady, barkReady, sparkReady, bitcoinSource, lightningSource, mint, REAL_MINT, TEST_MINT, usdtReady } from "./fixtures";
 
 // covers: wallet.deck, wallet.mode, wallet.instances.networks, wallet.fedimint.join
@@ -204,6 +206,14 @@ describe("Bitcoin on-chain", () => {
   it("asks for a source until one is set up", () => {
     expect(faceOf("bitcoin", "mainnet")).toEqual({ name: "Bitcoin", balance: "No source", detail: "On-chain", status: "Set up", ready: false });
     expect(faceOf("bitcoin", "mainnet", { bitcoin: bitcoinSource({ status: "none", providerId: undefined }) })).toMatchObject({ status: "Set up" });
+  });
+
+  it("names a source without a name of its own in the app's language: Via Nó LND, On-chain · Carteira BDK", () => {
+    const t = translateWith(LOCALES.pt, "pt");
+    const face = (id: string, wallet: Parameters<typeof walletView>[0]) => walletCards(walletView(wallet) as WalletState, { t }).find((c) => c.id === id)?.detail;
+    expect(face("lightning:mainnet", { lightning: lightningSource({ providerId: "lnd", label: "LND node" }) })).toBe("Via Nó LND");
+    expect(face("bitcoin:mainnet", { bitcoin: bitcoinSource({ providerId: "bdk", label: "BDK wallet" }) })).toBe("On-chain · Carteira BDK");
+    expect(face("bitcoin:mainnet", { bitcoin: bitcoinSource({ providerId: "bdk", label: "BDK wallet", alias: "Home node" }) })).toBe("On-chain · Home node");
   });
 
   it("shows its source and balance once ready", () => {

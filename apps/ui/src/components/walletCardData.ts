@@ -3,6 +3,7 @@ import type {WalletInstanceView, WalletNetwork, WalletPlatform, WalletState} fro
 import type {WalletCard,WalletRail} from './walletCardTypes';
 import type {Translate} from '../contexts/I18nContext';
 import {english} from '../lib/english';
+import {providerLabel} from './wallet/providers/providerText';
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 export type {ChatRail,WalletCard,WalletRail} from './walletCardTypes';
 export const CASHU_MINT_SOURCE = 'cashu-mint';
@@ -198,7 +199,7 @@ function lightningCard(t:Translate,s:WalletState,cashu:string,sats:(n:number)=>s
  const ready=ln.status==='ready';
  // Reconnecting: the last balance it read (the status says it is not a fresh one), until it is unavailable.
  const last=ln.status==='connecting'&&ln.balance!==undefined?sats(ln.balance):undefined;
- return {name:'Lightning',balance:ready?ln.balance!==undefined?sats(ln.balance):t('wallet.cards.status.ready'):ln.status==='error'?t('wallet.cards.balance.unavailable'):last??t('wallet.cards.status.connecting'),detail:t('wallet.cards.detail.lightningVia',{name:ln.alias??ln.label??ln.providerId}),status:ready?t('wallet.cards.status.ready'):ln.status==='error'?t('wallet.cards.status.checkSettings'):t('wallet.cards.status.connecting'),ready};
+ return {name:'Lightning',balance:ready?ln.balance!==undefined?sats(ln.balance):t('wallet.cards.status.ready'):ln.status==='error'?t('wallet.cards.balance.unavailable'):last??t('wallet.cards.status.connecting'),detail:t('wallet.cards.detail.lightningVia',{name:ln.alias??(ln.label?providerLabel(t,ln.providerId,ln.label):ln.providerId)}),status:ready?t('wallet.cards.status.ready'):ln.status==='error'?t('wallet.cards.status.checkSettings'):t('wallet.cards.status.connecting'),ready};
 }
 /** Federation ecash: the federations joined on this network, one balance. */
 function fedimintCard(t:Translate,s:WalletState,sats:(n:number)=>string):Face {
@@ -212,5 +213,5 @@ function bitcoinCard(t:Translate,s:WalletState,sats:(n:number)=>string):Face {
  const bt=s.bitcoin,ready=bt?.status==='ready';
  const last=bt?.status==='connecting'&&bt.balance!==undefined?sats(bt.balance):undefined;
  return {name:'Bitcoin',balance:ready?sats(bt!.balance??0):!bt||bt.status==='none'?t('wallet.cards.balance.noSource'):bt.status==='error'?t('wallet.cards.balance.unavailable'):last??t('wallet.cards.status.connecting'),
-  detail:bt?.providerId?t('wallet.cards.detail.onchainVia',{name:bt.alias??bt.label??bt.providerId}):t('wallet.cards.detail.onchain'),status:ready?t('wallet.cards.status.ready'):!bt||bt.status==='none'?t('wallet.cards.status.setUp'):bt.status==='error'?t('wallet.cards.status.checkSettings'):t('wallet.cards.status.connecting'),ready};
+  detail:bt?.providerId?t('wallet.cards.detail.onchainVia',{name:bt.alias??(bt.label?providerLabel(t,bt.providerId,bt.label):bt.providerId)}):t('wallet.cards.detail.onchain'),status:ready?t('wallet.cards.status.ready'):!bt||bt.status==='none'?t('wallet.cards.status.setUp'):bt.status==='error'?t('wallet.cards.status.checkSettings'):t('wallet.cards.status.connecting'),ready};
 }
