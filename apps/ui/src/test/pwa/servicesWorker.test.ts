@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BRIDGE_PAGE, MAX_REQUEST_BYTES } from "../../../../web/src/svc/protocol";
+import { BRIDGE_PAGE, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES } from "../../../../web/src/svc/protocol";
 
 // covers: services.web-open
 describe("the services worker", () => {
@@ -18,6 +18,14 @@ describe("the services worker", () => {
   let clients: Client[];
   let onFetch: FetchListener;
   let bridge: Client;
+  let scope: { location: URL };
+
+  /** The worker run again, as registered from `script` (whose query says whether Hide my IP from contacts is on). */
+  async function restart(script: string): Promise<void> {
+    vi.resetModules();
+    scope.location = new URL(`${ORIGIN}${script}`);
+    await import("../../../../web/src/svc/worker");
+  }
 
   beforeEach(async () => {
     vi.resetModules();
@@ -29,12 +37,12 @@ describe("the services worker", () => {
     };
     bridge = { id: "bridge", url: `${ORIGIN}${BRIDGE_PAGE}`, frameType: "nested", postMessage: vi.fn(answer) };
     clients = [bridge, { id: "app", url: `${ORIGIN}/`, frameType: "nested", postMessage: vi.fn() }];
-    const scope = {
+    scope = {
       location: new URL(`${ORIGIN}/ghostly-services-sw.js`),
       skipWaiting: async () => {},
       clients: { claim: async () => {}, matchAll: async () => clients, get: async (id: string) => clients.find((client) => client.id === id) },
       addEventListener: (type: string, listener: FetchListener) => { if (type === "fetch") onFetch = listener; },
-    };
+    } as { location: URL };
     vi.stubGlobal("self", scope);
     vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
     vi.stubGlobal("__SERVICES_APP_ORIGIN__", "https://app.ghostly.example");
@@ -115,7 +123,7 @@ describe("the services worker", () => {
         const response = await answer!;
         expect(response.status).toBe(403);
         expect(await response.text()).toBe("This app opens only inside Ghostly.");
-        expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'self' https://app.ghostly.example");
+        expect(response.headers.get("content-security-policy")).toMatch(/^frame-ancestors 'self' https:\/\/app\.ghostly\.example;/);
       }
       expect(bridge.postMessage).not.toHaveBeenCalled();
     });
@@ -128,10 +136,11 @@ describe("the services worker", () => {
       const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "", owner: "", openLink: () => "", hostError: () => null };
       for (const own of [null, "connect-src *"]) {
         for (const relayOnly of [false, true]) {
+          await restart(`/ghostly-services-sw.js?relay-only=${relayOnly ? 1 : 0}`);
           // The bridge hands the request to the real `serve`, and the contact answers with or without a policy of its own.
           bridge.postMessage.mockImplementation((message: unknown, transfer: Transferable[]) => {
             const headers: [string, string][] = [["content-type", "text/html"], ...(own ? [["content-security-policy", own] as [string, string]] : [])];
-            void serve(transfer[0] as MessagePort, message, async () => ({ status: 200, headers, body: (async function* () {})(), bytes: async () => new Uint8Array() }), new CookieJar(), words, undefined, relayOnly);
+            void serve(transfer[0] as MessagePort, message, async () => ({ status: 200, headers, body: (async function* () {})(), bytes: async () => new Uint8Array() }), new CookieJar(), words);
           });
           const response = await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
           // The guards' policy comes with the guards (`guardViewerAnswer`: the clipboard guard always, the WebRTC guard with
@@ -140,6 +149,126 @@ describe("the services worker", () => {
           expect(response.headers.get("content-security-policy"), `${own} ${relayOnly}`).toBe([own, ...policy, "frame-ancestors 'self' https://app.ghostly.example"].filter(Boolean).join(", "));
         }
       }
+    });
+
+    it("puts the clipboard guard first in each page of an app, and the WebRTC guard after it while Hide my IP from contacts is on", async () => {
+      const { CookieJar, serve } = await import("../../../../web/src/svc/opener");
+      const { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT } = await import("@ghostly/core");
+      const words = { unreachable: "", failed: "", close: "", callOn: "", tooSlow: "", offline: "", retry: "", blocked: "", unguarded: "", label: "", owner: "", openLink: () => "", hostError: () => null };
+      const page = "<!doctype html><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>";
+      const served = async (destination: string, relayOnly: boolean, type = "text/html") => {
+        await restart(`/ghostly-services-sw.js?relay-only=${relayOnly ? 1 : 0}`);
+        bridge.postMessage.mockImplementation((message: unknown, transfer: Transferable[]) => {
+          void serve(transfer[0] as MessagePort, message, async () => ({ status: 200, headers: [["content-type", type], ["content-length", String(page.length)], ["content-security-policy", "script-src 'nonce-a'"]], body: (async function* () { yield new TextEncoder().encode(page.slice(0, 7)); yield new TextEncoder().encode(page.slice(7)); })(), bytes: async () => new Uint8Array() }), new CookieJar(), words);
+        });
+        const response = await fetchThrough({ mode: destination === "iframe" ? "navigate" : "no-cors", destination, referrer: `${ORIGIN}/` }, "app")!;
+        return { policy: response.headers.get("content-security-policy")!, length: response.headers.get("content-length"), text: await response.text() };
+      };
+      const guarded = await served("iframe", true);
+      expect(guarded.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><script>${VIEWER_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+      // The contact's policy lets them run; its length is not the page's any more.
+      expect(guarded.policy.startsWith(`script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH}, `)).toBe(true);
+      expect(guarded.length).toBeNull();
+      // A page the guard cannot go into runs no script.
+      expect((await served("iframe", true, "image/svg+xml")).policy).toContain("script-src 'none'; frame-src 'none'; object-src 'none'");
+      // What is not a page (a fetch, a script) is the contact's as it was; with it off, a page has the clipboard guard alone.
+      expect((await served("", true)).text).toBe(page);
+      expect((await served("script", true, "text/javascript")).text).toBe(page);
+      const off = await served("iframe", false);
+      expect(off.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
+      expect(off.policy.startsWith(`script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH}, `)).toBe(true);
+    });
+
+    it("is guarded and given Ghostly's policy by the worker itself, whoever answered on the port: a page of the app's own origin can reach the bridge", async () => {
+      const { CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_CSP, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY } = await import("@ghostly/core");
+      // Hide my IP from contacts as the bridge registered the worker: on, off, and a script address that says neither
+      // (the app's own registration), which gets the stricter one.
+      for (const [query, relayOnly] of [["?relay-only=1", true], ["?relay-only=0", false], ["", true], ["?relay-only=no", true]] as const) {
+        await restart(`/ghostly-services-sw.js${query}`);
+        // The app's page took the request's port at the bridge and answers it with a page and headers of its own.
+        bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+          const port = transfer[0] as MessagePort;
+          port.postMessage({ type: "head", status: 200, headers: [["content-type", "text/html"], ["link", "<https://elsewhere.example/>; rel=preconnect"], ["content-security-policy", "default-src * 'unsafe-inline'; report-uri https://elsewhere.example/r"]] });
+          port.postMessage({ type: "chunk", bytes: new TextEncoder().encode("<!doctype html><script>new RTCPeerConnection()</script>") });
+          port.postMessage({ type: "end" });
+        });
+        const response = await fetchThrough({ path: "/evil", mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        expect(response.headers.get("content-security-policy"), query).toBe(["default-src * 'unsafe-inline'", VIEWER_GUARD_CSP, relayOnly ? VIEWER_SERVICE_CSP_RELAY_ONLY : VIEWER_SERVICE_CSP, "frame-ancestors 'self' https://app.ghostly.example"].join(", "));
+        expect(response.headers.get("link"), query).toBeNull();
+        const guards = `<script>${CLIPBOARD_GUARD_SCRIPT}</script>${relayOnly ? `<script>${VIEWER_GUARD_SCRIPT}</script>` : ""}`;
+        expect(await response.text(), query).toBe(`<!doctype html>${guards}<script>new RTCPeerConnection()</script>`);
+      }
+    });
+  });
+
+  describe("an origin of its own, apart from another contact's app open at once", () => {
+    // The apps' origins share one site (the services host): with no `Origin-Agent-Cluster: ?1` a browser keys their
+    // agent cluster by site, where `document.domain` joins two of them and they may share a process.
+    it("every answer the worker makes asks for an agent cluster of this origin's own, whatever the contact sends", async () => {
+      const answers: [string, () => Promise<Response>][] = [
+        ["refused", () => fetchThrough({ mode: "navigate", destination: "document", referrer: "" })!],
+        ["go on", () => fetchThrough({ mode: "navigate", destination: "iframe", referrer: "" })!],
+        ["contact's", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            const port = transfer[0] as MessagePort;
+            port.postMessage({ type: "head", status: 200, headers: [["content-type", "text/html"], ["Origin-Agent-Cluster", "?0"]] });
+            port.postMessage({ type: "end" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+        ["error page", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            (transfer[0] as MessagePort).postMessage({ type: "error", status: 503, text: "Unreachable", lang: "en" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+        ["empty error", () => {
+          bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+            (transfer[0] as MessagePort).postMessage({ type: "error", status: 304, text: "Not modified" });
+          });
+          return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+        }],
+      ];
+      for (const [label, answer] of answers) {
+        expect((await answer()).headers.get("origin-agent-cluster"), label).toBe("?1");
+      }
+    });
+  });
+
+  describe("an answer the worker makes in place of the contact's", () => {
+    // Such a page is on the app's origin: the app's page may frame one and reach anywhere through its window (its
+    // `fetch`, an image of its document), under that page's policy alone.
+    it("lets nothing load or run from it, whichever answer it is", async () => {
+      const failing = (reply: unknown) => () => {
+        bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+          (transfer[0] as MessagePort).postMessage(reply);
+        });
+        return fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+      };
+      const answers: [string, () => Promise<Response>][] = [
+        ["refused", () => fetchThrough({ mode: "navigate", destination: "document", referrer: "" })!],
+        ["no bridge", () => { clients = clients.filter((client) => client !== bridge); return fetchThrough({ mode: "cors", destination: "", referrer: `${ORIGIN}/` }, "app")!; }],
+        ["plain error", failing({ type: "error", status: 503, text: "Unreachable" })],
+        ["empty error", failing({ type: "error", status: 304, text: "Not modified" })],
+        ["failed", failing({ type: "head", status: 200, headers: null })],
+        ["timed out", () => {
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+          bridge.postMessage.mockImplementation(() => {});
+          const answer = fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+          return vi.waitFor(() => expect(bridge.postMessage).toHaveBeenCalled())
+            .then(() => vi.advanceTimersByTimeAsync(HEAD_TIMEOUT_MS))
+            .then(() => answer).finally(() => vi.useRealTimers());
+        }],
+      ];
+      const statuses: number[] = [];
+      for (const [label, answer] of answers) {
+        clients = [bridge, ...clients.filter((client) => client !== bridge)];
+        const response = await answer();
+        statuses.push(response.status);
+        expect(response.headers.get("content-security-policy"), label).toBe("frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; form-action 'none'; base-uri 'none'");
+        expect(response.headers.get("x-content-type-options"), label).toBe("nosniff");
+      }
+      expect(statuses).toEqual([403, 503, 503, 304, 502, 504]);
     });
   });
 
@@ -369,6 +498,7 @@ describe("a request body of a contact's app, where the browser's Request has no 
     expect(arrayBuffer).not.toHaveBeenCalled();
     expect(bridge.postMessage).not.toHaveBeenCalled();
     expect(refused.status).toBe(413);
+    expect(refused.headers.get("content-security-policy")).toMatch(/; default-src 'none'(;|$)/);
     expect(await refused.text()).toBe("The request body is too large.");
   });
 

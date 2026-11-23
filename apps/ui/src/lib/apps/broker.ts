@@ -23,6 +23,7 @@ import type { AppFileAt } from "@ghostly/browser/engine/apps";
 import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppLinkedFile, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
 import { appInput } from "./open";
+import { relayedChannel } from "./relayedChannel";
 
 /** An app to run: its checked entry (the engine's `appEntry`), what the person granted it, and where it opens. */
 export interface AppLaunch {
@@ -749,10 +750,11 @@ export interface RunningApp {
 
 /**
  * Whether an app's frame is on screen: in the page, in a tab that shows, and not under anything hidden (a chat kept
- * loaded behind another one, a panel Back hid).
+ * loaded behind another one, a panel Back hid), nor inert under a layer over it (an app open alone, a dialog): a frame
+ * covered that way still counts as visible to `checkVisibility`.
  */
 export function onScreen(frame: HTMLIFrameElement): boolean {
-  return frame.isConnected && document.visibilityState !== "hidden" && (frame.checkVisibility?.() ?? true);
+  return frame.isConnected && document.visibilityState !== "hidden" && !frame.closest("[inert]") && (frame.checkVisibility?.() ?? true);
 }
 
 export interface AppWatch {
@@ -798,6 +800,35 @@ export function watchApp({ ping, hung, boundMs = UNRESPONSIVE_AFTER_MS, now = ()
     },
     pong(n) { if (asked?.n === n) asked = null; },
     hidden() { excused = true; },
+  };
+}
+
+/**
+ * How long, in any one second, the page may spend reading a running app's messages (`event.data`, the structured clone
+ * of what the app posted) before the app is stopped. The clone runs on the page's thread before any check of the broker:
+ * 21k empty objects a message at 450 a second held it 98% of the time (gaps of 2 s), and 20 messages of 4M numbers each
+ * 2.5 s, all short of the watchdog's bound. A request within 66 KiB clones in well under a millisecond.
+ */
+export const READ_MS_PER_SECOND = 200;
+
+/** Returned by `readWithin`'s reader once the reads of the last second took more than the budget. */
+export const OVER_BUDGET: unique symbol = Symbol("over budget");
+
+/**
+ * Times each read of an app's message and keeps a one-second sliding total: past `budgetMs` the reader answers
+ * `OVER_BUDGET`, and stopping the app closes its port, which drops the messages still queued without cloning them.
+ */
+export function readWithin(budgetMs = READ_MS_PER_SECOND, now = () => performance.now()): (read: () => unknown) => unknown {
+  const reads: { at: number; ms: number }[] = [];
+  let total = 0;
+  return (read) => {
+    const start = now();
+    const data = read();
+    const at = now();
+    reads.push({ at, ms: at - start });
+    total += at - start;
+    while (reads.length && reads[0]!.at <= at - 1000) total -= reads.shift()!.ms;
+    return total > budgetMs ? OVER_BUDGET : data;
   };
 }
 
@@ -886,6 +917,7 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
   frame.setAttribute("allow", "");
   frame.title = launch.title;
   let port: MessagePort | null = null;
+  let relay: ReturnType<typeof relayedChannel> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let watch: AppWatch | null = null;
   let watching: ReturnType<typeof setInterval> | null = null;
@@ -912,6 +944,7 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
       frame.removeEventListener("load", loaded);
       port?.close();
       port = null;
+      relay?.end();
       frame.remove();
       onStop?.(reason);
     },
@@ -931,9 +964,14 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
       watch.tick();
     }
     if (broker.phase !== "starting" || port) return;
-    const channel = new MessageChannel();
+    const channel = (relay = relayedChannel(STOP_REQUESTS_PER_SECOND, () => broker.stop("protocol")));
     port = channel.port1;
-    port.onmessage = (event) => broker.message(event.data);
+    const reading = readWithin();
+    port.onmessage = (event) => {
+      const data = reading(() => event.data);
+      if (data === OVER_BUDGET) return broker.stop("protocol");
+      broker.message(data);
+    };
     port.onmessageerror = () => broker.message(null);
     frame.contentWindow?.postMessage({ ghostly: "port" }, "*", [channel.port2]);
     port.postMessage({ event: "start", data: launch.entry });

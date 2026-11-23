@@ -13,6 +13,7 @@ import { setAppOpener } from "../../lib/apps/open";
 import type { AppOpener } from "../../lib/apps/open";
 import { appWithContact, chatApp, chatAppOver, requestOpenInChat, takeOpenRequest, updateChatApp, useChatAppCovers } from "../../lib/apps/running";
 import { saveSession } from "../../lib/storage";
+import { translatorFor } from "../../locales";
 import type { ChatSession } from "../../lib/types";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
 import { Route, Routes, useLocation } from "react-router-dom";
@@ -595,11 +596,24 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     windowIs(false);
     panel();
     const t = ((key: string, vars: Record<string, string>) => key === "apps.view.with" ? `${vars.title} with ${vars.name}` : key === "apps.view.withSharing" ? `${vars.title} · sharing a file with ${vars.name}` : key) as never;
-    expect(appWithContact("Chess", "link-1", t)).toBe("Chess with Ana");
-    expect(appWithContact("Chess", "link-1", t, true)).toBe("Chess · sharing a file with Ana");
+    expect(appWithContact("Chess", "link-1", t)).toBe("⁨Chess⁩ with ⁨Ana⁩");
+    expect(appWithContact("Chess", "link-1", t, true)).toBe("⁨Chess⁩ · sharing a file with ⁨Ana⁩");
     expect(appWithContact("Chess", null, t, true)).toBe("Chess");
     expect(appWithContact("Chess", null, t)).toBe("Chess");
     expect(appWithContact("Chess", "link-other", t)).toBe("Chess");
+  });
+
+  it("in every language, a Desktop app window's title keeps an RTL contact's name and a title ending in punctuation each in its own direction", () => {
+    windowIs(false);
+    renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "سارة", named: true }} peerKey="peer" />);
+    for (const language of ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"] as const) {
+      const t = translatorFor(language);
+      for (const serving of [false, true]) {
+        const title = appWithContact("Hunt!", "link-1", t, serving);
+        expect(title, language).toBe(t(serving ? "apps.view.withSharing" : "apps.view.with", { title: "⁨Hunt!⁩", name: "⁨سارة⁩" }));
+        expect(title.split("⁨"), language).toHaveLength(3);
+      }
+    }
   });
 });
 

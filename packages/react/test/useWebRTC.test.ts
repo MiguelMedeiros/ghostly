@@ -1772,3 +1772,86 @@ describe("unmounting", () => {
   });
 });
 
+describe("ringing out (RING_MS) counts from the offer, not from the microphone prompt", () => {
+  it("a prompt left open past RING_MS rings nobody out: no hang-up, no unanswered line, no \"No answer\"", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+
+    act(() => { vi.advanceTimersByTime(RING_MS + 1); });
+
+    expect(call.published).toEqual([]);
+    expect(lines(call)).toEqual(["call_started"]);
+    expect(call.result.current.noAnswer).toBe(false);
+    expect(call.result.current.callState).toBe("offering");
+
+    // Allowed at last: the call goes out as any other.
+    devices.userMedia[0].grant();
+    await settle();
+    expect(call.publishedKinds()).toEqual(["o"]);
+    expect(call.result.current.callState).toBe("offering");
+  });
+
+  it("a prompt allowed after 30 s rings out RING_MS after the offer, not after the start", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+    act(() => { vi.advanceTimersByTime(30_000); });
+    devices.userMedia[0].grant();
+    await settle();
+    expect(call.publishedKinds()).toEqual(["o"]);
+
+    act(() => { vi.advanceTimersByTime(RING_MS - 1); });
+    expect(call.result.current.callState).toBe("offering");
+    expect(call.result.current.noAnswer).toBe(false);
+    expect(call.publishedKinds()).toEqual(["o"]);
+
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.noAnswer).toBe(true);
+    expect(call.publishedKinds()).toEqual(["o", "h"]);
+    expect(lines(call)).toEqual(["call_started", "call_unanswered"]);
+  });
+
+  it("a call cancelled while the prompt is open ends as it always has, and never rings out later", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+    act(() => { vi.advanceTimersByTime(30_000); });
+
+    act(() => call.result.current.hangUp());
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.publishedKinds()).toEqual(["h"]);
+    expect(lines(call)).toEqual(["call_started", "call_cancelled"]);
+
+    devices.userMedia[0].grant();
+    await settle();
+    act(() => { vi.advanceTimersByTime(RING_MS * 2); });
+
+    expect(call.publishedKinds()).toEqual(["h", null]);
+    expect(lines(call)).toEqual(["call_started", "call_cancelled"]);
+    expect(call.result.current.noAnswer).toBe(false);
+    expect(devices.liveTracks()).toEqual([]);
+  });
+
+  it("Android's two dialogs (microphone, then camera) open past RING_MS ring nobody out; the offer then rings its whole minute", async () => {
+    const call = renderCall(undefined, undefined, { asksEachAlone: true });
+    act(() => { void call.result.current.startCall(true); });
+    act(() => { vi.advanceTimersByTime(20_000); });
+    devices.userMedia[0].grant();
+    await settle();
+    act(() => { vi.advanceTimersByTime(RING_MS); });
+
+    expect(call.published).toEqual([]);
+    expect(lines(call)).toEqual(["call_started"]);
+    expect(call.result.current.noAnswer).toBe(false);
+
+    devices.userMedia[1].grant();
+    await settle();
+    expect(JSON.parse(call.published[0]!)).toMatchObject({ t: "o", v: 1 });
+
+    act(() => { vi.advanceTimersByTime(RING_MS - 1); });
+    expect(call.result.current.callState).toBe("offering");
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(call.result.current.noAnswer).toBe(true);
+    expect(call.publishedKinds()).toEqual(["o", "h"]);
+  });
+});
+

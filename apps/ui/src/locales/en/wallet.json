@@ -198,7 +198,10 @@
       "noFee": "no fee",
       "none": "Nothing yet",
       "note": {
+        "notSent": "A payment was not sent",
+        "paidRequest": "Paid a contact's request",
         "paymentFailed": "A Lightning payment failed",
+        "paymentFailedFor": "Payment failed: {{note}}",
         "requestPaid": "Request paid over Lightning",
         "testCoins": "Test coins from the test mint"
       }
@@ -213,8 +216,12 @@
     "paid": "Paid.",
     "pastePlaceholder": "Paste a Lightning invoice, a Lightning address or an ecash token",
     "payAmount": "Pay {{amount}} {{unit}}",
+    "payFailed": "The payment failed: the payee was not paid.",
+    "payFailedBack": "What was set aside for it is back in your balance.",
+    "payFailedFee": "What was set aside for it is back in your balance, less {{amount}} {{unit}} the mint kept as a fee (in the history).",
     "payLine": "Pay {{amount}}{{fees}}",
     "pendingMint": "The payment is still pending at the mint.",
+    "pendingMintNext": "It settles by itself; nothing is paid again. Until the mint answers, the amount shows as set aside under the balance.",
     "primary": "Primary",
     "received": "⚡ {{amount}} {{unit}} received",
     "redeem": "Redeem ecash token",
@@ -699,7 +706,8 @@
               "bip84": "Native SegWit (BIP84, bc1q…)"
             }
           }
-        }
+        },
+        "label": "BDK wallet"
       },
       "bitcoind": {
         "description": "A wallet on your own Bitcoin Core node, over its RPC. Your node holds the keys and signs. Needs the desktop app.",
@@ -726,7 +734,8 @@
         "description": "A self-custodial Lightning wallet on Spark, through the Breez SDK. Its recovery phrase is sealed on this device; you hold the sats."
       },
       "cashu-mint": {
-        "description": "Invoices are paid into, and paid from, your Cashu balance. The mints hold the sats."
+        "description": "Invoices are paid into, and paid from, your Cashu balance. The mints hold the sats.",
+        "label": "Cashu mints"
       },
       "core-lightning": {
         "description": "Your own Core Lightning node, over Commando with a rune. Your node holds the sats. The web app reaches it only through wss://.",
@@ -763,7 +772,8 @@
             "help": "LND's REST port (restlisten, 8080 by default). In a browser the node must allow this app with restcors and have a certificate the browser trusts; the desktop app needs neither.",
             "label": "REST address"
           }
-        }
+        },
+        "label": "LND node"
       },
       "nwc": {
         "description": "A wallet you connect with its NWC URI (Alby Hub, a node's NWC service, a hosted wallet). That wallet holds the sats and sets its own fee limit: custodial or not depends on the wallet.",
@@ -775,7 +785,8 @@
         }
       },
       "webln": {
-        "description": "A Lightning wallet in this browser (Alby and others). That wallet holds the sats and asks you before it pays."
+        "description": "A Lightning wallet in this browser (Alby and others). That wallet holds the sats and asks you before it pays.",
+        "label": "Browser wallet (WebLN)"
       }
     },
     "reconfigured": "{{name}} now uses that server.",

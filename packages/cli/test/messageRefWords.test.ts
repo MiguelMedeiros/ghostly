@@ -19,6 +19,7 @@ function fake() {
     getMessage: vi.fn(async (linkId: string, id: string) => (linkId === mine.linkId && id === mine.id ? mine : undefined)),
     getMessages: vi.fn(async (linkId: string) => (linkId === mine.linkId ? [mine] : [])),
     groupMessages: vi.fn(async () => []),
+    messagesByWireId: vi.fn(async (linkId: string, wireId: string) => (linkId === mine.linkId && mine.wireId === wireId ? [mine] : [])),
     messageDetails: vi.fn(async () => null),
     react: vi.fn(async ({ linkId }: { linkId: string }) => ({ error: `That message is not in this ${where(linkId)}, or takes no reaction` })),
     pinMessage: vi.fn(async ({ linkId }: { linkId: string }) => ({ error: `That message is not in this ${where(linkId)}, or cannot be pinned` })),

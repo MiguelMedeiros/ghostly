@@ -71,6 +71,30 @@ describe("a restored profile's name field", () => {
     expect(shownName()).toBe("Older work");
   });
 
+  it("the tag's x, pressed from the keyboard, leaves the focus on the name field, and is a thumb's size on a phone", async () => {
+    restoredWorkInUse();
+    const { user } = renderApp(<Profile />, { language: "en" });
+    const remove = screen.getByTestId("profile-restored-remove");
+    expect(remove).toHaveClass("tap-target");
+    remove.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("profile-restored-tag")).not.toBeInTheDocument();
+    // It goes with the tag: the focus lands on the name beside it, not on the page.
+    await waitFor(() => expect(screen.getByTestId("profile-name")).toHaveFocus());
+  });
+
+  it("a tap on the tag's x on a touch screen does not put the focus in the name field (no keyboard)", async () => {
+    const real = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+      ? ({ ...real(query), matches: query === "(any-pointer: coarse)" } as MediaQueryList) : real(query));
+    restoredWorkInUse();
+    const { user } = renderApp(<Profile />, { language: "en" });
+    await user.click(screen.getByTestId("profile-restored-remove"));
+    // A text field would raise the on-screen keyboard: the picture control beside it raises none.
+    await waitFor(() => expect(screen.getByTestId("profile-avatar-input")).toHaveFocus());
+    expect(screen.getByTestId("profile-name")).not.toHaveFocus();
+  });
+
   it("a registry an earlier build left with the translated word in the name and no mark is read as restored", () => {
     localStorage.setItem(registryKey(), JSON.stringify({ version: 1, active: WORK, profiles: [{ id: "", name: "Personal", createdAt: 0 }, { id: WORK, name: "Old work (restaurado)", createdAt: 1 }] }));
     renderApp(<Profile />, { language: "en" });

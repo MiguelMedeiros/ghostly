@@ -27,6 +27,7 @@ import { useComposition } from "../hooks/useComposition";
 import { useOwnNameField } from "../hooks/useOwnNameField";
 import { useFittedNameField } from "../hooks/useGroupNameField";
 import { useFocusLanding } from "../hooks/useFocusLanding";
+import { touchOnly } from "../lib/touchOnly";
 import { openJoinAnother } from "../lib/devices";
 import { problemText, type Problem } from "../lib/problemText";
 import { incomingShare } from "../lib/incomingShare";
@@ -106,6 +107,13 @@ export function Profile() {
   // Cancel goes with the form: the focus goes back to New profile, which takes its place, not to the page.
   const [cancelled, setCancelled] = useState(false);
   useFocusLanding(cancelled ? "[data-testid='profile-new']" : null, () => setCancelled(false));
+  // Remove picture goes with the picture: the focus goes to Add a picture, once the picture is gone.
+  const [unpictured, setUnpictured] = useState(false);
+  useFocusLanding(unpictured && !myAvatar ? "[data-testid='profile-avatar-input']" : null, () => setUnpictured(false));
+  // The Restored tag's × goes with the tag: the focus goes to the name beside it, which stays. On a touch screen
+  // a text field would raise the keyboard, so there it goes to the picture control, which raises none.
+  const [unmarked, setUnmarked] = useState(false);
+  useFocusLanding(unmarked ? (touchOnly() ? "[data-testid='profile-avatar-input']" : "[data-testid='profile-name']") : null, () => setUnmarked(false));
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
   // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
@@ -142,7 +150,8 @@ export function Profile() {
     <Page title={t("settings.profile")} width="md" testId="profile-page">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {/* The picture goes to paired contacts with the name: a fresh 128×128 JPEG, nothing of the file. */}
-        <label className="relative shrink-0 cursor-pointer group rounded-full focus-within:ring-2 focus-within:ring-accent" title={myAvatar ? t("profile.changePictureHint") : t("profile.addPictureHint")}>
+        {/* With no picture the badge is the accent itself: its ring sits past a gap of the page's colour, or it is not seen. */}
+        <label className="relative shrink-0 cursor-pointer group rounded-full focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-chat-bg" title={myAvatar ? t("profile.changePictureHint") : t("profile.addPictureHint")}>
           <ProfileBadge entry={{ ...current, name: name || plain }} size={52} avatar={myAvatar} />
           <span aria-hidden="true" className="absolute inset-0 rounded-full bg-black/45 grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
@@ -159,13 +168,13 @@ export function Profile() {
         {current.restored && (
           <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
             {t("profile.restoredTag")}
-            <button type="button" data-testid="profile-restored-remove" aria-label={t("profile.restoredRemove")} title={t("profile.restoredRemove")} onClick={() => attempt(() => clearRestoredMark(current.id))}
-              className="grid place-items-center w-7 h-7 rounded-full hover:text-text-primary hover:bg-surface-hover cursor-pointer">
+            <button type="button" data-testid="profile-restored-remove" aria-label={t("profile.restoredRemove")} title={t("profile.restoredRemove")} onClick={() => attempt(() => { clearRestoredMark(current.id); setUnmarked(true); })}
+              className="tap-target grid place-items-center w-7 h-7 rounded-full hover:text-text-primary hover:bg-surface-hover cursor-pointer">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
             </button>
           </span>
         )}
-        {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
+        {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => { setUnpictured(true); void setMyAvatar(null); }} className="min-h-10 max-md:min-h-11 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
         {/* There before it fills, so a screen reader says it; a refused name shows the Notice below instead. */}
         <span role="status" data-testid="profile-name-saved" className="text-accent text-sm shrink-0">{nameSaved ? t("profile.nameSaved") : ""}</span>
       </div>

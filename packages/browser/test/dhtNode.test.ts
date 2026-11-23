@@ -82,7 +82,7 @@ it("a contact that chose DHT only gets every text of a burst from this side, whi
   } finally { await contact.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }
 }, 70000);
 
-it("a text deleted while the profile is offline leaves the saved floor: back online, the contact never gets it (agents#6005)", async () => {
+it("in a chat that goes live, a text within 256 bytes the DHT packet cannot carry waits for live, and a later one goes on the floor", async () => {
   await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   vi.stubGlobal("RTCPeerConnection", undefined);
   const packets = new Map<string, SignedPacket>();
@@ -93,7 +93,53 @@ it("a text deleted while the profile is offline leaves the saved floor: back onl
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false, nativeTransports: { "iroh/1": native, "hyperdht/1": native } });
   const invitation = createLink(); let linkId = "";
   const received = vi.fn();
-  const contact = new DhtDelivery({ params: invitation.invite, mode: "dht", credentials: { seedB64: createIdentity().seedB64 }, transport,
+  // Both sides on Automatic: the chat is on the floor only until it is live.
+  const contact = new DhtDelivery({ params: invitation.invite, mode: "stream", credentials: { seedB64: createIdentity().seedB64 }, transport,
+    save: async () => {}, pin: async () => {}, message: async m => { received(m); }, receipt: async () => {}, changed: () => {}, pollMs: 100 });
+  try {
+    await node.start();
+    ({ linkId } = await node.ensureLink({ ...invitation.mine, profile: "paired-chat/1" }));
+    node.setActiveLink({ linkId });
+    await contact.start();
+    await vi.waitFor(() => expect(node.getState().links.find(l => l.id === linkId)?.textDelivery).toBe("dht"), { timeout: 20000 });
+    // 251 bytes; each quote takes two in the sealed body, so the packet has no room for it.
+    const t = Date.now(), long = `"quoted" `.repeat(28).trim();
+    // Refused before: the person had to write it again, while one past 256 bytes waited for live.
+    expect(await node.sendMessage({ linkId, text: long, timestamp: t })).toMatchObject({ error: null });
+    expect((await db.getMessages(linkId)).find(m => m.text === long)).toMatchObject({ delivery: "waiting", deliveryError: "Too long for the DHT packet: it is sent when you are live." });
+    // It waits off the floor: the text written after it goes there, and it does not.
+    expect((await node.sendMessage({ linkId, text: "after the long one", timestamp: t + 1 })).error).toBeNull();
+    await vi.waitFor(() => expect(received).toHaveBeenCalledWith(expect.objectContaining({ text: "after the long one" })), { timeout: 30000 });
+    await vi.waitFor(async () => expect((await db.getMessages(linkId)).filter(m => m.sender === "me").map(m => [m.text.length, m.delivery])).toEqual([[251, "waiting"], [18, "delivered"]]), { timeout: 12000 });
+    expect(received.mock.calls.map(([m]) => m.text)).not.toContain(long);
+  } finally { await contact.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }
+}, 70000);
+
+it("a text deleted while the profile is offline leaves the saved floor: back online, the contact never gets it (agents#6005)", async () => {
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  const packets = new Map<string, SignedPacket>();
+  // What the relays were given and read, in order: the keys written (`writes`), the keys the contact reads (`reads`),
+  // the envelopes put there once this side is back online (`fresh`), and the contact's reads of such a one under `held`.
+  const writes: string[] = [], reads = new Set<string>(), fresh = new WeakSet<SignedPacket>();
+  let back = false, held = "", freshReads = 0;
+  const transport = { publish: async (identity: Parameters<typeof createRelayPayload>[0], records: Parameters<typeof createRelayPayload>[1]) => {
+    const packet = parseRelayPayload(identity.pubKeyZ32, createRelayPayload(identity, records));
+    packets.set(identity.pubKeyZ32, packet);
+    writes.push(identity.pubKeyZ32);
+    if (back) fresh.add(packet);
+  }, resolve: async (key: string) => packets.get(key) ?? null, describe: () => ({ protocol: "signed packet fixture", relays: [] }) };
+  const contactTransport = { ...transport, resolve: async (key: string) => {
+    reads.add(key);
+    const packet = packets.get(key) ?? null;
+    if (key === held && packet && fresh.has(packet)) freshReads++;
+    return packet;
+  } };
+  const native = vi.fn();
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false, nativeTransports: { "iroh/1": native, "hyperdht/1": native } });
+  const invitation = createLink(); let linkId = "";
+  const received = vi.fn();
+  const contact = new DhtDelivery({ params: invitation.invite, mode: "dht", credentials: { seedB64: createIdentity().seedB64 }, transport: contactTransport,
     save: async () => {}, pin: async () => {}, message: async m => { received(m); }, receipt: async () => {}, changed: () => {}, pollMs: 100 });
   const saved = async () => (await db.getLinks()).find(l => l.id === linkId)?.dhtDeliveryState;
   try {
@@ -107,6 +153,9 @@ it("a text deleted while the profile is offline leaves the saved floor: back onl
     expect((await node.sendMessage({ linkId, text: "deleted while offline", timestamp: Date.now() })).error).toBeNull();
     const message = (await db.getMessages(linkId)).find(m => m.text === "deleted while offline")!;
     expect((await saved())?.pending?.message[2]).toBe("deleted while offline");
+    // The envelope that carries it: the last one put where the contact reads.
+    held = writes.filter(key => reads.has(key)).at(-1)!;
+    expect(held).toBeTruthy();
     // Offline: the chat's link is stopped, so the floor's state is all that holds the text.
     await node.updateSettings({ settings: { online: false } });
     node.deleteMessage({ linkId, messageId: message.id });
@@ -114,10 +163,13 @@ it("a text deleted while the profile is offline leaves the saved floor: back onl
     await vi.waitFor(async () => expect((await saved())?.pending).toBeUndefined());
     // Back online: nothing publishes the text again, and the envelope the relays held is replaced at once, not after
     // the start's quiet.
+    back = true;
     await node.updateSettings({ settings: { online: true } });
-    await new Promise(resolve => setTimeout(resolve, 3_000));
+    // That envelope is put out again at once: within 3 s, where the start's quiet is 15 s.
+    await vi.waitFor(() => expect(fresh.has(packets.get(held)!)).toBe(true), { timeout: 3_000, interval: 20 });
     await contact.start();
-    await new Promise(resolve => setTimeout(resolve, 2_000));
+    // The contact reads it twice: what the first read brought has been taken by the second.
+    await vi.waitFor(() => expect(freshReads).toBeGreaterThanOrEqual(2), { timeout: 5_000, interval: 20 });
     expect(received.mock.calls.map(([m]) => m.text)).not.toContain("deleted while offline");
     expect((await saved())?.pending).toBeUndefined();
   } finally { await contact.stop(); await node.shutdown(); if (linkId) await db.deleteLink(linkId); vi.unstubAllGlobals(); }

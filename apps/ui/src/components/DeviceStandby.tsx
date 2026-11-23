@@ -6,7 +6,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
 import { NAME, withName } from "./apps/aroundName";
 import { useLockPassedNow } from "../contexts/LockScreenContext";
-import { listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
+import { DEVICE_SET_EVERY_MS, listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
 import { TakeoverDialog } from "./devices/TakeoverDialog";
 import { RemoveHereDialog } from "./devices/RemoveHereDialog";
@@ -164,8 +164,10 @@ function Actions({ children }: { children: ReactNode }) {
  */
 function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   const { t } = useI18n();
-  const view = useHandoffView();
   const [asking, setAsking] = useState(false);
+  // This screen stays up for hours with no move: asked as often as the set, not twice a second. Use here's dialog closing
+  // asks at once, so a pull it started shows its steps, not Use here again.
+  const view = useHandoffView(!asking, DEVICE_SET_EVERY_MS);
   const device = gate.activeDevice ?? t("devices.join.otherDevice");
   // Released, and the other device's word that it took the profile not heard yet: Use here stays (WISP 06 § What a standby
   // shows), and reads the turn first. That word can be lost, and this screen would otherwise wait for it for good.
@@ -349,7 +351,8 @@ function Links() {
 /**
  * One of those devices. Check connection is there only while its link is connected: when the link drops under the
  * keyboard focus, the focus goes to this line, which now says Not connected, not to the page. The name keeps its
- * width (only one longer than the row is cut): on a narrow phone the button goes to a line of its own instead.
+ * width: on a narrow phone the button goes to a line of its own instead, and a name longer than the row (a large text
+ * size) wraps, never cut.
  */
 function LinkRow({ device, answer, onCheck }: { device: DeviceSetView["devices"][number]; answer?: string; onCheck(): void }) {
   const { t } = useI18n();
@@ -359,8 +362,8 @@ function LinkRow({ device, answer, onCheck }: { device: DeviceSetView["devices"]
   return (
     <li ref={row} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center gap-3 px-4 py-3">
       <DeviceGlyph name={device.name} active={device.active} />
-      <div className="max-w-full flex-1">
-        <p dir="auto" className="truncate text-text-primary">{device.name}</p>
+      <div className="min-w-0 max-w-full flex-auto">
+        <p dir="auto" className="break-words text-text-primary">{device.name}</p>
         <p className="text-xs text-text-muted">
           {device.active ? `${t("devices.section.active")} · ` : ""}
           <span className="inline-flex items-center gap-1">

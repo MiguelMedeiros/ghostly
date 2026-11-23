@@ -107,7 +107,7 @@ export function standInDuty(lost: readonly string[], standing: readonly string[]
 }
 
 /** What a hub says to its edges: the members it has an edge up with, the members whose apps take no hubs, and those nobody reaches. */
-export interface GroupReachFrame { t: "group-reach"; g: string; k: string[]; l?: string[]; u?: string[] }
+export interface GroupReachFrame { t: "group-reach"; g: string; k: string[]; v?: string[]; l?: string[]; u?: string[] }
 
 /** Per private group, in memory: its hubs as this device sees and plays them. */
 interface HubLive {
@@ -153,6 +153,8 @@ interface HubLive {
   claimed: Map<string, number>;
   /** What each hub said it reaches. */
   reach: Map<string, Set<string>>;
+  /** What each hub in the beacon said the hubs it hears from reach (`v`): whom I reach through it, a hub further. */
+  reachVia: Map<string, Set<string>>;
   /** What each hub in the beacon said of its own edges' apps taking no hubs (`l`): in memory, while that hub counts. */
   reachLegacy: Map<string, Set<string>>;
   /** When each member's last `group-reach` was taken. */
@@ -217,7 +219,7 @@ export class MeshHubs {
       const clocks = new HubClocks(() => live!.me, HUB_CLOCK_READ_GAP_MS);
       this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], clocks, me: "", firstRead: false, epochRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, publishAfter: 0, readAt: 0, stepUpAt: 0, hub: false, hubSince: 0,
       members: new Map(), lastLobbyPoll: 0, lobbyBusyUntil: 0, myHubs: [], lobbyWrites: new Map(), hubWaits: new Map(), avoided: new Map(), hubsUp: new Set(),
-      seenHubs: new Map(), claimed: new Map(), reach: new Map(), reachLegacy: new Map(), reachHeard: new Map(), takesHubs: new Set(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), reactionPace: new Map(), need: 0, departed: new Set(), unreached: new Map(), reachNone: new Map(), standFor: { at: "", mine: [] } }));
+      seenHubs: new Map(), claimed: new Map(), reach: new Map(), reachVia: new Map(), reachLegacy: new Map(), reachHeard: new Map(), takesHubs: new Set(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), reactionPace: new Map(), need: 0, departed: new Set(), unreached: new Map(), reachNone: new Map(), standFor: { at: "", mine: [] } }));
     }
     return live;
   }
@@ -293,6 +295,7 @@ export class MeshHubs {
     live.departed.add(key);
     const was = live.seenHubs.delete(key) || live.myHubs.includes(key) || live.beacon.some(h => h.key === key);
     live.reach.delete(key);
+    live.reachVia.delete(key);
     live.reachLegacy.delete(key);
     live.reachNone.delete(key);
     live.claimed.delete(key);
@@ -375,6 +378,16 @@ export class MeshHubs {
     live.wantedSize = out.size;
     const edges = this.host.edges(groupId);
     for (const [key, until] of live.gone) if (until <= now) live.gone.delete(key); else if (edges.has(key)) out.add(key);
+    // Make before break, as a member on my hubs: an edge that is up stays until a hub whose edge to me is up says it
+    // reaches that member itself (its `k`). Closed at once, texts sent while the hubs' edges opened came 13-35 s late.
+    if (!live.hub && live.myHubs.length) {
+      const reached = new Set<string>();
+      for (const hub of this.hubs(groupId, session, now)) {
+        const id = edges.get(hub), keys = live.reach.get(hub);
+        if (keys && id && this.host.linkReady(id)) for (const key of keys) reached.add(key);
+      }
+      for (const [key, id] of edges) if (!out.has(key) && !reached.has(key) && rosterHas(session.roster, key) && this.host.linkReady(id)) out.add(key);
+    }
     return out;
   }
 
@@ -684,20 +697,34 @@ export class MeshHubs {
     const edges = this.host.edges(groupId);
     const up = [...edges].filter(([key, id]) => rosterHas(session.roster, key) && this.host.linkReady(id)).map(([key]) => key).sort();
     const none = this.nobodyReaches(groupId, session, live, up, now);
-    const said = `${up.join(",")}|${none.join(",")}`;
+    const via = this.viaMyHubs(groupId, session, live, up, now);
+    const said = `${up.join(",")}|${via.join(",")}|${none.join(",")}`;
     // Said when it changed (at most every `reachEveryMs`), and once a minute anyway: it is also how members that could
     // not read the beacon know I am a hub.
     if (!only && ((said === live.sentReach && now - live.lastReach < REACH_AGAIN_MS) || now - live.lastReach < this.timings.reachEveryMs)) return;
     if (!only) { live.sentReach = said; live.lastReach = now; }
     // Only of my own edges: that is all a hub can know of members' apps (and all a member takes from it).
     const legacy = this.legacyOf(groupId).filter(key => up.includes(key));
-    const frame: GroupReachFrame = { t: "group-reach", g: groupId, k: up, ...(legacy.length ? { l: legacy } : {}), ...(none.length ? { u: none } : {}) };
+    const frame: GroupReachFrame = { t: "group-reach", g: groupId, k: up, ...(via.length ? { v: via } : {}), ...(legacy.length ? { l: legacy } : {}), ...(none.length ? { u: none } : {}) };
     for (const [key, id] of edges) {
       if ((only && key !== only) || !rosterHas(session.roster, key) || !this.host.linkReady(id)) continue;
       try { this.host.sendOnLink(id, frame); } catch { /* closing */ }
     }
   }
   private legacyOf(groupId: string): string[] { return this.groups.stored(groupId)?.legacy ?? []; }
+
+  /**
+   * As a hub: the members the hubs I hear from reach on their own edges (their `k`, on an edge with me that is up), but
+   * those on mine and me: what I say in `v`. A member on another hub's edges is reached through me, a hub further.
+   */
+  private viaMyHubs(groupId: string, session: GroupSession, live: HubLive, up: string[], now: number): string[] {
+    const edges = this.host.edges(groupId), mine = new Set([...up, session.myKey]), out = new Set<string>();
+    for (const hub of this.hubs(groupId, session, now)) {
+      const id = edges.get(hub), keys = live.reach.get(hub);
+      if (keys && id && this.host.linkReady(id)) for (const key of keys) if (!mine.has(key) && rosterHas(session.roster, key)) out.add(key);
+    }
+    return [...out].sort();
+  }
 
   /**
    * An edge came up: as a hub, the member counts as mine and hears whom I reach. `hubs`: its app takes part in hubs
@@ -774,6 +801,11 @@ export class MeshHubs {
     }
     live.reach.set(from, reach);
     live.seenHubs.set(from, now);
+    // Whom the hubs it hears from reach, by this hub's word: shown reachable through it, nothing else. A longer list
+    // than the roster is not taken.
+    const via = Array.isArray(frame.v) && frame.v.length <= session.roster.length
+      ? frame.v.filter((key): key is string => typeof key === "string" && key !== session.myKey && !reach.has(key) && rosterHas(session.roster, key)) : [];
+    if (via.length) live.reachVia.set(from, new Set(via)); else live.reachVia.delete(from);
     // Whom nobody reaches, by this hub's word (a hub of the beacon only, as above): members of the roster it does not reach
     // itself, not me (my edge with it is up). A longer list than a hub says is not taken.
     const none = Array.isArray(frame.u) && frame.u.length <= Math.min(UNREACHED_SAID, session.roster.length)
@@ -786,7 +818,10 @@ export class MeshHubs {
     return true;
   }
 
-  /** A member I have no edge with is reachable through a hub whose edge to me is up and that says it reaches them. */
+  /**
+   * A member I have no edge with is reachable through a hub whose edge to me is up and that says it reaches them: on its
+   * own edges (`k`), or through a hub it hears from (`v`).
+   */
   viaHub(groupId: string, session: GroupSession, key: string, now: number): boolean {
     const live = this.live.get(groupId);
     if (!live) return false;
@@ -794,7 +829,7 @@ export class MeshHubs {
     for (const [hub, keys] of live.reach) {
       if (!hubs.has(hub)) continue;
       const id = edges.get(hub);
-      if (keys.has(key) && id && this.host.linkReady(id)) return true;
+      if ((keys.has(key) || !!live.reachVia.get(hub)?.has(key)) && id && this.host.linkReady(id)) return true;
     }
     return false;
   }

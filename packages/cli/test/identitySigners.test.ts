@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { npubEncode } from "nostr-tools/nip19";
 import { describe, expect, it, vi } from "vitest";
 import { IdentityCheckUnavailable } from "@ghostly/core";
 import type { EngineState } from "@ghostly/browser/shared/types";
@@ -9,6 +10,7 @@ import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { callApi, type ApiContext } from "../src/api";
 import { asCliError, EXIT } from "../src/errors";
 import { EventHub, type GhostlyEvent } from "../src/events";
+import { identityWaitLines } from "../src/identityWait";
 // @ts-expect-error Native fixture is deliberately directly executable JavaScript.
 import { startTestBunker } from "../../browser/test/helpers/nostrBunker.mjs";
 // covers: headless.identities
@@ -119,6 +121,73 @@ describe("identity signers on Node", () => {
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
   });
 
+  /**
+   * `identity add <provider> [subject]` with a signer that runs here and brings its own subject dropped the subject:
+   * NIP-05 asked for `--field domain` after the domain was given, and Nostr made a proof of whatever key the signer
+   * held, exit 0, though another npub was named.
+   */
+  describe("a subject given to a signer that runs here", () => {
+    const signerOf = (provider: string, id: string) => IDENTITY_PROVIDERS.find((p) => p.id === provider)!.signers.find((s) => s.id === id) as InAppSigner<unknown>;
+    const ALICE = "a".repeat(64), BOB = "b".repeat(64);
+    // A link the bunker check takes: the signer itself is stubbed, so it never connects.
+    const BUNKER = `bunker://${"c".repeat(64)}?relay=wss://relay.example.com`;
+
+    it("is NIP-05's domain, as --field domain is", async () => {
+      const { ctx, node } = fake();
+      await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com" })).rejects.toMatchObject({
+        code: "usage", message: "NIP-05 with a remote signer needs bunker (Signer connection link): give it on stdin (--stdin, a bunker=... line), or --field bunker=...",
+      });
+      const seen: Record<string, string>[] = [];
+      const run = vi.spyOn(signerOf("domain", "nip05-nip46"), "run").mockImplementation(async (sctx) => { seen.push({ ...sctx.values }); throw new Error("stopped here"); });
+      try {
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { bunker: BUNKER } })).rejects.toThrow("stopped here");
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { domain: "example.com", bunker: BUNKER } })).rejects.toThrow("stopped here");
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "example.com", fields: { domain: "other.org", bunker: BUNKER } })).rejects.toMatchObject({
+          code: "usage", message: "Two domains: \"example.com\" as <subject>, \"other.org\" as --field domain; give one",
+        });
+        // The same domain written another way is one domain, as the provider reads it.
+        await expect(callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject: "Example.COM", fields: { domain: "example.com", bunker: BUNKER } })).rejects.toThrow("stopped here");
+        // A link or key typed as the subject (or the field) is refused in the provider's words, never printed back.
+        const SECRET = `${BUNKER}&secret=TOPSECRET123`, NSEC = `nsec1${"q".repeat(58)}`;
+        for (const [subject, domain] of [[SECRET, "example.com"], ["example.com", SECRET], [NSEC, "example.com"]]) {
+          const refused = await callApi(ctx, "identity.add", { provider: "domain", signer: "nip05-nip46", subject, fields: { domain, bunker: BUNKER } }).catch((error: unknown) => error);
+          expect(refused).toMatchObject({ code: "bad_request" });
+          expect((refused as Error).message).not.toContain("TOPSECRET123");
+          expect((refused as Error).message).not.toContain("nsec1");
+        }
+      } finally { run.mockRestore(); }
+      expect(seen).toEqual([{ domain: "example.com", bunker: BUNKER }, { domain: "example.com", bunker: BUNKER }, { domain: "Example.COM", bunker: BUNKER }]);
+      expect(node.beginIdentityProof).not.toHaveBeenCalled();
+    });
+
+    it("is checked against the key a Nostr signer holds before anything is signed", async () => {
+      const { ctx, node } = fake();
+      node.beginIdentityProof.mockImplementation(async ({ provider, subject }: { provider: string; subject: string }) => ({
+        draftId: "d1", binding: { v: 1, provider, subject, key: "y".repeat(52), issuedAt: 1_800_000_000, expiresAt: 1_800_086_400, nonce: "A".repeat(22) },
+      }));
+      node.completeIdentityProof.mockResolvedValue({ id: "p1", provider: "nostr", subject: BOB, verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] });
+      const sign = vi.fn(async () => ({}));
+      const run = vi.spyOn(signerOf("nostr", "nip46"), "run").mockImplementation((_, work) => work({ subject: async () => BOB, sign }));
+      try {
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: npubEncode(ALICE), fields: { bunker: BUNKER } })).rejects.toMatchObject({
+          code: "bad_request", message: `Remote signer (NIP-46) holds nostr:${npubEncode(BOB)}, not nostr:${npubEncode(ALICE)}: nothing was signed`,
+        });
+        expect(node.beginIdentityProof).not.toHaveBeenCalled();
+        expect(sign).not.toHaveBeenCalled();
+        // One the provider cannot read, before the signer is asked.
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: "npub1nope", fields: { bunker: BUNKER } })).rejects.toMatchObject({
+          code: "bad_request", message: "Enter a Nostr public key: npub1… or 64 hex characters",
+        });
+        expect(run).toHaveBeenCalledTimes(1);
+        // Its own key, as an npub or in hex: the proof is made.
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: npubEncode(BOB), fields: { bunker: BUNKER } })).resolves.toMatchObject({ done: true });
+        await expect(callApi(ctx, "identity.add", { provider: "nostr", subject: BOB.toUpperCase(), fields: { bunker: BUNKER } })).resolves.toMatchObject({ done: true });
+      } finally { run.mockRestore(); }
+      expect(node.beginIdentityProof).toHaveBeenCalledTimes(2);
+      expect(node.beginIdentityProof).toHaveBeenCalledWith({ provider: "nostr", subject: BOB });
+    });
+  });
+
   // The link or code a signer waits on holds the request's secret: it went into the event journal, kept on disk and
   // replayed to every `listen` that came later.
   it("reports a signer's approval link to the listeners live, never to the journal or a replay", async () => {
@@ -140,6 +209,55 @@ describe("identity signers on Node", () => {
     expect(live.filter((e) => e.type === "identity.approval").map((e) => e.url ?? e.qr)).toEqual(["https://bunker.test/auth?secret=s3cret", "pubkyauth://signin?secret=s3cret"]);
     expect(JSON.stringify(hub.replay(0))).not.toContain("s3cret");
     expect(hub.replay(0).map((e) => e.type)).toEqual(["daemon.started"]);
+  });
+
+  /**
+   * `identity add` wrote every `identity.progress`/`identity.approval` of the daemon to stderr as JSON: a terminal read
+   * event lines, and two proofs waiting on one daemon each printed the other's "approve now" and approval link.
+   */
+  it("each identity add tells only its own signer's wait, in words on a terminal and as JSON on a pipe", async () => {
+    const { ctx } = fake();
+    const hub = new EventHub(join(mkdtempSync(join(tmpdir(), "ghostly-wait-")), "events.jsonl"), () => 1000, "wait");
+    (ctx as unknown as { hub: EventHub }).hub = hub;
+    const heard: GhostlyEvent[] = [];
+    hub.onEvent((e) => heard.push(e));
+    const pubky = IDENTITY_PROVIDERS.find((p) => p.id === "pubky")!.signers.find((s) => s.kind === "in-app") as InAppSigner<unknown>;
+    const run = vi.spyOn(pubky, "run").mockImplementation(async (sctx) => {
+      const who = (sctx.values as Record<string, string> | undefined)?.who ?? "?";
+      sctx.onProgress(`${who}: approve in Pubky Ring.`);
+      sctx.onApproval?.({ qr: { value: `pubkyauth://signin?secret=${who}`, label: "Or scan with Pubky Ring" }, notes: ["The code is your request: scan it yourself, and do not share it."] });
+      throw new Error("stopped here");
+    });
+    try {
+      await expect(callApi(ctx, "identity.add", { provider: "pubky", fields: { who: "A" }, request: "call-a" })).rejects.toThrow("stopped here");
+      await expect(callApi(ctx, "identity.add", { provider: "pubky", fields: { who: "B" }, request: "call-b" })).rejects.toThrow("stopped here");
+    } finally { run.mockRestore(); }
+    const said = (request: string, terminal: boolean) => heard.map((e) => identityWaitLines(e, request, terminal)).join("");
+    expect(said("call-a", true)).toBe([
+      "ghostly: A: approve in Pubky Ring.",
+      "ghostly: Approve the request with this code (Scan with Pubky Ring):",
+      "pubkyauth://signin?secret=A",
+      "ghostly: The code is your request: scan it yourself, and do not share it.",
+      "",
+    ].join("\n"));
+    expect(said("call-b", true)).not.toMatch(/A: approve|secret=A/);
+    expect(said("call-b", true)).toContain("pubkyauth://signin?secret=B\n");
+    const piped = said("call-a", false).trim().split("\n").map((line) => JSON.parse(line) as GhostlyEvent);
+    expect(piped.map((e) => [e.type, e.request, e.message ?? e.qr])).toEqual([
+      ["identity.progress", "call-a", "A: approve in Pubky Ring."], ["identity.approval", "call-a", "pubkyauth://signin?secret=A"],
+    ]);
+    // A NIP-46 signer's page to approve on: the link alone on its line.
+    expect(identityWaitLines({ seq: 1, id: "x", type: "identity.approval", at: 1, provider: "nostr", request: "r", url: "https://bunker.test/auth" }, "r", true))
+      .toBe("ghostly: Approve the request at this link:\nhttps://bunker.test/auth\n");
+  });
+
+  // A daemon started before the `request` id (upgraded CLI, `daemon restart` not run yet) tags no event: `identity add`
+  // printed none of its waits, so the bunker's approval link never showed and the proof waited out its --timeout.
+  it("a wait from a daemon that tags no request is still told", () => {
+    const untagged: GhostlyEvent = { seq: 1, id: "x", type: "identity.approval", at: 1, provider: "nostr", url: "https://bunker.test/auth" };
+    expect(identityWaitLines(untagged, "r", true)).toBe("ghostly: Approve the request at this link:\nhttps://bunker.test/auth\n");
+    expect(identityWaitLines({ ...untagged, type: "identity.progress", url: undefined, message: "Approve it." }, "r", false)).toContain("\"message\":\"Approve it.\"");
+    expect(identityWaitLines({ ...untagged, request: "other" }, "r", true)).toBe("");
   });
 
   // Nobody approved a Pubky sign-in: it ended as `engine`, "The operation was aborted due to timeout", after 300 s,

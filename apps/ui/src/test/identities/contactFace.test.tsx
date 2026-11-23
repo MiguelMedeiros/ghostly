@@ -10,6 +10,7 @@ import {
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { deleteSession, saveSession } from "../../lib/storage";
+import type { Language } from "../../lib/settings";
 import type { ChatSession } from "../../lib/types";
 import { GroupChat } from "../../pages/GroupChat";
 import { choose, optionsOf } from "../select";
@@ -40,16 +41,16 @@ const choosePubky = () => setFaceChoice(PEER, { provider: "pubky", subject: PUBK
 
 /** Where the app is: nothing about the marks' card opens the chat. */
 function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
-function list(received: ReceivedIdentityView[]) {
+function list(received: ReceivedIdentityView[], language?: Language) {
   fakeEngine.on("loadPublicProfile", () => undefined);
-  const shown = renderApp(<UpdateProvider><Sidebar /><Where /></UpdateProvider>);
+  const shown = renderApp(<UpdateProvider><Sidebar /><Where /></UpdateProvider>, { language });
   act(() => fakeEngine.update(withReceived(received)));
   return shown;
 }
 const row = () => screen.getByTestId("chat-row");
 
 describe("a contact's name, by precedence", () => {
-  const face = { id: "x", provider: "pubky", subject: PUBKY_KEY, providerName: "Pubky", name: "Alice Liddell" };
+  const face = { id: "x", provider: "pubky", subject: PUBKY_KEY, name: "Alice Liddell" };
   it("is the nickname given here, then the chosen identity's name, then their own, then their key", () => {
     expect(shownContactName({ nickname: "Mom", face, nick: "Ghost", fallback: "Contact · abc" })).toEqual({ name: "Mom", from: "nickname" });
     expect(shownContactName({ face, nick: "Ghost", fallback: "Contact · abc" })).toEqual({ name: "Alice Liddell", from: "identity" });
@@ -193,6 +194,19 @@ describe("the marks' card in the chat list", () => {
     expect(screen.queryByTestId("contact-marks-tip")).not.toBeInTheDocument();
     expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
     void user;
+  });
+
+  // The hosts as the language lists them, each its own <bdi>: an English ", " between them read wrong in Japanese and Arabic.
+  it.each([
+    ["ja", "nexus.pubky.app、homeserver.example から読み込み"],
+    ["ar", "حُمّل من nexus.pubky.app وhomeserver.example"],
+  ] as const)("in %s, names the hosts the profile was loaded from the way the language lists them", async (language, text) => {
+    saveSession(chat());
+    list([pubky({ publicProfile: profile({ hosts: ["nexus.pubky.app", "homeserver.example"] }) })], language);
+    fireEvent.pointerOver(within(within(row()).getByTestId("contact-marks")).getByTestId("contact-mark"), { pointerType: "mouse" });
+    const tip = await screen.findByTestId("contact-marks-tip");
+    expect(within(tip).getByTestId("identity-tip-source").textContent).toBe(text);
+    expect([...within(tip).getByTestId("identity-tip-source").querySelectorAll("bdi")].map((b) => b.textContent)).toEqual(["nexus.pubky.app", "homeserver.example"]);
   });
 
   it("opens on keyboard focus with every mark, and Escape closes it", async () => {

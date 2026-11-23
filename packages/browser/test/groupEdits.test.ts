@@ -121,6 +121,10 @@ describe("GroupEdits on its own", () => {
     expect(await edits.edit("g1", mine(0).id, "   ")).toMatchObject({ refused: true, error: expect.stringMatching(/cannot be empty/) });
     expect(await edits.edit("g1", mine(0).id, "x".repeat(16 * 1024 + 1))).toMatchObject({ refused: true, error: expect.stringMatching(/exceeds/) });
     expect(await edits.edit("g1", mine(2).id, "one more")).toMatchObject({ refused: true, error: expect.stringMatching(/100 times/) });
+    // Whether the message is there at all, with each refusal once it was looked for: the CLI tells "not found" by it.
+    expect(await edits.edit("g1", bobs(0).id, "mine now")).toMatchObject({ missing: false });
+    expect(await edits.edit("g1", mine(0).id, "   ")).toMatchObject({ missing: false });
+    expect(await edits.edit("g1", "nobody:9:9", "x")).toEqual({ error: "Only your own text messages can be edited", refused: true, missing: true });
   });
 
   it("refuses to edit or delete for everyone a text of mine written under the member key I had before I was removed and invited back", async () => {
@@ -131,8 +135,9 @@ describe("GroupEdits on its own", () => {
     const old = (n: number, text = `old ${n}`): StoredMessage => ({ linkId: chat, id: `${before}:1:${n}`, text, sender: "me", member: before, timestamp: n + 1, via: "datalink" });
     const removed: string[] = [];
     const { edits, sent, messages, tick } = setup([old(0, "see you at 8"), old(1, "bring snacks"), mine(2)], [me, bob, carol], removed);
-    expect(await edits.edit("g1", old(0).id, "see you at 9")).toMatchObject({ refused: true, error: "Only your own text messages can be edited" });
-    expect(await edits.removeMine("g1", old(1).id)).toMatchObject({ refused: true, error: "Only your own messages can be deleted for everyone" });
+    // Said as mine from before, not as someone else's ("Only your own ...", and the CLI offered a reply to it).
+    expect(await edits.edit("g1", old(0).id, "see you at 9")).toEqual({ refused: true, missing: false, error: "This message is from before you were removed and invited back, and can't be edited now" });
+    expect(await edits.removeMine("g1", old(1).id)).toEqual({ refused: true, error: "This message is from before you were removed and invited back, and can't be deleted for everyone now" });
     tick(60_000); await vi.advanceTimersByTimeAsync(60_000);
     expect(messages.map(m => m.text)).toEqual(["see you at 8", "bring snacks", "text 2"]);
     expect(messages[0].edit).toBeUndefined();
@@ -304,6 +309,27 @@ describe("GroupEdits on its own", () => {
     // Nothing waits any more: the next is taken at once.
     expect(await edits.receive("g1", bob, { id: bobs(1).id, e: 2, ts: 43, m: "at once" })).toBe("applied");
     edits.stop();
+  });
+
+  it("a copy of an edit taken already (another hub's) takes no room in the member's window: a burst of EDIT_RECEIVE_LIMIT shows at once", async () => {
+    vi.useFakeTimers();
+    for (const copies of [2, 3]) {
+      const burst = Array.from({ length: EDIT_RECEIVE_LIMIT }, (_, n) => bobs(n));
+      const { edits, messages, tick } = setup(burst);
+      const results: string[] = [];
+      for (let n = 0; n < EDIT_RECEIVE_LIMIT; n++) {
+        for (let copy = 0; copy < copies; copy++) results.push(await edits.receive("g1", bob, { id: bobs(n).id, e: 1, ts: n, m: `done ${n}` }));
+      }
+      // Each one at once, its copies stale; but the last one's, which come with the window full of real edits and wait.
+      expect(results.filter(r => r === "applied")).toHaveLength(EDIT_RECEIVE_LIMIT);
+      expect(results.slice(0, -copies).filter(r => r !== "applied").every(r => r === "stale")).toBe(true);
+      expect(messages.map(m => m.text)).toEqual(burst.map((_, n) => `done ${n}`));
+      expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 2, ts: 99, m: "one more" })).toBe("waiting");
+      // Taken with the next window, the waiting copy found stale gives its room back to the one behind it.
+      tick(10_000); await vi.advanceTimersByTimeAsync(10_000);
+      expect(messages[0].text).toBe("one more");
+      edits.stop();
+    }
   });
 
   it("holds GROUP_EDITS_HELD edits a group at most, the oldest going first, and none of a member who left meanwhile", async () => {

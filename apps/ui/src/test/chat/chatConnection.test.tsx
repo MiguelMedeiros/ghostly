@@ -1,9 +1,11 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
-import { ChatConnection, MOVE_QUIET_MS } from "../../components/ChatConnection";
+import { ChatConnection } from "../../components/ChatConnection";
+import { SAID_QUIET_MS } from "../../hooks/useSaidSettled";
 import { connectionSummary, liveAttemptText, transportLineDetails, transportLineText, transportOptions, type TransportEntry, transportEventText, transportWaitText, type TransportEvent } from "../../lib/transportEvents";
 import { linkView, type StatePatch } from "../fakeEngine";
+import { plainSpaces } from "../timeSpaces";
 import { renderApp } from "../render";
 import { clockOffAmount } from "../../lib/clockOff";
 import { NetworkSettings } from "../../components/NetworkSettings";
@@ -804,8 +806,8 @@ describe("ChatConnection: how contacts are found", () => {
     const block = screen.getByTestId("connection-discovery");
     expect(screen.getByTestId("connection-details")).toContainElement(block);
     expect(screen.getByTestId("connection-discovery-path")).toHaveTextContent("DHT direct");
-    const time = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    expect(within(block).getAllByTestId("connection-relay").map(r => [r.dataset.state, r.textContent, r.title])).toEqual([
+    const time = plainSpaces(new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+    expect(within(block).getAllByTestId("connection-relay").map(r => [r.dataset.state, plainSpaces(r.textContent!), r.title])).toEqual([
       ["ok", "pkarr.pubky.org ok", ""],
       ["throttled", `pkarr.pubky.app throttled until ${time}`, "rate limited (429)"],
       ["failing", `relay.pkarr.org failing until ${time}`, "no answer"],
@@ -1041,6 +1043,45 @@ describe("the connection panel, while a choice or button works", () => {
     await finish();
     expect(screen.getByTestId("pair-verify-error")).toBeInTheDocument();
     expect(confirm).toHaveFocus();
+  });
+
+  it("Verify hands the focus to The codes match, which took its place", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    act(() => engine.update({ links: [linkView({ availableTransports: all, peerParticipationKey: "saved", pairing: { status: "ready", transport: "webrtc/1", code: "4821 0937", peerKey: "peer" } as Pairing })] }));
+    await user.click(screen.getByTestId("connection-options"));
+    screen.getByTestId("pair-verify").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("pair-verify-confirm")).toHaveFocus();
+  });
+
+  it("The codes match, accepted, hands the focus to the line that now says the contact is verified", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    const view = (peerVerified: boolean) => linkView({ availableTransports: all, peerParticipationKey: "saved", peerVerified, pairing: { status: "ready", transport: "webrtc/1", code: "4821 0937", peerKey: "peer" } as Pairing });
+    act(() => engine.update({ links: [view(false)] }));
+    engine.on("confirmPair", () => { engine.update({ links: [view(true)] }); });
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByTestId("pair-verify"));
+    screen.getByTestId("pair-verify-confirm").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("pair-verify-confirm")).toBeNull());
+    expect(screen.getByTestId("pair-verified")).toHaveFocus();
+    expect(screen.getByTestId("connection-menu")).toHaveProperty("open", true);
+  });
+
+  it("The codes match, accepted after the focus moved on in the panel, leaves it there", async () => {
+    const { user, engine } = renderApp(<ChatConnection peerKey="peer" />);
+    const view = (peerVerified: boolean) => linkView({ availableTransports: all, peerParticipationKey: "saved", peerVerified, pairing: { status: "ready", transport: "webrtc/1", code: "4821 0937", peerKey: "peer" } as Pairing });
+    act(() => engine.update({ links: [view(false)] }));
+    const finish = held(engine, "confirmPair");
+    await user.click(screen.getByTestId("connection-options"));
+    await user.click(screen.getByTestId("pair-verify"));
+    await user.click(screen.getByTestId("pair-verify-confirm"));
+    const elsewhere = screen.getByTestId("connection-options");
+    elsewhere.focus();
+    act(() => engine.update({ links: [view(true)] }));
+    await finish();
+    expect(screen.queryByTestId("pair-verify-confirm")).toBeNull();
+    expect(elsewhere).toHaveFocus();
   });
 
   it("leaves the focus where the person moved it meanwhile", async () => {
@@ -1307,7 +1348,7 @@ describe("a chat back on Automatic over Iroh's relay, on its way to WebRTC", () 
     act(() => engine.update({ links: [onIroh] }));
     await act(async () => { vi.advanceTimersByTime(250); await flush(); });
     act(() => engine.update({ links: [onWebrtc] }));
-    await act(async () => { vi.advanceTimersByTime(MOVE_QUIET_MS); await flush(); });
+    await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
     ear.stop();
     expect(ear.said).toEqual(["Connected · WebRTC"]);
   });
@@ -1318,27 +1359,32 @@ describe("a chat back on Automatic over Iroh's relay, on its way to WebRTC", () 
     act(() => engine.update({ links: [onDht] }));
     const ear = listen();
     act(() => engine.update({ links: [onIroh] }));
-    await act(async () => { vi.advanceTimersByTime(MOVE_QUIET_MS); await flush(); });
+    await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
     ear.stop();
     expect(ear.said).toEqual(["Connected · Iroh (relayed)"]);
   });
 
-  it("says it at once where no move is due: Iroh chosen, or no direct transport both apps run", () => {
-    for (const link of [linkView({ ...onIroh, transportAutomatic: false, preferredTransport: "iroh/1" }), linkView({ ...onIroh, availableTransports: ["iroh/1"] })]) {
+  // No move due (Iroh chosen, no direct transport both apps run, a network that blocks direct connections): the relay
+  // is where it lands, said once it held, as any change is (hooks/useSaidSettled).
+  it("says it once it held where no move is due: Iroh chosen, no direct transport both apps run, direct connections blocked", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: ["https://pkarr.pubky.org"], directBlocked: true as const };
+    const cases: [LinkView, StatePatch][] = [
+      [linkView({ ...onIroh, transportAutomatic: false, preferredTransport: "iroh/1" }), {}],
+      [linkView({ ...onIroh, availableTransports: ["iroh/1"] }), {}],
+      [onIroh, { transport }],
+    ];
+    for (const [link, state] of cases) {
       const { engine, unmount } = renderApp(<ChatConnection peerKey="peer" />);
-      act(() => engine.update({ links: [onDht] }));
-      act(() => engine.update({ links: [link] }));
-      expect(document.querySelector(".sr-only[aria-live=polite]")).toHaveTextContent("Connected · Iroh (relayed)");
+      act(() => engine.update({ ...state, links: [onDht] }));
+      await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
+      const ear = listen();
+      act(() => engine.update({ ...state, links: [link] }));
+      await act(async () => { vi.advanceTimersByTime(SAID_QUIET_MS); await flush(); });
+      ear.stop();
+      expect(ear.said).toEqual(["Connected · Iroh (relayed)"]);
       unmount();
     }
-  });
-
-  it("says it at once on a network that blocks direct connections: no move to WebRTC comes there", () => {
-    const { engine } = renderApp(<ChatConnection peerKey="peer" />);
-    const transport = { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: ["https://pkarr.pubky.org"], directBlocked: true as const };
-    act(() => engine.update({ transport, links: [onDht] }));
-    act(() => engine.update({ transport, links: [onIroh] }));
-    expect(document.querySelector(".sr-only[aria-live=polite]")).toHaveTextContent("Connected · Iroh (relayed)");
   });
 });
 
@@ -1388,6 +1434,17 @@ describe("a relayed transport", () => {
     expect(within(panel).getByTestId("connection-option-hyperdht")).toHaveTextContent("In use · relayed · 180 ms");
     expect(within(panel).getByTestId("connection-relayed")).toHaveTextContent("Relayed via relay.example");
     expect(within(panel).getByTestId("connection-summary")).toHaveTextContent("never what they say");
+  });
+
+  it.each([
+    ["ja", "relay.example、relay.two.example のリレー経由"],
+    ["ar", "عبر المرحّل relay.example وrelay.two.example"],
+  ] as const)("names its relays on the panel's Path as the language lists them, each host its own <bdi> (%s)", async (language, said) => {
+    const view = renderApp(<ChatConnection peerKey="peer" />, { language });
+    act(() => view.engine.update({ links: [linkView({ ...web, pairing: onHyperdht, dataLink: "open", transportRelayed: { relays: ["relay.example", "relay.two.example"] } })] }));
+    await view.user.click(screen.getByTestId("connection-options"));
+    expect(screen.getByTestId("connection-relayed").textContent).toBe(said);
+    expect([...screen.getByTestId("connection-relayed").querySelectorAll("bdi")].map((b) => b.textContent)).toEqual(["relay.example", "relay.two.example"]);
   });
 
   it("when not in use, says it goes through a relay", async () => {
@@ -1549,5 +1606,57 @@ describe("the connection Details of a contact with no name", () => {
   it("keeps the contact's name when there is one", () => {
     panel({ liveDialer: "contact", peerNick: "Bea" });
     expect(lines("connection-not-live").slice(1)).toEqual(["Bea's app connects to this one: this app answers.", "No attempt of Bea's has reached this app yet."]);
+  });
+});
+
+// On a phone the panel's own buttons kept the desktop's 36 px (Details 53 × 36, Verify 40-44 × 36, Connection history
+// 127 × 36) and the keys 40 px, while its transport rows are 44 px. happy-dom lays nothing out, so these pin the phone
+// floors, in px as phoneTargetsPx wants (#8056); e2e/web/phone-touch-targets.spec.ts measures them in Chromium.
+describe("ChatConnection on a phone: every button of the panel is a 44 px target", () => {
+  const TALL = "max-md:min-h-[44px]", WIDE = "max-md:min-w-[44px]";
+
+  it("Reconnect", () => {
+    banner({ dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" });
+    expect(screen.getByTestId("connection-reconnect")).toHaveClass(TALL);
+  });
+
+  it("Details and Connection history (and its Show all) are 44 px rows, and Details as wide in two characters (ja, zh)", async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ at: Date.now() - (25 - i) * 1_000, kind: i % 2 ? "down" as const : "live" as const, transport: "webrtc/1" as const }));
+    const { user } = banner({ pairing: ready(), transportHistory: many });
+    // A <summary> is a block: the 12 px above and below keep its words in the middle of the 44.
+    expect(screen.getByTestId("connection-details-summary")).toHaveClass(TALL, WIDE, "max-md:py-[12px]");
+    const history = screen.getByTestId("connection-history");
+    expect(history.querySelector("summary")).toHaveClass(TALL, "max-md:py-[12px]");
+    await user.click(within(history).getByText("Connection history (25)"));
+    expect(screen.getByTestId("connection-history-more")).toHaveClass(TALL);
+  });
+
+  it("Details keeps 4 px from Reconnect above it and from a key or Verify first under it", () => {
+    // Touching 44 px targets at a fractional y: the browser gave Reconnect their shared pixel row, and Details measured
+    // 56 × 43 in Arabic (e2e/web/phone-touch-targets.spec.ts). A margin may grow with the text size: rem is fine.
+    banner({ dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" });
+    expect(screen.getByTestId("connection-reconnect")).toBeInTheDocument();
+    expect(screen.getByTestId("connection-details-summary")).toHaveClass("max-md:my-1");
+  });
+
+  it("Verify, 40 px wide in Arabic and 2 characters in ja/zh, then The codes match", async () => {
+    const { user } = banner({ peerParticipationKey: "saved", pairing: ready({ code: "4821 0937", peerKey: "peer" }) });
+    expect(screen.getByTestId("pair-verify")).toHaveClass(TALL, WIDE);
+    await user.click(screen.getByTestId("pair-verify"));
+    expect(screen.getByTestId("pair-verify-confirm")).toHaveClass(TALL);
+  });
+
+  it("Use Automatic, while the chat waits for a transport the contact's app lacks", () => {
+    banner({ pairing: ready({ transport: "iroh/1" }), preferredTransport: "hyperdht/1", transportAutomatic: false,
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "contact-lacks", live: "iroh/1", failures: 0 } });
+    expect(screen.getByTestId("connection-waiting-automatic")).toHaveClass(TALL);
+  });
+
+  it("both keys, copied by a tap: 44 px tall, not the 40 px of their two lines, nor 24", () => {
+    banner({ pairing: ready() }, {}, { myKey: "mine" });
+    for (const id of ["connection-key-you", "connection-key-contact"]) {
+      expect(screen.getByTestId(id)).toHaveClass(TALL, WIDE);
+      expect(screen.getByTestId(id)).not.toHaveClass("max-md:min-h-6");
+    }
   });
 });

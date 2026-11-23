@@ -4,9 +4,10 @@ import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, parseLocalTarget, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, nameKey, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, guardViewerAnswer, type PageGuard } from "@ghostly/core";
 
 /**
  * Shared services (WISP 700/701, WISP 1100 phase 3b): a web app on this machine a contact may open over the chat's live
@@ -124,11 +125,47 @@ export const OPENED_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe
 export const OPENED_SERVICE_CSP_RELAY_ONLY = "default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'";
 
 /**
+ * Added to the policy of every answer, as the extension's viewer adds it (`sandboxed()`): the page keeps its scripts,
+ * its origin (cookies, storage) and its forms, but starts no download, opens no window or tab (a `target="_blank"`
+ * link, `window.open`) and shows none of the browser's own dialogs (`alert`, `confirm`, `prompt`), as on the web and in
+ * Desktop. A tab here has no word of the person's tap, so a link the app opens in a new window is dropped, as the
+ * sandbox drops it.
+ */
+export const OPENED_SERVICE_SANDBOX = "sandbox allow-scripts allow-same-origin allow-forms";
+
+/** The types a tab shows as a page; a browser saves any other as a file (the extension's `SHOWN_TYPES`). */
+const SHOWN_TYPES = new Set([
+  "text/html", "text/plain", "text/css", "text/javascript", "text/xml", "application/xml", "application/xhtml+xml", "application/json", "application/javascript",
+  "image/svg+xml", "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp", "image/x-icon", "image/vnd.microsoft.icon",
+  "video/mp4", "video/webm", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4", "audio/flac",
+]);
+
+/** The `Sec-Fetch-Dest` of a page's own load: the tab's, or a frame's. */
+const PAGE_LOADS = new Set(["document", "iframe", "frame"]);
+
+/** A page's load answered with a file to save (`shownAsPage` false): refused, as the extension's viewer refuses it. */
+export const SERVICE_SAVES_A_FILE = "The app answered a page with a file to save";
+
+/**
+ * Whether a browser would show this answer to a page's load, not save it as a file (the extension's `shownAsPage`).
+ * The sandbox keeps the page from starting a download, but a load that no page of the app started (the link
+ * `service open` gives, a reload, back) has none, so it is refused instead, as Desktop and the web view save no file a
+ * contact's app sends. Fail closed: no type, an unknown one, several, or a disposition other than inline.
+ */
+function shownAsPage(status: number, headers: [string, string][]): boolean {
+  const named = (name: string) => headers.filter(([key]) => key.toLowerCase() === name).map(([, value]) => value);
+  if (status === 204 || status === 205 || (status >= 300 && status < 400 && named("location").length)) return true;
+  if (named("content-disposition").some((value) => value.split(";")[0].trim().toLowerCase() !== "inline")) return false;
+  const types = named("content-type").flatMap((value) => value.split(","));
+  return types.length === 1 && SHOWN_TYPES.has(types[0].split(";")[0].trim().toLowerCase());
+}
+
+/**
  * The contact's headers that are not passed on: each makes the browser send something to a place it names, outside
  * `connect-src` (violation and network-error reports, and the endpoints they go to; `Link` preloads, prefetches and
- * early connections). Only the contact's server is reached.
+ * early connections; `Speculation-Rules` prefetches and prerenders). Only the contact's server is reached.
  */
-export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"];
+export const OPENED_SERVICE_DROPPED_HEADERS = ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link", "speculation-rules"];
 
 /**
  * A contact's headers that would set the page's browser features (camera, microphone, location, a device): the
@@ -147,6 +184,13 @@ export function withoutReports(value: string): string {
     .join(", ");
 }
 
+/**
+ * What each page of the app runs first, as in the web runner (`guardViewerAnswer`): the clipboard guard. The viewer's
+ * `clipboard-write=()` keeps the page off `navigator.clipboard`, but not off `execCommand("copy")`, which a browser
+ * allows for a while after any tap, from a timer too.
+ */
+const OPENED_SERVICE_GUARDS: PageGuard[] = [{ script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH }];
+
 /** `service open` while Hide my IP from contacts is on (as the browser extension refuses to open one). */
 export const SERVICE_OPEN_OFF_RELAY_ONLY = "A contact's app does not open here while Hide my IP from contacts is on: a browser tab cannot keep its page off WebRTC";
 
@@ -154,19 +198,27 @@ export const SERVICE_OPEN_OFF_RELAY_ONLY = "A contact's app does not open here w
 export const SERVICE_NEEDS_DAEMON = "An opened service lives in the daemon: start `ghostly daemon --detach` first";
 
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
-  response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
+  response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers, "content-security-policy": OWN_ANSWER_CSP, "x-content-type-options": "nosniff" });
   response.end(text);
 }
+
+/**
+ * The policy of this machine's own answers on the service's origin (its 404, 413, 502, 503, the link's redirect): they
+ * load and reach nothing. A page of the app may frame one, as it is on its own origin, and use its window: what it
+ * sends from there is bounded by this policy, so it must be no looser than `OPENED_SERVICE_CSP`.
+ */
+export const OWN_ANSWER_CSP = "default-src 'none'; form-action 'none'; base-uri 'none'";
 
 /**
  * A contact's app on a loopback port of this machine, under a host name of its own (`<random>.localhost`): its
  * cookies and storage are its own, apart from any other app on 127.0.0.1 or localhost, and a name that merely
  * resolves here (DNS rebinding) is not it. Only a browser given the link (which sets `OPEN_COOKIE`) is served; anyone
  * else on this machine who finds the port gets 404. The body streams through, bounded by `MAX_RESPONSE_BYTES`.
- * `relayOnly`: Hide my IP from contacts was on when it opened (`OPENED_SERVICE_CSP_RELAY_ONLY`).
+ * `relayOnly`: Hide my IP from contacts was on when it opened (`OPENED_SERVICE_CSP_RELAY_ONLY`). Either way with
+ * `OPENED_SERVICE_SANDBOX`.
  */
 export async function openServiceServer(send: ServiceSend, port = 0, { relayOnly = false }: { relayOnly?: boolean } = {}): Promise<OpenedService> {
-  const policy = relayOnly ? OPENED_SERVICE_CSP_RELAY_ONLY : OPENED_SERVICE_CSP;
+  const policy = `${relayOnly ? OPENED_SERVICE_CSP_RELAY_ONLY : OPENED_SERVICE_CSP}; ${OPENED_SERVICE_SANDBOX}`;
   const name = `${randomBytes(16).toString("hex")}.localhost`;
   const token = randomBytes(32).toString("hex");
   const cookies = new Set<string>();
@@ -214,7 +266,9 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
         const own = ownCookies(value, cookies);
         return own ? [[name, own]] : [];
       });
-    const answer = await send({ method: request.method ?? "GET", path: request.url ?? "/", headers, body: chunks.length ? new Uint8Array(Buffer.concat(chunks)) : null, maxResponseBytes: MAX_RESPONSE_BYTES, signal: stop.signal });
+    const sent = await send({ method: request.method ?? "GET", path: request.url ?? "/", headers, body: chunks.length ? new Uint8Array(Buffer.concat(chunks)) : null, maxResponseBytes: MAX_RESPONSE_BYTES, signal: stop.signal });
+    const destination = request.headers["sec-fetch-dest"];
+    const answer = { status: sent.status, ...(await guardViewerAnswer(sent.headers, sent.body, typeof destination === "string" ? destination : null, OPENED_SERVICE_GUARDS)) };
     const out: Record<string, string | string[]> = {};
     for (const [name, value] of answer.headers) {
       const lower = name.toLowerCase();
@@ -231,6 +285,13 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
     }
     out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), policy];
     out["permissions-policy"] = VIEWER_PERMISSIONS_POLICY;
+    // What the browser loads (`Sec-Fetch-Dest`, which no page can set): a page's own load is refused when the browser
+    // would save its answer as a file.
+    const dest = request.headers["sec-fetch-dest"];
+    if (typeof dest === "string" && PAGE_LOADS.has(dest.toLowerCase()) && !shownAsPage(answer.status, answer.headers)) {
+      stop.abort();
+      return plain(response, 502, SERVICE_SAVES_A_FILE);
+    }
     response.writeHead(answer.status, out);
     // Streamed, not gathered: past the cap (or when the contact drops it) the body stops and the connection closes.
     await pipeline(Readable.from(answer.body, { objectMode: false }), response);
@@ -244,12 +305,31 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
 
 /**
  * The service a command names, by its id: one of this profile's. The engine changes nothing for an id it does not
- * know and says nothing, so a mistyped id read as done ("shared": true, with a contact).
+ * know and says nothing, so a mistyped id read as done ("shared": true, with a contact). Or by its name, when no other
+ * service has that name (`service add "My App"` makes `my-app`): before, the name was refused as "No service" while
+ * `service list` showed it. An id comes first; a name several services share is refused with their ids.
  */
 function serviceOf(ctx: ApiContext, params: Params): string {
-  const serviceId = str(params, "service", true);
-  if (!state(ctx).services.some((s) => s.id === serviceId)) throw new CliError("not_found", `No service ${JSON.stringify(serviceId)} (ghostly service list)`);
-  return serviceId;
+  const given = str(params, "service", true);
+  const { services } = state(ctx);
+  if (services.some((s) => s.id === given)) return given;
+  const named = servicesNamed(services, given);
+  if (named.length === 1) return named[0];
+  throw noService(given, named);
+}
+
+/** The ids of the services `given` names by their name, compared as a chat's label is (`nameKey`: one case, one form). */
+function servicesNamed(services: readonly { id: string; name: string }[], given: string): string[] {
+  const key = nameKey(given);
+  return key ? services.filter((s) => nameKey(s.name) === key).map((s) => s.id) : [];
+}
+
+/** No service of that id or name, or a name several services share: which ids it names. Same code and exit either way. */
+function noService(given: string, named: readonly string[]): CliError {
+  const quoted = JSON.stringify(given);
+  if (!named.length) return new CliError("not_found", `No service ${quoted} (ghostly service list)`);
+  const which = `${named.length} services, ${named.slice(0, -1).join(", ")} and ${named.at(-1)}: use one of their ids`;
+  return new CliError("not_found", `No service with id ${quoted}. ${quoted} is the name of ${which} (ghostly service list)`);
 }
 
 /**
@@ -285,6 +365,31 @@ function serviceNameOf(params: Params): string {
   return name;
 }
 
+/** `service add`'s name and target, checked with no profile open (api.ts `refuseBeforeStart`). */
+export function serviceShape(params: Params): { name: string; target: string } {
+  const name = serviceNameOf(params);
+  const target = str(params, "target", true);
+  // The engine's own check of the target (core http.ts `parseLocalTarget`), the only one: a query, a fragment, a user
+  // and password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the
+  // engine, they were plain errors, `engine` (exit 1): "the engine failed" (agents#894). A check of its own here
+  // read `localhost:8080` as the scheme `localhost:`, refused `127.0.0.1:8080` as no URL, and let `127.0.0.2` through
+  // for the engine to refuse in other words.
+  try { parseLocalTarget(target); } catch (error) {
+    const said = error instanceof Error ? error.message : String(error);
+    // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
+    // parts refused here can hold a secret (a token). One that is no URL at all (a mistyped port) is not repeated: it
+    // has no parts to tell apart, and a token or password in it would be said whole.
+    const text = target.trim();
+    let shown = "";
+    try {
+      const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
+      shown = `: ${url.protocol}//${url.host}${url.pathname}`;
+    } catch { /* Not a URL: not repeated. */ }
+    throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}${shown}`);
+  }
+  return { name, target };
+}
+
 function portError(error: unknown, port: number): unknown {
   const { code } = (error ?? {}) as { code?: unknown };
   if (port && code === "EADDRINUSE") return new CliError("busy", `Port ${port} is in use on this machine: choose another, or leave out --port`);
@@ -297,25 +402,7 @@ export const SERVICE_METHODS: Record<string, Method> = {
     return { services: state(ctx).services.map((s) => ({ id: s.id, name: s.name, target: s.target, enabled: s.enabled, sharedWith: s.sharedWith ?? [], requests: s.requests })) };
   },
   async "service.add"(ctx, params) {
-    const name = serviceNameOf(params);
-    const target = str(params, "target", true);
-    // The engine's own check of the target (core http.ts `parseLocalTarget`), the only one: a query, a fragment, a user
-    // and password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the
-    // engine, they were plain errors, `engine` (exit 1): "the engine failed" (agents#894). A check of its own here
-    // read `localhost:8080` as the scheme `localhost:`, refused `127.0.0.1:8080` as no URL, and let `127.0.0.2` through
-    // for the engine to refuse in other words.
-    try { parseLocalTarget(target); } catch (error) {
-      const said = error instanceof Error ? error.message : String(error);
-      // Read as the engine reads it (no scheme is http) and named without its user, password, query and fragment: the
-      // parts refused here can hold a secret (a token). One that is no URL at all is named as given.
-      const text = target.trim();
-      let shown = text;
-      try {
-        const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `http://${text}`);
-        shown = `${url.protocol}//${url.host}${url.pathname}`;
-      } catch { /* Not a URL: named as given. */ }
-      throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
-    }
+    const { name, target } = serviceShape(params);
     // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
     const { serviceId } = node(ctx).addService({ name, target });
     return { service: serviceId, serviceId };

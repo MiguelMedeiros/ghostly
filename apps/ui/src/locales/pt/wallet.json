@@ -105,7 +105,7 @@
     "changeServer": "Trocar servidor",
     "confirmedAfter": "Confirmado após um bloco.",
     "connectingDefault": "Conectando à fonte Bitcoin…",
-    "connectingTo": "Conectando a {{label}}…",
+    "connectingTo": "Conectando com {{label}}…",
     "empty": "Nenhuma fonte Bitcoin configurada",
     "emptyNote": "Bitcoin on-chain passa por uma carteira ou um nó que você escolhe abaixo. Nada vem configurado por padrão.",
     "getAddress": "Obter um endereço",
@@ -114,7 +114,7 @@
     "maxFee": "O máximo que você aceita de taxa",
     "maxFeeInput": "Taxa máxima em {{unit}}",
     "newAddress": "Novo endereço",
-    "notConnected": "{{label}} não está conectado",
+    "notConnected": "Sem conexão com {{label}}",
     "notConnectedDefault": "A fonte Bitcoin não está conectada",
     "nothingYet": "Nada ainda",
     "refresh": "Atualizar",
@@ -127,7 +127,9 @@
       "confirmed": "{{sign}}{{amount}} · {{count}} conf.",
       "unconfirmed": "{{sign}}{{amount}} · não confirmado"
     },
-    "unconfirmed": "{{amount}} {{unit}} não confirmados"
+    "unconfirmed": "{{amount}} {{unit}} não confirmados",
+    "unconfirmed_one": "{{amount}} {{unit}} não confirmado",
+    "unconfirmed_other": "{{amount}} {{unit}} não confirmados"
   },
   "cards": {
     "amount": "{{amount}} {{unit}}",
@@ -198,7 +200,10 @@
       "noFee": "sem taxa",
       "none": "Nada ainda",
       "note": {
+        "notSent": "Um pagamento não foi enviado",
+        "paidRequest": "Pedido de um contato pago",
         "paymentFailed": "Um pagamento Lightning falhou",
+        "paymentFailedFor": "O pagamento falhou: {{note}}",
         "requestPaid": "Pedido pago via Lightning",
         "testCoins": "Moedas de teste do mint de teste"
       }
@@ -213,12 +218,20 @@
     "paid": "Pago.",
     "pastePlaceholder": "Cole uma fatura Lightning, um endereço Lightning ou um token ecash",
     "payAmount": "Pagar {{amount}} {{unit}}",
+    "payFailed": "O pagamento falhou: o destinatário não foi pago.",
+    "payFailedBack": "O que estava reservado para ele voltou ao seu saldo.",
+    "payFailedFee": "O que estava reservado para ele voltou ao seu saldo, menos {{amount}} {{unit}} que o mint ficou como taxa (no histórico).",
     "payLine": "Pagar {{amount}}{{fees}}",
     "pendingMint": "O pagamento ainda está pendente no mint.",
+    "pendingMintNext": "Ele se resolve sozinho; nada é pago de novo. Até o mint responder, o valor aparece como reservado abaixo do saldo.",
     "primary": "Principal",
     "received": "⚡ {{amount}} {{unit}} recebidos",
+    "received_one": "⚡ {{amount}} {{unit}} recebido",
+    "received_other": "⚡ {{amount}} {{unit}} recebidos",
     "redeem": "Resgatar token ecash",
     "redeemed": "{{amount}} {{unit}} resgatados.",
+    "redeemed_one": "{{amount}} {{unit}} resgatado.",
+    "redeemed_other": "{{amount}} {{unit}} resgatados.",
     "remove": "Remover",
     "removeLastMint": "Este é o último mint da carteira: removê-lo remove a carteira {{label}} e o cartão Lightning dela.",
     "removeMint": "Remover {{name}}",
@@ -228,6 +241,8 @@
     "removeMintQuestion": "Remover {{name}}?",
     "setAside": "{{amount}} {{unit}} reservados",
     "setAsideInfo": "Reservados para um pagamento que o mint ainda não confirmou. Saem com o pagamento ou voltam ao seu saldo assim que o mint responder.",
+    "setAside_one": "{{amount}} {{unit}} reservado",
+    "setAside_other": "{{amount}} {{unit}} reservados",
     "settings": "Ajustes",
     "testBalance": "{{amount}} sats de teste (sem valor)",
     "testBalance_one": "{{amount}} sat de teste (sem valor)",
@@ -249,6 +264,8 @@
     },
     "unconfirmed": "{{amount}} {{unit}} não confirmados",
     "unconfirmedInfo": "O mint recebeu estes sats em uma troca e não consegue dizer o que deu por eles. A carteira continua perguntando. Eles podem não voltar.",
+    "unconfirmed_one": "{{amount}} {{unit}} não confirmado",
+    "unconfirmed_other": "{{amount}} {{unit}} não confirmados",
     "unreachable": "Fora do ar no momento",
     "working": "Processando…"
   },
@@ -409,6 +426,8 @@
       "unknown": "resultado desconhecido"
     },
     "paidTo": "{{amount}} {{unit}} pagos a {{to}} ✓",
+    "paidTo_one": "{{amount}} {{unit}} pago a {{to}} ✓",
+    "paidTo_other": "{{amount}} {{unit}} pagos a {{to}} ✓",
     "pastePlaceholder": "Cole uma fatura Lightning ou um endereço Lightning",
     "pay": "Pagar",
     "payTo": "Pagar {{amount}} a {{to}}{{fees}}",
@@ -699,7 +718,8 @@
               "bip84": "SegWit nativo (BIP84, bc1q…)"
             }
           }
-        }
+        },
+        "label": "Carteira BDK"
       },
       "bitcoind": {
         "description": "Uma carteira no seu próprio nó Bitcoin Core, pelo RPC dele. Seu nó guarda as chaves e assina. Precisa do app para desktop.",
@@ -726,7 +746,8 @@
         "description": "Uma carteira Lightning autocustodial na Spark, pelo SDK da Breez. A frase de recuperação fica selada neste dispositivo; você guarda os sats."
       },
       "cashu-mint": {
-        "description": "As faturas são pagas para o seu saldo Cashu, e a partir dele. Os mints guardam os sats."
+        "description": "As faturas são pagas para o seu saldo Cashu, e a partir dele. Os mints guardam os sats.",
+        "label": "Mints Cashu"
       },
       "core-lightning": {
         "description": "Seu próprio nó Core Lightning, pelo Commando com uma rune. Seu nó guarda os sats. O app web só o alcança por wss://.",
@@ -763,7 +784,8 @@
             "help": "A porta REST do LND (restlisten, 8080 por padrão). Num navegador, o nó deve permitir este app com restcors e ter um certificado em que o navegador confie; o app para desktop não precisa de nenhum dos dois.",
             "label": "Endereço REST"
           }
-        }
+        },
+        "label": "Nó LND"
       },
       "nwc": {
         "description": "Uma carteira que você conecta pela URI NWC dela (Alby Hub, o serviço NWC de um nó, uma carteira hospedada). Essa carteira guarda os sats e define o próprio limite de taxa: ser custodial ou não depende da carteira.",
@@ -775,7 +797,8 @@
         }
       },
       "webln": {
-        "description": "Uma carteira Lightning neste navegador (Alby e outras). Essa carteira guarda os sats e pergunta a você antes de pagar."
+        "description": "Uma carteira Lightning neste navegador (Alby e outras). Essa carteira guarda os sats e pergunta a você antes de pagar.",
+        "label": "Carteira do navegador (WebLN)"
       }
     },
     "reconfigured": "{{name}} agora usa esse servidor.",
@@ -892,7 +915,9 @@
     "uncounted": "{{count}} cartões fora do total",
     "uncounted_one": "{{count}} cartão fora do total",
     "unknown": "Não deu para ler agora, fora do total",
-    "waiting": "{{amount}} {{unit}} ainda não disponíveis"
+    "waiting": "{{amount}} {{unit}} ainda não disponíveis",
+    "waiting_one": "{{amount}} {{unit}} ainda não disponível",
+    "waiting_other": "{{amount}} {{unit}} ainda não disponíveis"
   },
   "ui": {
     "amountIn": "Valor em {{unit}}",

@@ -7,6 +7,7 @@ import { translatorFor } from "../../locales";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { NotSent } from "@ghostly/browser/engine/outbox";
+import { MESSAGE_PACED } from "@ghostly/core";
 import { Profiler } from "react";
 import type { ChatMessage } from "../../lib/types";
 import { keepSentOriginal, sentOriginal } from "../../lib/sentOriginals";
@@ -59,6 +60,31 @@ describe("Cancel sending a waiting message", () => {
     expect(screen.queryByText(TEXT)).toBeNull();
     expect(screen.queryByTestId("message-retry-error")).toBeNull();
     expect(loadSession("chat-1")?.deletedIds).toEqual(["me_w1"]);
+  });
+});
+
+describe("texts the contact's windows have no room for yet, on a live chat", () => {
+  const PEER = "peer".padEnd(52, "p");
+  const FIRST = "the first, held by the pace", SECOND = "the second, behind it";
+  afterEach(() => { localStorage.clear(); setStorageProfile(""); });
+
+  it("say they wait for room and for the text before them, not for the contact to be online", async () => {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", createdAt: 1_700_000_000_000,
+      messages: [
+        { id: "me_p1", ref: "p1", text: FIRST, sender: "me", timestamp: 1_700_000_000_500, via: "datalink", delivery: "waiting", deliveryError: MESSAGE_PACED },
+        { id: "me_p2", ref: "p2", text: SECOND, sender: "me", timestamp: 1_700_000_000_600, via: "datalink", delivery: "waiting", deliveryError: NotSent.BEHIND },
+      ] as never });
+    const { user, engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />, { language: "en" });
+    engine.update({ settings: { online: true }, links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, profile: "paired-chat/1", peerOnline: true } as never)] } as never);
+    await screen.findByText(FIRST);
+    const mark = (text: string) => within(screen.getByText(text).closest("[data-message-row]") as HTMLElement).getByTestId("message-delivery");
+    expect(mark(FIRST)).toHaveAccessibleName("Waiting for your contact to take more texts");
+    await user.hover(mark(FIRST));
+    expect(screen.getByTestId("message-delivery-tip")).toHaveTextContent("Your contact takes a limited number of texts at a time. Sends by itself once they can take more.");
+    await user.unhover(mark(FIRST));
+    expect(mark(SECOND)).toHaveAccessibleName("Waiting for the messages before it");
+    await user.hover(mark(SECOND));
+    expect(screen.getByTestId("message-delivery-tip")).toHaveTextContent("Sends by itself after the messages before it.");
   });
 });
 
@@ -219,6 +245,57 @@ describe("an engine refusal in a 1:1 chat's composer, in Portuguese", () => {
     expect(await screen.findByText(said)).toBeInTheDocument();
     expect(engine.callsTo("editMessage")).toHaveLength(1);
     expect(document.body.textContent).not.toContain(raw);
+  });
+});
+
+// covers: chat.paired.send
+describe("a text or an edit the DHT packet cannot carry, in a chat on DHT only", () => {
+  const PEER = "peer".padEnd(52, "p");
+  /** The engine's DHT_PACKET_BUDGET (packages/core dhtDelivery.ts): refused, not kept, in a chat that never goes live. */
+  const BUDGET = "Text and authentication exceed the DHT packet budget. Shorten the message.";
+  const MINE = { deliveryMode: "dht" };
+  const THEIRS = { textDelivery: "dht", dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } };
+
+  /**
+   * No peer-to-peer connection comes to a chat kept on DHT only until the side that chose it leaves it: the refusal's
+   * next step said "send it once you're connected peer to peer", which never happens, and "send it" of an edit too.
+   */
+  function openChat(link: Record<string, unknown>) {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", createdAt: 1_700_000_000_000,
+      messages: [{ id: "me_w1", ref: "w1", text: "first", sender: "me", timestamp: 1_700_000_000_500, delivery: "delivered" } as never] });
+    const utils = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />, { language: "en" });
+    utils.engine.on("sendMessage", async () => ({ error: BUDGET, refused: true }))
+      .on("editMessage", async () => ({ error: BUDGET, refused: true }))
+      .update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", ...link } as never)] });
+    return utils;
+  }
+
+  afterEach(() => { localStorage.clear(); setProfile(""); });
+
+  it.each([
+    ["this side chose it", MINE, "Too long for the DHT, which carries about 248 bytes. This chat is on DHT only: shorten it, or change it from the connection icon."],
+    ["the contact chose it", THEIRS, "Too long for the DHT, which carries about 248 bytes. Your contact's chat is on DHT only: shorten it, or wait until they allow live again."],
+  ])("a send refused when %s says what ends DHT only", async (_, link, said) => {
+    const { user } = openChat(link);
+    await user.click(await screen.findByPlaceholderText("Message…"));
+    await user.keyboard("olá{Enter}");
+    expect(await screen.findByText(said)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("peer to peer");
+  });
+
+  it.each([
+    ["this side chose it", MINE, "Too long for the DHT, which carries about 214 bytes. This chat is on DHT only: shorten it, or change it from the connection icon."],
+    ["the contact chose it", THEIRS, "Too long for the DHT, which carries about 214 bytes. Your contact's chat is on DHT only: shorten it, or wait until they allow live again."],
+  ])("an edit refused when %s says it too, with no \"send it\"", async (_, link, said) => {
+    const { user } = openChat(link);
+    const field = await screen.findByPlaceholderText("Message…");
+    await screen.findByText("first");
+    await user.click(field);
+    await user.keyboard("{ArrowUp}");
+    await waitFor(() => expect(field).toHaveValue("first"));
+    await user.keyboard(" again{Enter}");
+    expect(await screen.findByText(said)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("send it");
   });
 });
 

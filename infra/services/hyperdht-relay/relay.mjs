@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import http from 'node:http'
 import { createRequire } from 'node:module'
+import { BlockList, isIP, isIPv6 } from 'node:net'
 import { dirname, join } from 'node:path'
 import DHT from 'hyperdht'
 import { relay } from '@hyperswarm/dht-relay'
@@ -155,22 +156,58 @@ async function holdsKey(keyPair, options, onLeave) {
  * Every other way a dial connects follows a packet from the far peer. The relays a far server names go too: HyperDHT
  * keeps them for the next dial to that key and sends its handshake and lookup there first, wherever they are; without
  * them it keeps the DHT nodes it reached the far server through itself.
+ *
+ * The address "the DHT node saw it at" is only that node's word, though: a reply relayed by a DHT node carries the far
+ * server's address as that node writes it, and a node run by whoever owns the dialled key writes any it likes, loopback
+ * and LAN addresses of the relay's own host too. HyperDHT connects the stream there at once when the far server says it
+ * is open or names no relays to holepunch through. A relayed reply has neither here: an open far server is taken as one
+ * to wait for, which HyperDHT does when the relay's node names its own address (the far server connects to it, and the
+ * stream goes where that packet came from), and holepunches otherwise. One that names no relays is passed on only to a
+ * relay's node that names its address, with the DHT node that relayed it as its relay so HyperDHT waits there too: a
+ * relay's node that names none could only send the stream to the address it was told, so that reply is dropped. A
+ * reply that comes straight from the node that answered (unrelayed) has HyperDHT connect to that node, where it came from.
  */
 const { isBogon } = hyperdht('bogon')
+const { FIREWALL } = hyperdht('./lib/constants.js')
+const Router = hyperdht('./lib/router.js')
 const NoiseWrap = hyperdht('./lib/noise-wrap.js')
 const noiseWrap = (keyPair, remotePublicKey) => new NoiseWrap(keyPair, remotePublicKey)
-const reached = payload => payload && {
-  ...payload,
-  ...(payload.addresses4?.length && { addresses4: payload.addresses4.filter(address => isBogon(address.host)) }),
-  relayAddresses: null
+// A relayed reply's Noise message → the DHT node that relayed it, as HyperDHT's router hands it on.
+const relayedReplies = new WeakMap()
+const peerHandshake = Router.prototype.peerHandshake
+Router.prototype.peerHandshake = async function (target, request, to) {
+  const reply = await peerHandshake.call(this, target, request, to)
+  if (reply.relayed) relayedReplies.set(reply.noise, to)
+  return reply
+}
+const reached = (payload, relayedBy, open) => {
+  if (!payload) return payload
+  const own = {
+    ...payload,
+    ...(payload.addresses4?.length && { addresses4: payload.addresses4.filter(address => isBogon(address.host)) }),
+    relayAddresses: null
+  }
+  if (!relayedBy) return own
+  if (own.holepunch?.relays?.length) return { ...own, firewall: own.firewall === FIREWALL.OPEN ? FIREWALL.CONSISTENT : own.firewall }
+  if (!open) return null
+  return { ...own, firewall: FIREWALL.CONSISTENT, holepunch: { id: own.holepunch?.id ?? 0, relays: [{ relayAddress: relayedBy, peerAddress: relayedBy }] } }
 }
 const reachedOnly = create => (...args) => {
   const handshake = create(...args)
+  // Whether the relay's node named its own address in the dial's request (HyperDHT's `c.firewall`).
+  let open = false
+  const send = handshake.send.bind(handshake)
+  handshake.send = (payload, ...rest) => {
+    open = payload?.firewall === FIREWALL.OPEN
+    return send(payload, ...rest)
+  }
   const recv = handshake.recv.bind(handshake)
   // NoiseWrap answers at once, the client's handshake (HandshakeProxy) in a promise.
-  handshake.recv = (...message) => {
-    const payload = recv(...message)
-    return typeof payload?.then === 'function' ? payload.then(reached) : reached(payload)
+  handshake.recv = (noise, ...rest) => {
+    const relayedBy = relayedReplies.get(noise)
+    const payload = recv(noise, ...rest)
+    const pass = answer => reached(answer, relayedBy, open)
+    return typeof payload?.then === 'function' ? payload.then(pass) : pass(payload)
   }
   return handshake
 }
@@ -250,9 +287,10 @@ const listensOn = (dht, keyPair) => keyPair?.publicKey?.byteLength === 32 && hol
  * the key, and the asking client's other listens, go on. The asking client is told: dht-relay has no message for a
  * refusal and its client drops a `closed` for a server that has had no `listening`, so the server says `listening` at
  * no address (0.0.0.0:0, the browser's sign of a refusal), then `closed`. A listen by a client that does not sign for
- * the key (holdsKey) is refused the same way, before the node holds the key.
+ * the key (holdsKey) is refused the same way, before the node holds the key. Each listen and dial is also counted for
+ * the client's address (`fromAddress`, see startRelay), over all its clients, closed ones too.
  */
-function clientDht(dht, limits, drop, gone, log, wrote) {
+function clientDht(dht, limits, drop, gone, log, wrote, fromAddress) {
   let listening = 0
   let listens = []
   let dials = []
@@ -304,6 +342,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         const now = monotonicNow()
         listens = listens.filter(at => now - at < 60_000)
         if (listens.push(now) > limits.listensPerMinute) { drop('listen rate'); throw new Error('Listen rate reached') }
+        if (!fromAddress('listens', now)) { drop('address listen rate'); throw new Error('Listen rate reached') }
         if (++listening > limits.listens) { drop('listen limit'); throw new Error('Listen limit reached') }
         watchIdle()
         const server = target.createServer({ ...options, createHandshake: untracked(options?.createHandshake) }, onconnection)
@@ -331,6 +370,7 @@ function clientDht(dht, limits, drop, gone, log, wrote) {
         const now = monotonicNow()
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
+        if (!fromAddress('dials', now)) { drop('address dial limit'); throw new Error('Dial limit reached') }
         if (streams.size >= limits.streams) { drop('stream limit'); throw new Error('Stream limit reached') }
         watchIdle()
         return hold(target.connect(publicKey, { ...options, createHandshake: reachedOnly(untracked(options?.createHandshake) ?? noiseWrap) }))
@@ -536,6 +576,9 @@ function guardProtocol(protocol, drop) {
  * protomux hands every error a client's messages raise (one it cannot decode, a throw in dht-relay's handler for it) to
  * safety-catch, which throws a TypeError or a RangeError again where nothing catches it: one client's message would end
  * the process and every client with it. The client's own mux now drops that client only.
+ *
+ * A client opens one session, dht-relay's, and protomux keeps a slot for every session a client opens (a rejected one
+ * too) until it leaves: one that opens a second is dropped, the rest of what it sent read as nothing.
  */
 function guardMux(mux, drop) {
   const fail = error => {
@@ -546,6 +589,20 @@ function guardMux(mux, drop) {
   mux._safeDestroy = fail
   mux._safeDestroyBound = fail
   mux._warn = error => mux.stream.emit('warning', error)
+  const onopensession = mux._onopensession.bind(mux)
+  let opened = false
+  mux._onopensession = state => {
+    if (!opened) {
+      opened = true
+      return onopensession(state)
+    }
+    if (!mux._destroying) {
+      drop('sessions')
+      mux._destroying = true
+      mux.stream.destroy()
+    }
+    return null
+  }
 }
 
 // Not in the package's exports: loaded by path, the same module dht-relay itself uses (0.4.3 is pinned).
@@ -713,6 +770,14 @@ export function addressOf(request, options = {}) {
   return forwardedAddress(request, options) ?? request.socket.remoteAddress ?? 'unknown'
 }
 
+/**
+ * Whether an address is loopback, private or link-local: where a reverse proxy on the same host or network connects
+ * from. Clients refused at their address's limit from one of these, with no proxy setting, are likely one proxy's.
+ */
+const NEARBY = new BlockList()
+for (const [network, prefix, type] of [['127.0.0.0', 8, 'ipv4'], ['10.0.0.0', 8, 'ipv4'], ['172.16.0.0', 12, 'ipv4'], ['192.168.0.0', 16, 'ipv4'], ['169.254.0.0', 16, 'ipv4'], ['100.64.0.0', 10, 'ipv4'], ['::1', 128, 'ipv6'], ['fc00::', 7, 'ipv6'], ['fe80::', 10, 'ipv6']]) NEARBY.addSubnet(network, prefix, type)
+export const nearbyAddress = address => isIP(address ?? '') > 0 && NEARBY.check(address, isIPv6(address) ? 'ipv6' : 'ipv4')
+
 /** The client's address from the header `proxies` or `cloudflare` says to read (see addressOf), or null without it. */
 export function forwardedAddress(request, { proxies = 0, cloudflare = false } = {}) {
   if (cloudflare) {
@@ -721,9 +786,25 @@ export function forwardedAddress(request, { proxies = 0, cloudflare = false } = 
     if (connecting) return connecting
   }
   if (!proxies) return null
-  const header = request.headers['x-forwarded-for']
-  const hops = (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
+  const hops = forwardedHops(request)
   return hops.length >= proxies ? hops[hops.length - proxies] : null
+}
+
+/** The entries of a request's `X-Forwarded-For`, in order (none without the header). */
+export function forwardedHops(request) {
+  const header = request.headers['x-forwarded-for']
+  return (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
+}
+
+/**
+ * The line for a request with `entries` X-Forwarded-For entries, fewer than GHOSTLY_RELAY_PROXIES (`proxies`) or than
+ * any request before: the setting names more proxies than write the header. Until then a client writing the header
+ * itself could choose the address it counted as; from then on the relay reads only as deep as `entries`. The push relay's.
+ */
+export function fewerHops(entries, proxies) {
+  const before = 'until now a client writing the header itself could choose the address it counts as'
+  if (!entries) return `requests arrive without X-Forwarded-For though GHOSTLY_RELAY_PROXIES is set: ${before}; from now on the header is ignored and each counts as the proxy, so have the proxy write it or leave the setting out`
+  return `requests carry ${entries} X-Forwarded-For ${entries === 1 ? 'entry' : 'entries'} though GHOSTLY_RELAY_PROXIES is ${proxies}: ${before}; from now on each counts by entry ${entries} from the end, so set it to the number of proxies that write the header`
 }
 
 /**
@@ -755,8 +836,9 @@ export function addressKey(address) {
  * the first `most` of each kind in a minute, then, once a minute while it goes on, one line with how many were left out
  * (`refused address (812 more this minute, not logged)`). A client repeating what it is refused for would otherwise write
  * a line per attempt, thousands a second, and rotate the whole log away. The push relay's refusalLog, with a few lines.
+ * `explain` names what a kind means (limitReasons): it goes on the kind's first line only, the short ones follow it.
  */
-export function refusalLines (log, { most = 5 } = {}) {
+export function refusalLines (log, { most = 5, explain = new Map() } = {}) {
   // Kind → lines written and lines left out since the last flush. Present: the kind has had a line in this minute.
   const kinds = new Map()
   return {
@@ -764,7 +846,11 @@ export function refusalLines (log, { most = 5 } = {}) {
       const kind = words.join(' ')
       const seen = kinds.get(kind) ?? { shown: 0, more: 0 }
       kinds.set(kind, seen)
-      if (seen.shown < most) { seen.shown++; log(...words) } else seen.more++
+      if (seen.shown < most) {
+        const reason = seen.shown++ === 0 ? explain.get(kind) : undefined
+        if (reason) log(`${kind}:`, reason)
+        else log(...words)
+      } else seen.more++
     },
     flush: () => {
       for (const [kind, seen] of kinds) {
@@ -773,6 +859,38 @@ export function refusalLines (log, { most = 5 } = {}) {
       }
     },
   }
+}
+
+const seconds = ms => ms % 1000 ? `${ms} ms` : `${ms / 1000} s`
+const counted = (count, word) => `${count} ${count === 1 ? word : `${word}s`}`
+const mebibytes = bytes => bytes % (1024 * 1024) ? `${bytes} bytes` : `${bytes / 1024 / 1024} MiB`
+
+/**
+ * Each limit's log kind (`refused address`, `dropped idle`), with the limit it reached and the setting that moves it,
+ * for its first line: `refused address: 16 clients from one address (GHOSTLY_RELAY_CLIENTS_PER_ADDRESS)`. An operator
+ * whose users cannot connect reads the setting to change there, not in this file.
+ */
+export function limitReasons (limits) {
+  const quarter = Math.max(1, Math.floor(limits.handshakes / 4))
+  return new Map([
+    ['refused full', `${counted(limits.clients, 'client')} (${limitVariable('clients')})`],
+    ['refused address', `${counted(limits.clientsPerAddress, 'client')} from one address (${limitVariable('clientsPerAddress')})`],
+    ['dropped room', `the oldest client of the address holding the most, for a newcomer on a relay full at ${counted(limits.clients, 'client')} (${limitVariable('clients')})`],
+    ['dropped idle', `no listen and no dial for ${seconds(limits.idleMs)} (${limitVariable('idleMs')})`],
+    ['dropped no pong', `no answer to the last ping by the next, ${seconds(limits.pingMs)} later (${limitVariable('pingMs')})`],
+    ['dropped listen rate', `${counted(limits.listensPerMinute, 'listen')} a minute (${limitVariable('listensPerMinute')})`],
+    ['dropped listen limit', `${counted(limits.listens, 'key')} listened on at once (${limitVariable('listens')})`],
+    ['dropped dial limit', `${counted(limits.connectsPerMinute, 'dial')} a minute (${limitVariable('connectsPerMinute')})`],
+    ['dropped address listen rate', `${counted(limits.listensPerMinute * limits.clientsPerAddress, 'listen')} a minute from one address (${limitVariable('listensPerMinute')} × ${limitVariable('clientsPerAddress')})`],
+    ['dropped address dial limit', `${counted(limits.connectsPerMinute * limits.clientsPerAddress, 'dial')} a minute from one address (${limitVariable('connectsPerMinute')} × ${limitVariable('clientsPerAddress')})`],
+    ['dropped stream limit', `${counted(limits.streams, 'stream')} open at once (${limitVariable('streams')})`],
+    ['dropped queue', `${mebibytes(limits.queuedBytes)} waiting for the client and its far peers (${limitVariable('queuedBytes')})`],
+    ['closed far queue', `a far peer leaving half of ${mebibytes(limits.queuedBytes)} untaken on one stream (${limitVariable('queuedBytes')})`],
+    ['dropped queue total', `${mebibytes(limits.queuedTotalBytes)} waiting over all clients, the one holding the most dropped (${limitVariable('queuedTotalBytes')})`],
+    ['refused handshake limit', `${counted(limits.handshakes, 'handshake')} waiting on one client (${limitVariable('handshakes')})`],
+    ['refused handshake listen share', `${counted(quarter, 'incoming handshake')} waiting on one key, a quarter of ${limitVariable('handshakes')}`],
+    ['refused handshake incoming', `${counted(limits.handshakes - quarter, 'incoming handshake')} waiting on one client, the rest of ${limitVariable('handshakes')} kept for its dials`],
+  ])
 }
 
 /** How often one address may have a client dropped to make room for its own on a full relay (see makeRoom). */
@@ -813,7 +931,8 @@ export async function startRelay(options = {}) {
   const onresponse = dht.io.onresponse
   dht.io.onresponse = (...args) => { answeredAt = monotonicNow(); return onresponse(...args) }
   await dht.ready()
-  if (dht.toArray().length === 0) log('bootstrap reached no node')
+  // With its next step: the operator reading it has no other line that says what to check.
+  if (dht.toArray().length === 0) log(`bootstrap reached no node: check that this host can send UDP out (a tunnel, a firewall or a container network may not)${bootstrap.length ? ' and that GHOSTLY_HYPERDHT_BOOTSTRAP names running nodes' : ''}; /healthz answers 503 until a node answers`)
 
   const clients = new Set()
   // Each client's dht-relay session, for what it holds (`stats().held`).
@@ -851,7 +970,7 @@ export async function startRelay(options = {}) {
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const origins = new Set((options.origins ?? []).map(origin => originOf(origin) ?? origin))
   const refusedOrigin = originRefusals(log)
-  const refusals = refusalLines(log)
+  const refusals = refusalLines(log, { explain: limitReasons(limits) })
   const flushing = setInterval(refusals.flush, 60_000)
   flushing.unref?.()
   // Once per start each: a proxy in front the relay was not told about, or one it was told about that does not write
@@ -864,6 +983,11 @@ export async function startRelay(options = {}) {
   }
   const unset = (header, setting) => hint(header, `requests carry ${header} but ${setting} is not set: every client counts as the proxy`)
   const missing = (header, setting) => hint(header, `requests arrive without ${header} though ${setting} is set: each counts as the proxy, so have the proxy write it or leave the setting out`)
+  // The fewest `X-Forwarded-For` entries a request has come with, from GHOSTLY_RELAY_PROXIES down: each proxy in front
+  // adds one and a client can only add more, so no more proxies than that write the header. Read deeper, the counted
+  // entry would be one the client wrote (a new address per upgrade if it likes, past clientsPerAddress and makeRoom's
+  // once per ROOM_MS), so the relay reads no deeper than that from then on.
+  let trusted = options.proxies ?? 0
 
   /**
    * On a full relay, what makes room for a client from `address` (null: none is made). A client holding one listen and
@@ -883,8 +1007,26 @@ export async function startRelay(options = {}) {
     const [[, evict]] = most
     return () => { madeRoom.set(address, monotonicNow()); evict() }
   }
+  /**
+   * The listens and dials each address has started in the last minute, over all its clients, the ones it has closed too:
+   * a client's own budgets start over with each WebSocket, so an address that closes each one and opens another would
+   * have the relay's node announce as fast as it reconnects. An address gets its clients' budgets times
+   * `clientsPerAddress`, what it could start with all of them open; one past that is refused and not counted.
+   */
+  const spent = new Map()
+  const perMinute = { listens: limits.listensPerMinute * limits.clientsPerAddress, dials: limits.connectsPerMinute * limits.clientsPerAddress }
+  const fromAddress = address => (kind, now) => {
+    let entry = spent.get(address)
+    if (!entry) spent.set(address, entry = { listens: [], dials: [] })
+    entry[kind] = entry[kind].filter(at => now - at < 60_000)
+    if (entry[kind].length >= perMinute[kind]) return false
+    entry[kind].push(now)
+    return true
+  }
   const forgetRoom = setInterval(() => {
     for (const [address, at] of madeRoom) if (monotonicNow() - at >= ROOM_MS) madeRoom.delete(address)
+    const now = monotonicNow()
+    for (const [address, entry] of spent) if ([...entry.listens, ...entry.dials].every(at => now - at >= 60_000)) spent.delete(address)
   }, 60_000)
   forgetRoom.unref?.()
 
@@ -916,16 +1058,17 @@ export async function startRelay(options = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.payloadBytes, perMessageDeflate: false, autoPong: false })
 
   server.on('upgrade', (request, socket, head) => {
-    const forwarded = forwardedAddress(request, { proxies: options.proxies, cloudflare: options.cloudflare })
-    const address = addressKey(forwarded ?? request.socket.remoteAddress ?? 'unknown')
     // Cloudflare writes both headers: its own setting is the one to name.
     if (!options.cloudflare && !options.proxies) {
       if (request.headers['cf-connecting-ip'] !== undefined) unset('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
       else if (request.headers['x-forwarded-for'] !== undefined) unset('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
-    } else if (forwarded === null) {
-      if (options.cloudflare) missing('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
-      else missing('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
+    } else if (options.proxies) {
+      const entries = forwardedHops(request).length
+      if (entries < trusted) { trusted = entries; log(fewerHops(entries, options.proxies)) }
     }
+    const forwarded = forwardedAddress(request, { proxies: trusted, cloudflare: options.cloudflare })
+    const address = addressKey(forwarded ?? request.socket.remoteAddress ?? 'unknown')
+    if (options.cloudflare && forwarded === null) missing('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
     const origin = request.headers.origin
     // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
     // would make the write fail with an error nobody catches, and that ends the relay for every other client.
@@ -940,7 +1083,14 @@ export async function startRelay(options = {}) {
     if (origins.size && !origins.has(origin)) { refusedOrigin(origin); return refuse('403 Forbidden') }
     const room = clients.size >= limits.clients ? makeRoom(address) : undefined
     if (room === null) return refuse('503 Service Unavailable', 'full')
-    if ((perAddress.get(address)?.size ?? 0) >= limits.clientsPerAddress) return refuse('429 Too Many Requests', 'address')
+    if ((perAddress.get(address)?.size ?? 0) >= limits.clientsPerAddress) {
+      // A proxy that writes no header and was not named: every browser behind it is this one address, and the hints
+      // above, which wait for a header, never fire. Said once, naming no address.
+      if (!options.cloudflare && !options.proxies && request.headers['x-forwarded-for'] === undefined && request.headers['cf-connecting-ip'] === undefined && nearbyAddress(request.socket.remoteAddress)) {
+        hint('nearby', `clients refused at ${limitVariable('clientsPerAddress')} (${limits.clientsPerAddress}) come from a loopback or private address: if they come through a proxy, have it write X-Forwarded-For and set GHOSTLY_RELAY_PROXIES (GHOSTLY_RELAY_CLOUDFLARE behind Cloudflare), or every client counts as the proxy`)
+      }
+      return refuse('429 Too Many Requests', 'address')
+    }
     // Room is made once the upgrade is through (ws calls back at once then, or never): one it refuses drops nobody.
     wss.handleUpgrade(request, socket, head, ws => { room?.(); accept(ws, address) })
   })
@@ -1013,9 +1163,10 @@ export async function startRelay(options = {}) {
         setTimeout(() => { paused = false; ws._socket?.resume() }, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
       }
     }
-    ws.on('message', data => spend(data.length ?? data.byteLength ?? 0))
-    // A control frame from a client is its payload and 6 bytes (header and mask), so an empty one still costs.
-    const CONTROL_FRAME_BYTES = 6
+    // Each frame from a client costs its payload and 64 bytes: the relay's work on a frame (parsing it, and for a message
+    // the protocol's decode and answer) does not shrink with its payload, so tiny ones are bounded as bytes are.
+    const FRAME_BYTES = 64
+    ws.on('message', data => spend((data.length ?? data.byteLength ?? 0) + FRAME_BYTES))
     // At most one pong waits to be written: a ping that comes meanwhile is kept, the last one only, and answered once
     // it is (RFC 6455 5.5.3 lets a pong answer only the most recent ping). Each pong waiting cost the process about
     // 700 bytes, and one client sent a million pings a second. The payload is copied: it is a view into the chunk the
@@ -1032,7 +1183,7 @@ export async function startRelay(options = {}) {
       })
     }
     ws.on('ping', data => {
-      spend(data.length + CONTROL_FRAME_BYTES)
+      spend(data.length + FRAME_BYTES)
       if (dropped) return
       if (ponging) nextPing = Buffer.from(data)
       else pong(Buffer.from(data))
@@ -1040,7 +1191,7 @@ export async function startRelay(options = {}) {
     // A peer that has gone without closing (a sleeping laptop, a dead route) still holds its slot: one that has not
     // answered the last ping by the next is dropped.
     let answered = true
-    ws.on('pong', data => { spend(data.length + CONTROL_FRAME_BYTES); answered = true })
+    ws.on('pong', data => { spend(data.length + FRAME_BYTES); answered = true })
     const ping = setInterval(() => {
       if (!answered) return drop('no pong')
       answered = false
@@ -1059,6 +1210,13 @@ export async function startRelay(options = {}) {
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
     stream.on('error', () => drop('stream error'))
+    // A client that resets right after its upgrade has a closed socket by the time the stream opens: dht-relay's open
+    // failed then with an error its handshake also rejected with, where nothing catches it (one `unhandled` line per
+    // client). The stream ends without an error instead; the socket's close has let the client go.
+    stream._open = cb => {
+      if (ws.readyState !== ws.OPEN) stream.destroy()
+      cb(null)
+    }
     // dht-relay 0.4.3 hands the WebSocket every chunk a HyperDHT stream brings, however slowly the client reads, and
     // a UDX stream has no receive window to slow its far end: a client that reads slowly or not at all would have the
     // relay hold everything its far peers send. Past `queuedBytes` waiting for it (with what waits for its far peers), it
@@ -1072,7 +1230,7 @@ export async function startRelay(options = {}) {
     // protomux keeps itself on a stream whose userData is null (a WsStream has none), and relay() makes the client's
     // mux at once: guardMux gets it there.
     stream.userData = null
-    const session = relay(clientDht(dht, limits, drop, gone, refusals.line, wrote), stream)
+    const session = relay(clientDht(dht, limits, drop, gone, refusals.line, wrote, fromAddress(address)), stream)
     guardMux(stream.userData, drop)
     void session.then(node => {
       guardProtocol(node._protocol, drop)
@@ -1231,7 +1389,8 @@ export const networkOf = ({ testnet, bootstrap }) =>
  * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0; 127.0.0.1 behind proxies
  * or Cloudflare), GHOSTLY_HYPERDHT_BOOTSTRAP,
  * GHOSTLY_HYPERDHT_TESTNET, GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_CLOUDFLARE (1 or 0), GHOSTLY_RELAY_PROXIES (0) and
- * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, and on a testnet with bootstrap nodes. `ignored`
+ * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, on a testnet with bootstrap nodes, and on
+ * GHOSTLY_RELAY_CLOUDFLARE with GHOSTLY_RELAY_PROXIES. `ignored`
  * names the other GHOSTLY_RELAY_* and GHOSTLY_HYPERDHT_* variables (see ignoredSettings), for server.mjs to print.
  */
 export function readSettings (env) {
@@ -1246,6 +1405,8 @@ export function readSettings (env) {
   if (testnet && bootstrap.length) throw new Error(`GHOSTLY_HYPERDHT_TESTNET=${JSON.stringify(env.GHOSTLY_HYPERDHT_TESTNET)}: expected no GHOSTLY_HYPERDHT_BOOTSTRAP with it (the testnet is a network of its own)`)
   const proxies = setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count')
   const cloudflare = setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag')
+  // forwardedAddress reads CF-Connecting-IP before X-Forwarded-For: behind nginx or Caddy a client writes its own.
+  if (proxies && cloudflare) throw new Error(`GHOSTLY_RELAY_PROXIES=${JSON.stringify(env.GHOSTLY_RELAY_PROXIES)}: expected no GHOSTLY_RELAY_CLOUDFLARE=1 with it (behind Cloudflare set GHOSTLY_RELAY_CLOUDFLARE alone; behind nginx or Caddy set GHOSTLY_RELAY_CLOUDFLARE=0)`)
   return {
     port: setting(env, 'PORT', 49443, 'port'),
     // Behind a proxy only the proxy should reach it: anyone else could write the header a client is counted by.

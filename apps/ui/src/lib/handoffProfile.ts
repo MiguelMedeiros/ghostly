@@ -1,10 +1,11 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import type { DeviceKind } from "@ghostly/core";
+import type { AppManifest, DeviceKind } from "@ghostly/core";
 import type { HandoffFile, HandoffSource, HandoffStaging, HandoffStagingHost } from "@ghostly/browser/devices/handoff";
 import type { HandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { memorySink } from "@ghostly/browser/backup/stream";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { databaseName, wrap, type StoredFile } from "@ghostly/browser/shared/idb";
+import { bundleLength } from "@ghostly/browser/shared/appBundleLength";
 import { FILE_BYTES_STEP, SMALL_FILE_BYTES, digestText, dropFileSpace, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "@ghostly/browser/shared/fileBytes";
 import { fileSource, restoreHandoffBundle, writeProfileBackup, type FileSource } from "./profileBackup";
 import { listDeviceRecords } from "@ghostly/browser/devices/store";
@@ -35,12 +36,42 @@ const DIGEST = /^[A-Za-z0-9_-]{43}$/;
  * the chat files (WISP 1200 § Where installed apps live): left behind, every app on the new device needed its files and
  * fetched them again, and one whose source no longer served that version did not open there at all (bug hunt, 2026-11-06).
  */
-type AppRecord = { ref: string; digest?: unknown; bytes?: unknown; pending?: { digest?: unknown; bytes?: unknown } };
+type AppVersion = { digest?: unknown; bytes?: unknown; sha256?: unknown; manifest?: unknown };
+type AppRecord = AppVersion & { ref: string; pending?: AppVersion };
 const bundleId = (digest: string) => `app-${digest}`;
 const BUNDLE_ID = /^app-[A-Za-z0-9_-]{43}$/;
-const bundlesOf = (app: AppRecord): { id: string; kind: unknown }[] => [app, ...(app.pending ? [app.pending] : [])]
-  .filter((version): version is { digest: string; bytes?: unknown } => typeof version.digest === "string" && DIGEST.test(version.digest))
-  .map((version) => ({ id: bundleId(version.digest), kind: version.bytes }));
+/** The whole bundle's length by its record's manifest, or none when the manifest cannot say. */
+const lengthOf = (manifest: unknown): number | undefined => {
+  try { return bundleLength(manifest as AppManifest); } catch { return undefined; }
+};
+const hashOf = (version?: AppVersion): string | undefined => typeof version?.sha256 === "string" && DIGEST.test(version.sha256) ? version.sha256 : undefined;
+/**
+ * Each bundle a record names, with its whole bundle's length by its manifest and the whole file's hash where the record
+ * kept it when the file was written: the hash is the file's only while the file has that length (a rewrite cut short
+ * leaves a shorter one).
+ */
+const bundlesOf = (app: AppRecord): { id: string; ref: string; digest: string; kind: unknown; sha256?: string; length?: number }[] => [app, ...(app.pending ? [app.pending] : [])]
+  .filter((version): version is AppVersion & { digest: string } => typeof version.digest === "string" && DIGEST.test(version.digest))
+  .map((version) => {
+    const length = lengthOf(version.manifest), sha = hashOf(version);
+    return { id: bundleId(version.digest), ref: app.ref, digest: version.digest, kind: version.bytes, ...(length !== undefined && { length }), ...(sha && { sha256: sha }) };
+  });
+
+/**
+ * A bundle's whole file's hash, read here, kept on its app's record as the engine keeps it when it writes the file, for
+ * the version (installed or waiting) still held there as read: one changed since (another version installed, its files
+ * written again) is left as it is. Kept for nothing: a write that fails leaves the record as it was.
+ */
+async function keepBundleHash(db: IDBDatabase, ref: string, digest: string, kind: unknown, sha: string): Promise<void> {
+  const tx = db.transaction("apps", "readwrite"), records = tx.objectStore("apps"), read = records.get(ref);
+  read.onsuccess = () => {
+    const app = read.result as AppRecord | undefined;
+    const holds = (version?: AppVersion) => !!version && version.digest === digest && version.bytes === kind && !hashOf(version);
+    if (holds(app)) records.put({ ...app, sha256: sha });
+    else if (holds(app?.pending)) records.put({ ...app, pending: { ...app!.pending, sha256: sha } });
+  };
+  await new Promise<void>((resolve) => { tx.oncomplete = tx.onabort = tx.onerror = () => resolve(); });
+}
 const FILE_KINDS: readonly FileBytesKind[] = ["opfs", "native", "idb"];
 
 /** The installed apps' records of a profile's database, none where it has no store for them yet. */
@@ -80,7 +111,8 @@ const stagedKeys = (ns: string): string[] => {
 };
 /** A staged file left as a Blob on a record of the frozen copy: that database, and the record's id. */
 type HeldBlob = { database: string; id: string };
-type Note = { ns: string; id: string; size: number; sha256: string; held?: HeldBlob };
+/** `loose`: staged without a forced write to disk (`Staging.finish`, a small file), checked again by a later page. */
+type Note = { ns: string; id: string; size: number; sha256: string; held?: HeldBlob; loose?: true };
 
 const NOTES_DB = "ghostly-staging", NOTES = "files";
 /** Every note of a namespace: an array key sorts after every string, so `[ns, []]` closes the range. */
@@ -124,7 +156,10 @@ const isStaged = (file: Partial<HandoffFile>): file is Pick<HandoffFile, "size" 
 const RESTORE_FILES = 200, RESTORE_BYTES = 32 * 1024 * 1024;
 const spaceOf = (database: string): string => (database === "ghostly" ? "" : database.replace(/^ghostly_/, ""));
 
-/** The peer database opened as it is stored (no version, so nothing migrates); only read-only transactions on it. */
+/**
+ * The peer database opened as it is stored (no version, so nothing migrates); only read-only transactions on it, but
+ * for the hash of an app's bundle kept on its record (`keepBundleHash`).
+ */
 async function openAsStored(database: string): Promise<IDBDatabase> {
   if (!(await databaseExists(database))) throw new Error("The profile's database is not on this device");
   return wrap(indexedDB.open(database));
@@ -168,12 +203,21 @@ function profileSource(database: string): HandoffSource {
       found.set(file.id, { file: { id: file.id, size: source.size, sha256: sha }, source });
     }
     // The apps' bundles, where their records say they are: one not here (it needs its files on this device too) is not.
-    for (const { id, kind } of (await appRecords(peer)).flatMap(bundlesOf)) {
+    // Its hash is the one its record kept when the engine wrote and checked it (else read and hashed once): read whole
+    // here, 20 bundles of 16 MiB held the offer back 1.8 s, at every Move and again after a reload (bug hunt, 2026-11-14).
+    // One whose record has none (an app installed by a build that did not keep it, not updated since) keeps the hash read
+    // here when the file is its whole bundle's length: else it was read whole again at each Move until the app updated.
+    for (const { id, ref, digest, kind, sha256, length } of (await appRecords(peer)).flatMap(bundlesOf)) {
       if (found.has(id) || !FILE_KINDS.includes(kind as FileBytesKind)) continue;
       const store = (await fileBytesOf(kind as FileBytesKind).catch(() => null))?.forSpace?.(database);
       const size = store ? await store.size(id).catch(() => null) : null;
       if (!store || !size) continue;
-      const sha = digests.get(id) ?? await store.digest(id).catch(() => undefined);
+      const kept = size === length ? sha256 : undefined;
+      let sha = digests.get(id) ?? kept;
+      if (!sha) {
+        sha = await store.digest(id).catch(() => undefined);
+        if (sha && size === length && !sha256) await keepBundleHash(peer, ref, digest, kind, sha).catch(() => {});
+      }
       if (!sha) continue;
       digests.set(id, sha);
       found.set(id, { file: { id, size, sha256: sha }, source: { size, read: (offset, length) => store.read(id, offset, length) } });
@@ -313,14 +357,39 @@ class Staging implements HandoffStaging {
     })().catch((error: unknown) => { this.adopted = null; throw error; });
     return this.adopted;
   }
+  /** The files this page staged without a forced write (`finish`): whole here, whatever happens to the device later. */
+  private readonly loose = new Set<string>();
+  private checked: Promise<Set<string>> | null = null;
+
+  /**
+   * Small files an earlier page staged without a forced write: whole there, but the device may have gone down since,
+   * before their bytes reached the disk. Each is read back once against its digest before its note is believed; one
+   * that is not the file goes, and the giver sends it again. It answers the ids that went, from the first notes read.
+   */
+  private check(notes: Note[]): Promise<Set<string>> {
+    this.checked ??= (async () => {
+      const loose = notes.filter((note) => note.loose && !this.loose.has(note.id));
+      if (!loose.length) return new Set<string>();
+      const store = await spaceFiles(this.database);
+      const bad = (await Promise.all(loose.map(async ({ id, sha256 }) => ((await store.digest(id).catch(() => null)) === sha256 ? null : id)))).filter((id): id is string => id !== null);
+      if (!bad.length) return new Set<string>();
+      await inNotes("readwrite", (store) => { for (const id of bad) store.delete([this.ns, id]); });
+      await Promise.all(bad.map((id) => store.remove(id).catch(() => {})));
+      return new Set(bad);
+    })().catch((error: unknown) => { this.checked = null; throw error; });
+    return this.checked;
+  }
+  /** One read of the notes: the check of the loose ones runs on it, not on a read of its own. */
   private async notes(): Promise<Note[]> {
     await this.adopt();
-    return (await inNotes("readonly", (store) => store.getAll(notesOf(this.ns))) ?? []) as Note[];
+    const notes = (await inNotes("readonly", (store) => store.getAll(notesOf(this.ns))) ?? []) as Note[];
+    const bad = await this.check(notes);
+    return bad.size ? notes.filter((note) => !bad.has(note.id) || this.loose.has(note.id)) : notes;
   }
   /** `held`: the file is not in this namespace's storage but a Blob on that record of the frozen copy. */
-  private async note(file: HandoffFile, held?: HeldBlob): Promise<void> {
+  private async note(file: HandoffFile, held?: HeldBlob, loose = false): Promise<void> {
     await this.adopt();
-    const note: Note = { ns: this.ns, id: file.id, size: file.size, sha256: file.sha256, ...(held ? { held } : {}) };
+    const note: Note = { ns: this.ns, id: file.id, size: file.size, sha256: file.sha256, ...(held ? { held } : {}), ...(loose ? { loose: true as const } : {}) };
     await inNotes("readwrite", (store) => { store.put(note); });
   }
   private async heldBlob(id: string): Promise<HeldBlob | null> {
@@ -340,20 +409,30 @@ class Staging implements HandoffStaging {
     } catch { return []; }
   }
 
-  async begin(id: string): Promise<void> {
-    await this.forget(id);
-    await (await spaceFiles(this.database)).remove(id).catch(() => {});
+  /** Their notes in one transaction, their files removed side by side: one by one, 3,000 files took 1.6 to 2.6 s. */
+  async begin(ids: readonly string[]): Promise<void> {
+    await this.adopt();
+    await inNotes("readwrite", (store) => { for (const id of ids) store.delete([this.ns, id]); });
+    const store = await spaceFiles(this.database);
+    await Promise.all(ids.map((id) => store.remove(id).catch(() => {})));
   }
 
   async append(id: string, offset: number, bytes: Uint8Array): Promise<void> {
     await (await spaceFiles(this.database)).append(id, offset, bytes);
   }
 
+  /**
+   * The size is read while the file is still open, from its handle. A small file is let go without a forced write to
+   * disk, as the restore reads it back whole into its record anyway: forced, each took 3.8 ms, 11.5 s of the 3,000 small
+   * files' pass 1 (bug hunt, 2026-11-13). Its note says so, and a later page checks it before believing it (`check`).
+   */
   async finish(file: HandoffFile): Promise<void> {
     const store = await spaceFiles(this.database);
-    await store.close(file.id);
-    if ((await store.size(file.id)) !== file.size) throw new Error("The file was not written whole");
-    await this.note(file);
+    const size = await store.size(file.id), loose = file.size <= SMALL_FILE_BYTES;
+    await store.close(file.id, !loose);
+    if (size !== file.size) throw new Error("The file was not written whole");
+    if (loose) this.loose.add(file.id);
+    await this.note(file, undefined, loose);
   }
 
   async discard(id: string): Promise<void> {

@@ -5,7 +5,7 @@ import { PaymentComposer } from "./PaymentComposer";
 import { ComposerIdentityPicker, useSharedIdentityCount } from "./identities/ComposerIdentities";
 import { VoiceRecorderButton } from "./voice/VoiceRecorderButton";
 import { canRecordVoice } from "../lib/voiceRecorder";
-import type { LinkPreview, TypingKind, VoiceMeta } from "@ghostly/core";
+import { sanitizeFileName, type LinkPreview, type TypingKind, type VoiceMeta } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { NAME, withName } from "./apps/aroundName";
 import { isolate } from "../lib/ownStatus";
@@ -26,7 +26,7 @@ import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { useEngineValue } from "../lib/engineState";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteKeepsFiles, pasteNamesFiles, pasteShowsNothing, PLATFORM_PASTE_FILES, platformDroppedFiles, platformPastedFiles, someNames, type PlatformFiles } from "../lib/pastedFiles";
 import { keepEditWords, keptEditWords } from "../lib/keptEdits";
 import { keepShareFor, onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight, useFieldFitsView } from "./composer/fieldHeight";
@@ -61,11 +61,11 @@ interface MessageInputProps {
   maxBytes?: number;
   /**
    * What the DHT carries while the chat is not live, counted as its packet counts a text (`dhtTextBytes`, escaped): past
-   * it the counter turns amber, and its title says what becomes of a text that long (`softTitle`, by its raw UTF-8
-   * bytes; else that it waits for a live connection).
+   * it the counter turns amber, and its title says what becomes of a text that long (`softTitle`; else that it waits
+   * for a live connection).
    */
   softBytes?: number;
-  softTitle?: (bytes: number) => string;
+  softTitle?: string;
   /**
    * The most UTF-8 bytes a message may have (the engine's 16 KiB): the counter near the end counts bytes then, not
    * characters, and a longer text stays in the field with why. An accented letter takes two, most CJK three, an emoji four.
@@ -218,9 +218,10 @@ export function MessageInput({
   const [toastAction, setToastAction] = useState<{ label: string; run: () => void } | null>(null);
   /**
    * `caption`: the guard asks about a pasted file's caption, not the draft; `translated`: about the translation shown;
-   * `translate`: about the draft, before it is translated (what Send anyway does then).
+   * `translate`: about the draft, before it is translated (what Send anyway does then); `files`: about a picked file's
+   * name; `sheet`: about a name in the sheet, which sends with this caption.
    */
-  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean; translate?: () => void } | null>(null);
+  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean; translate?: () => void; files?: File[]; sheet?: string } | null>(null);
   /** The draft the guard was answered Send for before Translate: its translation does not ask again. */
   const guardedDraft = useRef<string | null>(null);
   /** Files pasted or dropped here, waiting on the sheet for Send. */
@@ -397,6 +398,12 @@ export function MessageInput({
     setToastAction(null);
   }, []);
 
+  // The composer goes (the chat closed): its card's wait goes with it, never to run on a page that is gone.
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = null;
+  }, []);
+
   /** The card's time runs again, in full, unless it is pointed at or has the focus: it stays until it has been read. */
   const runToast = useCallback(() => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -440,7 +447,7 @@ export function MessageInput({
   // The draft emptied (by hand, or given to an edit): nothing left to translate.
   useEffect(() => { if (!text.trim() || editKey) closeTranslation(); }, [text, editKey, closeTranslation]);
   // The chat's translation turned off, or its language changed, while a preview was open: that preview is closed, so
-  // Enter sends the draft again rather than wait on a translation nothing can make (ghostly-agents#1812).
+  // Enter sends the draft again rather than wait on a translation nothing can make.
   // A group's list is ordered by use and recomputed as messages arrive, so it is compared as a set, and an open preview
   // stays while the language it shows is still offered: a reorder or a new language must not drop a picked translation.
   const offered = translation ? (translation.language ? [translation.language] : [...(translation.languages ?? [])].sort()).join(",") : null;
@@ -681,6 +688,7 @@ export function MessageInput({
     if (err) showToast(err);
     setShowPanel(false);
     if (!phone) textareaRef.current?.focus();
+    else if (panelByKey) panelButtonRef.current?.focus();
   };
 
   // A share of mine tapped in the chat's timeline: the picker, on that card.
@@ -770,14 +778,25 @@ export function MessageInput({
     }
   };
 
+  /**
+   * A file's name reaches the contact as a message's text does: the first that looks like a secret, read as it goes
+   * (`sanitizeFileName`: a key split by a `:` the name loses is whole), as the CLI's `file send` reads it.
+   */
+  const secretName = (files: File[]) => files.reduce<SecretFinding | null>((found, file) => found ?? findSecret(sanitizeFileName(file.name)), null);
+
   const sendFiles = (files: FileList | null, input: HTMLInputElement) => {
     const chosen = [...(files ?? [])];
     input.value = "";
+    const found = secretName(chosen);
+    if (found) { setSecret({ finding: found, files: chosen }); return; }
     void sendChosen(chosen);
   };
 
-  /** Files pasted or dropped: to the sheet, or the reason they cannot go. False where files have no place here. */
-  const offerFiles = (files: File[]): boolean => {
+  /**
+   * Files pasted or dropped: to the sheet, or the reason they cannot go. False where files have no place here. `left`:
+   * the paste's or drop's files the platform left out, said beside the sheet.
+   */
+  const offerFiles = (files: File[], left?: Omit<PlatformFiles, "files">): boolean => {
     // An edit is text only: files wait until it ends.
     if (disabled || !files.length || edit) return false;
     // Where files cannot go, the reason is said: also in a group, which has no way to send one at all (no
@@ -786,6 +805,11 @@ export function MessageInput({
     if (!onSendFile) return false;
     closeAll();
     setAttached((was) => [...(was ?? []), ...files]);
+    const leftOut = left && [
+      left.pastLimit.length ? t("errors.files.pastLimit", { count: String(PLATFORM_PASTE_FILES), names: someNames(left.pastLimit, t) }) : "",
+      left.leftOut.length ? t("errors.files.leftOut", { names: someNames(left.leftOut, t) }) : "",
+    ].filter(Boolean).join(" ");
+    if (leftOut) showToast(leftOut);
     return true;
   };
   const offerRef = useRef(offerFiles); offerRef.current = offerFiles;
@@ -803,14 +827,14 @@ export function MessageInput({
    * A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said, and so
    * is a read that ends where files cannot go any more (an edit began meanwhile).
    */
-  const offerHeld = (held: Promise<File[]>) => {
+  const offerHeld = (held: Promise<PlatformFiles>) => {
     // Up to 256 MB read in steps: the line says so until the sheet, or the reason there is none, takes its place.
     setDropsReading((was) => was + 1);
     const ended = () => setDropsReading((was) => was - 1);
-    held.then((files) => {
+    held.then(({ files, ...left }) => {
       ended();
       if (!files.length) showToast(t("errors.files.dropUnreadable"));
-      else if (!offerRef.current(files)) showToast(t("errors.files.dropLate"));
+      else if (!offerRef.current(files, left)) showToast(t("errors.files.dropLate"));
     },
       (error: unknown) => { ended(); showToast(problemLine(error, t)); });
   };
@@ -840,10 +864,10 @@ export function MessageInput({
     const ended = () => { readingRef.current = false; setReading(false); };
     // Copied files the platform could not read either are said, not dropped in silence; an empty clipboard stays quiet.
     const named = pasteNamesFiles(data);
-    read.then((found) => {
+    read.then(({ files: found, ...left }) => {
       ended();
       // Read to its end where files cannot go any more (an edit began meanwhile): said, as a paste never read is.
-      if (found.length) { if (!offerRef.current(found)) showToast(t("errors.files.pasteLate")); }
+      if (found.length) { if (!offerRef.current(found, left)) showToast(t("errors.files.pasteLate")); }
       else if (picture && plain) { if (!insertRef.current(plain)) showToast(t("errors.files.pasteUnreadable")); }
       else if (named || picture) showToast(t("errors.files.pasteUnreadable"));
     }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
@@ -877,8 +901,11 @@ export function MessageInput({
     if (err) showToast(err);
   };
 
-  const sendAttached = async (caption: string) => {
+  const sendAttached = async (caption: string, confirmed = false) => {
     const files = attached ?? [];
+    // Asked with the sheet still open: Cancel keeps its files and caption.
+    const found = confirmed ? null : secretName(files);
+    if (found) { setSecret({ finding: found, sheet: caption }); return; }
     setAttached(null);
     if (await sendChosen(files)) await sendCaption(caption);
   };
@@ -1020,6 +1047,20 @@ export function MessageInput({
   const overSoft = !!softBytes && packetBytes > softBytes;
   // Near the limit that refuses, its count wins over the DHT's (past 16 KiB is past 256 B too).
   const nearHard = remaining < 100 && (!softBytes || !!maxBytes || !!textBytes);
+  const dhtCounted = !!softBytes && !maxBytes && !nearHard && packetBytes > softBytes - 60;
+  // What the count's colour says, in words the field carries (its description) and a screen reader hears once as it
+  // changes: a `title` on the count reaches only a mouse.
+  const countState = dhtCounted ? (overSoft ? "overSoft" : null)
+    : nearHard && remaining < 50 ? (remaining < 0 ? "over" : "left") : null;
+  const countNote = countState === "overSoft" ? softTitle ?? t("composer.overSoft", { bytes: softBytes! })
+    : countState === "left" ? t(maxBytes || textBytes ? "composer.bytesLeft" : "composer.charactersLeft", { count: remaining })
+    : countState !== "over" ? undefined
+    : maxBytes ? t("composer.dhtTooLong", { bytes, max: maxBytes })
+    : textBytes ? t("composer.tooLongBytes", { bytes: formatAmount(bytes, t.language), max: formatAmount(textBytes, t.language) })
+    : t("composer.tooLong", { count: formatAmount(text.length, t.language), max: formatAmount(maxLength, t.language) });
+  const countNoteId = useId();
+  const [countSaid, setCountSaid] = useState<{ state: typeof countState; text: string }>({ state: null, text: "" });
+  if (countSaid.state !== countState) setCountSaid({ state: countState, text: countNote ?? "" });
 
   // With the sheet open the composer is behind its veil, outside the dialog: what it has to say is said on the sheet.
   const sheetOpen = !!attached && !locked;
@@ -1052,7 +1093,7 @@ export function MessageInput({
       </span>
       {toastAction && (
         <button type="button" data-testid="composer-toast-action" onClick={() => { toastAction.run(); hideToast(); }}
-          className="-my-1.5 min-h-8 max-md:min-h-11 shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
+          className="-my-1.5 min-h-8 max-md:min-h-[44px] shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
           {toastAction.label}
         </button>
       )}
@@ -1060,7 +1101,7 @@ export function MessageInput({
         type="button"
         onClick={hideToast}
         aria-label={t("common.close")}
-        className="-me-2 -my-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="tap-target -me-2 -my-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         &times;
       </button>
@@ -1096,7 +1137,7 @@ export function MessageInput({
       )}
       {shownConverting && (
         <button ref={cancelRef} type="button" data-testid="video-convert-cancel" onClick={() => cancelConverting(filesId, shown)}
-          className="min-h-6 max-md:min-h-11 shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
+          className="min-h-6 max-md:min-h-[44px] shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
           {t("common.cancel")}
         </button>
       )}
@@ -1161,10 +1202,12 @@ export function MessageInput({
               disabled={disabled}
               rows={1}
               dir={draftDirection(text)}
+              aria-describedby={countNote ? countNoteId : undefined}
               className="composer-textarea"
             />
-            {softBytes && !maxBytes && !nearHard && packetBytes > softBytes - 60 && (
-              <span data-testid="dht-byte-count" title={overSoft ? softTitle?.(bytes) ?? t("composer.overSoft", { bytes: softBytes }) : undefined}
+            {countNote && <span id={countNoteId} className="sr-only">{countNote}</span>}
+            {dhtCounted && (
+              <span data-testid="dht-byte-count" title={countNote}
                 className={`absolute end-2.5 bottom-1 text-[10px] ${overSoft ? "text-warn-ink" : "text-text-muted"}`}>
                 {packetBytes} / {softBytes} B
               </span>
@@ -1256,8 +1299,9 @@ export function MessageInput({
           onClose={() => {
             setShowPanel(false);
             const at = document.activeElement;
-            if (phone || (at && at !== document.body && !at.closest("[data-testid='expression-panel']"))) return;
-            if (panelByKey) panelButtonRef.current?.focus(); else textareaRef.current?.focus();
+            if (at && at !== document.body && !at.closest("[data-testid='expression-panel']")) return;
+            // Opened from the keyboard, the smiley takes it back: a button, so no on-screen keyboard on a phone either.
+            if (panelByKey) panelButtonRef.current?.focus(); else if (!phone) textareaRef.current?.focus();
           }}
         />
       )}
@@ -1265,7 +1309,9 @@ export function MessageInput({
         <SecretGuardDialog finding={secret.finding} recipient={recipient ?? payments?.contact ?? identities?.contact}
           onCancel={() => setSecret(null)} onConfirm={() => {
             setSecret(null);
-            if (secret.caption !== undefined) void sendCaption(secret.caption, true);
+            if (secret.files) void sendChosen(secret.files);
+            else if (secret.sheet !== undefined) void sendAttached(secret.sheet, true);
+            else if (secret.caption !== undefined) void sendCaption(secret.caption, true);
             else if (secret.translate) secret.translate();
             else if (secret.translated) void sendTranslation(true);
             else void handleSubmit(true);
@@ -1290,6 +1336,8 @@ export function MessageInput({
           void onSendFile(file).then((err) => { if (err) showToast(err); });
         }} />
       )}
+      {/* Said once as the count's state changes (muted, near, over), not on each key. */}
+      <span data-testid="composer-count-said" className="sr-only" aria-live="polite">{countSaid.text}</span>
     </div>
   );
 }

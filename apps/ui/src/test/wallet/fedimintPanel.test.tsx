@@ -41,6 +41,19 @@ describe("the Fedimint panel's history", () => {
   });
 });
 
+describe("the Fedimint panel's facts", () => {
+  it.each([
+    ["ja", "コンセンサス", "v2.1 · モジュール ln、mint"],
+    ["ar", "الإجماع", "v2.1 · الوحدات ln وmint"],
+  ] as const)("name the federation's modules as the language lists them, each its own <bdi> (%s)", (language, label, said) => {
+    renderApp(<FedimintWalletPanel wallet={wallet()} state={state([])} />, { language });
+    const facts = screen.getByTestId("fedimint-facts");
+    const value = within(facts).getByText(label).nextElementSibling!;
+    expect(value.textContent).toBe(said);
+    expect([...value.querySelectorAll("bdi")].map((b) => b.textContent)).toEqual(["ln", "mint"]);
+  });
+});
+
 describe("notes made in the Fedimint panel", () => {
   const made = async () => {
     const calls = { fedimintSpendNotes: vi.fn(async () => ({ notes: "notes-out-1", operation: "op-1" })), fedimintTakeBack: vi.fn(async () => "canceled" as const) };

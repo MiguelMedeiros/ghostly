@@ -38,7 +38,7 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: Reac
       className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[85dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
       <div className="mb-4 flex items-center justify-between gap-3">
         <h2 id={`${id}-title`} className="text-base font-semibold min-w-0 break-words">{title}</h2>
-        <button type="button" onClick={onClose} aria-label={t("common.close")} className="h-10 w-10 max-md:h-11 max-md:w-11 shrink-0 cursor-pointer rounded-lg text-xl hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">×</button>
+        <button type="button" onClick={onClose} aria-label={t("common.close")} className="h-10 w-10 max-md:h-[44px] max-md:w-[44px] shrink-0 cursor-pointer rounded-lg text-xl hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">×</button>
       </div>
       <div className="space-y-3 text-sm">{shown && children}</div>
     </dialog>,
@@ -47,10 +47,10 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: Reac
 }
 
 // A border in forced colors only (as wallet/ui.tsx's Button): there the fill is gone, and a filled button would read as bare text.
-export const primaryButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
+export const primaryButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
 export const quietButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-border px-3 py-2.5 text-sm font-semibold text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40";
 /** An action that cannot be undone from here (Remove): the danger color, never the accent. */
-export const dangerButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-danger-fill px-3 py-2.5 text-sm font-semibold text-white hover:bg-danger-fill/80 forced-colors:border forced-colors:border-[color:ButtonText] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg disabled:opacity-40 disabled:cursor-not-allowed";
+export const dangerButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-danger-fill px-3 py-2.5 text-sm font-semibold text-white hover:bg-danger-fill/80 forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg disabled:opacity-40 disabled:cursor-not-allowed";
 export const field = "w-full min-w-0 px-3 py-2 min-h-11 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";
 
 /** The six digits as people read them: "482 913", large and spaced. */

@@ -24,7 +24,7 @@ describe("the bridge whose policy refused its guard", () => {
     vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
     vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
     vi.spyOn(window, "parent", "get").mockReturnValue(parent as unknown as Window);
-    const workers = Object.assign(new EventTarget(), { startMessages: () => {}, register: async () => ({}), ready: Promise.resolve({}) });
+    const workers = Object.assign(new EventTarget(), { startMessages: () => {}, register: async (script: string) => ({ active: { scriptURL: script } }) });
     Object.defineProperty(navigator, "serviceWorker", { value: workers, configurable: true });
     vi.stubGlobal("fetch", async () => new Response(null, { status: 204 }));
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -81,7 +81,7 @@ describe("the bridge's frame of the contact's app", () => {
 
   afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); document.body.replaceChildren(); });
 
-  async function bridgeFrame(relayOnly?: boolean): Promise<HTMLIFrameElement> {
+  async function bridgeFrame(relayOnly?: boolean, title?: unknown): Promise<HTMLIFrameElement> {
     const dom = (window as unknown as { happyDOM?: { setURL(url: string): void; settings: { disableIframePageLoading: boolean; handleDisabledFileLoadingAsSuccess: boolean } } }).happyDOM!;
     Object.assign(dom.settings, { disableIframePageLoading: true, handleDisabledFileLoadingAsSuccess: true });
     dom.setURL(`https://${LABEL}.svc.ghostly.example/_ghostly-svc/bridge.html`);
@@ -89,7 +89,7 @@ describe("the bridge's frame of the contact's app", () => {
     vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
     vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
     vi.spyOn(window, "parent", "get").mockReturnValue(parent as unknown as Window);
-    const workers = Object.assign(new EventTarget(), { startMessages: () => {}, register: async () => ({}), ready: Promise.resolve({}) });
+    const workers = Object.assign(new EventTarget(), { startMessages: () => {}, register: async (script: string) => ({ active: { scriptURL: script } }) });
     Object.defineProperty(navigator, "serviceWorker", { value: workers, configurable: true });
     // The server's clear of the services host's cookies, before the app is framed.
     vi.stubGlobal("fetch", async () => new Response(null, { status: 204 }));
@@ -97,7 +97,7 @@ describe("the bridge's frame of the contact's app", () => {
     await import("../../../../web/src/svc/bridge");
     expect(parent.postMessage).toHaveBeenCalled();
     const { port1 } = new MessageChannel();
-    window.dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_PORT, ...(relayOnly === undefined ? {} : { relayOnly }) }, origin: APP_ORIGIN, source: parent as unknown as Window, ports: [port1] }));
+    window.dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_PORT, ...(relayOnly === undefined ? {} : { relayOnly }), ...(title === undefined ? {} : { title }) }, origin: APP_ORIGIN, source: parent as unknown as Window, ports: [port1] }));
     await vi.waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
     return document.querySelector("iframe")!;
   }
@@ -105,6 +105,16 @@ describe("the bridge's frame of the contact's app", () => {
   it("cannot take the screen from the view's bar: no full screen", async () => {
     const frame = await bridgeFrame();
     expect(frame.getAttribute("allow")).toBe("");
+  });
+
+  it("is named by the view's label in the profile's language, never \"Ghostly\": the bar says the app is not Ghostly", async () => {
+    document.title = "Ghostly";
+    expect((await bridgeFrame(false, "Démo, partagée par Ana")).title).toBe("Démo, partagée par Ana");
+    for (const title of [undefined, 42, ""]) {
+      document.body.replaceChildren();
+      vi.resetModules();
+      expect((await bridgeFrame(false, title)).title, String(title)).toBe("");
+    }
   });
 
   it("runs the WebRTC guard first while Hide my IP from contacts is on: the app's frame, on this origin, reaches this window", async () => {
@@ -120,6 +130,36 @@ describe("the bridge's frame of the contact's app", () => {
     const web = (file: string) => readFileSync(join(import.meta.dirname, "../../../../web", file), "utf8");
     expect(web("svcBuild.ts")).toContain("script-src 'self' ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH};");
     expect(web("nginx-services.conf")).toContain(`script-src 'self' ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH};`);
+  });
+
+  it("registers the worker that guards the app's pages as Hide my IP from contacts is, and frames the app only once that worker answers", async () => {
+    // covers: settings.network.relay-only
+    for (const relayOnly of [false, true]) {
+      document.head.replaceChildren();
+      vi.resetModules();
+      const dom = (window as unknown as { happyDOM?: { setURL(url: string): void; settings: { disableIframePageLoading: boolean } } }).happyDOM!;
+      dom.settings.disableIframePageLoading = true;
+      dom.setURL(`https://${LABEL}.svc.ghostly.example/_ghostly-svc/bridge.html`);
+      const parent = { postMessage: vi.fn() };
+      vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
+      vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
+      vi.spyOn(window, "parent", "get").mockReturnValue(parent as unknown as Window);
+      // The worker registered before (another build's, or Hide my IP the other way) still answers at first.
+      const registration = { active: { scriptURL: `https://${LABEL}.svc.ghostly.example/ghostly-services-sw.js` } };
+      const register = vi.fn(async () => registration);
+      Object.defineProperty(navigator, "serviceWorker", { value: Object.assign(new EventTarget(), { startMessages: () => {}, register }), configurable: true });
+      vi.stubGlobal("fetch", async () => new Response(null, { status: 204 }));
+      runBridgeGuard();
+      await import("../../../../web/src/svc/bridge");
+      window.dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_PORT, relayOnly }, origin: APP_ORIGIN, source: parent as unknown as Window, ports: [new MessageChannel().port1] }));
+      const script = `https://${LABEL}.svc.ghostly.example/ghostly-services-sw.js?relay-only=${relayOnly ? 1 : 0}`;
+      await vi.waitFor(() => expect(register).toHaveBeenCalledWith(script, { scope: "/", updateViaCache: "none" }));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(document.querySelector("iframe"), String(relayOnly)).toBeNull();
+      registration.active = { scriptURL: script };
+      await vi.waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
+      document.body.replaceChildren();
+    }
   });
 
   it("runs the clipboard guard always, before the app's frame is made: the app's page reaches this window's execCommand", async () => {
@@ -435,7 +475,7 @@ describe("the bridge's frame of the contact's app", () => {
     vi.stubGlobal("__SERVICES_HOST__", "https://*.svc.ghostly.example");
     vi.stubGlobal("__SERVICES_APP_ORIGIN__", APP_ORIGIN);
     vi.spyOn(window, "parent", "get").mockReturnValue(parent as unknown as Window);
-    const workers = Object.assign(new EventTarget(), { startMessages: () => {}, register: async () => ({}), ready: Promise.resolve({}) });
+    const workers = Object.assign(new EventTarget(), { startMessages: () => {}, register: async (script: string) => ({ active: { scriptURL: script } }) });
     Object.defineProperty(navigator, "serviceWorker", { value: workers, configurable: true });
     // The server's clear of the services host's cookies, before the app is framed.
     vi.stubGlobal("fetch", async () => new Response(null, { status: 204 }));

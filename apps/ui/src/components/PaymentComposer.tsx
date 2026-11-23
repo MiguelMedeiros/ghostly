@@ -31,6 +31,7 @@ import { Notice } from "./ui/Notice";
 import { SecretGuardDialog } from "./SecretGuardDialog";
 import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { fillNames } from "../lib/fillNodes";
+import { isolate } from "../lib/ownStatus";
 import { FocusSafeButton } from "./ui/FocusSafeButton";
 
 interface PaymentComposerProps {
@@ -101,7 +102,8 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   // while a file moves.
   const [peer] = usePlatformValue(() => [servicesPlatform?.getPeer(chat ?? ""), wallet?.getState()] as const);
   const who = contact || t("payments.composer.yourContact");
-  const networkName = (card: InstanceCard) => `${card.network === "testnet" ? "Testnet" : "Mainnet"} ${card.name}`;
+  // "Cashu (Testnet)", in the language's own order ("Cashu（Testnet）"), as the Accept sheet names a card.
+  const networkName = (card: InstanceCard) => t("payments.accept.cardNetwork", { card: card.name, network: card.network === "testnet" ? "Testnet" : "Mainnet" });
   /**
    * Why a card cannot be used in this chat: not set up, off here, off for the contact, or no wallet of its network
    * there. `contact`: it is the contact's side that says no (the card's face says "Not accepted", else "Off here").
@@ -300,9 +302,11 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
         // Fedimint, but no federation in common: their request carries an invoice of their federation instead.
         clearInterval(timer);
         setAsking(null);
+        // A Notice's title is a string: the name goes in it between FSI and PDI, as the sheet's <bdi>s keep it.
+        const name = isolate(who);
         setError(answer.invoice
-          ? { tone: "error", title: t("payments.composer.error.noFederationInvoice", { name: who }), next: t("payments.composer.error.noFederationInvoiceNext") }
-          : { tone: "error", title: t("payments.composer.error.noFederation", { name: who }), next: t("payments.composer.error.noFederationNext") });
+          ? { tone: "error", title: t("payments.composer.error.noFederationInvoice", { name }), next: t("payments.composer.error.noFederationInvoiceNext") }
+          : { tone: "error", title: t("payments.composer.error.noFederation", { name }), next: t("payments.composer.error.noFederationNext") });
       } else if (answer?.target && context && bound) {
         clearInterval(timer);
         const token = answer.target.method === "usdt";
@@ -363,10 +367,14 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
           <p className="payment-back-hint" data-testid={amountField.hint && !blocked ? "amount-unclear" : undefined}>{blocked ?? amountField.hint ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
           {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unitFor(t, unit, value)}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
-            <FocusSafeButton data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => guarded(() => void request())} className="payment-back-secondary">
+            {/* The button at work is busy and `aria-disabled`, not disabled: the memo's Send anyway gives the focus back to
+                it as its work starts, and a disabled one would drop it to the page, there still when the work is refused. */}
+            <FocusSafeButton data-testid="payment-request" disabled={turning || !value || busy === "send" || !!asking || !!blocked} aria-disabled={busy === "request" || undefined} aria-busy={busy === "request" || undefined}
+              onClick={() => { if (!busy) guarded(() => void request()); }} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
             </FocusSafeButton>
-            <FocusSafeButton data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy !== null || !!asking || tooMuch} onClick={() => guarded(() => void send())}
+            <FocusSafeButton data-testid="payment-send" disabled={turning || !canSend || !!blocked || !value || busy === "request" || tooMuch} aria-disabled={busy === "send" || !!asking || undefined} aria-busy={busy === "send" || !!asking || undefined}
+              onClick={() => { if (!busy && !asking) guarded(() => void send()); }}
               title={canSend ? undefined : sendUnavailable ?? t("payments.composer.sendHint")} className="payment-back-primary">
               {asking ? t("payments.composer.asking") : busy === "send" ? t("payments.composer.preparing") : t("payments.composer.send")}
             </FocusSafeButton>

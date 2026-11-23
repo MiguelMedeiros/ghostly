@@ -1,5 +1,6 @@
 {
   "attach": "Anexar",
+  "bytesLeft": "Bytes restantes: {{count}}",
   "camera": "Câmera",
   "cameraBlocked": "Câmera bloqueada. Permita a câmera nos ajustes do Android para o Ghostly.",
   "cameraFailed": "Não foi possível abrir a câmera.",
@@ -17,6 +18,7 @@
     "recent": "Recentes",
     "symbols": "Símbolos"
   },
+  "charactersLeft": "Caracteres restantes: {{count}}",
   "chooseFiles": "Escolher arquivos",
   "closeCamera": "Fechar câmera",
   "dhtFits": {
@@ -24,7 +26,6 @@
     "contact": "Longo demais para a DHT, que leva cerca de {{fits}} bytes. A conversa do seu contato está em Só DHT: encurte, ou espere ele permitir conexão direta de novo.",
     "editLive": "Longo demais para a DHT como edição, que leva cerca de {{fits}} bytes: vai quando houver conexão direta.",
     "held": "Maior do que a DHT leva (cerca de {{fits}} bytes): fica guardada para seu contato até ele ficar online.",
-    "live": "Longo demais para a DHT, que leva cerca de {{fits}} bytes. Encurte, ou envie quando vocês estiverem conectados direto.",
     "you": "Longo demais para a DHT, que leva cerca de {{fits}} bytes. Esta conversa está em Só DHT: encurte, ou mude no ícone de conexão."
   },
   "dhtTooLong": "Longo demais para a DHT ({{bytes}} de {{max}} bytes). Encurte ou conecte ao vivo; o rascunho fica.",

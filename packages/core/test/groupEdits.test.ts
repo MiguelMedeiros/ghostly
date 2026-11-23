@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
-import { GroupSession, groupMessageId, type GroupEdgeFrame, type GroupEditFrame, type GroupState } from "../src/groupSession";
+import { GroupSession, groupMessageId, type GroupEdgeFrame, type GroupEditFrame, type GroupIncomingMessage, type GroupMessageFrame, type GroupState } from "../src/groupSession";
 import { CommunitySession, COMMUNITY_LIMITS, type CommunityFrame } from "../src/groupCommunity";
 import { COMMUNITY_EDIT_FRAME, GROUP_EDIT_FRAME, carryMentions, communityEditFrame, meshMessageRef, parseCommunityEdit, type GroupIncomingEdit } from "../src/groupEdits";
 import { REMOVED_TEXT } from "../src/pairedEdits";
@@ -14,6 +14,7 @@ const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 class Mesh {
   readonly sessions = new Map<string, GroupSession>();
   readonly edits = new Map<string, GroupIncomingEdit[]>();
+  readonly messages = new Map<string, GroupIncomingMessage[]>();
   readonly sent: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
   /** What each member's session saved, in order (the whole record each time). */
   readonly saves = new Map<string, GroupState[]>();
@@ -31,7 +32,7 @@ class Mesh {
     const session: GroupSession = new GroupSession(state, {
       save: async state => { this.saves.get(session.myKey)!.push(clone(state)); },
       send: (to, frame) => this.deliver(session, to, frame),
-      message: () => {},
+      message: m => { this.messages.get(session.myKey)!.push(m); },
       clock: () => this.clock ?? Date.now(),
       ...(old ? {} : { edit: (e: GroupIncomingEdit) => { this.edits.get(session.myKey)!.push(e); } }),
       changed: () => {},
@@ -39,6 +40,7 @@ class Mesh {
     });
     this.sessions.set(session.myKey, session);
     this.edits.set(session.myKey, []);
+    this.messages.set(session.myKey, []);
     this.saves.set(session.myKey, []);
     return session;
   }
@@ -131,6 +133,30 @@ describe("group-edit frames (a private group)", () => {
     expect(toCarol).toEqual([1]);
   });
 
+  it("a reply to a message deleted for everyone keeps no line of it a saved state could open, and its author's copy still goes whole", async () => {
+    const { mesh, alice, bob, carol } = await trio();
+    mesh.setEdge(bob, carol, false);
+    const line = "token sk-made-up-0123456789";
+    const id = ((await alice.sendText(line)) as { id: string }).id;
+    await mesh.settle();
+    const reply = ((await bob.sendText("got it", Date.now(), [], { i: id, s: line, f: alice.myKey })) as { id: string }).id;
+    await mesh.settle();
+    // What each saved state opens of the frames it keeps (mine, and the members' to hand on): texts and quoted lines.
+    const opens = (s: GroupState) => [...s.sent, ...s.relay ?? []].flatMap((f: GroupMessageFrame) => {
+      const key = epochKeys(fromBase64Url(s.secrets[f.e]), f.g, f.e).message;
+      return [decryptText(key, JSON.stringify([f.g, f.e, f.s, f.n, f.ts]), f.nn, f.c), f.r && decryptText(key, JSON.stringify(["ghostly-group/1 reply", f.g, f.e, f.s, f.n, f.ts]), f.r.n, f.r.c)];
+    }).join(" ");
+    expect(opens(alice.state)).toContain("sk-made-up");
+    expect(opens(bob.state)).toContain("sk-made-up");
+    // Each app on the removal (`Groups.removed`): the author's own, Bob's whose reply quotes it, Carol's who kept it to hand on.
+    for (const s of [alice, bob, carol]) { s.forget(id); await s.flush(); }
+    for (const s of [alice, bob, carol]) expect(opens(mesh.saves.get(s.myKey)!.at(-1)!)).not.toContain("sk-made-up");
+    // Bob's reply is still his to hand on: Carol, away, takes it handed on whole, the reply without its line.
+    const kept = bob.state.sent.find(f => groupMessageId(f.s, f.e, f.n) === reply)!;
+    await carol.handle(alice.myKey, clone(kept));
+    expect(mesh.messages.get(carol.myKey)!.find(m => m.id === reply)).toMatchObject({ text: "got it", reply: { i: id, s: "", f: alice.myKey } });
+  });
+
   it("only its author edits a message: a member can hand the author's edit on, never alter or forge one", async () => {
     const { mesh, alice, bob, carol } = await trio();
     const id = ((await bob.sendText("mine")) as { id: string }).id;
@@ -139,15 +165,15 @@ describe("group-edit frames (a private group)", () => {
     await bob.sendEdit(id, { v: 1, ts: 1, text: "fixed" });
     await mesh.settle();
     const frame = mesh.sent.find(f => f.frame.t === GROUP_EDIT_FRAME && f.to === carol.myKey)!.frame as GroupEditFrame;
-    // Handed on by Carol, a member: Bob's own edit, taken again (the engine shows it once).
+    // Handed on by Carol, a member: Bob's own edit, taken already (another hub's copy), so not again.
     await alice.handle(carol.myKey, clone(frame));
-    expect(mesh.of(alice).map(e => [e.sender, e.e, e.m])).toEqual([[bob.myKey, 1, "fixed"], [bob.myKey, 1, "fixed"]]);
+    expect(mesh.of(alice).map(e => [e.sender, e.e, e.m])).toEqual([[bob.myKey, 1, "fixed"]]);
     // Altered on the way (a higher number, another text box): the author's signature no longer holds.
     await alice.handle(carol.myKey, { ...clone(frame), v: 2 });
     await alice.handle(carol.myKey, { ...clone(frame), c: clone(frame).c.slice(0, -4) + "AAAA" });
     // From someone not in the group: nothing.
     await alice.handle(createIdentity().pubKeyZ32, clone(frame));
-    expect(mesh.of(alice)).toHaveLength(2);
+    expect(mesh.of(alice)).toHaveLength(1);
   });
 
   it("a member hands an edit on to one whose edge to the author is down, when its sync asks for the author", async () => {

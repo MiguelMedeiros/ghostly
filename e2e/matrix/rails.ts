@@ -374,7 +374,14 @@ async function bdk(a: Actor, b: Actor): Promise<void> {
   bdkRegtest("ready");
   const panel = (p: Actor) => p.page.getByTestId("bitcoin-wallet");
   const balance = (p: Actor) => panel(p).getByTestId("bitcoin-balance");
-  const refreshed = async (p: Actor) => { await panel(p).getByRole("button", { name: either("Refresh now") }).click(); return amountIn(await balance(p).innerText()); };
+  // The panel shows the balance it had until the refresh ends (the button busy meanwhile): read at once, it was the one
+  // from before B's last payment (mx-12ea0748, 2026-11-15 and 11-21).
+  const refreshed = async (p: Actor) => {
+    const button = panel(p).getByRole("button", { name: either("Refresh now") });
+    await button.click();
+    await expect(button).not.toHaveAttribute("aria-busy", "true", { timeout: 60_000 });
+    return amountIn(await balance(p).innerText());
+  };
   const mine = () => { bdkRegtest("mine", "1"); };
   const address: Partial<Record<string, string>> = {};
   for (const p of [a, b]) {
@@ -408,10 +415,19 @@ async function bdk(a: Actor, b: Actor): Promise<void> {
   await requestInChat(a, b, { card: "bitcoin", amount: "2000", note: "bitcoin: A asks B", maxFee: "10000" }, mine);
 
   // B: 20,000 − 5,000 + 3,000 − 2,000 and its two fees; A: the rest, less its own two fees.
+  // Taken once two refreshes in a row agree and neither says unconfirmed.
   const settledBalance = async (p: Actor) => {
     await wallet(p, "bitcoin");
-    await expect.poll(async () => { mine(); await refreshed(p); return balance(p).innerText(); }, { timeout: 90_000, intervals: [3_000] }).not.toMatch(template("{{amount}} {{unit}} unconfirmed"));
-    return refreshed(p);
+    const unconfirmed = template("{{amount}} {{unit}} unconfirmed");
+    let last: number | undefined;
+    await expect.poll(async () => {
+      mine();
+      const sats = await refreshed(p);
+      const settled = sats === last && !unconfirmed.test(await balance(p).innerText());
+      last = sats;
+      return settled;
+    }, { timeout: 90_000, intervals: [3_000] }).toBe(true);
+    return last!;
   };
   const bFees = 16_000 - (await settledBalance(b));
   expect(bFees).toBeGreaterThan(0);

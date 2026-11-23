@@ -31,6 +31,14 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// the refusal is missing, instead of waiting out the real timeout.
 #[cfg(test)]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+/// The largest request body the data link carries (`LIMITS.maxRequestBodyBytes` in core, `MAX_REQUEST_BYTES` on the
+/// web): a larger one is refused here, before it is copied into the main window.
+const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024 * 1024;
+/// What one window may have waiting for an answer at once: requests, and the bytes of their bodies. Past either a
+/// request is refused at once, so the app cannot make the main window hold unbounded memory. The count is the web
+/// runner's sent and waiting ones together (`MAX_PENDING_REQUESTS` + `MAX_WAITING_REQUESTS`), the bytes its own.
+const MAX_PENDING_REQUESTS: usize = 288;
+const MAX_PENDING_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Added to every answer a contact's app gets served, after the contact's own
 /// policies: a WebView enforces every policy it is sent, so the contact's own
@@ -56,8 +64,12 @@ const SERVICE_CSP_RELAY_ONLY: &str = "default-src 'self' data: blob: 'unsafe-inl
 /// windows with `noopener`, and guards a frame's window before the page holds it (what a frame element
 /// hands out, the frames of a document as one loads or the page changes, each `srcdoc`), for a frame the
 /// WebView did not run it in, and starts a worker made from a `blob:` URL of the page's from a script that makes a
-/// pass-through Trusted Types `default` policy in it first. The same text as `VIEWER_GUARD_SCRIPT` in
-/// `packages/core/src/viewerGuard.ts`, which says what a script in the page cannot do.
+/// pass-through Trusted Types `default` policy in it first. It takes out each `<script type="speculationrules">`
+/// as it is put in the page: Chromium (WebView2) would prefetch or prerender the pages it lists on a server the
+/// contact names, outside the policy, and `'unsafe-inline'` lets it in. Its Trusted Types default policy refuses
+/// `javascript:` URLs; an app that makes its own `default` policy gets the guard's back, with the app's rules in it.
+/// The same text as `VIEWER_GUARD_SCRIPT` in `packages/core/src/viewerGuard.ts`, which says what a script in the
+/// page cannot do.
 const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
   "use strict";
   try {
@@ -66,13 +78,33 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     for (const name of Object.getOwnPropertyNames(w)) {
       if (/^(webkit)?RTC/.test(name)) { try { delete w[name]; } catch (e) {} }
     }
-    if (w.trustedTypes && !w.trustedTypes.defaultPolicy) {
+    const types = w.trustedTypes;
+    let passing = false;
+    if (types && !types.defaultPolicy) {
       try {
-        w.trustedTypes.createPolicy("default", {
-          createHTML: (input) => input,
-          createScript: (input, type, sink) => (sink === "Location href" ? null : input),
-          createScriptURL: (input) => input,
-        });
+        let rules = null;
+        const rule = (kind) => (input, type, sink) => {
+          if (kind === "createScript" && sink === "Location href") return null;
+          if (passing || rules === null) return input;
+          return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+        };
+        const members = ["createHTML", "createScript", "createScriptURL"];
+        const create = types.createPolicy;
+        const policy = apply(create, types, ["default", { createHTML: rule(members[0]), createScript: rule(members[1]), createScriptURL: rule(members[2]) }]);
+        const named = String;
+        const Mistyped = w.TypeError;
+        Object.getPrototypeOf(types).createPolicy = function createPolicy(name, options) {
+          if (this !== types || rules !== null || named(name) !== "default") return apply(create, this, arguments);
+          const given = { createHTML: null, createScript: null, createScriptURL: null };
+          for (let i = 0; i < members.length; i++) {
+            const found = options ? options[members[i]] : undefined;
+            if (found === undefined || found === null) continue;
+            if (typeof found !== "function") throw new Mistyped("The policy's " + members[i] + " is not a function");
+            given[members[i]] = found;
+          }
+          rules = given;
+          return policy;
+        };
       } catch (e) {}
     }
     const open = w.open;
@@ -148,7 +180,15 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     const first = (frame) => {
       const doc = apply(getAttribute, frame, ["srcdoc"]);
       if (doc === null || apply(slice, doc, [0, own.length]) === own) return;
+      passing = true;
       try { apply(setAttribute, frame, ["srcdoc", own + doc]); } catch (e) { apply(removeAttribute, frame, ["srcdoc"]); }
+      passing = false;
+    };
+    const trim = String.prototype.trim;
+    const drop = w.Element.prototype.remove;
+    const unruled = (script) => {
+      const type = apply(getAttribute, script, ["type"]);
+      if (type !== null && apply(lower, apply(trim, type, []), []) === "speculationrules") apply(drop, script, []);
     };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
@@ -157,6 +197,10 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
         try {
           const frames = apply(all, root, ["iframe[srcdoc]"]);
           for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+        } catch (e) {}
+        try {
+          const scripts = apply(all, root, ["script"]);
+          for (let i = apply(size, scripts, []); i-- > 0;) unruled(scripts[i]);
         } catch (e) {}
         sweep();
       };
@@ -381,17 +425,58 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
         if (name === "paste" || ((name === "copy" || name === "cut") && !tapping())) return false;
         const args = [name];
         for (let i = 1; i < arguments.length; i++) args[i] = arguments[i];
-        return apply(run, this, args);
+        try { return apply(run, this, args); } finally { sweep(); }
       };
       define(proto, "execCommand", { value: guarded, writable: false, enumerable: exec.enumerable, configurable: false });
+      const trim = text.prototype.trim;
+      const jar = describe(proto, "cookie");
+      if (jar && jar.configurable === true && typeof jar.set === "function") {
+        const put = jar.set;
+        const hostOnly = function cookie(value) {
+          const line = text(value);
+          let at = apply(index, line, [";"]);
+          let kept = at < 0 ? line : apply(slice, line, [0, at]);
+          while (at >= 0) {
+            const next = apply(index, line, [";", at + 1]);
+            const part = next < 0 ? apply(slice, line, [at + 1]) : apply(slice, line, [at + 1, next]);
+            const named = apply(index, part, ["="]);
+            if (apply(lower, apply(trim, named < 0 ? part : apply(slice, part, [0, named]), []), []) !== "domain") kept += ";" + part;
+            at = next;
+          }
+          return apply(put, this, [kept]);
+        };
+        define(proto, "cookie", { get: jar.get, set: hostOnly, enumerable: jar.enumerable, configurable: false });
+      }
+      const store = w.CookieStore && w.CookieStore.prototype;
+      const fields = ["name", "value", "expires", "path", "sameSite", "partitioned", "maxAge"];
+      const changes = ["set", "delete"];
+      for (let i = 0; store && i < changes.length; i++) {
+        const real = store[changes[i]];
+        if (typeof real !== "function") continue;
+        const ownHost = function (options) {
+          const args = [];
+          for (let j = 0; j < arguments.length; j++) args[j] = arguments[j];
+          if (options !== null && (typeof options === "object" || typeof options === "function")) {
+            const given = { __proto__: null };
+            for (let f = 0; f < fields.length; f++) {
+              const found = options[fields[f]];
+              if (found !== undefined) given[fields[f]] = found;
+            }
+            args[0] = given;
+          }
+          return apply(real, this, args);
+        };
+        define(ownHost, "name", { value: changes[i] });
+        define(store, changes[i], { value: ownHost, writable: false, enumerable: true, configurable: false });
+      }
       const types = w.trustedTypes;
       if (types && !types.defaultPolicy) {
         try {
           let rules = null;
           const rule = (kind) => (input, type, sink) => {
             if (kind === "createScript" && sink === "Location href") return null;
-            if (passing || rules === null) return input;
-            return rules[kind] ? apply(rules[kind], undefined, [input, type, sink]) : null;
+            if (passing || rules === null || !rules[kind]) return input;
+            return apply(rules[kind], undefined, [input, type, sink]);
           };
           const members = ["createHTML", "createScript", "createScriptURL"];
           const create = types.createPolicy;
@@ -523,6 +608,31 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           try { define(owner, name, found); } catch (e) {}
         }
       }
+      const inserts = [
+        [w.Node, ["appendChild", "insertBefore", "replaceChild"]],
+        [w.Element, ["append", "prepend", "before", "after", "replaceWith", "replaceChildren", "insertAdjacentElement", "insertAdjacentHTML", "setHTMLUnsafe", "setHTML", "innerHTML", "outerHTML"]],
+        [w.CharacterData, ["before", "after", "replaceWith"]],
+        [w.DocumentType, ["before", "after", "replaceWith"]],
+        [w.Document, ["append", "prepend", "replaceChildren", "write", "writeln", "body"]],
+        [w.Range, ["insertNode", "surroundContents"]],
+        [w.HTMLTableElement, ["caption", "tHead", "tFoot"]],
+        [w.HTMLSelectElement, ["add"]],
+        [w.HTMLOptionsCollection, ["add"]],
+      ];
+      for (let k = 0; k < inserts.length; k++) {
+        const owner = inserts[k][0] && inserts[k][0].prototype;
+        const names = inserts[k][1];
+        for (let n = 0; n < names.length; n++) {
+          const found = owner && describe(owner, names[n]);
+          const key = found && found.set ? "set" : "value";
+          if (!found || typeof found[key] !== "function") continue;
+          const real = found[key];
+          found[key] = function () {
+            try { return apply(real, this, arguments); } finally { sweep(); }
+          };
+          try { define(owner, names[n], found); } catch (e) {}
+        }
+      }
       const inShadow = w.DocumentFragment.prototype.querySelectorAll;
       if (attachShadow) {
         elements.attachShadow = function () {
@@ -533,6 +643,112 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
       }
     }
     if (!watched) watch(home, proto.querySelectorAll);
+  } catch (e) {}
+})(window)"#;
+
+/// Nor does any keep it off the async Clipboard API: WebKit lets `navigator.clipboard.writeText` and `write` write the
+/// system clipboard from a timer seconds after a tap in the page, and `readText` and `read` read it, whatever the
+/// `clipboard-write=()` and `clipboard-read=()` the window is sent (`PERMISSIONS_POLICY`). This runs in every frame of
+/// the window after the guards, whatever the setting, and in each frame of the page's it reaches: a write only while
+/// the person's own input in that frame is being dispatched (`CLIPBOARD_GUARD`'s test for a copy), never a read. The
+/// web needs none: there the browser keeps the app's frames off the API.
+const ASYNC_CLIPBOARD_GUARD: &str = r#"(function noAsyncClipboard(w) {
+  "use strict";
+  try {
+    const apply = w.Reflect.apply;
+    const describe = w.Object.getOwnPropertyDescriptor;
+    const define = w.Object.defineProperty;
+    const board = w.Clipboard && w.Clipboard.prototype;
+    if (!board || describe(board, "ghostlyAsyncClipboard")) return;
+    define(board, "ghostlyAsyncClipboard", { value: true });
+    const listen = w.EventTarget.prototype.addEventListener;
+    const phase = describe(w.Event.prototype, "eventPhase").get;
+    const stamp = describe(w.Event.prototype, "timeStamp").get;
+    const clock = w.performance;
+    const tick = clock && clock.now;
+    const time = () => { try { return apply(tick, clock, []); } catch (e) { return NaN; } };
+    let tap = null;
+    let trusted = null;
+    let tapped = NaN;
+    const seen = (event) => {
+      try {
+        const found = describe(event, "isTrusted");
+        if (!found || !found.get || apply(found.get, event, []) !== true) return;
+        let at = time();
+        try {
+          const given = apply(stamp, event, []);
+          if (given >= 0 && given < at) at = given;
+        } catch (e) {}
+        tap = event;
+        trusted = found.get;
+        tapped = at;
+      } catch (e) {}
+    };
+    const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
+    for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
+    const tapping = () => {
+      try { return tap !== null && apply(trusted, tap, []) === true && apply(phase, tap, []) !== 0 && time() - tapped <= 1000; } catch (e) { return false; }
+    };
+    const Refused = w.DOMException;
+    const Promised = w.Promise;
+    const reject = Promised.reject;
+    const refuse = () => apply(reject, Promised, [new Refused("The app may not use the clipboard here", "NotAllowedError")]);
+    const calls = [["write", true], ["writeText", true], ["read", false], ["readText", false]];
+    for (let i = 0; i < calls.length; i++) {
+      const name = calls[i][0];
+      const writes = calls[i][1];
+      const found = describe(board, name);
+      if (!found || typeof found.value !== "function") continue;
+      const real = found.value;
+      const guarded = function () {
+        if (!writes || !tapping()) return refuse();
+        return apply(real, this, arguments);
+      };
+      define(guarded, "name", { value: name });
+      define(board, name, { value: guarded, writable: false, enumerable: found.enumerable, configurable: false });
+    }
+    const shut = (inner) => {
+      try { if (inner && inner !== w) noAsyncClipboard(inner); } catch (e) {}
+    };
+    const count = describe(w, "length").get;
+    const view = describe(w.Document.prototype, "defaultView").get;
+    const sweep = () => {
+      try { for (let i = apply(count, w, []); i-- > 0;) shut(w[i]); } catch (e) {}
+    };
+    const kinds = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
+    const reads = ["contentWindow", "contentDocument", "getSVGDocument"];
+    for (let k = 0; k < kinds.length; k++) {
+      const owner = w[kinds[k]] && w[kinds[k]].prototype;
+      for (let r = 0; r < reads.length; r++) {
+        const name = reads[r];
+        const found = owner && describe(owner, name);
+        const key = found && found.get ? "get" : "value";
+        if (!found || typeof found[key] !== "function") continue;
+        const read = found[key];
+        found[key] = function () {
+          const got = apply(read, this, arguments);
+          try { shut(name === "contentWindow" ? got : apply(view, got, [])); } catch (e) {}
+          return got;
+        };
+        try { define(owner, name, found); } catch (e) {}
+      }
+    }
+    const Observer = w.MutationObserver;
+    const observe = Observer.prototype.observe;
+    const watch = (root) => {
+      apply(observe, new Observer(sweep), [root, { subtree: true, childList: true }]);
+      apply(listen, root, ["load", sweep, true]);
+    };
+    const attachShadow = w.Element.prototype.attachShadow;
+    if (attachShadow) {
+      w.Element.prototype.attachShadow = function () {
+        const root = apply(attachShadow, this, arguments);
+        try { watch(root); } catch (e) {}
+        return root;
+      };
+    }
+    watch(w.document);
+    sweep();
   } catch (e) {}
 })(window)"#;
 
@@ -554,19 +770,21 @@ const WORKER_DESTINATIONS: [&str; 3] = ["worker", "sharedworker", "serviceworker
 /// The contact's headers that are not passed on: each makes the WebView send
 /// something to a place it names, outside `connect-src` (violation and
 /// network-error reports, and the endpoints they go to; `Link` preloads,
-/// prefetches and early connections). The same list as
-/// `OPENED_SERVICE_DROPPED_HEADERS` in `packages/cli/src/services.ts`.
-const DROPPED_HEADERS: [&str; 5] = [
+/// prefetches and early connections; `Speculation-Rules` prefetches and
+/// prerenders). The same list as `OPENED_SERVICE_DROPPED_HEADERS` in
+/// `packages/cli/src/services.ts`.
+const DROPPED_HEADERS: [&str; 6] = [
     "content-security-policy-report-only",
     "reporting-endpoints",
     "report-to",
     "nel",
     "link",
+    "speculation-rules",
 ];
 
 /// The page's features, Ghostly's alone: the contact's `Permissions-Policy` (or the older `Feature-Policy`) could
 /// allow them, so it takes their place. `VIEWER_PERMISSIONS_POLICY` in `packages/core/src/http.ts`.
-const PERMISSIONS_POLICY: &str = "camera=(), microphone=(), display-capture=(), geolocation=(), midi=(), usb=(), serial=(), hid=(), clipboard-read=(), idle-detection=(), local-fonts=(), window-management=(), storage-access=(), publickey-credentials-create=()";
+const PERMISSIONS_POLICY: &str = "camera=(), microphone=(), display-capture=(), geolocation=(), midi=(), usb=(), serial=(), hid=(), clipboard-read=(), clipboard-write=(), idle-detection=(), local-fonts=(), window-management=(), storage-access=(), publickey-credentials-create=()";
 
 /// A contact's headers that would set the page's features (`PERMISSIONS_POLICY`).
 const FEATURE_HEADERS: [&str; 2] = ["permissions-policy", "feature-policy"];
@@ -604,6 +822,8 @@ pub struct ViewerState {
     /// Window label → what it shows. The window decides where a request goes, not its URL.
     windows: Mutex<HashMap<String, Bound>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<ServiceResponse>>>,
+    /// Window label → its requests waiting for an answer and the bytes of their bodies (`Room`).
+    held: Mutex<HashMap<String, (usize, usize)>>,
     next_id: AtomicU64,
 }
 
@@ -734,7 +954,8 @@ fn external_target(url: &url::Url, site: &str, service: &str) -> Option<String> 
 }
 
 /// Whether a link names this machine or the local network: an address that is not public (loopback, private,
-/// link-local, …), `localhost` and its subdomains, an mDNS `.local` name, or a name of one label (`router`, `nas`)
+/// link-local, …), a name under a local suffix (`localhost`, mDNS `.local`, a router's `.lan` or `.home`, a company's
+/// `.corp`: `local_names::LOCAL_SUFFIXES`), or a name of one label (`router`, `nas`)
 /// that only a local resolver answers. The contact's page runs on the contact's side; opening such a link in the
 /// person's browser sends it with the browser's cookies, past the browser's own guard for local addresses
 /// (WebView2 opens one from script, with no click). A public name that resolves to a local address is not caught here.
@@ -744,11 +965,7 @@ fn is_local_host(url: &url::Url) -> bool {
         Some(url::Host::Ipv6(ip)) => !crate::link_preview::is_public(ip.into()),
         Some(url::Host::Domain(name)) => {
             let name = name.trim_end_matches('.').to_ascii_lowercase();
-            !name.contains('.')
-                || name.ends_with(".localhost")
-                || name.ends_with(".local")
-                || name.ends_with(".internal")
-                || name.ends_with(".home.arpa")
+            !name.contains('.') || crate::local_names::under_local_suffix(&name)
         }
         None => true,
     }
@@ -876,6 +1093,7 @@ pub fn open<R: tauri::Runtime>(
         let _ = window.close();
         return Err(format!("Window: {}", e));
     }
+    crate::downloads::trim(&window, crate::downloads::Window::Contact);
     // With Hide my IP on, a rule list that blocks every HTTP(S) and WS(S) load goes in just after the window is
     // made, as an app window's filter on Linux (`app_sandbox::add_rules`); nothing is served to it before
     // (`handle`), so no page of the contact's runs there without it.
@@ -894,12 +1112,12 @@ pub fn open<R: tauri::Runtime>(
 }
 
 /// The scripts the app's every frame runs before its own code, in this order: the clipboard guard always, then the
-/// WebRTC guard with Hide my IP from contacts on (the web runner's order).
+/// WebRTC guard with Hide my IP from contacts on (the web runner's order), then the Desktop's async clipboard guard.
 fn frame_guards(relay_only: bool) -> Vec<&'static str> {
     if relay_only {
-        vec![CLIPBOARD_GUARD, SERVICE_GUARD]
+        vec![CLIPBOARD_GUARD, SERVICE_GUARD, ASYNC_CLIPBOARD_GUARD]
     } else {
-        vec![CLIPBOARD_GUARD]
+        vec![CLIPBOARD_GUARD, ASYNC_CLIPBOARD_GUARD]
     }
 }
 
@@ -976,12 +1194,60 @@ pub fn respond<R: tauri::Runtime>(app: &AppHandle<R>, id: u64, response: Service
     }
 }
 
+/// The policy of Ghostly's own answers on the app's origin (`plain`): nothing loads from them. The app could frame
+/// one and fetch or load through it, under this policy instead of `SERVICE_CSP`. The web runner's `ownPolicy` in
+/// `apps/web/src/svc/worker.ts`.
+const OWN_ANSWER_CSP: &str =
+    "frame-ancestors 'self'; default-src 'none'; form-action 'none'; base-uri 'none'";
+
 fn plain(status: StatusCode, message: &str) -> Response<Vec<u8>> {
     Response::builder()
         .status(status)
         .header("content-type", "text/plain; charset=utf-8")
+        .header("content-security-policy", OWN_ANSWER_CSP)
+        .header("x-content-type-options", "nosniff")
         .body(message.as_bytes().to_vec())
         .expect("static response")
+}
+
+/// One request's place in its window's room (`MAX_PENDING_REQUESTS`, `MAX_PENDING_BODY_BYTES`), given back when it
+/// is dropped: answered, timed out, or let go of by the page.
+struct Room<'a> {
+    held: &'a Mutex<HashMap<String, (usize, usize)>>,
+    label: &'a str,
+    bytes: usize,
+}
+
+impl<'a> Room<'a> {
+    fn take(state: &'a ViewerState, label: &'a str, bytes: usize) -> Option<Self> {
+        let mut held = state.held.lock().ok()?;
+        let (count, total) = held.entry(label.to_string()).or_default();
+        if *count >= MAX_PENDING_REQUESTS || *total + bytes > MAX_PENDING_BODY_BYTES {
+            return None;
+        }
+        *count += 1;
+        *total += bytes;
+        Some(Room {
+            held: &state.held,
+            label,
+            bytes,
+        })
+    }
+}
+
+impl Drop for Room<'_> {
+    fn drop(&mut self) {
+        let Ok(mut held) = self.held.lock() else {
+            return;
+        };
+        if let Some((count, total)) = held.get_mut(self.label) {
+            *count -= 1;
+            *total -= self.bytes;
+            if *count == 0 {
+                held.remove(self.label);
+            }
+        }
+    }
 }
 
 pub async fn handle<R: tauri::Runtime>(
@@ -1033,6 +1299,21 @@ pub async fn handle<R: tauri::Runtime>(
             "This window only shows the service it was opened for.",
         );
     }
+
+    // Refused before the body is copied and base64'd into the main window, which would only refuse it there.
+    let bytes = request.body().len();
+    if bytes > MAX_REQUEST_BODY_BYTES {
+        return plain(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "The request body is too large.",
+        );
+    }
+    let Some(_room) = Room::take(&state, &label, bytes) else {
+        return plain(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Too many requests are waiting for an answer.",
+        );
+    };
 
     let id = state.next_id.fetch_add(1, Ordering::Relaxed);
     let (sender, receiver) = oneshot::channel();
@@ -1400,6 +1681,12 @@ mod tests {
             "http://router/",
             "http://metadata.google.internal/",
             "http://nas.home.arpa/",
+            "http://router.lan/",
+            "http://NAS.Lan./",
+            "http://router.home/",
+            "http://nas.localdomain/",
+            "http://hr.intranet/",
+            "http://files.corp/",
         ] {
             assert_eq!(outside(local), None, "{local}");
         }
@@ -1696,6 +1983,84 @@ mod routing_tests {
     }
 
     #[test]
+    fn a_window_holds_only_so_many_requests_and_body_bytes_at_once() {
+        let app = app();
+        bind(&app, "svc-1");
+        bind(&app, "svc-2");
+        let asked = requests(&app);
+        let url = format!("{SCHEME}://atlas.{PEER}.{TAG}/up");
+        let send = |label: &str, body: &[u8]| {
+            tauri::async_runtime::spawn(handle(
+                app.handle().clone(),
+                label.into(),
+                request("POST", &url, body),
+            ))
+        };
+        let carried = || {
+            asked.recv_timeout(Duration::from_secs(5)).unwrap()["id"]
+                .as_u64()
+                .unwrap()
+        };
+        let served = |pending: tauri::async_runtime::JoinHandle<Response<Vec<u8>>>| {
+            tauri::async_runtime::block_on(pending).unwrap().status()
+        };
+        let answer = |id: u64| {
+            respond(
+                app.handle(),
+                id,
+                ServiceResponse {
+                    status: 200,
+                    headers: Vec::new(),
+                    body_b64: String::new(),
+                },
+            )
+        };
+
+        // A body past the data link's limit is refused here, never handed to the main window.
+        let too_large = vec![0u8; MAX_REQUEST_BODY_BYTES + 1];
+        assert_eq!(
+            served(send("svc-1", &too_large)),
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        assert!(asked.try_recv().is_err());
+
+        // A request waiting for its answer holds room in its window, and gives it back once answered.
+        let state = app.state::<ViewerState>();
+        let full = vec![0u8; MAX_REQUEST_BODY_BYTES];
+        let pending = send("svc-1", &full);
+        let id = carried();
+        assert_eq!(
+            state.held.lock().unwrap().get("svc-1"),
+            Some(&(1, MAX_REQUEST_BODY_BYTES))
+        );
+        answer(id);
+        assert_eq!(served(pending), StatusCode::OK);
+        assert!(state.held.lock().unwrap().is_empty());
+
+        // Room held by others, taken here rather than by requests that would time out while the test runs: past the
+        // bytes or the count, a request is refused at once and never handed to the main window.
+        let bytes = Room::take(&state, "svc-1", MAX_PENDING_BODY_BYTES).unwrap();
+        assert_eq!(served(send("svc-1", b"x")), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(asked.try_recv().is_err());
+        // Another window has its own room.
+        let other = send("svc-2", b"x");
+        answer(carried());
+        assert_eq!(served(other), StatusCode::OK);
+        drop(bytes);
+        let count: Vec<_> = (0..MAX_PENDING_REQUESTS)
+            .map(|_| Room::take(&state, "svc-1", 0).unwrap())
+            .collect();
+        assert_eq!(served(send("svc-1", b"")), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(asked.try_recv().is_err());
+        drop(count);
+        let again = send("svc-1", b"x");
+        answer(carried());
+        assert_eq!(served(again), StatusCode::OK);
+        assert!(state.pending.lock().unwrap().is_empty());
+        assert!(state.held.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn no_header_sends_reports_or_early_requests_elsewhere_and_requests_stay_on_the_contact() {
         let app = app();
         bind(&app, "svc-1");
@@ -1733,6 +2098,7 @@ mod routing_tests {
                 "Link",
                 "<https://nas.local/>; rel=preconnect, </s.css>; rel=\"dns-prefetch prefetch\"",
             ),
+            ("Speculation-Rules", "\"http://127.0.0.1:9/rules.json\""),
             ("x-served-by", "atlas"),
         ];
         respond(
@@ -1755,6 +2121,7 @@ mod routing_tests {
             "report-to",
             "nel",
             "link",
+            "speculation-rules",
         ] {
             assert!(response.headers().get(name).is_none(), "{name}");
         }
@@ -1977,8 +2344,32 @@ mod routing_tests {
     /// after it with Hide my IP on: the order the web runner puts them in a page.
     #[test]
     fn every_frame_runs_the_clipboard_guard_first() {
-        assert_eq!(frame_guards(false), vec![CLIPBOARD_GUARD]);
-        assert_eq!(frame_guards(true), vec![CLIPBOARD_GUARD, SERVICE_GUARD]);
+        assert_eq!(
+            frame_guards(false),
+            vec![CLIPBOARD_GUARD, ASYNC_CLIPBOARD_GUARD]
+        );
+        assert_eq!(
+            frame_guards(true),
+            vec![CLIPBOARD_GUARD, SERVICE_GUARD, ASYNC_CLIPBOARD_GUARD]
+        );
+    }
+
+    /// Every frame of the window, whatever the setting, also runs the Desktop's own guard of the async Clipboard API
+    /// after the others: its two writes go through only in the person's tap, its two reads never.
+    #[test]
+    fn every_frame_keeps_the_async_clipboard_to_a_tap() {
+        for relay_only in [false, true] {
+            assert_eq!(
+                frame_guards(relay_only).last(),
+                Some(&ASYNC_CLIPBOARD_GUARD)
+            );
+        }
+        assert!(ASYNC_CLIPBOARD_GUARD.starts_with("(function noAsyncClipboard(w) {"));
+        assert!(ASYNC_CLIPBOARD_GUARD.contains(
+            r#"const calls = [["write", true], ["writeText", true], ["read", false], ["readText", false]];"#
+        ));
+        assert!(ASYNC_CLIPBOARD_GUARD.contains("if (!writes || !tapping()) return refuse();"));
+        assert!(ASYNC_CLIPBOARD_GUARD.contains("configurable: false"));
     }
 
     /// The clipboard guard is the web runner's, word for word.
@@ -2230,6 +2621,103 @@ mod routing_tests {
         assert_eq!(
             (bad_body.status(), bad_body.body().len()),
             (StatusCode::OK, 0)
+        );
+    }
+
+    /// Ghostly's own answers on the app's origin (not ready, too much waiting, too large, no answer, an answer it
+    /// could not make) let nothing load from them: the app could frame one and load through it, under its policy.
+    #[test]
+    fn ghostlys_own_answers_on_the_apps_origin_let_nothing_load_from_them() {
+        let own = |response: &Response<Vec<u8>>, what: &str| {
+            assert_eq!(
+                response.headers()["content-security-policy"],
+                "frame-ancestors 'self'; default-src 'none'; form-action 'none'; base-uri 'none'",
+                "{what}"
+            );
+            assert_eq!(
+                response.headers()["x-content-type-options"],
+                "nosniff",
+                "{what}"
+            );
+        };
+        let app = app();
+        let asked = requests(&app);
+        let url = format!("{SCHEME}://atlas.{PEER}.{TAG}/");
+        let served = |label: &str, body: &[u8]| {
+            tauri::async_runtime::block_on(handle(
+                app.handle().clone(),
+                label.into(),
+                request("POST", &url, body),
+            ))
+        };
+
+        // Not ready: a window with Hide my IP on whose rule list is not in.
+        open(
+            app.handle(),
+            PEER.into(),
+            "atlas".into(),
+            TAG.into(),
+            "Atlas".into(),
+            None,
+            Some(true),
+        )
+        .unwrap();
+        let not_ready = served("svc-0", b"");
+        assert_eq!(not_ready.status(), StatusCode::SERVICE_UNAVAILABLE);
+        own(&not_ready, "not ready");
+
+        bind(&app, "svc-1");
+        let too_large = served("svc-1", &vec![0u8; MAX_REQUEST_BODY_BYTES + 1]);
+        assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        own(&too_large, "too large");
+
+        let state = app.state::<ViewerState>();
+        let held = Room::take(&state, "svc-1", MAX_PENDING_BODY_BYTES).unwrap();
+        let waiting = served("svc-1", b"x");
+        assert_eq!(waiting.status(), StatusCode::SERVICE_UNAVAILABLE);
+        own(&waiting, "too many waiting");
+        drop(held);
+        assert!(asked.try_recv().is_err());
+
+        let timeout = served("svc-1", b"");
+        assert_eq!(timeout.status(), StatusCode::GATEWAY_TIMEOUT);
+        own(&timeout, "no answer");
+        asked.try_recv().unwrap();
+
+        // An answer the contact made so that it cannot be passed on.
+        let pending = tauri::async_runtime::spawn(handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &url, b""),
+        ));
+        let id = asked.recv_timeout(Duration::from_secs(5)).unwrap()["id"]
+            .as_u64()
+            .unwrap();
+        respond(
+            app.handle(),
+            id,
+            ServiceResponse {
+                status: 200,
+                headers: vec![("bad header".into(), "x".into())],
+                body_b64: String::new(),
+            },
+        );
+        let invalid = tauri::async_runtime::block_on(pending).unwrap();
+        assert_eq!(invalid.status(), StatusCode::BAD_GATEWAY);
+        own(&invalid, "invalid answer");
+
+        // Another origin in the window, or a window that shows no service.
+        let other = handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &format!("{SCHEME}://notes.{PEER}.{TAG}/"), b""),
+        );
+        own(&tauri::async_runtime::block_on(other), "another origin");
+        own(&served("svc-9", b""), "no service");
+        // And the one no test here can reach (`Ghostly is not running`), made the same way.
+        own(
+            &plain(StatusCode::BAD_GATEWAY, "Ghostly is not running."),
+            "not running",
         );
     }
 

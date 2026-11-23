@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { setClipboard } from "../support/clipboard";
 import { DEVICE_SET_PASSWORD } from "../support/devices";
 import { expect, test } from "../support/fixtures";
+import { injectNostrSigner } from "../support/nostrSigner";
 
 /**
  * The browser's own text size (Chrome's Settings → Font size, a user style sheet) reaches the smallest text too: the
@@ -209,6 +210,15 @@ function cutNames(rows: ReturnType<Page["locator"]>, name: string): Promise<stri
     .map((label) => `${label.textContent}: ${label.scrollWidth}/${label.clientWidth}`), name);
 }
 
+/** The rows' hints (the line under a name) cut short, theirs or any part's inside, as "words: scrollWidth/clientWidth". */
+function cutHints(rows: Locator): Promise<string[]> {
+  return rows.evaluateAll((rows) => rows.flatMap((row) => {
+    const hint = row.querySelector<HTMLElement>(":scope > span.flex-1 > span:nth-child(2)");
+    return hint ? [hint, ...hint.querySelectorAll<HTMLElement>("*")] : [];
+  }).filter((part) => part.scrollWidth > part.clientWidth)
+    .map((part) => `${part.textContent}: ${part.scrollWidth}/${part.clientWidth}`));
+}
+
 /** The dialog's buttons whose words run past their edges, or past the dialog's, as "words: scrollWidth/clientWidth". */
 function cutButtons(dialog: Locator): Promise<string[]> {
   return dialog.evaluate((dialog) => {
@@ -256,7 +266,7 @@ test("a phone at 150% and 200% text size: adding a device, the new device's firs
   }
 });
 
-test("a phone at a larger text size: Settings' sections, its search results and the identity kinds wrap their names instead of cutting them", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
+test("a phone at a larger text size: Settings' sections (their names and what they hold), its search results and the identity kinds wrap their words instead of cutting them", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:settings.sections"] }, async ({ peer }) => {
   const { page } = await peer("text-size-names", { mobile: true, viewport: PHONE });
   await textSize(page, 24);
   for (const language of ["fr", "ja", "ar"]) {
@@ -265,6 +275,8 @@ test("a phone at a larger text size: Settings' sections, its search results and 
     const sections = page.locator('[data-testid^="settings-open-"]');
     await expect(sections.first()).toBeVisible();
     expect(await cutNames(sections, ":scope > span.flex-1 > span:first-child"), `${language}: Settings' sections`).toEqual([]);
+    // What each section holds, under its name: wrapped too (Media's, Privacy's and Network's are the long ones).
+    expect(await cutHints(sections), `${language}: Settings' section descriptions`).toEqual([]);
     await page.getByTestId("settings-search").fill(language === "ja" ? "プ" : language === "ar" ? "ال" : "e");
     const results = page.getByTestId("settings-search-result");
     await expect(results.first()).toBeVisible();
@@ -276,5 +288,42 @@ test("a phone at a larger text size: Settings' sections, its search results and 
     const kinds = page.getByTestId("add-identity").locator('[data-testid^="add-identity-card-"]');
     await expect(kinds.first()).toBeVisible();
     expect(await cutNames(kinds, 'span[dir="auto"]'), `${language}: the identity kinds`).toEqual([]);
+  }
+});
+
+/** The buttons past the screen's sides, as "words: left..right". */
+function offScreen(buttons: Locator): Promise<string[]> {
+  return buttons.evaluateAll((buttons) => buttons
+    .map((button) => ({ button, box: button.getBoundingClientRect() }))
+    .filter(({ box }) => box.width > 1 && (box.left < 0 || box.right > window.innerWidth))
+    .map(({ button, box }) => `${button.textContent!.trim()}: ${Math.round(box.left)}..${Math.round(box.right)}`));
+}
+
+test("a phone at 150% and 200% text size: a button's long label wraps inside the screen (Identities' Edit profile, Load my profile and follows, New identity's Sign with…)", { tag: ["@feature:app.accessibility", "@feature:app.mobile-layout", "@feature:proofs.page"] }, async ({ peer }) => {
+  // The shared Button kept its label on one line: in Japanese at 24px "Load my profile and follows" ran from 48 to 497 px
+  // on a 375 px screen, and New identity's "Sign with Browser extension (NIP-07)" from -33 to 359.
+  const alice = await peer("text-size-buttons", { mobile: true, viewport: PHONE });
+  await injectNostrSigner(alice);
+  const { page } = alice;
+  await page.getByTestId("mobile-tab-identities").click();
+  await page.getByTestId("identities-new").click();
+  await page.getByTestId("add-identity").getByTestId("add-identity-nostr").click();
+  await page.getByTestId("add-identity").getByTestId("add-identity-start").click();
+  await expect(page.getByTestId("identity-proof")).toHaveCount(1);
+  for (const px of [24, 32]) {
+    await textSize(page, px);
+    for (const language of ["fr", "ja", "ar"]) {
+      await useLanguage(page, language);
+      await page.getByTestId("mobile-tab-identities").click();
+      await expect(page.getByTestId("identity-ghostly-edit")).toBeVisible();
+      await expect(page.getByTestId("nostr-own-load")).toBeVisible();
+      expect.soft(await offScreen(page.getByTestId("identities-page").getByRole("button")), `${language} at ${px}px: Identities`).toEqual([]);
+      await page.getByTestId("identities-new").click();
+      const add = page.getByTestId("add-identity");
+      await add.getByTestId("add-identity-nostr").click();
+      await expect(add.getByTestId("add-identity-start")).toBeVisible();
+      expect.soft(await offScreen(add.getByRole("button")), `${language} at ${px}px: New identity`).toEqual([]);
+      expect.soft(await add.evaluate((sheet) => sheet.scrollWidth - sheet.clientWidth), `${language} at ${px}px: New identity scrolls sideways`).toBeLessThanOrEqual(0);
+    }
   }
 });

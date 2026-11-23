@@ -11,6 +11,7 @@ import { FieldGrid, InputGroup } from "../layout";
 import { NostrPublishDialog } from "./NostrPublishDialog";
 import { problemLine } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
+import { listText, namesText } from "../../lib/listText";
 
 
 /**
@@ -91,7 +92,7 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
           <p className="text-sm text-text-primary break-words" data-testid="nostr-own-name">{p?.name ?? (view.profile ? t("identities.nostr.noProfile") : t("identities.nostr.yourKey"))}</p>
           <p className="text-xs text-text-muted font-mono break-all" title={view.npub}>{short}</p>
           {view.profile && <p className="text-[11px] text-text-muted">{(() => {
-            const from = { relays: view.profile.relays.map(r => r.replace(/^wss?:\/\//, "")).join(", "), time: ago(view.profile.fetchedAt) };
+            const from = { relays: namesText(view.profile.relays.map(r => r.replace(/^wss?:\/\//, "")), t), time: ago(view.profile.fetchedAt) };
             return view.profile.stale ? t("identities.nostr.profileStaleFrom", from) : t("identities.nostr.profileFrom", from);
           })()}</p>}
           {view.follows && <p className="text-xs text-text-muted" data-testid="nostr-own-follows">{(() => {
@@ -100,11 +101,11 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
             return count === 1 ? t("identities.nostr.youFollowOne") : t("identities.nostr.youFollow", { count });
           })()}</p>}
           {view.mute && <p className="text-xs text-text-muted" data-testid="nostr-own-mute">{(() => {
-            const m = view.mute, list = [
+            const m = view.mute, list = listText([
               m.pubkeys === 1 ? t("identities.nostr.keyOne") : t("identities.nostr.keys", { count: m.pubkeys }),
               m.words === 1 ? t("identities.nostr.wordOne") : t("identities.nostr.words", { count: m.words }),
               m.notes === 1 ? t("identities.nostr.noteOne") : t("identities.nostr.notes", { count: m.notes }),
-            ].join(", ");
+            ], t);
             return m.hasPrivate ? t("identities.nostr.mutePrivate", { list }) : t("identities.nostr.mute", { list });
           })()}</p>}
         </div>

@@ -1,5 +1,5 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import React, { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import React, { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { sameValue } from "../lib/sameValue";
 import { clockTime } from "../lib/time";
 import { useI18n } from "../contexts/I18nContext";
@@ -560,7 +560,7 @@ function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean })
 export const MESSAGE_LIST = "[data-message-list]";
 
 /** The ⋮ of the message after the one `from` is in, then of the one before it: where the focus goes once it is deleted. */
-function neighbourOptions(from: HTMLElement | null): HTMLElement[] {
+export function neighbourOptions(from: HTMLElement | null): HTMLElement[] {
   const list = from?.closest(MESSAGE_LIST);
   if (!from || !list) return [];
   const options = [...list.querySelectorAll<HTMLElement>("[data-message-row] [data-testid=message-options]")];
@@ -735,6 +735,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
   const deleteHint = confirm === "everyone" ? t(group ? "chat.deleteForEveryoneGroupHint" : "chat.deleteForEveryoneHint") : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
     : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
   const confirmed = confirm === "everyone" ? onDeleteForEveryone : onDelete;
+  // The hint describes the confirmation and its Delete: the focus lands on Cancel, and a screen reader said only the
+  // group's name and the button, never what the delete does to the other side.
+  const hintId = useId();
   const trash = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>;
 
   return (
@@ -799,16 +802,16 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
         </MenuItem>}
       </Menu>
       {confirmed && (
-        <Menu open={!!confirm} onClose={() => setConfirm(null)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t(confirm === "everyone" ? "chat.deleteForEveryone" : "chat.deleteMessage")}>
+        <Menu open={!!confirm} onClose={() => setConfirm(null)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t(confirm === "everyone" ? "chat.deleteForEveryone" : "chat.deleteMessage")} describedBy={hintId}>
           <div className="px-3 py-2 md:w-[210px]">
-            <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
+            <p id={hintId} className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
             <div className="flex items-center justify-end gap-2">
               {/* Rows of the menu: Cancel takes the focus as it opens (Enter at once never deletes), the arrow keys move. */}
               <button
                 type="button"
                 data-menu-item
                 onClick={() => setConfirm(null)}
-                className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer max-md:min-h-11 max-md:px-4"
               >
                 {t("common.cancel")}
               </button>
@@ -816,6 +819,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
                 type="button"
                 data-menu-item
                 data-testid="message-delete-confirm"
+                aria-describedby={hintId}
                 onClick={() => {
                   setConfirm(null);
                   playCue("deleted", { chat });
@@ -823,7 +827,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
                   confirmed();
                 }}
                 // Filled, as the other destructive confirmations: red on a pink fill read at 3.98:1 in the light theme.
-                className="px-2 py-0.5 rounded border border-danger-fill bg-danger-fill text-white text-xs font-bold hover:bg-danger-fill/90 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                className="px-2 py-0.5 rounded border border-danger-fill bg-danger-fill text-white text-xs font-bold hover:bg-danger-fill/90 transition-colors cursor-pointer max-md:min-h-11 max-md:px-4"
               >
                 {t("common.delete")}
               </button>
@@ -951,6 +955,19 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // A control of the message taken out by its own press (my reaction's chip taken back, the red mark sent again): the
   // focus stays on the message, so Tab goes on from it.
   useFocusKept(rowRef);
+  // The message taken out of the chat by someone else (the contact's delete for everyone) while the focus is on it or
+  // in what it opened (its ⋮ menu, the delete confirmation, the reaction bar, the details): the focus goes where a
+  // delete of mine leaves it (`MessageMenu`), to the ⋮ of the message now in its place, not to the page. React's focus
+  // events come through the portals the menus and the details are drawn in; the row is still in the page when its
+  // layout effects end, and gone when its passive ones do.
+  const holds = useRef<EventTarget | null>(null);
+  const goneTo = useRef<HTMLElement[]>([]);
+  useLayoutEffect(() => () => {
+    if (holds.current && holds.current === document.activeElement) goneTo.current = neighbourOptions(rowRef.current);
+  }, []);
+  useEffect(() => () => {
+    if (goneTo.current.length && focusLost()) goneTo.current.find((el) => el.isConnected)?.focus({ preventScroll: true });
+  }, []);
   const openDetails = () => setDetails(true);
   // A plain double or triple click is the words' own: it selects a word or the line, as anywhere else. Ctrl+double
   // click (⌘ on a Mac) opens the details. On a control in the message (a file's Accept, Pause or Save, a player's
@@ -1094,12 +1111,13 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       picture={contentType === "image"} onClose={() => setDetails(false)}
       returnFocus={optionsButton()} />
   );
+  const onFocus = (e: React.FocusEvent) => { holds.current = e.target; };
   const rowProps = choosing ? {
-    ref: rowRef, "data-message-id": message.id, "data-selected": selection.selected || undefined,
+    ref: rowRef, onFocus, "data-message-id": message.id, "data-selected": selection.selected || undefined,
     // A click anywhere on the row (a player's button included) chooses it or not; nothing inside it runs.
     onClickCapture: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); selection.onToggle?.(); },
   } : {
-    ref: rowRef, onDoubleClick: detailsOnDoubleClick, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
+    ref: rowRef, onFocus, onDoubleClick: detailsOnDoubleClick, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
     // The second click of a Ctrl+double click would select a word of the message under the details.
     onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1 && detailsKey(e)) e.preventDefault(); },
   };

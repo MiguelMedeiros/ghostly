@@ -109,6 +109,7 @@ export const UNIT_PROJECTS = [
       "docs/RELEASING.md": ["chromeWebStore", "npmPublish", "webLatest"],
       "{CHANGELOG.md,apps/desktop/Cargo.toml,apps/website/lib/release.ts,apps/extension/public/manifest.json,packages/browser/src/shared/features.ts}": ["bumpVersion"],
       "packages/cli/package.json": ["npmPublish", "cliShrinkwrap"],
+      "apps/website/package.json": ["websiteSteps"],
       ".gitignore": ["cliShrinkwrap"],
       "apps/desktop/src/{translate,translate_models}.rs": ["translationRuntimes"],
       "e2e/playwright.config.ts": ["e2eWorkflow"],
@@ -128,7 +129,7 @@ export const UNIT_PROJECTS = [
   {
     name: "cli", cwd: "packages/cli", args: [],
     sources: ["packages/core/src/**", "packages/browser/src/**", "packages/cli/**"],
-    whole: ["packages/cli/package.json", "packages/cli/vitest.config.ts", "packages/cli/vite.config.ts", "packages/cli/test/support/build.ts", "packages/core/src/index.ts", "tools/vitest.shared.ts"],
+    whole: ["packages/cli/package.json", "packages/cli/vitest.config.ts", "packages/cli/vite.config.ts", "packages/cli/test/support/build.ts", "packages/core/src/index.ts", "tools/vitest.shared.ts", "tools/vitest.shards.ts"],
     tests: ["packages/cli/test/**"],
     // Most CLI tests run dist/ghostly.mjs (built by the globalSetup) through `runner`, which imports none of what
     // the binary is built from. A change the build takes in (bundleReaches from `entry`; without the sources, one
@@ -177,6 +178,13 @@ export const UNIT_PROJECTS = [
  */
 export const UNIT_ALONE = ["ui", "browser", "cli"];
 
+/**
+ * Projects of UNIT_ALONE too slow for one runner even alone: they run in two halves (`vitest --shard 1/2` and `2/2`,
+ * cut by time: tools/vitest.shards.ts), the first in their own group, the second beside the last group's small
+ * projects. A change reaching the CLI's bundle ran ~130 of its files for 6-8 minutes while the other groups took 1-2.
+ */
+export const UNIT_HALVED = ["cli"];
+
 /** `<i>/<n>` (1 ≤ i ≤ n) → { index, count }, or null. */
 export function parseUnitGroup(text) {
   const m = /^(\d+)\/(\d+)$/.exec(text ?? "");
@@ -186,10 +194,24 @@ export function parseUnitGroup(text) {
   return index >= 1 && index <= count ? { index, count } : null;
 }
 
-/** The group (1-based, of `count`) a unit project runs in. */
+/** ci.yml's name for the draft tier's job that runs `group` ({ index, count }): the name the run page shows. */
+export const draftUnitJob = (group) => `Affected unit tests (draft ${group.index}/${group.count})`;
+
+/** The group (1-based, of `count`) a unit project runs in: the one of its first half for a project of UNIT_HALVED. */
 export function unitGroupOf(name, count) {
   const alone = UNIT_ALONE.indexOf(name);
   return alone >= 0 && alone < count - 1 ? alone + 1 : count;
+}
+
+/**
+ * Every group (of `count`) a unit project runs in, each with the `--shard` it takes there (null: all of it). One
+ * group, unsharded, unless the project is halved and has a group of its own besides the last.
+ * @returns {{ group: number, shard: string | null }[]}
+ */
+export function unitPartsOf(name, count) {
+  const group = unitGroupOf(name, count);
+  if (!UNIT_HALVED.includes(name) || group === count) return [{ group, shard: null }];
+  return [{ group, shard: "1/2" }, { group: count, shard: "2/2" }];
 }
 
 /** `npm run lint`'s scope: what eslint is given, and what makes the whole lint run. */
@@ -383,6 +405,25 @@ export function testsReaching(changed, files, tests, packages) {
     }
   }
   return [...out].sort();
+}
+
+/**
+ * The integration test files (tools/scripts/integration-tests.json, repository paths) a unit project's plan reaches:
+ * all of the project's when it runs whole, those among its related files or importing one of them otherwise. As
+ * `vitest related` would pick them; `test:affected` leaves them out unless --integration is given.
+ *
+ * @param {{ mode: string, tests: string[], files?: string[] }} unit  a unit project of `plan`
+ * @param {string[]} list  the integration files
+ * @param {Record<string, string>} [files]  path → text of the files to follow
+ * @param {Record<string, [string, string][]>} [packages]  the workspaces' exports (workspaceExports)
+ * @returns {string[]}
+ */
+export function integrationReached(unit, list, files, packages) {
+  const mine = list.filter((f) => unit.tests.some((g) => globToRegExp(g).test(f)));
+  if (unit.mode === "skip" || !mine.length) return [];
+  if (unit.mode === "whole" || !files) return mine;
+  const hit = new Set([...unit.files.filter((f) => mine.includes(f)), ...testsReaching(unit.files, files, mine, packages)]);
+  return mine.filter((f) => hit.has(f));
 }
 
 // ---------- tests that read a file from disk ----------

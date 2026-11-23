@@ -8,6 +8,8 @@
  * and which of the person's devices each token this device gave out belongs to.
  */
 
+import { turnName } from "../../../../packages/core/src/turnRecord";
+
 /** What a push's notice depends on. Null: no device set (a profile on one device). */
 export interface PushDeviceView {
   state: string;
@@ -33,7 +35,10 @@ interface StoredRecord {
 /** The view of a stored record. Pure, so it is tested without a worker. */
 export function pushDeviceView(record: StoredRecord | undefined | null): PushDeviceView | null {
   if (!record || typeof record !== "object" || typeof record.state !== "string") return null;
-  const slots = Array.isArray(record.deviceSet) ? record.deviceSet as ({ key?: unknown; name?: unknown } | null)[] : [];
+  // Each name as the app reads the record (`cleanNames`): another device's own word, which a build that did not clean
+  // names may have stored.
+  const slots = (Array.isArray(record.deviceSet) ? record.deviceSet as ({ key?: unknown; name?: unknown } | null)[] : [])
+    .map((slot) => slot && typeof slot === "object" && typeof slot.name === "string" ? { ...slot, name: turnName(slot.name) } : slot);
   const nameOf = (key: string) => { const slot = slots.find((s) => s?.key === key); return typeof slot?.name === "string" ? slot.name : ""; };
   const activeSlot = typeof record.activeSlot === "number" ? slots[record.activeSlot] : undefined;
   const active = record.activeSlot !== record.ownSlot && typeof activeSlot?.name === "string" && activeSlot.name ? activeSlot.name : undefined;

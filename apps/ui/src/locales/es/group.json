@@ -181,6 +181,7 @@
     "fullShort": "El grupo está lleno",
     "hideQr": "Ocultar QR",
     "jammed": "Nadie puede unirse con el enlace de este grupo ahora: no deja de recibir solicitudes de apps que nunca se conectan, y ocupan los lugares donde esperan los que llegan. Alguien que tiene el enlace puede estar haciéndolo a propósito. Crea un enlace nuevo y compártelo otra vez.",
+    "madeNew": "El admin creó un nuevo enlace",
     "note": "Quien abra este enlace se une, sin ser tu contacto ni decir quién es. Entra mientras tu app esté abierta, hasta {{count}} miembros.",
     "noteCommunity": "Quien abra este enlace se une, sin ser contacto de nadie ni decir quién es. La app de cualquier miembro le deja entrar, así que funciona aunque no estés; hasta {{count}} miembros. Eliminar a alguien no le impide volver a abrir el enlace: para eso el admin crea uno nuevo.",
     "off": "El enlace está desactivado: nadie puede unirse con él, y el enlace compartido antes no volverá a funcionar. Al activarlo se crea un enlace nuevo para compartir.",
@@ -188,6 +189,7 @@
     "qrTitle": "Código QR del enlace del grupo",
     "reset": "Nuevo enlace",
     "resetBody": "El enlace compartido hasta ahora deja de funcionar para siempre: quien lo tiene y aún no se ha unido ya no puede entrar con él. Los miembros siguen en el grupo.",
+    "resetDone": "Nuevo enlace creado: el compartido antes ya no funciona",
     "resetHint": "Un enlace nuevo; el actual deja de funcionar",
     "resetTitle": "¿Crear un enlace nuevo?",
     "share": "Compartir",
@@ -199,6 +201,7 @@
     "title": "Enlace del grupo",
     "tooMany": "Demasiados enlaces de grupo abiertos",
     "tooManyNext": "Elimina un grupo que aún espera para entrar o pega el enlace en Unirse.",
+    "turnedOff": "El admin desactivó el enlace",
     "unanswered": "Quien abre el enlace quizá no consiga entrar: muchos que llamaron hace poco nunca respondieron. Un enlace nuevo lo resuelve; comparte el nuevo después."
   },
   "makeAdmin": {
@@ -231,8 +234,10 @@
     "fullInvited": "El grupo está lleno ({{max}} de {{max}}), contando invitaciones aún sin respuesta ({{invited}}). No se puede invitar a nadie más hasta que alguien salga.",
     "invite": "Invitar a un contacto",
     "inviteAction": "Invitar",
+    "inviteLabel": "Invitar a {{name}}",
     "invited": "Invitado…",
     "makeAdmin": "Ceder admin",
+    "makeAdminLabel": "Ceder admin a {{name}}",
     "missing": "Faltan por llegar {{count}} mensajes de este miembro",
     "missingOne": "Falta por llegar {{count}} mensaje de este miembro",
     "needsBothHint": "Los grupos necesitan ambas apps conectadas y actualizadas",
@@ -242,13 +247,16 @@
     "notReachable": "no accesible",
     "reachable": "accesible",
     "remove": "Eliminar",
+    "removeLabel": "Eliminar a {{name}}",
     "removePicture": "Quitar foto"
   },
   "menu": {
     "forget": "Eliminar de este dispositivo",
     "leave": "Salir del grupo",
     "members": "Miembros…",
-    "rotate": "Renovar claves"
+    "rotate": "Renovar claves",
+    "rotated": "Claves renovadas: los miembros reciben las nuevas claves",
+    "rotating": "Renovando claves…"
   },
   "others": {
     "body": "Quien conoce el id de un grupo puede crear un grupo propio con él, y solo uno de ellos puede estar en este dispositivo. Conserva este o cambia al otro: cambiar sale de este y lo borra de este dispositivo.",

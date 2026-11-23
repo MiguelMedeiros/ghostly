@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fakeInvoice } from "@ghostly/browser/engine/paymentAdapters/providers/testing";
 import { DEFAULT_MINTS, TEST_MINTS } from "@ghostly/browser/shared/mints";
@@ -91,6 +91,19 @@ describe("the Cashu card keeps the keyboard's place while it works", () => {
     expect(send).toHaveFocus();
     expect(send).not.toHaveAttribute("aria-busy");
     expect(calls).toBe(1);
+  });
+
+  it("Send's Pay <amount> wraps its label, like Create invoice, instead of leaving the card (a long amount, 200% text size), busy too", async () => {
+    const paid = later<never>();
+    const { user } = show({ quoteInvoice: () => paid.promise }, "mainnet");
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    await user.click(screen.getByTestId("wallet-pay-input"));
+    await user.paste(liveMainnetInvoice(21_000_000_000));
+    const pay = screen.getByRole("button", { name: /^Pay 21,000,000,000 sats$/ });
+    expect(pay.className).toContain("!whitespace-normal");
+    await user.click(pay);
+    expect(pay).toHaveAttribute("aria-busy", "true");
+    expect(pay.className).toContain("!whitespace-normal");
   });
 
   it("Add: busy where it was pressed, then the emptied address field takes the keys", async () => {
@@ -301,6 +314,80 @@ describe("Receive's invoice past its expiry", () => {
 });
 
 // covers: wallet.cashu.receive-lightning
+describe("Receive's New amount hands the keys to the amount", () => {
+  /**
+   * New amount (on the invoice, or on the line of an expired one) takes the button pressed away: the amount comes back
+   * with the focus, as it does after Done, never with the focus on the page. Also when Receive was the card's opening tab
+   * (the page loaded, the card picked by the arrow keys), where nothing had asked the amount for the focus before.
+   */
+  afterEach(() => { vi.restoreAllMocks(); });
+  const MINT = TEST_MINTS[0];
+  type Rail = "cashu" | "lightning";
+  const state = networkState(walletView({ mints: [mint(MINT, 5_000)], balance: 5_000, history: [], mode: "testnet",
+    lightning: lightningSource({ mode: "testnet", providerId: "nwc", label: "NWC", status: "ready", balance: 5_000 }) }) as WalletState, "testnet");
+  const walletExpiringIn = (ms: number | null): WalletPlatform => Object.assign(Object.create(servicesPlatform!.wallet), {
+    receiveLightning: async () => ({ quote: "our-quote", invoice: REGTEST_INVOICE, paymentHash: "our-hash", expiresAt: ms === null ? null : Date.now() + ms, source: "cashu-mint" }),
+  });
+  const amount = () => screen.getByTestId("wallet-receive-amount");
+  const newAmount = () => screen.getByRole("button", { name: "New amount" });
+
+  /** The card as the page shows it; the amount typed and Create invoice pressed from the keyboard. */
+  async function showInvoice(rail: Rail, { expiresIn = null, focusAmount = false, viaTab = false }: { expiresIn?: number | null; focusAmount?: boolean; viaTab?: boolean } = {}) {
+    const view = renderApp(<CashuWallet wallet={walletExpiringIn(expiresIn)} state={state} rail={rail} focusAmount={focusAmount} onOpenCashu={() => {}} />);
+    if (viaTab) {
+      await view.user.click(screen.getByRole("tab", { name: "Send" }));
+      await view.user.click(screen.getByRole("tab", { name: "Receive" }));
+    }
+    if (focusAmount || viaTab) expect(amount()).toHaveFocus();
+    else amount().focus();
+    await view.user.keyboard("1000{Enter}");
+    await waitFor(() => expect(screen.getByTestId("wallet-invoice")).toBeInTheDocument());
+    await waitFor(() => expect(document.activeElement?.textContent).toMatch(/^Invoice for/));
+    return view;
+  }
+
+  for (const rail of ["cashu", "lightning"] as const) {
+    it(`on the invoice, with Receive the ${rail} card's opening tab`, async () => {
+      const view = await showInvoice(rail);
+      newAmount().focus();
+      await view.user.keyboard("{Enter}");
+      expect(screen.queryByTestId("wallet-invoice")).not.toBeInTheDocument();
+      expect(amount()).toHaveFocus();
+    });
+
+    it(`on an expired invoice, with Receive the ${rail} card's opening tab`, async () => {
+      // Long enough for the invoice's line to take the focus first on a loaded runner (see the expiry tests above).
+      const view = await showInvoice(rail, { expiresIn: 1_500 });
+      await waitFor(() => expect(screen.getByTestId("wallet-invoice-expired")).toBeInTheDocument(), { timeout: 5_000 });
+      await waitFor(() => expect(newAmount()).toHaveFocus());
+      await view.user.keyboard("{Enter}");
+      expect(screen.queryByTestId("wallet-invoice-expired")).not.toBeInTheDocument();
+      expect(amount()).toHaveFocus();
+    });
+  }
+
+  it("on the invoice of a card chosen from the deck, and after Receive was chosen as a tab", async () => {
+    let view = await showInvoice("cashu", { focusAmount: true });
+    newAmount().focus();
+    await view.user.keyboard("{Enter}");
+    expect(amount()).toHaveFocus();
+    view.unmount();
+
+    view = await showInvoice("lightning", { viaTab: true });
+    newAmount().focus();
+    await view.user.keyboard("{Enter}");
+    expect(amount()).toHaveFocus();
+  });
+
+  it("on a touch-only screen too, as Done does: the person pressed it to type an amount", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ media: query, matches: query === "(any-pointer: coarse)", onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }));
+    const view = await showInvoice("cashu");
+    await view.user.click(newAmount());
+    expect(amount()).toHaveFocus();
+  });
+});
+
+// covers: wallet.cashu.receive-lightning
 describe("Receive's invoice on screen", () => {
   /**
    * agents#2447: the engine asks less and less about an open invoice nobody looks at. While Receive shows one, it says so
@@ -339,6 +426,52 @@ describe("Receive's invoice on screen", () => {
     vi.advanceTimersByTime(5 * 60_000);
     expect(watchInvoice).toHaveBeenCalledTimes(2);
   });
+
+  /**
+   * Nobody sees an invoice in a hidden page (another tab, the window minimised): the screen stops saying it, so the
+   * engine falls back to its own pace instead of asking the mint every 4 s for the invoice's whole life. Shown again,
+   * it says it at once, so a payment made meanwhile shows within seconds.
+   */
+  describe("while the page is hidden", () => {
+    let visibility: DocumentVisibilityState = "visible";
+    const turn = (to: DocumentVisibilityState) => act(() => {
+      visibility = to;
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    const showWatched = async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+      const watchInvoice = vi.fn(async () => {});
+      const wallet: WalletPlatform = Object.assign(Object.create(servicesPlatform!.wallet), {
+        receiveLightning: async () => ({ quote: "our-quote", invoice: REGTEST_INVOICE, expiresAt: null, source: "cashu-mint" }),
+        watchInvoice,
+      });
+      const view = renderApp(<CashuWallet wallet={wallet} state={at([])} rail="cashu" onOpenCashu={() => {}} />);
+      await view.user.click(screen.getByTestId("wallet-receive-amount"));
+      await view.user.keyboard("1000{Enter}");
+      await waitFor(() => expect(watchInvoice).toHaveBeenCalledWith(REGTEST_INVOICE));
+      return watchInvoice;
+    };
+    afterEach(() => { visibility = "visible"; vi.restoreAllMocks(); });
+
+    it("is not watched at all, however long it stays hidden", async () => {
+      const watchInvoice = await showWatched();
+      expect(watchInvoice).toHaveBeenCalledOnce();
+      turn("hidden");
+      vi.advanceTimersByTime(30 * 60_000);
+      expect(watchInvoice).toHaveBeenCalledOnce();
+    });
+
+    it("is watched at once when the page shows again, then every minute", async () => {
+      const watchInvoice = await showWatched();
+      turn("hidden");
+      vi.advanceTimersByTime(10 * 60_000);
+      turn("visible");
+      expect(watchInvoice).toHaveBeenCalledTimes(2);
+      vi.advanceTimersByTime(60_000);
+      expect(watchInvoice).toHaveBeenCalledTimes(3);
+    });
+  });
 });
 
 // covers: wallet.cashu.pay-invoice
@@ -360,7 +493,7 @@ describe("Send's result is said to a screen reader", () => {
 
   for (const [paid, rail, line] of [
     [true, "cashu", "Paid."],
-    [false, "cashu", "The payment is still pending at the mint."],
+    [false, "cashu", "The payment is still pending at the mint. It settles by itself; nothing is paid again. Until the mint answers, the amount shows as set aside under the balance."],
     [false, "lightning", "The payment is still pending. It is being checked; nothing is paid again."],
   ] as const) {
     it(`${rail} card, ${paid ? "paid" : "pending"}: "${line}" comes into a status line that was already there`, async () => {
@@ -479,6 +612,20 @@ describe("in Arabic, someone else's memo in the wallet keeps its own direction",
     await user.click(screen.getByTestId("lnurl-invoice"));
     await screen.findByTestId("lnurl-review");
     expect(screen.getByText(MEMO)).toHaveAttribute("dir", "auto");
+  });
+
+  it("a received ecash's memo and its mint's name in History, and the mint's name in Mints", async () => {
+    // Joined bare, an Arabic mint name, " · " and an Arabic memo made one right-to-left run: the memo was drawn first.
+    const TEST_MINT = TEST_MINTS[0];
+    const NAME = "مينت الاختبار (2)";
+    const ecash = { id: "tx-ecash", kind: "ecash-in" as const, amount: 100, fee: 0, timestamp: 1_791_000_000_000, mint: TEST_MINT, note: MEMO };
+    const state = networkState(walletView({ mints: [{ ...mint(TEST_MINT, 100), name: NAME }], balance: 100, history: [ecash] }) as WalletState, "testnet");
+    const { user } = renderApp(<CashuWallet wallet={servicesPlatform!.wallet} state={state} rail="cashu" onOpenCashu={() => {}} />, { language: "ar" });
+    expect(screen.getByText(NAME).tagName).toBe("BDI");
+    expect(screen.getByTestId("mint-row")).toContainElement(screen.getByText(NAME));
+    await user.click(screen.getByRole("tab", { name: "السجل" }));
+    const row = screen.getByTestId("wallet-tx");
+    for (const text of [NAME, MEMO]) expect(within(row).getByText(text).tagName).toBe("BDI");
   });
 });
 

@@ -1,11 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, vi, beforeEach } from "vitest";
 import { ANSWER_BY_MS, CookieJar, MAX_PENDING_REQUESTS, MAX_WAITING_REQUESTS, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
-import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
+import { closeServiceWindows, hostErrorText, serviceFrameTitle, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
 import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_READY, BRIDGE_REFUSED, BRIDGE_SHOWN, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply, BRIDGE_PAGE, answerStatus, fromView, readRequest, BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PORT, parseAppOrigin, CLEAR_COOKIES } from "../../../../web/src/svc/protocol";
 import { createHash } from "node:crypto";
-import { CHUNK_KIND, CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, VIEWER_GUARD_CSP, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, VIEWER_SERVICE_CSP, VIEWER_SERVICE_CSP_RELAY_ONLY, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { CHUNK_KIND, GhostlyHttpError, HttpClient, LIMITS, MAX_CHUNK_PAYLOAD_BYTES, decodeChunk, decodeControl, encodeChunk, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { precacheList } from "../../../../web/src/sw/policy";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -33,11 +33,16 @@ describe("opening a contact's app", () => {
 
     it("names the contact as this side calls them, else their nickname, else by their key", () => {
       expect(serviceFraming("Demo", { label: "Ana (work)", nick: "Ghostly" }, PEER, t)).toEqual({
-        label: "Demo, shared by \u2068Ana (work)\u2069",
+        label: "\u2068Demo\u2069, shared by \u2068Ana (work)\u2069",
         owner: "\u2068Ana (work)\u2069's app, running on their machine. Not Ghostly: never type your recovery words or passwords here.",
       });
-      expect(serviceFraming("Demo", { label: " ", nick: "Demo bot" }, PEER, t).label).toBe("Demo, shared by \u2068Demo bot\u2069");
-      expect(serviceFraming("Demo", undefined, PEER, t).label).toBe(`Demo, shared by \u2068${t("common.unnamedContact", { key: PEER.slice(0, 6) })}\u2069`);
+      expect(serviceFraming("Demo", { label: " ", nick: "Demo bot" }, PEER, t).label).toBe("\u2068Demo\u2069, shared by \u2068Demo bot\u2069");
+      expect(serviceFraming("Demo", undefined, PEER, t).label).toBe(`\u2068Demo\u2069, shared by \u2068${t("common.unnamedContact", { key: PEER.slice(0, 6) })}\u2069`);
+    });
+
+    it("names the app's frame only as the contact knows themselves: the app reads it, never the chat's label", () => {
+      expect(serviceFrameTitle("Demo", { label: "Mom", nick: "Ana" }, PEER, t)).toBe("\u2068Demo\u2069, shared by \u2068Ana\u2069");
+      expect(serviceFrameTitle("Demo", { label: "Mom" }, PEER, t)).toBe(`\u2068Demo\u2069, shared by \u2068${t("common.unnamedContact", { key: PEER.slice(0, 6) })}\u2069`);
     });
 
     it("is said in every language, with the contact in each", async () => {
@@ -153,7 +158,7 @@ describe("opening a contact's app", () => {
     };
   }
 
-  const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", openLink: (site: string) => `Open ${site}`, hostError: () => null };
+  const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", frameTitle: "Demo, shared by Demo bot", openLink: (site: string) => `Open ${site}`, hostError: () => null };
 
   describe("one request from the app, over the contact's link", () => {
     it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -165,8 +170,8 @@ describe("opening a contact's app", () => {
         async (request) => { sent.push(request); return answer(200, [["content-type", "text/plain"], ["set-cookie", "theme=dark; Path=/"], ["x-bad", "a\r\nb"]], ["he", "llo"]); }, jar, words);
       expect(sent[0]).toMatchObject({ method: "POST", path: "/api", headers: [["content-type", "text/plain"], ["cookie", "sid=abc"]] });
       expect(new TextDecoder().decode(sent[0]!.body!)).toBe("hi");
-      // A page the clipboard guard cannot go into (no destination said, so taken for one) runs no script.
-      expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", "script-src 'none'; frame-src 'none'; object-src 'none'"], ["content-security-policy", VIEWER_SERVICE_CSP]] });
+      // A viewer's headers: no cookie, none a header could not carry. The guards and Ghostly's policy are the worker's.
+      expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"]] });
       expect(replies.slice(1, 3).map((r) => r.type === "chunk" && new TextDecoder().decode(r.bytes))).toEqual(["he", "llo"]);
       expect(replies[replies.length - 1]).toEqual({ type: "end" });
       expect(jar.header()).toBe("sid=abc; theme=dark");
@@ -188,46 +193,13 @@ describe("opening a contact's app", () => {
       expect(cookies).toEqual(["sid=admin; sid=root", "sid=root", "cart=3; sid=root", "sid=root"]);
     });
 
-    it("keeps the app to its own origin while Hide my IP from contacts is on: Ghostly's policy goes after the contact's", async () => {
-      const { port, replies } = recorder();
-      await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
-        async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<img src=\"https://contact.example/p.png\">"]), new CookieJar(), words, undefined, true);
-      expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] });
-      // Off: the viewer policy every Ghostly viewer adds (its own origin to talk to, no plain http), after the contact's
-      // and the clipboard guard's.
-      const off = recorder();
-      await serve(off.port, { type: "request", method: "GET", path: "/", headers: [], body: null },
-        async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "img-src *"]], ["<p>hi</p>"]), new CookieJar(), words, undefined, false);
-      expect(off.replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "img-src *"], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]] });
-    });
-
-    it("puts the clipboard guard first in each page of an app, and the WebRTC guard after it while Hide my IP from contacts is on", async () => {
+    it("hands the worker the contact's page as it is: the guards and Ghostly's policy are the worker's to add", async () => {
       const page = "<!doctype html><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>";
-      const served = async (destination: string | undefined, relayOnly: boolean, type = "text/html") => {
-        const { port, replies } = recorder();
-        await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null, ...(destination === undefined ? {} : { destination }) },
-          async () => answer(200, [["content-type", type], ["content-length", String(page.length)], ["content-security-policy", "script-src 'nonce-a'"]], [page.slice(0, 7), page.slice(7)]), new CookieJar(), words, undefined, relayOnly);
-        const head = replies[0] as Extract<ServiceReply, { type: "head" }>;
-        const text = replies.filter((r) => r.type === "chunk").map((r) => new TextDecoder().decode((r as { bytes: Uint8Array }).bytes)).join("");
-        return { headers: head.headers, text };
-      };
-      const guarded = await served("iframe", true);
-      expect(guarded.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><script>${VIEWER_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
-      // The contact's policy lets it run; its length is not the page's any more.
-      expect(guarded.headers).toEqual([
-        ["content-type", "text/html"],
-        ["content-security-policy", `script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH} ${VIEWER_GUARD_HASH}`],
-        ["content-security-policy", VIEWER_GUARD_CSP],
-        ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY],
-      ]);
-      // A page the guard cannot go into runs no script.
-      expect((await served("iframe", true, "image/svg+xml")).headers).toContainEqual(["content-security-policy", "script-src 'none'; frame-src 'none'; object-src 'none'"]);
-      // What is not a page (a fetch, a script) is the contact's as it was; with it off, a page has the clipboard guard alone.
-      expect((await served("", true)).text).toBe(page);
-      expect((await served("script", true, "text/javascript")).text).toBe(page);
-      const off = await served("iframe", false);
-      expect(off.text).toBe(`<!doctype html><script>${CLIPBOARD_GUARD_SCRIPT}</script><title>Atlas</title><script nonce=a>new RTCPeerConnection()</script>`);
-      expect(off.headers).toEqual([["content-type", "text/html"], ["content-security-policy", `script-src 'nonce-a' ${CLIPBOARD_GUARD_HASH}`], ["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]]);
+      const { port, replies } = recorder();
+      await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null, destination: "iframe" },
+        async () => answer(200, [["content-type", "text/html"], ["content-security-policy", "script-src 'nonce-a'"]], [page.slice(0, 7), page.slice(7)]), new CookieJar(), words);
+      expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"], ["content-security-policy", "script-src 'nonce-a'"]] });
+      expect(replies.filter((r) => r.type === "chunk").map((r) => new TextDecoder().decode((r as { bytes: Uint8Array }).bytes)).join("")).toBe(page);
     });
 
     it("says the contact is not reachable, in the profile's words, when the link is gone; any other failure as failed", async () => {
@@ -253,7 +225,7 @@ describe("opening a contact's app", () => {
         const { port, replies } = recorder();
         await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
           async () => answer(status, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", code]], [`${english}\n`]), new CookieJar(), said);
-        expect(replies).toEqual([{ type: "error", status, text: t(key, { app: "Demo" }) }]);
+        expect(replies).toEqual([{ type: "error", status, text: t(key, { app: "⁨Demo⁩" }) }]);
         expect(replies[0]!.type === "error" && replies[0]!.text).not.toContain(english);
       }
     });
@@ -570,6 +542,42 @@ describe("opening a contact's app", () => {
       expect(replies[replies.length - 1]).toEqual({ type: "end" });
       expect(link.controls()).not.toContainEqual(expect.objectContaining({ t: "rst" }));
     });
+
+    it("gives back a request's place once the link lets go of the answer its frame left unread: the app's next request goes out", async () => {
+      const link = linkClient();
+      const jar = new CookieJar();
+      const requests = Array.from({ length: MAX_PENDING_REQUESTS + 1 }, (_, i) => {
+        const { port, replies } = workerPort();
+        const done = serve(port, { type: "request", method: "GET", path: `/video/${i}.mp4`, headers: [], body: null, flow: true }, (request) => link.client.request("app", request), jar, words);
+        return { replies, done };
+      });
+      const asked = () => link.controls().filter((f) => f.t === "req").map((f) => f.id);
+      const feed = (id: number, bytes: number) => {
+        for (let left = bytes; left > 0; left -= MAX_CHUNK_PAYLOAD_BYTES) link.chunk(id, new Uint8Array(Math.min(MAX_CHUNK_PAYLOAD_BYTES, left)), false);
+      };
+      // Each answer goes on past the MiB the opener sends ahead of the app's frame, which reads none of it (a paused
+      // video): the opener waits for the frame to read on, and the link holds the rest, 6 MiB in all, till it lets go.
+      const started = new Set<number>();
+      const filled = new Set<number>();
+      const answer = () => {
+        for (const id of started) if (!filled.has(id)) { filled.add(id); feed(id, 5 * 1024 * 1024); }
+        for (const id of asked().slice(0, MAX_PENDING_REQUESTS)) {
+          if (started.has(id)) continue;
+          started.add(id);
+          link.client.handleResponse({ t: "res", id, st: 200, h: [], b: true });
+          feed(id, ANSWER_AHEAD_BYTES + MAX_CHUNK_PAYLOAD_BYTES);
+        }
+        return asked().length;
+      };
+      await vi.waitFor(() => expect(answer()).toBe(MAX_PENDING_REQUESTS + 1), { timeout: 3 * LIMITS.unreadStallMs });
+      const next = asked()[MAX_PENDING_REQUESTS]!;
+      link.client.handleResponse({ t: "res", id: next, st: 200, h: [], b: true });
+      link.chunk(next, new Uint8Array(16), true);
+      await Promise.all(requests.map((r) => r.done));
+      const last = (replies: ServiceReply[]) => replies[replies.length - 1];
+      for (const r of requests.slice(0, MAX_PENDING_REQUESTS)) expect(last(r.replies)).toEqual({ type: "error", status: 502, text: "Failed" });
+      expect(last(requests[MAX_PENDING_REQUESTS]!.replies)).toEqual({ type: "end" });
+    }, 5 * LIMITS.unreadStallMs);
   });
 
   describe("a contact's app shown over the app", () => {
@@ -875,7 +883,7 @@ describe("opening a contact's app", () => {
       expect(signals.every((s) => s.aborted), "closed: every request ends").toBe(true);
     });
 
-    it("answers every request of an app with the viewer policy, and the one that keeps it to its own origin while Hide my IP from contacts is on", async () => {
+    it("answers every request of an app, and tells the bridge whether Hide my IP from contacts is on: the worker it registers guards by it", async () => {
       for (const relayOnly of [true, false]) {
         await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [["content-type", "text/html"]], ["<p>hi</p>"]), words, relayOnly });
         const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
@@ -887,9 +895,9 @@ describe("opening a contact's app", () => {
         const head = new Promise<ServiceReply>((resolve) => { reply.port1.onmessage = (event) => resolve(event.data as ServiceReply); });
         channel.postMessage({ type: "request", method: "GET", path: "/", headers: [], body: null }, [reply.port2]);
         const headers = (await head) as Extract<ServiceReply, { type: "head" }>;
-        expect(headers.headers.filter(([name]) => name === "content-security-policy"), String(relayOnly)).toEqual(relayOnly ? [["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP_RELAY_ONLY]] : [["content-security-policy", VIEWER_GUARD_CSP], ["content-security-policy", VIEWER_SERVICE_CSP]]);
-        // The bridge, on the app's origin, runs the WebRTC guard too while it is on.
-        expect(inFrame.postMessage.mock.calls[0]![0], String(relayOnly)).toEqual({ type: "ghostly-svc-port", relayOnly });
+        expect(headers, String(relayOnly)).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"]] });
+        // The bridge, on the app's origin, runs the WebRTC guard too while it is on, and registers the worker for it.
+        expect(inFrame.postMessage.mock.calls[0]![0], String(relayOnly)).toEqual({ type: "ghostly-svc-port", relayOnly, title: words.frameTitle });
         document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
       }
     });
@@ -1304,7 +1312,7 @@ describe("a services host given with a port", () => {
   });
 
   it("hands the bridge its port when it says it loaded, from the origin the browser gives it", async () => {
-    const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "", unguarded: "", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", openLink: (site: string) => `Open ${site}`, hostError: () => null };
+    const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "", unguarded: "", label: "Demo, shared by Mom", owner: "Mom's app, running on their machine. Not Ghostly.", frameTitle: "Demo, shared by Demo bot", openLink: (site: string) => `Open ${site}`, hostError: () => null };
     try {
       await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => { throw new Error("not asked"); }, words });
       const origin = `https://${await serviceLabel("ybndrfg8ejkmcpqx", PEER, "demo")}.svc.ghostly.example`;
@@ -1313,7 +1321,9 @@ describe("a services host given with a port", () => {
       Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
       dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_READY }, origin, source: inFrame as unknown as Window }));
       expect(inFrame.postMessage).toHaveBeenCalledTimes(1);
-      expect(inFrame.postMessage.mock.calls[0]![0]).toMatchObject({ type: BRIDGE_PORT });
+      // Named in the profile's language, not "Ghostly", but never by the chat's label ("Mom"): the app reads its frame's title.
+      expect(inFrame.postMessage.mock.calls[0]![0]).toMatchObject({ type: BRIDGE_PORT, title: words.frameTitle });
+      expect(JSON.stringify(inFrame.postMessage.mock.calls[0]![0])).not.toContain("Mom");
       expect(inFrame.postMessage.mock.calls[0]![1]).toBe(origin);
     } finally {
       closeServiceView();
@@ -1695,7 +1705,8 @@ describe("a contact's app while Hide my IP is on", () => {
     vi.unstubAllEnvs();
   });
 
-  it("opens no contact's app while Hide my IP from contacts is on, and says why", async () => {
+  // Its time is the web host's fresh import (its whole graph, after vi.resetModules()), not the check: a bound of its own.
+  it("opens no contact's app while Hide my IP from contacts is on, and says why", { timeout: 30_000 }, async () => {
     const host = await webHost();
     await expect(host.openService!("o".repeat(52), "demo", "ybndrfg8ejkmcpqx", true))
       .rejects.toThrow("A contact's app does not open in the web app while Hide my IP from contacts is on");

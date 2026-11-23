@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -434,14 +437,23 @@ describe("a card that cannot be used here", () => {
   it("says a way of paying is off in this chat, naming the card's network", () => {
     rememberNetwork("peer", "testnet");
     open({ link: { paymentMethods: { ...ALL_ON, bark: false } } });
-    expect(card("bark-testnet")).toHaveAttribute("title", "Testnet Bark is off in this chat");
+    expect(card("bark-testnet")).toHaveAttribute("title", "Bark (Testnet) is off in this chat");
     expect(within(card("bark-testnet")).getByText("Off here")).toBeInTheDocument();
   });
 
   it("says a card is off when this chat takes its way of paying on the other network only", () => {
     open({ link: { paymentNetworks: { ...Object.fromEntries(Object.keys(ALL_ON).map((m) => [m, ["mainnet", "testnet"]])), cashu: ["testnet"] } as LinkView["paymentNetworks"] } });
-    expect(card("cashu-mainnet")).toHaveAttribute("title", "Mainnet Cashu is off in this chat");
+    expect(card("cashu-mainnet")).toHaveAttribute("title", "Cashu (Mainnet) is off in this chat");
     expect(card("lightning-mainnet")).not.toHaveAttribute("aria-disabled");
+  });
+
+  it.each([
+    ["ja", "Bark（Testnet） はこのチャットではオフです"],
+    ["ar", "Bark (Testnet) متوقف في هذه المحادثة"],
+  ] as const)("names the card that is off in %s's own order, not as \"Testnet Bark\"", (language, reason) => {
+    rememberNetwork("peer", "testnet");
+    open({ link: { paymentMethods: { ...ALL_ON, bark: false } }, language });
+    expect(card("bark-testnet")).toHaveAttribute("title", reason);
   });
 
   it("says the contact does not accept a way of paying", () => {
@@ -466,11 +478,20 @@ describe("a card that cannot be used here", () => {
       rememberNetwork("peer", "testnet");
       const { user } = open({ wallet: testCashu(), link: { dataLink: "open", capabilities: { files: true, payments: true, methods: ALL_ON, networks: theirs } } });
       expect(card("cashu-testnet")).toHaveAttribute("aria-disabled", "true");
-      expect(card("cashu-testnet")).toHaveAttribute("title", "Your contact has no Testnet Cashu wallet");
+      expect(card("cashu-testnet")).toHaveAttribute("title", "Your contact has no Cashu (Testnet) wallet");
       expect(within(card("cashu-testnet")).getByText("Not accepted")).toBeInTheDocument();
       await user.click(card("cashu-testnet"));
-      expect(screen.getByText("Your contact has no Testnet Cashu wallet", { selector: "p" })).toBeInTheDocument();
+      expect(screen.getByText("Your contact has no Cashu (Testnet) wallet", { selector: "p" })).toBeInTheDocument();
       expect(screen.getByTestId("payment-use")).toBeDisabled();
+    });
+
+    it.each([
+      ["ja", "連絡先は Cashu（Testnet） ウォレットを持っていません"],
+      ["ar", "لا تملك جهة اتصالك محفظة Cashu (Testnet)"],
+    ] as const)("names the card the contact lacks in %s's own order, not as \"Testnet Cashu\"", (language, reason) => {
+      rememberNetwork("peer", "testnet");
+      open({ wallet: testCashu(), link: { dataLink: "open", capabilities: { files: true, payments: true, methods: ALL_ON, networks: theirs } }, language });
+      expect(card("cashu-testnet")).toHaveAttribute("title", reason);
     });
 
     it("still offers the card the contact has a wallet for", () => {
@@ -737,6 +758,44 @@ describe("a memo that looks like a seed or a key", () => {
     expect(view.onClose).not.toHaveBeenCalled();
   });
 
+  // Send anyway gives the focus back to the button that asked, which the work it starts makes busy at that moment: a
+  // natively disabled button takes no focus, so it fell to the page while the work ran and stayed there on a refusal.
+  it("keeps a keyboard's focus on Request after Send anyway, while it works and when it is refused", async () => {
+    let refuse!: (why: string) => void;
+    const { user } = open({ onRequest: () => new Promise<string | null>((resolve) => { refuse = resolve; }) });
+    await user.click(tab("mainnet"));
+    await user.click(card("lightning-mainnet"));
+    await user.type(amount(), "12");
+    await user.type(memo(), SEED);
+    request().focus();
+    await user.keyboard("{Enter}");
+    const guard = await screen.findByTestId("secret-guard");
+    within(guard).getByTestId("secret-guard-send").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("secret-guard")).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(request());
+    expect(request()).toHaveTextContent("Requesting");
+    expect(request()).toHaveAttribute("aria-disabled", "true");
+    await act(async () => refuse("The contact's app is offline"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The contact's app is offline");
+    expect(document.activeElement).toBe(request());
+  });
+
+  it("keeps a keyboard's focus on Send after Send anyway when the send is refused", async () => {
+    const view = open({ wallet: everyWallet({ mints: [mint(TEST_MINT, 500)], balance: 500 }) });
+    view.engine.on("preparePayment", () => { throw new Error("Mint is offline"); });
+    await view.user.click(tab("testnet"));
+    await view.user.click(card("cashu-testnet"));
+    await view.user.type(amount(), "30");
+    await view.user.type(memo(), SEED);
+    send().focus();
+    await view.user.keyboard("{Enter}");
+    within(await screen.findByTestId("secret-guard")).getByTestId("secret-guard-send").focus();
+    await view.user.keyboard("{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Mint is offline");
+    expect(document.activeElement).toBe(send());
+  });
+
   it("asks nothing of an ordinary memo", async () => {
     const { user, onRequest } = open();
     await user.click(tab("mainnet"));
@@ -746,6 +805,19 @@ describe("a memo that looks like a seed or a key", () => {
     await user.click(request());
     expect(screen.queryByTestId("secret-guard")).not.toBeInTheDocument();
     expect(onRequest).toHaveBeenCalledWith(12, "pizza", "cashu", "lightning", "mainnet");
+  });
+});
+
+// Send or Request at work (or held from the keys) is `aria-disabled`, not disabled: its hover answered as a live one's
+// did, Send brighter and Request lighter under the pointer while they read "Preparing…" or "Requesting…". Hover itself
+// is measured in a browser; here, the rules that give it.
+describe("PaymentComposer: the CSS of Send and Request", () => {
+  const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/payment-composer.css"), "utf8");
+
+  it("a busy or held Send or Request does not answer the pointer's hover", () => {
+    const hovers = CSS.split(/\r?\n/).filter((line) => /^\.payment-back-(primary|secondary)[^{]*:hover/.test(line.trim()));
+    expect(hovers).toHaveLength(2);
+    for (const line of hovers) expect(line).toMatch(/:not\(\[aria-disabled="?true"?\]\)/);
   });
 });
 
@@ -1163,9 +1235,9 @@ describe("the payment sheet's network tabs", () => {
       for (const m of ["pay", "accept"]) expect(screen.getByTestId(`payment-mode-${m}`)).toHaveClass("max-md:min-h-11");
       const arrows = [...screen.getAllByRole("button", { name: "Previous card" }), ...screen.getAllByRole("button", { name: "Next card" })];
       expect(arrows).toHaveLength(2);
-      for (const arrow of arrows) expect(arrow).toHaveClass("max-md:min-h-11", "max-md:min-w-11");
+      for (const arrow of arrows) expect(arrow).toHaveClass("max-md:min-h-[44px]", "max-md:min-w-[44px]");
       await user.click(screen.getByTestId("payment-card-lightning-mainnet"));
-      expect(screen.getByRole("button", { name: "Cards" })).toHaveClass("max-md:min-h-11");
+      expect(screen.getByRole("button", { name: "Cards" })).toHaveClass("max-md:min-h-[44px]");
     });
 
     it("pays a card of the tab on its own network, and goes back to that tab from the card", async () => {
@@ -1394,6 +1466,24 @@ describe("the payment sheet's names, each in its own direction", () => {
     open(everyWallet(), "en", "محمد 🚀");
     expect(isolated(one(".composer-sheet-who"))).toEqual(["محمد 🚀"]);
     expect(one(".composer-sheet-who")).toHaveTextContent("with محمد 🚀");
+  });
+
+  // The error is a Notice's title, a string: the name goes in it between FSI and PDI, "Bob!" read "!Bob" in Arabic.
+  it.each([["no invoice", undefined], ["an invoice of their federation", "lnbcrt1theirs"]])("no federation in common (%s)", async (_, invoice) => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      rememberRail("peer", "fedimint:testnet");
+      const fed = { federations: [{ id: "ab".repeat(32), name: "Fed", guardians: [], consensusVersion: "2.1", network: "regtest" as const, modules: [], joinedAt: 1, invite: "fed11qq", balance: 2_000, status: "ready" as const, lightning: true }], balance: 2_000, history: [] };
+      const { user, engine } = open(everyWallet({ fedimint: fed }), "ar", "Bob!");
+      engine.on("askToPay", () => ({ askId: "ask-1" }));
+      await user.click(screen.getByTestId("payment-use"));
+      await user.type(amount(), "3");
+      await user.click(send());
+      await waitFor(() => expect(engine.callsTo("askToPay")).toHaveLength(1));
+      act(() => engine.update({ payments: { "req-1": paymentView({ id: "req-1", kind: "request", direction: "in", ask: "ask-1", amount: 3, target: undefined, federations: ["cd".repeat(32)], invoice }) } }));
+      act(() => { vi.advanceTimersByTime(400); });
+      expect(await screen.findByRole("alert")).toHaveTextContent("⁨Bob!⁩");
+    } finally { vi.useRealTimers(); }
   });
 });
 

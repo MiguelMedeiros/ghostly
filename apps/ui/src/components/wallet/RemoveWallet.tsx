@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { removalRisksFunds, walletRemoval, type WalletRemoval } from "@ghostly/browser/shared/walletRemoval";
 import type { WalletNetwork, WalletPlatform, WalletState, WalletType } from "../../lib/platform";
 import { useBackdropDismiss, useBackCloses } from "../../hooks/useDismiss";
-import { useI18n } from "../../contexts/I18nContext";
+import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { listText } from "../../lib/listText";
 import { copySecret } from "../../lib/shareLink";
 import { NetworkTag } from "../NetworkTag";
@@ -15,6 +15,7 @@ import { useRun } from "./run";
 import { removalWords } from "./removalWords";
 import { TakeBack } from "./SentEcash";
 import { Block, Button, Notice, Row, Section } from "./ui";
+import { providerLabel } from "./providers/providerText";
 
 /**
  * The last section of a wallet's details: remove it. A card that comes with another wallet (Lightning through the
@@ -46,15 +47,15 @@ export function RemoveWalletSection({ type, network, card, wallet, state, onRemo
           <Button variant="danger" data-testid="wallet-remove" aria-haspopup="dialog" onClick={() => setAsking(true)}>{t("wallet.remove.ask", { label })}</Button>
         </Row>
       )}
-      {asking && <RemoveWalletDialog removal={removal} wallet={wallet.forNetwork(network)} source={sourceName(type, network, state, card)} onClose={() => setAsking(false)} onRemoved={() => { setAsking(false); onRemoved(); }} />}
+      {asking && <RemoveWalletDialog removal={removal} wallet={wallet.forNetwork(network)} source={sourceName(t, type, network, state, card)} onClose={() => setAsking(false)} onRemoved={() => { setAsking(false); onRemoved(); }} />}
     </Section>
   );
 }
 
 /** Where a Lightning or on-chain wallet keeps its money (the source's name), for "the money stays in …". */
-function sourceName(type: WalletType, network: WalletNetwork, state: WalletState, card?: string): string | undefined {
+function sourceName(t: Translate, type: WalletType, network: WalletNetwork, state: WalletState, card?: string): string | undefined {
   const view = networkState(state, network, card), source = type === "lightning" ? view.lightning : type === "bitcoin" ? view.bitcoin : undefined;
-  return source?.alias ?? source?.label ?? undefined;
+  return source?.alias ?? (source?.providerId && source.label ? providerLabel(t, source.providerId, source.label) : source?.label);
 }
 
 /**

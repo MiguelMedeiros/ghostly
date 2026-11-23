@@ -39,6 +39,19 @@ describe("chat folders: kept per profile, on this device", () => {
     expect(createFolder("x".repeat(FOLDER_NAME_MAX + 20))?.name).toHaveLength(FOLDER_NAME_MAX);
   });
 
+  it("keeps no invisible or direction-changing character in a name: a lone PDI cannot close the isolate it is shown in", () => {
+    // U+2069 PDI, U+202E RLO, U+2066-8 LRI/RLI/FSI, U+202A/U+202C LRE/PDF, U+200F RLM, U+061C ALM, U+200B zero width space.
+    expect(createFolder("Bob\u2069 Admin")?.name).toBe("Bob Admin");
+    expect(createFolder("\u202eWork\u2066 \u2067\u2068x\u202a\u202c\u200f\u061c\u200b")?.name).toBe("Work x");
+    // The joiners stay: they shape an emoji or a word.
+    expect(createFolder("👩\u200d💻 Code")?.name).toBe("👩\u200d💻 Code");
+    expect(createFolder("\u2069\u202e")).toBeUndefined();
+    const folder = createFolder("Agents")!;
+    renameFolder(folder.id, "Mach\u2069ines\u200f");
+    restart();
+    expect(names()).toEqual(["Bob Admin", "Work x", "👩\u200d💻 Code", "Machines"]);
+  });
+
   it("renames a folder; an empty name leaves it as it was", () => {
     const folder = createFolder("Agents")!;
     renameFolder(folder.id, " Machines ");

@@ -207,7 +207,8 @@ export function takenDownSince(): (ref: string, digest: string, runAnyway: boole
 
 /**
  * The files people picked for apps on this client (WISP 1200 · Linked files), as its opener keeps them: set once by
- * the client that runs apps. An app uninstalled drops its links (`forgetLinkedFiles`); the files are never touched.
+ * the client that runs apps. An app uninstalled drops its links (`forgetLinkedFiles`), and so does a new grant of
+ * `files` (`forgetLinkedFilesOnGrant`); the files are never touched.
  */
 let linkedFiles: LinkedFilesHost | null = null;
 
@@ -218,4 +219,13 @@ export function setLinkedFiles(host: LinkedFilesHost | null): void {
 /** Drops every link of an app: it was uninstalled. Never fails the uninstall. */
 export async function forgetLinkedFiles(ref: string): Promise<void> {
   await linkedFiles?.forget(ref, "all").catch(() => {});
+}
+
+/**
+ * The person granted `granted` to an app (an install, or an update that adds them). A grant of `files` reads "the files
+ * and folders you pick": it starts with no links, so what was picked under an earlier grant (one a later version dropped,
+ * or one before a reinstall) does not come back with it.
+ */
+export async function forgetLinkedFilesOnGrant(ref: string, granted: readonly string[]): Promise<void> {
+  if (granted.includes("files")) await forgetLinkedFiles(ref);
 }

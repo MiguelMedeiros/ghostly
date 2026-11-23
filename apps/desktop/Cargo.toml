@@ -1,6 +1,6 @@
 [package]
 name = "ghostly"
-version = "1.13.0"
+version = "1.13.7"
 edition = "2021"
 
 # The app is a library (src/lib.rs) that src/main.rs runs on Desktop; Android and iOS load it as a shared or static
@@ -18,13 +18,13 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 ghostly-transports = { path = "../../native/transports" }
-iroh = "=1.3.0"
+iroh = "=1.5.0"
 # `macos-proxy`: the sandbox spike's proxy that goes nowhere (src/app_sandbox.rs, test driver only).
 tauri = { version = "2", features = ["macos-proxy"] }
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-pkarr = "8"
+pkarr = "9"
 # The turn record's conditional put (WISP 06): `put_mutable` with a `cas`, which pkarr's DHT client does not offer.
 mainline = "8"
 simple-dns = "0.12"

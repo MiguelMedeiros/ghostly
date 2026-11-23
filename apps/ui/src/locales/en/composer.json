@@ -1,5 +1,6 @@
 {
   "attach": "Attach",
+  "bytesLeft": "Bytes left: {{count}}",
   "camera": "Camera",
   "cameraBlocked": "Camera blocked. Allow the camera in Android's settings for Ghostly.",
   "cameraFailed": "The camera could not start.",
@@ -17,6 +18,7 @@
     "recent": "Recent",
     "symbols": "Symbols"
   },
+  "charactersLeft": "Characters left: {{count}}",
   "chooseFiles": "Choose files",
   "closeCamera": "Close camera",
   "dhtFits": {
@@ -24,7 +26,6 @@
     "contact": "Too long for the DHT, which carries about {{fits}} bytes. Your contact's chat is on DHT only: shorten it, or wait until they allow live again.",
     "editLive": "Too long for the DHT as an edit, which carries about {{fits}} bytes: it goes when you are live.",
     "held": "Longer than the DHT carries (about {{fits}} bytes): it is kept for your contact until they are online.",
-    "live": "Too long for the DHT, which carries about {{fits}} bytes. Shorten it, or send it once you're connected peer to peer.",
     "you": "Too long for the DHT, which carries about {{fits}} bytes. This chat is on DHT only: shorten it, or change it from the connection icon."
   },
   "dhtTooLong": "Too long for the DHT ({{bytes}} of {{max}} bytes). Shorten it or go live; your draft is kept.",

@@ -16,7 +16,7 @@ import type { Language } from "../../lib/settings";
 
 // covers: app.composer.attach, app.composer.expressions, app.emoji-picker, chat.paired.emoji, chat.paired.gifs, chat.paired.gifs.categories, chat.paired.gifs.busy
 
-// The emoji panel's data set, here before any panel opens (its loading: emojiPanelLoad.test.tsx).
+// The emoji panel's data set, here before any panel opens (its loading: emojiPanel.test.tsx).
 beforeAll(() => loadEmoji());
 
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
@@ -326,6 +326,21 @@ describe("the emoji/GIF panel", () => {
     expect(screen.getByTestId("emoji-category-people")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByPlaceholderText("Search emoji")).toBeInTheDocument();
     expect(within(screen.getByTestId("emoji-section-people")).getByRole("button", { name: "😀" })).toBeInTheDocument();
+  });
+
+  it("makes the tab shown the panel its switch's tab controls, by name, on emoji and on GIFs", async () => {
+    gifCities();
+    const { user } = composer();
+    await user.click(smiley());
+    // Before, two tabs that controlled nothing: no tab panel, and no aria-controls to one.
+    for (const [id, name] of [["emoji", "Emoji"], ["gif", "GIF"]] as const) {
+      if (id === "gif") await user.click(screen.getByTestId("expression-tab-gif"));
+      const shown = screen.getByRole("tabpanel", { name });
+      expect(shown).toBe(screen.getByTestId(`${id}-tab`));
+      expect(screen.getByTestId(`expression-tab-${id}`)).toHaveAttribute("aria-controls", shown.id);
+      // The other tab's panel is not drawn: its tab names none.
+      expect(screen.getByTestId(`expression-tab-${id === "emoji" ? "gif" : "emoji"}`)).not.toHaveAttribute("aria-controls");
+    }
   });
 
   it("puts an emoji where the caret is, keeps the panel open, and lists it first under Recent next time", async () => {
@@ -871,6 +886,47 @@ describe("the composer counts a message's bytes", () => {
     expect(screen.getByTestId("composer-left")).toHaveTextContent("0 B");
     await act(async () => { fireEvent.keyDown(field(), { key: "Enter" }); });
     expect(onSend).toHaveBeenCalledWith("👻".repeat(4_096));
+  });
+
+  it("off the live link, the DHT's count is on the text as its packet carries it, escaped", () => {
+    // A new line takes two bytes there: 245 B with four of them is 249 in the packet, past the about 248 it carries.
+    composer({ softBytes: 248, softTitle: "Past what the DHT carries" });
+    fireEvent.change(field(), { target: { value: "x".repeat(248) } });
+    expect(screen.getByTestId("dht-byte-count")).toHaveClass("text-text-muted");
+    expect(screen.getByTestId("dht-byte-count")).not.toHaveAttribute("title");
+    fireEvent.change(field(), { target: { value: `${"x".repeat(60)}\n`.repeat(4) + "x" } });
+    expect(screen.getByTestId("dht-byte-count")).toHaveTextContent("249 / 248 B");
+    expect(screen.getByTestId("dht-byte-count")).toHaveClass("text-warn-ink");
+    expect(screen.getByTestId("dht-byte-count")).toHaveAttribute("title", "Past what the DHT carries");
+  });
+
+  it("the count's warning reaches the field and is said once as it changes, not only as a mouse tooltip", () => {
+    // Its sentence was a `title` on a span no keyboard reaches: a screen reader typing on heard nothing as the count
+    // turned amber past the about 248 B the DHT packet carries, where the text silently waits for live.
+    composer({ softBytes: 248 });
+    const live = () => screen.getByTestId("composer-count-said");
+    fireEvent.change(field(), { target: { value: "x".repeat(240) } });
+    expect(field()).not.toHaveAccessibleDescription();
+    expect(live()).toHaveTextContent("");
+    fireEvent.change(field(), { target: { value: "x".repeat(252) } });
+    expect(field()).toHaveAccessibleDescription("Over the 248 bytes the DHT carries: it is sent when you are live");
+    expect(live()).toHaveTextContent("Over the 248 bytes the DHT carries: it is sent when you are live");
+    // Each keystroke within a state says nothing new.
+    live().textContent = "";
+    fireEvent.change(field(), { target: { value: "x".repeat(300) } });
+    expect(live()).toHaveTextContent("");
+    fireEvent.change(field(), { target: { value: "x".repeat(10) } });
+    expect(field()).not.toHaveAccessibleDescription();
+  });
+
+  it("the 16 KiB count's warning, red under 50 left and past the limit, reaches the field too", () => {
+    composer();
+    const live = () => screen.getByTestId("composer-count-said");
+    fireEvent.change(field(), { target: { value: "x".repeat(16_350) } });
+    expect(field()).toHaveAccessibleDescription("Bytes left: 34");
+    expect(live()).toHaveTextContent("Bytes left: 34");
+    fireEvent.change(field(), { target: { value: "é".repeat(8_200) } });
+    expect(field()).toHaveAccessibleDescription("That is too long to send (16,400 bytes, the limit is 16,384). Shorten it, or send it as a file.");
   });
 
   it("off the live link, past 16 KiB the hard count shows instead of the DHT's", () => {

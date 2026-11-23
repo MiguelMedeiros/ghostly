@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createChatInvite, inviteLink } from "@ghostly/core";
+import { LOCAL_SUFFIXES as CORE_LOCAL_SUFFIXES } from "../../../../../packages/core/src/localNames";
+import { LOCAL_SUFFIXES } from "../../lib/localHost";
 import { decodeEntities, isLocalHost, oEmbedEndpoint, parseOEmbed, parseOpenGraph, previewableLink, videoSite } from "../../lib/parse/linkPreview";
 import { decodePage } from "../../lib/linkPreviewFetch";
 import { findLocation, formatCoordinates, locationIn, mapTiles, mapsUrl } from "../../lib/parse/location";
@@ -71,6 +75,21 @@ describe("which link gets a preview", () => {
       expect(isLocalHost(host), host).toBe(false);
   });
 
+  it("a router's or a company's own name, under any suffix a local network answers", () => {
+    for (const host of ["router.lan", "router.home", "fritz.box.home", "nas.localdomain", "hr.intranet", "files.corp", "NAS.Home.", "corp", "nas.home.arpa"])
+      expect(isLocalHost(host), host).toBe(true);
+    for (const host of ["home.example.com", "corp.example.com", "myhome.net", "intranet.example.org"])
+      expect(isLocalHost(host), host).toBe(false);
+  });
+
+  it("the same local suffixes as the rest of the app and Ghostly Desktop", () => {
+    const rust = readFileSync(resolve(__dirname, "../../../../desktop/src/local_names.rs"), "utf8");
+    const list = /LOCAL_SUFFIXES: &\[&str\] = &\[([^\]]*)\]/.exec(rust)?.[1];
+    expect(list).toBeTruthy();
+    expect([...list!.matchAll(/"([^"]+)"/g)].map(m => m[1])).toEqual([...LOCAL_SUFFIXES]);
+    expect([...CORE_LOCAL_SUFFIXES]).toEqual([...LOCAL_SUFFIXES]);
+  });
+
   it("no IPv6 address outside global unicast, nor one that tunnels to an IPv4 address", () => {
     // As a link's URL spells them: `new URL()` writes an IPv6 host in short hex, with no dotted IPv4 part.
     const hostOf = (literal: string) => new URL(`http://[${literal}]/`).hostname;
@@ -99,9 +118,10 @@ describe("which link gets a preview", () => {
     expect(previewableLink("look `https://news.example/secret` here")).toBeNull();
     expect(previewableLink("```\nhttps://news.example/a\n```")).toBeNull();
     expect(previewableLink("`https://news.example/a` then https://other.example/b")).toBe("https://other.example/b");
-    // The bubble's link ends before a closing "~~" or "||"; a card for the longer address would open another page.
-    expect(previewableLink("~~https://news.example/a~~")).toBeNull();
-    expect(previewableLink("|| https://news.example/a||")).toBeNull();
+    // The bubble's link ends before a closing "~~" or "||", and so does the card's: it opens the same page.
+    expect(previewableLink("~~https://news.example/a~~")).toBe("https://news.example/a");
+    expect(previewableLink("|| https://news.example/a||")).toBe("https://news.example/a");
+    expect(previewableLink("||https://news.example/a||")).toBeNull();
     // A written link opens its whole address; a card for it without its last "." or "_" would be another page's.
     expect(previewableLink("[DC](https://en.wikipedia.org/wiki/Washington,_D.C.)")).toBeNull();
     expect(previewableLink("[x](https://news.example/a_)")).toBeNull();

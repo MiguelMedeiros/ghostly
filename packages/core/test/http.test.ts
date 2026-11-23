@@ -157,6 +157,35 @@ describe("header hygiene", () => {
     ]);
   });
 
+  it("takes a shared sub-path's prefix off a cookie's Path, as off its requests and redirects", () => {
+    // The viewer sees an app shared at `http://127.0.0.1:8888/notes` at `/`: a cookie kept on `/notes` was never sent
+    // back to `/home`, so a login there did not stick.
+    const target = parseLocalTarget("http://127.0.0.1:8888/notes");
+    const cookies = (values: string[]) =>
+      sanitizeResponseHeaders(values.map((value) => ["set-cookie", value]), target, "http://127.0.0.1:8888/notes/login").map(([, value]) => value);
+    expect(cookies([
+      "sid=abc; Path=/notes; HttpOnly",
+      "a=1; path = /notes/; SameSite=Lax",
+      "b=2; Path=/notes/api",
+      "c=3; Path=/; Domain=localhost",
+      "d=4; Path=/other",
+      "e=5; Path=/notesX",
+      "f=6",
+      "g=7; Path=notes",
+    ])).toEqual([
+      "sid=abc; Path=/; HttpOnly",
+      "a=1; Path=/; SameSite=Lax",
+      "b=2; Path=/api",
+      "c=3; Path=/",
+      "d=4; Path=/",
+      "e=5; Path=/",
+      "f=6",
+      "g=7; Path=notes",
+    ]);
+    // At the root nothing is taken off.
+    expect(sanitizeResponseHeaders([["set-cookie", "sid=abc; Path=/notes"]], parseLocalTarget("localhost:3400"))).toEqual([["set-cookie", "sid=abc; Path=/notes"]]);
+  });
+
   it("serves a contact's response headers to a viewer only when they are headers: no CR, LF or NUL, a token name", () => {
     expect(
       viewerResponseHeaders([
@@ -251,7 +280,7 @@ describe("header hygiene", () => {
     const [[name, value]] = features;
     expect(name).toBe("permissions-policy");
     const denied = new Map(value.split(",").map((entry) => entry.trim().split("=") as [string, string]));
-    for (const feature of ["camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read", "storage-access"]) {
+    for (const feature of ["camera", "microphone", "display-capture", "geolocation", "midi", "usb", "serial", "hid", "clipboard-read", "clipboard-write", "storage-access"]) {
       expect(denied.get(feature), feature).toBe("()");
     }
     expect([...denied.values()].every((allow) => allow === "()")).toBe(true);

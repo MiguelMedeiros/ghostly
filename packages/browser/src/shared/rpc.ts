@@ -154,11 +154,12 @@ export interface EngineApi {
   sendMessage(params: { linkId: string; text: string; timestamp?: number; preview?: LinkPreview; replyTo?: string; card?: StatusCard }): { error: string | null; refused?: boolean; messageId?: string };
   /**
    * Edits a text of mine (WISP 400 § Edits): the new text here at once, and to the contact once both sides offer edit/1
-   * on a live session. `messageId`: the row's id, or its wire id. `refused`: not something to edit. In a group
+   * on a live session. `messageId`: the row's id, or its wire id. `refused`: not something to edit; `missing` with it,
+   * once the message was looked for: whether no message goes by that id. In a group
    * (`group:<id>`, WISP 902 § Edits) it goes to the members; `mentions`: members named by the new text beyond those the
    * message already named.
    */
-  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: StatusCard }): { error: string | null; refused?: boolean; messageId?: string; note?: string };
+  editMessage(params: { linkId: string; messageId: string; text: string; preview?: LinkPreview; mentions?: GroupMention[]; card?: StatusCard }): { error: string | null; refused?: boolean; missing?: boolean; messageId?: string; note?: string };
   retryMessage(params: { linkId: string; messageId: string }): void;
   /**
    * Reacts to a message (WISP 400 § Reactions): `linkId` a chat's link or `group:<id>`, `messageId` the message's id
@@ -584,6 +585,11 @@ export interface EngineApi {
    * start with `remove-<reason>:`.
    */
   deviceRemove(params: { key: string }): import("../devices/links").DeviceSetView;
+  /**
+   * "Get them now", on the active device: the files a move left for later on the device with this signing key come over
+   * its link while it is on, on mobile data too (without it they wait for a connection that is not metered).
+   */
+  deviceFetchLeftFiles(params: { key: string }): import("../devices/links").DeviceSetView;
   /**
    * Rename (WISP 06 § User experience), on the active device: the device with this signing key gets this name in the
    * set's next record, which every device reads. The name is trimmed; one the record would change (empty, over 16 bytes,

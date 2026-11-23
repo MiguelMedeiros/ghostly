@@ -122,9 +122,11 @@ if (failed) {
 
 // Audio sent as a file (e2e/support/audio-fixtures/): an MP3 plays from a blob in the chat's <audio>. FLAC is
 // reported, not required: on a GitHub macOS runner it loaded (canPlayType "maybe", its length read) but its time did
-// not move within 700 ms, while it plays on a Mac.
+// not move within 700 ms, while it plays on a Mac. A WAV typed `audio/x-wav` (Android's pickers) and an Opus typed
+// `audio/opus` are reported too: Desktop serves a stored file as the type it came with (MEDIA_TYPES in
+// apps/desktop/src/file_stream.rs), so their lines say what WKWebView makes of those types.
 const audioDir = new URL("../../../e2e/support/audio-fixtures/", import.meta.url);
-const audioFixtures = { "ghost-tune.mp3": "audio/mpeg", "ghost-tune.flac": "audio/flac" };
+const audioFixtures = { "ghost-tune.mp3": "audio/mpeg", "ghost-tune.flac": "audio/flac", "ghost-tune.wav": "audio/x-wav", "ghost-tune.opus": "audio/opus" };
 const sounds = inWebView(async (fixtures) => {
   const out = {};
   for (const [name, { type, base64 }] of Object.entries(fixtures)) {

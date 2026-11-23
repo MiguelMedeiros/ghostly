@@ -11,16 +11,15 @@ const PEER = "peer".padEnd(52, "p");
 /** The engine's DHT_PACKET_BUDGET (core dhtDelivery.ts): a text or an edit within 256 bytes the sealed packet cannot carry. */
 const BUDGET = "Text and authentication exceed the DHT packet budget. Shorten the message.";
 
-const LIVE_LATER = "Too long for the DHT, which carries about 248 bytes. Shorten it, or send it once you're connected peer to peer.";
 const MINE = "Too long for the DHT, which carries about 248 bytes. This chat is on DHT only: shorten it, or change it from the connection icon.";
 const THEIRS = "Too long for the DHT, which carries about 248 bytes. Your contact's chat is on DHT only: shorten it, or wait until they allow live again.";
 const BOTH = "Too long for the DHT, which carries about 248 bytes. You and your contact keep this chat on DHT only: shorten it, or both change it from the connection icon.";
 const WAITS = "Over the 248 bytes the DHT carries: it is sent when you are live";
 
 /**
- * A 1:1 chat off the live link, on the DHT floor. The engine refuses a text of about 249-256 bytes there (sealed, it
- * does not fit the packet) and an edit past about 214: the composer counted against 256, muted and with no title, and
- * only the refusal after Send said it, with a next step a DHT-only chat never reaches by itself.
+ * A 1:1 chat off the live link, on the DHT floor. A text of about 249-256 bytes does not fit the packet once sealed, nor
+ * an edit past about 214: in a chat on DHT only the engine refuses them, elsewhere they wait for live. The composer
+ * counted against 256 on the raw bytes, muted and with no title, and only the refusal after Send said it.
  */
 function openChat(link: Record<string, unknown>, messages: never[] = []) {
   saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages, createdAt: 1_700_000_000_000 });
@@ -31,6 +30,9 @@ function openChat(link: Record<string, unknown>, messages: never[] = []) {
       ...link, dhtDelivery: { mode: "stream", authenticated: true, maxTextBytes: 256, ...(link.dhtDelivery as object) } } as never)] } as never);
   return app;
 }
+
+/** The refusal shown after Send, beside the count's own words for a screen reader (the same sentence, `sr-only`). */
+const shown = (said: string) => waitFor(() => expect(screen.getAllByText(said).filter(e => !e.closest(".sr-only"))).toHaveLength(1));
 
 async function type(text: string) {
   const field = await screen.findByPlaceholderText("Message…");
@@ -52,7 +54,6 @@ describe("the DHT byte count off the live link", () => {
   });
 
   it.each([
-    ["a chat that goes live", {}, LIVE_LATER],
     ["a chat on DHT only by this side", { deliveryMode: "dht" }, MINE],
     ["a chat on DHT only by the contact", { dhtDelivery: { peerMode: "dht" } }, THEIRS],
     ["a chat on DHT only by both sides", { deliveryMode: "dht", dhtDelivery: { peerMode: "dht" } }, BOTH],
@@ -65,13 +66,15 @@ describe("the DHT byte count off the live link", () => {
     expect(counter).toHaveAttribute("title", said);
     await user.click(field);
     await user.keyboard("{Enter}");
-    expect(await screen.findByText(said)).toBeInTheDocument();
+    await shown(said);
   });
 
-  it("past 256 bytes, in a chat that goes live, says it is sent when live", async () => {
+  it.each([["within", 250], ["past", 300]])("%s 256 bytes, in a chat that goes live, says it is sent when live", async (_, bytes) => {
     openChat({});
-    await type("x".repeat(300));
-    expect(await screen.findByTestId("dht-byte-count")).toHaveAttribute("title", WAITS);
+    await type("x".repeat(bytes));
+    const counter = await screen.findByTestId("dht-byte-count");
+    expect(counter.className).toContain("text-warn-ink");
+    expect(counter).toHaveAttribute("title", WAITS);
   });
 
   // The packet carries the text JSON-escaped: a new line, a quote or a backslash takes two bytes there.
@@ -80,12 +83,12 @@ describe("the DHT byte count off the live link", () => {
     ["quotes", 'xxxxxxxxx"'.repeat(23), 253],
     ["backslashes", "x".repeat(240) + "\\".repeat(9), 258],
   ])("counts a text with %s as the packet does", async (_, text, escaped) => {
-    openChat({});
+    openChat({ deliveryMode: "dht" });
     await type(text);
     const counter = await screen.findByTestId("dht-byte-count");
     expect(counter).toHaveTextContent(`${escaped} / 248 B`);
     expect(counter.className).toContain("text-warn-ink");
-    expect(counter).toHaveAttribute("title", LIVE_LATER);
+    expect(counter).toHaveAttribute("title", MINE);
   });
 
   it("with no DHT to carry it, says a text that long waits for live, not to shorten it", async () => {
@@ -125,6 +128,6 @@ describe("the DHT byte count off the live link", () => {
     await waitFor(() => expect(field).toHaveValue("first"));
     fireEvent.change(field, { target: { value: "x".repeat(220) } });
     await user.keyboard("{Enter}");
-    expect(await screen.findByText("Too long for the DHT, which carries about 214 bytes. This chat is on DHT only: shorten it, or change it from the connection icon.")).toBeInTheDocument();
+    await shown("Too long for the DHT, which carries about 214 bytes. This chat is on DHT only: shorten it, or change it from the connection icon.");
   });
 });

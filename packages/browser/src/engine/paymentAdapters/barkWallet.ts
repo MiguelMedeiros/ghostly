@@ -3,13 +3,13 @@ import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { PaymentTarget, WalletNetwork } from "@ghostly/core";
 import { store, STORES, transact, wrap } from "../../shared/idb";
-import type { WalletMode } from "../../shared/mints";
 import { BARK_NETWORKS, BarkAdapter, barkDatabase, serverInfo, type BarkConfig, type BarkExpiry } from "./bark";
 import { loadBarkSdk, type BarkNetwork, type BarkSdk } from "./barkSdk";
-import { RETIRE_READ_MS } from "./arkWallet";
+import { RETIRE_READ_MS, barkMode } from "./walletModes";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
 import { viewNews } from "./viewNews";
+import { AskBackoff } from "../askBackoff";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
 import type { SavedIntent } from "./coordinator";
 
@@ -52,7 +52,7 @@ export const SECOND_TERMS = "https://second.tech/terms";
 const TERMS: Record<string, string> = { [MAINNET_BARK.provider]: SECOND_TERMS };
 /** The defaults a new wallet of this network is made with, in one click. */
 export const barkDefaults = (network: WalletNetwork): BarkCreate => network === "testnet" ? TESTNET_BARK : MAINNET_BARK;
-export const barkMode = (network: BarkNetwork): WalletMode => network === "bitcoin" ? "mainnet" : "testnet";
+export { barkMode };
 /**
  * An SDK error as a person reads it: the WebAssembly's own words up to where it starts quoting JavaScript values and
  * stack frames ("…: JsValue(TypeError: Failed to fetch at __wbg_fetch… wasm-function[3134]…"), bounded.
@@ -70,12 +70,24 @@ const forget = async (walletId: string) => {
   }
 };
 
+/** The wallet is read every 10 s while its server answers; one that could not connect tries again after 30 s. */
+const READ_MS = 10_000, CONNECT_MS = 30_000;
+/**
+ * A server that does not answer (down, the device offline) is asked twice as late after each failed refresh or
+ * connect, up to this (`AskBackoff`, as a USDT wallet's RPC): at the fixed pace it was 360 refreshes an hour, each a
+ * sync and several reads that fail. An answer, and the app coming back (`wake`), go back to the pace.
+ */
+export const BARK_SLOW_MS = 5 * 60_000;
 /** The Bark wallet of one network, under its own key (see walletNetworks.ts). */
 export class BarkWallet {
   private readonly key: string;
   private saved?: StoredBark;
   private timer?: ReturnType<typeof setTimeout>;
   private retry?: ReturnType<typeof setTimeout>;
+  /** What the waiting retry makes when it runs (`ready`'s `create`); undefined while none waits. */
+  private retrying?: boolean;
+  private readonly reads = new AskBackoff(READ_MS, BARK_SLOW_MS);
+  private readonly connects = new AskBackoff(CONNECT_MS, BARK_SLOW_MS);
   private readying?: Promise<void>;
   private stopped = false;
   private lastMaintenance = 0;
@@ -107,16 +119,17 @@ export class BarkWallet {
   private startReady(create: boolean): Promise<void> { return this.readying ??= this.ready(create).finally(() => { this.readying = undefined; }); }
   private needsReady(create: boolean) { return !this.stopped && (this.saved ? !this.adapter : create); }
   private async ready(create: boolean) {
-    clearTimeout(this.retry);
+    clearTimeout(this.retry); this.retrying = undefined;
     try {
       await requireTurn();
       if (!this.saved) { if (create) await this.serial(async () => { if (!this.saved) await this.createNow({ ...barkDefaults(this.network) }); }); }
       else if (!this.adapter) await this.serial(() => this.stopped ? Promise.resolve() : this.open());
+      this.connects.forget("server");
     } catch (error) {
       if (this.stopped || error instanceof ModeChanged) return;
       const readable = readableBarkError(error);
       this.view = { ...this.view, error: `Connecting to Bark… ${readable instanceof Error ? readable.message : ""}`.trim() }; this.changed();
-      this.retry = setTimeout(() => void this.ensureReady(create), 30000);
+      this.retrying = create; this.retry = setTimeout(() => void this.ensureReady(create), this.connects.missed("server", Date.now()));
     }
   }
   /** A wallet of this network on its default server, made now: it answers first, or nothing is saved. */
@@ -209,7 +222,7 @@ export class BarkWallet {
       this.view = this.idle(); this.changed();
     }).finally(() => this.gate.resume());
   }
-  async lock() { clearTimeout(this.timer); clearTimeout(this.retry); const adapter = this.adapter; this.adapter = undefined; this.scanning = false; this.view = { ...this.view, locked: true, address: undefined, scanning: undefined }; this.changed(); await adapter?.dispose(); }
+  async lock() { clearTimeout(this.timer); clearTimeout(this.retry); this.retrying = undefined; this.reads.forget("server"); const adapter = this.adapter; this.adapter = undefined; this.scanning = false; this.view = { ...this.view, locked: true, address: undefined, scanning: undefined }; this.changed(); await adapter?.dispose(); }
 
   /** Stopping ends it where it is: a wallet shutting down needs no balance. */
   async refresh() { await this.poll().catch((error) => { if (!(error instanceof ModeChanged)) throw error; }); }
@@ -245,7 +258,18 @@ export class BarkWallet {
     };
     // Every 10 s: a read that says what the view already did is no news for the wallet view (`changed(false)`).
     this.changed(viewNews(before, this.view));
-    if (this.adapter) this.timer = setTimeout(() => void this.refresh(), 10000);
+    const wait = failed.length ? this.reads.missed("server", Date.now()) : READ_MS;
+    if (!failed.length) this.reads.forget("server");
+    if (this.adapter) { clearTimeout(this.timer); this.timer = setTimeout(() => void this.refresh(), wait); }
+  }
+  /**
+   * The app is back (in front, online, the computer woke): a wallet whose last refresh or connect failed tries now,
+   * not at the end of its wait. One that reads fine keeps its pace.
+   */
+  wake() {
+    if (this.stopped) return;
+    if (this.adapter) { if (this.view.error) { this.reads.forget("server"); void this.refresh(); } return; }
+    if (this.retrying !== undefined && !this.readying) { const create = this.retrying; this.connects.forget("server"); void this.ensureReady(create); }
   }
   /** On-chain coins into Ark: the board confirms on-chain, then they are spendable. */
   async board(): Promise<string> { const pending = await this.require().board(); await this.refresh(); return pending.txid; }

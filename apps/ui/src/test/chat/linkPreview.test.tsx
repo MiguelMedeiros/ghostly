@@ -6,6 +6,7 @@ import { MessageInput } from "../../components/MessageInput";
 import { MessageBubble } from "../../components/MessageBubble";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { forgetLinkPreviews } from "../../lib/linkPreviewFetch";
+import { PREVIEW_DEBOUNCE_MS } from "../../hooks/useLinkPreviewDraft";
 import { setSessionDraft } from "../../lib/storage";
 import { renderApp } from "../render";
 import { fakeEngine } from "../fakeEngine";
@@ -40,10 +41,17 @@ beforeEach(() => { onSend.mockReset().mockResolvedValue(null); forgetLinkPreview
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe("a link preview in the composer", () => {
+  // The text's rest (PREVIEW_DEBOUNCE_MS) runs on a fake clock that also keeps real time: `rest()` passes it at once.
+  beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] }); });
+  afterEach(() => { vi.useRealTimers(); });
+  /** Past the time the text rests before its link is read, and a little more: what would be asked has been by now. */
+  const rest = () => act(() => vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS + 100));
+
   it("is read from the page once the text rests, shown, and sent with the message", async () => {
     const fetch = sites();
     composer();
     type("look https://news.example/story?utm_source=feed&id=9");
+    await rest();
     const card = await screen.findByTestId("composer-link-preview");
     await waitFor(() => expect(card).toHaveAttribute("data-status", "ready"));
     expect(within(card).getByTestId("composer-link-preview-title")).toHaveTextContent("Ghosts are real");
@@ -63,6 +71,7 @@ describe("a link preview in the composer", () => {
     sites();
     composer();
     type("look https://news.example/story");
+    await rest();
     const card = await screen.findByTestId("composer-link-preview");
     await waitFor(() => expect(card).toHaveAttribute("data-status", "ready"));
     for (const id of ["composer-link-preview-title", "composer-link-preview-description"]) {
@@ -80,11 +89,12 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     composer();
     type("https://news.example/a");
+    await rest();
     await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
     fireEvent.click(screen.getByTestId("link-preview-remove"));
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     type("https://news.example/a and more");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     send();
     await waitFor(() => expect(onSend).toHaveBeenCalledWith("https://news.example/a and more"));
@@ -95,18 +105,19 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     const view = composer(false);
     type("https://news.example/a");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     view.unmount();
 
     composer();
     type("my router http://192.168.0.1/ and http://printer.local/");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(fetch).not.toHaveBeenCalled();
     // CORS refused: the fetch fails as a network error does, and there is simply no card.
     fetch.mockRejectedValue(new TypeError("Failed to fetch"));
     type("https://closed.example/page");
+    await rest();
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByTestId("composer-link-preview")).toBeNull());
     send();
@@ -120,7 +131,7 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     composer();
     type("look https://their-server.example/page");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     send();
@@ -133,10 +144,11 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     renderApp(<LockScreenProvider><MessageInput onSend={onSend} linkPreviews draftId="chat-kept" /></LockScreenProvider>);
     expect(field().value).toBe("look https://their-server.example/page");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(fetch).not.toHaveBeenCalled();
     // Once the engine says it is off, the preview is made.
     act(() => fakeEngine.update({ settings: { relayOnly: false } }));
+    await rest();
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     expect(String(fetch.mock.calls[0][0])).toBe("https://their-server.example/page");
   });
@@ -162,6 +174,7 @@ describe("a link preview in the composer", () => {
     view = editing("look https://news.example/story");
     await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
     type("Look https://news.example/story");
+    await rest();
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
@@ -199,7 +212,7 @@ describe("a link preview in the composer", () => {
       let view = editing("look https://news.example/story", linkPreviews);
       await waitFor(() => expect(field()).toHaveValue("look https://news.example/story"));
       type("Look https://news.example/story");
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await rest();
       expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready");
       save();
       await waitFor(() => expect(onSave).toHaveBeenCalledWith("Look https://news.example/story", { preview: kept }));
@@ -228,11 +241,12 @@ describe("a link preview in the composer", () => {
     const fetch = sites();
     composer();
     type("guess the ending: ||https://news.example/ending||");
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await rest();
     expect(screen.queryByTestId("composer-link-preview")).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
     // The same link outside the spoiler too: it shows, so its card tells nothing hidden.
     type("read https://news.example/ending, or guess: ||https://news.example/ending||");
+    await rest();
     await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
     expect(fetch).toHaveBeenCalledOnce();
   });
@@ -308,8 +322,34 @@ describe("a link preview in a message", () => {
     expect(screen.queryByTestId("link-preview-card")).toBeNull();
   });
 
+  // An older app's card for a struck-through link opened /a~~: another page than the bubble's link above it.
+  it("opens a struck-through link as the bubble does, and is not drawn for the address with its closing ~~", () => {
+    const text = "~~https://news.example/a~~";
+    const older = renderApp(<MessageBubble message={{ id: "m13", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/a~~", t: "Old news" } }} />);
+    expect(screen.queryByTestId("link-preview-card")).toBeNull();
+    older.unmount();
+    renderApp(<MessageBubble message={{ id: "m14", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/a", t: "Old news" } }} />);
+    expect(screen.getByTestId("link-preview-card")).toHaveAttribute("href", "https://news.example/a");
+  });
+
+  // The sender makes a card only for a link the bubble draws, with the address it opens; an older app or another
+  // client sends one for an address in code, or read from a [text](url) link shorter than it opens.
+  it("is not drawn for an address the bubble does not draw as a link with that same address", () => {
+    for (const [text, u] of [
+      ["`https://news.example/x`", "https://news.example/x%60"],
+      ["`see https://news.example/story here`", "https://news.example/story"],
+      ["```\nhttps://news.example/story\n```", "https://news.example/story"],
+      ["[DC](https://en.wikipedia.org/wiki/Washington,_D.C.)", "https://en.wikipedia.org/wiki/Washington,_D.C"],
+      ["||[the ending](https://news.example/ending.)||", "https://news.example/ending"],
+    ]) {
+      const view = renderApp(<MessageBubble message={{ id: "m15", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u, t: "Ghosts are real" } }} />);
+      expect(screen.queryByTestId("link-preview-card"), text).toBeNull();
+      view.unmount();
+    }
+  });
+
   it("is drawn for a link outside a spoiler, even when the spoiler holds it too", () => {
-    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "`https://news.example/story`"]) {
+    for (const text of ["read ||this|| https://news.example/story", "||https://news.example/story|| is https://news.example/story", "[the story](https://news.example/story)"]) {
       const view = renderApp(<MessageBubble message={{ id: "m12", text, sender: "peer", timestamp: 1_700_000_000_000, preview: { u: "https://news.example/story", t: "Ghosts are real" } }} />);
       expect(screen.getByTestId("link-preview-card"), text).toHaveTextContent("Ghosts are real");
       view.unmount();

@@ -5,6 +5,7 @@ import { appLinkOrigin, decodePart } from "./url";
 import { setChatFolder } from "./chatFolders";
 import { forgetChatLanguage } from "./chatLanguage";
 import { forgetChatMute, groupChat } from "./chatMute";
+import { clearExtensionNotices } from "./notifications";
 import { forgetChatTranslate } from "./chatTranslate";
 import { forgetSentOriginals } from "./sentOriginals";
 import { forgetTranslateSend } from "./chatTranslateSend";
@@ -14,6 +15,7 @@ import { transportName } from "./connection";
 import { ago } from "./time";
 import { english } from "./english";
 import { relayCause } from "./problemText";
+import { listText } from "./listText";
 import type { Translate } from "../contexts/I18nContext";
 
 /** Whether a group's name is one `groupName` takes whole: characters (`MAX_GROUP_NAME_LENGTH`) and bytes (`MAX_GROUP_NAME_BYTES`). */
@@ -138,6 +140,30 @@ export const authorName = (group: FormerNamesOf & { formerNames?: GroupView["for
 };
 
 /**
+ * The members `authorName` reads to name `key`: `key`'s, and every other one whose name could be taken for it (its
+ * name's or, out of the roster, its former name's). `authorName` over these names `key` as over the whole roster, so
+ * the chat list keeps them, not a community's hundreds of members, of each group on every engine state.
+ */
+export function authorRoster<M extends Pick<GroupMemberView, "key" | "me" | "nick">>(members: readonly M[], key: string, formerNames?: GroupView["formerNames"]): M[] {
+  const author = members.find(m => m.key === key);
+  const name = author ? !author.me && author.nick : formerNames?.[key];
+  if (!name) return author ? [author] : [];
+  const form = knownNameForm(name);
+  return members.filter(m => m.key === key || (!m.me && m.nick && knownNameForm(m.nick) === form));
+}
+
+/** `sameNameForm` of names already read: `authorRoster` reads a whole roster's on every engine state. */
+const nameForms = new Map<string, string>();
+function knownNameForm(nick: string): string {
+  let form = nameForms.get(nick);
+  if (form === undefined) {
+    if (nameForms.size >= 10_000) nameForms.clear();
+    nameForms.set(nick, form = sameNameForm(nick));
+  }
+  return form;
+}
+
+/**
  * The name `key` went by when it was no longer in the roster. In a community, where anyone with the link comes in, it
  * is told apart by the end of its key where a member there shows it too. A private group's members come in only by
  * the admin's invitation, and one removed and invited again comes back with a new key under the same name: what she
@@ -203,7 +229,7 @@ export function groupTransports(members: GroupMemberView[], t: Translate = engli
   const head = hubbed ? t("group.transports.liveHubs", { live: live.length + hubbed, total: others.length, hubs: hubbed })
     : t("group.transports.live", { live: live.length, total: others.length });
   if (counts.size === 1) { const [transport] = counts.keys(); return { line: t("group.transports.over", { head, transport: transportName(transport) }), transport }; }
-  return { line: t("group.transports.mixed", { head, list: [...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`).join(", ") }) };
+  return { line: t("group.transports.mixed", { head, list: listText([...counts].sort((a, b) => b[1] - a[1]).map(([kind, n]) => `${n} ${transportName(kind)}`), t) }) };
 }
 
 /**
@@ -271,10 +297,12 @@ export function markGroupRead(groupId: string, at = Date.now()): void {
 /**
  * What this device keeps of a group beside the engine goes with it (left, deleted here, a join called off): what was
  * typed and not sent, the read mark, the mute, the translation choice, the language and the folder, as a chat's go with the chat (storage.ts deleteSession).
- * A community keeps its id, so a draft left behind was in the field again after joining it again.
+ * A community keeps its id, so a draft left behind was in the field again after joining it again. Its notifications in
+ * the extension go too: Chrome keeps them past the page, and a click on one opened a group that is not there.
  */
 export function forgetGroupLocal(groupId: string): void {
   setSessionDraft(`group:${groupId}`, "");
+  void clearExtensionNotices(groupChat(groupId));
   try { localStorage.removeItem(`${getPrefix()}group_read_${groupId}`); } catch { /* storage unavailable */ }
   forgetTranslateSend(groupChat(groupId));
   forgetChatMute(groupChat(groupId));
