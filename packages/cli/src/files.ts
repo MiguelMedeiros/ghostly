@@ -428,6 +428,8 @@ export const FILE_METHODS: Record<string, Method> = {
     // the file's own without --name, read once cleaned (a key split by a `:` or a line break the cleaning drops is whole).
     const name = sanitizeFileName(str(params, "name") ?? basename(path));
     guardText(name, bool(params, "force"), "file's name", "send it");
+    // Its type too, which the contact's app shows, as it goes out (`sendFile` reads `file.mime`).
+    guardText(mimeOf(path, str(params, "mime"), params.voice !== undefined), bool(params, "force"), "file's type", "send it");
     const target = chatOrGroupOf(ctx, params);
     let info;
     try { info = await stat(path); } catch { throw new CliError("not_found", `No file ${path}`); }
