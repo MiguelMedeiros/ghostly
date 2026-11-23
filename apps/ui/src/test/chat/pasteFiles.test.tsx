@@ -251,7 +251,7 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     const open = await screen.findByTestId("attachment-sheet");
     // The first ten names, then the rest unnamed: the line stays one to read.
     expect(await within(open).findByRole("alert")).toHaveTextContent(
-      `Only the first 32 files were added. Left out: ${names.slice(0, 10).join(", ")}, …. Add the rest with + → Document.`);
+      `Only the first 32 files were added. Left out: ${names.slice(0, 10).map((name) => `⁨${name}⁩`).join(", ")}, …. Add the rest with + → Document.`);
   });
 
   it("text, or files the paste already showed, never ask the platform", async () => {

@@ -798,8 +798,8 @@ export function MessageInput({
     closeAll();
     setAttached((was) => [...(was ?? []), ...files]);
     const leftOut = left && [
-      left.pastLimit.length ? t("errors.files.pastLimit", { count: String(PLATFORM_PASTE_FILES), names: someNames(left.pastLimit) }) : "",
-      left.leftOut.length ? t("errors.files.leftOut", { names: someNames(left.leftOut) }) : "",
+      left.pastLimit.length ? t("errors.files.pastLimit", { count: String(PLATFORM_PASTE_FILES), names: someNames(left.pastLimit, t) }) : "",
+      left.leftOut.length ? t("errors.files.leftOut", { names: someNames(left.leftOut, t) }) : "",
     ].filter(Boolean).join(" ");
     if (leftOut) showToast(leftOut);
     return true;
