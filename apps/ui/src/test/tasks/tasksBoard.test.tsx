@@ -901,4 +901,35 @@ describe("the way to the board, above the chat list", () => {
     changes([], [sent.id]);
     await waitFor(() => expect(reads()).toBe(3));
   });
+
+  it("reads, at each engine state, only the chats, groups and members its cards name, not every chat and every member", async () => {
+    // A profile in a large group with no card and many chats with no bot, beside a bot that posts in its chat and in a
+    // group. Each read of a member list or a contact's identities is counted.
+    const read = { members: 0, identities: 0 };
+    const counted = <T extends object>(view: T, field: keyof typeof read, value: unknown): T =>
+      Object.defineProperty(view, field, { enumerable: true, configurable: true, get: () => { read[field]++; return value; } });
+    const large = counted(groupView({ id: "large", name: "Large", status: "active" }), "members",
+      Array.from({ length: 300 }, (_, i) => ({ key: `large-member-${i}`, me: i === 0, nick: `Member ${i}` })));
+    const crew = groupView({ id: "g1", name: "Sala de Máquinas", status: "active", memberLinks: { "link-1": "hermes-key" },
+      members: [{ key: "me-key", me: true, nick: "Me" }, { key: "hermes-key", me: false, nick: "Hermes One" }] as never });
+    const links = [linkView({ id: "link-1", peerPubKeyZ32: PEER, peerNick: "Coordinator" }),
+      ...Array.from({ length: 50 }, (_, i) => counted(linkView({ id: `link-other-${i}`, peerPubKeyZ32: `other${i}` }), "identities", undefined))];
+    fakeEngine.on("statusCardIndex", () => [
+      row("link-1", task({ id: "relay" })),
+      row("group:g1", task({ id: "relay" }), { member: "hermes-key" }),
+      row("group:g1", task({ id: "docs", status: "queued" }), { member: "hermes-key" }),
+    ]);
+    const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
+    act(() => engine.update({ links, groups: [large, crew] }));
+    // Hermes in the group is the Coordinator of the 1:1 chat: its relay task in both is one, beside the docs task.
+    await waitFor(() => expect(screen.getByTestId("sidebar-tasks")).toHaveAccessibleName("Tasks, 2 active"));
+    read.members = 0;
+    read.identities = 0;
+
+    // The engine sends its whole state anew on every change (up to 20 a second while a file moves): nothing on the
+    // board changed, and the large group's members and the other chats' identities are not read for it.
+    for (let i = 0; i < 20; i++) act(() => engine.update({ links: [...links], groups: [large, crew] }));
+    expect(read).toEqual({ members: 0, identities: 0 });
+    expect(screen.getByTestId("sidebar-tasks")).toHaveAccessibleName("Tasks, 2 active");
+  });
 });
