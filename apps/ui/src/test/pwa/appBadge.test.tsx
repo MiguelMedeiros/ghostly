@@ -251,7 +251,8 @@ describe("the number on the app's icon while the app is locked", () => {
 
     fireEvent.change(lockField(), { target: { value: "pw" } });
     await act(async () => { fireEvent.submit(lockField().closest("form")!); });
-    await screen.findByText("false");
+    // The password is checked for real (PBKDF2, 600,000 rounds): more than findBy's 1 s on a busy runner.
+    await screen.findByText("false", undefined, { timeout: 10_000 });
     // The number comes from useAppBadge's effect, which React may run a task after the page shows the unlock: findBy
     // resolves on the page, outside act, so it is waited for.
     await waitFor(() => expect(icon).toEqual([2, 0, 7]));
