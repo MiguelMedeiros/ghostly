@@ -471,8 +471,8 @@ for (const screen of KEYBOARD_SCREENS) {
       const b = document.querySelector(selector)!.getBoundingClientRect();
       const x = b.left + b.width / 2, y = b.top + b.height / 2;
       return y < visible && !!document.elementFromPoint(x, y)?.closest(selector);
-    }), [visible, [".composer-textarea", ".composer-send", "[data-testid=call-mute]", "[data-testid=call-hang-up]"]] as const);
-    expect(reached).toEqual([".composer-textarea", ".composer-send", "[data-testid=call-mute]", "[data-testid=call-hang-up]"]);
+    }), [visible, [".composer-textarea", ".composer-send, [data-testid=voice-record]", "[data-testid=call-mute]", "[data-testid=call-hang-up]"]] as const);
+    expect(reached).toEqual([".composer-textarea", ".composer-send, [data-testid=voice-record]", "[data-testid=call-mute]", "[data-testid=call-hang-up]"]);
     const tiny = (await smallTargets(bob.page, 44, "[data-testid=call-window] button")).map((t) => `${t.name} ${t.width}×${t.height} (${t.stops})`);
     expect(tiny, "the call's buttons under 44 × 44 px").toEqual([]);
     // The person is typing: the call takes no focus from the field.

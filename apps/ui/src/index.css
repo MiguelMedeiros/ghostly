@@ -906,9 +906,10 @@ html[data-standalone="true"] {
 
 /* The small window with a phone's keyboard up and no room for it between the chat's header and the message field (a
    phone on its side: 175px visible at 667×375, hooks/useFloatingBox.ts): a one-line bar over the header, with who,
-   the clock, Mute and End call on 44px. The rest only steps aside, nothing is taken out: the call's sound and
-   pictures go on, and the window is back as it was when the keyboard goes down. At 168px it covered the field's end
-   and its Send, and its End call stood behind the keyboard. */
+   Mute and End call on 44px (a one-to-one call adds its clock; a group's small window has none, and its button is
+   Leave call). The rest only steps aside, nothing is unmounted: the call's sound goes on, and the window is back as
+   it was when the keyboard goes down. At 168px it covered the field's end and its Send, and its End call stood
+   behind the keyboard. */
 .call-mini[data-compact] {
   flex-direction: row;
   justify-content: flex-start;
@@ -925,7 +926,8 @@ html[data-standalone="true"] {
   display: none;
 }
 
-/* Hidden, not removed, or a picture could stop and not play again. */
+/* The one-to-one window's own pictures: hidden, not removed, or a picture could stop and not play again. The group's
+   tile (its video inside) is in .call-mini-tile above, display: none but still mounted; its sound is outside it. */
 .call-mini[data-compact] > video,
 .call-mini[data-compact] > .call-preview {
   visibility: hidden;
