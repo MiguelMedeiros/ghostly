@@ -278,6 +278,26 @@ describe("a received reply in a long history", () => {
     expect(await replyFor("G".repeat(22))).toMatchObject({ id: "G".repeat(22), messageId: `peer_${at + 1}` });
     expect(whole).toBe(1);
   });
+
+  it("a message named by its wire id (messagesByWireId, the CLI's delete --everyone) is read by rows: the whole chat once in a run", async () => {
+    // Each wire id, id the chat lacks or contact's message the CLI named read the chat whole: 0.7-0.8 s at 100,000 messages.
+    const t = await setup();
+    const at = 1_700_000_001_000, text = "T".repeat(22);
+    await db.putMessage({ linkId: t.id, id: `me_${text}`, wireId: text, text: "mine", sender: "me", timestamp: at, via: "datalink" });
+    await db.putMessage({ linkId: t.id, id: `peer_${at}`, wireId: "F".repeat(22), text: "📎 photo.jpg", sender: "peer", timestamp: at, via: "datalink",
+      file: { id: `${t.id}-in-${"F".repeat(22)}`, name: "photo.jpg", size: 5, mime: "image/jpeg" } });
+    const [measuring, read] = [new AsyncLocalStorage<true>(), db.getMessages.bind(db)];
+    let whole = 0;
+    const history = vi.spyOn(db, "getMessages").mockImplementation(linkId => { if (measuring.getStore() && linkId === t.id) whole++; return read(linkId); });
+    cleanup.push(async () => { history.mockRestore(); });
+    const byWire = (id: string, chat = t.id) => measuring.run(true, () => t.node.messagesByWireId(chat, id));
+    expect((await byWire(text)).map(m => m.id)).toEqual([`me_${text}`]);
+    expect((await byWire("F".repeat(22))).map(m => m.id)).toEqual([`peer_${at}`]);
+    for (const unknown of ["me_typo", "Z".repeat(22), "nope"]) expect(await byWire(unknown)).toEqual([]);
+    expect(whole).toBe(1);
+    // A group's rows go by their own id.
+    expect(await byWire("k:0:1", "group:g1")).toEqual([]);
+  });
 });
 
 describe("what a reply names", () => {

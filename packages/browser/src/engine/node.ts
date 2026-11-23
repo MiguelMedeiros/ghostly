@@ -3367,6 +3367,18 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * A 1:1 chat's messages whose wire id (`StoredMessage.wireId`) is `wireId`, by time, each row read alone
+   * (`rowsByWireId`): what a command names by the id both sides know. A group's rows carry none (its message id is the
+   * same for every member): none. A chat not loaded is read whole.
+   */
+  async messagesByWireId(linkId: string, wireId: string): Promise<StoredMessage[]> {
+    if (linkId.startsWith("group:")) return [];
+    const live = this.links.get(linkId);
+    const rows = live && !live.stored.group ? await this.rowsByWireId(live, wireId) : (await db.getMessages(linkId)).filter(m => m.wireId === wireId);
+    return rows.map(withoutFrame);
+  }
+
+  /**
    * A page of a chat's or a group's history: the newest `limit` (before `before`), or with `after` the oldest `limit`
    * after it (and before `before`). Each bound is a time or a message's place; only the page's rows are read.
    */
