@@ -352,11 +352,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         <>
           <div className="call-top flex items-center justify-center gap-1.5 px-16 pt-6 pb-2">
             <p dir="auto" className="min-w-0 truncate text-text-primary font-medium">{groupName}</p>
-            <button type="button" data-testid="group-call-info" aria-expanded={info} aria-controls={infoId} aria-label={t("common.moreInfo")} title={t("common.moreInfo")}
-              onClick={() => setInfo(!info)}
-              className="grid h-5 w-5 shrink-0 cursor-pointer place-items-center rounded-full text-text-muted transition-colors hover:text-accent aria-expanded:text-accent">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
-            </button>
+            {/* Its phone hit area reaches up into the window's top, not down onto the tiles drawn over it 8 px below. */}
+            <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className="max-md:before:-top-4 max-md:before:-bottom-2" />
             {moderation && <RemovedFromCall moderation={moderation} nameOf={(identity) => (groupNameOf ? groupNameOf(identity) : identity)} host={box} />}
           </div>
           {info && <p id={infoId} data-testid="group-call-info-text" className="mx-auto max-w-md px-4 pb-2 text-center text-xs text-text-secondary break-words">{t("calls.group.info")}</p>}
