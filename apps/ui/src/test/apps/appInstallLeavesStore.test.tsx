@@ -7,7 +7,7 @@ import { AppInstallDialog } from "../../components/apps/AppInstallDialog";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: apps.install
+// covers: apps.updates
 
 const KEY = "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo";
 const REF = `${KEY}/chess`;

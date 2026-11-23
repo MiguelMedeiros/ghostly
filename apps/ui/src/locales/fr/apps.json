@@ -129,6 +129,7 @@
     "ipInfoOffline": "L'app n'a pas accès à Internet, mais son éditeur peut quand même apprendre votre adresse IP et quand vous l'ouvrez.",
     "ipLine": "Téléchargée depuis {{host}}, qui voit votre adresse IP.",
     "ipLineInstalled": "Son éditeur peut apprendre votre adresse IP.",
+    "leavesStore": "{{title}} ne reçoit aujourd'hui ses mises à jour qu'une fois listées par {{name}}. Installer cette version y met fin : ses mises à jour viendront alors des liens de son éditeur.",
     "newPermissions": "Cette mise à jour demande aussi de",
     "notListed": "Dans aucune de vos boutiques",
     "perm": {
@@ -155,8 +156,7 @@
     "unknownPublisherInfo": "N'importe qui peut signer une app avec une nouvelle clé. Seule une boutique que vous avez ajoutée peut garantir son éditeur. Comparez la clé avec celle que publie l'éditeur.",
     "update": "Mettre à jour",
     "webkit": "Dans ce navigateur, une app peut quand même contacter d'autres serveurs.",
-    "webkitInfo": "Safari et tout navigateur sur iPhone ou iPad laissent une app ouvrir des connexions que Ghostly ne peut pas bloquer. Ces serveurs apprennent votre adresse IP. L'app de bureau les bloque.",
-    "leavesStore": "{{title}} ne reçoit aujourd'hui ses mises à jour qu'une fois listées par {{name}}. Installer cette version y met fin : ses mises à jour viendront alors des liens de son éditeur."
+    "webkitInfo": "Safari et tout navigateur sur iPhone ou iPad laissent une app ouvrir des connexions que Ghostly ne peut pas bloquer. Ces serveurs apprennent votre adresse IP. L'app de bureau les bloque."
   },
   "page": {
     "add": "Ajouter",

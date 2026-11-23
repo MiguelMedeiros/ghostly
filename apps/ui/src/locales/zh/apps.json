@@ -129,6 +129,7 @@
     "ipInfoOffline": "该应用无法访问互联网，但其发布者仍可能知道你的 IP 地址以及你何时打开它。",
     "ipLine": "从 {{host}} 下载，该主机会看到你的 IP 地址。",
     "ipLineInstalled": "其发布者可能会知道你的 IP 地址。",
+    "leavesStore": "{{title}} 目前只在 {{name}} 列出更新后才会更新。安装此版本将结束这一点：之后的更新将来自其发布者的链接。",
     "newPermissions": "此更新还要求",
     "notListed": "不在你的任何商店中",
     "perm": {
@@ -155,8 +156,7 @@
     "unknownPublisherInfo": "任何人都可以用新密钥签名应用。只有你添加的商店才能为其发布者担保。请将密钥与发布者公布的密钥进行比对。",
     "update": "更新",
     "webkit": "在此浏览器中，应用仍可能连接其他服务器。",
-    "webkitInfo": "Safari 以及 iPhone 和 iPad 上的所有浏览器，都允许应用建立 Ghostly 无法阻止的连接。这些服务器会知道你的 IP 地址。桌面应用会阻止这些连接。",
-    "leavesStore": "{{title}} 目前只在 {{name}} 列出更新后才会更新。安装此版本将结束这一点：之后的更新将来自其发布者的链接。"
+    "webkitInfo": "Safari 以及 iPhone 和 iPad 上的所有浏览器，都允许应用建立 Ghostly 无法阻止的连接。这些服务器会知道你的 IP 地址。桌面应用会阻止这些连接。"
   },
   "page": {
     "add": "添加",

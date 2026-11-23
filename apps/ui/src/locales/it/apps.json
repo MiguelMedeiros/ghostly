@@ -129,6 +129,7 @@
     "ipInfoOffline": "L'app non ha accesso a internet, ma il suo editore può comunque sapere il tuo indirizzo IP e quando la apri.",
     "ipLine": "Scaricata da {{host}}, che vede il tuo indirizzo IP.",
     "ipLineInstalled": "Il suo editore può sapere il tuo indirizzo IP.",
+    "leavesStore": "{{title}} ora riceve aggiornamenti solo dopo che {{name}} li elenca. Installare questa versione pone fine a questo: i suoi aggiornamenti arriveranno dai link del suo editore.",
     "newPermissions": "Questo aggiornamento chiede anche di",
     "notListed": "In nessuno dei tuoi store",
     "perm": {
@@ -155,8 +156,7 @@
     "unknownPublisherInfo": "Chiunque può firmare un'app con una chiave nuova. Solo uno store che hai aggiunto può garantire il suo editore. Confronta la chiave con quella pubblicata dall'editore.",
     "update": "Aggiorna",
     "webkit": "In questo browser, un'app può comunque contattare altri server.",
-    "webkitInfo": "Safari e ogni browser su iPhone o iPad lasciano che un'app apra connessioni che Ghostly non può bloccare. Quei server vedono il tuo indirizzo IP. L'app desktop le blocca.",
-    "leavesStore": "{{title}} ora riceve aggiornamenti solo dopo che {{name}} li elenca. Installare questa versione pone fine a questo: i suoi aggiornamenti arriveranno dai link del suo editore."
+    "webkitInfo": "Safari e ogni browser su iPhone o iPad lasciano che un'app apra connessioni che Ghostly non può bloccare. Quei server vedono il tuo indirizzo IP. L'app desktop le blocca."
   },
   "page": {
     "add": "Aggiungi",
