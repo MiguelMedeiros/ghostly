@@ -241,7 +241,7 @@ export function Tasks() {
     model.active ? t("cards.panel.activeCount", { count: model.active }) : t("cards.panel.idle"),
     model.total === 1 ? t("cards.board.tasksOne") : t("cards.board.tasksMany", { count: model.total }),
   ].join(" · ");
-  const pill = (on: boolean) => `cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-9 ${on ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"}`;
+  const pill = (on: boolean) => `cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-[44px] max-md:min-w-[44px] ${on ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"}`;
 
   return (
     <div ref={pageRef} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-chat-bg" data-testid="tasks-page">
@@ -264,7 +264,7 @@ export function Tasks() {
             <p data-testid="tasks-summary" className="m-0 text-xs text-text-secondary">{summary}</p>
             {showing === "tasks" && model.finished > 0 && (
               <button type="button" data-testid="tasks-clear-finished" onClick={clearFinished} title={t("cards.board.clearFinishedHint")}
-                className="cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-9">
+                className="cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-[44px] max-md:min-w-[44px]">
                 {t("cards.board.clearFinished")}
               </button>
             )}
@@ -303,7 +303,7 @@ export function Tasks() {
                 <div role="group" aria-label={t("cards.board.tags")} data-testid="tasks-tags" className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-4 py-1.5 [scrollbar-width:none]">
                   <span aria-hidden="true" className="shrink-0 text-xs text-text-muted">{t("cards.board.tags")}</span>
                   {model.tags.map((name) => (
-                    <button key={name} type="button" data-testid="tasks-tag" aria-pressed={tag === name} onClick={() => setTag(tag === name ? undefined : name)} className={`${pill(tag === name)} flex max-w-40 shrink-0 items-center`}>
+                    <button key={name} type="button" data-testid="tasks-tag" aria-pressed={tag === name} onClick={() => setTag(tag === name ? undefined : name)} className={`${pill(tag === name)} flex max-w-40 shrink-0 items-center justify-center`}>
                       {/* Cut in the tag's own direction: cut by the pill in the page's, a Latin tag lost its start in Arabic. */}
                       <bdi className="min-w-0 truncate">{name}</bdi>
                     </button>
@@ -318,7 +318,7 @@ export function Tasks() {
                     {model.groups.map((group, i) => (
                       <button key={group.id} type="button" role="tab" id={`${tabsId}-${i}`} aria-selected={i === at} aria-controls={`${tabsId}-${i}-panel`} tabIndex={i === at ? 0 : -1}
                         data-testid="tasks-tab" data-column={group.id} onClick={() => toTab(i)}
-                        className={`flex min-h-9 max-w-44 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent ${i === at ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary"}`}>
+                        className={`tap-target flex min-h-9 max-w-44 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent ${i === at ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary"}`}>
                         <bdi className="min-w-0 truncate">{nameOf(group)}</bdi>
                         <span data-testid="tasks-tab-count" className="tabular-nums opacity-80">{group.tasks.length}</span>
                       </button>
