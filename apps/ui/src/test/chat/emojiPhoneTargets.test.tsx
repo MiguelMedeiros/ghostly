@@ -51,6 +51,23 @@ describe("the emoji panel on a phone", () => {
     } finally { viewport(1024, 768); }
   });
 
+  it("opened from the keyboard, takes the focus on its switch, and a tap leaves the on-screen keyboard down", async () => {
+    const viewport = (width: number, height: number) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
+    viewport(390, 844);
+    try {
+      // Enter on the smiley is a click with no pointer (`detail` 0): before, the focus stayed on it behind the backdrop
+      // and the first Tab closed the sheet.
+      const panel = open();
+      expect(within(panel).getByTestId("expression-tab-emoji")).toHaveFocus();
+      await userEvent.setup().tab();
+      expect(panel).toBeInTheDocument();
+      expect(panel).toContainElement(document.activeElement as HTMLElement);
+      fireEvent.click(screen.getByTestId("composer-expressions"), { detail: 1 });
+      fireEvent.click(screen.getByTestId("composer-expressions"), { detail: 1 });
+      expect(screen.getByTestId("expression-panel")).not.toContainElement(document.activeElement as HTMLElement);
+    } finally { viewport(1024, 768); }
+  });
+
   it("the skin tone and the Emoji / GIF switch are thumb-sized", () => {
     const panel = open();
     expect(within(panel).getByTestId("emoji-skin")).toHaveClass("tap-target");
