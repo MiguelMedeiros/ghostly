@@ -39,13 +39,19 @@ test("on a 375x667 phone at 200% text size the Tasks board takes the screen, and
   await page.waitForTimeout(300);
   await expect(page.getByTestId("tasks-summary")).toBeInViewport({ ratio: 1 });
 
-  // A wheel in the middle of the screen, over the rows: the board may have no height to hover.
+  // A wheel in the middle of the screen, over the rows: the board may have no height to hover. Until the page is at its
+  // end, however tall the rows above the tabs have grown.
   await textSize(page, 32);
   await page.mouse.move(PHONE.width / 2, PHONE.height / 2);
-  await page.mouse.wheel(0, 400);
-  // The rows went with the page, the column tabs stay, and the board below them is most of the screen.
+  const scroller = page.getByTestId("tasks-scroller");
+  await expect(async () => {
+    await page.mouse.wheel(0, 400);
+    expect(await scroller.evaluate((el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 1)).toBe(true);
+  }).toPass({ timeout: 10_000 });
+  // The rows went with the page, the column tabs stay, and the board below them is most of the screen. At the page's
+  // end the tabs may lose a fraction of a pixel to rounding at the scroller's top.
   await expect(page.getByTestId("tasks-summary")).not.toBeInViewport();
-  await expect(page.getByTestId("tasks-tabs")).toBeInViewport({ ratio: 1 });
+  await expect(page.getByTestId("tasks-tabs")).toBeInViewport({ ratio: 0.95 });
   const shown = await board.evaluate((el) => { const box = el.getBoundingClientRect(); return Math.min(box.bottom, innerHeight) - Math.max(box.top, 0); });
   expect(shown).toBeGreaterThan(PHONE.height / 2);
   await page.screenshot({ path: test.info().outputPath("tasks-phone-32px-scrolled.png") });
