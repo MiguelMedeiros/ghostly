@@ -511,10 +511,19 @@ export function decodeCashu(version: "A" | "B", body: string): { amount: number;
   }
 }
 
+/**
+ * A unit as the mints name theirs (NUT-00: "sat", "msat", "usd", "eur"): letters only. The question prints it after the
+ * amount, so any other ("000 sats", a line break, a direction mark) leaves the amount unread, as an unreadable token
+ * does: the token is still asked about, without its amount.
+ */
+const PLAIN_UNIT = /^[a-z]{1,12}$/i;
+
 function total(amounts: unknown[] | undefined, unit: unknown): { amount: number; unit: string } | null {
   if (!amounts?.length || !amounts.every((a): a is number => Number.isSafeInteger(a) && (a as number) >= 0)) return null;
+  // No unit at all is a sat, as NUT-00 says.
+  if (unit != null && !(typeof unit === "string" && PLAIN_UNIT.test(unit))) return null;
   const amount = amounts.reduce((sum, a) => sum + a, 0);
-  return Number.isSafeInteger(amount) ? { amount, unit: typeof unit === "string" && unit ? unit : "sat" } : null;
+  return Number.isSafeInteger(amount) ? { amount, unit: typeof unit === "string" ? unit : "sat" } : null;
 }
 
 function fromBase64(text: string): Uint8Array {

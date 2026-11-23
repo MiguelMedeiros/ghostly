@@ -15,6 +15,11 @@ const SEED_PT = "imitador vinheta sogro xerife veleiro pomar volumoso tratador i
 /** A cashuB token for 8 + 13 sat on http://mint.test (test secrets, no mint behind it). */
 const CASHU_21 = "cashuBo2FtcGh0dHA6Ly9taW50LnRlc3RhdWNzYXRhdIGiYWlIAJofKTJT5B5hcIKjYWEIYXNtdGVzdC1zZWNyZXQtYWFjWCECERERERERERERERERERERERERERERERERERERERERERGjYWENYXNtdGVzdC1zZWNyZXQtYmFjWCECIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI";
 
+/** A cashuA token for 21 of `unit` (left out when undefined), its JSON in UTF-8 as a wallet writes it. */
+const cashuA = (unit: unknown) => "cashuA" + btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify({
+  token: [{ mint: "http://mint.test", proofs: [{ id: "009a1f293253e41e", amount: 21, secret: "test-secret", C: "02" + "11".repeat(32) }] }], unit,
+})))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
 const onSend = vi.fn<(text: string) => Promise<string | null>>();
 
 type Props = Partial<Parameters<typeof MessageInput>[0]>;
@@ -144,6 +149,36 @@ describe("the secret guard", () => {
     await write(second.user, `cashuBnotreallyatokenatallxx`);
     await second.user.keyboard("{Enter}");
     expect(screen.getByRole("alertdialog", { name: "Send this ecash to this chat?" })).toBeInTheDocument();
+  });
+
+  // A unit is printed after the amount: one a mint would not name (a space and digits, a direction mark, a line break)
+  // read "Send 21 000 SATS to Alice?". Only letters are said; any other leaves the amount out, and still asks.
+  it.each([
+    ["a space and digits", "000 sats"],
+    ["a direction mark", "sat\u202e"],
+    ["a line break", "sat\nAlice"],
+    ["13 letters", "satsatsatsats"],
+    ["an empty one", ""],
+    ["a number", 5],
+  ])("asks about a token whose unit is %s, without its amount", async (_, unit) => {
+    const { user } = composer();
+    await write(user, cashuA(unit));
+    await user.keyboard("{Enter}");
+    expect(guard()).toHaveAttribute("data-kind", "cashu");
+    expect(screen.getByRole("alertdialog", { name: "Send this ecash to \u2068Alice\u2069?" })).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["sat", "Send 21 sats to \u2068Alice\u2069?"],
+    ["usd", "Send 21 USD to \u2068Alice\u2069?"],
+    ["eur", "Send 21 EUR to \u2068Alice\u2069?"],
+    [undefined, "Send 21 sats to \u2068Alice\u2069?"],
+  ])("says a token's amount in its unit (%s)", async (unit, title) => {
+    const { user } = composer();
+    await write(user, cashuA(unit));
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("alertdialog", { name: title })).toBeInTheDocument();
   });
 
   it("lets ordinary text, invoices and invites go at once", async () => {
