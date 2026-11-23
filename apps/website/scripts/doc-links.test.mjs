@@ -37,16 +37,16 @@ test("another repository's issue with no owner, or under this one's owner, is fo
 test("a section of a document whose anchor starts with a number is no repository's issue", () => {
   const body = [
     "[records](PROTOCOL.md#4-records), `WEB.md#2-storage`, [intro](BROWSER.md#1-intro), README.md#123, [steps](setup#4-steps) and [here](#1-intro).",
-    "Still found: other-repo#12, (other-repo#13), `other-repo#14` and MiguelMedeiros/other-repo#15.",
+    "Still found: other-repo#12, (other-repo#13), `other-repo#14`, MiguelMedeiros/other-repo#15 and ghostly-other#16.",
   ].join("\n");
-  assert.deepEqual(privateRefs(body), ["other-repo#12", "other-repo#13", "other-repo#14", "MiguelMedeiros/other-repo#15"]);
+  assert.deepEqual(privateRefs(body), ["other-repo#12", "other-repo#13", "other-repo#14", "MiguelMedeiros/other-repo#15", "ghostly-other#16"]);
 });
 
 test("a full link to an issue or pull request of this owner's other repositories is found; this repository's is not", () => {
   const body = [
     "https://github.com/MiguelMedeiros/other-repo/issues/12 and https://github.com/MiguelMedeiros/other-repo/pull/13,",
     "github.com/MiguelMedeiros/other-repo/issues/14, github.com/miguelmedeiros/Other-Repo/issues/15/ and",
-    "[t](https://github.com/MiguelMedeiros/other-repo/issues/16?x=1#c).",
+    "[t](https://github.com/MiguelMedeiros/other-repo/issues/16?x=1#c) and github.com/MiguelMedeiros/ghostly-other/issues/20.",
     "Left alone: https://github.com/MiguelMedeiros/ghostly/issues/17, github.com/MiguelMedeiros/ghostly/pull/18 and owner/repo#19.",
   ].join("\n");
   assert.deepEqual(privateRefs(body), [
@@ -55,6 +55,7 @@ test("a full link to an issue or pull request of this owner's other repositories
     "github.com/MiguelMedeiros/other-repo/issues/14",
     "github.com/miguelmedeiros/Other-Repo/issues/15",
     "github.com/MiguelMedeiros/other-repo/issues/16",
+    "github.com/MiguelMedeiros/ghostly-other/issues/20",
   ]);
 });
 
