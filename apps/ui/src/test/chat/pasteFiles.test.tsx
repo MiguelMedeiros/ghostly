@@ -1,5 +1,6 @@
 import { act, createEvent, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PLAYABLE_AUDIO, PLAYABLE_VIDEO } from "@ghostly/core";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
 import { guardFileDrops, pastedFiles, pastedImageName, pasteIsPictureOnly, PLATFORM_PASTE_MAX } from "../../lib/pastedFiles";
@@ -241,6 +242,19 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     await user.click(await screen.findByTestId("attachment-send"));
     await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(2));
     expect(onSendFile.mock.calls.map(([f]) => [f.name, f.type, f.size])).toEqual([["scan.pdf", "application/pdf", 4], ["notes", "", 1]]);
+  });
+
+  it("copied audio and video files go with a type the contact's app plays, as + → Document picks them", async () => {
+    // Before, these went with no type, so as bytes to download; and a WMA was refused in a video's words.
+    const names = ["take.flac", "take.aac", "take.oga", "take.weba", "clip.m4v", "clip.ogv"];
+    fakeEngine.readClipboardFiles = vi.fn(async () => [...names, "song.wma"].map((name) => held(name, [1])));
+    const { user } = composer();
+    paste(field(), {});
+    await user.click(await screen.findByTestId("attachment-send"));
+    await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(names.length + 1));
+    const types = Object.fromEntries(onSendFile.mock.calls.map(([f]) => [f.name, f.type]));
+    for (const name of names) expect(PLAYABLE_AUDIO.test(types[name]!) || PLAYABLE_VIDEO.test(types[name]!), `${name}: ${types[name]}`).toBe(true);
+    expect(types["song.wma"]).toBe("audio/x-ms-wma");
   });
 
   it("a paste the platform brought only some files of names the ones it left out", async () => {
