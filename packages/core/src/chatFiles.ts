@@ -637,6 +637,14 @@ export class ChatFiles {
    */
   private readonly unended = new Set<Entry>();
   /**
+   * Files sent from here, not ended, that the contact was offered (not `queued`): what its receiver counts among a
+   * contact's unfinished files (`maxUnfinishedIncoming`). Offered all at once, 300 files lost the 41 past its limit
+   * (`too-many`): the rest wait here as `queued`, and go as these end (`offerNext`).
+   */
+  private readonly there = new Set<Entry>();
+  /** How many of `there` the contact takes on this session: its limit, or fewer once it refused one as too many. */
+  private offerLimit: number = FILE_LIMITS.maxUnfinishedIncoming;
+  /**
    * Files this side cancelled while no session carried the cancel (`pf-abort`), said on the next one. The session also
    * goes for a moment when a move swaps it (its capabilities are agreed again): unsaid, the receiver showed the file
    * moving, its bytes kept, until its idle nudge asked 30 s later.
@@ -676,7 +684,7 @@ export class ChatFiles {
       if (record.direction === "out") entry.out = { next: record.confirmed, sent: 0, generation: 0, sends: [] };
       else entry.in = { written: record.confirmed, stored: record.confirmed, acked: record.confirmed, checkpointed: record.confirmed, writing: Promise.resolve(), quietState: record.state };
       const replaced = this.entries.get(key(record.direction, record.id));
-      if (replaced) this.unended.delete(replaced);
+      if (replaced) { this.unended.delete(replaced); this.there.delete(replaced); }
       this.entries.set(key(record.direction, record.id), entry);
       this.track(entry);
     }
@@ -762,6 +770,8 @@ export class ChatFiles {
   private track(entry: Entry): void {
     if (!transferEnded(entry.record) && this.entries.get(key(entry.record.direction, entry.record.id)) === entry) this.unended.add(entry);
     else this.unended.delete(entry);
+    if (entry.out && this.unended.has(entry) && entry.record.state !== "queued") this.there.add(entry);
+    else this.there.delete(entry);
   }
 
   private send(frame: Record<string, unknown>): boolean {
@@ -780,6 +790,7 @@ export class ChatFiles {
     // Another session may be another path.
     this.pace.reset();
     this.refill = 0;
+    this.offerLimit = FILE_LIMITS.maxUnfinishedIncoming;
     this.host.uplink?.join(this);
     void this.sayRoom();
     for (const id of this.unsaid) if (this.send({ t: "pf-abort", id })) this.unsaid.delete(id);
@@ -793,7 +804,7 @@ export class ChatFiles {
     this.sweep();
     for (const entry of this.entries.values()) {
       if (transferEnded(entry.record)) continue;
-      if (entry.record.direction === "out") this.announce(entry);
+      if (entry.record.direction === "out") { if (entry.record.state === "queued") this.offerIfRoom(entry); else this.announce(entry); }
       else if (entry.record.state === "queued") this.startIncoming(entry);
       // The sender offers again on its own; one that does not (an older app, one stuck) is asked.
       else if (entry.record.state === "active") this.armNudge(entry);
@@ -895,8 +906,42 @@ export class ChatFiles {
     };
     this.entries.set(key("out", file.id), entry);
     this.changed(entry);
-    if (this.attached) this.announce(entry);
+    this.offerIfRoom(entry);
     return { ...entry.record };
+  }
+
+  /** A file the contact was not offered yet goes now if it has room for one more of this side's (`there`); else it waits as `queued`. */
+  private offerIfRoom(entry: Entry): void {
+    if (this.attached && this.there.size < this.offerLimit) this.announce(entry);
+  }
+
+  /** One of this side's files there ended: the ones waiting for room go, in the order they were sent. */
+  private offerNext(): void {
+    if (!this.attached) return;
+    for (const entry of this.unended) {
+      if (this.there.size >= this.offerLimit) return;
+      if (entry.out && entry.record.state === "queued") this.announce(entry);
+    }
+  }
+
+  /**
+   * Refused as one too many there: it waits as `queued`, offered again once another of this side's files there ends, and
+   * no more than the others there are offered on this session. With none of them there, nothing would end: false, it fails.
+   */
+  private waitForRoom(entry: Entry): boolean {
+    const { record } = entry, out = entry.out!;
+    const others = this.there.size - (this.there.has(entry) ? 1 : 0);
+    if (!others) return false;
+    this.offerLimit = Math.min(this.offerLimit, others);
+    out.generation++; out.next = record.confirmed; out.block = undefined; clearTimeout(out.timer);
+    this.moving.delete(entry); this.held.delete(entry);
+    // Its sender's pause holds: resumed, it is offered again.
+    if (record.state !== "paused" || record.pausedBy !== "me") { record.state = "queued"; record.pausedBy = record.waitingFor = undefined; }
+    // Nothing is agreed there any more: unoffered, its week ends it (`sweep`).
+    record.agreed = undefined;
+    this.changed(entry);
+    this.wakeHeld();
+    return true;
   }
 
   private offerFrame(record: FileTransferRecord, paused: boolean): Record<string, unknown> {
@@ -1468,6 +1513,7 @@ export class ChatFiles {
         return;
       }
       case "pf-refuse": {
+        if (frame.why === "too-many" && this.waitForRoom(outgoing)) return;
         const { state, error } = refusalText(String(frame.why), isInt(frame.room) ? frame.room : undefined);
         this.end(outgoing, state, error);
         return;
@@ -1494,7 +1540,7 @@ export class ChatFiles {
       void incoming.writing.finally(() => { if (transferEnded(record)) incoming.target = undefined; });
     }
     this.changed(entry);
-    if (entry.out) this.wakeHeld();
+    if (entry.out) { this.wakeHeld(); this.offerNext(); }
   }
 
   // ─── What the person does ───────────────────────────────────────────────
@@ -1594,7 +1640,7 @@ export class ChatFiles {
     clearTimeout(entry.out!.timer); clearTimeout(entry.out!.wake);
     entry.out = { next: 0, sent: 0, generation: entry.out!.generation + 1, sends: [] };
     this.changed(entry);
-    if (this.attached) this.announce(entry);
+    this.offerIfRoom(entry);
   }
 
   /**

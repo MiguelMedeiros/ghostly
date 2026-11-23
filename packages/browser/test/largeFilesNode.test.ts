@@ -774,7 +774,7 @@ it("a file said on the floor and refused here for no room says so here, and arri
   expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(30_000));
 }, 60_000);
 
-it("a file said on the floor and refused here as one too many waiting says so, and arrives on the sender's Retry once the person answered them", async () => {
+it("a file said on the floor and refused here as one too many waiting says so, and arrives by itself once the person answered them", async () => {
   const t = await setup();
   await announce(t, "many-00001", 30_000);
   const fileId = (await db.getMessages(t.id)).find((m) => m.id === "peer_many-00001")!.file!.id;
@@ -782,12 +782,12 @@ it("a file said on the floor and refused here as one too many waiting says so, a
   for (const id of asks) t.offer(id, FILE_LIMITS.askAboveBytes + 1);
   await vi.waitFor(async () => { for (const id of asks) expect((await t.incoming(id))?.transfer).toMatchObject({ stage: "asking" }); }, { timeout: 20_000 });
   t.offer("many-00001", 30_000);
-  await vi.waitFor(() => expect(t.records.get("out:many-00001")).toMatchObject({ state: "failed", error: expect.stringContaining("too many files waiting") }), { timeout: 10_000 });
-  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Too many files are waiting here" }));
-  // The person declines the ones waiting; later the sender tries again, as told.
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Too many files are waiting here" }), { timeout: 10_000 });
+  // The sender keeps it, waiting its turn: its others there are still asked about.
+  expect(t.records.get("out:many-00001")).toMatchObject({ state: "queued" });
+  // The person declines the ones waiting; each that ends gives the one waiting its turn, offered again without a Retry.
   for (const id of asks) await t.node().fileAction({ linkId: t.id, fileId: (await t.incoming(id))!.fileId, action: "decline" });
   await vi.waitFor(() => { for (const id of asks) expect(t.records.get(`out:${id}`)?.state).toBe("declined"); }, { timeout: 10_000 });
-  t.files.retry("many-00001");
   await vi.waitFor(() => expect(t.records.get("out:many-00001")?.state).toBe("done"), { timeout: 20_000 });
   await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "done" }));
 }, 90_000);
