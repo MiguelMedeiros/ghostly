@@ -7,6 +7,7 @@ import { GhostlyHttpError, LIMITS, parseLocalTarget, VIEWER_PERMISSIONS_POLICY, 
 import { bool, chatOf, nameKey, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, guardViewerAnswer, type PageGuard } from "@ghostly/core";
 
 /**
  * Shared services (WISP 700/701, WISP 1100 phase 3b): a web app on this machine a contact may open over the chat's live
@@ -147,6 +148,13 @@ export function withoutReports(value: string): string {
     .join(", ");
 }
 
+/**
+ * What each page of the app runs first, as in the web runner (`guardViewerAnswer`): the clipboard guard. The viewer's
+ * `clipboard-write=()` keeps the page off `navigator.clipboard`, but not off `execCommand("copy")`, which a browser
+ * allows for a while after any tap, from a timer too.
+ */
+const OPENED_SERVICE_GUARDS: PageGuard[] = [{ script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH }];
+
 /** `service open` while Hide my IP from contacts is on (as the browser extension refuses to open one). */
 export const SERVICE_OPEN_OFF_RELAY_ONLY = "A contact's app does not open here while Hide my IP from contacts is on: a browser tab cannot keep its page off WebRTC";
 
@@ -214,7 +222,9 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
         const own = ownCookies(value, cookies);
         return own ? [[name, own]] : [];
       });
-    const answer = await send({ method: request.method ?? "GET", path: request.url ?? "/", headers, body: chunks.length ? new Uint8Array(Buffer.concat(chunks)) : null, maxResponseBytes: MAX_RESPONSE_BYTES, signal: stop.signal });
+    const sent = await send({ method: request.method ?? "GET", path: request.url ?? "/", headers, body: chunks.length ? new Uint8Array(Buffer.concat(chunks)) : null, maxResponseBytes: MAX_RESPONSE_BYTES, signal: stop.signal });
+    const destination = request.headers["sec-fetch-dest"];
+    const answer = { status: sent.status, ...(await guardViewerAnswer(sent.headers, sent.body, typeof destination === "string" ? destination : null, OPENED_SERVICE_GUARDS)) };
     const out: Record<string, string | string[]> = {};
     for (const [name, value] of answer.headers) {
       const lower = name.toLowerCase();

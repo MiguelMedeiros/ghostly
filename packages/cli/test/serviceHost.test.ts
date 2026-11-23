@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { request as httpRequest } from "node:http";
 import { createServer as createNetServer, Server as NetServer, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostlyHttpError, LIMITS, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, GhostlyHttpError, LIMITS, VIEWER_GUARD_CSP, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { keepServing } from "../src/host";
 import type { ApiContext } from "../src/api";
 import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, OPENED_SERVICE_CSP_RELAY_ONLY, openServiceServer, ownCookies, SERVICE_METHODS, SERVICE_NEEDS_DAEMON, SERVICE_OPEN_OFF_RELAY_ONLY, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
@@ -12,10 +12,10 @@ import { chatViewOf } from "./support/chatView";
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; body: string; aborted: boolean }
 
 /** A request to the opened service's port with any `Host` (fetch would not let a test set one). */
-function get(opened: OpenedService, path: string, { host = opened.host, cookie, method = "GET", body }: { host?: string; cookie?: string; method?: string; body?: Buffer } = {}): Promise<Reply> {
+function get(opened: OpenedService, path: string, { host = opened.host, cookie, method = "GET", body, headers = {} }: { host?: string; cookie?: string; method?: string; body?: Buffer; headers?: Record<string, string> } = {}): Promise<Reply> {
   const port = Number(opened.host.split(":")[1]);
   return new Promise((resolve, reject) => {
-    const req = httpRequest({ host: "127.0.0.1", port, path, method, headers: { host, ...(cookie ? { cookie } : {}) } }, (res) => {
+    const req = httpRequest({ host: "127.0.0.1", port, path, method, headers: { ...headers, host, ...(cookie ? { cookie } : {}) } }, (res) => {
       const parts: Buffer[] = [];
       let aborted = false;
       res.on("data", (c: Buffer) => parts.push(c));
@@ -229,10 +229,10 @@ describe("an opened service's host and link", () => {
       : [["content-type", "text/html"]], ["<p>hi</p>"]));
     expect(OPENED_SERVICE_CSP).toBe("default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'");
     const page = await get(service, "/", { cookie });
-    expect(page.headers["content-security-policy"]).toBe(OPENED_SERVICE_CSP);
+    expect(page.headers["content-security-policy"]).toBe(`${VIEWER_GUARD_CSP}, ${OPENED_SERVICE_CSP}`);
     // Node joins repeated headers with ", ": each policy is still there, and a browser enforces every one.
     const own = await get(service, "/own", { cookie });
-    expect(own.headers["content-security-policy"]).toBe(`default-src 'self', img-src *, ${OPENED_SERVICE_CSP}`);
+    expect(own.headers["content-security-policy"]).toBe(`default-src 'self' ${CLIPBOARD_GUARD_HASH}, img-src *, ${VIEWER_GUARD_CSP}, ${OPENED_SERVICE_CSP}`);
   });
 
   it("keeps the page on its own origin while Hide my IP from contacts is on: no picture, script or frame from an https server the contact names", async () => {
@@ -242,10 +242,10 @@ describe("an opened service's host and link", () => {
     const hidden = await openServiceServer(send, 0, { relayOnly: true });
     servers.push(hidden);
     const hiddenCookie = String((await get(hidden, new URL(hidden.url).pathname)).headers["set-cookie"]).split(";")[0];
-    expect((await get(hidden, "/", { cookie: hiddenCookie })).headers["content-security-policy"]).toBe(`img-src *, ${OPENED_SERVICE_CSP_RELAY_ONLY}`);
+    expect((await get(hidden, "/", { cookie: hiddenCookie })).headers["content-security-policy"]).toBe(`img-src *, ${VIEWER_GUARD_CSP}, ${OPENED_SERVICE_CSP_RELAY_ONLY}`);
     // Off: as before.
     const { service, cookie } = await opened(send);
-    expect((await get(service, "/", { cookie })).headers["content-security-policy"]).toBe(`img-src *, ${OPENED_SERVICE_CSP}`);
+    expect((await get(service, "/", { cookie })).headers["content-security-policy"]).toBe(`img-src *, ${VIEWER_GUARD_CSP}, ${OPENED_SERVICE_CSP}`);
   });
 
   it("`service open` opens no app while Hide my IP from contacts is on: its browser tab could not be kept off WebRTC", async () => {
@@ -269,7 +269,7 @@ describe("an opened service's host and link", () => {
       try {
         const parsed = new URL(url), service = { host: parsed.host } as OpenedService;
         const cookie = String((await get(service, parsed.pathname)).headers["set-cookie"]).split(";")[0];
-        expect((await get(service, "/", { cookie })).headers["content-security-policy"], String(relayOnly)).toBe(OPENED_SERVICE_CSP);
+        expect((await get(service, "/", { cookie })).headers["content-security-policy"], String(relayOnly)).toBe(`${VIEWER_GUARD_CSP}, ${OPENED_SERVICE_CSP}`);
       } finally {
         await SERVICE_METHODS["service.close"](ctx, params);
       }
@@ -292,7 +292,7 @@ describe("an opened service's host and link", () => {
     const page = await get(service, "/", { cookie });
     expect(page.headers["x-served-by"]).toBe("atlas");
     for (const name of ["content-security-policy-report-only", "reporting-endpoints", "report-to", "nel", "link"]) expect(page.headers[name], name).toBeUndefined();
-    expect(page.headers["content-security-policy"]).toBe(`default-src 'self'; img-src *, script-src 'self', ${OPENED_SERVICE_CSP}`);
+    expect(page.headers["content-security-policy"]).toBe(`default-src 'self' ${CLIPBOARD_GUARD_HASH}; img-src *, script-src 'self' ${CLIPBOARD_GUARD_HASH}, ${VIEWER_GUARD_CSP}, ${OPENED_SERVICE_CSP}`);
   });
 
   it("the page's browser features are Ghostly's viewer policy, not the contact's: its own Permissions-Policy or Feature-Policy cannot allow the camera, a device or the location", async () => {
@@ -303,6 +303,40 @@ describe("an opened service's host and link", () => {
       const page = await get(service, path, { cookie });
       expect(page.headers["permissions-policy"], path).toBe(VIEWER_PERMISSIONS_POLICY);
       expect(page.headers["feature-policy"], path).toBeUndefined();
+    }
+  });
+
+  it("each HTML page of the app runs the clipboard guard first, its hash allowed by the contact's policy; a page it cannot go into runs no script, on an origin of its own", async () => {
+    const pages: Record<string, [string, string][]> = {
+      "/": [["content-type", "text/html; charset=utf-8"], ["content-security-policy", "script-src 'self'"], ["content-length", "28"]],
+      "/utf16": [["content-type", "text/html; charset=utf-16"]],
+      "/gzip": [["content-type", "text/html"], ["content-encoding", "gzip"]],
+      "/untyped": [],
+      "/logo.png": [["content-type", "image/png"]],
+      "/app.js": [["content-type", "text/javascript"]],
+    };
+    const { service, cookie } = await opened(async (request) => answer(200, pages[request.path], ["<!doctype html>", "<p>hi</p>"]));
+    const guard = `<script>${CLIPBOARD_GUARD_SCRIPT}</script>`;
+    const policies = (reply: Reply) => String(reply.headers["content-security-policy"]);
+
+    const page = await get(service, "/", { cookie, headers: { "sec-fetch-dest": "document" } });
+    expect(page.body).toBe(`<!doctype html>${guard}<p>hi</p>`);
+    expect(page.headers["content-length"]).toBeUndefined();
+    expect(policies(page)).toBe(`script-src 'self' ${CLIPBOARD_GUARD_HASH}, ${VIEWER_GUARD_CSP}, ${OPENED_SERVICE_CSP}`);
+    // A frame's page too, and one the browser said nothing of.
+    for (const dest of ["iframe", undefined]) expect((await get(service, "/", { cookie, headers: dest ? { "sec-fetch-dest": dest } : {} })).body, dest).toBe(`<!doctype html>${guard}<p>hi</p>`);
+
+    for (const path of ["/utf16", "/gzip", "/untyped"]) {
+      const refused = await get(service, path, { cookie, headers: { "sec-fetch-dest": "document" } });
+      expect(refused.body, path).toBe("<!doctype html><p>hi</p>");
+      expect(policies(refused), path).toContain("script-src 'none'; frame-src 'none'; object-src 'none'; sandbox allow-forms");
+    }
+
+    // What is not a page passes as it was.
+    for (const [path, dest] of [["/logo.png", "image"], ["/app.js", "script"], ["/", "empty"]]) {
+      const other = await get(service, path, { cookie, headers: { "sec-fetch-dest": dest } });
+      expect(other.body, path).toBe("<!doctype html><p>hi</p>");
+      expect(policies(other), path).not.toContain("'none'");
     }
   });
 
@@ -339,7 +373,7 @@ describe("an opened service's answers", () => {
     const cut = await get(service, "/big", { cookie });
     expect(cut.status).toBe(200);
     expect(cut.aborted).toBe(true);
-    expect(cut.body).toBe("<p>start");
+    expect(cut.body).toBe(`<script>${CLIPBOARD_GUARD_SCRIPT}</script><p>start`);
     const next = await get(service, "/", { cookie });
     expect(next).toMatchObject({ status: 200, body: "still here", aborted: false });
   });
