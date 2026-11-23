@@ -17,7 +17,7 @@ vi.mock("../../contexts/LockScreenContext", async (importOriginal) => ({
 }));
 
 function ringing(over: Partial<LockedCall> = {}): LockedCall {
-  return { id: "chat-1", name: "Casper", named: true, peerPubKey: "casper-key", hasVideo: false, onCall: false, answer: vi.fn(), decline: vi.fn(), ...over };
+  return { id: "chat-1", name: "Casper", named: true, peerPubKey: "casper-key", hasVideo: false, onCall: false, answer: vi.fn(), decline: vi.fn(), ringOn: vi.fn(), ...over };
 }
 
 describe("a call ringing while the app is locked", () => {
@@ -134,6 +134,52 @@ describe("a call ringing while the app is locked", () => {
       await act(async () => { checked(true); });
       expect(audio.answer).not.toHaveBeenCalled();
       expect(video.answer).not.toHaveBeenCalled();
+      // It rings on, in the chat the app opens: the chat that rang before the first unlock goes with the lock. (Its
+      // chat rings on the call it has now, whichever of the two is asked.)
+      expect(audio.ringOn).toHaveBeenCalledOnce();
+    } finally {
+      lock.unlock = async (password: string) => password === "spooky";
+    }
+  });
+
+  it("the other kind while the password is checked, and the chat gone before the check ends (a hash upgraded): not answered", async () => {
+    let checked: (right: boolean) => void = () => {};
+    lock.unlock = () => new Promise<boolean>((resolve) => { checked = resolve; });
+    try {
+      const audio = ringing();
+      lock.ringing = [audio];
+      const { user, rerender } = renderApp(<LockScreen />);
+      await user.click(screen.getByRole("button", { name: "Answer" }));
+      await user.type(screen.getByPlaceholderText("Password"), "spooky{Enter}");
+      const video = ringing({ hasVideo: true });
+      lock.ringing = [video];
+      await act(async () => rerender(<LockScreen />));
+      // Unlocked already: the chat that rang before the first unlock went with the lock, its call off the list.
+      lock.ringing = [];
+      await act(async () => rerender(<LockScreen />));
+      await act(async () => { checked(true); });
+      expect(audio.answer).not.toHaveBeenCalled();
+      expect(video.answer).not.toHaveBeenCalled();
+      expect(audio.ringOn).toHaveBeenCalledOnce();
+    } finally {
+      lock.unlock = async (password: string) => password === "spooky";
+    }
+  });
+
+  it("the chat gone before the check ends, the call of the same kind: answered", async () => {
+    let checked: (right: boolean) => void = () => {};
+    lock.unlock = () => new Promise<boolean>((resolve) => { checked = resolve; });
+    try {
+      const call = ringing();
+      lock.ringing = [call];
+      const { user, rerender } = renderApp(<LockScreen />);
+      await user.click(screen.getByRole("button", { name: "Answer" }));
+      await user.type(screen.getByPlaceholderText("Password"), "spooky{Enter}");
+      lock.ringing = [];
+      await act(async () => rerender(<LockScreen />));
+      await act(async () => { checked(true); });
+      expect(call.answer).toHaveBeenCalledOnce();
+      expect(call.ringOn).not.toHaveBeenCalled();
     } finally {
       lock.unlock = async (password: string) => password === "spooky";
     }

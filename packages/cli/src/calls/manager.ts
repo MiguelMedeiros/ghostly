@@ -126,6 +126,8 @@ interface Call {
   offering: boolean;
   /** How many times this side offered again on a new connection after an answer was refused (`redial`). */
   redials: number;
+  /** How many of those redials came after the connection failed (an answer refused), not after it kept checking. */
+  refusals: number;
   /** How many times this side answered the contact's newer offer on a new connection (`reanswer`). */
   reanswers: number;
   /** The log said the contact's offers past the last start-over are ignored: it says so once a call. */
@@ -275,14 +277,18 @@ export class CallManager {
       this.lastSignal.set(chat, signal.ts);
       this.held.delete(chat);
       if (call) {
-        // A hang-up while this side starts over (`redial`) is the contact's app ending a connection that failed. Once
-        // a connection came up, the call was on: a start-over before it does not make the hang-up a failure.
+        // A hang-up while this side starts over after a refused answer (`redial`) is the contact's app ending a
+        // connection that failed. One after a start-over for a connection still checking (CHECKING_REDIAL_MS) is the
+        // contact's own: nothing failed on either side. Once a connection came up, the call was on: a start-over
+        // before it does not make the hang-up a failure.
         // A hang-up that says the contact's side could not connect (`r: "u"`, WISP 601): the call failed, not declined.
         const unreachable = signal.r === "u" && call.state !== "connected";
-        const failed = unreachable || (call.state !== "connected" && (call.offering || (call.direction === "out" && call.redials > 0)));
+        const failed = unreachable || (call.state !== "connected" && call.direction === "out" && call.refusals > 0);
         const reason: EndReason = call.state === "ringing" && call.direction === "in" ? "missed"
           : call.state === "ringing" && !unreachable ? "rejected" : failed ? "failed" : "remote-hangup";
-        void this.end(call, reason, false);
+        // A hang-up that crossed our offer made again (`redial`) is answered with ours: that offer reaches a side with
+        // no call, which rings it as a new one, unless a hang-up comes after it.
+        void this.end(call, reason, call.offering && call.redials > 0);
       }
     }
   }
@@ -336,7 +342,7 @@ export class CallManager {
     call.timer = setTimeout(() => {
       call.timer = null;
       if (call.ended || attempt !== call.attempt || call.state === "connected") return;
-      this.refused(call, `not connected ${Math.round(wait / 100) / 10} s after the answer went in (ice ${call.media?.ice.state ?? "none"})`);
+      this.refused(call, `not connected ${Math.round(wait / 100) / 10} s after the answer went in (ice ${call.media?.ice.state ?? "none"})`, false);
     }, wait);
     call.timer.unref?.();
   }
@@ -344,8 +350,10 @@ export class CallManager {
   /**
    * The contact's answer on this connection was refused, or the connection failed right after it (the same race,
    * whose handshake can also fail once the answer is in): offering again (`redial`) while there are tries left.
+   * `failed` false: the connection only kept checking (CHECKING_REDIAL_MS), and a hang-up after it is no failure.
    */
-  private refused(call: Call, what: string): void {
+  private refused(call: Call, what: string, failed = true): void {
+    if (failed) call.refusals++;
     if (call.redials < this.maxRedials) {
       process.stderr.write(`ghostly: call ${call.id}: ${what}: offering again on a new connection\n`);
       void this.redial(call);
@@ -618,7 +626,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redials: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, connectedTick: null, timer: null,
+      offering: false, redials: 0, refusals: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, connectedTick: null, timer: null,
       watcher: null, stalledFrom: null, stalls: 0, ended: false,
     };
     this.calls.set(call.id, call);

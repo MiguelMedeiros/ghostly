@@ -1220,13 +1220,17 @@ export class ChatFiles {
       this.startIncoming(existing);
       return;
     }
-    if (this.waitingOffers() >= FILE_LIMITS.maxWaitingOffers || this.unfinishedIncoming() >= FILE_LIMITS.maxUnfinishedIncoming) {
+    // The offers waiting for an answer count only against another one asked about: a file taken without asking (a photo
+    // after a few videos nobody answered yet) was refused as one too many waiting. One this large is always asked about.
+    const asksTooMany = () => this.waitingOffers() >= FILE_LIMITS.maxWaitingOffers;
+    if (this.unfinishedIncoming() >= FILE_LIMITS.maxUnfinishedIncoming || (file.size > FILE_LIMITS.askAboveBytes && asksTooMany())) {
       this.send({ t: "pf-refuse", id, why: "too-many" }); return;
     }
     let decision: OfferDecision;
     try { decision = await this.host.decide(file); } catch { decision = { refuse: "invalid" }; }
     if (this.entries.has(key("in", id))) return;
     if (typeof decision === "object") { this.refuseOffer(id, decision); return; }
+    if (decision === "ask" && asksTooMany()) { this.send({ t: "pf-refuse", id, why: "too-many" }); return; }
     const entry: Entry = {
       record: { id, direction: "in", file, state: decision === "ask" ? "asking" : paused ? "paused" : "queued", confirmed: 0, since: this.now(),
         ...(decision !== "ask" && { agreed: true }), ...(paused && decision !== "ask" && { pausedBy: "peer" as const }) },

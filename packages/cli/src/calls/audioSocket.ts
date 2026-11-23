@@ -284,8 +284,12 @@ export class AudioSocket {
       }
       if (this.client === socket) handlers.onAudio(chunk);
     });
-    // The program ended its side: it stays on and keeps hearing the call. One that never proved itself never will.
-    socket.on("end", () => { if (this.unproven.has(socket)) socket.destroy(); });
+    // The program ended its side: it stays on and keeps hearing the call. One that never proved itself never will. One
+    // that exited reads the same EOF: an empty write fails (EPIPE) for it alone, so it is off now, not at the next frame.
+    socket.on("end", () => {
+      if (this.unproven.has(socket)) socket.destroy();
+      else if (!socket.destroyed) socket.write(Buffer.alloc(0));
+    });
     socket.on("close", () => {
       if (timer) clearTimeout(timer);
       this.unproven.delete(socket);
