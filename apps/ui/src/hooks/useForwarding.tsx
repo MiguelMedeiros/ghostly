@@ -34,16 +34,18 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
   // "Forward to…" open on it forwards the rest (the engine refuses a forward with a message it no longer has, for every
   // chat), or closes when none is left. One edited meanwhile is held as it reads now: the engine forwards its new text,
   // and the seed/key question must judge that text, not the one it had when Forward was pressed.
+  // The chat's messages by id only then: nearly always nothing is chosen, and a long chat changes several times a message.
   useEffect(() => {
-    const here = new Map(messages.map(m => [m.id, m]));
+    let byId: Map<string, ChatMessage> | undefined;
+    const here = () => (byId ??= new Map(messages.map(m => [m.id, m])));
     setSelected(now => {
       if (!now) return now;
-      const rest = now.filter(id => here.has(id));
+      const rest = now.filter(id => here().has(id));
       return rest.length === now.length ? now : rest.length ? rest : null;
     });
     setForwarding(now => {
       if (!now) return now;
-      const rest = now.flatMap(m => here.get(m.id) ?? []);
+      const rest = now.flatMap(m => here().get(m.id) ?? []);
       return rest.length === now.length && rest.every((m, i) => m === now[i]) ? now : rest.length ? rest : null;
     });
   }, [messages]);
