@@ -3,7 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { sanitizeNick } from "@ghostly/core";
 import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
-import { authorName, formerName, memberName, sameNamed } from "../../lib/groups";
+import { authorName, authorRoster, formerName, memberName, sameNamed } from "../../lib/groups";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -139,6 +139,21 @@ describe("a group's members with one name", () => {
     const community = { ...mesh, profile: "community" as const };
     expect(authorName(community, CAROL_THEN)).toBe(apart("Carol", "c4r0l1"));
     expect(formerName(community, CAROL_THEN, "Carol")).toBe(apart("Carol", "c4r0l1"));
+  });
+
+  it("the chat list's few members (authorRoster) name an author as the whole roster does", () => {
+    const CAROL_THEN = "carolthen".padEnd(46, "y") + "c4r0l1";
+    const crowd = Array.from({ length: 200 }, (_, i) => member(`m${i}`.padEnd(52, "z"), `Member ${i}`));
+    const roster = [member(ME, undefined, "member", true), member(ADMIN, "Alice", "admin"), member(OTHER, "Аlice"), member(CAROL_THEN.replace("then", "now0"), "carol"), ...crowd];
+    const formerNames = { [CAROL_THEN]: "Carol", [GONE]: "Gone" };
+    for (const profile of ["mesh", "community"] as const) {
+      const group = { profile, members: roster, formerNames };
+      for (const key of [ME, ADMIN, OTHER, CAROL_THEN, GONE, "unknown".padEnd(52, "q"), crowd[7]!.key]) {
+        const few = authorRoster(roster, key, formerNames);
+        expect(few.length, key).toBeLessThanOrEqual(2);
+        expect(authorName({ ...group, members: few }, key), `${profile} ${key}`).toBe(authorName(group, key));
+      }
+    }
   });
 
   it("in a community, the admin's messages and those of a member who took the admin's name read apart, the admin's marked", async () => {
