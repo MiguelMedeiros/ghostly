@@ -163,4 +163,15 @@ describe("a member that picks its hubs keeps the edges it had until they reach t
     down.add("e-hub");
     expect(wanted()).toEqual([hub, a].sort());
   });
+
+  it("a member taken out keeps no edge by this rule once the commit's linger is over", async () => {
+    const { session, mesh, hub, members: [a, b], edges, wanted } = await adminOf20();
+    edges.set(a, "e-a"); edges.set(b, "e-b");
+    expect(wanted()).toEqual([hub, a, b].sort());
+    await session.remove(a, NOW + 1);
+    mesh.removed(session.groupId, [a], NOW + 1);
+    // The commit's 15 s linger, then only `b` is kept.
+    expect(wanted(NOW + 2)).toContain(a);
+    expect(wanted(NOW + 20_000)).toEqual([hub, b].sort());
+  });
 });
