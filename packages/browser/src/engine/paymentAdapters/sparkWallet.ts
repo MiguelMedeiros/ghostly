@@ -8,6 +8,7 @@ import { SPARK_MAINNET_NEEDS_KEY, sparkMode, sparkNetworkFor } from "./walletMod
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
 import { viewNews } from "./viewNews";
+import { AskBackoff } from "../askBackoff";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
 import { forgetBreez, loadBreezSdk, type BreezSdkModule } from "./providers/breezSdk";
 import { breezDatabaseInUse, breezDatabasesFor } from "./providers/breezDatabases";
@@ -35,6 +36,12 @@ export interface SparkCreate { network: SparkNetwork; mnemonic?: string; apiKey?
 export { SPARK_MAINNET_NEEDS_KEY, sparkMode, sparkNetworkFor };
 /** How often the page's balance and history are read while the wallet is open. */
 export const sparkTiming = { pollMs: 10_000, retryMs: 30_000 };
+/**
+ * Spark that does not answer (down, the device offline) is asked twice as late after each failed refresh or connect,
+ * up to this (`AskBackoff`, as a USDT wallet's RPC): at the fixed pace it was 360 refreshes an hour, each several
+ * failed requests. An answer, and the app coming back (`wake`), go back to the pace.
+ */
+export const SPARK_SLOW_MS = 5 * 60_000;
 
 /**
  * The Spark wallet of one network, under its own key: Testnet's runs on Breez's regtest with no key; Mainnet's needs
@@ -45,6 +52,10 @@ export class SparkWallet {
   private saved?: StoredSpark;
   private timer?: ReturnType<typeof setTimeout>;
   private retry?: ReturnType<typeof setTimeout>;
+  /** What the waiting retry makes when it runs (`ready`'s `create`); undefined while none waits. */
+  private retrying?: boolean;
+  private readonly reads = new AskBackoff(sparkTiming.pollMs, SPARK_SLOW_MS);
+  private readonly connects = new AskBackoff(sparkTiming.retryMs, SPARK_SLOW_MS);
   private readying?: Promise<void>;
   private stopped = false;
   private queue: Promise<unknown> = Promise.resolve();
@@ -74,15 +85,16 @@ export class SparkWallet {
   private startReady(create: boolean): Promise<void> { return this.readying ??= this.ready(create).finally(() => { this.readying = undefined; }); }
   private needsReady(create: boolean) { return !this.stopped && (this.saved ? !this.adapter : create && this.network === "testnet"); }
   private async ready(create: boolean) {
-    clearTimeout(this.retry);
+    clearTimeout(this.retry); this.retrying = undefined;
     try {
       await requireTurn();
       if (!this.saved) { if (create) await this.serial(async () => { if (!this.saved && this.network === "testnet") await this.createNow({ network: "regtest" }); }); }
       else if (!this.adapter) await this.serial(() => this.stopped ? Promise.resolve() : this.open());
+      this.connects.forget("server");
     } catch (error) {
       if (this.stopped || error instanceof ModeChanged) return;
       this.view = { ...this.view, error: `Connecting to Spark… ${error instanceof Error ? error.message : ""}`.trim() }; this.changed();
-      this.retry = setTimeout(() => void this.ensureReady(create), sparkTiming.retryMs);
+      this.retrying = create; this.retry = setTimeout(() => void this.ensureReady(create), this.connects.missed("server", Date.now()));
     }
   }
 
@@ -158,7 +170,7 @@ export class SparkWallet {
       this.view = this.idle(); this.changed();
     }).finally(() => this.gate.resume());
   }
-  async lock() { clearTimeout(this.timer); clearTimeout(this.retry); const adapter = this.adapter; this.adapter = undefined; this.view = { ...this.view, locked: true }; this.changed(); await adapter?.close(); }
+  async lock() { clearTimeout(this.timer); clearTimeout(this.retry); this.retrying = undefined; this.reads.forget("server"); const adapter = this.adapter; this.adapter = undefined; this.view = { ...this.view, locked: true }; this.changed(); await adapter?.close(); }
 
   async refresh() { await this.poll().catch((error) => { if (!(error instanceof ModeChanged)) throw error; }); }
   private async poll() {
@@ -178,7 +190,18 @@ export class SparkWallet {
     this.view = { ...this.idle(this.saved), locked: false, ...(balancesRead ? { read: true as const } : {}), address, balance, history, error: failed.length ? `Could not read the ${failed.join(", ")} from Spark. Last values may be stale.` : undefined };
     // Every poll: a read that says what the view already did is no news for the wallet view (`changed(false)`).
     this.changed(viewNews(before, this.view));
-    if (this.adapter) this.timer = setTimeout(() => void this.refresh(), sparkTiming.pollMs);
+    const wait = failed.length ? this.reads.missed("server", Date.now()) : sparkTiming.pollMs;
+    if (!failed.length) this.reads.forget("server");
+    if (this.adapter) { clearTimeout(this.timer); this.timer = setTimeout(() => void this.refresh(), wait); }
+  }
+  /**
+   * The app is back (in front, online, the computer woke): a wallet whose last refresh or connect failed tries now,
+   * not at the end of its wait. One that reads fine keeps its pace.
+   */
+  wake() {
+    if (this.stopped) return;
+    if (this.adapter) { if (this.view.error) { this.reads.forget("server"); void this.refresh(); } return; }
+    if (this.retrying !== undefined && !this.readying) { const create = this.retrying; this.connects.forget("server"); void this.ensureReady(create); }
   }
 
   /** Where a contact pays one request: a Spark invoice made for it (its amount, its memo, a quarter of an hour). */
