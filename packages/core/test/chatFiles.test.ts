@@ -1555,6 +1555,37 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.b.sent.filter((f) => f.t === "pf-refuse")).toEqual([]);
   });
 
+  it("a sender that ignores the confirms has at most a window waiting to be written; the rest is asked for again", async () => {
+    // The receiver alone, driven frame by frame: its storage holds the first write until the whole file has arrived.
+    const w = wire({ drop: (_frame, from) => from === "b" });
+    const id = "flood-001", size = 24 * 1024 * 1024, chunk = FILE_LIMITS.chunkBytes;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const disk = new Disk(false);
+    const open = disk.target.bind(disk);
+    let appends = 0;
+    disk.target = () => {
+      const target = open();
+      return { ...target, append: async (bytes) => { appends++; await gate; return target.append(bytes); } };
+    };
+    w.b.disks.set(id, disk);
+    w.attach();
+    await w.b.files.handle({ t: "pf-offer", id, name: `${id}.bin`, mime: "application/octet-stream", size, ts: 1_700_000_000_000 });
+    await until(() => state(w.b, "in", id) === "active");
+    for (let offset = 0; offset < size; offset += chunk) await w.b.files.handle({ t: "pf-data", id, offset, data: pattern(offset, chunk) });
+    release();
+    await until(() => disk.length > 0 && w.b.transferred.get(`in:${id}`) === disk.length);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(appends * chunk).toBeLessThanOrEqual(FILE_LIMITS.chatWindowBytes + chunk);
+    expect(disk.length).toBe(appends * chunk);
+    // The dropped bytes are asked for from where the receiver stopped taking them, and taken once the store caught up.
+    expect(w.b.sent).toContainEqual({ t: "pf-accept", id, offset: disk.length });
+    const from = disk.length;
+    for (let offset = from; offset < from + 4 * chunk; offset += chunk) await w.b.files.handle({ t: "pf-data", id, offset, data: pattern(offset, chunk) });
+    await until(() => disk.length === from + 4 * chunk);
+    expect(state(w.b, "in", id)).toBe("active");
+  });
+
   it("the idle time is kept across a restart, from what its record says; a record without it starts counting at the next session", async () => {
     const { w, clock, tick } = idleWire();
     w.attach();
