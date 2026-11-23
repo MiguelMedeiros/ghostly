@@ -4,6 +4,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useBackCloses } from "../hooks/useDismiss";
 import type { SecretFinding } from "../lib/parse/secrets";
 import { formatAmount } from "../lib/amount";
+import { isolate } from "../lib/ownStatus";
 
 /**
  * Asked before the composer sends text that looks like a secret (`findSecret`): a seed, a private key or a login to a
@@ -26,7 +27,8 @@ export function SecretGuardDialog({ finding, recipient, onCancel, onConfirm }: {
     return () => { element.close(); if (previous?.isConnected) previous.focus(); };
   }, []);
 
-  const contact = recipient || t("secretGuard.thisChat");
+  // The contact's or the group's name in its own direction: in Arabic "Bob!" read "!Bob".
+  const contact = recipient ? isolate(recipient) : t("secretGuard.thisChat");
   let title: string, body: string;
   if (finding.kind === "cashu") {
     const { amount, unit } = finding;
