@@ -153,7 +153,7 @@ test("a contact's identities: two marks and +1 in the chat list, a stack in the 
 
   // The Nostr card's back loads what the key published, from Bob's relay, only when asked.
   back = await turnTheirs(bob, "Nostr");
-  await expect(back.getByTestId("nostr-contact-note")).toContainText("Loading asks your relays (relay.ghostly.test)");
+  await expect(back.getByTestId("nostr-contact-note")).toContainText("Loading asks your relays (⁨relay.ghostly.test⁩)");
   expect(relay.requests.filter(r => r.by === "bob")).toEqual([]);
   await back.getByTestId("nostr-load-profile").click();
   await expect(back.getByTestId("nostr-profile-name")).toContainText("Alice in Chains");

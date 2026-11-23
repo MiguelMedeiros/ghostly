@@ -90,7 +90,7 @@ test("a contact's profile, follows and notes load only on request from the perso
   await expect(card.getByTestId("nostr-profile-about")).toHaveText("Just here for the ghosts.");
   await expect(card.getByTestId("nostr-profile-nip05")).toContainText("alice@example.com");
   await expect(card.getByTestId("nostr-profile-avatar")).toBeVisible();
-  await expect(card.getByTestId("nostr-profile-source")).toContainText("from relay.ghostly.test");
+  await expect(card.getByTestId("nostr-profile-source")).toContainText("from ⁨relay.ghostly.test⁩");
   await expect(card.getByTestId("nostr-profile-source")).toContainText("Self-described");
   await expect(back).toContainText("Nostr · Alice in Chains");
   expect(pictureFetches).toBe(1);
