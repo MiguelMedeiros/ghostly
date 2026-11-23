@@ -251,6 +251,22 @@ describe("the Tasks board", () => {
     expect(within(column("done")).getByTestId("board-column-older")).toHaveTextContent("Hide older");
   });
 
+  it("Clear finished that takes the chosen tag's last task drops the tag, so the tasks still standing show", async () => {
+    // The tag stayed chosen with its pill gone: "No tasks match", no cards, and nothing on screen to unpick it.
+    const { user } = profile([
+      row("link-1", task({ id: "relay", status: "running", tags: ["core"] })),
+      row("link-1", task({ id: "done", status: "done", tags: ["old"] })),
+    ]);
+    await loaded();
+    await user.click(within(screen.getByTestId("tasks-tags")).getByRole("button", { name: "old" }));
+    expect(cardIds("done")).toEqual(["done"]);
+    expect(cardIds("running")).toEqual([]);
+    await user.click(screen.getByTestId("tasks-clear-finished"));
+    expect(screen.queryByTestId("tasks-no-match")).not.toBeInTheDocument();
+    expect(cardIds("running")).toEqual(["relay"]);
+    expect(within(screen.getByTestId("tasks-tags")).getByRole("button", { name: "core" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("Clear finished hides the done, failed and cancelled tasks on this device, for good after a reload; a bot's update brings one back", async () => {
     const finished = () => [
       row("link-1", task({ id: "relay", status: "running" })),
