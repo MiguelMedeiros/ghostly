@@ -245,4 +245,16 @@ describe("a hub answering a member's sync", { timeout: 120_000 }, () => {
     hub.state.entry = { key: hub.state.entry.key, seedB64: "" };
     expect(syncs(await answer(sync))).toHaveLength(1);
   });
+
+  it("asks when it is waiting on a secret or a commit itself", async () => {
+    const net = new Net();
+    const alice = net.create(), bob = await net.admit(alice);
+    await net.settle();
+    const { hub, answer } = hubOf(alice.session.state, bob.session.myKey);
+    const sync = bob.session.syncFrame();
+    await answer(sync);
+    expect(syncs(await answer(sync))).toHaveLength(0);
+    vi.spyOn(hub, "needsCatchUp", "get").mockReturnValue(true);
+    expect(syncs(await answer(sync))).toHaveLength(1);
+  });
 });
