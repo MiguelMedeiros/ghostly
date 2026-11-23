@@ -18,6 +18,8 @@ function Where() {
 
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
 
+/** Alice's name in a line of text, between the isolate marks (U+2068 FSI, U+2069 PDI). */
+const ALICE = "\u2068Alice\u2069";
 /** A paired chat with Alice, connected now. */
 const paired = (patch: Partial<LinkView> = {}) => linkView({ pairing: { status: "ready" } as LinkView["pairing"], identities: identitiesView(), ...patch });
 
@@ -94,8 +96,8 @@ describe("ComposerIdentityPicker", () => {
     expect(cards().map(c => [within(c).getByTestId("identity-proof-subject").textContent, !!within(c).queryByTestId("id-card-shared")])).toEqual([
       ["example.com", true], ["example.net", false], ["example.org", true], ["example.info", false],
     ]);
-    expect(cards()[0]).toHaveTextContent("Shared with Alice");
-    expect(cards()[1]).toHaveTextContent("Not shared with Alice");
+    expect(cards()[0]).toHaveTextContent(`Shared with ${ALICE}`);
+    expect(cards()[1]).toHaveTextContent(`Not shared with ${ALICE}`);
     expect(cards()[0]).toHaveTextContent("Domain");
     expect(cards()[0]).toHaveTextContent("Your own key");
     expect(cards()[0]).toHaveTextContent("Verified");
@@ -103,7 +105,7 @@ describe("ComposerIdentityPicker", () => {
     expect(chosen()).toBe(cards()[0]);
     expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
     expect(screen.queryByText(/What Alice sees/)).not.toBeInTheDocument();
-    expect(hint()).toBe(`Alice sees your domain example.com, your own key, valid until ${date(now() + 30 * DAY)}.`);
+    expect(hint()).toBe(`${ALICE} sees your domain example.com, your own key, valid until ${date(now() + 30 * DAY)}.`);
     expect(use()).toHaveTextContent("Use Domain");
     expect(screen.getByTestId("composer-identities-manage")).toHaveTextContent("Manage identities");
   });
@@ -113,7 +115,7 @@ describe("ComposerIdentityPicker", () => {
     act(() => cards()[0].focus());
     await user.keyboard("{ArrowRight}");
     expect(chosen()).toBe(cards()[1]);
-    expect(hint()).toBe(`Alice will see your domain example.net, your own key, valid until ${date(now() + 30 * DAY)}.`);
+    expect(hint()).toBe(`${ALICE} will see your domain example.net, your own key, valid until ${date(now() + 30 * DAY)}.`);
     // Only selected: nothing turned over yet.
     expect(sheet()).toHaveAttribute("data-side", "cards");
   });
@@ -130,7 +132,7 @@ describe("ComposerIdentityPicker", () => {
     expect(within(back()).getByTestId("composer-identity-sees")).toHaveTextContent("example.net");
     expect(within(back()).getByTestId("composer-identity-sees")).toHaveTextContent(`Your own key · Valid until ${date(now() + 30 * DAY)}`);
     expect(status()).toBe("Not shared");
-    expect(action()).toHaveTextContent("Share with Alice");
+    expect(action()).toHaveTextContent(`Share with ${ALICE}`);
     expect(back()).not.toHaveTextContent("a copy they kept stays");
     await user.click(action());
     expect(engine.callsTo("shareIdentityProof")).toEqual([{ linkId: "link-1", id: "b" }]);
@@ -155,7 +157,7 @@ describe("ComposerIdentityPicker", () => {
     await turned();
     await result.user.click(action());
     act(() => result.engine.update({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "b", subject: "example.net", status: "pending" })] }) })] }));
-    expect(await within(back()).findByTestId("composer-identity-done")).toHaveTextContent("Shared with Alice");
+    expect(await within(back()).findByTestId("composer-identity-done")).toHaveTextContent(`Shared with ${ALICE}`);
     expect(within(back()).queryByTestId("composer-identity-status")).not.toBeInTheDocument();
     expect(screen.queryByTestId("composer-identity-share")).not.toBeInTheDocument();
     // Then the deck, the same card chosen and with the keys, wearing the seal.
@@ -163,7 +165,7 @@ describe("ComposerIdentityPicker", () => {
     expect(chosen()).toBe(cards()[1]);
     expect(within(cards()[1]).getByTestId("id-card-shared")).toBeInTheDocument();
     await waitFor(() => expect(cards()[1]).toHaveFocus());
-    expect(hint()).toMatch(/^Alice sees your domain example.net/);
+    expect(hint()).toMatch(/^\u2068Alice\u2069 sees your domain example.net/);
   });
 
   it("stops sharing from the back, with the note that a kept copy stays, and the seal goes", async () => {
@@ -179,10 +181,10 @@ describe("ComposerIdentityPicker", () => {
     await user.click(action());
     expect(engine.callsTo("withdrawIdentityProof")).toEqual([{ linkId: "link-1", id: "on" }]);
     act(() => engine.update({ links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "on", status: "withdrawn" })] }) })] }));
-    expect(await within(back()).findByTestId("composer-identity-done")).toHaveTextContent("Alice no longer sees it");
+    expect(await within(back()).findByTestId("composer-identity-done")).toHaveTextContent(`${ALICE} no longer sees it`);
     await deckAgain();
     expect(within(cards()[0]).queryByTestId("id-card-shared")).not.toBeInTheDocument();
-    expect(cards()[0]).toHaveTextContent("Not shared with Alice");
+    expect(cards()[0]).toHaveTextContent(`Not shared with ${ALICE}`);
   });
 
   it("turns over with Enter and back to the deck with Cards, doing nothing", async () => {
@@ -257,7 +259,7 @@ describe("ComposerIdentityPicker", () => {
     expect(screen.getByTestId("composer-identities-add")).toHaveTextContent("Add another identity");
     await user.keyboard("{Home}");
     expect(chosen()).toBe(ghostly());
-    expect(hint()).toBe("Alice sees your Ghostly identity, Ghost, and this chat's key me.");
+    expect(hint()).toBe(`${ALICE} sees your Ghostly identity, Ghost, and this chat's key me.`);
     expect(use()).toHaveTextContent("Use Ghostly");
   });
 
@@ -287,8 +289,8 @@ describe("ComposerIdentityPicker", () => {
   it("does not share what the contact's app cannot receive or verify, but can always stop", async () => {
     const { user } = open({ links: [paired({ identities: identitiesView({ contactProviders: ["nostr"], shared: [sharedView({ id: "on" })] }) })], identityProofs: [proofView({ id: "off", subject: "example.net" }), proofView({ id: "on" })] });
     expect(cards()[0]).toHaveAttribute("aria-disabled", "true");
-    expect(cards()[0]).toHaveAttribute("title", "Alice’s app cannot verify Domain yet");
-    expect(hint()).toBe("Alice’s app cannot verify Domain yet");
+    expect(cards()[0]).toHaveAttribute("title", `${ALICE}’s app cannot verify Domain yet`);
+    expect(hint()).toBe(`${ALICE}’s app cannot verify Domain yet`);
     expect(use()).toBeDisabled();
     await user.click(cards()[1]);
     await turned();
@@ -297,7 +299,7 @@ describe("ComposerIdentityPicker", () => {
 
   it("says when the contact's app cannot receive identities at all", () => {
     open({ links: [paired({ identities: identitiesView({ support: false }) })], identityProofs: [proofView()] });
-    expect(hint()).toBe("Alice’s app cannot receive identities yet");
+    expect(hint()).toBe(`${ALICE}’s app cannot receive identities yet`);
     expect(use()).toBeDisabled();
   });
 
@@ -308,7 +310,7 @@ describe("ComposerIdentityPicker", () => {
     await turned();
     await user.click(action());
     expect(await within(back()).findByRole("alert")).toHaveTextContent("Connect to this contact first");
-    expect(action()).toHaveTextContent("Share with Alice");
+    expect(action()).toHaveTextContent(`Share with ${ALICE}`);
     // Retry is the same button: the second try goes through, and the sheet closes.
     expect(onClose).not.toHaveBeenCalled();
     engine.on("shareIdentityProof", () => undefined);
@@ -451,10 +453,10 @@ describe("MessageInput: the + menu's Identity row", () => {
       expect(within(card).getByTestId("identity-proof-subject")).toHaveAttribute("title", KEY);
       expect(card).toHaveTextContent("Default");
       expect(card).toHaveTextContent("Your key in this chat");
-      expect(card).toHaveTextContent("Shared with Alice");
+      expect(card).toHaveTextContent(`Shared with ${ALICE}`);
       expect(within(card).getByTestId("id-card-shared")).toBeInTheDocument();
       expect(card).not.toHaveAttribute("aria-disabled");
-      expect(hint()).toBe("Alice sees your Ghostly identity, Ghost, and this chat's key yzk3gq8q…1mio.");
+      expect(hint()).toBe(`${ALICE} sees your Ghostly identity, Ghost, and this chat's key yzk3gq8q…1mio.`);
       expect(use()).toHaveTextContent("Use Ghostly");
       expect(use()).toBeEnabled();
     });
@@ -481,7 +483,7 @@ describe("MessageInput: the + menu's Identity row", () => {
     it("is never blocked, even before the contact's app is known", () => {
       open({ links: [linkView({ myPubKeyZ32: KEY })], identityProofs: [] });
       expect(ghostly()).not.toHaveAttribute("aria-disabled");
-      expect(hint()).toMatch(/^Alice sees your Ghostly identity/);
+      expect(hint()).toMatch(/^\u2068Alice\u2069 sees your Ghostly identity/);
     });
 
     it("turns over to the key in full, to copy, and says Alice sees only this when nothing else is shared", async () => {
@@ -494,7 +496,7 @@ describe("MessageInput: the + menu's Identity row", () => {
       expect(within(back()).getByTestId("composer-identity-sees")).toHaveTextContent("Ghostly · Ghost");
       expect(within(back()).getByTestId("composer-identity-key")).toHaveTextContent(KEY);
       expect(within(back()).getByTestId("composer-identity-key")).toHaveAttribute("dir", "ltr");
-      expect(status()).toBe("Alice sees only this identity");
+      expect(status()).toBe(`${ALICE} sees only this identity`);
       // Nothing to take back: no Share only this.
       expect(screen.queryByTestId("composer-identity-share")).not.toBeInTheDocument();
       await user.click(screen.getByTestId("composer-identity-copy-key"));
@@ -514,7 +516,7 @@ describe("MessageInput: the + menu's Identity row", () => {
       engine.on("withdrawIdentityProof", () => undefined);
       await user.click(ghostly());
       await turned();
-      expect(status()).toBe("Alice also sees 2 other identities");
+      expect(status()).toBe(`${ALICE} also sees 2 other identities`);
       expect(action()).toHaveTextContent("Share only this");
       await user.click(action());
       expect(engine.callsTo("withdrawIdentityProof")).toEqual([{ linkId: "link-1", id: "a" }, { linkId: "link-1", id: "b" }]);
@@ -529,7 +531,7 @@ describe("MessageInput: the + menu's Identity row", () => {
       const { user } = open({ links: [withKey({ identities: identitiesView({ shared: [sharedView({ id: "a", status: "accepted" })] }) })], identityProofs: [proofView({ id: "a" })] });
       await user.click(ghostly());
       await turned();
-      expect(status()).toBe("Alice also sees 1 other identity");
+      expect(status()).toBe(`${ALICE} also sees 1 other identity`);
     });
   });
 });
