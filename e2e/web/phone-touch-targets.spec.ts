@@ -801,3 +801,36 @@ test("on a phone Show all under an app's or a store's description is a 44 px tar
   }
   expect(small, "Show all under a description under 44 × 44 px on a phone").toEqual([]);
 });
+
+/**
+ * A chat's Connection options on a phone: its own buttons kept the desktop's 36 px (Details 53 × 36, Verify 44 × 36
+ * and 40 × 36 in Arabic, Connection history 127 × 36) and the keys were 40 px tall, under the transport rows' 44 px.
+ * Each one scrolled into view in the panel, Details and Connection history open, in English and in Arabic.
+ */
+test("on a phone the chat's Connection options, Details, keys and Connection history are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:transport.indicator", "@feature:chat.paired.verify", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(4 * 60_000);
+  const alice = await peer("alice", { mobile: true, viewport: { width: 375, height: 667 } });
+  const bob = await peer("bob");
+  await link(alice, bob);
+  await connect(alice, bob);
+  const { page } = alice;
+  const small: string[] = [];
+  for (const [language, dir] of [["en", "ltr"], ["ar", "rtl"]] as const) {
+    if (language !== "en") await speak(alice, language, dir);
+    await page.getByTestId("connection-options").click();
+    const panel = page.getByTestId("connection-menu").getByRole("dialog");
+    await expect(panel).toBeVisible();
+    await panel.getByTestId("connection-details-summary").click();
+    const history = panel.getByTestId("connection-history").locator("summary");
+    if (await history.count()) await history.click();
+    for (const control of await panel.locator("button, summary").all()) {
+      if (!(await control.isVisible())) continue;
+      await control.evaluate((el) => { el.scrollIntoView({ block: "center" }); el.setAttribute("data-measured", ""); });
+      for (const target of await smallTargets(page, 44, "[data-measured]")) small.push(`${language}: ${target.name} ${target.width}×${target.height} (${target.stops})`);
+      await control.evaluate((el) => el.removeAttribute("data-measured"));
+    }
+    await page.screenshot({ path: testInfo.outputPath(`connection-options-${language}.png`) });
+    await page.keyboard.press("Escape");
+  }
+  expect(small, "Connection options' controls under 44 × 44 px on a phone").toEqual([]);
+});

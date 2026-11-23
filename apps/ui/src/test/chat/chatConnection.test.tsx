@@ -1608,3 +1608,47 @@ describe("the connection Details of a contact with no name", () => {
     expect(lines("connection-not-live").slice(1)).toEqual(["Bea's app connects to this one: this app answers.", "No attempt of Bea's has reached this app yet."]);
   });
 });
+
+// On a phone the panel's own buttons kept the desktop's 36 px (Details 53 × 36, Verify 40-44 × 36, Connection history
+// 127 × 36) and the keys 40 px, while its transport rows are 44 px. happy-dom lays nothing out, so these pin the phone
+// floors, in px as phoneTargetsPx wants (#8056); e2e/web/phone-touch-targets.spec.ts measures them in Chromium.
+describe("ChatConnection on a phone: every button of the panel is a 44 px target", () => {
+  const TALL = "max-md:min-h-[44px]", WIDE = "max-md:min-w-[44px]";
+
+  it("Reconnect", () => {
+    banner({ dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" });
+    expect(screen.getByTestId("connection-reconnect")).toHaveClass(TALL);
+  });
+
+  it("Details and Connection history (and its Show all) are 44 px rows, and Details as wide in two characters (ja, zh)", async () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({ at: Date.now() - (25 - i) * 1_000, kind: i % 2 ? "down" as const : "live" as const, transport: "webrtc/1" as const }));
+    const { user } = banner({ pairing: ready(), transportHistory: many });
+    // A <summary> is a block: the 12 px above and below keep its words in the middle of the 44.
+    expect(screen.getByTestId("connection-details-summary")).toHaveClass(TALL, WIDE, "max-md:py-[12px]");
+    const history = screen.getByTestId("connection-history");
+    expect(history.querySelector("summary")).toHaveClass(TALL, "max-md:py-[12px]");
+    await user.click(within(history).getByText("Connection history (25)"));
+    expect(screen.getByTestId("connection-history-more")).toHaveClass(TALL);
+  });
+
+  it("Verify, 40 px wide in Arabic and 2 characters in ja/zh, then The codes match", async () => {
+    const { user } = banner({ peerParticipationKey: "saved", pairing: ready({ code: "4821 0937", peerKey: "peer" }) });
+    expect(screen.getByTestId("pair-verify")).toHaveClass(TALL, WIDE);
+    await user.click(screen.getByTestId("pair-verify"));
+    expect(screen.getByTestId("pair-verify-confirm")).toHaveClass(TALL);
+  });
+
+  it("Use Automatic, while the chat waits for a transport the contact's app lacks", () => {
+    banner({ pairing: ready({ transport: "iroh/1" }), preferredTransport: "hyperdht/1", transportAutomatic: false,
+      transportWait: { transport: "hyperdht/1", by: "you", reason: "contact-lacks", live: "iroh/1", failures: 0 } });
+    expect(screen.getByTestId("connection-waiting-automatic")).toHaveClass(TALL);
+  });
+
+  it("both keys, copied by a tap: 44 px tall, not the 40 px of their two lines, nor 24", () => {
+    banner({ pairing: ready() }, {}, { myKey: "mine" });
+    for (const id of ["connection-key-you", "connection-key-contact"]) {
+      expect(screen.getByTestId(id)).toHaveClass(TALL, WIDE);
+      expect(screen.getByTestId(id)).not.toHaveClass("max-md:min-h-6");
+    }
+  });
+});
