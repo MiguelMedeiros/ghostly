@@ -198,9 +198,16 @@ export const SERVICE_OPEN_OFF_RELAY_ONLY = "A contact's app does not open here w
 export const SERVICE_NEEDS_DAEMON = "An opened service lives in the daemon: start `ghostly daemon --detach` first";
 
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
-  response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
+  response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers, "content-security-policy": OWN_ANSWER_CSP, "x-content-type-options": "nosniff" });
   response.end(text);
 }
+
+/**
+ * The policy of this machine's own answers on the service's origin (its 404, 413, 502, 503, the link's redirect): they
+ * load and reach nothing. A page of the app may frame one, as it is on its own origin, and use its window: what it
+ * sends from there is bounded by this policy, so it must be no looser than `OPENED_SERVICE_CSP`.
+ */
+export const OWN_ANSWER_CSP = "default-src 'none'; form-action 'none'; base-uri 'none'";
 
 /**
  * A contact's app on a loopback port of this machine, under a host name of its own (`<random>.localhost`): its
