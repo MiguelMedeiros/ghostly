@@ -14,10 +14,16 @@ export function missingDocLinks(body, sourcePath, root) {
     .filter((url) => /\.md$/i.test(url.split("#")[0]) && !existsSync(resolve(from, url.split("#")[0])));
 }
 
+/** Names that take a `#` and a number and are no repository: standards (PKCS#8). */
+const NOT_A_REPOSITORY = new Set(["pkcs"]);
+
 /**
- * The references in `body` to the project's private tracker (`ghostly-agents#12`, `agents#12`): a reader of the site
- * cannot open one, and the page would name the tracker. Code too: a span or a block is published as well.
+ * The references in `body` to an issue of another repository written `<repo>#N` (no owner) or
+ * `MiguelMedeiros/<repo>#N`, other than this repository's `ghostly#N`: a reader of the site may not be able to open it.
+ * One written `owner/repo#N` (an upstream project's) is left alone. Code too: a span or a block is published as well.
  */
 export function privateRefs(body) {
-  return [...body.matchAll(/(?<![\w-])(?:ghostly-)?agents#\d+/gi)].map((m) => m[0]);
+  return [...body.matchAll(/(?<![\w./-])(?:MiguelMedeiros\/)?([a-z][\w.-]*)#\d+/gi)]
+    .filter((m) => m[1].toLowerCase() !== "ghostly" && !NOT_A_REPOSITORY.has(m[1].toLowerCase()))
+    .map((m) => m[0]);
 }

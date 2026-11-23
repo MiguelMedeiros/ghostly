@@ -144,9 +144,9 @@ const entries = paths.map((sourcePath) => {
   // A relative link to a Markdown file that is not there would open a GitHub page that does not exist.
   const missing = missingDocLinks(body, sourcePath, root);
   if (missing.length) throw new Error(`${sourcePath}: ${missing.length} link(s) to a file that does not exist as published: ${missing.join(", ")}`);
-  // Nor an issue of the private tracker, which no reader can open.
+  // Nor an issue of another repository named with no owner, which a reader may not be able to open.
   const unopenable = privateRefs(body);
-  if (unopenable.length) throw new Error(`${sourcePath}: cites the private tracker, which a reader cannot open: ${unopenable.join(", ")}`);
+  if (unopenable.length) throw new Error(`${sourcePath}: cites another repository's issue as <repo>#N, which a reader may not open (write owner/repo#N for an upstream one): ${unopenable.join(", ")}`);
   writeFileSync(resolve(destination, file), body);
   return {
     file,

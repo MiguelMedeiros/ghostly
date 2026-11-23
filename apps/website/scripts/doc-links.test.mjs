@@ -25,15 +25,16 @@ test("a published document's relative .md links each name a file of the reposito
   assert.deepEqual(missingDocLinks("[up](wisps/503-group-files.md)", "docs/PROTOCOL.md", root), []);
 });
 
-test("a reference to the private tracker is found, a public pull request's is not", () => {
+test("another repository's issue with no owner, or under this one's owner, is found; this repository's and an upstream's are not", () => {
   const body = [
-    "nothing reached it (ghostly-agents#1), held for a day (agents#2), and `GHOSTLY-AGENTS#3` in code.",
-    "See MiguelMedeiros/ghostly-agents#4. Fixed in ghostly#5 and MiguelMedeiros/ghostly#6; user-agents#7 and my_agents#8 are not ours.",
+    "nothing reached it (other-repo#1), held for a day (tracker#2), and `OTHER-REPO#3` in code.",
+    "See MiguelMedeiros/other-repo#4. Fixed in ghostly#5 and MiguelMedeiros/ghostly#6, upstream in owner/repo#7.",
+    "A PKCS#8 key, a [section](400-chat.md#log) and #9 alone are no repository's issue.",
   ].join("\n");
-  assert.deepEqual(privateRefs(body), ["ghostly-agents#1", "agents#2", "GHOSTLY-AGENTS#3", "ghostly-agents#4"]);
+  assert.deepEqual(privateRefs(body), ["other-repo#1", "tracker#2", "OTHER-REPO#3", "MiguelMedeiros/other-repo#4"]);
 });
 
-test("no document the site publishes, revision logs included, cites the private tracker", () => {
+test("no document the site publishes, revision logs included, cites another repository's issue a reader may not open", () => {
   // What scripts/sync-references.mjs publishes: every WISP, its change files (the revision log), and the other docs.
   const wisps = join(repo, "docs/wisps");
   const files = [
