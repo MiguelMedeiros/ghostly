@@ -67,7 +67,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
     shownStep.current = step;
     if (!document.activeElement || document.activeElement === document.body) (stepLine.current ?? waitLine.current)?.focus();
   }, [step]);
-  const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress`;
+  const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress`;
   const quiet = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer disabled:opacity-40`;
   const field = `w-full min-w-0 bg-black/20 rounded-lg px-3 py-2 ${dense ? "text-xs" : "text-sm"} placeholder-current/50 focus:outline-none focus:ring-1 focus:ring-accent`;
   const muted = `${dense ? "text-[11px]" : "text-xs"} opacity-70 m-0`;
