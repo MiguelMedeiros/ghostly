@@ -78,7 +78,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
       {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={t(blockedNext)} />}
     </div>
     {error && <Notice problem={error} className="mt-2 text-sm" />}
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex flex-wrap justify-end gap-2">
       <button ref={cancel} onClick={close} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       {/* While it leaves, a press does nothing; not disabled, which would drop the focus to the page (and keep it there if refused). */}
       <button disabled={blocked} aria-disabled={busy || undefined} onClick={() => void leave()} data-testid="group-leave-confirm"
