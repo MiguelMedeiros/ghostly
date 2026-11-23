@@ -8,8 +8,9 @@ import { LocalRelay } from "../../support/relay";
 import { ensureHostRoute, hostAddresses, routeTo } from "./network";
 import { minWebView, webViewTooOld } from "./webview";
 import { PKG, type Phone, webViewPage } from "./webViewPage";
+import { Adb } from "./adb";
 
-export { expect, PKG, webViewPage };
+export { Adb, expect, PKG, webViewPage };
 
 /**
  * The native Android app (apps/desktop built with Tauri for Android, docs/ANDROID.md) on an emulator, driven by
@@ -31,49 +32,6 @@ export { expect, PKG, webViewPage };
  */
 
 const ACTIVITY = `${PKG}/.MainActivity`;
-
-/** One device over adb: every command names its serial, since another session's emulator may share the adb server. */
-export class Adb {
-  constructor(readonly serial: string) {}
-
-  run(...args: string[]): string {
-    return execFileSync("adb", ["-s", this.serial, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 120_000 });
-  }
-
-  /** As `run`, but a failure is its output, not an exception (`pm grant` of an undeclared permission, a missing file). */
-  tryRun(...args: string[]): { ok: boolean; out: string } {
-    try {
-      return { ok: true, out: this.run(...args) };
-    } catch (error) {
-      const failure = error as { stdout?: string; stderr?: string; message: string };
-      return { ok: false, out: `${failure.stdout ?? ""}${failure.stderr ?? ""}` || failure.message };
-    }
-  }
-
-  shell(command: string): string {
-    return this.run("shell", command);
-  }
-
-  /** The device's lines since `logcat -c`, in the time format. */
-  logcat(...filter: string[]): string {
-    return this.run("logcat", "-d", "-v", "time", ...filter);
-  }
-
-  /** The emulator's port as the host's own: `adb reverse` for a TCP port on the host's loopback. */
-  reverse(port: number): void {
-    this.run("reverse", `tcp:${port}`, `tcp:${port}`);
-  }
-
-  unreverse(port: number): void {
-    this.tryRun("reverse", "--remove", `tcp:${port}`);
-  }
-
-  /** The app's process id; "" when it has none (`pidof` fails then, and its failure is no id). */
-  pid(): string {
-    const found = this.tryRun("shell", "pidof", PKG);
-    return found.ok ? found.out.trim() : "";
-  }
-}
 
 /**
  * The serial to drive: the one named, or on CI the only device adb lists. Outside CI it has to be named: every test
