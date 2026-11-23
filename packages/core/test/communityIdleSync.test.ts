@@ -142,7 +142,8 @@ describe("a hub answering a member's sync", { timeout: 120_000 }, () => {
 
   it("asks a member whose sync says it holds a frame the hub lacks, and takes it", async () => {
     const net = new Net();
-    const alice = net.create(), bob = await net.admit(alice), carol = await net.admit(alice);
+    const alice = net.create(), bob = await net.admit(alice);
+    await net.admit(alice);
     await net.settle();
     const before = clone(alice.session.state);
     const said = await bob.session.sendText("while the hub was away", "x", 2_000);
@@ -160,7 +161,6 @@ describe("a hub answering a member's sync", { timeout: 120_000 }, () => {
     });
     await bobSide.handle(hub.myKey, clone(asked[0]));
     expect(answer.filter(f => f.t === "group-msg")).toHaveLength(1);
-    void carol;
   });
 
   it("asks a member whose sync names a secret the hub lacks, or a newer picture or name", async () => {
