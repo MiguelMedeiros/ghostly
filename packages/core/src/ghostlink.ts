@@ -1551,6 +1551,16 @@ export class GhostLink {
         if (!this.dialing) { this.attemptEnded(); this.lookAtRetry(); }
         this.rejectWaiters(new GhostlyHttpError("unreachable", "Could not connect to the peer"));
         if (unanswerable && this.dialsPastRtc()) this.redial();
+        // Nothing else to dial, and this side's answer could not be made, or its own offer (which the contact's crossing
+        // one gave way to) never went out: the contact's offer, if it still stands, is answered (`DataLink.answerAgain`),
+        // once this turn is over (the data link went idle from inside its own attempt). Left alone, it stood unanswered
+        // until the contact's attempt ended, or until this side's next dial.
+        else if (unanswerable || this.dialUnseen) {
+          const epoch = this.connectionEpoch;
+          setTimeout(() => {
+            if (epoch === this.connectionEpoch && !this.channel && !this.stopped && !this.leaving && !this.streamBlocked && !this.dialing) this.dataLink.answerAgain();
+          }, 0);
+        }
       },
       // Asked as each attempt starts: once the first pairing is over, the contact reads at its chat's pace (30 s in the
       // background), and a short offer would be withdrawn before it looked.

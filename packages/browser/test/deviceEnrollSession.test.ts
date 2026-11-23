@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { RELAY_POLL_INTERVALS, randomBytes, toBase64Url, type NativeEndpoint, type NativeTransport } from "@ghostly/core";
+import { GATHER_ATTEMPTS, RELAY_POLL_INTERVALS, randomBytes, toBase64Url, type NativeEndpoint, type NativeTransport } from "@ghostly/core";
 import { EnrollInviter, EnrollJoiner, ghostLinkEnrollChannel } from "../src/devices/enroll";
 import { DeviceLinks } from "../src/devices/links";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, loadDeviceSigningKey } from "../src/devices/signingKey";
@@ -131,6 +131,30 @@ describe("enroll/1 over a one-time paired session", () => {
     expect(a.current()).toMatchObject({ step: "done", device: "Computer" });
     expect(b.current()).toMatchObject({ step: "done", device: "Phone" });
     expect((native.dialsBy.get("phone") ?? 0) + (native.dialsBy.get("computer") ?? 0)).toBeGreaterThan(0);
+  });
+
+  // The inviter answers the joiner's offer (its key the higher one) or dials too and keeps its own offer (the lower):
+  // either way the one attempt it makes may find no candidate (Chromium, under load), and the joiner's offer stands.
+  it("an answer or offer the inviter could not make (no candidate) is followed by its answer to the joiner's standing offer", async () => {
+    const network = new FakeTurnNetwork();
+    // The inviter's first connections gather nothing (`GATHER_ATTEMPTS` of them: one whole answer, or offer), the rest do.
+    let made = 0;
+    rtc.noCandidates.add("desktop-stalled");
+    const inviter = ghostLinkEnrollChannel({ transport: pkarr.transport(), createPeerConnection: () => fakePeerConnection(++made <= GATHER_ATTEMPTS ? "desktop-stalled" : "desktop"), pollIntervals: RELAY_POLL_INTERVALS });
+    const joiner = ghostLinkEnrollChannel({ transport: pkarr.transport(), createPeerConnection: () => fakePeerConnection("phone"), pollIntervals: RELAY_POLL_INTERVALS });
+    const a = new EnrollInviter({ profile: A, network, open: inviter, didSeed: async () => randomBytes(32), name: "Desktop", forceSeed: true });
+    const b = new EnrollJoiner({ profile: B, network, open: joiner, about: { name: "Phone", kind: "web", app: "1.1.0" }, forceSeed: true, install: null });
+    try {
+      const waiting = await settled(a.start());
+      if (waiting.step !== "waiting") throw new Error("no code");
+      await settled(b.start(waiting.code));
+      // The joiner's offer stands for its attempt (90 s), the same in its packet at each read: answered, both screens
+      // show the digits well inside a minute, not when that attempt or the inviter's next dial comes.
+      expect(await until(() => a.current().step === "confirm" && b.current().step === "confirm", 30_000)).toBe(true);
+      expect(made).toBeGreaterThan(GATHER_ATTEMPTS);
+    } finally { rtc.noCandidates.delete("desktop-stalled"); }
+    await settled(a.cancel());
+    expect(await until(() => b.ended, 30_000)).toBe(true);
   });
 
   it("two devices that see each other and cannot connect both say so, at the joiner's timeout", async () => {
