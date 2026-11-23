@@ -421,12 +421,16 @@ const ON_A_MESSAGE: ReadonlySet<string> = new Set(["chat.react", "chat.pin", "ch
 
 /**
  * Whether the chat may have the message `ref` names: by its row's id, or by an id both sides know it by (its wire id,
- * the one a reaction or a pin names), as each call of `ON_A_MESSAGE` looks for it. The chat is read whole only when the
- * row's id finds nothing.
+ * the one a reaction or a pin names), as each call of `ON_A_MESSAGE` looks for it. A text and a contact's file are kept
+ * under their wire id (`me_<wire id>`, `peer_<wire id>`), so those rows are read alone first, as the engine's own
+ * lookup by wire id does. The chat is read whole only when none of them is the message (a payment, a file of mine, a
+ * mistyped id): a wire id read it whole here and again as the chat started, 0.45 s more at 100,000 messages.
  */
 async function mayHaveMessage(ctx: ApiContext, linkId: string, ref: string): Promise<boolean> {
   if (await node(ctx).getMessage(linkId, ref)) return true;
-  return (await node(ctx).getMessages(linkId)).some((m) => m.wireId === ref || replyRef(m, false) === ref);
+  const named = (m: StoredMessage | undefined) => !!m && (m.wireId === ref || replyRef(m, false) === ref);
+  for (const id of [`me_${ref}`, `peer_${ref}`]) if (named(await node(ctx).getMessage(linkId, id))) return true;
+  return (await node(ctx).getMessages(linkId)).some(named);
 }
 
 /**
