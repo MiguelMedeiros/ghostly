@@ -115,6 +115,8 @@ export class FedimintWallet {
   private saved?: StoredFedimint;
   private readonly clients = new Map<string, FedimintClient>();
   private readonly opening = new Map<string, Promise<FedimintClient>>();
+  /** Per database, a restored federation's recovery join until it settles, its failure's removal included (`joinAgain`). */
+  private readonly joins = new Map<string, Promise<void>>();
   private readonly problems = new Map<string, string>();
   private readonly balances = new Map<string, number>();
   private readonly unsubscribe = new Map<string, () => void>();
@@ -156,16 +158,12 @@ export class FedimintWallet {
         try {
           const mnemonic = await unsealSeed(this.saved!.seed, this.saved!.deviceKey);
           const sdk = await this.sdk();
+          // A join the mode gate gave up on still runs, and removes its database if it fails: never under a later try's.
+          await this.joins.get(federation.database);
           // Restored from a profile backup (the records came, the client's files did not): joined again, recovering.
           const client = await this.gate.within((await sdk.exists(federation.database))
             ? sdk.open({ database: federation.database, mnemonic })
-            // A join that fails (the guardians not answering, the device offline) leaves the database it made, which never
-            // joined: it goes, as `join` removes its own, so the next try joins again. Left, every later try opened it and
-            // failed, every 30 s and at each start, and the federation's ecash never came back.
-            : sdk.join({ database: federation.database, mnemonic, invite: federation.invite, recover: true }).catch(async (error: unknown) => {
-              await sdk.remove(federation.database).catch(() => {});
-              throw error;
-            }), (c) => c.close());
+            : this.joinAgain(sdk, federation, mnemonic), (c) => c.close());
           if (client.federationId !== federation.id) { await client.close(); throw new Error("This federation's database belongs to another federation"); }
           this.attach(federation.id, client);
           return client;
@@ -177,6 +175,23 @@ export class FedimintWallet {
       this.opening.set(federation.id, opening);
     }
     return opening;
+  }
+
+  /**
+   * A restored federation's recovery join on its saved database, which `exists` said is not there. One that fails (the
+   * guardians not answering, the device offline) leaves the database it made, which never joined: it goes, as `join`
+   * removes its own, so the next try joins again. Left, every later try opened it and failed, every 30 s and at each
+   * start, and the federation's ecash never came back.
+   */
+  private joinAgain(sdk: FedimintSdk, federation: StoredFederation, mnemonic: string): Promise<FedimintClient> {
+    const { database } = federation;
+    const joining = sdk.join({ database, mnemonic, invite: federation.invite, recover: true }).catch(async (error: unknown) => {
+      await sdk.remove(database).catch(() => {});
+      throw error;
+    });
+    const settled: Promise<void> = joining.then(() => {}, () => {}).finally(() => { if (this.joins.get(database) === settled) this.joins.delete(database); });
+    this.joins.set(database, settled);
+    return joining;
   }
 
   private attach(id: string, client: FedimintClient) {

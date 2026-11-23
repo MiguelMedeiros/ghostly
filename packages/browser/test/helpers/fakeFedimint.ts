@@ -155,6 +155,11 @@ export class FakeFedimintSdk {
    * join that fails then does not remove it. `exists` says it is there; `open` fails on it (it never joined).
    */
   readonly halfMade = new Set<string>();
+  /** How many `exists` calls fail to look (a read error, not "absent"). */
+  existsFails = 0;
+  /** Set: a join (its database made) waits for it, then fails if `failJoins` says so. */
+  joinHold: Promise<void> | undefined;
+  failJoins = 0;
 
   federation(info: Partial<Omit<FederationInfo, "federationId">> = {}): FakeFederation {
     const f = new FakeFederation({ name: "Test federation", guardians: [{ name: "g0", url: "ws://127.0.0.1:1" }], consensusVersion: "2.1", network: "regtest", modules: ["ln", "meta", "mint", "wallet"], ...info });
@@ -174,6 +179,12 @@ export class FakeFedimintSdk {
         if (this.databases.has(database) || this.halfMade.has(database)) throw new Error("database exists");
         if (this.unreachable) { this.halfMade.add(database); throw new Error("guardians did not answer"); }
         const f = find(invite);
+        if (this.joinHold) {
+          this.halfMade.add(database);
+          await this.joinHold;
+          if (this.failJoins > 0) { this.failJoins--; throw new Error("guardians did not answer"); }
+          this.halfMade.delete(database);
+        }
         if (!recover && f.joined.get(mnemonic)) throw new Error("joined fresh twice with one mnemonic: its keys collide");
         f.joined.set(mnemonic, (f.joined.get(mnemonic) ?? 0) + 1);
         this.databases.set(database, { federation: f, mnemonic });
@@ -198,8 +209,13 @@ export class FakeFedimintSdk {
         return client;
       },
       remove: async (database) => { this.removed.push(database); this.databases.delete(database); this.halfMade.delete(database); },
-      exists: async (database) => this.databases.has(database) || this.halfMade.has(database),
+      exists: async (database) => {
+        if (this.existsFails > 0) { this.existsFails--; throw new DOMException("could not read it", "NotReadableError"); }
+        return this.databases.has(database) || this.halfMade.has(database);
+      },
     };
-    return async () => sdk;
+    return async () => { this.loads++; return sdk; };
   }
+  /** How many times the wallet asked for the SDK: once per open, right before it looks for the database. */
+  loads = 0;
 }
