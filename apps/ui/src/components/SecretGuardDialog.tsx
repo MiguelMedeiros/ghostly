@@ -47,7 +47,7 @@ export function SecretGuardDialog({ finding, recipient, onCancel, onConfirm }: {
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <h2 id={`${id}-title`} className="text-base font-semibold">{title}</h2>
     <p id={`${id}-body`} className="mt-2 text-sm text-text-muted">{body}</p>
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex flex-wrap justify-end gap-2">
       <button ref={cancel} type="button" data-testid="secret-guard-cancel" onClick={onCancel}
         className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button ref={confirm} type="button" data-testid="secret-guard-send" onClick={onConfirm}

@@ -85,7 +85,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
       {noLinks && <p className="mt-3 rounded-lg border border-border px-3 py-2 text-xs text-text-muted" data-testid="new-group-no-webrtc">
         <span className="block text-sm font-semibold text-text-primary">{t("group.connection.noWebrtc")}</span>{noLinksHint}</p>}
       {error && <Notice problem={error} className="mt-2 text-sm" />}
-      <div className="mt-5 flex justify-end gap-2">
+      <div className="mt-5 flex flex-wrap justify-end gap-2">
         <button type="button" onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
         {/* While it works, a press does nothing; not disabled, which would drop the focus to the page (and keep it there if refused). */}
         <button type="submit" disabled={!named || noLinks} aria-disabled={busy || undefined} aria-busy={busy || undefined} data-testid="new-group-create"
