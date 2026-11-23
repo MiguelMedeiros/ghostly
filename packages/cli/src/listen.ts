@@ -63,6 +63,8 @@ class CursorError extends Error {
  */
 export class Allowlist {
   private readonly peers = new Map<string, string>();
+  /** Lookups not answered yet, one per chat. */
+  private readonly asking = new Map<string, Promise<string | undefined>>();
 
   /** `peerOf`: a chat's contact key (null when it has none yet, or the chat is gone). */
   constructor(private readonly chats: ReadonlySet<string>, private readonly keys: ReadonlySet<string>, private readonly groups: ReadonlySet<string>, private readonly peerOf: (chat: string) => Promise<string | null>) {}
@@ -70,11 +72,32 @@ export class Allowlist {
   async allows(event: GhostlyEvent): Promise<boolean> {
     const known = this.decided(event);
     if (known !== undefined) return known;
-    // Kept once known: a chat's contact key does not change. One not paired yet is asked again next time.
-    const chat = event.chat as string;
-    const key = (await this.peerOf(chat).catch(() => null)) || undefined;
-    if (key) this.peers.set(chat, key);
+    const key = await this.keyOf(event.chat as string);
     return !!key && this.keys.has(key);
+  }
+
+  /**
+   * `decided`, and for a chat whose contact key is not known yet, its lookup started now: asked only in the chain, it
+   * waited behind a slow hook, and every event of that chat meanwhile counted toward MAX_BEHIND.
+   */
+  decide(event: GhostlyEvent): boolean | undefined {
+    const known = this.decided(event);
+    if (known === undefined) void this.keyOf(event.chat as string);
+    return known;
+  }
+
+  /** Kept once known: a chat's contact key does not change. One not paired yet is asked again next time. */
+  private keyOf(chat: string): Promise<string | undefined> {
+    let asked = this.asking.get(chat);
+    if (!asked) {
+      asked = this.peerOf(chat).catch(() => null).then((key) => {
+        this.asking.delete(chat);
+        if (key) this.peers.set(chat, key);
+        return key || undefined;
+      });
+      this.asking.set(chat, asked);
+    }
+    return asked;
   }
 
   /** `allows` when it needs no lookup; undefined for a chat whose contact key is not known yet. */
@@ -527,9 +550,10 @@ export function eventHandler(options: ListenOptions): EventHandler {
     // that messages were lost across a crash or a trim. Before, it was dropped and the cursor moved past it.
     const gap = type === "events.gap";
     // What the allowlist or --turns surely drops goes the same way: a group not on --group, a chat not on --from (but one whose
-    // contact key is still to be asked), what is no turn. Counted, a busy group it was never asked for filled the bound
-    // behind a slow hook, paused the feed, and could push an allowed chat's event out of the daemon's journal.
-    const passes = gap || (matches(event, options.types) && options.allow?.decided(event) !== false && !(options.turns && !toTurn(event)));
+    // contact key is still to be asked: asked now, so its later events are decided as they come), what is no turn.
+    // Counted, a busy group it was never asked for filled the bound behind a slow hook, paused the feed, and could push
+    // an allowed chat's event out of the daemon's journal.
+    const passes = gap || (matches(event, options.types) && !(options.turns && !toTurn(event)) && options.allow?.decide(event) !== false);
     if (!passes) { dropped = Math.max(dropped, seq); keepDropped(); return; }
     behind++;
     chain = chain.then(async () => {
