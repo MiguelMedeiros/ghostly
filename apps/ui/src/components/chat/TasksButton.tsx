@@ -235,8 +235,9 @@ function TasksPanel({ entries, nameOf, faceOf, anchorRef, onClose, onJump }: {
         <h2 id={titleId} className="m-0 text-sm font-semibold text-text-primary">{t("cards.panel.title")}</h2>
         <p data-testid="chat-tasks-summary" className="m-0 truncate text-xs text-text-muted">{summary}</p>
       </div>
+      {/* A thumb's 44 px on a phone (`.tap-target`), 12 px from the × there so that area ends where the × begins. */}
       <button type="button" data-testid="chat-tasks-info" aria-expanded={info} onClick={() => setInfo(!info)} aria-label={t("common.moreInfo")} title={t("common.moreInfo")}
-        className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted hover:text-accent hover:bg-surface-hover cursor-pointer aria-expanded:text-accent">
+        className="tap-target grid h-8 w-8 shrink-0 place-items-center rounded-full text-text-muted hover:text-accent hover:bg-surface-hover cursor-pointer aria-expanded:text-accent max-md:me-2">
         <svg {...icon} width={15} height={15}><circle cx="12" cy="12" r="9.5" /><path d="M12 11v5.5M12 7.5v.01" /></svg>
       </button>
       <button type="button" data-testid="chat-tasks-close" onClick={onClose} aria-label={t("cards.panel.close")} title={t("cards.panel.close")}
