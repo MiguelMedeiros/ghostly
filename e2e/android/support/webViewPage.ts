@@ -30,6 +30,7 @@ export async function webViewPage(phone: Phone, pid: number, devices: () => Prom
   let listedBy = Date.now() + UNLISTED_MS;
   const takeAgain = async (why: string) => {
     const serial = phone.device.serial();
+    console.log(`  [android] the device taken again for ${why} (pid ${pid})`);
     await phone.device.close().catch(() => {});
     const again = (await devices()).find((d) => d.serial() === serial);
     if (!again) throw new Error(`Playwright sees no device ${serial} after closing it for ${why}`);

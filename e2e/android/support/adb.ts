@@ -29,6 +29,7 @@ export class Adb {
       return this.exec(["-s", this.serial, ...args], 120_000);
     } catch (error) {
       if (!offline(error)) throw error;
+      console.log(`  [android] adb: device offline at \`${args.join(" ")}\`: waiting for the device, then once more`);
       try {
         this.exec(["-s", this.serial, "wait-for-device"], OFFLINE_WAIT_MS);
       } catch {
