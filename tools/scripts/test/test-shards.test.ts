@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -151,6 +151,26 @@ describe("the integration tests", () => {
     expect(quarantined(undefined, cli)).not.toContain("test/twoPeers.test.ts");
     vi.stubEnv("GHOSTLY_INTEGRATION", undefined);
     expect(quarantined(undefined, cli)).not.toContain("test/twoPeers.test.ts");
+  });
+
+  // 2026-11-23: on one runner (--integration 1 1) the job took a median 563 s over 88 green runs, the slowest of the run
+  // in 85 of them (Desktop on macOS, next, 428 s): twoPeers 125 s, the CLI's 226 s and the browser's 183 s one after
+  // another. Each runner of CI's job gets at most this much test time, about 5 minutes on the runner.
+  it("run on as many runners as ci.yml's Integration tests matrix lists, none with more than 950 s of test time", () => {
+    const ci = readFileSync(join(repo, ".github/workflows/ci.yml"), "utf8");
+    const job = /\n {2}integration-tests:\n([\s\S]*?)\n {2}\S/.exec(ci)?.[1] ?? "";
+    const runners = /\n {8}shard: \[([\d, ]+)\]/.exec(job)?.[1].split(",").map(Number) ?? [1];
+    const of = runners.length;
+    const seconds = JSON.parse(readFileSync(join(repo, "tools/scripts/test-durations.json"), "utf8"));
+    const list = integrationFiles();
+    const byPackage = [...new Set(list.filter((f) => !ALONE.includes(f)).map((f) => f.split("/").slice(0, 2).join("/")))];
+    const units = [...byPackage.map((dir) => unit(dir, list.filter((f) => f.startsWith(`${dir}/`) && !ALONE.includes(f)))), ...ALONE.map((f) => unit(f, [f], true))];
+    const shards = split(units, seconds, of);
+    expect(shards.map((s) => Math.round(s.load)).filter((load) => load > 950), `${of} runner(s)`).toEqual([]);
+    expect(shards[0].units[0].id).toBe(ALONE[0]);
+    expect(runners).toEqual(Array.from({ length: of }, (_, i) => i + 1));
+    expect(job).toContain(`name: Integration tests (\${{ matrix.shard }}/${of})`);
+    expect(job).toContain(`node tools/scripts/test-shards.mjs --integration \${{ matrix.shard }} ${of} `);
   });
 
   it("refuse a listed file no package's Vitest lists, but not one tools/scripts/quarantine.json holds", () => {
