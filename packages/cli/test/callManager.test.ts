@@ -1780,6 +1780,19 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("a plain hang-up after a call offered again for not connecting a while after its answer is the contact's, not a failure", async () => {
+    // The contact pressed End on "Connecting…": nothing refused an answer, so the start-over says nothing failed.
+    const { a, b } = pairOfManagers({ a: stuckStack(1), checkingRedialMs: 1000 });
+    b.calls.setAuto({ on: true });
+    await a.calls.start("chat-ab", {});
+    await until(() => signalsOf(b, "a").length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 1050));
+    await b.calls.hangup("chat-ba");
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("answers refused past the last start-over end the call as failed, and the contact is told", async () => {
     // The first offer and MAX_REDIALS more, each answer refused.
     const { a, b } = pairOfManagers({ a: refusingStack(MAX_REDIALS + 1) });
