@@ -1604,6 +1604,21 @@ describe("with the apps flag on", () => {
     expect(within(unread).queryByTestId("app-store-chevron")).not.toBeInTheDocument();
   });
 
+  // happy-dom draws nothing: the class is what gives each the 44 px a thumb needs under 768 px (36, 40, 35 and 36 before;
+  // e2e/web/apps-store-text-size.spec.ts measures them in a browser).
+  it("on a phone, a store's name, an installed app's row, the store's search and Show more are each 44 px tall", async () => {
+    const apps = Array.from({ length: 60 }, (_, i) => ({ ref: `${KEY}/app${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `App ${i}`, tagline: `Tagline ${i}` }));
+    fakeEngine.on("appList", () => [installed({ ref: `${KEY}/app1` })]).on("appCheckUpdates", () => [])
+      .on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+        name: "Big", kind: "indexed", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps, removed: [] }]);
+    renderApp(<Apps />, { route: "/apps" });
+    const store = await screen.findByTestId("app-store");
+    for (const target of [within(store).getByRole("button", { name: /^Big/ }), within(screen.getByTestId("installed-app")).getAllByRole("button")[0]!,
+      screen.getByTestId("app-store-filter"), screen.getByTestId("app-store-more")]) {
+      expect(target).toHaveClass("max-md:min-h-11");
+    }
+  });
+
   it("a store at the format's limit of 4096 listings opens with its first 50, Show more for the next, and a search over them all", async () => {
     const apps = Array.from({ length: 4096 }, (_, i) => ({ ref: `${KEY}/app${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `App ${i}`, tagline: `Tagline ${i}` }));
     fakeEngine.on("appList", () => [installed({ ref: `${KEY}/app4000` })]).on("appCheckUpdates", () => [])
