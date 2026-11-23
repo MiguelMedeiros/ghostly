@@ -185,6 +185,14 @@ export function readRequest(data: unknown): ServiceRequestMessage | null {
   };
 }
 
+/**
+ * What every answer on a contact's app origin sends as `Origin-Agent-Cluster`: the bridge's files (nginx-services.conf)
+ * and every one the services worker makes. The apps' origins share one site (the services host), so a browser would put
+ * two contacts' apps open at once in one agent cluster, where `document.domain` joins them and they may share a process;
+ * keyed by origin, each stays alone.
+ */
+export const ORIGIN_AGENT_CLUSTER = "?1";
+
 /** Statuses a Response has no body for. */
 export const NULL_BODY = new Set([101, 103, 204, 205, 304]);
 

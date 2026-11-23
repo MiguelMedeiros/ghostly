@@ -178,6 +178,16 @@ describe("the Cashu card says what Redeem and a pending Pay came to", () => {
       expect(said().filter((text) => text !== "")).toEqual(["Paid."]);
     });
 
+    it("paid at the mint, it stays Paid. once 100 newer History rows push its row out", async () => {
+      const settle = await payPending();
+      settle(stateOf({ balance: 4_995, history: [out("lightning-out", 5, 0)] }));
+      await waitFor(() => expect(screen.getByTestId("wallet-notice-title").textContent).toBe("Paid."));
+      // The view keeps the newest 100 History rows.
+      settle(stateOf({ balance: 5_095, history: Array.from({ length: 100 }, (_, i) => ({ id: `in-${i}`, timestamp: Date.now() + i, mint: TEST_MINT, kind: "lightning-in" as const, amount: 1, fee: 0, quote: `q-in-${i}` })) }));
+      expect(screen.getByTestId("wallet-notice-title").textContent).toBe("Paid.");
+      expect(screen.getByTestId("wallet-notice")).toHaveAttribute("data-tone", "success");
+    });
+
     it("failed at the mint: the result says the payee was not paid and the sats are back, said once", async () => {
       const settle = await payPending();
       settle(stateOf({ balance: 5_000 }));
@@ -205,6 +215,17 @@ describe("the Cashu card says what Redeem and a pending Pay came to", () => {
       expect(screen.getByTestId("wallet-notice")).toHaveAttribute("data-tone", "wait");
       settle(withOp("failed"));
       await waitFor(() => expect(screen.getByTestId("wallet-notice-title").textContent).toBe("The payment failed: the payee was not paid."));
+    });
+
+    it("a Lightning card through the mints: the fee the mint kept on its journal's failed payment is said, as the Cashu card says it", async () => {
+      const settle = await payPending("lightning");
+      const hash = decodeBolt11(REGTEST_INVOICE)!.paymentHash!;
+      // What the engine writes: the fee row under the melt quote (not the card's quote), the balance 1 lower, and the
+      // fee on the card's journal entry.
+      const s = stateOf({ balance: 4_999, history: [out("fee", 0, 1, "melt-q")] });
+      settle({ ...s, lightning: { ...s.lightning!, recent: [{ direction: "out", paymentHash: hash, amount: 5, createdAt: Date.now(), state: "failed", fee: 1 }] } } as WalletState);
+      await waitFor(() => expect(screen.getByTestId("wallet-notice-title").textContent).toBe("The payment failed: the payee was not paid."));
+      expect(screen.getByTestId("wallet-notice-next").textContent).toBe("What was set aside for it is back in your balance, less 1 test sat the mint kept as a fee (in the history).");
     });
   });
 });

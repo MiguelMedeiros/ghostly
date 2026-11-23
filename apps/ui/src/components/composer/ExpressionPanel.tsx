@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useLockScreen } from "../../contexts/LockScreenContext";
@@ -51,7 +51,7 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
   onEmoji: (emoji: string) => void;
   onGif: (url: string) => void;
   onClose: () => void;
-  /** Opened from the keyboard: the emoji search takes the focus, as it does after a switch from GIFs. */
+  /** Opened from the keyboard: the emoji search takes the focus, as it does after a switch from GIFs; on a phone, the switch. */
   focusOnOpen?: boolean;
 }) {
   const { t } = useI18n();
@@ -137,6 +137,15 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
       window.visualViewport?.removeEventListener("scroll", later);
     };
   }, [boundsRef, phone]);
+
+  // On a phone a search taking the focus would bring the on-screen keyboard up: opened from the keyboard, the switch
+  // takes it instead, once it is placed (Tab stays in the sheet from there). Before, it stayed behind the backdrop.
+  const focusedOnOpen = useRef(false);
+  useEffect(() => {
+    if (!phone || !focusOnOpen || position === undefined || focusedOnOpen.current) return;
+    focusedOnOpen.current = true;
+    ref.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus({ preventScroll: true });
+  }, [phone, focusOnOpen, position]);
 
   const choose = (next: ExpressionTab) => { setTab(next); rememberTab(next); setSwitched(true); };
   const tabKeys = (e: KeyboardEvent) => {

@@ -84,7 +84,9 @@
 //   green on its own full CI, it lands alone with GitHub's squash merge, which pushes nothing. Behind (or into an
 //   epic, which lands by a push), it leaves the line with `queue:hand-merge` and a comment for a coordinator, whose
 //   token may update its branch: `queue` again once that head is green (the train takes the label off), or a squash
-//   merge by hand. Up to date with its own full CI still running, it waits in line for that run.
+//   merge by hand. Up to date with its own full CI still running, it waits in line for that run. With none that can
+//   count (its newest cancelled, or a green one not its own or planned for other files), its position comment says
+//   what starts one that does (the train never starts that run itself).
 // - Signatures: GitHub writes and signs the commit of a squash merge, so what the train lands on `dev`, alone or in a
 //   batch, shows as Verified, with one message format ("<title> (#n)", then one "* <subject>" line per commit). The
 //   train reads each new commit back and warns when it is not verified. GitHub never signs a rebase merge, and a
@@ -324,6 +326,7 @@ export const PLANNED_JOBS = {
   "Frontend lint and types": "lint",
   "Frontend tests (app)": "full",
   "Frontend tests (packages ": "packages",
+  "Integration tests": "packages",
   "CLI on Linux ARM64": "packages",
   "Frontend builds": "full",
   "Tauri Backend": "rust",
@@ -433,6 +436,20 @@ export function order(prs) {
  */
 const AT_BACK = "again at the back once it is reviewed and queued";
 
+/**
+ * Why a green full run of a pull request does not count (`own`, `planned` in `tick`), as what starts one that does, or
+ * null. That run, not the fast tier, is what a ready pull request needs, and what one that changes a workflow lands on.
+ */
+function notCounted(pr) {
+  if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\`${o.moved ? ", its base changed" : ""}`).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and, ten minutes later, push a new commit; after the push it leaves the line and joins it ${AT_BACK}`;
+  if (pr.crowded) return `its branch has more pull requests than the train reads (${PAGES_READ * 100}), so one into another base may have run CI on the same commit; open a new pull request from a new branch, which joins the line ${AT_BACK}`;
+  if (pr.retargeted) return `its green CI run on its last commit ran before its base was changed; close and reopen it for a run against this base, which keeps its place (after a pushed commit instead, it leaves the line and joins it ${AT_BACK})`;
+  // A re-run plans from the run's own merge commit again (GitHub keeps its sha), so it skips the same jobs: a run
+  // planned by an older ci-changes.mjs than the base's stays short. Closing and reopening makes a new merge commit.
+  if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base, or by an older copy of ci-changes.mjs); close and reopen it for a new run (re-running that run plans it the same way again)";
+  return null;
+}
+
 /** Why a queued pull request cannot board now, or null. It keeps its place while it waits, unless the reason says otherwise. */
 export function waiting(pr) {
   if (onHold(pr)) return `it is on hold (\`${HOLD}\`): it boards once the label comes off`;
@@ -448,17 +465,19 @@ export function waiting(pr) {
   if (pr.unread) return `it has more events than the train reads (${PAGES_READ * 100}), so it cannot tell when it was queued or whether its base changed; close it and open a new pull request from the same branch, which joins the line ${AT_BACK}`;
   if (pr.ci === "failure") return `CI Success is red on its last commit. A re-run of a failed job keeps its place; after a pushed fix it leaves the line and joins it ${AT_BACK}`;
   // `tick` reads the files of one that could board: one that changes a workflow lands only alone, on its own full CI.
-  if (pr.workflows?.length && pr.ci !== "success") return `it changes a workflow (${pr.workflows.map(escapeMark).join(", ")}), which the queue app may not push, so it never boards a batch: it lands alone once CI Success has passed on its last commit`;
+  // Nothing but a person starts that run again, so one that cannot count (or was cancelled, `cancelled`: the newest
+  // run ended so and none before it counts) says what does.
+  if (pr.workflows?.length && pr.ci !== "success") {
+    const lands = `it changes a workflow (${pr.workflows.map(escapeMark).join(", ")}), which the queue app may not push, so it never boards a batch: it lands alone once CI Success has passed on its last commit`;
+    const hint = notCounted(pr) ?? (pr.cancelled ? "its full run was cancelled; re-run CI on its last commit" : null);
+    return hint ? `${lands}, and no run there counts yet: ${hint}` : lands;
+  }
   // The fast tier is enough to board: the batch's full CI is the gate.
   if (pr.ci === "success" || pr.fast === "success") return null;
   // A green full run that does not count says how to get one that does: that run, not the fast tier, is what a ready
   // pull request needs, so these come before a red fast tier.
-  if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\`${o.moved ? ", its base changed" : ""}`).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and, ten minutes later, push a new commit; after the push it leaves the line and joins it ${AT_BACK}`;
-  if (pr.crowded) return `its branch has more pull requests than the train reads (${PAGES_READ * 100}), so one into another base may have run CI on the same commit; open a new pull request from a new branch, which joins the line ${AT_BACK}`;
-  if (pr.retargeted) return `its green CI run on its last commit ran before its base was changed; close and reopen it for a run against this base, which keeps its place (after a pushed commit instead, it leaves the line and joins it ${AT_BACK})`;
-  // A re-run plans from the run's own merge commit again (GitHub keeps its sha), so it skips the same jobs: a run
-  // planned by an older ci-changes.mjs than the base's stays short. Closing and reopening makes a new merge commit.
-  if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base, or by an older copy of ci-changes.mjs); close and reopen it for a new run (re-running that run plans it the same way again)";
+  const uncounted = notCounted(pr);
+  if (uncounted) return uncounted;
   if (pr.fast === "failure") return "CI Success (draft) is red on its last commit and CI Success has not passed on it yet";
   return "CI Success has not passed on its last commit yet";
 }
@@ -564,7 +583,8 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * for, and from when it leaves anyway (a fixed time, so the comment does not change from run to run; it leaves at the
  * train's first run after it, which the workflow starts at that time). `stuck` is the base's
  * commit once a hold for its red has lasted HOLD_HELP: the comment then says what a person can do. A lone pull request
- * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so; one whose has `refused`, GitHub's
+ * whose mark has `past` goes ahead of that held one (`queue:priority`), and says so (its `held` is the base's CI that
+ * holds that one, not a hold of its own); one whose has `refused`, GitHub's
  * refusal of the push of its rebase, says that. One with that label that may not go ahead (`cannot`: `canGoAlone`
  * refuses its branch) says why, and its help leaves that advice out. One with `pr.behind` ({ batch,
  * with }) merges cleanly onto the base but conflicts with `with`, aboard the batch in flight: it waits for the next.
@@ -586,12 +606,13 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
   if (alone) {
     const again = alone.retried ? " (a second run, after a red one)" : "";
     // A push GitHub refused (`refused`, its message): the branch never got that commit, so no CI Success is coming.
+    // One going ahead of a hold (`past`) is not held itself: `held` there is what holds the one it goes past.
     const where = alone.refused
       ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}, but GitHub refused the push of that rebase to its branch: ${escapeMark(alone.refused)}. The train tries once more at its next run; refused again, it leaves the line.`
-      : held ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
-    const past = alone.past ? ` It goes ahead of #${alone.past}, which the train holds while CI Success on \`${base}\` itself is red (\`${LABEL.priority}\`).` : "";
+      : held && !alone.past ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
+    const past = alone.past ? ` It goes ahead of #${alone.past}, which the train holds while CI Success on \`${base}\` itself is ${held ?? "red"} (\`${LABEL.priority}\`).` : "";
     // GitHub's message may hold any text: escaped (JSON.parse reads it back) so none ends the mark.
-    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${hold}`;
+    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${alone.past ? "" : hold}`;
   }
   if (batch) {
     const note = own ? ` Its own full CI is not needed: the batch's CI is its gate, so the train cancels that run if it is still going.${cancelled}` : "";
@@ -829,6 +850,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.priority = p.labels.includes(LABEL.priority);
     const jobs = await gh.ciJobs(p.sha, counts(p));
     p.ci = ciState(jobs);
+    p.cancelled = !!jobs.cancelled;
     // The fast tier on the same head: read only when CI Success alone does not decide.
     const drafts = p.ci !== "success" && p.ci !== "failure" ? await gh.draftJobs(p.sha) : null;
     if (drafts) p.fast = draftState(drafts);
@@ -1640,7 +1662,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // Whoever is still in line passed the head checks above: its head is the one `queue` (or the train) vouches for.
     const text =
       past?.number === p.number
-        ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone)
+        ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held)
         : inFlight?.alone && inFlight.number === p.number
           ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held, null, stuck)
           : aboard.has(p.number)
@@ -1849,12 +1871,14 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
         warnedChecks = true;
         return (await all(`/commits/${sha}/check-runs?filter=latest`)).filter((c) => c.app?.slug === "github-actions");
       }
-      for (const run of ciRuns(r.data.workflow_runs, repo, sha).slice(0, CI_RUNS_READ)) {
+      const runs = ciRuns(r.data.workflow_runs, repo, sha).slice(0, CI_RUNS_READ);
+      for (const run of runs) {
         const jobs = await runJobs(run.id);
         if (saysNothing(jobs, run)) continue;
         if (await counts(jobs, run)) return jobs;
       }
-      return [];
+      // None counts, and the newest ended cancelled: nothing starts another run there by itself (`waiting` says so).
+      return runs[0]?.conclusion === "cancelled" ? Object.assign([], { cancelled: true }) : [];
     },
     /**
      * The files a pull request changes against its base, a renamed file by both names (as ci.yml lists them), or null

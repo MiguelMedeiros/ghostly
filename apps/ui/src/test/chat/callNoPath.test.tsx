@@ -1,4 +1,7 @@
 import { screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { useRef, useState } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -79,6 +82,14 @@ describe("the note when a call found no path to the contact", () => {
     for (const name of ["Network settings", "How to fix it"])
       expect(within(note).getByRole("link", { name })).toHaveClass("relative", "before:absolute", "before:-inset-y-3");
     expect(within(note).getByRole("button", { name: "Close" })).toHaveClass("before:-inset-3");
+  });
+
+  // A phone on its side with the keyboard up leaves 175 px: the note put the message field under the keyboard.
+  it("goes behind the keyboard on a short touch screen, as the offline line does (chat-banner)", () => {
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(css).toMatch(/@media \(pointer: coarse\) and \(max-height: 500px\) \{[^@]*html\[data-keyboard="true"\] \.chat-banner \{ display: none; \}/);
+    renderApp(<CallNoPathNotice onClose={() => {}} />);
+    expect(screen.getByRole("alert")).toHaveClass("chat-banner");
   });
 
   it("is in every language", () => {

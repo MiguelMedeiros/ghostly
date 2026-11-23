@@ -90,6 +90,7 @@ import {
   loadShownSession,
   peerDisplayName,
   updateSessionLabel,
+  chatLabelOf,
 } from "../lib/storage";
 import { chatPath, inviteShareText } from "../lib/url";
 import { copySecret } from "../lib/shareLink";
@@ -658,9 +659,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   const saveLabel = () => {
     if (!sessionId) return;
-    const trimmed = labelDraft.trim();
-    updateSessionLabel(sessionId, trimmed);
-    setChatLabel(trimmed);
+    const label = chatLabelOf(labelDraft) ?? "";
+    updateSessionLabel(sessionId, label);
+    setChatLabel(label);
     setIsEditingLabel(false);
     window.dispatchEvent(new Event("session-updated"));
   };
@@ -794,6 +795,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); handOverCall(sessionId, ringing.signal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
       : () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
     decline: webrtc.rejectCall,
+    // Not answered, the call turned into the other kind: the offer goes back the same way, and rings there.
+    ringOn: holdForUnlock
+      ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); nav.conversation(chatPath(sessionId)); }
+      : undefined,
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {

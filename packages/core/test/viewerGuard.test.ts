@@ -133,7 +133,8 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
 
   it("lets a page it cannot be put in run no script, and leaves what is not a page as it was", async () => {
     // A refused page runs no frames either: one of its origin with no charset would read in the page's (UTF-16...).
-    const REFUSED = "script-src 'none'; frame-src 'none'; object-src 'none'";
+    // And it has an origin of its own: the app's page cannot reach its window, which the guard never ran in.
+    const REFUSED = "script-src 'none'; frame-src 'none'; object-src 'none'; sandbox allow-forms";
     const noScripts = async (headers: HeaderList, text: string | Uint8Array, destination: string | null = "iframe") => {
       const answer = await guardViewerAnswer(headers, (async function* () { yield typeof text === "string" ? utf8Encode(text) : text; })(), destination);
       return { policies: policies(answer.headers), text: await read(answer.body).catch(() => "binary") };
@@ -148,10 +149,12 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
     for (const charset of ["unicode", "ucs-2", "csunicode", "iso-10646-ucs-2", "unicodefeff", "unicodefffe", "\"UTF-16BE\""]) {
       expect((await noScripts([["content-type", `text/html; charset=${charset}`]], "<\0p\0")).policies, charset).toContain(REFUSED);
     }
-    // A PDF, a picture, a video or a sound keeps its frames (a browser shows one in a frame), only its scripts are refused.
-    for (const type of ["application/pdf", "image/png", "video/mp4", "audio/ogg"]) {
-      expect((await noScripts([["content-type", type]], "%PDF-1.7")).policies, type).toEqual([VIEWER_GUARD_CSP, "script-src 'none'"]);
+    // A picture, a video or a sound keeps its frames (a browser shows one in a frame), only its scripts are refused.
+    for (const type of ["image/png", "video/mp4", "audio/ogg"]) {
+      expect((await noScripts([["content-type", type]], "\x89PNG")).policies, type).toEqual([VIEWER_GUARD_CSP, "script-src 'none'; sandbox allow-forms"]);
     }
+    // A PDF keeps its origin too: a PDF viewer may refuse a sandboxed frame (Chromium's loads as it commits).
+    expect((await noScripts([["content-type", "application/pdf"]], "%PDF-1.7")).policies).toEqual([VIEWER_GUARD_CSP, "script-src 'none'"]);
     // Every other refused type loses its frames: a browser renders HTML under some of them.
     for (const type of ["application/unknown; charset=unicode", "unknown/unknown; charset=unicode", "*/*; charset=unicode", "multipart/x-mixed-replace; boundary=b", "text/plain"]) {
       expect((await noScripts([["content-type", type]], "<\0p\0")).policies, type).toEqual([VIEWER_GUARD_CSP, REFUSED]);

@@ -809,6 +809,14 @@ describe("a push on a device on standby", () => {
       expect(pushDeviceView({ ...record, push: { ...record.push, allowed: [TOKEN] } })).toMatchObject({ allowed: [TOKEN] });
     });
 
+    it("reads each device's name as the app reads the record (`turnName`), whatever a build that did not clean it stored", () => {
+      const named = (name: string) => ({ ...record, deviceSet: [{ key: "K".repeat(43), name }, ...record.deviceSet.slice(1)] });
+      expect(pushDeviceView(named("Mac‮koob\n"))).toEqual({ state: "standby", active: "Mackoob", tokens: { [DEVICE_TOKEN]: "Mackoob" } });
+      expect(pushDeviceView(named("M".repeat(10_000)))?.active).toBe("M".repeat(16));
+      // Nothing that shows: no name, so the notice says the one without a device.
+      expect(pushDeviceView(named("​⁦"))).toEqual({ state: "standby", tokens: { [DEVICE_TOKEN]: "" } });
+    });
+
     afterEach(async () => {
       await new Promise<void>((resolve) => { const r = indexedDB.deleteDatabase("ghostly-devices"); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
     });

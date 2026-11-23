@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/types";
-import { dhtOnly, findChat, findOwnNamedChat } from "../apiKit";
+import { dhtOnly, findChat, findOwnNamedChats } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets, feedQueue, sharedFolder } from "./audioSocket";
 import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
@@ -56,6 +56,8 @@ export interface CallHost {
   callPaceMs?: number;
   /** QUICK_REDIAL_MS (0: no call is held back; tests that ring and hang up over and over to see each call). */
   quickRedialMs?: number;
+  /** CHECKING_REDIAL_MS (tests shorten it). */
+  checkingRedialMs?: number;
 }
 
 /**
@@ -81,6 +83,14 @@ export const STALL_MS = 5_000;
 export const STALL_END_MS = 15_000;
 /** A connection that fails this soon after its answer went in lost the race `redial` describes, and starts over. */
 export const RACE_FAIL_MS = 2_000;
+/**
+ * An outgoing call whose answer went in and that has not connected this long after offers again (`redial`). The
+ * contact's app, whose connection failed before it ever connected, waits RESTART_GRACE_MS (8 s) for that newer offer
+ * and then hangs up, while libjuice here can still say "checking": the app's checks are all this side has when its
+ * host address is an mDNS name (WebKit's), and none from a macOS runner's WKWebView arrived in 23 s (CI run
+ * 44619228595). A call on a LAN connects in under 100 ms, one through a TURN server in a few seconds.
+ */
+export const CHECKING_REDIAL_MS = 10_000;
 /**
  * A ringing call's answer is made ahead (`prepare`), and made again this often while it rings: libjuice gives up on a
  * connection that has nothing to check (the offer's candidates wait for the answer) after about 40 s.
@@ -116,6 +126,8 @@ interface Call {
   offering: boolean;
   /** How many times this side offered again on a new connection after an answer was refused (`redial`). */
   redials: number;
+  /** How many of those redials came after the connection failed (an answer refused), not after it kept checking. */
+  refusals: number;
   /** How many times this side answered the contact's newer offer on a new connection (`reanswer`). */
   reanswers: number;
   /** The log said the contact's offers past the last start-over are ignored: it says so once a call. */
@@ -265,14 +277,18 @@ export class CallManager {
       this.lastSignal.set(chat, signal.ts);
       this.held.delete(chat);
       if (call) {
-        // A hang-up while this side starts over (`redial`) is the contact's app ending a connection that failed. Once
-        // a connection came up, the call was on: a start-over before it does not make the hang-up a failure.
+        // A hang-up while this side starts over after a refused answer (`redial`) is the contact's app ending a
+        // connection that failed. One after a start-over for a connection still checking (CHECKING_REDIAL_MS) is the
+        // contact's own: nothing failed on either side. Once a connection came up, the call was on: a start-over
+        // before it does not make the hang-up a failure.
         // A hang-up that says the contact's side could not connect (`r: "u"`, WISP 601): the call failed, not declined.
         const unreachable = signal.r === "u" && call.state !== "connected";
-        const failed = unreachable || (call.state !== "connected" && (call.offering || (call.direction === "out" && call.redials > 0)));
+        const failed = unreachable || (call.state !== "connected" && call.direction === "out" && call.refusals > 0);
         const reason: EndReason = call.state === "ringing" && call.direction === "in" ? "missed"
           : call.state === "ringing" && !unreachable ? "rejected" : failed ? "failed" : "remote-hangup";
-        void this.end(call, reason, false);
+        // A hang-up that crossed our offer made again (`redial`) is answered with ours: that offer reaches a side with
+        // no call, which rings it as a new one, unless a hang-up comes after it.
+        void this.end(call, reason, call.offering && call.redials > 0);
       }
     }
   }
@@ -318,14 +334,26 @@ export class CallManager {
       if (attempt === call.attempt) this.refused(call, `the answer was refused (${error instanceof Error ? error.message : String(error)})`);
       return;
     }
-    if (attempt === call.attempt) this.arm(call, CONNECT_MS, "failed", true);
+    if (attempt !== call.attempt) return;
+    if (call.redials >= this.maxRedials) { this.arm(call, CONNECT_MS, "failed", true); return; }
+    // Still not connected a while after the answer (CHECKING_REDIAL_MS): offering again, as the contact's app waits for.
+    const wait = this.host.checkingRedialMs ?? CHECKING_REDIAL_MS;
+    this.disarm(call);
+    call.timer = setTimeout(() => {
+      call.timer = null;
+      if (call.ended || attempt !== call.attempt || call.state === "connected") return;
+      this.refused(call, `not connected ${Math.round(wait / 100) / 10} s after the answer went in (ice ${call.media?.ice.state ?? "none"})`, false);
+    }, wait);
+    call.timer.unref?.();
   }
 
   /**
    * The contact's answer on this connection was refused, or the connection failed right after it (the same race,
    * whose handshake can also fail once the answer is in): offering again (`redial`) while there are tries left.
+   * `failed` false: the connection only kept checking (CHECKING_REDIAL_MS), and a hang-up after it is no failure.
    */
-  private refused(call: Call, what: string): void {
+  private refused(call: Call, what: string, failed = true): void {
+    if (failed) call.refusals++;
     if (call.redials < this.maxRedials) {
       process.stderr.write(`ghostly: call ${call.id}: ${what}: offering again on a new connection\n`);
       void this.redial(call);
@@ -557,7 +585,7 @@ export class CallManager {
   setAuto(next: { on: boolean; from?: string[]; rate?: unknown }): AutoAnswer {
     // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
     const { links, groups } = this.host.engine.getState();
-    const from = (next.from ?? []).map((ref) => findOwnNamedChat(links, ref, groups).id);
+    const from = findOwnNamedChats(links, next.from ?? [], groups).map((link) => link.id);
     // Each `on` sets the whole of it: the chats and the rate, 48000 when none is given, as the usage line says.
     this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, DEFAULT_RATE) };
     this.saveAuto();
@@ -598,7 +626,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redials: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, connectedTick: null, timer: null,
+      offering: false, redials: 0, refusals: 0, reanswers: 0, ignoring: false, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, connectedTick: null, timer: null,
       watcher: null, stalledFrom: null, stalls: 0, ended: false,
     };
     this.calls.set(call.id, call);

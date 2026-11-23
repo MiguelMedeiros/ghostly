@@ -348,7 +348,7 @@ export class LightningCards {
     return (owner && this.services.get(owner)) || this.services.get(CASHU_CARD) || this.receiving;
   }
   async reportInvoicePaid(invoice: string, context: { paymentId?: string; mint?: string } = {}) { await (await this.ownerOf("in", invoice)).reportInvoicePaid(invoice, context); }
-  async reportPaymentResolved(invoice: string, paid: boolean, context: { paymentId?: string; mint?: string } = {}) { await (await this.ownerOf("out", invoice)).reportPaymentResolved(invoice, paid, context); }
+  async reportPaymentResolved(invoice: string, paid: boolean, context: { paymentId?: string; mint?: string; fee?: number } = {}) { await (await this.ownerOf("out", invoice)).reportPaymentResolved(invoice, paid, context); }
 
   // -- Lightning addresses: resolved by one card, and the invoice asked by that same one --------
 

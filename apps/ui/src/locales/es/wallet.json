@@ -221,6 +221,8 @@
     "pendingMintNext": "Se resuelve solo; no se paga nada otra vez. Hasta que el mint responda, el importe aparece como apartado bajo el saldo.",
     "primary": "Principal",
     "received": "⚡ {{amount}} {{unit}} recibidos",
+    "received_one": "⚡ {{amount}} {{unit}} recibido",
+    "received_other": "⚡ {{amount}} {{unit}} recibidos",
     "redeem": "Canjear token ecash",
     "redeemed": "{{amount}} {{unit}} canjeados.",
     "redeemed_one": "{{amount}} {{unit}} canjeado.",
@@ -417,6 +419,8 @@
       "unknown": "resultado desconocido"
     },
     "paidTo": "{{amount}} {{unit}} pagados a {{to}} ✓",
+    "paidTo_one": "{{amount}} {{unit}} pagado a {{to}} ✓",
+    "paidTo_other": "{{amount}} {{unit}} pagados a {{to}} ✓",
     "pastePlaceholder": "Pega una factura Lightning o una dirección Lightning",
     "pay": "Pagar",
     "payTo": "Pagar {{amount}} a {{to}}{{fees}}",
@@ -900,7 +904,9 @@
     "uncounted": "{{count}} tarjetas fuera del total",
     "uncounted_one": "{{count}} tarjeta fuera del total",
     "unknown": "No se pudo leer ahora, fuera del total",
-    "waiting": "{{amount}} {{unit}} aún no disponibles"
+    "waiting": "{{amount}} {{unit}} aún no disponibles",
+    "waiting_one": "{{amount}} {{unit}} aún no disponible",
+    "waiting_other": "{{amount}} {{unit}} aún no disponibles"
   },
   "ui": {
     "amountIn": "Cantidad en {{unit}}",

@@ -10,6 +10,27 @@ export function peerDisplayName(name: string | undefined): string | undefined {
   return name ? sanitizeDisplayText(name, MAX_NICK_LENGTH) : undefined;
 }
 
+/**
+ * A chat's name on this side as the engine keeps one (`renameLink`): one line, invisible and direction-changing
+ * characters gone, 48 characters at most. Undefined when nothing visible is left: the contact's own name shows.
+ */
+export function chatLabelOf(label: unknown): string | undefined {
+  return typeof label === "string" ? sanitizeDisplayText(label.replace(/\s+/gu, " "), 48)?.replace(/ {2,}/g, " ") : undefined;
+}
+
+/**
+ * A stored chat as parsed, its names read as they are written (`chatLabelOf`, `peerDisplayName`): a copy a restored
+ * backup, an older app or another page wrote is shown as one this page wrote.
+ */
+function parseSession(raw: string): ChatSession {
+  const session = JSON.parse(raw) as ChatSession;
+  if (session && typeof session === "object") {
+    if (session.label !== undefined) session.label = chatLabelOf(session.label);
+    if (session.nick !== undefined) session.nick = peerDisplayName(typeof session.nick === "string" ? session.nick : undefined);
+  }
+  return session;
+}
+
 export const GHOST_NAMES = [
   "Casper", "Phantom", "Specter", "Shadow", "Wraith",
   "Spirit", "Poltergeist", "Banshee", "Shade", "Apparition",
@@ -388,7 +409,7 @@ function loadStored(sessionId: string): ChatSession | null {
   try {
     const raw = readKey(key);
     if (!raw) return null;
-    return JSON.parse(raw) as ChatSession;
+    return parseSession(raw);
   } catch {
     return null;
   }
@@ -785,7 +806,7 @@ export function forgetShownSession(sessionId: string): void {
  */
 function readThrough(key: string, raw: string, cache?: SessionCache): { parsed: ChatSession; session: ChatSession } {
   const hit = cache?.get(key);
-  const parsed = hit?.raw === raw ? hit.session : JSON.parse(raw) as ChatSession;
+  const parsed = hit?.raw === raw ? hit.session : parseSession(raw);
   // With its older messages, the same object while neither it nor its whole history changed (the sync's reconcile
   // tells an unchanged list by its sessions' identity).
   const list = parsed.older ? whole.get(parsed.id) : undefined;
@@ -915,7 +936,7 @@ function namesOf(chat: ChatKeys): { label?: string; nick?: string } | undefined 
   let known = names.get(chat.key);
   if (known?.raw !== raw) {
     try {
-      const session = JSON.parse(raw) as ChatSession;
+      const session = parseSession(raw);
       names.set(chat.key, known = { raw, label: session.label, nick: session.nick });
     } catch {
       return undefined;
@@ -1154,7 +1175,7 @@ export function setSessionPeerNick(sessionId: string, peerNick: string): boolean
 export function updateSessionLabel(sessionId: string, label: string): void {
   const session = loadSession(sessionId);
   if (!session) return;
-  session.label = label || undefined;
+  session.label = chatLabelOf(label);
   saveSession(session);
 }
 

@@ -63,6 +63,12 @@ describe("linksIn", () => {
     expect(linksIn("https://a.example/x\uff0ehttps://b.example/y")).toEqual(["https://a.example/x\uff0ehttps://b.example/y"]);
     expect(linksIn("https://a.example/x https://b.example/y")).toEqual(["https://a.example/x", "https://b.example/y"]);
   });
+
+  // The preview was fetched from /a~~, and its card opened it: another page than the bubble's link.
+  it("leaves out the ~~ or || closing a strike or spoiler around a link, as the bubble does", () => {
+    expect(linksIn("~~https://news.example/a~~ and ||https://news.example/ending||.")).toEqual(["https://news.example/a", "https://news.example/ending"]);
+    expect(linksIn("https://x.example/~user/ https://x.example/a~b")).toEqual(["https://x.example/~user/", "https://x.example/a~b"]);
+  });
 });
 
 describe("sanitizePreviewImage", () => {
@@ -110,6 +116,12 @@ describe("parseLinkPreview", () => {
     expect(parseLinkPreview({ ...preview, u: "https://bank.example/login" }, text)).toBeUndefined();
     expect(parseLinkPreview({ ...preview, u: "https://news.example/story?id=10" }, text)).toBeUndefined();
     expect(parseLinkPreview({ ...preview, u: "javascript:alert(1)" }, "javascript:alert(1)")).toBeUndefined();
+  });
+
+  it("matches a link in a strike or spoiler without the marks that close it, as the bubble shows it", () => {
+    const spoiler = "||https://news.example/ending||";
+    expect(parseLinkPreview({ ...preview, u: "https://news.example/ending" }, spoiler)?.u).toBe("https://news.example/ending");
+    expect(parseLinkPreview({ ...preview, u: "https://news.example/ending||" }, spoiler)).toBeUndefined();
   });
 
   it("drops what is not an object, and a card with nothing but the link", () => {

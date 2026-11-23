@@ -16,12 +16,17 @@
 // Vitest selects exactly that part.
 //
 //   node tools/scripts/test-shards.mjs --plan 4 [--app]   # print the 4 shards and check every file is in exactly one
+//   node tools/scripts/test-shards.mjs --integration 1 1  # the integration tests, twoPeers first and alone
 //   node tools/scripts/test-shards.mjs --record a.json …  # tools/scripts/test-durations.json from Vitest JSON reports
 //
 // CI's shards upload their JSON reports (artifacts "packages-test-reports-<shard>" and "app-test-reports-<shard>"):
 // download them all and --record them after adding a slow test file; reports of several runs record each file's median.
 // --plan and shard 1 warn when over a tenth of the files have no time, and with --report-dir each shard warns, after
 // its run, of a file that took far more than its record (see slowWarnings).
+//
+// The package tests that start real peers, daemons or a DHT (tools/scripts/integration-tests.json, about 40% of the
+// packages' time and most of their flakes) are left out of the shards (GHOSTLY_INTEGRATION=0, tools/vitest.shared.ts):
+// with --integration this runs only those, on one runner, as CI's Integration tests job (--integration 1 1).
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,7 +36,7 @@ import { pathToFileURL } from "node:url";
 const root = resolve(import.meta.dirname, "../..");
 const durationsFile = join(root, "tools/scripts/test-durations.json");
 
-/** Files that run on a shard of their own (repository paths). */
+/** Files that run on a shard of their own (repository paths), first on it: today in the integration run. */
 export const ALONE = ["packages/cli/test/twoPeers.test.ts"];
 
 /**
@@ -83,9 +88,24 @@ export function appSuites() {
   });
 }
 
-/** A Vitest in a suite's folder, with its config when it names one. */
-function vitest({ dir, config }, [command, ...args], options = {}) {
-  return spawnSync("npx", ["--no-install", "vitest", command, ...(config ? ["-c", config] : []), ...args], { cwd: join(root, dir), encoding: "utf8", maxBuffer: 64 << 20, ...options });
+/** A Vitest in a suite's folder, with its config when it names one: with the integration files only in the integration run. */
+function vitest({ dir, config, integration = false }, [command, ...args], options = {}) {
+  const env = { ...process.env, GHOSTLY_INTEGRATION: integration ? "1" : "0" };
+  return spawnSync("npx", ["--no-install", "vitest", command, ...(config ? ["-c", config] : []), ...args], { cwd: join(root, dir), encoding: "utf8", maxBuffer: 64 << 20, env, ...options });
+}
+
+/** tools/scripts/integration-tests.json's files (repository paths). */
+export const integrationFiles = () => JSON.parse(readFileSync(join(root, "tools/scripts/integration-tests.json"), "utf8")).map((entry) => entry.file);
+
+/**
+ * The integration files no unit runs and tools/scripts/quarantine.json does not hold: renamed or removed, so the
+ * integration run would pass without them.
+ * @param {{ files: string[] }[]} units
+ * @param {string[]} list
+ * @param {string[]} quarantined
+ */
+export function integrationLeft(units, list, quarantined) {
+  return list.filter((file) => !quarantined.includes(file) && !units.some((u) => u.files.includes(file)));
 }
 
 /** The test files Vitest selects in a suite (repository paths, sorted), for these filters (all when none). */
@@ -142,18 +162,24 @@ export function unlistedAlone(units, quarantined) {
   return ALONE.filter((file) => !quarantined.includes(file) && !units.some((u) => u.alone && u.files[0] === file));
 }
 
-/** Every suite's files as units: the suite, less its ALONE files, and each ALONE file (a package's: test:app has none). */
-function units(app) {
+/**
+ * Every suite's files as units: the suite, less its ALONE files, and each ALONE file (a package's: test:app has none).
+ * `integration`: the packages' integration files only, each package's run by its files.
+ */
+function units(app, integration = false) {
+  const list = integrationFiles();
   const out = [];
   for (const { name, dir, config } of app ? appSuites() : packages()) {
-    const files = listed({ dir, config });
+    if (integration && !list.some((f) => f.startsWith(`${dir}/`))) continue;
+    const files = listed({ dir, config, integration }).filter((f) => !integration || list.includes(f));
     const alone = files.filter((f) => ALONE.includes(f));
-    out.push({ id: name, dir, config, files: files.filter((f) => !alone.includes(f)), alone: false, whole: !alone.length });
-    for (const file of alone) out.push({ id: file, dir, config, files: [file], alone: true, whole: false });
+    out.push({ id: name, dir, config, integration, files: files.filter((f) => !alone.includes(f)), alone: false, whole: !integration && !alone.length });
+    for (const file of alone) out.push({ id: file, dir, config, integration, files: [file], alone: true, whole: false });
   }
   if (app) return out;
   const quarantined = JSON.parse(readFileSync(join(root, "tools/scripts/quarantine.json"), "utf8")).map((entry) => entry.file);
-  for (const file of unlistedAlone(out, quarantined)) throw new Error(`ALONE names ${file}, which no package's Vitest lists`);
+  if (integration) for (const file of integrationLeft(out, list, quarantined)) throw new Error(`tools/scripts/integration-tests.json names ${file}, which no package's Vitest lists`);
+  for (const file of unlistedAlone(out, [...quarantined, ...(integration ? [] : list)])) throw new Error(`ALONE names ${file}, which no package's Vitest lists`);
   return out;
 }
 
@@ -218,9 +244,11 @@ const describe = (shards) => shards.map((s, i) => `  ${i + 1}: about ${Math.roun
 
 function main(args) {
   const app = args.includes("--app");
-  const suite = app ? "app" : "packages";
-  const command = app ? "npm run test:app" : "npm run test:packages";
-  const [first, ...rest] = args.filter((a) => a !== "--app");
+  const integration = args.includes("--integration");
+  if (app && integration) return usage();
+  const suite = app ? "app" : integration ? "integration" : "packages";
+  const command = app ? "npm run test:app" : integration ? "the integration tests" : "npm run test:packages";
+  const [first, ...rest] = args.filter((a) => a !== "--app" && a !== "--integration");
   const seconds = () => JSON.parse(readFileSync(durationsFile, "utf8"));
 
   if (first === "--record") {
@@ -236,7 +264,7 @@ function main(args) {
   if (first === "--plan") {
     const of = Number(rest[0]);
     if (!Number.isInteger(of) || of < 1) return usage();
-    const all = units(app);
+    const all = units(app, integration);
     const shards = split(all, seconds(), of);
     console.log(`${of} shards of ${command}:\n${describe(shards)}`);
     const stale = staleWarning(all, seconds(), suite);
@@ -258,7 +286,7 @@ function main(args) {
   const reportDir = reportIndex >= 0 ? resolve(rest[reportIndex + 1]) : null;
   if (reportDir) mkdirSync(reportDir, { recursive: true });
 
-  const all = units(app);
+  const all = units(app, integration);
   const shards = split(all, seconds(), of);
   const mine = shards[shard - 1];
   console.log(`Shard ${shard}/${of} of ${command}. All shards:\n${describe(shards)}`);
@@ -295,7 +323,7 @@ function main(args) {
 }
 
 function usage() {
-  console.error("usage: node tools/scripts/test-shards.mjs [--app] <shard> <of> [--report-dir <dir>] | --plan <of> [--app] | --record <report.json>...");
+  console.error("usage: node tools/scripts/test-shards.mjs [--app | --integration] <shard> <of> [--report-dir <dir>] | --plan <of> [--app | --integration] | --record <report.json>...");
   return 2;
 }
 

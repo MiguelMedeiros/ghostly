@@ -171,6 +171,25 @@ export function holdsLess(rail:WalletRail,s:WalletState|null|undefined,amount:nu
  return holds!==undefined&&amount!>holds?holds:undefined;
 }
 
+/**
+ * How a Pay left pending ended, once its wallet says (`undefined` until then): the result shown was what the mint said
+ * when Pay was answered. A Cashu card's melt `quote` is paid once it is on a payment row; failed once it is on a fee row,
+ * or once what was set aside since (`held`) is all back with no row of it (a failure that cost no fee writes none).
+ * Another payment still set aside only makes that later, never wrong. A Lightning card's invoice is read in its journal,
+ * by its `hash`, with the fee a failed one cost when its source says it (the mints do). Shared by the Cashu card's Send
+ * and a Lightning address's Pay.
+ */
+export function pendingPayEnd(sent:{quote?:string;hash?:string;held?:boolean},s:WalletState|null|undefined):{paid:boolean;fee:number}|undefined {
+ if(sent.hash){
+  const op=s?.lightning?.recent.find(o=>o.direction==='out'&&o.paymentHash===sent.hash);
+  return op?.state==='paid'?{paid:true,fee:0}:op?.state==='failed'?{paid:false,fee:op.fee??0}:undefined;
+ }
+ if(!sent.quote||!s)return undefined;
+ const row=s.history.find(tx=>tx.quote===sent.quote&&(tx.kind==='lightning-out'||tx.kind==='fee'));
+ if(row)return {paid:row.kind==='lightning-out',fee:row.kind==='fee'?row.fee:0};
+ return sent.held&&!s.setAside?{paid:false,fee:0}:undefined;
+}
+
 type Face=Omit<WalletCard<string>,'id'|'rail'|'network'>;
 /** Lightning goes through its network's source: the Cashu mints (sharing the Cashu balance) unless another was chosen. */
 function lightningCard(t:Translate,s:WalletState,cashu:string,sats:(n:number)=>string):Face {

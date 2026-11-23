@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi, beforeEach } from "vitest";
 import { ANSWER_BY_MS, CookieJar, MAX_PENDING_REQUESTS, MAX_WAITING_REQUESTS, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
-import { closeServiceWindows, hostErrorText, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
+import { closeServiceWindows, hostErrorText, serviceFrameTitle, serviceFraming, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { loadLocale, translatorFor } from "../../locales";
 import { onAppInput } from "../../lib/apps/open";
 import { ANSWER_AHEAD_BYTES, BRIDGE_OPEN_LINK, BRIDGE_READY, BRIDGE_REFUSED, BRIDGE_SHOWN, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply, BRIDGE_PAGE, answerStatus, fromView, readRequest, BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PORT, parseAppOrigin, CLEAR_COOKIES } from "../../../../web/src/svc/protocol";
@@ -33,11 +33,16 @@ describe("opening a contact's app", () => {
 
     it("names the contact as this side calls them, else their nickname, else by their key", () => {
       expect(serviceFraming("Demo", { label: "Ana (work)", nick: "Ghostly" }, PEER, t)).toEqual({
-        label: "Demo, shared by \u2068Ana (work)\u2069",
+        label: "\u2068Demo\u2069, shared by \u2068Ana (work)\u2069",
         owner: "\u2068Ana (work)\u2069's app, running on their machine. Not Ghostly: never type your recovery words or passwords here.",
       });
-      expect(serviceFraming("Demo", { label: " ", nick: "Demo bot" }, PEER, t).label).toBe("Demo, shared by \u2068Demo bot\u2069");
-      expect(serviceFraming("Demo", undefined, PEER, t).label).toBe(`Demo, shared by \u2068${t("common.unnamedContact", { key: PEER.slice(0, 6) })}\u2069`);
+      expect(serviceFraming("Demo", { label: " ", nick: "Demo bot" }, PEER, t).label).toBe("\u2068Demo\u2069, shared by \u2068Demo bot\u2069");
+      expect(serviceFraming("Demo", undefined, PEER, t).label).toBe(`\u2068Demo\u2069, shared by \u2068${t("common.unnamedContact", { key: PEER.slice(0, 6) })}\u2069`);
+    });
+
+    it("names the app's frame only as the contact knows themselves: the app reads it, never the chat's label", () => {
+      expect(serviceFrameTitle("Demo", { label: "Mom", nick: "Ana" }, PEER, t)).toBe("\u2068Demo\u2069, shared by \u2068Ana\u2069");
+      expect(serviceFrameTitle("Demo", { label: "Mom" }, PEER, t)).toBe(`\u2068Demo\u2069, shared by \u2068${t("common.unnamedContact", { key: PEER.slice(0, 6) })}\u2069`);
     });
 
     it("is said in every language, with the contact in each", async () => {
@@ -153,7 +158,7 @@ describe("opening a contact's app", () => {
     };
   }
 
-  const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", openLink: (site: string) => `Open ${site}`, hostError: () => null };
+  const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "This browser blocks Demo here", unguarded: "This page of Demo cannot be shown here", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", frameTitle: "Demo, shared by Demo bot", openLink: (site: string) => `Open ${site}`, hostError: () => null };
 
   describe("one request from the app, over the contact's link", () => {
     it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -220,7 +225,7 @@ describe("opening a contact's app", () => {
         const { port, replies } = recorder();
         await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
           async () => answer(status, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", code]], [`${english}\n`]), new CookieJar(), said);
-        expect(replies).toEqual([{ type: "error", status, text: t(key, { app: "Demo" }) }]);
+        expect(replies).toEqual([{ type: "error", status, text: t(key, { app: "⁨Demo⁩" }) }]);
         expect(replies[0]!.type === "error" && replies[0]!.text).not.toContain(english);
       }
     });
@@ -537,6 +542,42 @@ describe("opening a contact's app", () => {
       expect(replies[replies.length - 1]).toEqual({ type: "end" });
       expect(link.controls()).not.toContainEqual(expect.objectContaining({ t: "rst" }));
     });
+
+    it("gives back a request's place once the link lets go of the answer its frame left unread: the app's next request goes out", async () => {
+      const link = linkClient();
+      const jar = new CookieJar();
+      const requests = Array.from({ length: MAX_PENDING_REQUESTS + 1 }, (_, i) => {
+        const { port, replies } = workerPort();
+        const done = serve(port, { type: "request", method: "GET", path: `/video/${i}.mp4`, headers: [], body: null, flow: true }, (request) => link.client.request("app", request), jar, words);
+        return { replies, done };
+      });
+      const asked = () => link.controls().filter((f) => f.t === "req").map((f) => f.id);
+      const feed = (id: number, bytes: number) => {
+        for (let left = bytes; left > 0; left -= MAX_CHUNK_PAYLOAD_BYTES) link.chunk(id, new Uint8Array(Math.min(MAX_CHUNK_PAYLOAD_BYTES, left)), false);
+      };
+      // Each answer goes on past the MiB the opener sends ahead of the app's frame, which reads none of it (a paused
+      // video): the opener waits for the frame to read on, and the link holds the rest, 6 MiB in all, till it lets go.
+      const started = new Set<number>();
+      const filled = new Set<number>();
+      const answer = () => {
+        for (const id of started) if (!filled.has(id)) { filled.add(id); feed(id, 5 * 1024 * 1024); }
+        for (const id of asked().slice(0, MAX_PENDING_REQUESTS)) {
+          if (started.has(id)) continue;
+          started.add(id);
+          link.client.handleResponse({ t: "res", id, st: 200, h: [], b: true });
+          feed(id, ANSWER_AHEAD_BYTES + MAX_CHUNK_PAYLOAD_BYTES);
+        }
+        return asked().length;
+      };
+      await vi.waitFor(() => expect(answer()).toBe(MAX_PENDING_REQUESTS + 1), { timeout: 3 * LIMITS.unreadStallMs });
+      const next = asked()[MAX_PENDING_REQUESTS]!;
+      link.client.handleResponse({ t: "res", id: next, st: 200, h: [], b: true });
+      link.chunk(next, new Uint8Array(16), true);
+      await Promise.all(requests.map((r) => r.done));
+      const last = (replies: ServiceReply[]) => replies[replies.length - 1];
+      for (const r of requests.slice(0, MAX_PENDING_REQUESTS)) expect(last(r.replies)).toEqual({ type: "error", status: 502, text: "Failed" });
+      expect(last(requests[MAX_PENDING_REQUESTS]!.replies)).toEqual({ type: "end" });
+    }, 5 * LIMITS.unreadStallMs);
   });
 
   describe("a contact's app shown over the app", () => {
@@ -856,7 +897,7 @@ describe("opening a contact's app", () => {
         const headers = (await head) as Extract<ServiceReply, { type: "head" }>;
         expect(headers, String(relayOnly)).toEqual({ type: "head", status: 200, headers: [["content-type", "text/html"]] });
         // The bridge, on the app's origin, runs the WebRTC guard too while it is on, and registers the worker for it.
-        expect(inFrame.postMessage.mock.calls[0]![0], String(relayOnly)).toEqual({ type: "ghostly-svc-port", relayOnly });
+        expect(inFrame.postMessage.mock.calls[0]![0], String(relayOnly)).toEqual({ type: "ghostly-svc-port", relayOnly, title: words.frameTitle });
         document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
       }
     });
@@ -1271,7 +1312,7 @@ describe("a services host given with a port", () => {
   });
 
   it("hands the bridge its port when it says it loaded, from the origin the browser gives it", async () => {
-    const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "", unguarded: "", label: "Demo, shared by Demo bot", owner: "Demo bot's app, running on their machine. Not Ghostly.", openLink: (site: string) => `Open ${site}`, hostError: () => null };
+    const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", blocked: "", unguarded: "", label: "Demo, shared by Mom", owner: "Mom's app, running on their machine. Not Ghostly.", frameTitle: "Demo, shared by Demo bot", openLink: (site: string) => `Open ${site}`, hostError: () => null };
     try {
       await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => { throw new Error("not asked"); }, words });
       const origin = `https://${await serviceLabel("ybndrfg8ejkmcpqx", PEER, "demo")}.svc.ghostly.example`;
@@ -1280,7 +1321,9 @@ describe("a services host given with a port", () => {
       Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
       dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_READY }, origin, source: inFrame as unknown as Window }));
       expect(inFrame.postMessage).toHaveBeenCalledTimes(1);
-      expect(inFrame.postMessage.mock.calls[0]![0]).toMatchObject({ type: BRIDGE_PORT });
+      // Named in the profile's language, not "Ghostly", but never by the chat's label ("Mom"): the app reads its frame's title.
+      expect(inFrame.postMessage.mock.calls[0]![0]).toMatchObject({ type: BRIDGE_PORT, title: words.frameTitle });
+      expect(JSON.stringify(inFrame.postMessage.mock.calls[0]![0])).not.toContain("Mom");
       expect(inFrame.postMessage.mock.calls[0]![1]).toBe(origin);
     } finally {
       closeServiceView();
