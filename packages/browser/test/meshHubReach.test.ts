@@ -89,6 +89,43 @@ describe("a private group's `group-reach` is taken from its hubs, and only about
   });
 });
 
+describe("members on other hubs' edges show reachable through mine (`v`, WISP 902 · Group Mesh § Hubs, Presence)", () => {
+  it("whom a hub of the beacon says the hubs it hears reach is reachable through it, and moves no edge", async () => {
+    const { session, mesh, hub, mallory, members: [other, far, near, stranger], wanted } = await adminOf20();
+    const via = (key: string, now = NOW) => mesh.viaHub(session.groupId, session, key, now);
+    // My hub holds edges with me and another hub; that hub holds `far`'s. Every frame `far` says reaches me through both.
+    mesh.reached(session.groupId, session, hub, { t: "group-reach", g: session.groupId, k: [session.myKey, other, near], v: [far, near] }, NOW);
+    expect(via(near)).toBe(true);
+    expect(via(far)).toBe(true);
+    expect(via(stranger)).toBe(false);
+    // Shown only: my edges are as they were.
+    expect(wanted()).toEqual([hub]);
+    // Mallory is no hub in the beacon: whom she says she reaches through others shows nobody.
+    mesh.reached(session.groupId, session, mallory, { t: "group-reach", g: session.groupId, k: [session.myKey], v: [stranger] }, NOW + 2_000);
+    expect(via(stranger, NOW + 2_000)).toBe(false);
+    // Said again without `v`: `far` is not reachable through it any more.
+    mesh.reached(session.groupId, session, hub, { t: "group-reach", g: session.groupId, k: [session.myKey, other] }, NOW + 4_000);
+    expect(via(far, NOW + 4_000)).toBe(false);
+    // Longer than the roster: not taken.
+    mesh.reached(session.groupId, session, hub, { t: "group-reach", g: session.groupId, k: [session.myKey], v: [...session.others, ...session.others] }, NOW + 6_000);
+    expect(via(far, NOW + 6_000)).toBe(false);
+  });
+
+  it("a hub says in `v` whom the hubs it hears reach, but those on its own edges and itself", async () => {
+    const { session, mesh, live, hub, members: [up, far], edges, sent } = await adminOf20();
+    live.hub = true;
+    edges.set(up, "e-up");
+    // The other hub, on its edge with me, reaches `far`, `up` and me.
+    mesh.reached(session.groupId, session, hub, { t: "group-reach", g: session.groupId, k: [session.myKey, up, far] }, NOW);
+    (mesh as unknown as { sayReach(groupId: string, session: GroupSession, live: unknown, now: number): void }).sayReach(session.groupId, session, live, NOW);
+    expect(sent.length).toBeGreaterThan(0);
+    for (const { frame } of sent) {
+      expect(frame.k).toEqual([hub, up].sort());
+      expect((frame as { v?: string[] }).v).toEqual([far]);
+    }
+  });
+});
+
 describe("stand-ins for the members no hub reaches (`u`, WISP 902 · Group Mesh § Hubs, Stand-ins)", () => {
   const keys = (n: number) => Array.from({ length: n }, () => identityFromSeedB64(createIdentity().seedB64).pubKeyZ32);
 
