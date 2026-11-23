@@ -795,6 +795,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); handOverCall(sessionId, ringing.signal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
       : () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
     decline: webrtc.rejectCall,
+    // Not answered, the call turned into the other kind: the offer goes back the same way, and rings there.
+    ringOn: holdForUnlock
+      ? () => { if (chatLink?.id && ringing.signal) engine.keepCallOffer(chatLink.id, ringing.signal); nav.conversation(chatPath(sessionId)); }
+      : undefined,
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {

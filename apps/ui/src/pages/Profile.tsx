@@ -106,6 +106,9 @@ export function Profile() {
   // Cancel goes with the form: the focus goes back to New profile, which takes its place, not to the page.
   const [cancelled, setCancelled] = useState(false);
   useFocusLanding(cancelled ? "[data-testid='profile-new']" : null, () => setCancelled(false));
+  // Remove picture goes with the picture: the focus goes to Add a picture, once the picture is gone.
+  const [unpictured, setUnpictured] = useState(false);
+  useFocusLanding(unpictured && !myAvatar ? "[data-testid='profile-avatar-input']" : null, () => setUnpictured(false));
   // The Restored tag's × goes with the tag: the focus goes to the name beside it, which stays.
   const [unmarked, setUnmarked] = useState(false);
   useFocusLanding(unmarked ? "[data-testid='profile-name']" : null, () => setUnmarked(false));
@@ -169,7 +172,7 @@ export function Profile() {
             </button>
           </span>
         )}
-        {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => void setMyAvatar(null)} className="min-h-10 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
+        {myAvatar && <button type="button" data-testid="profile-avatar-remove" onClick={() => { setUnpictured(true); void setMyAvatar(null); }} className="min-h-10 max-md:min-h-11 text-xs text-text-muted hover:text-danger cursor-pointer shrink-0 whitespace-nowrap">{t("profile.removePicture")}</button>}
         {/* There before it fills, so a screen reader says it; a refused name shows the Notice below instead. */}
         <span role="status" data-testid="profile-name-saved" className="text-accent text-sm shrink-0">{nameSaved ? t("profile.nameSaved") : ""}</span>
       </div>

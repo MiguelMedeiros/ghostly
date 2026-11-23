@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { parseEngineError, parseLightningDestination } from "@ghostly/core";
+import { decodeBolt11, parseEngineError, parseLightningDestination } from "@ghostly/core";
 import type { LightningAddressInfo, WalletPlatform } from "../../lib/platform";
-import { CASHU_MINT_SOURCE, holdsLess, spendable } from "../walletCardData";
+import { CASHU_MINT_SOURCE, holdsLess, pendingPayEnd, spendable } from "../walletCardData";
+import { useWalletPlatform } from "../../hooks/useServicesPlatform";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
@@ -33,6 +34,8 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [outcome, setOutcome] = useState<"paid" | "pending" | null>(null);
+  /** What a payment left pending is followed by (`pendingPayEnd`): the mints' melt quote, or the paying card's invoice. */
+  const [follow, setFollow] = useState<{ quote?: string; hash?: string; held?: boolean; ended?: { paid: boolean; fee: number } } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   /** Real money: Pay opens the second step, and only it pays. A wallet naming no network is Mainnet's. */
@@ -45,6 +48,17 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   /** Test sats say so wherever an amount shows, as the Cashu panel does. */
   const unit = satsIn(t, real ? "mainnet" : "testnet");
   const ln = wallet.getState()?.lightning;
+  // Drawn again with each wallet state, as the Cashu card is: a payment left pending ends here once its wallet says.
+  useWalletPlatform();
+  const setAside = wallet.getState()?.setAside;
+  // Once it ended it stays so: its History row or journal entry may later leave the newest ones the view keeps.
+  const ended = outcome === "pending" && follow ? follow.ended ?? pendingPayEnd(follow, wallet.getState()) : undefined;
+  useEffect(() => {
+    if (!follow || follow.ended) return;
+    if (ended) setFollow({ ...follow, ended });
+    else if (follow.quote && !follow.held && setAside) setFollow({ ...follow, held: true });
+  }, [follow, ended, setAside]);
+  const shown = ended ? (ended.paid ? "paid" : "failed") : outcome;
   const sourceName = (source?: string) => (via === "cashu" || !source || source === CASHU_MINT_SOURCE ? t("wallet.lightning.cashuMints") : source === ln?.providerId ? ln.alias ?? ln.label ?? source : source);
 
   const run = async (task: () => Promise<void>) => {
@@ -57,7 +71,8 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
 
   // A step that comes takes the place of the button that asked for it: its first line takes the keys, so they go on
   // from there (to the amount, to Pay, to Done). Not when they went somewhere else meanwhile, nor on the first step.
-  const step = outcome ? "done" : !info ? "resolve" : quote && invoice ? "review" : "amount";
+  // A pending payment's end is a step too: its line takes the place of the waiting one, and the keys with it.
+  const step = shown ? `done:${shown}` : !info ? "resolve" : quote && invoice ? "review" : "amount";
   const stepLine = useRef<HTMLParagraphElement>(null);
   /** A payment left pending: its notice takes the keys in the step line's place. */
   const waitLine = useRef<HTMLDivElement>(null);
@@ -67,21 +82,26 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
     shownStep.current = step;
     if (!document.activeElement || document.activeElement === document.body) (stepLine.current ?? waitLine.current)?.focus();
   }, [step]);
-  const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress`;
+  const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress`;
   const quiet = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer disabled:opacity-40`;
   const field = `w-full min-w-0 bg-black/20 rounded-lg px-3 py-2 ${dense ? "text-xs" : "text-sm"} placeholder-current/50 focus:outline-none focus:ring-1 focus:ring-accent`;
   const muted = `${dense ? "text-[11px]" : "text-xs"} opacity-70 m-0`;
 
-  if (outcome) {
+  if (shown) {
     // Left pending, it reads as waiting, never as paid (it may still come back), as an invoice's Pay does: paid by the
-    // mints, it says the mint holds it and that the amount shows as set aside meanwhile.
+    // mints, it says the mint holds it and that the amount shows as set aside meanwhile. Followed, it says how it ended.
     const byMints = via === "cashu" || !quote?.source || quote.source === CASHU_MINT_SOURCE;
+    const failedNext = !byMints || !ended ? undefined : ended.fee > 0
+      ? t("wallet.cashu.payFailedFee", { amount: formatAmount(ended.fee, t.language), unit: satsIn(t, real ? "mainnet" : "testnet", ended.fee) })
+      : t("wallet.cashu.payFailedBack");
     return (
       <div className="space-y-1.5" data-testid="lnurl-done">
-        {outcome === "paid"
+        {shown === "paid"
           ? <p ref={stepLine} tabIndex={-1} className={`${dense ? "text-xs" : "text-sm"} font-semibold text-accent m-0 focus:outline-none`} data-testid="lnurl-paid">{t("wallet.lightning.paidTo", { amount: quote ? formatAmount(quote.amount, t.language) : "", unit, to: text })}</p>
-          : <div ref={waitLine} tabIndex={-1} className="focus:outline-none">
-            <Notice tone="wait" testId="lnurl-pending" className={dense ? "text-xs" : "text-sm"} title={byMints ? t("wallet.cashu.pendingMint") : t("wallet.lightning.pending")} next={byMints ? t("wallet.cashu.pendingMintNext") : undefined} />
+          : <div key={shown} ref={waitLine} tabIndex={-1} className="focus:outline-none">
+            {shown === "failed"
+              ? <Notice tone="warning" testId="lnurl-failed" className={dense ? "text-xs" : "text-sm"} title={t("wallet.cashu.payFailed")} next={failedNext} />
+              : <Notice tone="wait" testId="lnurl-pending" className={dense ? "text-xs" : "text-sm"} title={byMints ? t("wallet.cashu.pendingMint") : t("wallet.lightning.pending")} next={byMints ? t("wallet.cashu.pendingMintNext") : undefined} />}
           </div>}
         {invoice?.successAction?.tag === "message" && invoice.successAction.message && <p className={muted} data-testid="lnurl-success">{t("wallet.lightning.says", { domain: info?.domain ?? "", message: invoice.successAction.message })}</p>}
         {/* The service's link reads as the address it opens, as a chat's does, and its words cannot reorder it. */}
@@ -110,6 +130,8 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
     const over = holdsLess(via === "cashu" ? "cashu" : "lightning", wallet.getState(), quote.amount);
     const pay = (confirmedReal: boolean) => { if (!busy) void run(async () => {
       const paid = await wallet.payQuote(quote.quote, quote.mint, invoice.note, confirmedReal);
+      // The mints' melt quote (the Cashu card) or the invoice in the paying Lightning card's journal, as the Cashu card's Send.
+      if (!paid) setFollow(via === "cashu" ? { quote: quote.quote } : { hash: decodeBolt11(invoice.invoice)?.paymentHash });
       setOutcome(paid ? "paid" : "pending");
     }); };
     return (

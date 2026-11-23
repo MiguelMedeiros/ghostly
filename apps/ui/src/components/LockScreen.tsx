@@ -34,8 +34,10 @@ export function LockScreen() {
   const errorId = useId();
   // A call ringing while locked (WISP 601 § Locked): who calls, Decline, and Answer, which asks for the password first.
   const call = isLocked ? ringing?.[0] ?? null : null;
-  const ringingRef = useRef(ringing);
-  ringingRef.current = ringing;
+  // The kind each call last rang as. A chat that rang before the first unlock goes with the lock, its call off the list,
+  // maybe before the password check ends (an older hash replaced): what it last rang as still counts.
+  const rangAs = useRef(new Map<string, boolean>());
+  for (const c of ringing ?? []) rangAs.current.set(c.id, c.hasVideo);
   const [answering, setAnswering] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const screenRef = useRef<HTMLDialogElement>(null);
@@ -154,10 +156,10 @@ export function LockScreen() {
     // turned into the other kind while the password was checked is not answered either: it rings on, asking again.
     const answer = answering ? call : null;
     const success = await unlock(password);
-    const ringsNow = answer && ringingRef.current.find((c) => c.id === answer.id);
 
     if (success) {
-      if (answer && (!ringsNow || ringsNow.hasVideo === answer.hasVideo)) answer.answer();
+      if (answer && rangAs.current.get(answer.id) === answer.hasVideo) answer.answer();
+      else answer?.ringOn?.();
     } else {
       setError(true);
       setPassword("");
@@ -255,7 +257,7 @@ export function LockScreen() {
           <button
             type="submit"
             disabled={!password || isUnlocking || waitSeconds > 0}
-            className="w-full bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed text-on-accent py-3 px-4 rounded-xl font-medium transition-colors"
+            className="w-full bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed text-on-accent py-3 px-4 rounded-xl font-medium transition-colors"
           >
             {isUnlocking ? (
               <span className="flex items-center justify-center gap-2">

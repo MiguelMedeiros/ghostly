@@ -178,6 +178,16 @@ describe("the Cashu card says what Redeem and a pending Pay came to", () => {
       expect(said().filter((text) => text !== "")).toEqual(["Paid."]);
     });
 
+    it("paid at the mint, it stays Paid. once 100 newer History rows push its row out", async () => {
+      const settle = await payPending();
+      settle(stateOf({ balance: 4_995, history: [out("lightning-out", 5, 0)] }));
+      await waitFor(() => expect(screen.getByTestId("wallet-notice-title").textContent).toBe("Paid."));
+      // The view keeps the newest 100 History rows.
+      settle(stateOf({ balance: 5_095, history: Array.from({ length: 100 }, (_, i) => ({ id: `in-${i}`, timestamp: Date.now() + i, mint: TEST_MINT, kind: "lightning-in" as const, amount: 1, fee: 0, quote: `q-in-${i}` })) }));
+      expect(screen.getByTestId("wallet-notice-title").textContent).toBe("Paid.");
+      expect(screen.getByTestId("wallet-notice")).toHaveAttribute("data-tone", "success");
+    });
+
     it("failed at the mint: the result says the payee was not paid and the sats are back, said once", async () => {
       const settle = await payPending();
       settle(stateOf({ balance: 5_000 }));

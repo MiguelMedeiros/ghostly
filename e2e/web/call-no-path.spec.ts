@@ -1,5 +1,6 @@
 import type { BrowserContext } from "@playwright/test";
 import { chat, connect, expect, link, test } from "../support/fixtures";
+import { iosKeyboard, keyboard } from "../support/keyboard";
 import { pair } from "../support/paired";
 
 // covers: calls.no-path
@@ -84,6 +85,38 @@ for (const language of ["en", "ar"] as const) {
     await expect(bob.page.getByTestId("network-turn-field")).toBeInViewport({ ratio: 1 });
   });
 }
+
+// A phone on its side with the keyboard up leaves 175 px: the note (81 px, 101 in French) took the list's room and put
+// the message field 28-48 px under the keyboard. It waits behind the keyboard, as the offline line does.
+test("a small phone on its side with the keyboard up: the note leaves the message field above the keyboard", { tag: ["@feature:calls.no-path", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  test.setTimeout(4 * 60_000);
+  const screen = { width: 667, height: 375, keyboard: 200 };
+  const visible = screen.height - screen.keyboard;
+  const [alice, bob] = await Promise.all([
+    peer("no-path-side-alice", { beforeOpen: callsFindNoPath }),
+    peer("no-path-side-bob", { beforeOpen: callsFindNoPath, mobile: true, viewport: { width: screen.width, height: screen.height } }),
+  ]);
+  await pair(alice, bob);
+  const page = bob.page;
+  await iosKeyboard(page);
+  await expect(page.getByTestId("call-audio")).toBeEnabled({ timeout: 30_000 });
+  await page.getByTestId("call-audio").click();
+  await alice.page.getByTitle("Accept audio call").click();
+  const note = page.getByTestId("call-no-path");
+  await expect(note).toBeVisible({ timeout: 90_000 });
+
+  await page.getByPlaceholder("Message…").focus();
+  await keyboard(page, screen.keyboard);
+  await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+  const fits = async () => { const box = (await page.locator("[data-composer]").boundingBox())!; return box.y + box.height <= visible + 1; };
+  await expect.poll(fits).toBe(true);
+  await expect(note).toBeHidden();
+  expect((await page.locator(".chat-wallpaper").boundingBox())!.height).toBeGreaterThan(0);
+  // Keyboard down: the note is there again, until closed.
+  await keyboard(page, 0);
+  await page.getByPlaceholder("Message…").blur();
+  await expect(note).toBeVisible();
+});
 
 test("a caller who left the chat while it rang finds the note there when back", { tag: ["@feature:calls.no-path"] }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);

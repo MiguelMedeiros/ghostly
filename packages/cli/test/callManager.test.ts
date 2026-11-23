@@ -1780,6 +1780,19 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("a plain hang-up after a call offered again for not connecting a while after its answer is the contact's, not a failure", async () => {
+    // The contact pressed End on "Connecting…": nothing refused an answer, so the start-over says nothing failed.
+    const { a, b } = pairOfManagers({ a: stuckStack(1), checkingRedialMs: 1000 });
+    b.calls.setAuto({ on: true });
+    await a.calls.start("chat-ab", {});
+    await until(() => signalsOf(b, "a").length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 1050));
+    await b.calls.hangup("chat-ba");
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("answers refused past the last start-over end the call as failed, and the contact is told", async () => {
     // The first offer and MAX_REDIALS more, each answer refused.
     const { a, b } = pairOfManagers({ a: refusingStack(MAX_REDIALS + 1) });
@@ -1810,6 +1823,28 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "failed" });
     expect(signalsOf(a, "o")).toHaveLength(2);
     expect(a.calls.list()).toEqual([]);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("a contact that hangs up while the offer made again is on its way is told: their app rings no call nobody places", async () => {
+    // The person on 'Connecting...' hangs up as the call offers again (CHECKING_REDIAL_MS): the hang-up and the offer
+    // cross. With no hang-up after it, the offer reaches a side with no call, and rings there as a new one.
+    const stack = stuckStack(1);
+    const { a, b } = pairOfManagers({ a: stack, checkingRedialMs: 1000, delay: 300 });
+    b.calls.setAuto({ on: true });
+    await a.calls.start("chat-ab", {});
+    await until(() => signalsOf(b, "a").length > 0);
+    b.calls.setAuto({ on: false });
+    await until(() => signalsOf(a, "o").length === 2);
+    await b.calls.hangup(undefined);
+    // Its reason is the redial's to say: only that it ended, and that the contact is told.
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toBeTruthy();
+    expect(signalsOf(a, "h")).toHaveLength(1);
+    // The offer rings a moment on B, and the hang-up after it ends that ring as missed.
+    await until(() => b.events.filter((e) => e.type === "call.ended").length === 2, 5_000).catch(diagnose(a, b));
+    expect(b.events.filter((e) => e.type === "call.ended").map((e) => e.reason)).toEqual(["hangup", "missed"]);
+    expect(b.calls.list()).toEqual([]);
     await a.calls.stopAll();
     await b.calls.stopAll();
   });
