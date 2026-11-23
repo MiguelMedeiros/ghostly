@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { CueChat } from "../lib/cues";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { MessageBubble, sameMessageRow } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
@@ -385,6 +385,19 @@ function withoutTyping(group: GroupView | undefined): GroupView | undefined {
 }
 
 /**
+ * Of the 1:1 chats, the ones the page reads: those of the group's members who are contacts (`memberLinks`), each by
+ * what names and pictures its member. Every chat of the profile was copied and compared on each engine state (0.3 ms a
+ * state at 500 chats, 1 ms at 2,000), and one with nobody of the group in it drew the whole page.
+ */
+function memberChats(state: EngineState | null, groupId: string) {
+  if (!state) return undefined;
+  const chats = state.groups.find(g => g.id === groupId)?.memberLinks ?? {};
+  const found: Pick<LinkView, "id" | "peerPubKeyZ32" | "peerAvatar">[] = [];
+  for (const link of state.links) if (Object.prototype.hasOwnProperty.call(chats, link.id)) found.push({ id: link.id, peerPubKeyZ32: link.peerPubKeyZ32, peerAvatar: link.peerAvatar });
+  return found;
+}
+
+/**
  * Who is typing in the open group while it lasts, in place of `children` (the member count), as a 1:1 chat's header
  * does. Read here, not by the page: each start and stop draws this line, not the page with its rows.
  */
@@ -415,8 +428,8 @@ export function GroupChat() {
   const rosterGroup = useEngineValue(state => withoutTyping(state?.groups.find(g => g.id === groupId)));
   // An extension tab that lost its peer (the Reconnecting notice): who is reachable is the last thing it was told.
   const peerLost = useEngineReconnecting();
-  // Of the 1:1 chats, what names and pictures members who are contacts: not each link's whole state.
-  const links = useEngineValue(state => state?.links.map(({ id, peerPubKeyZ32, peerAvatar }) => ({ id, peerPubKeyZ32, peerAvatar })));
+  // Of the 1:1 chats, what names and pictures members who are contacts: theirs alone, not each link's whole state.
+  const links = useEngineValue(state => memberChats(state, groupId));
   // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
   const faceOf = useContactFaces();
   // A member's nickname from that contact's chat, read only when a member is a contact and parsed again only when the
