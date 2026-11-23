@@ -77,7 +77,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
 
 const BUTTON = {
   // A border in forced colors only: there the fill is gone, and the button would read as bare text beside the others.
-  primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold forced-colors:border forced-colors:border-[color:ButtonText]",
+  primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText]",
   secondary: "bg-surface-alt text-text-primary hover:bg-surface-hover border border-border",
   danger: "bg-transparent text-danger-ink hover:bg-danger/10 border border-border",
 } as const;

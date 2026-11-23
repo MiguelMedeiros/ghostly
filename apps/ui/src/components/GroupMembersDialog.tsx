@@ -183,7 +183,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
                 onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={e => { namingField.onCompositionEnd(e); namingKeys.inputProps.onCompositionEnd(e); }} onKeyDown={e => { if (namingKeys.composing(e)) return; if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
                 className="min-w-0 flex-1 rounded-md border border-field-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-focus-ring read-only:opacity-60 max-md:min-h-11" />
               <button type="submit" data-testid="group-rename-save" disabled={!groupName(naming)} aria-disabled={busy !== null || undefined}
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.rename.save")}</button>
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.rename.save")}</button>
               <button type="button" data-testid="group-rename-cancel" onClick={endNaming} className="rounded text-xs text-text-muted hover:text-text-primary max-md:min-h-11 max-md:px-3">{t("group.rename.cancel")}</button>
             </form>}
           {/* Who sees the new name, in words while the field is open: it was a tooltip on Rename, which a phone never shows. */}
@@ -232,7 +232,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
               : !link.groups ? <span className="text-xs text-text-muted">{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
               : <button disabled={!can} aria-disabled={busy !== null || undefined} onClick={() => invite(link.id)} data-testid="group-invite"
                 aria-label={t("group.members.inviteLabel", { name: isolate(contactName(link)) })}
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.inviteAction")}</button>}
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.inviteAction")}</button>}
           </li>;
         })}
       </ul>
