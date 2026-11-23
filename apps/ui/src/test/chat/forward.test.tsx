@@ -567,6 +567,24 @@ describe("choosing several", () => {
     expect(document.activeElement).toBe(screen.getAllByTestId("message-options")[0]);
   });
 
+  it("a change of a long chat looks at none of its messages while none is chosen", () => {
+    function Hook({ messages }: { messages: ChatMessage[] }) {
+      useForwarding("link-bo", messages);
+      return null;
+    }
+    let looks = 0;
+    const history = (n: number) => Array.from({ length: n }, (_, i) => {
+      const row = message({ id: `m${i}`, text: `message ${i}`, timestamp: i });
+      Object.defineProperty(row, "id", { enumerable: true, get: () => (looks++, `m${i}`) });
+      return row;
+    });
+    const { rerender } = renderApp(<Hook messages={history(2_000)} />);
+    looks = 0;
+    rerender(<Hook messages={history(2_001)} />);
+    // It was a map of all 2,001, for nothing chosen.
+    expect(looks).toBe(0);
+  });
+
   it("Escape, ✕ or taking the last one off ends it", async () => {
     const { user } = renderApp(<Timeline messages={messages} />);
     await user.click(screen.getAllByTestId("message-options")[0]!);
