@@ -198,7 +198,10 @@
       "noFee": "手数料なし",
       "none": "まだありません",
       "note": {
+        "notSent": "送信されなかった支払い",
+        "paidRequest": "連絡先のリクエストへの支払い",
         "paymentFailed": "Lightning の支払いが失敗しました",
+        "paymentFailedFor": "支払いに失敗しました：{{note}}",
         "requestPaid": "Lightning で支払われたリクエスト",
         "testCoins": "テストミントからのテストコイン"
       }
