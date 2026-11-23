@@ -74,7 +74,7 @@ export function ChatPaymentAccept({ peer, contact, cards, network, empty, onSave
   const label = (card: InstanceCard) => t("payments.accept.card", { card: t("payments.accept.cardNetwork", { card: card.name, network: card.network === "testnet" ? "Testnet" : "Mainnet" }), name: contact });
   // The card's and the contact's names are each their own <bdi>, as on Pay.
   const hint = (card: InstanceCard) => {
-    const names = { card: card.network === "testnet" ? `Testnet ${card.name}` : card.name, name: contact };
+    const names = { card: card.network === "testnet" ? t("payments.accept.cardNetwork", { card: card.name, network: "Testnet" }) : card.name, name: contact };
     if (!draft[card.id]) return fillNames(t("payments.accept.hint.off"), names);
     if (!on(card, saved)) return fillNames(t("payments.accept.hint.onceSaved"), names);
     const said = theirs(card);

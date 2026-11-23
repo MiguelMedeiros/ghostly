@@ -1,4 +1,6 @@
 import { Fragment, type ReactNode } from "react";
+import type { Translate } from "../locales/translate";
+import { listParts } from "./listText";
 
 /**
  * A translated sentence with elements inside it: `fillNodes(t("wallet.first.orNew"), { new: <button>…</button> })`
@@ -19,4 +21,12 @@ export function fillNodes(text: string, nodes: Record<string, ReactNode>): React
  */
 export function fillNames(text: string | undefined, names: Record<string, string>): ReactNode {
   return text === undefined ? undefined : fillNodes(text, Object.fromEntries(Object.entries(names).map(([key, name]) => [key, <bdi>{name}</bdi>])));
+}
+
+/**
+ * Names (relays, hosts, modules) for a `{{name}}` of `fillNodes`, as the language lists them ("a、b", "a وb"), each its
+ * own `<bdi>`: a Latin host keeps its order in an Arabic sentence, and the text selected or copied is the plain names.
+ */
+export function listNodes(names: readonly string[], t: Translate): ReactNode {
+  return listParts(names, t).map((part, i) => part.item ? <bdi key={i}>{part.text}</bdi> : <Fragment key={i}>{part.text}</Fragment>);
 }
