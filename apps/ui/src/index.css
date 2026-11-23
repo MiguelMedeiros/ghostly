@@ -906,6 +906,72 @@ html[data-standalone="true"] {
   }
 }
 
+/* The small window with a phone's keyboard up and no room for it between the chat's header and the message field (a
+   phone on its side: 175px visible at 667×375, hooks/useFloatingBox.ts): a one-line bar over the header, with who,
+   Mute and End call on 44px (a one-to-one call adds its clock; a group's small window has none, and its button is
+   Leave call). The rest only steps aside, nothing is unmounted: the call's sound goes on, and the window is back as
+   it was when the keyboard goes down. At 168px it covered the field's end and its Send, and its End call stood
+   behind the keyboard. */
+.call-mini[data-compact] {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding-inline: 12px 2px;
+}
+
+.call-mini[data-compact] > .call-resize,
+.call-mini[data-compact] > .call-sides,
+.call-mini[data-compact] > .call-share-notice,
+.call-mini[data-compact] > .call-share-error,
+.call-mini[data-compact] > .call-mini-tile,
+.call-mini[data-compact] .call-controls > :not(.call-compact-keep) {
+  display: none;
+}
+
+/* The one-to-one window's own pictures: hidden, not removed, or a picture could stop and not play again. The group's
+   tile (its video inside) is in .call-mini-tile above, display: none but still mounted; its sound is outside it. */
+.call-mini[data-compact] > video,
+.call-mini[data-compact] > .call-preview {
+  visibility: hidden;
+}
+
+.call-mini[data-compact] .call-compact-name {
+  flex: 0 1 auto;
+}
+
+.call-mini[data-compact] .call-top {
+  position: static;
+  flex: 0 1 auto;
+  min-width: 3rem;
+}
+
+.call-mini[data-compact] .call-top p {
+  flex-flow: row nowrap;
+}
+
+/* The words ("Audio call") have no room beside the name: the clock stays. */
+.call-mini[data-compact] .call-top p > span:not(:last-child) {
+  display: none;
+}
+
+.call-mini[data-compact] .call-controls,
+.call-mini[data-compact] .call-controls:has(> :nth-child(5)) {
+  position: static;
+  flex: none;
+  margin-inline-start: auto;
+  gap: 8px;
+}
+
+.call-mini[data-compact] .call-controls button,
+.call-mini[data-compact] .call-controls:has(> :nth-child(5)) button {
+  width: 44px;
+  height: 44px;
+}
+
+.call-mini[data-compact] .call-controls > button:last-child {
+  margin-inline-start: 4px;
+}
+
 /* The header of a right-column page (components/layout/Page.tsx): one 3.5rem line, or two when its
    controls wrap under the title in a narrow column. The inset is 0 everywhere but under a phone's notch. */
 .page-header {
