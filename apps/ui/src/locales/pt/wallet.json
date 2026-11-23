@@ -127,7 +127,9 @@
       "confirmed": "{{sign}}{{amount}} · {{count}} conf.",
       "unconfirmed": "{{sign}}{{amount}} · não confirmado"
     },
-    "unconfirmed": "{{amount}} {{unit}} não confirmados"
+    "unconfirmed": "{{amount}} {{unit}} não confirmados",
+    "unconfirmed_one": "{{amount}} {{unit}} não confirmado",
+    "unconfirmed_other": "{{amount}} {{unit}} não confirmados"
   },
   "cards": {
     "amount": "{{amount}} {{unit}}",
@@ -221,6 +223,8 @@
     "pendingMintNext": "Ele se resolve sozinho; nada é pago de novo. Até o mint responder, o valor aparece como reservado abaixo do saldo.",
     "primary": "Principal",
     "received": "⚡ {{amount}} {{unit}} recebidos",
+    "received_one": "⚡ {{amount}} {{unit}} recebido",
+    "received_other": "⚡ {{amount}} {{unit}} recebidos",
     "redeem": "Resgatar token ecash",
     "redeemed": "{{amount}} {{unit}} resgatados.",
     "redeemed_one": "{{amount}} {{unit}} resgatado.",
@@ -257,6 +261,8 @@
     },
     "unconfirmed": "{{amount}} {{unit}} não confirmados",
     "unconfirmedInfo": "O mint recebeu estes sats em uma troca e não consegue dizer o que deu por eles. A carteira continua perguntando. Eles podem não voltar.",
+    "unconfirmed_one": "{{amount}} {{unit}} não confirmado",
+    "unconfirmed_other": "{{amount}} {{unit}} não confirmados",
     "unreachable": "Fora do ar no momento",
     "working": "Processando…"
   },
@@ -417,6 +423,8 @@
       "unknown": "resultado desconhecido"
     },
     "paidTo": "{{amount}} {{unit}} pagos a {{to}} ✓",
+    "paidTo_one": "{{amount}} {{unit}} pago a {{to}} ✓",
+    "paidTo_other": "{{amount}} {{unit}} pagos a {{to}} ✓",
     "pastePlaceholder": "Cole uma fatura Lightning ou um endereço Lightning",
     "pay": "Pagar",
     "payTo": "Pagar {{amount}} a {{to}}{{fees}}",
@@ -900,7 +908,9 @@
     "uncounted": "{{count}} cartões fora do total",
     "uncounted_one": "{{count}} cartão fora do total",
     "unknown": "Não deu para ler agora, fora do total",
-    "waiting": "{{amount}} {{unit}} ainda não disponíveis"
+    "waiting": "{{amount}} {{unit}} ainda não disponíveis",
+    "waiting_one": "{{amount}} {{unit}} ainda não disponível",
+    "waiting_other": "{{amount}} {{unit}} ainda não disponíveis"
   },
   "ui": {
     "amountIn": "Valor em {{unit}}",

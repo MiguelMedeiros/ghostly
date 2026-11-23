@@ -3,8 +3,8 @@ import { CommunityWorld, sameRun, seededRandom, type Peer } from "./communityWor
 // covers: groups.community.join, groups.protocol.community-topology
 
 /**
- * The admin replaced a community's link while a member hub's app was off the network (still open). Someone holding the
- * old link knocked, and the hub, back online, let them in before it heard the new link: on a branch that lost. Nobody's
+ * The admin replaced a community's link while a member hub was cut off from the rest (its app running). Someone holding
+ * the old link knocked on its side, and the hub let them in before it heard the new link: on a branch that lost. Nobody's
  * roster holds the key, but the hub kept it among its members, refreshed as long as the edge was up, and the edge to
  * it stayed up for hours. A key no commit names is no member of a hub: its edge closes.
  */
@@ -25,14 +25,16 @@ describe("a key let in on the old link by a hub that was away", { timeout: 600_0
     await world.run(60_000);
     const hub = rest.find(p => p.groups.communities.isHub(id));
     if (!hub) return null;
-    hub.online = false;
+    // Cut off from the rest, its app running (a hub back from a while away waits until it caught up: not this one),
+    // with the old link's holder on its side.
+    const zed = world.add("zed");
+    world.part = p => p === hub || p === zed ? 1 : 0;
     await world.run(2 * 60_000);
     await alice.groups.enableLink(id, true);
     await world.run(5_000);
-    const zed = world.add("zed");
     await zed.groups.joinByLink(link);
     await world.run(10_000);
-    world.reopen(hub);
+    world.part = null;
     try { await world.until(() => world.member(zed, id), 2 * 60_000); } catch { return null; }
     return { world, id, peers, hub, zed, key: world.view(zed, id)!.myKey! };
   }

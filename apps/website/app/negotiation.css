@@ -88,15 +88,18 @@
 .ng-tabs-current {
   display: none;
 }
-/* Its own name: dev-steps.css, on the same page, registers --p as not inherited, which held this bar at 0. */
+/* Its own name: dev-steps.css, on the same page, registers --p as not inherited, which held this bar at 0.
+   Scaled from its left edge, not widened: a width that grows lays out the page on every frame the loop plays. */
 .ng-tab-bar {
   position: absolute;
   left: 0;
   bottom: 0;
   height: 2px;
-  width: calc(var(--ng-p, 0) * 100%);
+  width: 100%;
+  transform: scaleX(var(--ng-p, 0));
+  transform-origin: left;
   background: var(--cyan);
-  transition: width 0.12s linear;
+  transition: transform 0.12s linear;
 }
 
 /* ── One scenario: phase caption, stage, sub-caption. Remounts per scenario,

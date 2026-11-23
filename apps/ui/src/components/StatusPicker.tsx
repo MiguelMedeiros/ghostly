@@ -197,7 +197,7 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
           {status && <FocusSafeButton type="button" disabled={busy} onClick={() => void run(() => engine.call("clearOwnStatus"))} className={`${button} me-auto text-danger hover:bg-surface-hover`}>{t("status.clear")}</FocusSafeButton>}
           <div className="flex gap-2 ms-auto">
             <button type="button" onClick={onClose} className={`${button} bg-surface-alt text-text-primary border border-border`}>{t("common.cancel")}</button>
-            <FocusSafeButton type="button" disabled={busy} onClick={() => save()} className={`${button} bg-accent text-on-accent font-semibold`}>{t("common.save")}</FocusSafeButton>
+            <FocusSafeButton type="button" disabled={busy} onClick={() => save()} className={`${button} bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] text-on-accent font-semibold`}>{t("common.save")}</FocusSafeButton>
           </div>
         </div>
       </div>

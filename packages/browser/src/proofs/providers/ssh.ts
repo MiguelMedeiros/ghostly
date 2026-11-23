@@ -4,6 +4,7 @@ import {
 } from "@ghostly/core";
 import { englishSay, type ExternalToolSigner, type IdentityProofProvider, type VerifyContext } from "../contract";
 import { checkSshForge, SSH_FORGE_HOST, SSH_FORGE_LABEL, validForgeLogin, type SshForge } from "../sshForges";
+import { windowsStatementFiles } from "../statementFile";
 
 /**
  * SSH keys (draft WISP 307-ssh). The person signs the binding statement once with their own
@@ -64,6 +65,9 @@ async function verifyStatementSignature(statement: IdentityStatement, evidence: 
     try { return await verifySshSignature(evidence.signature, bytes); }
     catch (e) { if (!(e instanceof SshSigError) || !/does not match this statement/.test(e.message)) throw e; last = e; }
   }
+  for (const bytes of windowsStatementFiles(statement.text))
+    if (await verifySshSignature(evidence.signature, bytes).then(() => true, () => false))
+      throw Object.assign(new Error("The statement file was saved as UTF-16 or with a byte order mark: save it as UTF-8 and sign it again"), { cause: last });
   throw Object.assign(new Error("The signature is not over this statement: copy the command again and sign exactly what it shows"), { cause: last });
 }
 
