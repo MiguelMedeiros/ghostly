@@ -1315,7 +1315,7 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.a.records.get("out:alone-0001")?.error).toContain("too many files");
   });
 
-  it("with 16 offers waiting for an answer, a file taken without asking still comes; one that would be asked about is refused", async () => {
+  it("with 16 offers waiting for an answer, a file taken without asking still comes; one that would be asked about is refused and waits its turn", async () => {
     // A few videos the person has not answered yet, then a photo: the photo was refused as one too many waiting,
     // though nothing waited for an answer on it.
     const w = wire();
@@ -1325,10 +1325,11 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => [...w.b.records.values()].filter((r) => r.state === "asking").length === 16);
     send(w, file("photo-0001", 50));
     send(w, file("big-0016", 1000));
-    await until(() => ["done", "failed"].includes(state(w.a, "out", "photo-0001")!) && state(w.a, "out", "big-0016") === "failed");
+    await until(() => w.b.sent.some((f) => f.t === "pf-refuse" && f.id === "big-0016" && f.why === "too-many"));
+    await until(() => ["done", "failed"].includes(state(w.a, "out", "photo-0001")!) && state(w.a, "out", "big-0016") === "queued");
     expect(w.a.records.get("out:photo-0001")).toMatchObject({ state: "done" });
-    expect(w.a.records.get("out:big-0016")?.error).toContain("too many files");
     expect(state(w.b, "in", "photo-0001")).toBe("done");
+    expect(w.b.records.has("in:big-0016")).toBe(false);
     expect([...w.b.records.values()].filter((r) => r.state === "asking")).toHaveLength(16);
   });
 
