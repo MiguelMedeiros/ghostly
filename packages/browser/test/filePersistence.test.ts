@@ -86,15 +86,38 @@ it("a link's files are read in a constant number of requests, each with what cha
   await fileStore.updateTransfer("group-files-many-in-150x", { state: "failed", transferred: 0, size: 1 });
 
   const requests = { count: 0 };
-  const spies = [IDBObjectStore.prototype, IDBIndex.prototype].flatMap(proto => (["get", "getAll", "openCursor"] as const).map(name => {
+  const spies = [IDBObjectStore.prototype, IDBIndex.prototype].flatMap(proto => (["get", "getAll", "getAllKeys", "openCursor"] as const).map(name => {
     const orig = proto[name] as (...args: unknown[]) => IDBRequest;
     return vi.spyOn(proto, name).mockImplementation(function (this: unknown, ...args: unknown[]) { requests.count++; return orig.apply(this, args); });
   }));
   const files = await fileStore.listForLink(linkId);
   for (const spy of spies) spy.mockRestore();
 
-  expect(requests.count).toBeLessThanOrEqual(2);
+  expect(requests.count).toBeLessThanOrEqual(3);
   expect(files).toHaveLength(300);
   expect(files.filter(file => file.transfer?.state === "done").map(file => file.createdAt)).toEqual(Array.from({ length: 150 }, (_, i) => 2 * i + 1));
   expect(files.filter(file => file.transfer && file.transfer.state !== "done")).toEqual([]);
+});
+
+it("a link's files are read from the store, never through an index, each with its bytes and what changed about it", async () => {
+  // WebKit (the macOS app) hands back a record read through an index with its Blob missing its stored bytes; a File
+  // dropped in then points at the path it came from, and the page was ended at every start.
+  const linkId = "fixture-index", other = "fixture-index-other";
+  await fileStore.put({ id: `${linkId}-out-b`, linkId, blob: new File(["second"], "b.pdf", { type: "application/pdf" }), createdAt: 2 });
+  await fileStore.put({ id: `${linkId}-in-a`, linkId, blob: new Blob(["first"]), createdAt: 1 });
+  await fileStore.updateTransfer(`${linkId}-in-a`, { state: "done", transferred: 5, size: 5 });
+  // Another link's file sorted between them, with a state of its own.
+  await fileStore.put({ id: `${linkId}-in-z`, linkId: other, blob: new Blob(["not theirs"]), createdAt: 3 });
+  await fileStore.updateTransfer(`${linkId}-in-z`, { state: "failed", transferred: 0, size: 1 });
+
+  const throughIndex = (["get", "getAll", "openCursor"] as const).map(name => vi.spyOn(IDBIndex.prototype, name));
+  const files = await fileStore.listForLink(linkId);
+  for (const spy of throughIndex) { expect(spy, `IDBIndex.${spy.getMockName()}`).not.toHaveBeenCalled(); spy.mockRestore(); }
+
+  expect(files.map(file => file.id)).toEqual([`${linkId}-in-a`, `${linkId}-out-b`]);
+  expect(await files[0].blob?.text()).toBe("first");
+  expect(files[0].transfer).toEqual({ state: "done", transferred: 5, size: 5 });
+  expect(await files[1].blob?.text()).toBe("second");
+  expect(files[1].transfer).toBeUndefined();
+  expect(await fileStore.listForLink("fixture-index-none")).toEqual([]);
 });
