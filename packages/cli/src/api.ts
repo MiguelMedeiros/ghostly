@@ -528,9 +528,10 @@ const METHODS: Record<string, Method> = {
       }
       // `GHOSTLY_PKARR_RELAYS` and `GHOSTLY_IROH_RELAYS` pin the relays of the process that runs the profile (this one,
       // or its daemon; runtime/engine.ts): the setting is kept and not read while the variable is set. It was taken with
-      // exit 0 and nothing said, while `status` went on naming the variable's relays.
+      // exit 0 and nothing said, while `status` went on naming the variable's relays. The variable pins only when it names
+      // a relay, as `pkarrRelays`/`irohRelays` read it: blank or commas alone leave the setting in use.
       const variable = { relays: "GHOSTLY_PKARR_RELAYS", irohRelays: "GHOSTLY_IROH_RELAYS" }[key as "relays" | "irohRelays"] as string | undefined;
-      if (variable && process.env[variable]?.trim()) {
+      if (variable && process.env[variable]?.split(",").some((url) => url.trim())) {
         warning = (warning ? `${warning}. ` : "") + `${variable} is set where this profile runs, and only its relays are used: ${key} is kept for when the profile runs without it`;
       }
       patch[key] = value;
