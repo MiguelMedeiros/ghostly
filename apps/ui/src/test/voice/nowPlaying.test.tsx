@@ -6,7 +6,7 @@ import { NowPlayingBar } from "../../components/NowPlayingBar";
 import { VoiceBubble } from "../../components/voice/VoiceBubble";
 import { JUMP_TO } from "../../hooks/useJumpTo";
 import { userState } from "../../lib/navigation";
-import { NowPlayingChat, pauseForCall, stopPlayingFrom, type PlayingChat } from "../../lib/nowPlaying";
+import { NowPlayingChat, pauseForCall, stopPlayingFrom, stopPlayingMessages, type PlayingChat } from "../../lib/nowPlaying";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
@@ -331,6 +331,58 @@ describe("a voice message playing on as its chat goes from this device", () => {
     expect(bar()).not.toBeNull();
 
     act(() => stopPlayingFrom(FAMILY.path, false));
+    expect(player.paused).toBe(true);
+    expect(bar()).toBeNull();
+  });
+});
+
+describe("a voice message or audio file playing as its message goes from this device", () => {
+  // Deleted here, or by its sender for everyone, while it plays: its bubble leaving the screen handed it to the bar as
+  // a change of page does, and it played on to its end, the message gone from the chat.
+  it("playing in its bubble: it stops with its message, and no bar comes", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen files={[file]} />, { route: "/group/family" });
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    const player = audio.players[0]!;
+    playTo(player, 3);
+
+    act(() => stopPlayingMessages([`m-${file.id}`]));
+    view.rerender(<Screen files={[]} />);
+    expect(screen.queryByTestId("voice-bubble")).toBeNull();
+    expect(player.paused).toBe(true);
+    expect(bar()).toBeNull();
+  });
+
+  it("an audio file playing in its bubble stops with its message too", async () => {
+    const file = song();
+    const view = renderApp(<Screen files={[]} audioFiles={[file]} />, { route: "/group/family" });
+    fireEvent.click(await screen.findByTestId("audio-play"));
+    await flush();
+    const player = document.querySelector<HTMLAudioElement>("[data-testid=audio-element]")!;
+    expect(player.paused).toBe(false);
+
+    act(() => stopPlayingMessages([`m-${file.id}`]));
+    view.rerender(<Screen files={[]} />);
+    expect(player.paused).toBe(true);
+    expect(bar()).toBeNull();
+  });
+
+  it("playing on away from its chat: it stops and the bar goes; another message going leaves it playing", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen files={[file]} />, { route: "/group/family" });
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    const player = audio.players[0]!;
+    playTo(player, 3);
+    view.rerender(<Screen files={[file]} open={false} />);
+    expect(bar()).not.toBeNull();
+
+    act(() => stopPlayingMessages(["m-another"]));
+    expect(player.paused).toBe(false);
+    expect(bar()).not.toBeNull();
+
+    act(() => stopPlayingMessages([`m-${file.id}`]));
     expect(player.paused).toBe(true);
     expect(bar()).toBeNull();
   });
