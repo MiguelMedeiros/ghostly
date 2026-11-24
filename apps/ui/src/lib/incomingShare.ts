@@ -221,10 +221,22 @@ const MAX_LINK_TAIL = 64;
 /** What may stand right before and right after a link of its own in a shared text. */
 const LINK_BEFORE = new RegExp(`[\\s\\p{Ps}\\p{Pi}"'${LINK_STOP_CHARS}]`, "u");
 const LINK_AFTER = new RegExp(`[\\s${LINK_STOP_CHARS}]`);
+/**
+ * A bold, italic, strike or spoiler marker ("*https://a.example/p*", lib/parse/inline.ts) or "<": the bubble draws the
+ * link after them as one of its own only where the run of them opens after `LINK_BEFORE` or the text's start.
+ */
+const LINK_MARKS = /[*_~|<]/;
+
+/** Whether what stands right before `at` lets the link there be one of its own (at most 4 markers looked past). */
+function opensLink(text: string, at: number): boolean {
+  let before = at - 1;
+  while (before >= 0 && at - before <= 4 && LINK_MARKS.test(text[before]!)) before -= 1;
+  return before < 0 || LINK_BEFORE.test(text[before]!);
+}
 
 /**
- * Whether `text` carries `url` as a link of its own: after the text's start, a space, an opening bracket or quote or
- * the CJK or Arabic punctuation a link stops at ("链接：https://a.example/p"), and ending where a bubble's link would
+ * Whether `text` carries `url` as a link of its own: after the text's start, a space, an opening bracket or quote, a
+ * chat's marker or the CJK or Arabic punctuation a link stops at ("链接：https://a.example/p"), and ending where a bubble's link would
  * (`linkEnd`: "https://a.example/p.", "(https://a.example/p)" or "https://a.example/p。見て" carry it).
  * A longer address that starts with it ("https://a.example/p2") or holds it ("…?u=https://a.example/p") does not.
  * Any website can post a share, of megabytes: only the first `MAX_LINK_LOOKS` places it turns up are read, each up to
@@ -243,7 +255,7 @@ function carriesLink(text: string, url: string): boolean {
   const address = (link: string) => webAddress(link) ?? link;
   const own = address(linkEnd(url));
   for (let at = within.indexOf(sought), looks = 0; at >= 0 && looks < MAX_LINK_LOOKS; at = within.indexOf(sought, at + 1), looks += 1) {
-    if (at > 0 && !LINK_BEFORE.test(text[at - 1]!)) continue;
+    if (!opensLink(text, at)) continue;
     word.lastIndex = at;
     const link = word.exec(text)![0];
     if (!LINK_AFTER.test(text[at + link.length] ?? " ")) continue;

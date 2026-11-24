@@ -63,6 +63,21 @@ describe("a share into the app", () => {
       expect(shareText(share({ text: `链接：${url}2`, url }))).toBe(`链接：${url}2\n${url}`);
     });
 
+    it("its link is not repeated when the text carries it in a bold, italic, strike or spoiler marker, or in < >", () => {
+      const url = "https://a.example/p";
+      // The bubble draws each as that link (`linkEnd` leaves the closing marker out): a second copy was put under it.
+      for (const text of [`Read *${url}*`, `Read **${url}**`, `Read _${url}_`, `Read ~~${url}~~`, `Read ||${url}||`, `Read <${url}>`]) {
+        expect(shareText(share({ text, url }))).toBe(text);
+      }
+      // A longer address in a marker still does not carry it.
+      expect(shareText(share({ text: `Read *${url}2*`, url }))).toBe(`Read *${url}2*\n${url}`);
+      // Nor does another address that holds it right after one of them: the bubble draws only that address.
+      for (const mark of ["_", "*", "~~", "||", "<"]) {
+        const text = `Go https://r.example/x${mark}${url}`;
+        expect(shareText(share({ text, url }))).toBe(`${text}\n${url}`);
+      }
+    });
+
     it("its link is not repeated when the text's differs only by a site's closing '/' or the scheme and host's case", () => {
       expect(shareText(share({ text: "Check this https://x.example", url: "https://x.example/" }))).toBe("Check this https://x.example");
       expect(shareText(share({ text: "Check this https://x.example/.", url: "https://x.example" }))).toBe("Check this https://x.example/.");
