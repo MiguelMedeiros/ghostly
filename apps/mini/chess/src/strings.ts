@@ -1,7 +1,7 @@
 /**
  * The app's words in its 8 languages (en, pt, es, fr, it, ja, zh, ar): English here, the others in languages.ts.
- * pickLanguage chooses from the client's locale (context.locale, else the browser's). addStrings can add or replace a
- * table; a key it leaves out falls back to English.
+ * pickLanguage chooses from the client's locale (context.locale, else the browser's); a key a language leaves out
+ * falls back to English.
  */
 import { ar, es, fr, it, ja, pt, zh } from "./languages.ts";
 
@@ -75,11 +75,6 @@ export const LANGUAGES = ["en", "pt", "es", "fr", "it", "ja", "zh", "ar"] as con
 export type Language = (typeof LANGUAGES)[number];
 
 const tables: Partial<Record<Language, Partial<Strings>>> = { en, pt, es, fr, it, ja, zh, ar };
-
-/** Adds (or replaces) the words of one language. */
-export function addStrings(language: Language, table: Partial<Strings>): void {
-  tables[language] = { ...tables[language], ...table };
-}
 
 /** The app language for a BCP 47 locale ("pt-BR" is "pt"); English when the app does not have it. */
 export function pickLanguage(locale: string | undefined): Language {
