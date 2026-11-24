@@ -3,6 +3,7 @@ import { createChatInvite } from "@ghostly/core";
 import { afterEach, expect, it, vi, describe } from "vitest";
 import { Root } from "../../Root";
 import { listSessions } from "../../lib/storage";
+import { readInvite } from "../../lib/url";
 import { axeViolations } from "../axe";
 
 // covers: invite.link, profiles.lock
@@ -36,6 +37,35 @@ it("an invite link opened while locked makes its chat only after the lock is pas
   expect(chat.viaLink).toBe(true);
   await waitFor(() => expect(window.location.hash).toBe(`#/chat/${chat.id}`));
   expect(window.location.hash).not.toContain(code);
+}, 60_000);
+
+// covers: invite.link, profiles.lock
+/*
+ * Several invite links opened while locked (a tab that takes the profile over opens every link no tab answered, one
+ * after the other): each makes its chat after the unlock, the same one once, and one past what links may make waiting
+ * (`LINK_CHATS_WAITING`) is refused, said then. Only the last used to be kept.
+ */
+it("invite links opened while locked each make their chat after the unlock, up to the links' limit", async () => {
+  const codes = [createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode];
+  window.location.hash = `#${codes[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const code of [codes[1], codes[0], codes[2], codes[3]]) {
+    window.location.hash = `#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+  expect(listSessions()).toHaveLength(0);
+  expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(3));
+  const peerOf = (code: string) => { const reading = readInvite(code); return reading.ok ? reading.keys.peerPubKeyB64 : null; };
+  expect(listSessions().map((s) => s.peerPubKeyB64).sort()).toEqual(codes.slice(0, 3).map(peerOf).sort());
+  expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(listSessions()).toHaveLength(3);
 }, 60_000);
 
 // covers: invite.invalid, invite.link, profiles.lock
