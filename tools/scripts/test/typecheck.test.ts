@@ -1,4 +1,4 @@
-// guards: #PRNUM
+// guards: #8681
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
