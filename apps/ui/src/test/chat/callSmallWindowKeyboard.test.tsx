@@ -31,6 +31,31 @@ let inner = { w: 0, h: 0 };
 let touch = true;
 /** Where the chat's message field is drawn (`[data-composer]`): above the keyboard while it is up. */
 let composer = { top: 0, bottom: 0 };
+/** How many times the message field's box was read. */
+let composerReads = 0;
+
+/**
+ * A ResizeObserver as a browser runs one: an element it starts observing is reported once, at the next frame
+ * (`frame`), and again only when its size changes (`resized`).
+ */
+class FrameObserver {
+  static all = new Set<FrameObserver>();
+  private observed = new Set<Element>();
+  private due = new Set<Element>();
+  constructor(private readonly callback: ResizeObserverCallback) { FrameObserver.all.add(this); }
+  observe(element: Element) { if (!this.observed.has(element)) { this.observed.add(element); this.due.add(element); } }
+  unobserve(element: Element) { this.observed.delete(element); this.due.delete(element); }
+  disconnect() { this.observed.clear(); this.due.clear(); }
+  static resized(element: Element) { for (const o of FrameObserver.all) if (o.observed.has(element)) o.due.add(element); }
+  static frame() {
+    for (const o of [...FrameObserver.all]) {
+      if (!o.due.size) continue;
+      const entries = [...o.due].map((target) => ({ target }) as ResizeObserverEntry);
+      o.due.clear();
+      o.callback(entries, o as unknown as ResizeObserver);
+    }
+  }
+}
 
 const SIDE = { w: 667, h: 375, keyboard: 200, composer: { top: 109, bottom: 175 } };
 const UPRIGHT = { w: 375, h: 667, keyboard: 300, composer: { top: 301, bottom: 367 } };
@@ -57,11 +82,14 @@ beforeEach(() => {
   const rect = HTMLElement.prototype.getBoundingClientRect;
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (!this.hasAttribute("data-composer")) return rect.call(this);
+    composerReads++;
     return { x: 0, y: composer.top, left: 0, right: inner.w, top: composer.top, bottom: composer.bottom, width: inner.w, height: composer.bottom - composer.top, toJSON() {} } as DOMRect;
   });
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  FrameObserver.all.clear();
   Reflect.deleteProperty(window, "visualViewport");
   Reflect.deleteProperty(window, "innerWidth");
   Reflect.deleteProperty(window, "innerHeight");
@@ -230,6 +258,27 @@ describe("the small window's place with the keyboard up", () => {
     expect(document.documentElement.dataset.keyboard).toBe("false");
     expect(screen.getByTestId("call-window")).not.toHaveAttribute("data-compact");
     expect(drawn("call-window")).toEqual(before);
+  });
+
+  it("reads the message field again as it changes, not at every frame the keyboard is up", async () => {
+    vi.stubGlobal("ResizeObserver", FrameObserver);
+    screenIs(UPRIGHT);
+    renderApp(oneToOne());
+    await keyboard(UPRIGHT.keyboard);
+    await act(async () => { FrameObserver.frame(); });
+    const settled = composerReads, above = drawn("call-window");
+    // A second of frames with nothing changed: the field observed again at each read reported again at the next frame,
+    // and was read 60 times a second (a forced layout each) for as long as the keyboard stayed up.
+    await act(async () => { for (let i = 0; i < 60; i++) FrameObserver.frame(); });
+    expect(composerReads - settled).toBe(0);
+    expect(drawn("call-window")).toEqual(above);
+    // A second line in the field: read again, and the window moves up with its top.
+    composer = { ...composer, top: composer.top - 22 };
+    const field = document.querySelector("[data-composer]")!;
+    await act(async () => { FrameObserver.resized(field); FrameObserver.frame(); });
+    expect(composerReads - settled).toBe(1);
+    expect(drawn("call-window").bottom).toBeLessThanOrEqual(composer.top);
+    expect(drawn("call-window").bottom).toBeLessThan(above.bottom);
   });
 
   it("leaves the whole-screen call as it is", async () => {

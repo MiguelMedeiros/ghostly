@@ -196,12 +196,18 @@ export function useFloatingBox(storageKey: string, initial: () => Box, options: 
     if (!enabled || !keyboard) return;
     const viewport = window.visualViewport;
     const field = typeof ResizeObserver === "function" ? new ResizeObserver(() => measure()) : null;
+    let watched: Element[] = [];
     const measure = () => {
       readInsets();
       const next = keyboardRoom();
       setRoom((was) => (was && next && was.top === next.top && was.bottom === next.bottom) || (!was && !next) ? was : next);
+      // Observed again only when the fields changed: a field observed anew is reported at the next frame, and observed
+      // anew at each measure it was measured at every frame the keyboard stayed up (a forced layout each).
+      const fields = next ? [...document.querySelectorAll("[data-composer]")] : [];
+      if (fields.length === watched.length && fields.every((composer, i) => composer === watched[i])) return;
       field?.disconnect();
-      if (next) document.querySelectorAll("[data-composer]").forEach((composer) => field?.observe(composer));
+      watched = fields;
+      for (const composer of fields) field?.observe(composer);
     };
     const said = new MutationObserver(measure);
     said.observe(document.documentElement, { attributes: true, attributeFilter: ["data-keyboard"] });
