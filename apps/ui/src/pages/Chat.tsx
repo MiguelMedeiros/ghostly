@@ -196,8 +196,11 @@ function editableText(message: ChatMessage): boolean {
  */
 function removableForEveryone(message: ChatMessage): boolean {
   // By the id the contact knows it by (`replyTarget`), as Reply, React and Pin read it: a file or a voice message sent
-  // from this page has a row the page made itself, with no `ref`, and its id is in its file's.
-  return message.sender === "me" && !!replyTarget(message) && message.delivery !== "waiting" && !message.paymentId && !message.systemEvent && !message.callEvent;
+  // from this page has a row the page made itself, with no `ref`, and its id is in its file's. Not such a row with the
+  // red Not sent mark: a file that never left (no room for its copy) is in this page's chat alone, and the engine,
+  // which has no row of it, would refuse.
+  const neverLeft = !!message.file && !message.ref && message.delivery === "failed";
+  return message.sender === "me" && !!replyTarget(message) && message.delivery !== "waiting" && !neverLeft && !message.paymentId && !message.systemEvent && !message.callEvent;
 }
 
 /**

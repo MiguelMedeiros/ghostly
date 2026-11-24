@@ -39,6 +39,14 @@ describe("Delete for everyone on a file sent from this page", () => {
     await waitFor(() => expect(engine.callsTo("removeMessage")).toEqual([{ linkId: "link-1", messageId: SENT }]));
   });
 
+  it("is not offered on a file that never left (no room for its copy), which the engine has no row of", async () => {
+    const { user } = openChat([file({ delivery: "failed", deliveryError: "Not enough space on this device" })]);
+    const bubble = (await screen.findByText("notes.txt")).closest<HTMLElement>(`[data-message-id="${SENT}"]`)!;
+    await user.click(within(bubble).getByTestId("message-options"));
+    expect(screen.getByTestId("message-delete")).toBeInTheDocument();
+    expect(screen.queryByTestId("message-delete-everyone")).toBeNull();
+  });
+
   it("is not offered while the file still waits to be sent", async () => {
     const { user } = openChat([file({ delivery: "waiting" })]);
     const bubble = (await screen.findByText("notes.txt")).closest<HTMLElement>(`[data-message-id="${SENT}"]`)!;
