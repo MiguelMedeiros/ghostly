@@ -568,7 +568,7 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
       </div>
       {offered && (
         <div className="mt-1.5 px-1" data-testid="voice-offer">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button ref={acceptRef} type="button" data-testid="voice-download" onClick={() => act("accept")}
               className={`text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer`}>
               {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
@@ -584,7 +584,7 @@ export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file
         </div>
       )}
       {(canPause || pausedHere || canCancel) && (
-        <div className="flex gap-1.5 mt-1 px-1">
+        <div className="flex flex-wrap gap-1.5 mt-1 px-1">
           {canPause && <button type="button" className={pill} data-testid="voice-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={pill} data-testid="voice-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
           {canCancel && <button type="button" className={pill} data-testid="voice-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}
