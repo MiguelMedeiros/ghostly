@@ -1375,6 +1375,8 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   "setOwnStatus",
   // A Nostr note or profile, public on relays: the app asks before it is signed (NostrPublishDialog).
   "nostrDraft",
+  // A shared app's name, every contact it is shared with reads, as `service add` guards it.
+  "addService",
 ]);
 
 /**
