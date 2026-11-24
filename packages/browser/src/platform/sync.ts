@@ -410,6 +410,69 @@ function mirrorPeerNick(session: ChatSession, link: LinkView): boolean {
 }
 
 const ensuring = new Set<string>();
+
+/** Links the engine was told this page keeps a chat for (`noteChats`), this page life; and those on their way. */
+const chatsNoted = new Set<string>();
+const chatsNoting = new Set<string>();
+
+/**
+ * Tells the engine which links have their chat here: its record of it outlives a read of this page's storage that comes
+ * back without the chats (a restart while another instance still held it), and the first-run import reads it.
+ */
+function noteChats(linkIds: string[]): void {
+  const fresh = linkIds.filter((id) => !chatsNoted.has(id) && !chatsNoting.has(id));
+  if (!fresh.length) return;
+  for (const id of fresh) chatsNoting.add(id);
+  engine
+    .call("noteChats", { linkIds: fresh })
+    .then(() => { for (const id of fresh) chatsNoted.add(id); }, () => {})
+    .finally(() => { for (const id of fresh) chatsNoting.delete(id); });
+}
+
+/** The first-run import under way: every reconcile meanwhile waits for it, none starts its own. */
+let importing: Promise<boolean> | undefined;
+/** No import before this time: one that could not finish is tried at the next 5 s tick, not at every engine state. */
+let importAfter = 0;
+const IMPORT_AGAIN_MS = 4_000;
+
+function importLinks(): Promise<boolean> {
+  return (importing ??= importOnce().finally(() => { importing = undefined; }));
+}
+
+/**
+ * Links made before the UI kept sessions (or by another Ghostly page) become chats, once: true once done and marked.
+ * Never a second chat for a link that has one: one stored here (read again after the engine's answer, so one stored
+ * meanwhile counts), or one the engine was told this page keeps (`hasChat`) while this page's storage read without it.
+ * The mark is not written then: the read was not the whole storage, and no link goes for want of a chat (below) until
+ * a later import finds them.
+ */
+async function importOnce(): Promise<boolean> {
+  let changed = false;
+  try {
+    let unread = false;
+    for (const link of await engine.call("exportLinks")) {
+      if (findSession(link.seedB64, link.peerPubKeyZ32)) continue;
+      if (link.hasChat) { unread = true; continue; }
+      const id = ensureSession(
+        { profile: link.profile, deliveryMode: link.deliveryMode, seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
+        { inviteCode: link.inviteCode, createdAt: link.createdAt },
+      );
+      changed = true;
+      if (link.label) updateSessionLabel(id, link.label);
+    }
+    if (unread) return false;
+    localStorage.setItem(MIGRATED_KEY, "1");
+    changed = true;
+    return true;
+  } catch {
+    // No room to store them (or the mark): imported again at the next reconcile. Until then no link goes for want of
+    // its chat below.
+    return false;
+  } finally {
+    if (changed) notifySessionsChanged();
+    importAfter = Date.now() + IMPORT_AGAIN_MS;
+  }
+}
 /**
  * The last reconcile that left nothing for later: every chat had its link and every link its chat. With links the same
  * in what it reads and the same sessions (none stored differently since), the next one has nothing to do either.
@@ -444,25 +507,7 @@ async function reconcile(fromState = false): Promise<void> {
     try { localStorage.setItem(MIGRATED_KEY, "1"); } catch { /* no room: the old mark still counts */ }
   }
   let imported = !!localStorage.getItem(MIGRATED_KEY) || !!localStorage.getItem(OLD_MIGRATED_KEY);
-  if (!imported) {
-    try {
-      // Links made before the UI kept sessions (or by another Ghostly page).
-      for (const link of await engine.call("exportLinks")) {
-        if (findSession(link.seedB64, link.peerPubKeyZ32)) continue;
-        const id = ensureSession(
-          { profile: link.profile, deliveryMode: link.deliveryMode, seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
-          { inviteCode: link.inviteCode, createdAt: link.createdAt },
-        );
-        if (link.label) updateSessionLabel(id, link.label);
-      }
-      localStorage.setItem(MIGRATED_KEY, "1");
-      imported = true;
-      notifySessionsChanged();
-    } catch {
-      // No room to store them (or the mark): imported again at the next reconcile. Until then no link goes for want of
-      // its chat below.
-    }
-  }
+  if (!imported && Date.now() >= importAfter) imported = await importLinks();
 
   const last = settled;
   const linksAsSettled = !!last && last.prefix === getPrefix() && sameLinks(last.links, state.links) && sameLinks(last.edges, state.edges);
@@ -479,12 +524,14 @@ async function reconcile(fromState = false): Promise<void> {
   const peers = new Set(sessions.map((s) => s.peerPubKeyB64));
   let renamed = false;
   let later = false;
+  const kept: string[] = [];
 
   for (const shown of sessions) {
     // Changed here (its delivery mode, its latest reaction or identity share), never the one the other readers hold.
     const session = { ...shown };
     const live = engine.linkByPeer(session.peerPubKeyB64);
     if (live) {
+      kept.push(live.id);
       // The note of a reaction whose row the change tick still holds goes in with that row, when the tick ends.
       const waiting = engine.changing(live.id);
       if (waiting) later = true;
@@ -514,6 +561,7 @@ async function reconcile(fromState = false): Promise<void> {
       .finally(() => ensuring.delete(session.id));
   }
   if (renamed) notifySessionsChanged();
+  noteChats(kept);
 
   for (const link of state.links) {
     if (peers.has(link.peerPubKeyZ32)) continue;

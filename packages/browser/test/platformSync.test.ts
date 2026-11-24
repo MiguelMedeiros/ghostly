@@ -216,7 +216,8 @@ describe("keeping links and chats in step", () => {
     imported();
     storage.saveSession(session({ deliveryMode: "stream" }));
     await start([link({ createdAt: 1, deliveryMode: "dht" })]);
-    expect(engine.calls).toEqual([]);
+    // Only told the engine that this link has its chat here (the first-run import reads that).
+    expect(engine.calls).toEqual([["noteChats", { linkIds: ["link-1"] }]]);
     expect(storage.loadSession("s1")?.deliveryMode).toBe("dht");
   });
 
