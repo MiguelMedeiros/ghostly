@@ -11,7 +11,7 @@ import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inCall, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
-  type ApiContext, type CallScope, type Method, type Params, type RefPlace,
+  type ApiContext, type CallScope, type Lookup, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
@@ -22,14 +22,14 @@ import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdEnds, holdOf, releaseHold }
 import { endTyping, keepOneShot, keepTyping, ONE_SHOT_LIVE_GRACE_MS, sayTyping, typingStatus } from "./typing";
 import { GROUP_ADMIN_METHODS, moreThanOneMember, noMember, withUrl } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
-import { IDENTITY_METHODS } from "./identities";
+import { IDENTITY_LOOKUPS, IDENTITY_METHODS } from "./identities";
 import { X401_METHODS } from "./x401";
-import { closeServicesOf, SERVICE_METHODS, serviceShape } from "./services";
+import { closeServicesOf, SERVICE_LOOKUPS, SERVICE_METHODS, serviceShape } from "./services";
 import { BACKUP_METHODS } from "./backup";
-import { CALL_METHODS } from "./calls/api";
+import { CALL_LOOKUPS, CALL_METHODS } from "./calls/api";
 import { APP_SERVE_METHODS } from "./appServe";
 import { APP_CHAT_METHODS } from "./appChat";
-import { mintUrlShape, payShape, tokenShape, WALLET_METHODS } from "./wallets";
+import { mintUrlShape, PAYMENT_LOOKUPS, payShape, tokenShape, WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
 import { chatState, dhtOnlyNote, heldWords, pinWaitsNote, type DhtOnly } from "./waitNotice";
@@ -1842,6 +1842,18 @@ const SHAPES: Record<string, (params: Params) => unknown> = {
 /** Throws what `method` answers `params` whose shape it refuses, with no profile open; nothing for any other. */
 export async function refuseBeforeStart(method: string, params: Params): Promise<void> {
   if (Object.hasOwn(SHAPES, method)) await SHAPES[method](params);
+}
+
+/** Each method's lookup of the id it names, the one its handler makes first (main.ts `LOOKED_UP_FIRST`). */
+const LOOKUPS: Record<string, Lookup> = { ...IDENTITY_LOOKUPS, ...SERVICE_LOOKUPS, ...PAYMENT_LOOKUPS, ...CALL_LOOKUPS };
+
+/**
+ * Throws what `method` answers an id that names nothing, with no chat started; else starts every chat and group the
+ * run left unstarted (main.ts `LOOKED_UP_FIRST`), as a run that left none would have.
+ */
+export async function startOnceFound(ctx: ApiContext, method: string, params: Params): Promise<void> {
+  if (Object.hasOwn(LOOKUPS, method)) LOOKUPS[method](ctx, params);
+  await node(ctx).startDeferredChats();
 }
 
 export { findChat, findGroup, startNamedChats } from "./apiKit";

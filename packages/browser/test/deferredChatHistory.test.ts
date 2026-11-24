@@ -55,6 +55,31 @@ it("a run that leaves the saved chats unstarted reads their newest rows at start
   expect(read).toEqual(["chat-1"]);
 }, 30000);
 
+it("a run that left the saved chats unstarted starts them all at once when asked, each history read once", async () => {
+  await db.putSettings({ online: false, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  for (let i = 0; i < 3; i++) {
+    await db.putLink(chat(i));
+    await db.putMessage({ linkId: `chat-${i}`, id: `m-${i}`, text: "hi", sender: "peer", timestamp: 1000 + i, via: "datalink" });
+  }
+  const read: string[] = [];
+  const whole = db.getMessages.bind(db);
+  vi.spyOn(db, "getMessages").mockImplementation(async (linkId, ...rest) => {
+    if (linkId.startsWith("chat-")) read.push(linkId);
+    return whole(linkId, ...rest);
+  });
+  node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() },
+    { transport: fixture as never, automaticWallets: false, nativeTransports: {}, deferChats: true });
+  await node.start();
+  // One named first (a one-shot's chat) is not read again.
+  await node.startDeferredChat("chat-0");
+  await node.startDeferredChats();
+  expect([...read].sort()).toEqual(["chat-0", "chat-1", "chat-2"]);
+  // None is left unstarted: naming one reads nothing more.
+  await node.readDeferredChat("chat-2");
+  await node.startDeferredChats();
+  expect(read).toHaveLength(3);
+}, 30000);
+
 it("a run that starts the saved chats reads each history at start, as before", async () => {
   await db.putSettings({ online: false, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
   for (let i = 0; i < 2; i++) {

@@ -273,6 +273,14 @@ const NO_HISTORY_WRITES: ReadonlySet<string> = new Set([
   "app.serve", "app.unserve", "call.answer", "call.flush", "wallet.address", "lightning.rename", "lightning.default", "wallet.remove",
 ]);
 
+/**
+ * Calls that name their thing by an id of no chat (a proof, a service, a payment, a call) and need the chats once it is
+ * found (a proof is withdrawn from each; a call may ring in any): a one-shot for one leaves every saved chat and group
+ * unstarted, looks the id up, and starts them only when it names something (api.ts `startOnceFound`). Each started every
+ * saved chat first, then said not_found for a typo: with 20 chats, 20 relay requests and 0.4-0.7 s more.
+ */
+const LOOKED_UP_FIRST: ReadonlySet<string> = new Set(["identity.remove", "service.enable", "service.remove", "payment.reclaim", "call.hangup"]);
+
 /** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`, `NO_HISTORY_WRITES`). */
 export function readsNoHistory(method: string, params: Record<string, unknown> = {}): boolean {
   if (method === "call.auto" || method === "group.auto") return params.on === undefined;
@@ -372,12 +380,15 @@ async function session(g: Globals, options: RuntimeOptions, again = true, first?
   const anew = again ? () => session(g, options, false) : undefined;
   const client = await connectDaemon(g.paths);
   if (client) return throughDaemon(client, anew);
-  const [, { callApi, refuseBeforeStart, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
+  const [, { callApi, refuseBeforeStart, startNamedChats, startOnceFound }] = await Promise.all([engineHost(), engineApi()]);
   if (first) await refuseBeforeStart(first.method, first.params);
-  const host = await openOneShot(g, options);
+  const lookup = first && LOOKED_UP_FIRST.has(first.method) ? first.method : undefined;
+  const host = await openOneShot(g, lookup ? { ...options, deferChats: true } : options);
   if (host instanceof DaemonClient) return throughDaemon(host, anew);
+  let looked = false;
   const call = async (m: string, p?: unknown) => {
-    if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, m, p as Record<string, unknown>, READS.has(m));
+    if (m === lookup && !looked && p && typeof p === "object") { await startOnceFound(host.ctx, m, p as Record<string, unknown>); looked = true; }
+    else if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, m, p as Record<string, unknown>, READS.has(m));
     return callApi(host.ctx, m, p ?? {});
   };
   return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };

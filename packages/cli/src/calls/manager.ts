@@ -878,15 +878,7 @@ export class CallManager {
     if (ref) {
       const byId = this.calls.get(ref);
       if (byId) return byId;
-      let chat: LinkView;
-      try {
-        chat = this.chatOf(ref);
-      } catch (error) {
-        if (CALL_ID.test(ref) && error instanceof CliError && error.code === "not_found" && !error.details) {
-          throw new CliError("not_found", `No call ${ref}: it ended or never existed (ghostly call list)`);
-        }
-        throw error;
-      }
+      const chat = this.chatOfCall(ref);
       const call = this.byChat(chat.id);
       if (!call) throw new CliError("not_found", `No call in chat ${ref}`);
       return call;
@@ -896,6 +888,26 @@ export class CallManager {
     if (picked.length === 1) return picked[0];
     if (!picked.length) throw new CliError("not_found", "No call is on");
     throw new CliError("bad_request", "More than one call is on: name one (its id or its chat)", { calls: picked.map((c) => c.id) });
+  }
+
+  /** The chat a ref that is no call's id names; one that names no chat either is no call. */
+  private chatOfCall(ref: string): LinkView {
+    try {
+      return this.chatOf(ref);
+    } catch (error) {
+      if (CALL_ID.test(ref) && error instanceof CliError && error.code === "not_found" && !error.details) {
+        throw new CliError("not_found", `No call ${ref}: it ended or never existed (ghostly call list)`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Refuses a ref that names no call and no chat, as `find` does, before a one-shot starts its chats (api.ts
+   * `startOnceFound`): a chat's call may still ring once they start, so one named by its chat is not looked for here.
+   */
+  named(ref: string): void {
+    if (!this.calls.has(ref)) this.chatOfCall(ref);
   }
 
   private link(chat: string): LinkView | undefined {
