@@ -1,9 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { oneChatOnly, oneGroupOnly, readsNoHistory } from "../src/main";
+import { chatOnly, oneChatOnly, oneGroupOnly, readsNoHistory } from "../src/main";
 import { ghostly, home, hyperdhtTestnet, ok, Running } from "./support/cli";
 // covers: headless.one-shot, headless.groups
 
@@ -95,10 +95,29 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     }
   });
 
+  it("file wait and file save given a file's id alone start the chat it is of only", async () => {
+    // The chat with Carol the test above joined: a file sent to it, then named by its id alone.
+    const path = join(bob, "note.txt");
+    writeFileSync(path, "a file for carol\n");
+    const sent = ok(await ghostly(["--home", bob, "file", "send", "carol", path], { env: bobEnv })) as { file: { id: string } };
+    const wait = await counted(["file", "wait", sent.file.id, "--timeout", "60"]);
+    const save = await counted(["file", "save", sent.file.id, "--path", join(bob, "saved.txt")]);
+    expect(ok(wait.result)).toMatchObject({ file: sent.file.id, state: "done" });
+    expect(ok(save.result)).toMatchObject({ file: sent.file.id, size: 17 });
+    // Read as about no chat, each started the 13 saved ones: the relay's whole 30 a minute.
+    for (const [name, requests] of [["file wait", wait.requests], ["file save", save.requests]] as const) expect(requests, name).toBeLessThan(24);
+  });
+
   it("starts every chat for a call that names none and makes none", () => {
     expect(oneChatOnly("invite.join", { invite: "ghostly1…" })).toBe(true);
     expect(oneChatOnly("invite.create", {})).toBe(true);
     expect(oneChatOnly("file.send", { chat: "carol", path: "a.txt" })).toBe(true);
+    // A 1:1 chat's file named by its id alone is about that chat; a group's file goes over the groups' edges.
+    for (const method of ["file.save", "file.wait", "file.action"]) {
+      expect(oneChatOnly(method, { file: "chat1-in-abc" }), method).toBe(true);
+      expect(chatOnly(method, { file: "chat1-out-abc" }), method).toBe(true);
+      expect(chatOnly(method, { file: "group-g1-in-abc" }), method).toBe(false);
+    }
     expect(oneChatOnly("usage.send", { all: true })).toBe(false);
     // A call whose chat may name a group leaves the other 1:1 chats unstarted too; its groups start (`chatOnly` is false).
     expect(oneChatOnly("task.send", { chat: "Sala" })).toBe(true);
