@@ -335,6 +335,24 @@ describe("placing a call", () => {
     expect(call.result.current.callState).toBe("connecting");
   });
 
+  it("an answer that names its offer, to a call placed after the clock was set back, connects", async () => {
+    const call = renderCall();
+    await offered(call);
+    vi.setSystemTime(Date.now() - 60_000);
+    act(() => call.result.current.hangUp());
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[1].grant();
+    await settle();
+    const offer = JSON.parse(call.published[call.published.length - 1]!) as { ts: number };
+    expect(offer.ts).toBeGreaterThan(Date.now());
+
+    act(() => { vi.advanceTimersByTime(5000); });
+    call.receive(JSON.stringify({ ...JSON.parse(remote.answer(Date.now())), o: offer.ts, at: Date.now() }));
+    await settle();
+    expect(FakePeerConnection.instances[1].remoteDescription?.type).toBe("answer");
+    expect(call.result.current.callState).toBe("connecting");
+  });
+
   it("a call nobody answers hangs up after RING_MS and says \"No answer\" for a while", async () => {
     const call = renderCall();
     const { stream, pc } = await offered(call);
