@@ -71,14 +71,5 @@ export function contrast(a, b) {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-/**
- * What a pair passes. Normal text needs 4.5 (AA) or 7 (AAA); large text (24px, or 19px bold) and graphics such as the
- * logo and icons need 3 (AA) or 4.5 (AAA for large text).
- * @param {number} ratio
- */
-export function levels(ratio) {
-  return { aa: ratio >= 4.5, aaa: ratio >= 7, aaLarge: ratio >= 3, aaaLarge: ratio >= 4.5 };
-}
-
 /** The ratio a use needs: text 4.5, large text and graphics 3. "avoid" is a pair shown because it fails. */
 export const NEEDS = { text: 4.5, large: 3, graphic: 3 };
