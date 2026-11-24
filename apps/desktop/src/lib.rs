@@ -16,6 +16,8 @@ mod app_sandbox;
 #[cfg(desktop)]
 mod app_window;
 mod bitcoind_rpc;
+#[cfg(any(target_os = "macos", test))]
+mod bundle_folders;
 mod clipboard;
 mod commands;
 // The e2e build pastes from a stand-in, never from the clipboard.
@@ -297,7 +299,11 @@ pub fn run() {
     if let Err(error) = android_tls() {
         eprintln!("tls: Android's certificate verifier is not ready: {error}");
     }
-    let context = tauri::generate_context!();
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    let mut context = tauri::generate_context!();
+    // A Mac bundle renamed after it was built keeps its own data, cache and log folders (`bundle_folders`).
+    #[cfg(target_os = "macos")]
+    bundle_folders::apply(&mut context);
     // Launched again on the same profile, it brings the running window forward and leaves here, before Tauri and
     // its threads start (an exit under tao's X11 thread could crash).
     #[cfg(target_os = "linux")]
