@@ -544,7 +544,7 @@ export const fileStore = {
     const tx = (await openDb()).transaction([STORES.files, STORES.fileState], "readonly");
     const store = tx.objectStore(STORES.files);
     // Strings sort by UTF-16 code unit, as IndexedDB orders its keys.
-    const ids = (await wrap<string[]>(store.index("byLink").getAllKeys(linkId))).sort();
+    const ids = (await wrap(store.index("byLink").getAllKeys(linkId)) as string[]).sort();
     if (!ids.length) return [];
     const range = IDBKeyRange.bound(ids[0], ids[ids.length - 1]);
     const files = (await wrap<StoredFile[]>(store.getAll(range))).filter(file => file.linkId === linkId);
