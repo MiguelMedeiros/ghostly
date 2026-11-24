@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "../affected/files.mjs";
-import { bundleReaches, checkPaths, featureGrep, globToRegExp, integrationReached, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_ALONE, UNIT_HALVED, UNIT_PROJECTS, unitGroupOf, unitPartsOf, workspaceExports } from "../affected/select.mjs";
+import { bundleReaches, checkPaths, featureGrep, globToRegExp, integrationReached, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, TYPECHECK_WHOLE, TYPECHECKS, UNIT_ALONE, UNIT_HALVED, UNIT_PROJECTS, unitGroupOf, unitPartsOf, workspaceExports } from "../affected/select.mjs";
 import { shardByTime, TimedShards } from "../../vitest.shards.ts";
 
 // A small repository: a few features, a paths map, specs tagged with them, and core modules behind a barrel.
@@ -458,6 +458,32 @@ describe("the real repository's import graph", () => {
     // fileAnnouncements.test.tsx checks chat.announce.fileOffer through lib/fileAnnounce.ts.
     expect(realPlan("apps/ui/src/locales/en/chat.json").ui.files).toEqual(expect.arrayContaining(["apps/ui/src/lib/fileAnnounce.ts", "apps/ui/src/test/i18n/keys.test.ts"]));
     expect(realPlan("apps/ui/src/locales/ja/home.json").ui.files).not.toContain("apps/ui/src/lib/fileAnnounce.ts");
+  });
+
+  // A tsc program runs only when a changed file matches its `sources`, so they have to name every file it reaches from
+  // its tsconfig's `include`: the browser one compiles 71 apps/ui/src files and was skipped when one of them changed.
+  it("each type check's sources hold every file its tsc program reaches", { timeout: 60_000 }, () => {
+    const { codeFiles, packages } = load();
+    const known = new Set(knownFiles(root));
+    const whole = TYPECHECK_WHOLE.map(globToRegExp);
+    const byModule = new Map(Object.keys(codeFiles).map((p) => [p.replace(/\.(?:d\.ts|[cm]?[jt]sx?)$/, ""), p]));
+    const outside: Record<string, string[]> = {};
+    for (const t of TYPECHECKS as { name: string; cmd: string[]; sources: string[] }[]) {
+      const p = t.cmd.indexOf("-p");
+      const target = p < 0 ? "tsconfig.json" : t.cmd[p + 1];
+      const config = target.endsWith(".json") ? target : `${target}/tsconfig.json`;
+      const dir = config.slice(0, config.lastIndexOf("/") + 1);
+      const include: string[] = JSON.parse(readFileSync(join(root, config), "utf8")).include;
+      const roots = include.map((i) => globToRegExp(`${dir}${/[*.]/.test(i.split("/").pop() ?? "") ? i : `${i}/**`}`));
+      const entries = Object.keys(codeFiles).filter((f) => /\.tsx?$/.test(f) && roots.some((re) => re.test(f)));
+      expect(entries.length, t.name).toBeGreaterThan(0);
+      const sources = [...t.sources.map(globToRegExp), ...whole];
+      outside[t.name] = [...bundleReaches(entries, codeFiles, packages)]
+        .map((m) => byModule.get(m) ?? byModule.get(`${m}/index`) ?? m)
+        .filter((f) => known.has(f) && !sources.some((re) => re.test(f)))
+        .sort();
+    }
+    expect(Object.fromEntries(Object.entries(outside).filter(([, files]) => files.length))).toEqual({});
   });
 });
 
