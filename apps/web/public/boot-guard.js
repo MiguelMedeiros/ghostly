@@ -341,19 +341,28 @@
     light: { classic: "#f0f2f5", monochrome: "#f5f5f5", cyan: "#ecfeff", purple: "#faf5ff" }
   };
 
+  /** Whether the registry lists profile `id` (the default profile, `""`, always is). */
+  function listed(profiles, id) {
+    if (id === "") return true;
+    if (!/^[a-z0-9]{10}$/.test(id)) return false;
+    for (var i = 0; i < profiles.length; i++) if (profiles[i] && profiles[i].id === id) return true;
+    return false;
+  }
+
   /**
-   * Where the profile the page will start as keeps its settings, as apps/ui/src/lib/profiles.ts finds it: the one the
-   * registry chose, in the space a handoff moved it to, or the default profile's.
+   * Where the profile the page will start as keeps its settings, as apps/ui/src/lib/profiles.ts finds it: the one this
+   * tab ran before it reloaded (`tabProfileId`: another tab may have chosen another since), else the one the registry
+   * chose, in the space a handoff moved it to, or the default profile's.
    */
   function settingsKey() {
     var space = "";
     try {
       var registry = JSON.parse(localStorage.getItem("ghostly_profiles") || "null");
       var profiles = registry && registry.profiles instanceof Array ? registry.profiles : [];
-      var active = registry && typeof registry.active === "string" && /^[a-z0-9]{10}$/.test(registry.active) ? registry.active : "";
-      var found = !active;
-      for (var i = 0; i < profiles.length; i++) if (profiles[i] && profiles[i].id === active) found = true;
-      if (!found) active = "";
+      var tab = null;
+      try { tab = sessionStorage.getItem("ghostly_profiles_tab"); } catch (e) { /* the registry's choice */ }
+      var active = typeof tab === "string" && listed(profiles, tab) ? tab
+        : registry && typeof registry.active === "string" && listed(profiles, registry.active) ? registry.active : "";
       space = active;
       for (var j = 0; j < profiles.length; j++) {
         var entry = profiles[j];
