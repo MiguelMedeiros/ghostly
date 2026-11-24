@@ -4405,6 +4405,16 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * Why a reply to `messageId` in this chat or group (`group:<id>`) would be refused, or null: the check `sendFile` and
+   * `sendGroupFile` make (`replyFor`), asked by a caller that would copy a file in first. Not a promise: the message
+   * may be deleted in between, and the send checks again.
+   */
+  async replyRefusal(linkId: string, messageId: string): Promise<string | null> {
+    const found = await this.replyFor(linkId, messageId);
+    return typeof found === "string" ? found : null;
+  }
+
+  /**
    * The message of a chat a reply answers, by its id here or the id both sides know it by (`replyRef`): what the
    * reply keeps of it, or why there is nothing to reply to. A group's reply needs the author's member key too.
    * Read alone by its id, or a chat's `peer_`/`me_` row for a wire id, as `resolveReply` does: a group's message goes
