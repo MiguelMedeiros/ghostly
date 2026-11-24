@@ -53,7 +53,7 @@ it("a backup that shares only a chat's key with a profile here is the same perso
     await storeWith(db, links);
     return refusal(home, db);
   };
-  const same = { code: "refused", details: { reason: "same-profile", profiles: ["alice"] } };
+  const same = { code: "confirm", details: { reason: "same-profile", profiles: ["alice"] } };
   expect(await shares([{ id: "chat-1", seedB64: createIdentity().seedB64, participationSeed: participation }]), "the participation key").toEqual(same);
   expect(await shares([{ id: "chat-2", seedB64: older }]), "an older chat's own key").toEqual(same);
   expect(await shares([{ id: "chat-1", seedB64: participation }]), "the same key as an older chat's").toEqual(same);

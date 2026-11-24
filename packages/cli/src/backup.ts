@@ -364,7 +364,8 @@ export function identityKeys(db: string): Set<string> {
 /**
  * The backup whose store is in `db` is of the same person as profiles of this home (WISP 05 § Restoring on the same
  * device): a copy beside them would answer their contacts as them, and with both running messages land in either one
- * and wallets race on the same funds. Refused, naming them, unless `copy` says to make it anyway. Each profile's store
+ * and wallets race on the same funds. Refused (`confirm`, as a refusal its go-on flag lifts), naming them, unless
+ * `copy` says to make it anyway. Each profile's store
  * is read from its files, a running one's too; one that cannot be read is no match, and a backup whose store this
  * cannot read has nothing to compare.
  */
@@ -378,7 +379,7 @@ export function refuseSameProfile(home: string, db: string, copy: boolean): void
   });
   if (!same.length) return;
   const named = same.join(", ");
-  throw new CliError("refused", `This backup is of the same person as ${same.length > 1 ? "profiles" : "profile"} ${named}: a copy would act as them to their contacts, and with both running messages can land in either one and wallets can spend the same money. Pass --copy to restore it anyway`, { reason: "same-profile", profiles: same });
+  throw new CliError("confirm", `This backup is of the same person as ${same.length > 1 ? "profiles" : "profile"} ${named}: a copy would act as them to their contacts, and with both running messages can land in either one and wallets can spend the same money. Pass --copy to restore it anyway`, { reason: "same-profile", profiles: same });
 }
 
 /**
