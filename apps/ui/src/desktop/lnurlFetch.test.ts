@@ -59,6 +59,16 @@ describe("how Ghostly Desktop asks a Lightning address service", () => {
     await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(local as never, page(opaque)) })).rejects.toThrow(/Could not reach ln.example.com/);
   });
 
+  it("gives up on a service that never answers at the lookup's own time limit, not at Rust's 150 s", async () => {
+    const never = new Promise<never>(() => {});
+    const silent = vi.fn(() => never);
+    await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(silent as never, page(opaque)), timeoutMs: 20 })).rejects.toThrow("The server took too long to answer");
+    // Its redirect, asked again from Rust, too.
+    const moved = vi.fn(async (command: string) => command === "hold_fetch" ? { status: 302, contentType: "", bodyB64: "" } : never);
+    await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(moved as never, page(opaque)), timeoutMs: 20 })).rejects.toThrow("The server took too long to answer");
+    expect(moved).toHaveBeenLastCalledWith("link_preview_fetch", { url: "https://ln.example.com/x", kind: "json" });
+  }, 2_000);
+
   it("asks a test server on this machine from the page, and never asks Rust for its redirect", async () => {
     const invoke = vi.fn();
     await expect(fetchLnurlJson("http://localhost:4610/x", { fetch: desktopLnurlFetch(invoke, page(() => new Response('{"ok":3}'))) })).resolves.toEqual({ ok: 3 });
