@@ -156,6 +156,24 @@ describe("Join call in a group's header", () => {
     expect(passAsks()).toHaveLength(2);
   });
 
+  // Try again goes with the box it stands in: as Close, it hands the focus to Join call, or it fell to the page's body,
+  // and the call window opened from there had nothing to give it back to on Leave call.
+  it("Try again by keyboard hands the focus to Join call, refused again or joined, and Leave call gives it back there", async () => {
+    answerPass(() => { throw new Error("The call node refused the pass (403)"); });
+    const { user } = joinButton();
+    await user.click(screen.getByTestId("group-call-join"));
+    act(() => screen.getByTestId("group-call-retry").focus());
+    await user.keyboard("{Enter}");
+    expect(await screen.findByTestId("group-call-problem")).toBeInTheDocument();
+    expect(screen.getByTestId("group-call-join")).toHaveFocus();
+    answerPass(() => pass());
+    act(() => screen.getByTestId("group-call-retry").focus());
+    await user.keyboard("{Enter}");
+    expect(await screen.findByTestId("group-call")).toBeInTheDocument();
+    await user.click(screen.getByTestId("group-call-leave"));
+    expect(screen.getByTestId("group-call-join")).toHaveFocus();
+  });
+
   it("the engine's own refusals, not let in by the node or not a member, say the refused line too", async () => {
     for (const refusal of [
       "sfu.ghostly.test did not let you into the group's call. Try again in a minute.",
