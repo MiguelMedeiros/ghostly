@@ -610,7 +610,8 @@ the start, run every command with `GHOSTLY_PKARR_RELAYS=http://…,…` (the Des
 then the only Pkarr relays, the profile's `relays` setting is not used, and the Mainline DHT is left out unless
 `GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `GHOSTLY_IROH_RELAYS=https://…,…` (`http://` on loopback, at most five) does the same
 for Iroh: those are the only Iroh relays, whatever `irohRelays` says. `status` shows the relays in use (`discovery.relays`); `settings get`
-still shows the profile's own list, which is used again once the variable is unset. Without the variable,
+still shows the profile's own list, which is used again once the variable is unset (`settings set relays` or
+`irohRelays` keeps the new list and says so on stderr). Without the variable,
 `settings set relays '["http://…"]'` before the first `daemon`, with `GHOSTLY_DHT=0` or `GHOSTLY_DHT_BOOTSTRAP`, does
 the same for that profile. Unlike the Desktop, the CLI keeps its request budget per relay (30 a minute), so give a
 busy bot two relays or more.
