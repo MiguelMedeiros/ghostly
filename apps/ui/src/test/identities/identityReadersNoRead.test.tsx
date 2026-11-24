@@ -4,7 +4,7 @@
 // changed none, only the chat that changed on one that did, and a contact whose identities changed draws what shows
 // them and not another contact's face.
 import { Profiler } from "react";
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
@@ -86,6 +86,7 @@ describe("an engine state that changed no chat", () => {
     expect(commits.section).toBeGreaterThan(0);
     expect(commits.faces).toBeGreaterThan(0);
     expect(commits.face4).toBe(0);
-    expect(screen.getAllByTestId("identity-received").some(row => row.textContent?.includes("s3-new.example.org"))).toBe(true);
+    const rows = screen.getAllByTestId("identity-received");
+    expect(rows.flatMap(row => within(row).queryAllByText("s3-new.example.org", { exact: false })).length).toBeGreaterThan(0);
   });
 });
