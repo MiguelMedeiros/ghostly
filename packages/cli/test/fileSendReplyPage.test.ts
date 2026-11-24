@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -14,17 +14,22 @@ import { chatViewOf } from "./support/chatView";
 /**
  * `file send --reply` leaves the message it answers to the engine, which reads it by single rows (`replyFor`), and says
  * its refusal as `not_found`: the CLI's own look read the newest 200, then the chat's (or group's) whole history for an
- * older message or one it lacks, 0.8-1 s held at 100,000 messages on each send.
+ * older message or one it lacks, 0.8-1 s held at 100,000 messages on each send. Refused before the file is copied in:
+ * a mistyped `--reply` on a large file copied all of it (seconds per GiB) to say "No message".
  */
 const link = { id: "chat-one", label: "Alice", peerPubKeyZ32: "palice", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", dataLink: "open",
   capabilities: { files: true }, pairing: { status: "ready" } } as unknown as LinkView;
 const group = { id: "g1", name: "Crew", status: "active", members: [] } as unknown as GroupView;
 
 let path: string;
+let files: string;
+/** What was ever copied in: the staged bytes and their rows. */
+const copied = () => existsSync(files) ? readdirSync(files).length : 0;
 beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), "ghostly-file-reply-page-"));
   await openPersistentIndexedDb(join(dir, "db"));
-  registerFileBytes("native", async () => new NodeFileBytes(join(dir, "files")), true);
+  files = join(dir, "files");
+  registerFileBytes("native", async () => new NodeFileBytes(files), true);
   path = join(dir, "note.txt");
   writeFileSync(path, "note");
 });
@@ -40,6 +45,7 @@ function fake(missing = false, there?: { id: string }) {
     getMessages: vi.fn(async () => []),
     groupMessages: vi.fn(async () => []),
     getMessage: vi.fn(async (_: string, id: string) => (there?.id === id ? there : undefined)),
+    replyRefusal: vi.fn(async () => (missing ? NOT_THERE : null)),
     sendFile: vi.fn(async (_: { file: MessageFile; replyTo?: string }) => { if (missing) throw new Error(NOT_THERE); }),
     groupFileCheck: vi.fn(() => ({ error: null })),
     sendGroupFile: vi.fn(async (_: { file: MessageFile; replyTo?: string }) => (missing ? { error: NOT_THERE } : { error: null, messageId: "mine:0:1" })),
@@ -57,25 +63,38 @@ describe("file send --reply", () => {
     expect(reads()).toBe(0);
   });
 
-  it("in a chat, a message the engine finds nowhere is not_found, and the staged copy goes", async () => {
+  it("in a chat, a message the engine finds nowhere is not_found, before the file is copied in", async () => {
     const { node, ctx, reads } = fake(true);
+    const before = copied();
     await expect(callApi(ctx, "file.send", { chat: "Alice", path, reply: "peer_gone" })).rejects.toMatchObject({
       code: "not_found", message: 'No message "peer_gone" in this chat, or it cannot be replied to (ghostly chat history Alice)',
     });
-    expect(await fileStore.get(node.sendFile.mock.calls[0]![0].file.id)).toBeUndefined();
+    expect(node.replyRefusal).toHaveBeenCalledWith("chat-one", "peer_gone");
+    expect(node.sendFile).not.toHaveBeenCalled();
+    expect(copied()).toBe(before);
     expect(reads()).toBe(0);
   });
 
-  it("in a group, the same: the engine checks it, a message it lacks is not_found and the staged copy goes", async () => {
+  it("in a chat, a reply refused by the send itself (deleted in between) is not_found, and the staged copy goes", async () => {
+    const { node, ctx } = fake();
+    node.sendFile.mockRejectedValueOnce(new Error(NOT_THERE));
+    await expect(callApi(ctx, "file.send", { chat: "Alice", path, reply: "peer_gone" })).rejects.toMatchObject({ code: "not_found" });
+    expect(await fileStore.get(node.sendFile.mock.calls[0]![0].file.id)).toBeUndefined();
+  });
+
+  it("in a group, the same: the engine checks it, a message it lacks is not_found before the file is copied in", async () => {
     const sent = fake();
     expect(await callApi(sent.ctx, "file.send", { chat: "group:g1", path, reply: "k:0:1" })).toMatchObject({ group: "g1", messageId: "mine:0:1" });
     expect(sent.node.sendGroupFile).toHaveBeenCalledWith(expect.objectContaining({ replyTo: "k:0:1" }));
     expect(sent.reads()).toBe(0);
     const nowhere = fake(true);
+    const before = copied();
     await expect(callApi(nowhere.ctx, "file.send", { chat: "group:g1", path, reply: "k:0:9" })).rejects.toMatchObject({
       code: "not_found", message: 'No message "k:0:9" in this group, or it cannot be replied to (ghostly group history group:g1)',
     });
-    expect(await fileStore.get(nowhere.node.sendGroupFile.mock.calls[0]![0].file.id)).toBeUndefined();
+    expect(nowhere.node.replyRefusal).toHaveBeenCalledWith("group:g1", "k:0:9");
+    expect(nowhere.node.sendGroupFile).not.toHaveBeenCalled();
+    expect(copied()).toBe(before);
     expect(nowhere.reads()).toBe(0);
   });
 
