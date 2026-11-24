@@ -1,6 +1,6 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { DeleteChatDialog } from "./DeleteChatDialog";
-import { chatOnCall, useChatOnCall } from "../lib/chatsOnCall";
+import { chatOnCall, declineRingIn, useChatOnCall } from "../lib/chatsOnCall";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { useChatsFound } from "../hooks/useChatsFound";
@@ -648,7 +648,7 @@ export function Sidebar() {
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
         callOn={deleteOnCall}
-        onConfirm={() => { const id=confirmDeleteId; if (chatOnCall(id)) return; deleteSession(id); setChatFolder(id, undefined); void clearExtensionNotices(id); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
+        onConfirm={() => { const id=confirmDeleteId; if (chatOnCall(id)) return; declineRingIn(id); deleteSession(id); setChatFolder(id, undefined); void clearExtensionNotices(id); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar rail={collapsed} />}
 
       {/* Resize Handle */}

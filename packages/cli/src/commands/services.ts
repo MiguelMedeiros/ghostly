@@ -2,7 +2,11 @@ import { type Command, inRange } from "./shared";
 
 /** Shared local services: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
-  "service add": { method: "service.add", usage: "service add <name> <http://127.0.0.1:port>", summary: "A web app on this machine that contacts may be given", args: ["name", "target"], params: (_, a) => ({ name: a.name, target: a.target }) },
+  "service add": {
+    method: "service.add", usage: "service add <name> <http://127.0.0.1:port> [--force]", summary: "A web app on this machine that contacts may be given", args: ["name", "target"],
+    options: { force: { type: "boolean", description: "Use the name even if it looks like a seed, a key or ecash" } },
+    params: ({ options }, a) => ({ name: a.name, target: a.target, ...(options.force === true ? { force: true } : {}) }),
+  },
   "service close": { method: "service.close", usage: "service close <chat> <service>", summary: "Close a contact's app opened here", args: ["chat", "service"], params: (_, a) => ({ chat: a.chat, service: a.service }) },
   "service enable": { method: "service.enable", usage: "service enable <service> [--off]", summary: "Turn a shared app on or off; <service> is its id, as service add and service list show it, or its name if no other service has it", args: ["service"], options: { off: { type: "boolean", description: "Turn it off" } }, params: ({ options }, a) => ({ service: a.service, off: options.off === true }) },
   "service list": { method: "service.list", usage: "service list", summary: "Web apps this profile shares" },

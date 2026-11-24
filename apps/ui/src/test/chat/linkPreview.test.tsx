@@ -5,11 +5,12 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { MessageInput } from "../../components/MessageInput";
 import { MessageBubble } from "../../components/MessageBubble";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
-import { forgetLinkPreviews } from "../../lib/linkPreviewFetch";
+import { forgetLinkPreviews, makeLinkPreview } from "../../lib/linkPreviewFetch";
 import { PREVIEW_DEBOUNCE_MS } from "../../hooks/useLinkPreviewDraft";
 import { setSessionDraft } from "../../lib/storage";
 import { renderApp } from "../render";
 import { fakeEngine } from "../fakeEngine";
+import { pngHead } from "../pngHead";
 
 // covers: chat.link-preview.compose, chat.link-preview.render, chat.location.card
 
@@ -249,6 +250,26 @@ describe("a link preview in the composer", () => {
     await rest();
     await waitFor(() => expect(screen.getByTestId("composer-link-preview")).toHaveAttribute("data-status", "ready"));
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("draws the page's picture only when its bytes say a size a preview takes: a few bytes can declare gigabytes", async () => {
+    const decode = vi.fn(async () => ({ width: 400, height: 400, close() {} }));
+    vi.stubGlobal("createImageBitmap", decode);
+    const picture = (width: number, height: number) => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => String(input).endsWith(".png")
+        ? new Response(pngHead(width, height), { headers: { "content-type": "image/png" } })
+        : new Response(ogPage.replace("</head>", `<meta property="og:image" content="https://news.example/p.png"></head>`), { headers: { "content-type": "text/html" } }));
+    };
+    picture(20_000, 20_000);
+    const preview = await makeLinkPreview("https://news.example/huge", new AbortController().signal);
+    expect(preview).toMatchObject({ t: "Ghosts are real" });
+    expect(preview!.i).toBeUndefined();
+    expect(decode).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+    picture(1200, 630);
+    await makeLinkPreview("https://news.example/fine", new AbortController().signal);
+    expect(decode).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
   });
 });
 

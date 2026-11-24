@@ -4,6 +4,123 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.13.8
+
+### Security
+
+**Chat**
+
+- A composer link preview no longer decodes a page's picture whose header declares an oversized image.
+- Forwarding a file now asks first when its name or type looks like a seed, a private key or ecash, as sending it from the composer does.
+
+**Files**
+
+- A file being received holds at most 2 MiB waiting to be written; a contact's app that ignores confirmations can no longer make it hold the whole file in memory.
+
+**Calls**
+
+- A contact's call that keeps ringing no longer stops a chat from being deleted: deleting the chat declines the ringing call, then deletes the chat (app and CLI).
+
+**Communities**
+
+- A group hub now passes on only the signed parts of membership changes, group name and picture updates and leave notices it relays, as it already did for messages.
+- Right after the admin role moves, the new admin takes a statement of the former admin's only on the word of a member that was already in the group before the role moved.
+
+**Apps**
+
+- An installed app's publisher revocations are now also read where its earlier versions came from, so a revocation still reaches devices that installed a later version from another link.
+- A shared app's name that looks like a recovery phrase, a private key or a Cashu token now asks first (in the CLI, `--force`), as a group's name does.
+
+**CLI**
+
+- `ghostly listen --from <key>` no longer lets another contact's chat, whose key it has not looked up yet, fill its backlog behind a slow hook.
+
+### Fixed
+
+**Apps**
+
+- On a phone, the Apps page's store names, an installed app's row, a store's search and its Show more take a tap in 44 px, as its buttons do.
+- An app you installed from a store takes only the updates that store lists. When you install a newer version of it from a link or a contact's card, the install screen now says this ends, and names the store, before you press Update. Before, it said nothing, and the app quietly started taking updates from its publisher's links.
+
+**Everywhere**
+
+- In Arabic (and any right-to-left language), the question asked before ecash is sent ("Send 21 sats to <contact>?", in a chat, a group or a payment's note), the payment sheet's "You and <contact> share no federation" and an identity card's "Proved by ~<contact>" keep the contact's or the group's name as it is written: a contact named "Bob!" read "!Bob".
+- In Arabic (and any right-to-left language), an invite or group-link card's "From ~<contact>" and Delete folder's title keep a name as it is written: a contact named "C++" or "Bob!" and a folder named "Work!" had their trailing punctuation drawn on the wrong side ("++C", "!Bob", "!Work").
+- On a phone at a larger text size, a button with a long label (Identities' Edit profile and Load my profile and follows, New identity's Sign with…) wraps its words instead of running past the screen.
+- On a phone, what a message's ⋮ opens takes a tap in 44 px, as the rest of the chat does: the Delete question's Cancel and Delete, the × of the reply and edit bars, the pinned message, the details' × and Copy as JSON, the Cancel and Forward of the bar for choosing messages, and the Forward dialog's Cancel and Send.
+- In the browser extension, a contact's app no longer opens from a Ghostly tab that is still reconnecting after Hide my IP from contacts was turned on in another tab: the extension now checks the setting itself each time the app's tab asks for a page, and shows why it refuses.
+- A chat folder's name keeps no invisible or direction-changing characters (a pasted RLO or a lone isolate end), so the name cannot turn the Delete folder question or the folder's tooltip around it.
+- On a phone with the browser's text size at 200 %, Cancel stays inside the dialog, and on the screen, in New group, Leave, New link, Turn off, Remove, Make admin, Delete chat, the folder questions and the other two-button questions: their buttons go on to a second line instead of pushing Cancel past the edge.
+- In Arabic (any right-to-left language), the identity picker in a chat's composer keeps a contact's name whole: "Bob!" or "C++" no longer has its trailing punctuation drawn on the other side ("!Bob") on Share with, Shown to, the card's Shared with, the line under the cards and why an identity cannot be shared.
+- Lists of relays, hosts, mints and modules (a chat's connection Path, the mints a Cashu payment request names, where an identity was loaded from, the Nostr relays a profile was published to or read from, a Fedimint federation's modules) are listed the way your language lists things, with 、 in Japanese and Chinese and و in Arabic, and each host keeps its own order in an Arabic sentence. The payment sheet names a card that cannot be used in your language's order, "Cashu（Testnet）" in Japanese and Chinese, not "Testnet Cashu".
+- In Settings → Network, Reset of the Pkarr or Iroh relay list now takes away the list's refusal of a Save (the error line under it and its red border) along with the value refused. Before, the defaults were back in the list while it still said, on screen and to a screen reader, that its value was refused, until the next Save.
+- On a phone, the × of a floating card (a refused password, Add a device's notices), of the "Couldn't open the link" card and of the Nostr publish dialog, and the × and Open settings of Android's "stopped in the background" banner, take a tap within 44 px, as the app's other buttons do there.
+
+**Chat**
+
+- In Arabic, the payment sheet's Pay and Accept tabs (as a screen reader names them) and an identity card's did:web line keep a contact's name and the server's address in their own direction.
+- On a phone, the × of the card above the message field (a file that could not be added, a message that could not be sent) and the × of a chat's Tech Info take a tap in 44 px, as the rest of the chat does.
+- At a larger text size in Arabic, a chat's Connection options no longer hide the transports' radios and the Fallback switch past the panel's edge; the "In use" line goes onto a second line beside the transport's name instead of cutting it.
+- Sending more than 256 files to one contact at once (a whole album, a folder from a bot) no longer fails the ones past the first 256 with "Your contact has too many files waiting". They wait their turn and go as the others arrive. The same goes for files your contact has to accept first: past 16 waiting for an answer, the rest go once they answer.
+- On the web, a message that arrives in a long open chat no longer makes the page set every message of the chat apart to tell the new one, nor rebuild the whole history when the chat list reads it back: in a chat of 30,000 messages, a burst of 40 takes about a quarter less of the page's time and makes fewer or no long pauses.
+- In a chat's connection panel, Verify now hands the keyboard focus to "The codes match", and "The codes match", once accepted, hands it to the line that says the contact is verified. Before, each button went away with the focus, which fell to the page.
+- The saved messages in the sidebar no longer build a list of every chat and group each time the app's state changes, up to 20 times a second while a file moves, just to notice one coming or going: the chats and groups are checked against the ones already known, and the list is built only when one came or went (with 2,000 chats and 40 groups, about 0.1 ms less work on each change, and nothing left for the garbage collector).
+- The way to the Tasks board above the chat list no longer reads every chat and every member of every group each time the app's state changes, cards or not: it reads only the chats and senders of the cards it counts (with 200 chats and five communities of 256 members, 0.8 ms less work on each change, up to 20 a second while a file moves).
+
+**Wallets**
+
+- The Cashu card's history says three more of its own notes in the app's language, not in English: a fee for a payment that was not sent, a fee for a failed payment with its note (the note itself stays as written), and a contact's request paid without a memo.
+- A Fedimint federation restored with a profile backup while its guardians did not answer (or you were offline) is now joined again, recovering its ecash, once they answer. Before, the failed first try left an empty client database behind: every later try opened it and failed, every 30 seconds and at each start, and the federation stayed in error until you left it and joined it again by hand.
+- Paying a Lightning address or an LNURL, a comment that looks like a wallet seed, a private key, a node login or a Cashu token now asks before Get invoice sends it to the address's service, as a chat payment's note does. It went with no question.
+- In a Cashu wallet's History, the row for what a mint kept of a failed or unsent payment now shows those sats as its amount ("Fee of a failed payment −22 test sats"). It showed −0, with the sats lost only in the small "fee 22 test sats" under it.
+- The wallet sources whose names are words, not brand names ("LND node", "BDK wallet", "Browser wallet (WebLN)" and "Cashu mints"), are now in the app's language wherever they show: the wallet card itself ("Via …", "On-chain · …"), New's provider list, a card's Source (its row, its list, "Use …" and the saved notice), the Bitcoin card's "Connecting to …", the Lightning card's balance line, the fees through a source and Remove's "Your money stays in …". Before, they stayed English in every language. Names like Core Lightning or Nostr Wallet Connect, and a plugin's sources, are unchanged.
+
+**Groups**
+
+- The chat list costs less while you are in large groups: it no longer copies every member of every group each time the app's state changes (several times a second while a file moves or links check in), only each group's member count and the names its reaction line may need. With 20 communities of 256 members, about 3 ms down to under 1 ms a change on a fast machine. A member made admin, or another change the list does not show, no longer redraws it.
+- In a community, a member's older message that arrives after a newer one (from a catch-up, or said again after the member was behind) no longer puts back the name the member had before. Before, the old name stayed until that member said something else.
+- In a community, a pin the admin made while their device's clock ran ahead no longer stays the pin a member back from away gets: the admin's unpin or newer pin, said once the clock was right, comes instead.
+- Invited back to a group whose history this device kept, Decline (or Delete on an invitation taken back) on the band over that history now gives the keyboard focus to the group's ⋮, as Accept does. Before, the band went with the button and the focus fell to the page.
+- After a device takeover, turning on "Manage groups from this device" in a group now gives the keyboard focus to the group's name. Before, the line went away with the Confirm button that had the focus, and the focus fell to the page.
+- An open group's page costs less when you have many chats: it no longer copies every one of your 1:1 chats, picture included, each time the app's state changes (several times a second while a file moves or links check in), only the chats of the group's members who are your contacts. With 500 chats, about 0.3 ms down to under 0.04 ms a change on a fast machine; with 2,000, about 1 ms down to 0.2 ms. A contact who is not in the group changing their picture, or a new contact, no longer redraws the group's page.
+- In a group, + → Payment now puts the keyboard focus on the first member who can be paid, as a chat's payment sheet starts on its card. "Choose another" gives it back to the member (or Everyone) you left, and Escape from the list to the message field (to the + on a touch screen, where the field would bring the keyboard up). Before, the focus stayed on the + behind the sheet, and Escape or "Choose another" dropped it to the page.
+
+**CLI**
+
+- `ghostly file send` of an `.m4v` or `.ogv` video now sends it as a video, so the contact's app plays it as it plays the same file sent from the app. Before, it went as plain bytes, and the contact saw a file to download. A `.wma` is now refused as audio whose details cannot be removed. Before, the refusal called it a video.
+- `ghostly settings set relays` (or `irohRelays`) while `GHOSTLY_PKARR_RELAYS` (or `GHOSTLY_IROH_RELAYS`) is set where the profile runs now says on stderr that only the variable's relays are used and the setting is kept for later. Before, it answered with exit 0 and said nothing, while `status` went on naming the variable's relays.
+
+**Web**
+
+- On a phone, a chat's Connection options take every tap on 44 px, as its transport rows do: Details, Verify, The codes match, Reconnect, Show pairing progress, Use Automatic, Connection history and its Show all were 36 px tall (Verify 40 px wide in Arabic, Details 30 px in Japanese and Chinese), and the two keys copied by a tap 40 px.
+- On a phone held upright with the keyboard up (iPhone), Set status, Delete profile and Nostr publish now stand above the keyboard, so "Save", "Delete" and "Sign and publish" stay in reach while you type. They stayed centred on the whole screen, their buttons under the keyboard until it was put away. A phone on its side and a tablet already did this.
+
+**Desktop**
+
+- On a Mac, the Desktop app now plays an audio file a contact sent as `audio/x-wav`, `audio/wave`, `audio/mp3`, `audio/opus` or `audio/x-flac` (how Android and some other systems label WAV, MP3, Opus and FLAC files). Before, Desktop handed such a file to its player as plain bytes, which the Mac's player does not play.
+- On Ghostly Desktop, a `.flac`, `.aac`, `.oga`, `.weba`, `.m4v` or `.ogv` file copied in a file manager and pasted into a chat now goes as audio or video, so the contact's app plays it, as it does when the same file is sent with + → Document. Before, it went as plain bytes, and the contact saw a file to download. A pasted `.wma` is now refused as audio whose details cannot be removed. Before, the refusal called it a video.
+- In Settings, Translate messages, a language's Remove now leaves the keyboard focus on the Remove of the language that takes its place, the last one's, or the Translate switch when none is left; a Try again that reads the list hands it to the first language's Remove. Before, the focus fell to the page with the row, and the next Tab started from the top.
+
+**Devices**
+
+- On a narrow phone with a large text size, a menu's action now wraps onto more lines instead of being cut with "…" (a device's ⋮ read "Verifica la connes…" in Italian), and the standby screen's Your devices names the active device in full instead of "Chrome, Win…". A touch screen never showed the rest of the words.
+- Moving your profile to another device no longer reads and checks the full files of apps installed before 1.13.6 at every move. The first move checks them once and remembers it, so later moves start as soon as they do for newer apps.
+
+**Files**
+
+- In the list of files still coming under an offer that has no room beside them, a row's Cancel now leaves the keyboard focus on the Cancel of the row that takes its place, and the last one's on the offer's Accept (files, videos and voice notes alike). Before, the focus fell to the page with the row, and the next Tab started from the top.
+- An offer refused for lack of room beside the files still coming no longer keeps saying there is no room once those files are cancelled or have arrived: the refusal goes with their list, and the offer reads as one to Accept again (file, video and voice-note bubbles).
+- A voice message you are asked to download that does not fit beside the files still coming now lists those files (which file, from which chat, how much is left) with a Cancel for each, as file, video and audio offers do: behind a button while the space shown is short, and open at once when Download is refused for them.
+
+**Calls**
+
+- When a group's Join call fails, Try again now hands the keyboard focus to Join call while it asks again, as Close does, and Leave call gives it back there once you are in. Before, the box went with the button and the focus fell to the page.
+- Calling a contact whose app is closed, Cancel on "Waking … for the call" now gives the keyboard focus back to the call button that started the wait (or to ⋮ when it was the menu's video call). Before, the focus fell to the page with the notice, and the next Tab started from the top.
+
+**Transports**
+
+- A connection choice for a chat that waits its turn to come back after a restart (`ghostly chat transport`, `ghostly chat disconnect --hold`, or the same from the app's engine) now starts that chat at once and takes the choice: HyperDHT or Iroh once its listener is up, and a hold on DHT only from the start, with no direct connection tried first. It was refused with "Delivery method unavailable." or "Transport unavailable" until the chat's turn came, which on a daemon with many chats live at its last run could take minutes.
+
 ## 1.13.7
 
 ### Security

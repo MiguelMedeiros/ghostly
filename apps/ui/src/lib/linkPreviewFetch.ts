@@ -160,6 +160,8 @@ export async function makeLinkPreview(link: string, signal: AbortSignal): Promis
     if (meta.image && !isLocalHost(new URL(meta.image).hostname)) {
       try {
         const picture = await get(meta.image, "image", both);
+        // Decoded only at a size its own bytes say a preview takes, as `readPicture` does: a few kilobytes can declare gigabytes.
+        if (!previewable(imageSize(picture.body.subarray(0, IMAGE_LIMITS.headBytes)))) throw new Error("Not previewable");
         if (/^image\/(jpeg|png|webp|gif)/i.test(picture.contentType) || !picture.contentType)
           i = await thumbnailFrom(new Blob([picture.body as BlobPart], { type: picture.contentType || "image/jpeg" }));
       } catch { /* a preview without a picture */ }
