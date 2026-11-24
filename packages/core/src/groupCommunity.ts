@@ -64,6 +64,12 @@ export const COMMUNITY_LIMITS = {
    * store (`CommunitySessionHooks.lasting`). A few kinds at most.
    */
   lasting: 8,
+  /**
+   * A lasting frame is ordered by its rank (a pin: its number) or its author's time, both its author's clock: one ranked
+   * further ahead of my clock than this is not kept, and one kept from before gives way, or a clock a day ahead would
+   * keep it in place of every newer one for a day. As a pin's number (`PIN_CLOCK_SKEW_MS`).
+   */
+  lastingAheadMs: 10 * 60_000,
   storeBytes: 1024 * 1024,
   /** Epoch secrets kept (by commit), main branch and losing ones together. */
   secrets: 96,
@@ -475,6 +481,11 @@ export interface CommunityState {
    */
   lasting?: Record<string, CommunityMessageFrame>;
   /**
+   * Kind → the order the kept frame of `lasting` was taken by (`CommunitySessionHooks.lastingRank`, else its time).
+   * Absent in older states, or for a kind kept before: its frame's time.
+   */
+  lastingRank?: Record<string, number>;
+  /**
    * Frames of mine no edge took when I said them (none was up), as `e:h16:n`, oldest first: the first member I reach
    * may have joined after I sealed them, and carries them all the same (see `receiveSync`). Absent in older states.
    */
@@ -537,6 +548,11 @@ export interface CommunitySessionHooks {
    * Undefined for anything else. Asked once the frame is read, before the `app` hook.
    */
   lasting?(message: CommunityIncomingApp): string | undefined;
+  /**
+   * The order of a lasting frame among those of its kind, as the app orders what it says live (a pin: its number, which
+   * stays past the pin shown when the admin's clock went back). Undefined: the frame's time, its author's clock.
+   */
+  lastingRank?(message: CommunityIncomingApp): number | undefined;
   /**
    * Whether an application frame (mine or a member's) is only a hint (a `group-have`, WISP 503): relayed live like any
    * frame, but never kept, so it takes no place among those a member back from away gets.
@@ -1945,6 +1961,7 @@ export class CommunitySession {
     for (const id of this.onRows.values()) this.hooks.forgetFrame?.(id);
     this.onRows.clear();
     delete this.state.lasting;
+    delete this.state.lastingRank;
     this.state.entry = { key: this.state.entry.key, seedB64: "" };
     this.waiting = []; this.waitingBytes = 0; this.pendingCommits.clear(); this.pendingSecrets.clear();
   }
@@ -2030,18 +2047,26 @@ export class CommunitySession {
 
   /**
    * An application frame that says the group's state (`CommunitySessionHooks.lasting`) in place of the one of its
-   * kind kept now, unless that one is newer (by the author's time, then its epoch, so one said again under a newer
-   * commit takes the first's place, then the frame's identity, so every member keeps the same one).
+   * kind kept now, unless that one is newer (by its rank, `CommunitySessionHooks.lastingRank`, the order the app shows
+   * it live in; then the author's time; then its epoch, so one said again under a newer commit takes the first's place;
+   * then the frame's identity, so every member keeps the same one). A rank further ahead of my clock than
+   * `COMMUNITY_LIMITS.lastingAheadMs` is no rank: such a frame is not kept, and one kept from before gives way.
    */
   private keepLasting(message: CommunityIncomingApp, frame: CommunityMessageFrame): void {
     const kind = this.hooks.lasting?.(message);
     if (typeof kind !== "string" || !kind) return;
+    const bound = (this.hooks.clock?.() ?? Date.now()) + COMMUNITY_LIMITS.lastingAheadMs;
+    const asked = this.hooks.lastingRank?.(message);
+    const rank = typeof asked === "number" && Number.isSafeInteger(asked) ? asked : frame.ts;
+    if (rank > bound) return;
     const kept = { ...this.state.lasting };
-    const now = kept[kind];
-    if (now && (now.ts > frame.ts || (now.ts === frame.ts && (now.e > frame.e || (now.e === frame.e && frameKey(now) >= frameKey(frame)))))) return;
+    const now = kept[kind], nowRank = now && (this.state.lastingRank?.[kind] ?? now.ts);
+    if (now && nowRank !== undefined && nowRank <= bound && (nowRank > rank || (nowRank === rank
+      && (now.ts > frame.ts || (now.ts === frame.ts && (now.e > frame.e || (now.e === frame.e && frameKey(now) >= frameKey(frame)))))))) return;
     if (!now && Object.keys(kept).length >= COMMUNITY_LIMITS.lasting) return;
     kept[kind] = frame;
     this.state.lasting = kept;
+    this.state.lastingRank = { ...this.state.lastingRank, [kind]: rank };
   }
 
   /**
