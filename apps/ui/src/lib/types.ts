@@ -1,6 +1,6 @@
 import type { CallEventType, ImageMeta, VideoMeta, VoiceMeta } from "@ghostly/core";
 
-export type { CallEventType, CallSignal, CallState } from "@ghostly/core";
+export type { CallEventType, CallState } from "@ghostly/core";
 
 export interface MessageMeta {
   dhtKey: string;
