@@ -9499,6 +9499,25 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /**
+   * Starts every chat and group this run left unstarted (`NodeOptions.deferChats`), as a run that left none does: each
+   * chat's history read first, then the links in `startLinks`' order and turns. A one-shot whose call names its thing by
+   * an id of no chat (a proof, a service, a payment) looks it up first and starts them only when it names something.
+   */
+  async startDeferredChats(): Promise<void> {
+    const chats = [...this.deferredChats];
+    for (const linkId of chats) await this.restoreDeferred(linkId);
+    if (this.shuttingDown) return;
+    const groups = new Set(this.deferredGroups);
+    this.deferredChats.clear();
+    this.deferredGroups.clear();
+    const edges = [...this.links.values()].flatMap(({ stored }) => (stored.group && !stored.groupEntry && groups.has(stored.group) ? [stored.id] : []));
+    this.awaitingSoon();
+    await this.startLinks([...chats, ...edges], linkId => {
+      if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
+    });
+  }
+
+  /**
    * Reads the history of a chat this run left unstarted (`restoreDeferred`) and leaves it unstarted: what a read the
    * one-shot makes beside its call (a pin's notice reads its chat) needs, with nothing put on the relays for it.
    */

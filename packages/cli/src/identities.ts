@@ -4,7 +4,7 @@ import { parseProofBunker } from "@ghostly/browser/proofs/nostr";
 import { SignerTimeout, type IdentityProofProvider, type IdentitySigner, type SignerField, type SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
-import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Lookup, type Method, type Params } from "./apiKit";
 import { CliError, shownValue } from "./errors";
 
 /**
@@ -127,6 +127,16 @@ async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string,
   const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays, whole: true });
   return node(ctx).beginIdentityProof({ provider: p.id, subject: normalized, ...(days ? { validityDays: days } : {}) });
 }
+
+/** The proof `identity remove` names: the engine removes nothing for an id it does not know, and says nothing. */
+function proofToRemove(ctx: ApiContext, params: Params): string {
+  const id = str(params, "id", true);
+  if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
+  return id;
+}
+
+/** What a one-shot looks up before any chat starts (api.ts `startOnceFound`). */
+export const IDENTITY_LOOKUPS: Record<string, Lookup> = { "identity.remove": proofToRemove };
 
 export const IDENTITY_METHODS: Record<string, Method> = {
   async "identity.providers"() {
@@ -252,9 +262,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
   },
 
   async "identity.remove"(ctx, params) {
-    const id = str(params, "id", true);
-    // The engine removes nothing for an id it does not know, and says nothing.
-    if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
+    const id = proofToRemove(ctx, params);
     await node(ctx).removeIdentityProof({ id });
     return { removed: id };
   },

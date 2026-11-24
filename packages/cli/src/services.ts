@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, parseLocalTarget, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
-import { bool, chatOf, nameKey, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, nameKey, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Lookup, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { guardText } from "./secretGuard";
 import { isLive } from "./views";
@@ -399,6 +399,12 @@ function portError(error: unknown, port: number): unknown {
   if (port && (code === "EACCES" || code === "EPERM")) return new CliError("refused", `Port ${port} is not allowed for this user: choose another, or leave out --port`);
   return error;
 }
+
+/** What a one-shot looks up before any chat starts (api.ts `startOnceFound`): the service, and `enable`'s on or off first, as it reads them. */
+export const SERVICE_LOOKUPS: Record<string, Lookup> = {
+  "service.remove": serviceOf,
+  "service.enable": (ctx, params) => { onUnlessOff(params, "enabled"); return serviceOf(ctx, params); },
+};
 
 export const SERVICE_METHODS: Record<string, Method> = {
   async "service.list"(ctx) {

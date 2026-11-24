@@ -1,5 +1,10 @@
-import { bool, list, onlyKeys, str, type Method } from "../apiKit";
+import { bool, list, onlyKeys, str, type Lookup, type Method } from "../apiKit";
 import { CliError } from "../errors";
+
+/** What a one-shot looks up before any chat starts (api.ts `startOnceFound`): `hangup`'s call or chat, when it names one. */
+export const CALL_LOOKUPS: Record<string, Lookup> = {
+  "call.hangup": (ctx, params) => { const ref = str(params, "call"); if (ref) ctx.calls.named(ref); },
+};
 
 /** Voice calls (WISP 1100 § Calls): the API methods. The audio itself goes over each call's own socket. */
 export const CALL_METHODS: Record<string, Method> = {
