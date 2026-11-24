@@ -238,7 +238,8 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
         <Notice problem={problem} testId="group-call-problem-notice" />
         <div className="mt-2 flex flex-wrap justify-end gap-2 text-xs">
           <button type="button" onClick={() => { setProblem(null); button.current?.focus(); }} className={`min-h-8 rounded-md px-2 text-text-secondary hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("common.close")}</button>
-          {!blocked && <button type="button" onClick={() => void join()} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
+          {/* It goes with the box as it asks again: the focus on Join call first, as Close's, or it fell to the page. */}
+          {!blocked && <button type="button" onClick={() => { button.current?.focus(); void join(); }} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
         </div>
       </div>}
       {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised} moderator={moderator} connected={call.status === "connected"} devices={devices}
