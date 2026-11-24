@@ -40,14 +40,16 @@ describe("npm run typecheck", () => {
   // Each tsc is one thread; one after another they took 144 s of the lint job on a 4-core runner, eslint on one core
   // beside them.
   it("runs the tsc programs side by side, up to --jobs at a time", async () => {
-    const sleep = (name: string) => ({ name, cmd: [process.execPath, "-e", "setTimeout(() => console.log('ok'), 600)"], seconds: 1 });
-    const started = Date.now();
-    const results = await runChecks([sleep("a"), sleep("b"), sleep("c"), sleep("d")], { jobs: 2, cwd: root, log: () => {} });
-    const took = Date.now() - started;
-    expect(results.map((r) => r.ok)).toEqual([true, true, true, true]);
-    // Two lanes of two: 1.2 s, not 2.4 s one at a time nor 0.6 s all at once.
-    expect(took).toBeGreaterThanOrEqual(1150);
-    expect(took).toBeLessThan(2300);
+    const sleep = (name: string) => ({ name, cmd: [process.execPath, "-e", "setTimeout(() => console.log('ok'), 300)"], seconds: 1 });
+    let running = 0, most = 0;
+    const log = (line: string) => {
+      if (/^▶ \w+ started$/.test(line)) most = Math.max(most, ++running);
+      else if (/^\w+: (passed|failed) in /.test(line)) running--;
+    };
+    const results = await runChecks([sleep("a"), sleep("b"), sleep("c"), sleep("d"), sleep("e")], { jobs: 2, cwd: root, log });
+    expect(results.map((r) => r.ok)).toEqual([true, true, true, true, true]);
+    expect(most).toBe(2);
+    expect(running).toBe(0);
   });
 
   it("goes on past a failed one, prints each one's output whole, and says which failed", async () => {
