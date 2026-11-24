@@ -38,5 +38,3 @@ export const roadmap = {
     states: { "In implementation": "In implementation", Blocked: "Blocked" },
   },
 };
-
-export type RoadmapCopy = typeof roadmap;
