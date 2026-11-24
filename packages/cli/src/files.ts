@@ -238,6 +238,17 @@ async function stageWhileAsked(bytes: FileBytes, id: string, path: string, sourc
 }
 
 /**
+ * A reply's refusal by the engine (`said`), as `not_found` only for a message that is not there: one that is but cannot
+ * be replied to (an old app's text with no wire id, a group's event or payment note) keeps the engine's words, said by
+ * the caller. Only a row named by its own id can be refused while there (one found by its wire id has a reply ref), so
+ * one row is read, only on this path.
+ */
+async function replyRefused(ctx: ApiContext, params: Params, linkId: string, replyTo: string, said: string): Promise<CliError | undefined> {
+  if (await node(ctx).getMessage(linkId, replyTo)) return undefined;
+  return notHere(said, replyTo, { group: linkId.startsWith("group:"), ref: str(params, "chat", true) });
+}
+
+/**
  * A file announced in a group (WISP 503): its bytes staged under a group file id with their digest, as a chat's are, then
  * the announcement. This device is its first holder and serves the members who ask.
  */
@@ -248,8 +259,11 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   }
   if (!picked) throw new CliError("refused", "An empty file cannot go to a group");
   const mime = mimeOf(path, str(params, "mime"), params.voice !== undefined);
-  // A reply names a message of this group: the announcement checks it (`replyFor`, by its row), as `send --reply`'s does.
+  // A reply names a message of this group: the engine checks it (`replyFor`, by its row), as `send --reply`'s does,
+  // before a byte is copied in, and the announcement again.
   const replyTo = str(params, "reply");
+  const refusal = replyTo ? await node(ctx).replyRefusal(`group:${group.id}`, replyTo) : null;
+  if (refusal) throw await replyRefused(ctx, params, `group:${group.id}`, replyTo!, refusal) ?? groupSendRefused(refusal);
   // A send the group would refuse anyway (its files of the minute are taken, or this device is not in it) is refused
   // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
   const check = await node(ctx).groupFileCheck({ groupId: group.id });
@@ -273,9 +287,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   if (result.error) {
     // Not announced: nothing is in the group, so the staged copy goes too.
     await removeStored(fileId).catch(() => {});
-    // Said as missing only for a message that is not there: one that is but cannot be replied to (an event, a payment
-    // note) keeps the engine's words.
-    const missing = replyTo && !await node(ctx).getMessage(`group:${group.id}`, replyTo) ? notHere(result.error, replyTo, { group: true, ref: str(params, "chat", true) }) : undefined;
+    const missing = replyTo ? await replyRefused(ctx, params, `group:${group.id}`, replyTo, result.error) : undefined;
     throw missing || (result.refused ? new CliError("refused", result.error) : groupSendRefused(result.error));
   }
   return { group: group.id, messageId: result.messageId ?? null, file: { id: fileId, name: file.name, size, mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
@@ -466,10 +478,12 @@ export const FILE_METHODS: Record<string, Method> = {
     if (link.dataLink === "open" && !link.capabilities?.largeFiles && info.size > LIMITS.maxFileBytes) throw new CliError("refused", `Too large for the contact's app (at most ${LIMITS.maxFileBytes} bytes)`);
     if (typeof link.peerFileRoom === "number" && info.size > link.peerFileRoom) throw new CliError("refused", `Not enough space on the contact's device (${link.peerFileRoom} bytes free)`);
     const mime = mimeOf(path, str(params, "mime"), params.voice !== undefined);
-    // A reply names a message of this chat, as `send --reply` does: the engine checks it (`replyFor`, by single rows) and
-    // refuses before anything goes. Looked for here, the newest 200 then the whole chat were read for an older message
-    // or one the chat lacks, 0.8-1 s held at 100,000 messages on each send.
+    // A reply names a message of this chat, as `send --reply` does: the engine checks it (`replyFor`, by single rows)
+    // before a byte is copied in, and `sendFile` again. Looked for here, the newest 200 then the whole chat were read for
+    // an older message or one the chat lacks, 0.8-1 s held at 100,000 messages on each send.
     const replyTo = str(params, "reply");
+    const refusal = replyTo ? await node(ctx).replyRefusal(link.id, replyTo) : null;
+    if (refusal) throw await replyRefused(ctx, params, link.id, replyTo!, refusal) ?? new CliError("refused", refusal);
     const { voice, warning } = await voiceOf(params, path, mime, info.size);
     const source = await whileUnchanged(path, () => sendable(path, mime));
     // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
@@ -492,10 +506,7 @@ export const FILE_METHODS: Record<string, Method> = {
       // so the staged copy goes too.
       await removeStored(file.id).catch(() => {});
       const said = error instanceof Error ? error.message : String(error);
-      // Said as missing only for a message that is not there: one that is but cannot be replied to (an old app's text
-      // with no wire id) stays refused, with the engine's words. Only a row named by its own id can be refused while
-      // there (one found by its wire id has a reply ref), so one row is read, only on this path.
-      const missing = replyTo && !await node(ctx).getMessage(link.id, replyTo) ? notHere(said, replyTo, { group: false, ref: str(params, "chat", true) }) : undefined;
+      const missing = replyTo ? await replyRefused(ctx, params, link.id, replyTo, said) : undefined;
       throw missing || new CliError("refused", said);
     }
     // The message's id, as a group's file and `send` answer it: what `message delete`, `react`, `pin` and `--reply` take.
