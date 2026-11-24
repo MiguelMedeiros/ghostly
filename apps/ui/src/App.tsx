@@ -112,18 +112,36 @@ function useOnScreenLink(): string | null {
   return onScreen;
 }
 
+/** How long a phone's page change waits for the page's title to be drawn (a file asked for on a slow network). */
+const PAGE_TITLE_WAIT_MS = 10_000;
+
 /**
  * A phone's page change took the focused control away (a chat's Back, Profile's Identities): back on the chat list, the
  * row of the chat or group just left takes the focus (New chat when it has none), as a Settings section's Back gives it
  * to the section's row; any other page, its title (layout/Page.tsx), as a Settings section's opening does. A chat or a
- * group opened puts the focus where it wants it (hooks/useOpenedHeading.ts).
+ * group opened puts the focus where it wants it (hooks/useOpenedHeading.ts). A page of the menu opened for the first
+ * time draws its title once its file is there (components/MenuPage.tsx): watched for until then, unless something took
+ * the focus meanwhile. Returns what stops the watch.
  */
-function focusOnPhonePage(left: string, shown: string) {
+function focusOnPhonePage(left: string, shown: string): (() => void) | undefined {
   if (chatRouteSession(shown) || groupRouteId(shown)) return;
   const visible = (el: HTMLElement | null | undefined) => (el && !el.closest("[hidden], [inert]") && (el.checkVisibility?.() ?? true) ? el : null);
   if (shown !== "/") {
-    visible(document.querySelector<HTMLElement>("main h1[tabindex='-1']"))?.focus({ preventScroll: true });
-    return;
+    const title = () => visible(document.querySelector<HTMLElement>("main h1[tabindex='-1']"));
+    const now = title();
+    if (now) { now.focus({ preventScroll: true }); return; }
+    const main = document.querySelector("main");
+    if (!main) return;
+    const stop = () => { watch.disconnect(); clearTimeout(timer); };
+    const watch = new MutationObserver(() => {
+      const drawn = title();
+      if (!drawn) return;
+      stop();
+      if (focusOffScreen()) drawn.focus({ preventScroll: true });
+    });
+    const timer = setTimeout(stop, PAGE_TITLE_WAIT_MS);
+    watch.observe(main, { childList: true, subtree: true });
+    return stop;
   }
   const chat = chatRouteSession(left), group = groupRouteId(left);
   const row = chat
@@ -252,7 +270,7 @@ export function App() {
     if (left === pathname) return;
     shownPath.current = pathname;
     if (!isMobile) { if (focusLost()) mainRef.current?.focus({ preventScroll: true }); }
-    else if (focusOffScreen()) focusOnPhonePage(left, pathname);
+    else if (focusOffScreen()) return focusOnPhonePage(left, pathname);
   }, [pathname, isMobile]);
   // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
   // profile closing): after the bubbles' layout cleanups have handed it over.

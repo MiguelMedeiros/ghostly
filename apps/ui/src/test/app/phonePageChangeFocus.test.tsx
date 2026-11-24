@@ -1,5 +1,5 @@
-import { act, fireEvent, screen } from "@testing-library/react";
-import { useEffect, useRef } from "react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { useEffect, useRef, useState } from "react";
 import { Route, Routes, useNavigate } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { renderApp } from "../render";
@@ -36,6 +36,14 @@ function Named() {
   return <><h1 tabIndex={-1}>Name</h1><input ref={field} aria-label="Name" /></>;
 }
 
+/** A page of the menu opened for the first time: nothing until its file is there (components/MenuPage.tsx). */
+let drawLate: () => void = () => {};
+function Late() {
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => { drawLate = () => setDrawn(true); }, []);
+  return drawn ? <h1 tabIndex={-1}>Wallets</h1> : null;
+}
+
 const { App } = await import("../../App");
 
 function renderPages(route: string) {
@@ -45,9 +53,10 @@ function renderPages(route: string) {
         <Route index element={null} />
         <Route path="chat/:sessionId" element={null} />
         <Route path="group/:groupId" element={<Leave to="/" label="Back from group" />} />
-        <Route path="profile" element={<><h1 tabIndex={-1}>Profile</h1><Leave to="/identities" label="Identities" /><Leave to="/" label="Chats" /><Leave to="/name" label="Name" /></>} />
+        <Route path="profile" element={<><h1 tabIndex={-1}>Profile</h1><Leave to="/identities" label="Identities" /><Leave to="/" label="Chats" /><Leave to="/name" label="Name" /><Leave to="/wallet" label="Wallets" /></>} />
         <Route path="identities" element={<h1 tabIndex={-1}>Identities</h1>} />
         <Route path="name" element={<Named />} />
+        <Route path="wallet" element={<Late />} />
       </Route>
     </Routes>,
     { route },
@@ -91,6 +100,27 @@ describe("a page change on a phone that takes the focused control away", () => {
     expect(document.activeElement).toBe(document.body);
     press("Identities");
     expect(screen.getByRole("heading", { name: "Identities" })).toHaveFocus();
+  });
+
+  it("gives a page drawn a moment later its title once it is there", async () => {
+    renderPages("/profile");
+    press("Wallets");
+    expect(document.activeElement).toBe(document.body);
+    act(() => drawLate());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Wallets" })).toHaveFocus());
+  });
+
+  it("leaves a page drawn a moment later alone when something took the focus meanwhile", async () => {
+    renderPages("/profile");
+    press("Wallets");
+    const tab = document.createElement("button");
+    document.body.append(tab);
+    tab.focus();
+    act(() => drawLate());
+    await screen.findByRole("heading", { name: "Wallets" });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(tab).toHaveFocus();
+    tab.remove();
   });
 
   it("gives the list to New chat when no conversation was left", () => {
