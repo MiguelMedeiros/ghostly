@@ -126,4 +126,3 @@ export const cli = {
 };
 
 export const scope = SCOPE;
-export type CliCopy = typeof cli;
