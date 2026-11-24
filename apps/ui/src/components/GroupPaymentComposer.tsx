@@ -31,6 +31,8 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   // Drawn again when the wallets change (the balance below), not on every change of the platform.
   const wallet = useWalletPlatform();
   const [to, setTo] = useState<string | null>(null);
+  // The row last chosen, for the way back from its cards.
+  const left = useRef<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   // Escape too, spent there: a key handler of its own closed it once more and left the key to a notice behind.
   useOutsideDismiss(ref, to === null, onClose);
@@ -51,6 +53,17 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   const linkOf = (m: GroupMemberView): PayLink | undefined => { const id = linkIdOf(m); return id ? links[id] : undefined; };
   // Their app is asked what it takes, so the cards say what the two of you share.
   useEffect(() => { if (community && to && to !== EVERYONE) void engine.call("groupPaymentHello", { groupId: group.id, member: to }).catch(() => {}); }, [community, group.id, to]);
+  // As the chat's sheet starts on its card: the list starts on the first member who can be paid (else Everyone), and the
+  // way back from the cards on the row just left. The + behind the backdrop kept it, and Choose another dropped it to the page.
+  // The page stays still; the list, about six rows high and back at its top, brings the row into view.
+  useEffect(() => {
+    if (to !== null) return;
+    const rows = [...ref.current?.querySelectorAll<HTMLButtonElement>("button") ?? []].filter(b => !b.disabled);
+    const row = rows.find(b => left.current === EVERYONE ? b.dataset.testid === "group-pay-everyone" : b.dataset.key === left.current) ?? rows[0];
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView?.({ block: "nearest" });
+  }, [to]);
+  const choose = (key: string) => { left.current = key; setTo(key); };
   /** Why this member cannot be paid right now, if they cannot. */
   const why = (m: GroupMemberView): string | undefined => {
     const link = linkOf(m);
@@ -101,7 +114,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
         {others.map(m => {
           const reason = why(m);
           return <li key={m.key}>
-            <button type="button" data-testid="group-pay-recipient" data-key={m.key} disabled={!!reason} title={reason} onClick={() => setTo(m.key)}
+            <button type="button" data-testid="group-pay-recipient" data-key={m.key} disabled={!!reason} title={reason} onClick={() => choose(m.key)}
               className="flex w-full min-h-11 items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50">
               <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${reachDot(edgeDot(m))}`} />
               {/* The member's name in its own direction, on the box that cuts it and as wide as it: a Latin name in Arabic
@@ -114,7 +127,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
           </li>;
         })}
         <li className="border-t border-border pt-1">
-          <button type="button" data-testid="group-pay-everyone" disabled={others.length === 0} onClick={() => setTo(EVERYONE)}
+          <button type="button" data-testid="group-pay-everyone" disabled={others.length === 0} onClick={() => choose(EVERYONE)}
             className="flex w-full min-h-11 items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-surface-hover disabled:opacity-50">
             <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-accent"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
             <span className="min-w-0 flex-1">
