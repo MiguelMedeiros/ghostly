@@ -239,6 +239,46 @@ describe("a daemon restarted while the 20 contacts first in line are away", () =
   }, 300_000);
 });
 
+/**
+ * A chat waiting its turn has no link yet: a transport chosen for it then (`chat transport`, `chat disconnect --hold`
+ * on a daemon just restarted, its line still long) was refused as "Delivery method unavailable." or "Transport
+ * unavailable" until its turn came, though the chat itself was fine. Chosen, it is wanted now: it starts at once.
+ */
+describe("a transport chosen for a chat that waits its turn to resume", () => {
+  /** One chat live when the app last ran, its contact away, and an engine whose line has no turn free. */
+  async function waiting() {
+    const { inviter: app, joiner: contact } = invitationWhere("inviter");
+    const row = {
+      ...app.params, id: "chat-0", label: "c0", createdAt: app.createdAt, participationSeed: app.seedB64,
+      pairedPeerKey: peerKeyOf(contact), peerTrust: { version: 1, verifiedKey: peerKeyOf(contact) }, peerTransports: ["webrtc/1"],
+      transportHistory: [{ id: "h0", at: Date.now() - MIN, kind: "live", transport: "webrtc/1" }],
+    } as unknown as StoredLink;
+    await db.putLink(row);
+    const node = engine(unlimited(), { resumesAtOnce: 0 });
+    await settled(node.start());
+    expect((node["resumeTurns"] as ResumeTurns)["line"], "the chat waits its turn").toEqual([row.id]);
+    return { node, id: row.id };
+  }
+
+  it("puts the chat on DHT only (a hold) at once", async () => {
+    const { node, id } = await waiting();
+    await settled(node.setChatTransport({ linkId: id, transport: "dht" }));
+    expect(node["links"].get(id)?.stored.deliveryMode).toBe("dht");
+  }, 60_000);
+
+  it("takes a delivery mode or a transport preference at once", async () => {
+    const first = await waiting();
+    await settled(first.node.setDeliveryMode({ linkId: first.id, mode: "dht" }));
+    expect(first.node["links"].get(first.id)?.stored.deliveryMode).toBe("dht");
+    await settled(first.node.shutdown());
+    nodes.splice(nodes.indexOf(first.node), 1);
+
+    const second = await waiting();
+    await settled(second.node.setTransportPreference({ linkId: second.id, preferred: "webrtc/1", fallback: false }));
+    expect(second.node["links"].get(second.id)?.stored.transportFallback).toBe(false);
+  }, 60_000);
+});
+
 describe("chats taking turns to resume", () => {
   it("starts so many at once in the order given; each one done starts the next; one wanted now starts at once", () => {
     const started: string[] = [];

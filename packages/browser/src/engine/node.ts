@@ -5814,9 +5814,11 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * DHT only, or back to a live link. Back, it answers once the link has left DHT only: the native listeners start
    * behind it and join the chat as each comes up (`registerEndpoint`). It waited for them before, 10 to 25 s with
-   * Iroh's relay or the HyperDHT out of reach, so `chat disconnect --hold 0` blocked that long.
+   * Iroh's relay or the HyperDHT out of reach, so `chat disconnect --hold 0` blocked that long. A chat waiting for its
+   * turn to resume (`ResumeTurns`) starts now: it has no link yet, and was refused until its turn came.
    */
   async setDeliveryMode({ linkId, mode }: { linkId: string; mode: DeliveryMode }): Promise<void> {
+    this.resumeTurns.now(linkId);
     await this.switchDeliveryMode(linkId, mode);
   }
 
@@ -5843,9 +5845,11 @@ export class GhostlyNode implements EngineImplementation {
    * `chosen`: a choice from the chat's Connection menu, a row in its timeline even when it names the transport already
    * set. Left out (the RPC), only a change of transport is: the Fallback switch sends the same preference again, and
    * is neither a row nor a switch intent. On Automatic it sends back the transport Automatic names: only the fallback
-   * changes (and with it what Automatic names), and the chat stays on Automatic.
+   * changes (and with it what Automatic names), and the chat stays on Automatic. A chat waiting for its turn to resume
+   * (`ResumeTurns`) starts now, as `setDeliveryMode`.
    */
   async setTransportPreference({ linkId, preferred, fallback }: { linkId: string; preferred: PairedTransport; fallback: boolean }, chosen?: boolean): Promise<void> {
+    this.resumeTurns.now(linkId);
     const live = this.links.get(linkId);
     if (!live?.stored.profile || !live.link?.availableTransports.includes(preferred) || typeof fallback !== "boolean") throw new Error("Transport unavailable");
     // What Automatic names with either Fallback (`automaticTransport`): the view the switch read names it with the old
@@ -5882,6 +5886,8 @@ export class GhostlyNode implements EngineImplementation {
    * said, the later one already answered (Automatic 3 s after HyperDHT, Iroh's relay out of reach: bug hunt, 2026-11-17).
    */
   async setChatTransport({ linkId, transport }: { linkId: string; transport: PairedTransport | "auto" | "dht" }): Promise<void> {
+    // Waiting for its turn to resume (`ResumeTurns`): chosen for, it is wanted now, and starts.
+    this.resumeTurns.now(linkId);
     const live = this.links.get(linkId);
     const choice = (this.transportChoices.get(linkId) ?? 0) + 1;
     this.transportChoices.set(linkId, choice);
