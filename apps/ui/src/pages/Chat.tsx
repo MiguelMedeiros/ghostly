@@ -195,7 +195,9 @@ function editableText(message: ChatMessage): boolean {
  * text, a card, a file or a voice message), not a payment, a request, a notice or a call line, nor one still waiting.
  */
 function removableForEveryone(message: ChatMessage): boolean {
-  return message.sender === "me" && !!message.ref && message.delivery !== "waiting" && !message.paymentId && !message.systemEvent && !message.callEvent;
+  // By the id the contact knows it by (`replyTarget`), as Reply, React and Pin read it: a file or a voice message sent
+  // from this page has a row the page made itself, with no `ref`, and its id is in its file's.
+  return message.sender === "me" && !!replyTarget(message) && message.delivery !== "waiting" && !message.paymentId && !message.systemEvent && !message.callEvent;
 }
 
 /**
