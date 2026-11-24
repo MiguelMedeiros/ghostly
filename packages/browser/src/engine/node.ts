@@ -5815,10 +5815,18 @@ export class GhostlyNode implements EngineImplementation {
    * DHT only, or back to a live link. Back, it answers once the link has left DHT only: the native listeners start
    * behind it and join the chat as each comes up (`registerEndpoint`). It waited for them before, 10 to 25 s with
    * Iroh's relay or the HyperDHT out of reach, so `chat disconnect --hold 0` blocked that long. A chat waiting for its
-   * turn to resume (`ResumeTurns`) starts now: it has no link yet, and was refused until its turn came.
+   * turn to resume (`ResumeTurns`) starts now: it has no link yet, and was refused until its turn came. Put on DHT
+   * only, it starts there: started as it was, it sent its contact a resume offer first, the hold asked for none.
    */
   async setDeliveryMode({ linkId, mode }: { linkId: string; mode: DeliveryMode }): Promise<void> {
-    this.resumeTurns.now(linkId);
+    const waiting = this.links.get(linkId);
+    if (mode === "dht" && waiting && this.resumeTurns.waits(linkId)) {
+      // `switchDeliveryMode` saves it; one that did not start (offline) stays as it was.
+      const before = waiting.stored.deliveryMode;
+      waiting.stored = { ...waiting.stored, deliveryMode: "dht" };
+      this.resumeTurns.now(linkId);
+      if (!waiting.link) waiting.stored = { ...waiting.stored, deliveryMode: before };
+    } else this.resumeTurns.now(linkId);
     await this.switchDeliveryMode(linkId, mode);
   }
 
@@ -5849,9 +5857,10 @@ export class GhostlyNode implements EngineImplementation {
    * (`ResumeTurns`) starts now, as `setDeliveryMode`.
    */
   async setTransportPreference({ linkId, preferred, fallback }: { linkId: string; preferred: PairedTransport; fallback: boolean }, chosen?: boolean): Promise<void> {
+    if (typeof fallback !== "boolean") throw new Error("Transport unavailable");
     this.resumeTurns.now(linkId);
     const live = this.links.get(linkId);
-    if (!live?.stored.profile || !live.link?.availableTransports.includes(preferred) || typeof fallback !== "boolean") throw new Error("Transport unavailable");
+    if (!live?.stored.profile || !live.link?.availableTransports.includes(preferred)) throw new Error("Transport unavailable");
     // What Automatic names with either Fallback (`automaticTransport`): the view the switch read names it with the old
     // one, and may be from before the Iroh endpoint came up (WebRTC, as with Fallback off). Another transport is a choice.
     const available = live.link.availableTransports;
@@ -5886,8 +5895,10 @@ export class GhostlyNode implements EngineImplementation {
    * said, the later one already answered (Automatic 3 s after HyperDHT, Iroh's relay out of reach: bug hunt, 2026-11-17).
    */
   async setChatTransport({ linkId, transport }: { linkId: string; transport: PairedTransport | "auto" | "dht" }): Promise<void> {
-    // Waiting for its turn to resume (`ResumeTurns`): chosen for, it is wanted now, and starts.
-    this.resumeTurns.now(linkId);
+    if (transport !== "auto" && transport !== "dht" && !TRANSPORTS.includes(transport)) throw new Error("Transport unavailable");
+    // Waiting for its turn to resume (`ResumeTurns`): chosen for, it is wanted now, and starts (DHT only: as
+    // `setDeliveryMode` starts it, there).
+    if (transport !== "dht") this.resumeTurns.now(linkId);
     const live = this.links.get(linkId);
     const choice = (this.transportChoices.get(linkId) ?? 0) + 1;
     this.transportChoices.set(linkId, choice);
@@ -5910,6 +5921,12 @@ export class GhostlyNode implements EngineImplementation {
         if (this.links.get(linkId)?.stored.deliveryMode === "dht") throw new Error("Transport unavailable");
         return;
       }
+    } else if (transport !== "auto" && transport !== "webrtc/1" && live?.link && !live.link.availableTransports.includes(transport)
+      && transport in this.nativeFactories) {
+      // Just started (it waited its turn): its listeners come up behind it, HyperDHT's in 1 to 6 s. The one it names
+      // was not there yet, and the choice was refused.
+      await this.ensureNativeEndpoints(linkId, false, transport);
+      if (this.transportChoices.get(linkId) !== choice) return;
     }
     if (transport !== "auto") {
       // A choice on the wire too; out of DHT only, the log leaves the row to the one that says so (it names it).
