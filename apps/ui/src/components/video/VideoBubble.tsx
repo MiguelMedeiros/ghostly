@@ -365,7 +365,9 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
             ) : (
               <div className="w-full h-full bg-gradient-to-br from-black/80 to-black/40" data-testid="video-blank" />
             )}
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/10">
+            {/* No gap on a phone: Decline's 44 px box keeps its word clear of Download, and both (88 px) fit the shortest
+                frame (videoBox's 96 px, less the bubble's edge). */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 max-md:gap-0 bg-black/10">
               {offered ? (
                 <>
                   {/* Not turned off by a room shown less than its size: that room may be old, and the engine reads it again. */}
@@ -374,13 +376,14 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                     type="button"
                     data-testid="video-accept"
                     onClick={() => act("accept")}
-                    className={`flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}
+                    className={`flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 max-md:min-h-11 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}
                   >
                     <DownloadIcon size={18} />
                     {t("chat.media.downloadSize", { size: statusSize(file.size, t) })}
                   </button>
-                  {/* A group's video (WISP 503) is downloaded or not: nothing to decline. */}
-                  {!group && <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>}
+                  {/* A group's video (WISP 503) is downloaded or not: nothing to decline. On a phone 44 px tall, as a file's
+                      Decline: a bare word took taps on 16 px. */}
+                  {!group && <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="max-md:min-h-11 max-md:px-3 text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>}
                 </>
               ) : showRing ? (
                 <ProgressRing percent={percent} paused={transfer?.stage === "paused" || transfer?.stage === "waiting" || !!transfer?.stalled} />
