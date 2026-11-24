@@ -102,12 +102,11 @@ export function useInvitationAnswer(group: Pick<GroupView, "id" | "invitation">,
     const next = method === "declineGroupInvitation" && (onDeclined || !returnFocus) ? rowAfter(group.id) : undefined;
     try {
       await engine.call(method, { groupId: group.id });
-      if (method === "declineGroupInvitation") {
-        onDeclined?.();
-        if (next !== undefined) focusPastRow(next, pressed);
-      }
+      if (method === "declineGroupInvitation") onDeclined?.();
+      if (next !== undefined) focusPastRow(next, pressed);
       // Only if the focus is still on the button (or already dropped with it): the user may have gone on elsewhere.
-      // From the chat list (no returnFocus), the row's own open button: the row stays, its buttons go.
+      // From the chat list (no returnFocus), the row's own open button: the row stays, its buttons go. A Decline on the
+      // band over a kept history goes there too, as Accept's: the page stays, and the focus fell to its body.
       else if (document.activeElement === pressed || document.activeElement === document.body) {
         (returnFocus ? returnFocus.current : rowOpen(group.id))?.focus();
       }
