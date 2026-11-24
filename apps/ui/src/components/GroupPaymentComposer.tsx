@@ -55,11 +55,13 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   useEffect(() => { if (community && to && to !== EVERYONE) void engine.call("groupPaymentHello", { groupId: group.id, member: to }).catch(() => {}); }, [community, group.id, to]);
   // As the chat's sheet starts on its card: the list starts on the first member who can be paid (else Everyone), and the
   // way back from the cards on the row just left. The + behind the backdrop kept it, and Choose another dropped it to the page.
+  // The page stays still; the list, about six rows high and back at its top, brings the row into view.
   useEffect(() => {
     if (to !== null) return;
     const rows = [...ref.current?.querySelectorAll<HTMLButtonElement>("button") ?? []].filter(b => !b.disabled);
-    const back = rows.find(b => left.current === EVERYONE ? b.dataset.testid === "group-pay-everyone" : b.dataset.key === left.current);
-    (back ?? rows[0])?.focus({ preventScroll: true });
+    const row = rows.find(b => left.current === EVERYONE ? b.dataset.testid === "group-pay-everyone" : b.dataset.key === left.current) ?? rows[0];
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView?.({ block: "nearest" });
   }, [to]);
   const choose = (key: string) => { left.current = key; setTo(key); };
   /** Why this member cannot be paid right now, if they cannot. */
