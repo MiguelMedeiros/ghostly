@@ -5953,8 +5953,9 @@ export class GhostlyNode implements EngineImplementation {
     } else if (transport !== "auto" && transport !== "webrtc/1" && live?.link && !live.link.availableTransports.includes(transport)
       && transport in this.nativeFactories) {
       // Just started (it waited its turn): its listeners come up behind it, HyperDHT's in 1 to 6 s. The one it names
-      // was not there yet, and the choice was refused.
-      await this.ensureNativeEndpoints(linkId, false, transport);
+      // was not there yet, and the choice was refused. Chosen for, the chat is in use: its start goes before every
+      // other chat's in the transport's queue, which waited for each one's (83 s with 12 chats, HyperDHT out of reach).
+      await this.ensureNativeEndpoints(linkId, true, transport);
       if (this.transportChoices.get(linkId) !== choice) return;
     }
     if (transport !== "auto") {
