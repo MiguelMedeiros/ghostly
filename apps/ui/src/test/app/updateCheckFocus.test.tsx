@@ -88,6 +88,16 @@ describe("Settings → Updates, from the keyboard", () => {
     expect(restart).toHaveFocus();
     installed();
   });
+
+  it("an update this client only links to (a Linux .deb or .rpm): the focus is on Download", async () => {
+    const { answer } = host();
+    const { user } = renderSettings();
+    screen.getByRole("button", { name: "Check now" }).focus();
+    await user.keyboard("{Enter}");
+    browserDropsFocus();
+    await answer(MANUAL);
+    expect(screen.getByRole("link", { name: /Download/ })).toHaveFocus();
+  });
 });
 
 describe("the update banner above the list, from the keyboard and a screen reader", () => {
