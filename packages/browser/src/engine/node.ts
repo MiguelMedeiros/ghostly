@@ -5821,6 +5821,9 @@ export class GhostlyNode implements EngineImplementation {
       const before = waiting.stored.deliveryMode;
       waiting.stored = { ...waiting.stored, deliveryMode: "dht" };
       this.resumeTurns.now(linkId);
+      // Started there, it resumes no live session (`resumesAtStart`): no resume window or data link ends its turn, and
+      // the chats behind it in line never started. It gives the turn back at once.
+      this.resumeTurns.finished(linkId);
       if (!waiting.link) waiting.stored = { ...waiting.stored, deliveryMode: before };
     } else this.resumeTurns.now(linkId);
     await this.switchDeliveryMode(linkId, mode);

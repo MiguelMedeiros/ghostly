@@ -274,6 +274,31 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
     expect(dialled, "WebRTC peer connections").toBe(0);
   }, 60_000);
 
+  it("gives the turn back once it starts on DHT only: the chats behind it in line still start", async () => {
+    // Three chats live when the app last ran, one turn: chat-0 resumes, chat-1 and chat-2 wait.
+    for (let i = 0; i < 3; i++) {
+      const { inviter: app, joiner: contact } = invitationWhere(i % 2 ? "joiner" : "inviter");
+      await db.putLink({
+        ...app.params, id: `chat-${i}`, label: `c${i}`, createdAt: app.createdAt, participationSeed: app.seedB64,
+        pairedPeerKey: peerKeyOf(contact), peerTrust: { version: 1, verifiedKey: peerKeyOf(contact) }, peerTransports: ["webrtc/1"],
+        transportHistory: [{ id: `h${i}`, at: Date.now() - MIN - i * 1_000, kind: "live", transport: "webrtc/1" }],
+      } as unknown as StoredLink);
+    }
+    const node = engine(unlimited(), { resumesAtOnce: 1 });
+    await settled(node.start());
+    const turns = node["resumeTurns"] as ResumeTurns;
+    expect([...turns["running"]], "resuming").toEqual(["chat-0"]);
+    expect(turns["line"], "waiting").toEqual(["chat-1", "chat-2"]);
+    // Held while it waits: it starts on DHT only, where no live session resumes (and no data link opens to end a turn).
+    await settled(node.setChatTransport({ linkId: "chat-1", transport: "dht" }));
+    expect(node["links"].get("chat-1")?.link, "started").toBeDefined();
+    expect(turns["running"].has("chat-1"), "a turn held on DHT only").toBe(false);
+    // chat-0's turn ends (its contact read away, here, or done by hand): the one left in line takes it. Before, chat-1
+    // kept a turn on DHT only and chat-2 never started.
+    turns.finished("chat-0");
+    expect(node["links"].get("chat-2")?.link, "the chat behind starts").toBeDefined();
+  }, 60_000);
+
   it("goes back to Automatic at once", async () => {
     const { node, id } = await waiting();
     await settled(node.setChatTransport({ linkId: id, transport: "auto" }));
