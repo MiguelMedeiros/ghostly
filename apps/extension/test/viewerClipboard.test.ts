@@ -69,4 +69,17 @@ describe("a contact's app's page in its tab", () => {
       if (resourceType === "Other") expect(answer.policy).not.toContain("require-trusted-types-for");
     }
   });
+
+  it("hands on what it leaves as it was without decoding it: a video, a script or an <object>'s PDF of up to 32 MiB costs no copy", async () => {
+    const atob = vi.spyOn(globalThis, "atob");
+    try {
+      for (const [resourceType, type] of [["Media", "video/mp4"], ["Script", "text/javascript"], ["Other", "application/pdf"]]) {
+        const answer = await served(`${resourceType} bytes`, [["content-type", type]], resourceType, "x");
+        expect(answer.body).toBe(`${resourceType} bytes`);
+        expect(atob.mock.calls.filter(([text]) => text === btoa(`${resourceType} bytes`))).toEqual([]);
+      }
+    } finally {
+      atob.mockRestore();
+    }
+  });
 });
