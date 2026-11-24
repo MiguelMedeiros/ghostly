@@ -34,7 +34,7 @@ import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
 import { useGroupDownloadsSync } from "./lib/groupDownloads";
 import { NowPlayingBar } from "./components/NowPlayingBar";
-import { stopHeld } from "./lib/nowPlaying";
+import { stopHeld, stopPlayingMessages } from "./lib/nowPlaying";
 import { groupRouteId } from "./lib/groups";
 import { sessionPeerKey } from "./lib/storage";
 import { useEngineValue } from "./lib/engineState";
@@ -232,6 +232,13 @@ export function App() {
   // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
   // profile closing): after the bubbles' layout cleanups have handed it over.
   useEffect(() => () => stopHeld(), []);
+  // And with its message, when that goes from this device (deleted here, or by its sender for everyone), whatever page
+  // is open: the engine names the rows that went, of a chat or a group.
+  // What a change names, or the ids a whole list says the engine deleted (a removal no page heard), as the chats' mirror reads them.
+  useEffect(() => engine.onMessages((linkId, _messages, changes) => {
+    const gone = changes ? changes.deleted : engine.deletedIds.get(linkId) ?? [];
+    if (gone.length) stopPlayingMessages(gone);
+  }), []);
 
   const inChat = pathname.startsWith("/chat");
   // A group is a conversation too: on a phone it takes the whole screen, without the tab bar.
