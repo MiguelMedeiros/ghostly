@@ -388,6 +388,43 @@ describe("Manage groups from this device", () => {
     expect(confirm).toHaveFocus();
   });
 
+  it("turned on, the line goes with the Confirm that had the focus: the focus goes to the group's name, not the page", async () => {
+    fakeEngine.update({ groups: [adminGroup({ adminOff: true })] });
+    const { user, engine } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    engine.on("setGroupManage", () => { fakeEngine.update({ groups: [adminGroup()] }); });
+    await user.click(await screen.findByTestId("group-manage-open"));
+    await user.click(screen.getByTestId("group-manage-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("group-manage-off")).toBeNull());
+    expect(screen.getByTestId("group-name")).toHaveFocus();
+  });
+
+  it("turned on while the focus went elsewhere, the line's going leaves it there", async () => {
+    fakeEngine.update({ groups: [adminGroup({ adminOff: true })] });
+    const { user, engine } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    let done!: () => void;
+    engine.on("setGroupManage", () => new Promise<void>(resolve => { done = resolve; }));
+    await user.click(await screen.findByTestId("group-manage-open"));
+    await user.click(screen.getByTestId("group-manage-confirm"));
+    screen.getByTestId("group-options").focus();
+    await act(async () => { fakeEngine.update({ groups: [adminGroup()] }); done(); });
+    expect(screen.queryByTestId("group-manage-off")).toBeNull();
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+  });
+
+  it("turned on from another device while its warning is open, and off here again later: the line starts from Turn on", async () => {
+    fakeEngine.update({ groups: [adminGroup({ adminOff: true })] });
+    const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    await user.click(await screen.findByTestId("group-manage-open"));
+    expect(screen.getByTestId("group-manage-warning")).toBeInTheDocument();
+    act(() => fakeEngine.update({ groups: [adminGroup()] }));
+    expect(screen.queryByTestId("group-manage-off")).toBeNull();
+    // The focus was on Cancel, which went with the line: nothing here was confirmed, so the line does not move it.
+    expect(screen.getByTestId("group-name")).not.toHaveFocus();
+    act(() => fakeEngine.update({ groups: [adminGroup({ adminOff: true })] }));
+    expect(screen.getByTestId("group-manage-open")).toBeInTheDocument();
+    expect(screen.queryByTestId("group-manage-warning")).toBeNull();
+  });
+
   it("Turn on hands the focus to the warning's Cancel, and Cancel hands it back to Turn on", async () => {
     fakeEngine.update({ groups: [adminGroup({ adminOff: true })] });
     const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });

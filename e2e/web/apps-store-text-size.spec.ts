@@ -61,3 +61,35 @@ test("on a phone at a doubled text size, each store's Refresh and Remove are on 
   await question.getByRole("button", { name: "Cancel" }).click();
   await expect(added.getByTestId("app-store-remove")).toBeFocused();
 });
+
+test("on a phone, a store's name, an installed app's row, the store's search and Show more each take a tap in 44 px", { tag: ["@feature:apps.page", "@feature:app.accessibility", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  // A store long enough for its search and Show more (over 50 listings), and one app of it installed.
+  const store = await testStore({ more: 60 });
+  const ana = await peer("ana", { mobile: true, viewport: PHONE });
+  await serveStore(ana.context, store);
+  await ana.page.goto("/#/apps");
+  await ana.page.getByTestId("apps-add").click();
+  await ana.page.getByTestId("apps-add-url").fill(STORE_URL);
+  await ana.page.getByTestId("apps-add-check").click();
+  await ana.page.getByTestId("apps-add-store-confirm").click();
+  const added = ana.page.getByTestId("app-store").filter({ hasText: store.storeName });
+  const name = added.getByRole("button", { name: new RegExp(`^${store.storeName}`) });
+  // Beside the official store, a store this long starts closed.
+  await name.click();
+  await expect(name).toHaveAttribute("aria-expanded", "true");
+  await added.getByTestId("app-listing").filter({ hasText: store.title }).getByTestId("app-listing-install").click();
+  await ana.page.getByTestId("app-install").getByTestId("app-install-confirm").click();
+  await expect(ana.page.getByTestId("installed-app")).toContainText(store.title);
+
+  const targets = {
+    "the store's name": name,
+    "the installed app's row": ana.page.getByTestId("installed-app").getByRole("button", { name: new RegExp(store.title) }).first(),
+    "the store's search": added.getByTestId("app-store-filter"),
+    "Show more": added.getByTestId("app-store-more"),
+  };
+  for (const [name, target] of Object.entries(targets)) {
+    const { width, height } = (await target.boundingBox())!;
+    expect.soft(Math.round(height), `${name} is 44 px tall`).toBeGreaterThanOrEqual(44);
+    expect.soft(Math.round(width), `${name} is 44 px wide`).toBeGreaterThanOrEqual(44);
+  }
+});

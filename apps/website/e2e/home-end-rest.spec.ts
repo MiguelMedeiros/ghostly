@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
  * At the end of the home (the download panel and the footer), nothing off screen keeps an infinite loop running: the
  * finale title's gradient words a screen above (background-position, never on the compositor), Act I's field drift
  * and the pointer ghost left above by a scroll under a still pointer each kept the page restyling 60 times a second,
- * 84-92 ms a second at 1280 and 213 on a throttled phone (agents#1056). What runs is on screen, or within the quarter
+ * 84-92 ms a second at 1280 and 213 on a throttled phone. What runs is on screen, or within the quarter
  * screen IdleLoops starts things early for. The particles of a field on screen are not counted: they rise across it,
  * in and out of view, and run on the compositor.
  */

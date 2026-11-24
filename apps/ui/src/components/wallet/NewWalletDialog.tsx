@@ -9,7 +9,7 @@ import { Button, Notice, input } from "./ui";
 import { NETWORK_NAME, WALLET_NAME, failedBecause, shortReason } from "./names";
 import { ProviderConfigForm } from "./providers/SourcePicker";
 import { PROVIDER_FORMS } from "./providers/forms";
-import { providerText } from "./providers/providerText";
+import { providerLabel, providerText } from "./providers/providerText";
 import { rawError } from "../../lib/errorText";
 import "./new-wallet.css";
 import { problemText, type Problem } from "../../lib/problemText";
@@ -214,7 +214,7 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
               <div className="space-y-3" data-testid="new-wallet-provider">
                 {(chosenOffer.providers?.length ?? 0) > 1 && (
                   <Select aria-label={t("wallet.source.title")} data-testid="new-wallet-provider-select" value={providerId} disabled={busy} onChange={(id) => { setProviderId(id); setPhase(null); }}
-                    options={(chosenOffer.providers ?? []).map((p) => ({ value: p.id, label: p.label }))} />
+                    options={(chosenOffer.providers ?? []).map((p) => ({ value: p.id, label: providerLabel(t, p.id, p.label) }))} />
                 )}
                 {/* The provider's English line, in its own direction (as in SourcePicker). */}
                 {descriptor?.description && <p className="text-xs text-text-secondary"><bdi>{descriptor.description}</bdi></p>}

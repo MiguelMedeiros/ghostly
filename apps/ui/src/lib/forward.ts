@@ -1,4 +1,4 @@
-import { forwardedMany } from "@ghostly/core";
+import { forwardedMany, sanitizeFileName } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { findSecret, type SecretFinding } from "./parse/secrets";
 import type { ChatMessage } from "./types";
@@ -29,11 +29,15 @@ export function forwardedLabel(hops: number | undefined): "chat.forward.forwarde
   return forwardedMany(hops) ? "chat.forward.many" : "chat.forward.forwarded";
 }
 
-/** The first text among these that looks like a seed, a key or ecash: asked about before it goes, as typing it would be. */
+/**
+ * The first text, file name or file type among these that looks like a seed, a key or ecash: asked about before it
+ * goes, as typing it or sending the file from the composer would be (the name as `sanitizeFileName` leaves it, as the
+ * composer and the CLI read it).
+ */
 export function forwardSecret(messages: readonly ChatMessage[]): SecretFinding | null {
   for (const message of messages) {
-    if (message.file) continue;
-    const found = findSecret(message.text);
+    const found = findSecret(message.text)
+      ?? (message.file ? findSecret(sanitizeFileName(message.file.name)) ?? findSecret(message.file.mime) : null);
     if (found) return found;
   }
   return null;

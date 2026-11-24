@@ -71,7 +71,8 @@ export function nodeFedimintSdk(dir: string): () => Promise<FedimintSdk> {
     return fedimintSdkOn({
       transport: async () => new ThreadTransport(),
       async exists(database) {
-        try { return statSync(databasePath(dir, database)).size > 0; } catch { return false; }
+        // Absent only when the file system says so (`FedimintPlatform.exists`): a failed look is no answer.
+        try { return statSync(databasePath(dir, database)).size > 0; } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
       },
       async remove(database) { rmSync(databasePath(dir, database), { force: true }); },
     });

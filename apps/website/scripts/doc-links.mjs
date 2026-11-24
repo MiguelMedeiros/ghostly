@@ -20,10 +20,15 @@ const NOT_A_REPOSITORY = new Set(["pkcs"]);
 /**
  * The references in `body` to an issue of another repository written `<repo>#N` (no owner) or
  * `MiguelMedeiros/<repo>#N`, other than this repository's `ghostly#N`: a reader of the site may not be able to open it.
- * One written `owner/repo#N` (an upstream project's) is left alone. Code too: a span or a block is published as well.
+ * One written `owner/repo#N` (an upstream project's) is left alone, and so is a document's section (`PROTOCOL.md#4-records`).
+ * A full link to an issue or pull request of `MiguelMedeiros/<repo>` is found too. Code too: a span or a block is
+ * published as well.
  */
 export function privateRefs(body) {
-  return [...body.matchAll(/(?<![\w./-])(?:MiguelMedeiros\/)?([a-z][\w.-]*)#\d+/gi)]
+  const short = [...body.matchAll(/(?<![\w./-])(?:MiguelMedeiros\/)?([a-z][\w.-]*)#\d+(?![\w-])/gi)]
+    .filter((m) => !/\.md$/i.test(m[1]))
     .filter((m) => m[1].toLowerCase() !== "ghostly" && !NOT_A_REPOSITORY.has(m[1].toLowerCase()))
     .map((m) => m[0]);
+  const links = [...body.matchAll(/github\.com\/MiguelMedeiros\/(?!ghostly(?=[/?#]|$))[\w.-]+\/(?:issues|pull)\/\d+/gi)].map((m) => m[0]);
+  return [...short, ...links];
 }

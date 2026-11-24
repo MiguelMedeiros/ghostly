@@ -10,6 +10,7 @@ import { externalLinkProps } from "../../lib/externalLink";
 import { problemLine } from "../../lib/problemText";
 import { initial } from "../../lib/initial";
 import { shownUrl } from "../../lib/parse";
+import { namesText } from "../../lib/listText";
 
 
 /**
@@ -39,10 +40,10 @@ export function NostrContactCard({ linkId, view, name, compact = false, turning 
   const myKey = f?.hints?.myKey ?? own[0]?.subject;
   const relays = settings?.relays ?? [];
   const when = (x: { fetchedAt: number; relays: string[]; stale?: boolean }) => {
-    const from = { relays: x.relays.map(r => r.replace(/^wss?:\/\//, "")).join(", "), time: ago(x.fetchedAt) };
+    const from = { relays: namesText(x.relays.map(r => r.replace(/^wss?:\/\//, "")), t), time: ago(x.fetchedAt) };
     return x.stale ? t("identities.nostr.staleFrom", from) : t("identities.nostr.from", from);
   };
-  const relayList = relays.map(r => r.replace(/^wss?:\/\//, "")).join(", ");
+  const relayList = namesText(relays.map(r => r.replace(/^wss?:\/\//, "")), t);
 
   return (
     <div data-testid="nostr-contact" data-subject={view.subject} className="space-y-3 text-xs text-text-muted">

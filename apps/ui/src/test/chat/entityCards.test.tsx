@@ -45,7 +45,8 @@ describe("invite cards", () => {
     const { inviteCode } = createChatInvite();
     const { user } = bubble(`Here: ${inviteLink(inviteCode)} see you`);
     const card = screen.getByTestId("entity-invite");
-    expect(card).toHaveTextContent("From ~Alice");
+    // The contact's name is isolated (FSI…PDI), so "C++" or "Bob!" keep their punctuation in an Arabic line.
+    expect(card).toHaveTextContent("From ~\u2068Alice\u2069");
     // The text stays as it was, link and all.
     expect(screen.getByTestId("message-text")).toHaveTextContent(`Here: ${inviteLink(inviteCode)} see you`);
     expect(listSessions()).toHaveLength(0);
@@ -393,6 +394,23 @@ describe("Nostr cards", () => {
     }
   });
 
+  // The relays as the language lists them, each its own <bdi>: an English ", " between them read wrong in Japanese and Arabic.
+  it.each([
+    ["ja", "あなたのリレー（relay.one.example、relay.two.example）に問い合わせます", "relay.one.example、relay.two.example から "],
+    ["ar", "مرحّلاتك (relay.one.example وrelay.two.example)،", "من relay.one.example وrelay.two.example "],
+  ] as const)("in %s, names the relays it asks and the ones that answered the way the language lists them", async (language, asked, from) => {
+    const relays = ["wss://relay.one.example", "wss://relay.two.example"];
+    const { user, engine } = bubble(npubEncode(hex()), { language });
+    engine.update({ nostr: { own: [], settings: { relays, autoLoadProfiles: false, publish: false } } });
+    engine.on("nostrLookup", () => ({ fetchedAt: Math.floor(Date.now() / 1000), relays, found: true, profile: { name: "Alice", hasPicture: false, eventAt: 0, eventId: "e" } }));
+    const card = screen.getByTestId("entity-nostr");
+    await waitFor(() => expect(within(card).getByTestId("entity-nostr-where").textContent).toContain(asked));
+    await user.click(within(card).getByTestId("entity-nostr-load"));
+    const source = await within(card).findByTestId("entity-nostr-source");
+    expect(source.textContent).toContain(from);
+    expect([...source.querySelectorAll("bdi")].map((b) => b.textContent)).toEqual(["relay.one.example", "relay.two.example"]);
+  });
+
   it("says when the relays could not be asked", async () => {
     const { user, engine } = bubble(npubEncode(hex()));
     engine.on("nostrLookup", () => { throw new Error("Offline: turn the network on first"); });
@@ -496,6 +514,24 @@ describe("identity cards", () => {
     expect(await within(card).findByTestId("entity-identity-error")).toHaveTextContent("Could not resolve it");
     expect(asked.length).toBeGreaterThan(0);
     expect(asked.every(url => /^https:\/\/pkarr\.pubky\.(org|app)\//.test(url))).toBe(true);
+  });
+
+  it.each([
+    ["ja", "Pkarr リレー（⁨pkarr.pubky.org⁩、⁨pkarr.pubky.app⁩）に問い合わせます"],
+    ["ar", "Pubky (⁨pkarr.pubky.org⁩ و⁨pkarr.pubky.app⁩)،"],
+  ] as const)("in %s, names Pubky's Pkarr relays the way the language lists them, each on its own", (language, text) => {
+    bubble(`pubky://${toZ32(randomBytes(32))}`, { language });
+    expect(screen.getByTestId("entity-identity-where").textContent).toContain(text);
+  });
+
+  // The server is whoever wrote the DID's choice: its own <bdi>, or in Arabic a port at its edge ("example.com:8443")
+  // takes the sentence's direction and reads on the other side of the name.
+  it.each([[false], [true]])("in Arabic, keeps a did:web's server in its own direction (Hide my IP on: %s)", (hideIp) => {
+    const { engine } = bubble("did:web:example.com%3A8443", { language: "ar" });
+    if (hideIp) act(() => engine.update({ settings: { ...engine.state.settings, relayOnly: true } }));
+    const where = screen.getByTestId("entity-identity-where");
+    expect([...where.querySelectorAll("bdi")].map(bdi => bdi.textContent)).toEqual(["example.com:8443"]);
+    expect(where.textContent).not.toContain("{{");
   });
 
   it("with Hide my IP on, offers no lookup of a did:web someone else chose, and asks its server nothing", async () => {

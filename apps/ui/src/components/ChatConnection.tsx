@@ -11,7 +11,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { dots, focus, transportName, type ConnectionKind } from "../lib/connection";
 import { CONTACT, connectionSummary, lasting, liveAttemptText, namedReason, transportWaitText } from "../lib/transportEvents";
 import { clockTime, formatAt } from "../lib/time";
-import { fillNames } from "../lib/fillNodes";
+import { fillNames, fillNodes, listNodes } from "../lib/fillNodes";
 import { ConnectionIcon } from "./ConnectionIcon";
 import { PairingDetail } from "./pairing/PairingDetail";
 import { PairingGlyph } from "./pairing/PairingGlyph";
@@ -286,6 +286,16 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     reconnectLeft.current = false;
     if (root.current?.open && focusLost()) stateLine.current?.focus({ preventScroll: true });
   });
+  // Verify goes from under the focus as the code and The codes match take its place: that button takes it. The codes
+  // match, accepted, goes with the code: the line that now says the contact is verified takes it. A focus moved meanwhile stays.
+  const matchButton = useRef<HTMLButtonElement>(null), trustLine = useRef<HTMLSpanElement>(null);
+  const verifyLeft = useRef<"verify" | "match" | null>(null);
+  useLayoutEffect(() => {
+    const left = verifyLeft.current;
+    if (!left || (left === "verify" && !matchButton.current)) return;
+    verifyLeft.current = null;
+    if (root.current?.open && focusLost()) (left === "verify" ? matchButton : trustLine).current?.focus({ preventScroll: true });
+  });
   async function run(action: () => Promise<unknown>, fail = setError) {
     focusBack();
     dial.current++; setDialing(false);
@@ -319,13 +329,15 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
         {slow && <p className="text-text-secondary">{slow}</p>}
         {pairingReason && !failure && <p className="break-words text-danger">{pairingReason}</p>}
         {onDhtWhy && <p>{onDhtWhy}</p>}
-        {pairing?.onShow && <button type="button" data-testid="connection-show-pairing" className={`-mx-1 min-h-9 rounded-md px-1 text-accent hover:bg-surface-hover ${focus}`}
+        {pairing?.onShow && <button type="button" data-testid="connection-show-pairing" className={`-mx-1 min-h-9 rounded-md px-1 max-md:min-h-[44px] text-accent hover:bg-surface-hover ${focus}`}
           onClick={() => { close(); pairing.onShow?.(); }}>{t("pairing.showProgress")}</button>}
       </div>}
       {problem && <Notice problem={problem} testId="connection-failure" className="mt-1.5 px-1" />}
       {paired && online && !dht && directBlocked && <DirectBlockedHint />}
       {online && clockOffMs !== undefined && <ClockOffHint ms={clockOffMs} />}
-      {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2">
+      {/* min-w-0: a fieldset is never narrower than its content by default, so a long one-line "In use" mark (Arabic at
+          a larger text size) made the rows wider than the panel, and the panel cut off their radios and Fallback. */}
+      {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2 min-w-0">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
         {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined} relayOnly={relayOnly}
           onChoose={choice => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: choice }))} />}
@@ -339,18 +351,20 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue.
             Nor in the seconds after a live link closed with messages held: the contact may have chosen it and not said so yet.
             Nor with no transport this app can run: no dial can connect. Nor while the tab lost its peer: nothing dials. */}
-        {!dht && !peerLost &&link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !liveOff && !ready && !awaitingJoin && online && link && <FocusSafeButton className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 aria-disabled:opacity-40 ${focus}`} disabled={busy}
+        {!dht && !peerLost &&link?.dhtDelivery?.peerMode !== "dht" && labelState !== "heldPlain" && !liveOff && !ready && !awaitingJoin && online && link && <FocusSafeButton className={`-mx-1 min-h-9 rounded-md px-2 max-md:min-h-[44px] text-accent hover:bg-surface-hover disabled:opacity-40 aria-disabled:opacity-40 ${focus}`} disabled={busy}
           ref={reconnectRef} aria-disabled={dialing || undefined} data-testid="connection-reconnect"
           onClick={() => void reconnect(link.id)}>{t(dialing ? "connection.panel.reconnecting" : "connection.panel.reconnect")}</FocusSafeButton>}
+        {/* my-1 on a phone: Reconnect above and a key or Verify first in the open Details are 44 px too, and touching at
+            a fractional y the browser gave their shared pixel row to one of them (Details 56 × 43 in Arabic). */}
         <details className="text-[11px]" data-testid="connection-details">
-          <summary data-testid="connection-details-summary" className={`w-fit cursor-pointer rounded-md px-1 py-2 text-text-secondary ${focus}`}>{t("connection.panel.details")}</summary>
+          <summary data-testid="connection-details-summary" className={`w-fit cursor-pointer rounded-md px-1 py-2 max-md:my-1 max-md:min-h-[44px] max-md:min-w-[44px] max-md:py-[12px] text-text-secondary ${focus}`}>{t("connection.panel.details")}</summary>
           <div className="space-y-2 px-1 pb-2">
             {wait && waitText && <div data-testid="connection-waiting" data-reason={wait.reason} data-transport={wait.transport} className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
               <p className="font-medium text-text-primary">{waitText.label}</p>
               <p className="mt-0.5 break-words" data-testid="connection-waiting-why">{named(waitText.why)}</p>
               <p className="mt-0.5">{waitText.meanwhile}</p>
               {waitText.automatic && link && <FocusSafeButton type="button" data-testid="connection-waiting-automatic" disabled={busy || !ghostlyOnline}
-                className={`mt-1.5 min-h-9 rounded-md px-2 text-accent hover:bg-surface disabled:opacity-40 ${focus}`}
+                className={`mt-1.5 min-h-9 rounded-md px-2 max-md:min-h-[44px] text-accent hover:bg-surface disabled:opacity-40 ${focus}`}
                 onClick={() => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: "auto" }))}>{t("connection.panel.useAutomatic")}</FocusSafeButton>}
             </div>}
             {progress && (pairingOn || pairingFailed) && <div data-testid="connection-pairing-details" className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
@@ -371,7 +385,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             })()}</p>}
             {summary && <dl data-testid="connection-summary" className="grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5">
               <dt>{t("connection.detail.transport")}</dt><dd className="min-w-0 text-text-primary">{summary.name}</dd>
-              {summary.relays && <><dt>{t("connection.panel.path")}</dt><dd data-testid="connection-relayed" className="min-w-0 text-text-primary break-words">{summary.relays.length ? t("connection.panel.relayedVia", { relays: summary.relays.join(", ") }) : t("connection.panel.relayed")}</dd></>}
+              {summary.relays && <><dt>{t("connection.panel.path")}</dt><dd data-testid="connection-relayed" className="min-w-0 text-text-primary break-words">{summary.relays.length ? fillNodes(t("connection.panel.relayedVia"), { relays: listNodes(summary.relays, t) }) : t("connection.panel.relayed")}</dd></>}
               {summary.rttMs !== undefined && <><dt>{t("connection.detail.roundTrip")}</dt><dd className="text-text-primary">{t("connection.ms", { ms: summary.rttMs })}</dd></>}
               {summary.since !== undefined && <><dt>{t("connection.panel.liveSince")}</dt><dd className="text-text-primary">{clock(summary.since)} ({lasting(Date.now() - summary.since, t)})</dd></>}
               <dt>{t("connection.detail.why")}</dt><dd className="min-w-0 break-words text-text-primary">{summary.why}</dd>
@@ -384,17 +398,17 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             {(pinned || pair?.keyMismatch) && <div data-testid="pair-trust">
               {pair?.keyMismatch ? <p role="alert" className="text-danger">{t("connection.panel.keyMismatch")}</p> : <>
                 <div className="flex min-h-9 items-center justify-between gap-2">
-                  <span data-testid={link?.peerVerified ? "pair-verified" : undefined} className={`flex items-center gap-1.5 ${link?.peerVerified ? "text-accent" : "text-text-secondary"}`}>
+                  <span ref={trustLine} tabIndex={-1} data-testid={link?.peerVerified ? "pair-verified" : undefined} className={`flex items-center gap-1.5 outline-none ${link?.peerVerified ? "text-accent" : "text-text-secondary"}`}>
                     <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6Z"/>{link?.peerVerified && <path d="m8 12 3 3 5-6"/>}</svg>
                     {link?.peerVerified ? t("connection.panel.verified") : t("connection.panel.notVerified")}
                   </span>
-                  {!link?.peerVerified && canCompare && !comparing && <button data-testid="pair-verify" aria-label={t("connection.panel.verifyContact")} className={`min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover ${focus}`} onClick={()=>{setVerifyError("");setComparing(true);}}>{t("connection.panel.verify")}</button>}
+                  {!link?.peerVerified && canCompare && !comparing && <button data-testid="pair-verify" aria-label={t("connection.panel.verifyContact")} className={`min-h-9 rounded-md px-2 max-md:min-h-[44px] max-md:min-w-[44px] text-accent hover:bg-surface-hover ${focus}`} onClick={()=>{setVerifyError("");verifyLeft.current="verify";setComparing(true);}}>{t("connection.panel.verify")}</button>}
                 </div>
                 {comparing && canCompare && !link?.peerVerified && <div className="rounded-lg bg-surface-hover p-3">
                   <code data-testid="pair-code" className="block select-all break-words text-sm tracking-widest text-text-primary">{pair?.code}</code>
                   <p className="mt-1">{t("connection.panel.compare")}</p>
-                  <FocusSafeButton data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 rounded-lg bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] px-3 text-panel-header ${focus}`}
-                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</FocusSafeButton>
+                  <FocusSafeButton ref={matchButton} data-testid="pair-verify-confirm" disabled={busy} className={`mt-2 min-h-9 max-md:min-h-[44px] rounded-lg bg-accent forced-colors:border forced-colors:border-[color:ButtonText] forced-colors:disabled:border-[color:GrayText] px-3 text-panel-header ${focus}`}
+                    onClick={() => link && pair?.code && void run(async () => {await engine.call("confirmPair", {linkId:link.id,code:pair.code!});verifyLeft.current="match";setComparing(false);}, setVerifyError)}>{t("connection.panel.codesMatch")}</FocusSafeButton>
                   {verifyError && <Notice problem={problemText(verifyError, t)} tone="warning" testId="pair-verify-error" className="mt-1.5" />}
                 </div>}
               </>}
@@ -444,7 +458,7 @@ function KeyRow({ label, value, testId }: { label: string; value: string; testId
       <dt>{label}</dt>
       <dd className="min-w-0">
         <button type="button" data-testid={testId} onClick={copy} title={t("chat.message.copyHint")} aria-label={t("connection.panel.copyKey", { label, value })}
-          className={`break-all rounded bg-transparent p-0 text-start font-mono transition-colors hover:text-accent max-md:min-h-6 ${copied ? "text-accent" : "text-text-secondary"} ${focus}`}>
+          className={`break-all rounded bg-transparent p-0 text-start font-mono transition-colors hover:text-accent max-md:min-h-[44px] max-md:min-w-[44px] ${copied ? "text-accent" : "text-text-secondary"} ${focus}`}>
           {copied ? t("common.copied") : failed ? t("common.notCopied") : value}
         </button>
       </dd>

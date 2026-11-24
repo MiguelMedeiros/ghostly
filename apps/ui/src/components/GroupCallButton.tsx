@@ -236,9 +236,10 @@ export function GroupCallButton({ group, loadLivekit }: { group: GroupView; load
           lies across the width under the header there, as the connection panels do. */}
       {problem && <div id={`${id}-problem`} data-testid="group-call-problem" className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(18rem,calc(100vw-1rem))] rounded-xl border border-border bg-panel-header p-3 shadow-xl">
         <Notice problem={problem} testId="group-call-problem-notice" />
-        <div className="mt-2 flex justify-end gap-2 text-xs">
+        <div className="mt-2 flex flex-wrap justify-end gap-2 text-xs">
           <button type="button" onClick={() => { setProblem(null); button.current?.focus(); }} className={`min-h-8 rounded-md px-2 text-text-secondary hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("common.close")}</button>
-          {!blocked && <button type="button" onClick={() => void join()} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
+          {/* It goes with the box as it asks again: the focus on Join call first, as Close's, or it fell to the page. */}
+          {!blocked && <button type="button" onClick={() => { button.current?.focus(); void join(); }} data-testid="group-call-retry" className={`min-h-8 rounded-md px-2 font-semibold text-accent hover:bg-surface-hover max-md:min-h-11 ${focus}`}>{t("calls.group.retry")}</button>}
         </div>
       </div>}
       {joined && <GroupCallView call={call} groupName={group.name || t("group.chat.unnamed")} canShareScreen={canShareScreen} nameOf={nameOf} raised={raised} moderator={moderator} connected={call.status === "connected"} devices={devices}
@@ -266,7 +267,7 @@ function HideIpDialog({ onClose, onConfirm }: { onClose(): void; onConfirm(): vo
       <InfoButton open={info} onToggle={() => setInfo(!info)} controls={`${id}-info`} testId="group-call-hide-ip-info" className="mt-0.5" />
     </div>
     {info && <p id={`${id}-info`} data-testid="group-call-hide-ip-info-text" className="mt-2 border-s-2 border-border ps-2 text-xs text-text-secondary">{t("calls.group.hideIpInfo")}</p>}
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex flex-wrap justify-end gap-2">
       <button ref={cancel} onClick={onClose} data-testid="group-call-hide-ip-cancel" className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button onClick={onConfirm} data-testid="group-call-hide-ip-confirm"
         className="min-h-11 rounded-lg px-4 text-sm font-semibold text-accent hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("calls.group.joinAnyway")}</button>
@@ -286,7 +287,7 @@ function EndOtherCallDialog({ onClose, onConfirm }: { onClose(): void; onConfirm
     data-testid="group-call-end-other" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <h2 id={`${id}-title`} className="text-base font-semibold">{t("calls.group.endOtherTitle")}</h2>
     <p id={`${id}-body`} className="mt-2 text-sm text-text-muted">{t("calls.group.endOtherBody")}</p>
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex flex-wrap justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button onClick={onConfirm} data-testid="group-call-end-other-confirm"
         className="min-h-11 rounded-lg px-4 text-sm bg-danger/15 text-danger-ink hover:bg-danger/25 forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-danger">{t("calls.group.endAndJoin")}</button>

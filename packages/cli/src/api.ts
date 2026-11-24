@@ -188,9 +188,28 @@ const inviteShown = new WeakMap<ApiContext, () => void>();
  * way: the call talked on in a chat gone from this device, and its hang-up had no chat left to cross. `engine.call`
  * refuses the raw calls that do the same (`removeLink`, `setChatTransport` / `setDeliveryMode` to `dht`).
  */
-function noCallOn(ctx: ApiContext, linkId: string, then: string): void {
-  const call = ctx.calls.list().find((c) => c.chat === linkId);
+function noCallOn(ctx: ApiContext, linkId: string, then: string, ringingInToo = true): void {
+  const call = ctx.calls.list().find((c) => c.chat === linkId && (ringingInToo || !ringsIn(c)));
   if (call) throw new CliError("busy", `A call is on in this chat: hang it up first (ghostly call hangup ${linkId}), then ${then}`, { call: call.call });
+}
+
+/** A contact's call that only rings here: not answered yet. */
+function ringsIn(call: Record<string, unknown>): boolean {
+  return call.direction === "in" && call.state === "ringing";
+}
+
+/**
+ * Removing a chat is not refused for a call that only rings in it: a contact who called again as soon as one was
+ * declined kept the chat from ever being removed (`call hangup`, then `chat remove`, met their next call in between).
+ * The calls ringing in it are declined first, while the chat is there for the decline to cross; a call that is on
+ * still refuses (`noCallOn`).
+ */
+async function declineRingingIn(ctx: ApiContext, linkId: string): Promise<void> {
+  for (const call of ctx.calls.list()) {
+    if (call.chat !== linkId || !ringsIn(call)) continue;
+    // Ended on its own meanwhile (the contact hung up, it went stale): nothing to decline.
+    await ctx.calls.hangup(String(call.call)).catch(() => undefined);
+  }
 }
 
 /**
@@ -473,6 +492,14 @@ const METHODS: Record<string, Method> = {
       // the relay only under "Hide my IP from contacts", not the CLI's yet (`engine.call`). Kept for the apps, said here.
       if (key === "hyperdhtRelay" && value) {
         warning = (warning ? `${warning}. ` : "") + "This CLI runs HyperDHT itself and does not dial through hyperdhtRelay: it uses it only with Hide my IP from contacts, which comes in a later release. It is kept for the apps this profile moves to";
+      }
+      // `GHOSTLY_PKARR_RELAYS` and `GHOSTLY_IROH_RELAYS` pin the relays of the process that runs the profile (this one,
+      // or its daemon; runtime/engine.ts): the setting is kept and not read while the variable is set. It was taken with
+      // exit 0 and nothing said, while `status` went on naming the variable's relays. The variable pins only when it names
+      // a relay, as `pkarrRelays`/`irohRelays` read it: blank or commas alone leave the setting in use.
+      const variable = { relays: "GHOSTLY_PKARR_RELAYS", irohRelays: "GHOSTLY_IROH_RELAYS" }[key as "relays" | "irohRelays"] as string | undefined;
+      if (variable && process.env[variable]?.split(",").some((url) => url.trim())) {
+        warning = (warning ? `${warning}. ` : "") + `${variable} is set where this profile runs, and only its relays are used: ${key} is kept for when the profile runs without it`;
       }
       patch[key] = value;
     }
@@ -915,8 +942,9 @@ const METHODS: Record<string, Method> = {
   async "chat.remove"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass --yes (yes: true over the socket) to go on");
-    noCallOn(ctx, link.id, "remove the chat");
+    noCallOn(ctx, link.id, "remove the chat", false);
     if (!bool(params, "force")) noRemovalOnItsWay(ctx, [link.id]);
+    await declineRingingIn(ctx, link.id);
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
     ctx.groupAuto.forgetChat(link.id);
@@ -1209,7 +1237,7 @@ const METHODS: Record<string, Method> = {
     // Removing the chat or putting it on DHT only is refused mid-call, as `chat remove` and `chat transport dht` are.
     if (typeof args?.linkId === "string") {
       if (method === "removeLink") {
-        noCallOn(ctx, args.linkId, "remove the chat");
+        noCallOn(ctx, args.linkId, "remove the chat", false);
         if (!bool(params, "force")) noRemovalOnItsWay(ctx, [args.linkId]);
       }
       else if ((method === "setChatTransport" && args.transport === "dht") || (method === "setDeliveryMode" && args.mode === "dht")) noCallOn(ctx, args.linkId, "put the chat on DHT only");
@@ -1221,6 +1249,7 @@ const METHODS: Record<string, Method> = {
     if (method === "setActiveLink") inviteShown.get(ctx)?.();
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
+    if (method === "removeLink" && typeof args?.linkId === "string") await declineRingingIn(ctx, args.linkId);
     const removedPeer = method === "removeLink" ? state(ctx).links.find((link) => link.id === args?.linkId)?.peerPubKeyZ32 : undefined;
     try {
       const result = (await target.call(node(ctx), args)) ?? null;
@@ -1281,6 +1310,8 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   "setOwnStatus",
   // A Nostr note or profile, public on relays: the app asks before it is signed (NostrPublishDialog).
   "nostrDraft",
+  // A shared app's name, every contact it is shared with reads, as `service add` guards it.
+  "addService",
 ]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {

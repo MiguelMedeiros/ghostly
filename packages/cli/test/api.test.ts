@@ -1719,3 +1719,20 @@ describe("chat transport", () => {
     expect(unknown.node.setChatTransport).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("settings set relays or irohRelays while a variable pins them", () => {
+  // runtime/engine.ts pins only on a non-empty entry: unset, blank or commas alone leave the setting in use.
+  it("says so only when the variable names a relay", async () => {
+    const { ctx } = fake();
+    try {
+      for (const [key, variable, value] of [["relays", "GHOSTLY_PKARR_RELAYS", ["https://relay.example"]], ["irohRelays", "GHOSTLY_IROH_RELAYS", ["https://iroh.example/"]]] as const) {
+        for (const unpinned of ["", "  ", ",", " , ", ",,"]) {
+          vi.stubEnv(variable, unpinned);
+          expect(await callApi(ctx, "settings.set", { [key]: value }), JSON.stringify(unpinned)).not.toHaveProperty("warning");
+        }
+        vi.stubEnv(variable, " , http://127.0.0.1:9");
+        expect(await callApi(ctx, "settings.set", { [key]: value })).toHaveProperty("warning", `${variable} is set where this profile runs, and only its relays are used: ${key} is kept for when the profile runs without it`);
+      }
+    } finally { vi.unstubAllEnvs(); }
+  });
+});

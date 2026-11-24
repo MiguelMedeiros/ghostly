@@ -1269,6 +1269,21 @@ html[data-standalone="true"] {
   }
 }
 
+/* The same on a phone held upright, below the notch as a <dialog> is: Set status, Delete profile and Nostr publish
+   open with a field, and centred on the whole screen their Save, Delete and Sign and publish were under the keyboard.
+   A sheet (Apps → Add, Add identity, New wallet) stands on the keyboard by its own rule and is left out: it is fixed,
+   so `max-height: 100%` would be the whole screen's and lift its cap. */
+@media (pointer: coarse) and (max-width: 767px) {
+  html[data-keyboard="true"] .fixed.inset-0:has(> [aria-modal="true"]:not(.sheet)) {
+    bottom: calc(100% - var(--app-height, 100%));
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+  }
+
+  html[data-keyboard="true"] .fixed.inset-0 > [aria-modal="true"]:not(.sheet) {
+    max-height: 100%;
+  }
+}
+
 /* Send files (components/composer/AttachmentSheet.tsx): a layer over the whole screen with its panel centred, which
    opens with the focus in its caption, so on a phone the keyboard comes up at once. As the rule above, but on a phone
    held upright too: centred on the whole screen, the caption and Cancel/Send were under the keyboard. The layer ends

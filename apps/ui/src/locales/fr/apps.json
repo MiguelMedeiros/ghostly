@@ -125,6 +125,8 @@
     "ipInfoOffline": "L'app n'a pas accès à Internet, mais son éditeur peut quand même apprendre votre adresse IP et quand vous l'ouvrez.",
     "ipLine": "Téléchargée depuis {{host}}, qui voit votre adresse IP.",
     "ipLineInstalled": "Son éditeur peut apprendre votre adresse IP.",
+    "leavesStore": "{{title}} ne reçoit aujourd'hui ses mises à jour qu'une fois listées par {{name}}. Installer cette version y met fin : ses mises à jour viendront alors des liens de son éditeur.",
+    "leavesStoreTo": "{{title}} ne reçoit aujourd'hui ses mises à jour qu'une fois listées par {{name}}. Installer cette version d'ici y met fin : ses mises à jour attendront alors que cette boutique les liste.",
     "newPermissions": "Cette mise à jour demande aussi de",
     "notListed": "Dans aucune de vos boutiques",
     "perm": {

@@ -449,7 +449,7 @@ export function MessageInput({
   // The draft emptied (by hand, or given to an edit): nothing left to translate.
   useEffect(() => { if (!text.trim() || editKey) closeTranslation(); }, [text, editKey, closeTranslation]);
   // The chat's translation turned off, or its language changed, while a preview was open: that preview is closed, so
-  // Enter sends the draft again rather than wait on a translation nothing can make (ghostly-agents#1812).
+  // Enter sends the draft again rather than wait on a translation nothing can make.
   // A group's list is ordered by use and recomputed as messages arrive, so it is compared as a set, and an open preview
   // stays while the language it shows is still offered: a reorder or a new language must not drop a picked translation.
   const offered = translation ? (translation.language ? [translation.language] : [...(translation.languages ?? [])].sort()).join(",") : null;
@@ -710,12 +710,13 @@ export function MessageInput({
 
   /**
    * The payment sheet closed (its Close, Escape, a click outside): the focus in it goes to the message field, as a sent
-   * payment's does, not to the page. On a touch screen the field would bring the keyboard up: there it falls.
+   * payment's does, not to the page. On a touch screen the field would bring the keyboard up: there it goes to the +.
+   * A group's list of whom to pay is a sheet of its own.
    */
   const closePayment = () => {
     const at = document.activeElement;
     setShowPayment(false);
-    if (at?.closest(".composer-sheet") && !touchOnly()) textareaRef.current?.focus({ preventScroll: true });
+    if (at?.closest('.composer-sheet, [data-testid="group-pay-recipients"]')) (touchOnly() ? plusRef : textareaRef).current?.focus({ preventScroll: true });
   };
 
   /** Whatever the composer has open over it. */
@@ -1105,7 +1106,7 @@ export function MessageInput({
         type="button"
         onClick={hideToast}
         aria-label={t("common.close")}
-        className="-me-2 -my-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="tap-target -me-2 -my-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         &times;
       </button>

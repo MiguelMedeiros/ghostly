@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, parseLocalTarget, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
 import { bool, chatOf, nameKey, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
+import { guardText } from "./secretGuard";
 import { isLive } from "./views";
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, guardViewerAnswer, type PageGuard } from "@ghostly/core";
 
@@ -386,6 +387,8 @@ export function serviceShape(params: Params): { name: string; target: string } {
     } catch { /* Not a URL: not repeated. */ }
     throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}${shown}`);
   }
+  // Every contact it is shared with reads its name, as a group's members read the group's.
+  guardText(name, bool(params, "force"), "service's name", "add it");
   return { name, target };
 }
 

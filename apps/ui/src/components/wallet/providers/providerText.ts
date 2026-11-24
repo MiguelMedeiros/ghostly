@@ -2,16 +2,19 @@ import type { ProviderDescriptorView, ProviderField } from "@ghostly/browser/eng
 import type { Translate, TranslationKey } from "../../../locales/translate";
 
 /**
- * A provider's lines in the person's language: the built-in providers' description and their fields' label, help,
+ * A provider's lines in the person's language: the built-in providers' label and description and their fields' label, help,
  * placeholder, options and suggestions are under `wallet.source.providers.<id>` (a field's under `fields.<name>`, an
  * option's or a suggestion's by its value). A line without a key (a plugin provider, a technical name like
- * "Macaroon (hex)") stays the descriptor's English. A command the English names (`lncli …`, `lightning-cli …`) is
+ * "Macaroon (hex)", a name like "Core Lightning") stays the descriptor's English. A command the English names (`lncli …`, `lightning-cli …`) is
  * kept as it is, as `{{command}}`.
  */
-export function providerText<D extends Pick<ProviderDescriptorView, "id" | "description" | "fields">>(t: Translate, descriptor: D): D {
+export function providerText<D extends Pick<ProviderDescriptorView, "id" | "label" | "description" | "fields">>(t: Translate, descriptor: D): D {
   const base = `wallet.source.providers.${descriptor.id}`;
-  return { ...descriptor, description: said(t, `${base}.description`, descriptor.description), fields: descriptor.fields.map((f) => fieldText(t, descriptor.id, f)) };
+  return { ...descriptor, label: providerLabel(t, descriptor.id, descriptor.label), description: said(t, `${base}.description`, descriptor.description), fields: descriptor.fields.map((f) => fieldText(t, descriptor.id, f)) };
 }
+
+/** Provider `id`'s label in the person's language ("LND node"): `label`, the English, where it has none (see `providerText`). */
+export const providerLabel = (t: Translate, id: string, label: string): string => said(t, `wallet.source.providers.${id}.label`, label);
 
 /** One field of provider `id` in the person's language (see `providerText`). */
 export function fieldText(t: Translate, id: string, field: ProviderField): ProviderField {

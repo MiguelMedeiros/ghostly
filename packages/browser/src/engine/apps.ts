@@ -141,6 +141,13 @@ export interface InstalledApp {
   /** The URL the installed version was read from. */
   from: string;
   /**
+   * The `ghostly-revoke.json` beside where its earlier versions came from and the sources they named, the first
+   * `FORMER_SOURCES_KEPT` met (`formerSourcesOf`): its publisher's revocations are read there too, so a version that
+   * names only other URLs does not move them away from where the publisher still can publish. Absent on a record from
+   * before they were kept, or of an app that never changed version.
+   */
+  formerSources?: string[];
+  /**
    * The key of the store the person installed it from (WISP 1200 § Updates and rollback): it then updates only to the
    * version that store's signed index lists, never to a newer one found at its publisher's sources first. Absent for an
    * app added by URL or from a card, which takes a valid newer version from its sources or any of the person's stores.
@@ -317,6 +324,14 @@ export interface AppPreview {
   run: AppRunStatus;
   listedBy: AppListedBy[];
   unknownPublisher: boolean;
+  /**
+   * The store the installed app takes its updates from (`InstalledApp.store`), when Install here ends that: a newer
+   * version by URL or card unpins it, another store's listing pins it to that store (WISP 1200 § Updates and rollback).
+   * The screen says so, as removing the store does. `name` is absent while no index of the store was read. `to`: the
+   * store this screen's listing is from, which the app's updates then wait for instead; absent when they then come from
+   * the publisher's links.
+   */
+  leavesStore?: { key: string; name?: string; to?: string };
   /** Read from the bundle this build carries (a built-in app): no server was asked for it, `from` notwithstanding. */
   carried?: true;
   /** This screen's bundle and source, for `install`: Install on it installs from where it said, whatever screen opened since. */
@@ -618,6 +633,31 @@ function withRevocations(app: InstalledApp, read: readonly SignedAppRevocation[]
   const merged = new Map((app.revocations ?? []).map((r) => [canonicalJson(r), r]));
   for (const r of read) merged.set(canonicalJson(r), r);
   return merged.size ? { ...app, revocations: [...merged.values()] } : app;
+}
+
+/**
+ * At most this many `InstalledApp.formerSources`: past the first version's own (its URL and its 8 sources) room for a
+ * few moves, each one more `ghostly-revoke.json` read per check at most. The first met are kept, not the last: a
+ * version signed with a stolen key, and the ones after it, cannot push the publisher's own places out by naming many.
+ */
+const FORMER_SOURCES_KEPT = 16;
+
+/** `InstalledApp.formerSources` as kept: a list, at most `FORMER_SOURCES_KEPT`. */
+const formerOf = (app: InstalledApp): string[] => Array.isArray(app.formerSources) ? app.formerSources.slice(0, FORMER_SOURCES_KEPT) : [];
+
+/** Where an installed app's publisher's revocations are read: where it came from, the sources it names, and its earlier ones. */
+function revocationUrlsOf(installed: InstalledApp | undefined): string[] {
+  return installed ? [installed.from, ...(installed.manifest.sources ?? []), ...formerOf(installed)] : [];
+}
+
+/** `InstalledApp.formerSources` once another version replaces `installed`: its own first, then where it came from and the sources it named. */
+function formerSourcesOf(installed: InstalledApp | undefined): string[] | undefined {
+  const kept = new Set<string>();
+  for (const url of installed ? [...formerOf(installed), installed.from, ...(installed.manifest.sources ?? [])] : []) {
+    if (kept.size >= FORMER_SOURCES_KEPT) break;
+    if (isAppFetchUrl(url)) kept.add(besideUrl(url, "ghostly-revoke.json"));
+  }
+  return kept.size ? [...kept] : undefined;
 }
 
 /** Of these revocations, the ones that stop one of these versions. */
@@ -1934,8 +1974,9 @@ export class Apps {
     const version = versionOf(manifest, digest);
     // A fetched version is checked against its publisher's revocations before Install, as the update check does: beside
     // the URL it came from and beside each source it names (beside a pinned commit, the file is that commit's). A version
-    // this build carries makes no request here: `install` reads them.
-    const read = carried ? [] : await this.readStopping(version, [from, ...(manifest.sources ?? [])]);
+    // this build carries makes no request here: `install` reads them. Over an installed version, beside every place it
+    // and the earlier ones came from too: a version naming only other URLs does not take the reads away from there.
+    const read = carried ? [] : await this.readStopping(version, [from, ...(manifest.sources ?? []), ...revocationUrlsOf(await this.app(version.ref))]);
     const revocations = [...await this.keptRevocationsOf(version.ref), ...read];
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
     // What a store's index revokes of it is kept too (the person is shown it revoked): the store removed, or its next index
@@ -1953,12 +1994,18 @@ export class Apps {
     if (!this.sweep) this.sweepStaged();
 
     const listedBy = this.listedBy(version, stores);
+    // As `install` writes the record: an update not from the pinned store drops the pin, the same version from another
+    // store moves it there; the same version by URL or card leaves the record as it is.
+    const pin = installed?.store;
+    const leaves = pin !== undefined && fromStore !== pin && (install === "update" || (install === "same" && fromStore !== undefined));
+    const leftName = leaves ? stores.find((s) => s.key === pin)?.index?.name : undefined;
     return {
       digest, ref: version.ref, publisher: manifest.publisher, fingerprint: appFingerprint(manifest.publisher), manifest, from,
       icon: bundle.files.get("icon.png")?.slice() ?? null,
       install, asks,
       run: this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
+      ...(leaves && { leavesStore: { key: pin, ...(leftName !== undefined && { name: leftName }), ...(fromStore !== undefined && { to: fromStore }) } }),
       ...(carried && { carried: true as const }),
       stage,
     };
@@ -1986,7 +2033,7 @@ export class Apps {
     const version = versionOf(manifest, digest);
     // A version this build carries was opened with no request: its publisher's revocations are read now, at its public
     // URL and its sources, as for a fetched one. None answering (offline) installs it; the update check reads them later.
-    const revocations = staged.carried ? [...staged.revocations, ...await this.readStopping(version, [from, ...(manifest.sources ?? [])])] : staged.revocations;
+    const revocations = staged.carried ? [...staged.revocations, ...await this.readStopping(version, [from, ...(manifest.sources ?? []), ...revocationUrlsOf(await this.app(version.ref))])] : staged.revocations;
     // The files written here: left only while a record names them (a version refused after all keeps none).
     let wrote: BundleFile | undefined;
     try {
@@ -2057,6 +2104,8 @@ export class Apps {
   private versionRecord(installed: InstalledApp | undefined, bundle: AppBundle, files: Pick<InstalledApp, "bytes" | "sha256">, from: string, store: string | undefined): InstalledApp {
     const { manifest, digest } = bundle;
     const now = this.now();
+    // Where the version it replaces came from stays where its publisher's revocations are read.
+    const formerSources = formerSourcesOf(installed);
     const kept = installed?.pending && installed.pending.sequence > manifest.sequence && installed.store === store ? installed.pending : undefined;
     // What it adds is worked out again against this version: the person is shown, and grants, only what is new to it.
     const keepPending = kept && { ...kept, added: addedAppPermissions(manifest.permissions, kept.manifest.permissions) as AppPermission[] };
@@ -2064,6 +2113,7 @@ export class Apps {
       ref: appRef(manifest.publisher, manifest.name), publisher: manifest.publisher, name: manifest.name,
       sequence: manifest.sequence, digest, permissions: [...manifest.permissions], manifest, bytes: files.bytes,
       ...(files.sha256 !== undefined && { sha256: files.sha256 }), from,
+      ...(formerSources && { formerSources }),
       ...(store !== undefined && { store }),
       installedAt: installed?.installedAt ?? now, updatedAt: now,
       ...(installed?.revocations?.length && { revocations: installed.revocations }),
@@ -2246,7 +2296,7 @@ export class Apps {
     // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
     const revokeRead = new Set<string>();
     const reach: RevocationsReach = { answered: false, failed: false };
-    const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead, reach);
+    const before = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach);
     app = withRevocations(app, before ?? []);
     // The ones this profile kept (`APP_REVOCATIONS_KEY`) judge too: one that dropped a waiting update stops it from
     // being taken again, once the record keeps it no more and its store's next index does not carry it.
@@ -2347,8 +2397,9 @@ export class Apps {
       }
       break;
     }
-    // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
-    const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead, reach);
+    // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too (and still
+    // beside where the earlier ones came from).
+    const after = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach);
     // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version, or one
     // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
     // version not found yet): a file that changes does not pile up.

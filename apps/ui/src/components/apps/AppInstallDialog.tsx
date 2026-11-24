@@ -11,7 +11,7 @@ import { Button } from "../wallet/ui";
 import { InfoButton } from "../layout";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppDescription } from "./AppDescription";
-import { NAME, withName } from "./aroundName";
+import { NAME, SECOND_NAME, withName, withNames } from "./aroundName";
 import { removedLine } from "./removedLine";
 import { stopReason, stoppedSaid } from "./stoppedSaid";
 import { appErrorCode, appErrorRetryable, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
@@ -144,6 +144,24 @@ function InfoLine({ children, info, testId, className = "text-xs text-text-secon
  */
 function ErrorLine({ error, testId }: { error: AppErrorView; testId?: string }) {
   return <div role="alert"><InfoLine testId={testId} info={error.info} dir={ownDirection(error.text)} className="text-xs text-danger-ink whitespace-pre-line">{error.text}</InfoLine></div>;
+}
+
+/**
+ * Install here ends the store's hold on the app's updates (a newer version by link or card, WISP 1200 § Updates and
+ * rollback): said before Install, as removing the store says it. The store is named as on its store line, with its
+ * fingerprint unless it is the official one; by its fingerprint alone while no index of it was read. From another store's
+ * listing (`to`), Install pins the app to that store: its updates then wait for it, not for the publisher's links.
+ */
+function LeavesStore({ title, store }: { title: string; store: NonNullable<AppPreview["leavesStore"]> }) {
+  const { t } = useI18n();
+  const fingerprint = appFingerprint(store.key);
+  const named = store.name ?? fingerprint;
+  return (
+    <Line tone="warning" testId="app-install-leaves-store">
+      {withNames(t(store.to === undefined ? "apps.install.leavesStore" : "apps.install.leavesStoreTo", { title: NAME, name: SECOND_NAME }), [title, named])}
+      {store.name !== undefined && store.key !== DEFAULT_STORE_KEY && <> <Fingerprint value={fingerprint} /></>}
+    </Line>
+  );
 }
 
 /** What the app may do: always its own data on this device (not on an update), then each permission it asks for. */
@@ -411,6 +429,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
           <Publisher fingerprint={preview.fingerprint} unknown={preview.unknownPublisher} listedBy={preview.listedBy} sentBy={sentBy} builtIn={preview.carried && "carried"} />
           {!blocked && (preview.install === "new" || preview.asks.length > 0) && <Permissions asks={preview.asks} update={preview.install === "update"} />}
           {why && <Line tone="danger" testId="app-install-blocked">{why}</Line>}
+          {!blocked && preview.leavesStore && <LeavesStore title={shownTitle} store={preview.leavesStore} />}
           <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} carried={preview.carried} />
           {preview.manifest.description && <AppDescription text={preview.manifest.description} from="publisher" testId="app-description" />}
         </>

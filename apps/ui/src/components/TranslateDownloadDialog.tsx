@@ -78,7 +78,7 @@ function DownloadQuestion({ from, to, back, bytes, engine, busy = false, problem
     </div>
     {busy && <p role="status" data-testid="translate-download-goes-on" className="mt-2 text-sm text-text-muted">{t("translate.download.goesOn")}</p>}
     {problem && <Notice problem={problem} testId="translate-download-failed" className="mt-3 text-sm" />}
-    <div className="mt-5 flex justify-end gap-2">
+    <div className="mt-5 flex flex-wrap justify-end gap-2">
       <button ref={notNow} type="button" data-testid="translate-download-not-now" onClick={onNotNow}
         className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t(busy ? "common.close" : "translate.download.notNow")}</button>
       {/* Busy while it downloads, not disabled: that would drop a keyboard's focus to the page. */}

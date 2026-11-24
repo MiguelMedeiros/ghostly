@@ -224,6 +224,19 @@ describe("GroupChat: what the header says", () => {
     expect(screen.queryByText("Chat list")).not.toBeInTheDocument();
   });
 
+  // The band goes with the button: Accept there hands the focus to the ⋮, a Decline left it on the page's body.
+  it.each([["Decline", "group-decline", false], ["Delete of a taken-back invitation", "group-taken-back-delete", true]] as const)(
+    "%s by keyboard on the band over a member's kept history gives the focus to the group's ⋮", async (_, button, takenBack) => {
+      const { user, engine } = openGroup(groupView({ status: "removed", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false, takenBack } }),
+        [stored({ id: "old", text: "from before", member: ALICE })]);
+      engine.on("declineGroupInvitation", () => { fakeEngine.update({ groups: [groupView({ status: "removed", canSend: false })] }); });
+      await screen.findByText("from before");
+      act(() => within(screen.getByTestId("group-invitation")).getByTestId(button).focus());
+      await user.keyboard("{Enter}");
+      await vi.waitFor(() => expect(screen.queryByTestId("group-invitation")).not.toBeInTheDocument());
+      expect(screen.getByTestId("group-options")).toHaveFocus();
+    });
+
   it("says the group is gone when this device does not have it, with a way back to the chat list", async () => {
     // Deleted on another device, say: the group page has no tabs, and an installed iPhone web app no system back.
     const { user } = openGroup(null);

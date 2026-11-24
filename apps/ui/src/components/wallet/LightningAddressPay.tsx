@@ -15,6 +15,9 @@ import { problemText, type Problem } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { shownUrl } from "../../lib/parse/links";
 import { FocusSafeButton } from "../ui/FocusSafeButton";
+import { providerLabel } from "./providers/providerText";
+import { SecretGuardDialog } from "../SecretGuardDialog";
+import { findSecret, type SecretFinding } from "../../lib/parse/secrets";
 
 interface Quote { quote: string; mint: string; amount: number; feeReserve: number; source?: string }
 interface Invoice { invoice: string; note: string; successAction?: { tag: "message" | "url"; message?: string; description?: string; url?: string } }
@@ -30,6 +33,12 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const [info, setInfo] = useState<LightningAddressInfo | null>(null);
   const [amount, setAmount] = useState("");
   const [comment, setComment] = useState("");
+  /**
+   * The comment reaches the address's owner with the invoice request, as a chat payment's memo reaches the contact: one
+   * that looks like a seed or a private key is asked about first (`SecretGuardDialog`, as the memo and the CLI's
+   * `pay --comment` are), and Send anyway asks for the invoice.
+   */
+  const [secret, setSecret] = useState<SecretFinding | null>(null);
   const composition = useComposition();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
@@ -59,7 +68,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
     else if (follow.quote && !follow.held && setAside) setFollow({ ...follow, held: true });
   }, [follow, ended, setAside]);
   const shown = ended ? (ended.paid ? "paid" : "failed") : outcome;
-  const sourceName = (source?: string) => (via === "cashu" || !source || source === CASHU_MINT_SOURCE ? t("wallet.lightning.cashuMints") : source === ln?.providerId ? ln.alias ?? ln.label ?? source : source);
+  const sourceName = (source?: string) => (via === "cashu" || !source || source === CASHU_MINT_SOURCE ? t("wallet.lightning.cashuMints") : source === ln?.providerId ? ln.alias ?? (ln.label ? providerLabel(t, ln.providerId, ln.label) : source) : source);
 
   const run = async (task: () => Promise<void>) => {
     setError(null); setBusy(true);
@@ -161,7 +170,12 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const holds = state ? spendable(via === "cashu" ? "cashu" : "lightning", state) : undefined;
   const max = holds === undefined ? undefined : Math.min(holds, info.maxSat);
   // Not a <form>: this panel lives inside the wallet's Send form, and a form in a form submits the page.
-  const getInvoice = () => { if (!busy && Number(amount)) void run(async () => {
+  const getInvoice = () => {
+    if (busy || !Number(amount)) return;
+    const found = comment.trim() ? findSecret(comment) : null;
+    if (found) setSecret(found); else askInvoice();
+  };
+  const askInvoice = () => { if (!busy && Number(amount)) void run(async () => {
     // The fee is known only from a quote of an invoice, so a Max asks again for what it leaves: twice at most, as a fee
     // may grow a little with another invoice. What is left below the address's least is the refusal, or the review's say.
     let sats = Number(amount);
@@ -207,6 +221,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         <FocusSafeButton type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</FocusSafeButton>
       </div>
       {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} />}
+      {secret && <SecretGuardDialog finding={secret} recipient={info.text} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); askInvoice(); }} />}
     </div>
   );
 }

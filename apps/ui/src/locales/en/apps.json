@@ -125,6 +125,8 @@
     "ipInfoOffline": "The app has no internet access, but its publisher may still learn your IP address and when you open it.",
     "ipLine": "Downloads from {{host}}, which sees your IP address.",
     "ipLineInstalled": "Its publisher may learn your IP address.",
+    "leavesStore": "{{title}} now takes updates only once {{name}} lists them. Installing this version ends that: its updates then come from its publisher's links.",
+    "leavesStoreTo": "{{title}} now takes updates only once {{name}} lists them. Installing this version from here ends that: its updates then come only once this store lists them.",
     "newPermissions": "This update also asks to",
     "notListed": "Not in any of your stores",
     "perm": {

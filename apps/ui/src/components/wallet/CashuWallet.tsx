@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { parseEngineError, paymentUri, type Bolt11Invoice, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
@@ -18,7 +18,7 @@ import { LightningCardSettings } from "./LightningCardSettings";
 import { CASHU_MINT_SOURCE, holdsLess, pendingPayEnd } from "../walletCardData";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { NAME, withName } from "../apps/aroundName";
-import { fillNodes } from "../../lib/fillNodes";
+import { fillNames, fillNodes } from "../../lib/fillNodes";
 import { satsIn, unitFor } from "../NetworkTag";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { lightningStateLabel, paymentStateLabel } from "../paymentWords";
@@ -28,6 +28,7 @@ import { problemLine, problemText } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
 import { copySecret } from "../../lib/shareLink";
 import { FocusSafeButton } from "../ui/FocusSafeButton";
+import { providerLabel } from "./providers/providerText";
 
 const TX_LABEL = {
   "lightning-in": "wallet.cashu.tx.lightningIn",
@@ -47,16 +48,26 @@ const TEST_COINS_NOTE = "Test coins from the test mint";
 /**
  * The notes the engine writes itself (engine/wallet.ts), in English: shown in the app's language. Each is only ever on
  * its kind of movement, where no memo goes: a contact's memo (ecash in, a payment out) is shown as written, even one
- * that reads like a note of the engine's.
+ * that reads like a note of the engine's. A payment out's own note stands in the place of a request's missing memo: one
+ * written word for word like it says the same thing.
  */
-type EngineNote = "wallet.cashu.history.note.testCoins" | "wallet.cashu.history.note.requestPaid" | "wallet.cashu.history.note.paymentFailed";
+type EngineNote = "wallet.cashu.history.note.testCoins" | "wallet.cashu.history.note.requestPaid" | "wallet.cashu.history.note.paymentFailed"
+  | "wallet.cashu.history.note.notSent" | "wallet.cashu.history.note.paidRequest";
+/** A contact's request paid without a memo of its own (engine/payments.ts): the note of its payment, its memo's place. */
+const PAID_REQUEST_NOTE = "Paid a contact's request";
 const ENGINE_NOTES: Partial<Record<keyof typeof TX_LABEL, Record<string, EngineNote>>> = {
   "lightning-in": { [TEST_COINS_NOTE]: "wallet.cashu.history.note.testCoins", "Request paid over Lightning": "wallet.cashu.history.note.requestPaid" },
-  fee: { "A Lightning payment failed": "wallet.cashu.history.note.paymentFailed" },
+  "lightning-out": { [PAID_REQUEST_NOTE]: "wallet.cashu.history.note.paidRequest" },
+  fee: { "A Lightning payment failed": "wallet.cashu.history.note.paymentFailed", "A payment was not sent": "wallet.cashu.history.note.notSent" },
 };
-const noteText = (t: Translate, { kind, note = "" }: { kind: keyof typeof TX_LABEL; note?: string }) => {
+/** What the mint kept when a payment with a note failed (engine/wallet.ts): the note is the payment's, as it was written. */
+const FAILED_WITH_NOTE = "Payment failed: ";
+const noteText = (t: Translate, { kind, note = "" }: { kind: keyof typeof TX_LABEL; note?: string }): ReactNode => {
   const key = ENGINE_NOTES[kind]?.[note];
-  return key ? t(key) : note;
+  if (key) return t(key);
+  if (kind !== "fee" || !note.startsWith(FAILED_WITH_NOTE)) return note;
+  const paid = note.slice(FAILED_WITH_NOTE.length);
+  return fillNames(t("wallet.cashu.history.note.paymentFailedFor"), { note: paid === PAID_REQUEST_NOTE ? t("wallet.cashu.history.note.paidRequest") : paid });
 };
 /** How often the Receive screen says again that it shows its invoice (the engine's watch lasts 90 s). */
 const INVOICE_WATCH_AGAIN_MS = 60_000;
@@ -139,7 +150,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
   // The Cashu card always uses the mints; the Lightning card uses its network's source (the mints by default).
   const ln = state.lightning;
   const viaMint = rail === "cashu" || !ln?.providerId || ln.providerId === CASHU_MINT_SOURCE;
-  const sourceName = ln?.alias ?? ln?.label;
+  const sourceName = ln?.alias ?? (ln?.providerId && ln.label ? providerLabel(t, ln.providerId, ln.label) : ln?.label);
   const unit = satsIn(t, testnet ? "testnet" : "mainnet");
   // Test sats say so wherever an amount shows on a Testnet wallet: its invoice, its mints, what came in.
   const sats = (amount: number) => t("wallet.cards.amount", { amount: formatAmount(amount, t.language), unit });
@@ -418,17 +429,20 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
               {state.history.map((tx) => {
                 const incoming = tx.kind === "lightning-in" || tx.kind === "ecash-in" || tx.kind === "reclaimed";
                 const mint = state.mints.find((m) => m.url === tx.mint);
+                // What a mint kept of a failed or unsent payment is a "fee" row of amount 0: its fee is what it moved.
+                const feeOnly = tx.kind === "fee";
+                const moved = feeOnly ? tx.fee : tx.amount;
                 return (
                   <div key={tx.id} className="text-sm py-2" data-testid="wallet-tx">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-text-primary truncate">{t(TX_LABEL[tx.kind])}</span>
-                      <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}><Signed sign={incoming ? "+" : "−"} amount={formatAmount(tx.amount, t.language)} /> <span className="text-xs font-normal text-text-muted">{unitFor(t, unit, tx.amount)}</span></span>
+                      <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}><Signed sign={incoming ? "+" : "−"} amount={formatAmount(moved, t.language)} /> <span className="text-xs font-normal text-text-muted">{unitFor(t, unit, moved)}</span></span>
                     </div>
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
                       {/* A mint's name and a contact's memo are someone else's text, in any script: each in its own
                           direction, so the two never swap around the " · " between them. */}
                       <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · <bdi>{mint?.name ?? new URL(tx.mint).hostname}</bdi>{tx.note && <> · <bdi>{noteText(t, tx)}</bdi></>}</span>
-                      <span className={`shrink-0 ${tx.fee > 0 ? "text-warn-ink" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language), unit }) : t("wallet.cashu.history.noFee")}</span>
+                      {!feeOnly && <span className={`shrink-0 ${tx.fee > 0 ? "text-warn-ink" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language), unit }) : t("wallet.cashu.history.noFee")}</span>}
                     </div>
                   </div>
                 );

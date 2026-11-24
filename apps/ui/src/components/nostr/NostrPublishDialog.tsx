@@ -10,6 +10,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { problemLine } from "../../lib/problemText";
 import { findSecret, type SecretFinding } from "../../lib/parse/secrets";
 import { SecretGuardDialog } from "../SecretGuardDialog";
+import { namesText } from "../../lib/listText";
 
 
 /**
@@ -68,14 +69,14 @@ export function NostrPublishDialog({ request, onClose, onDone }: { request: Nost
   };
 
   const template = draft?.template;
-  const published = result ? `${t("identities.nostr.published", { relays: result.accepted.join(", ") })}${result.rejected.length ? ` ${t("identities.nostr.rejected", { relays: result.rejected.map(r => `${r.relay} (${r.reason})`).join(", ") })}` : ""}` : "";
+  const published = result ? `${t("identities.nostr.published", { relays: namesText(result.accepted, t) })}${result.rejected.length ? ` ${t("identities.nostr.rejected", { relays: namesText(result.rejected.map(r => `${r.relay} (${r.reason})`), t) })}` : ""}` : "";
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="nostr-publish-title" data-testid="nostr-publish-dialog"
         className="focus:outline-none w-full max-w-md max-h-[90dvh] overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4">
         <div className="flex items-start justify-between gap-4">
           <h2 id="nostr-publish-title" className="text-lg font-medium text-text-primary">{draft?.summary ?? t("identities.nostr.publish")}</h2>
-          <button type="button" aria-label={t("common.close")} data-testid="nostr-publish-close" onClick={close} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
+          <button type="button" aria-label={t("common.close")} data-testid="nostr-publish-close" onClick={close} className="tap-target grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
         </div>
         {!draft && !error && <p className="text-xs text-text-muted">{t("identities.nostr.preparing")}</p>}
         {template && !result && <>

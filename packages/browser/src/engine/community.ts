@@ -372,7 +372,8 @@ interface Live {
   memberBackUntil?: number;
   /**
    * Started again with edges of my last run that are not up (their apps were closed too): until then those apps may come
-   * back, as hubs or members, and I look for them fast (my lobby, the beacon, our edge). Set at the first tick.
+   * back, as hubs or members, and I look for them fast (my lobby, the beacon, our edge). Set from the first reading of the
+   * beacon, never for one whose entry moved since (its app runs).
    */
   restartedUntil?: number;
   /** Members whose edge is due any moment (we just met over the admission): opened expecting them, and since when it is awaited. */
@@ -426,6 +427,12 @@ interface Live {
   restored: Map<string, number>;
   /** The restored edges to members were cut down to `RESTORED_MEMBER_EDGES`, at the first reading of the beacon. */
   restoredTrimmed?: boolean;
+  /**
+   * The keys of `restored` as the app started, for the restart window (`restartedUntil`), each with its beacon entry's
+   * time at the first reading (0 before it): a reading held back a minute finds `restored` emptied by then
+   * (`RESTORED_EDGE_MS`). One stays until its entry moves (its app runs), goes stale or its edge is up.
+   */
+  restartKeys?: Map<string, number>;
   /** As a hub: keys the chain took out that I keep an edge to until they are told (since when, told when); keys not waited for until; and when each was last told. */
   farewells: Map<string, { since: number; told?: number }>;
   farewellQuiet: Map<string, number>;
@@ -545,7 +552,7 @@ export class Communities {
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
       // The edges of the last run stay a while, whatever the topology wants at first (see `reconcile`).
       const live = this.live.get(group.id);
-      if (live) for (const key of this.host.edges(group.id).keys()) live.restored.set(key, 0);
+      if (live) { for (const key of this.host.edges(group.id).keys()) live.restored.set(key, 0); live.restartKeys = new Map([...live.restored.keys()].map(key => [key, 0])); }
     }
   }
 
@@ -867,7 +874,8 @@ export class Communities {
     else fresh = await s.handle(from, raw) && f.t === "group-commit";
     // While I am still in, what moves the chain or says a leave goes on, once, to my other edges: a member whose only
     // edge is to me (I was its hub) reaches the group through me, its hand-on of the role and its leave too.
-    if (fresh && rosterHas(s.roster, s.myKey)) for (const [key, linkId] of this.host.edges(groupId)) if (key !== from) this.sendTo(linkId, f);
+    // Its own fields alone, as a hub hands on (`passOn`).
+    if (fresh && rosterHas(s.roster, s.myKey)) { const out = s.passOn(f); for (const [key, linkId] of this.host.edges(groupId)) if (key !== from) this.sendTo(linkId, out); }
     await this.leftMoved(groupId, this.now());
   }
 
@@ -1884,6 +1892,26 @@ export class Communities {
       // Not one whose leave I hold: its app follows the chain a while after it left, and keeps its side open.
       for (const [key, id] of existing) if (this.host.linkReady(id, 2) && (live.members.has(key) || this.recentHub(live, key)) && !this.gone(live, key)) wanted.add(key);
     }
+    // An app of my last run whose edge is not up was closed too, and may be back any moment: looked for fast a while
+    // (`restartedUntil`), as a hub looks for a member it dropped (`MEMBER_BACK_MS`), which a restart forgets. Not one whose
+    // beacon entry moved since my first reading: its app runs, and our edge comes up as links reopen. No edge is up this
+    // early after a restart, so the window started on nearly every one, the others' apps running: a hub of 5 communities
+    // read its lobbies 50 times a minute, against a budget of 20, and an app reloaded every half minute never left the
+    // window (bug hunt 1118, 2026-11-17). Nor is an entry's age enough: one closed with mine half a minute ago is still
+    // listed when I am back, and the window waits until a reading finds it stale (else that app, back later, waited 61 s),
+    // or until it would be gone from the door, the readings failing. A member is never listed: its key counts only while
+    // no other hub is listed fresh (one is, and the community runs: that hub's own key decides), else a hub whose edges
+    // went to members started the window on every restart all the same.
+    if (live.restartKeys && live.beaconKnown) {
+      const hubUp = this.hubs(live).some(h => h.key !== s.myKey && live.beaconAt - h.ts < COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5);
+      for (const [key, first] of live.restartKeys) {
+        const id = existing.get(key), ts = live.beacon.find(h => h.key === key)?.ts;
+        if ((id && this.host.linkReady(id, 2)) || (first && ts !== undefined && ts > first) || (ts === undefined && hubUp)) live.restartKeys.delete(key);
+        else if (ts === undefined || live.beaconAt - ts >= COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5 || now - ts >= COMMUNITY_TOPOLOGY.beaconFreshMs) { live.restartedUntil = now + MEMBER_BACK_MS; live.restartKeys.delete(key); }
+        else if (!first) live.restartKeys.set(key, ts);
+      }
+      if (!live.restartKeys.size) live.restartKeys = undefined;
+    }
     // Back after a restart: an edge of the last run stays a while, since its other end is likely looking for this app
     // (and, once up, carries the catch-up). Closed as the fresh topology's first pick did not name it, it was one about
     // to come up (2026-09-29).
@@ -1903,9 +1931,6 @@ export class Communities {
       }
     }
     for (const [key, since] of live.restored) {
-      // Its first tick: an app of my last run whose edge is not up was closed too, and may be back any moment. Looked for
-      // fast a while (`restartedUntil`), as a hub looks for a member it dropped (`MEMBER_BACK_MS`), which a restart forgets.
-      if (!since && !(existing.has(key) && this.host.linkReady(existing.get(key)!, 2))) live.restartedUntil = now + MEMBER_BACK_MS;
       if (!since) live.restored.set(key, now);
       if (!existing.has(key) || now - (since || now) >= RESTORED_EDGE_MS || s.wasRemoved(key)) live.restored.delete(key);
       else wanted.add(key);
@@ -2535,6 +2560,8 @@ export class Communities {
       // The admin's pin is the group's state, said once: kept past the store and handed to whoever was away however
       // much was said since, an unpin too (WISP 903, agents#1095). Only the admin's: no one else's pin is taken.
       lasting: m => m.frame.t === COMMUNITY_PIN_FRAME && m.sender === session.admin ? COMMUNITY_PIN_FRAME : undefined,
+      // In the order members show it live: by its number, which a new pin keeps past the one shown, whatever the clock.
+      lastingRank: m => m.frame.t === COMMUNITY_PIN_FRAME && typeof m.frame.n === "number" ? m.frame.n : undefined,
       // Who holds a file is a hint (WISP 503: no file is given up for lack of one): kept, every holder of every photo
       // would push the oldest texts out of what a member back from away gets.
       fleeting: frame => frame.t === GROUP_HAVE_FRAME,

@@ -1011,6 +1011,33 @@ describe("group call node, group-community/1 (WISP 602)", () => {
     expect([alice.session.call, bob.session.call, carol.session.call]).toEqual([undefined, undefined, undefined]);
   });
 
+  it("nor have a member let in since the hand-over vouch for it, by handing it on or by a sync", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    // The last commit under which Alice was the admin.
+    const before = bob.session.state.chain[bob.session.epoch - 1];
+    // A second key of Alice's, let in by her after the role moved, as anyone with the link may be.
+    const kay = await net.admit(alice, "kay");
+    await net.meet(kay, alice); await net.meet(kay, bob);
+    later(60_000);
+    const s = bob.session, key = epochKeys(fromBase64Url(s.state.secrets[s.topHash]), s.id, s.epoch).message;
+    const hers = signGroupMeta({ g: s.id, e: before.e, h: communityCommitHash(before), r: 50, ts: 1 }, encodeGroupMetaBody({ name: "Pwned", call: { sfu: SFU } }),
+      identityFromSeedB64(alice.session.state.seedB64).seed, alice.session.myKey);
+    const frame = wrapGroupMeta(hers, s.topHash, key, true);
+    await s.handle(kay.session.myKey, clone(frame));
+    await net.settle();
+    expect([bob.session.name, bob.session.call]).toEqual(["Ghosts", undefined]);
+    // From Alice herself, then Kay's sync naming it: still not taken.
+    await s.handle(alice.session.myKey, clone(frame));
+    await s.handle(kay.session.myKey, { ...clone(kay.session.syncFrame()), mt: `${hers.e}.${hers.r}` });
+    await net.settle();
+    expect([bob.session.name, bob.session.call, carol.session.call]).toEqual(["Ghosts", undefined, undefined]);
+  });
+
   it("the admin turns sealed call media on and off, and naming the node again keeps it as it was", async () => {
     const net = new Net();
     const alice = net.create("alice");
