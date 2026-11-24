@@ -64,6 +64,12 @@ export const COMMUNITY_LIMITS = {
    * store (`CommunitySessionHooks.lasting`). A few kinds at most.
    */
   lasting: 8,
+  /**
+   * A lasting frame is ordered by its author's time: one whose time is further ahead of my clock than this is not kept,
+   * and one kept from before gives way, or a clock a day ahead would keep it in place of every newer one for a day. As
+   * a pin's number (`PIN_CLOCK_SKEW_MS`).
+   */
+  lastingAheadMs: 10 * 60_000,
   storeBytes: 1024 * 1024,
   /** Epoch secrets kept (by commit), main branch and losing ones together. */
   secrets: 96,
@@ -2035,9 +2041,11 @@ export class CommunitySession {
   private keepLasting(message: CommunityIncomingApp, frame: CommunityMessageFrame): void {
     const kind = this.hooks.lasting?.(message);
     if (typeof kind !== "string" || !kind) return;
+    const ahead = (f: CommunityMessageFrame) => f.ts > (this.hooks.clock?.() ?? Date.now()) + COMMUNITY_LIMITS.lastingAheadMs;
+    if (ahead(frame)) return;
     const kept = { ...this.state.lasting };
     const now = kept[kind];
-    if (now && (now.ts > frame.ts || (now.ts === frame.ts && (now.e > frame.e || (now.e === frame.e && frameKey(now) >= frameKey(frame)))))) return;
+    if (now && !ahead(now) && (now.ts > frame.ts || (now.ts === frame.ts && (now.e > frame.e || (now.e === frame.e && frameKey(now) >= frameKey(frame)))))) return;
     if (!now && Object.keys(kept).length >= COMMUNITY_LIMITS.lasting) return;
     kept[kind] = frame;
     this.state.lasting = kept;
