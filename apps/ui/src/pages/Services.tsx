@@ -11,6 +11,8 @@ import { externalLinkProps } from "../lib/externalLink";
 import { useToast } from "../hooks/useToast";
 import { useFocusLanding } from "../hooks/useFocusLanding";
 import { Toast } from "../components/ui/Toast";
+import { SecretGuardDialog } from "../components/SecretGuardDialog";
+import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { draftDirection } from "../lib/documentLanguage";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
@@ -98,6 +100,8 @@ export function Services() {
   // Counted up once a card's Allow or Share asked for its address: every card reads its own again, as the address one
   // allowed may be another app's too.
   const [accessAsked, setAccessAsked] = useState(0);
+  // A name that looks like a secret asks first, as a new group's does: every contact the app is shared with reads it.
+  const [secret, setSecret] = useState<SecretFinding | null>(null);
   if (!platform || !view) return null;
 
   const { online, services, canShare } = view;
@@ -115,7 +119,9 @@ export function Services() {
     finally { sharing.current = false; setBusy(false); }
   };
 
-  const shareThenLand = async () => {
+  const shareThenLand = async (confirmed = false) => {
+    const found = confirmed || sharing.current ? null : findSecret(name);
+    if (found) { setSecret(found); return; }
     // A Share pressed again while one runs keeps the first one's apps.
     const mark = { sharing: new Set(services.map((s) => s.id)) };
     setLanding((was) => (was && "sharing" in was ? was : mark));
@@ -156,6 +162,7 @@ export function Services() {
                 <Button onClick={() => { setAdding(false); setError(""); }}>{t("common.cancel")}</Button>
               </ButtonGroup>
             </form>
+            {secret && <SecretGuardDialog finding={secret} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void shareThenLand(true); }} />}
           </Block>
         ) : (
           <button data-testid="add-service" onClick={() => setAdding(true)} className="w-full flex items-center justify-center gap-2 px-4 py-3.5 text-sm text-text-secondary hover:text-accent hover:bg-surface-alt transition-colors cursor-pointer rounded-b-xl">
