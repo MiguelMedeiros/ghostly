@@ -34,7 +34,7 @@ const CARD: AppCard = { kind: "app", id: appCardId(REF), ref: REF, digest: "ExPD
   version: "1.2.0", url: "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp", opened: true };
 /** What the bubble shows where it draws no card. */
 const TEXT = "Your move after lunch, the board is set";
-const LINE = `🧩 App: ${isolate("Chess")} 1.2.0`;
+const LINE = `🧩 App: ${isolate("Chess")} ${isolate("1.2.0")}`;
 /** The line as a quote and the pinned bar say it: a snippet keeps no direction marks (`replySnippet`). */
 const QUOTED = "🧩 App: Chess 1.2.0";
 const NOW = Date.now();

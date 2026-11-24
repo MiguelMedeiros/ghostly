@@ -304,11 +304,11 @@ export function appCardsShown(chat: string | undefined, appsOn: boolean): boolea
  * the bundle's link (WISP 405 § An app). An app installed here is named as its card names it, by its own title and
  * version, never the sender's words for it (`installed`: the list as last read). None for any other message, and none
  * where its chat does not draw it as a card (`shown`: `appCardsShown`), where the message's text is read instead.
- * The title is isolated: in Arabic, "Chess! 1.2.0" read "1.2.0 !Chess", and an Arabic title in an English line put the
- * version before it.
+ * The title and the version are each isolated: in Arabic, a card with no version, "Chess!", read "!Chess", and an Arabic
+ * title in an English line put the version before it; the version's own isolate keeps "1.2.0-beta.1" whole in Arabic.
  */
 export function appCardLine(card: StatusCard | Pick<AppCard, "kind" | "ref" | "title" | "version"> | undefined, shown: boolean, t: Translate, installed = installedApps()): string | undefined {
   if (!shown || card?.kind !== "app") return undefined;
   const { title, version } = installed?.find((app) => app.ref === card.ref) ?? card;
-  return `🧩 ${t("apps.card.label", { title: version ? `${isolate(title)} ${version}` : isolate(title) })}`;
+  return `🧩 ${t("apps.card.label", { title: version ? `${isolate(title)} ${isolate(version)}` : isolate(title) })}`;
 }

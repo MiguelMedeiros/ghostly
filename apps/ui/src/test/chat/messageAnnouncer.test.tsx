@@ -126,7 +126,7 @@ describe("a new message, read out to a screen reader", () => {
       const view = renderApp(<MessageAnnouncer chat="c" linkId="link-1" messages={HISTORY} nameOf={nameOf} />, { language: "zh" });
       view.rerender(<MessageAnnouncer chat="c" linkId="link-1" messages={[...HISTORY, peer(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${card.url}`, { card })]} nameOf={nameOf} />);
       wait(ANNOUNCE_WINDOW_MS);
-      expect(region().textContent).toBe(`Alice：🧩 应用：${isolate("Chess")} 1.2.0`);
+      expect(region().textContent).toBe(`Alice：🧩 应用：${isolate("Chess")} ${isolate("1.2.0")}`);
     } finally { hideApps(); }
   });
 

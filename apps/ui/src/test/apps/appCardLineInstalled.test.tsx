@@ -39,8 +39,8 @@ const CARD: AppCard = { kind: "app", id: appCardId(REF), ref: REF, digest: DIGES
 const NOW = Date.now();
 const MESSAGE = { id: "m1", text: statusCardText(CARD), card: CARD, sender: "peer", timestamp: NOW } as ChatMessage;
 const OTHER: AppCard = { ...CARD, id: appCardId(`${KEY}/chess`), ref: `${KEY}/chess` };
-/** The installed app's line, its title isolated (appCardLineDirection.test.ts). */
-const NOTES_LINE = `🧩 App: ${isolate("Private Notes")} 3.1.0`;
+/** The installed app's line, its title and version isolated (appCardLineDirection.test.ts). */
+const NOTES_LINE = `🧩 App: ${isolate("Private Notes")} ${isolate("3.1.0")}`;
 
 describe("an app card for an app installed here", () => {
   beforeEach(() => {

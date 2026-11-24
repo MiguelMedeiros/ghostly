@@ -79,9 +79,9 @@ describe("the installed apps read again", () => {
     saveSession(session("ana", [message]));
     renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
     const row = screen.getAllByTestId("chat-row").find((r) => within(r).getByTestId("chat-row-name").textContent === "ana")!;
-    await waitFor(() => expect(within(row).getByTestId("chat-row-preview").textContent).toBe(`🧩 App: ${isolate("Private Notes")} 3.1.0`));
+    await waitFor(() => expect(within(row).getByTestId("chat-row-preview").textContent).toBe(`🧩 App: ${isolate("Private Notes")} ${isolate("3.1.0")}`));
     fakeEngine.on("appList", () => [{ ...NOTES, version: "3.2.0" }]);
     await readAgain();
-    expect(within(row).getByTestId("chat-row-preview").textContent).toBe(`🧩 App: ${isolate("Private Notes")} 3.2.0`);
+    expect(within(row).getByTestId("chat-row-preview").textContent).toBe(`🧩 App: ${isolate("Private Notes")} ${isolate("3.2.0")}`);
   });
 });
