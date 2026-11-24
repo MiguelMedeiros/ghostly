@@ -293,6 +293,21 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
     expect(node["links"].get(id)?.stored.preferredTransport).toBe("hyperdht/1");
   }, 60_000);
 
+  it("ends on a later choice made while the native listener it named comes up", async () => {
+    const listen = async (): Promise<NativeEndpoint> => {
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      return { transport: "hyperdht/1", descriptor: { publicKey: "ab".repeat(32) }, onConnection: null, onDescriptor: null,
+        connect: vi.fn(), close: vi.fn(async () => {}) } as unknown as NativeEndpoint;
+    };
+    const { node, id } = await waiting({ nativeTransports: { "hyperdht/1": listen } }, ["webrtc/1", "hyperdht/1"]);
+    const pinned = node.setChatTransport({ linkId: id, transport: "hyperdht/1" });
+    pinned.catch(() => {});
+    await run(500);
+    await settled(node.setChatTransport({ linkId: id, transport: "auto" }));
+    await settled(pinned);
+    expect(node["links"].get(id)?.stored.preferredTransport, "Automatic, chosen last").toBeUndefined();
+  }, 60_000);
+
   it("leaves a chat waiting for a choice it refuses", async () => {
     const { node, id } = await waiting();
     await expect(settled(node.setTransportPreference({ linkId: id, preferred: "webrtc/1", fallback: "yes" as unknown as boolean }))).rejects.toThrow("Transport unavailable");
@@ -310,6 +325,13 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
     const second = await waiting();
     await settled(second.node.setTransportPreference({ linkId: second.id, preferred: "webrtc/1", fallback: false }));
     expect(second.node["links"].get(second.id)?.stored.transportFallback).toBe(false);
+  }, 60_000);
+
+  it("keeps a chat on its live link at once", async () => {
+    const { node, id } = await waiting();
+    await settled(node.setDeliveryMode({ linkId: id, mode: "stream" }));
+    expect(node["links"].get(id)?.link, "started").toBeDefined();
+    expect((node["resumeTurns"] as ResumeTurns)["line"]).toEqual([]);
   }, 60_000);
 });
 
