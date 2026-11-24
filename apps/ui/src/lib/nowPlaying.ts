@@ -88,10 +88,47 @@ function end(): void {
 }
 
 /**
+ * Messages that went from this device a moment ago (deleted here, or by their sender for everyone), by id, the newest
+ * `GONE_MESSAGES`: a bubble that leaves the screen because its message went is not one that plays on.
+ */
+const goneMessages = new Set<string>();
+const GONE_MESSAGES = 200;
+
+/**
+ * These messages go from this device (a delete here, or their sender's for everyone, WISP 400 § Delete for everyone):
+ * what plays from one of them stops for good, held here now or handed here by its bubble as it leaves (`holdPlayback`),
+ * and where it stopped is forgotten. It used to play on to its end with the bar, the message gone from the chat.
+ */
+export function stopPlayingMessages(messageIds: readonly string[]): void {
+  for (const id of messageIds) {
+    goneMessages.delete(id);
+    goneMessages.add(id);
+  }
+  for (const id of goneMessages) {
+    if (goneMessages.size <= GONE_MESSAGES) break;
+    goneMessages.delete(id);
+  }
+  const playing = held?.handed;
+  if (!playing?.messageId || !messageIds.includes(playing.messageId)) return;
+  playing.audio.pause();
+  forgetPosition(playing.id);
+  end();
+}
+
+/**
  * A bubble leaving the screen while `handed.audio` plays: it plays on from here, with the bar. Only one at a time: one
- * held before is stopped. The system's media controls now drive this one.
+ * held before is stopped. The system's media controls now drive this one. One whose message went from this device
+ * (`stopPlayingMessages`) is let go of instead.
  */
 export function holdPlayback(handed: Handed): void {
+  if (handed.messageId && goneMessages.has(handed.messageId)) {
+    handed.audio.pause();
+    forgetPosition(handed.id);
+    handed.release();
+    releasePlayback(handed.id);
+    releaseMediaSession(handed.id);
+    return;
+  }
   if (held) stopHeld();
   const { audio, id } = handed;
   const listening = new AbortController();
@@ -189,4 +226,5 @@ export const onNowPlaying = (listener: (now: NowPlaying | null) => void): (() =>
 export function resetNowPlaying(): void {
   end();
   positions.clear();
+  goneMessages.clear();
 }

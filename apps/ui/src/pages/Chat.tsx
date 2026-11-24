@@ -78,7 +78,7 @@ import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
 import { CueChat } from "../lib/cues";
-import { NowPlayingChat, pauseForCall, stopPlayingFrom } from "../lib/nowPlaying";
+import { NowPlayingChat, pauseForCall, stopPlayingFrom, stopPlayingMessages } from "../lib/nowPlaying";
 import { usePlatformValue } from "../hooks/useServicesPlatform";
 import {
   isSessionPinned,
@@ -481,6 +481,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
    * pressed: a row is drawn again only when what it shows changes (`MessageRow`), so it holds them from an earlier draw.
    */
   const forgetMessage = useHandler(async (messageId: string, waiting = false): Promise<void> => {
+    // What plays from it stops with it, before its bubble leaves the screen and would hand it to the bar.
+    stopPlayingMessages([messageId]);
     if (waiting) {
       if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
       deleteMessage(messageId);
@@ -548,6 +550,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
     if (result.error) throw new Error(result.error);
     engine.tellChangesNow();
+    stopPlayingMessages([messageId]);
     deleteMessage(messageId);
     forgetSentOriginal(sessionId, messageId);
   });
