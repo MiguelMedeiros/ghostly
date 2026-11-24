@@ -196,7 +196,8 @@ function editableText(message: ChatMessage): boolean {
  */
 function removableForEveryone(message: ChatMessage): boolean {
   // By the id the contact knows it by (`replyTarget`), as Reply, React and Pin read it: a file or a voice message sent
-  // from this page has a row the page made itself, with no `ref`, and its id is in its file's.
+  // from this page has a row the page made itself, with no `ref`, and its id is in its file's. One that never left this
+  // device (no room for its copy) is the bubble's to leave out: it reads the transfer (`fileNeverSent`).
   return message.sender === "me" && !!replyTarget(message) && message.delivery !== "waiting" && !message.paymentId && !message.systemEvent && !message.callEvent;
 }
 
