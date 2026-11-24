@@ -1,4 +1,5 @@
 import { act } from "@testing-library/react";
+import { CALL_SIGNAL_MAX_AGE_MS, parseCallSignal } from "@ghostly/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
@@ -270,13 +271,68 @@ describe("placing a call", () => {
     expect(next.ts).toBeGreaterThan(hangUp.ts);
   });
 
+  // A signal read from the call record carries no `at`: a contact takes it only CALL_SIGNAL_MAX_AGE_MS ahead of its own
+  // clock. Dated after what was said last, a hang-up and the next call after a clock set back further would be refused.
   it("a clock set back by more than a contact takes ahead of its own dates what this side says by the clock again", async () => {
     const call = renderCall();
     await offered(call);
-    // The clock was an hour ahead, and is right now: an hour ahead, a contact whose clock is right refuses every signal.
-    vi.setSystemTime(Date.now() - 60 * 60_000);
+    vi.setSystemTime(Date.now() - 3 * 60_000);
+
     act(() => call.result.current.hangUp());
     expect(JSON.parse(call.published[1]!)).toMatchObject({ t: "h", ts: Date.now() });
+    expect(parseCallSignal(call.published[1]!, Date.now())).toMatchObject({ t: "h" });
+
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[1].grant();
+    await settle();
+    const next = call.published[call.published.length - 1]!;
+    expect(parseCallSignal(next, Date.now())).toMatchObject({ t: "o" });
+  });
+
+  it.each([
+    ["at", CALL_SIGNAL_MAX_AGE_MS, false],
+    ["1 ms under", CALL_SIGNAL_MAX_AGE_MS - 1, true],
+  ])("a clock set back %s CALL_SIGNAL_MAX_AGE_MS: the hang-up is dated after the offer only under it", async (_, back, after) => {
+    const call = renderCall();
+    await offered(call);
+    const offer = JSON.parse(call.published[0]!) as { ts: number };
+    vi.setSystemTime(offer.ts - back);
+    act(() => call.result.current.hangUp());
+    expect(JSON.parse(call.published[1]!)).toMatchObject({ t: "h", ts: after ? offer.ts + 1 : Date.now() });
+  });
+
+  // The offer's `ts` is dated after what this side said last, ahead of its clock: when the contact's signal was heard
+  // here (`at`, this clock) is held against when the offer went out on this clock.
+  it("the contact's decline of a call placed after the clock was set back is a declined call", async () => {
+    const call = renderCall();
+    await offered(call);
+    vi.setSystemTime(Date.now() - 60_000);
+    act(() => call.result.current.hangUp());
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[1].grant();
+    await settle();
+    expect(call.result.current.callState).toBe("offering");
+
+    act(() => { vi.advanceTimersByTime(5000); });
+    call.receive(JSON.stringify({ ...JSON.parse(remote.hangUp(Date.now())), at: Date.now() }));
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_rejected", false);
+    expect(call.result.current.callState).toBe("idle");
+  });
+
+  it("an answer that names no offer (an app up to 1.0.2), to a call placed after the clock was set back, connects", async () => {
+    const call = renderCall();
+    await offered(call);
+    vi.setSystemTime(Date.now() - 60_000);
+    act(() => call.result.current.hangUp());
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[1].grant();
+    await settle();
+
+    act(() => { vi.advanceTimersByTime(5000); });
+    call.receive(JSON.stringify({ ...JSON.parse(remote.answer(Date.now())), at: Date.now() }));
+    await settle();
+    expect(FakePeerConnection.instances[1].remoteDescription?.type).toBe("answer");
+    expect(call.result.current.callState).toBe("connecting");
   });
 
   it("a call nobody answers hangs up after RING_MS and says \"No answer\" for a while", async () => {

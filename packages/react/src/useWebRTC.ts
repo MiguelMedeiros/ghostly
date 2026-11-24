@@ -6,7 +6,7 @@ import {
   parseCallSignal,
   answersOffer,
   BURST_RING_MS,
-  CALL_SIGNAL_FUTURE_MS,
+  CALL_SIGNAL_MAX_AGE_MS,
   callSignalHeardAt,
   QUICK_REDIAL_MS,
   keepsToRelays,
@@ -507,6 +507,11 @@ export function useWebRTC({
   const heldOfferRef = useRef<{ signal: CallSignal; at: number; line: string | null } | null>(null);
   const hangupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myOfferTimestampRef = useRef<number>(0);
+  /**
+   * When our offer went out, on this device's clock. Its `ts` (`stamp`) may be a little ahead of that clock: when a
+   * contact's signal was heard here (`at`) is held against this one.
+   */
+  const myOfferAtRef = useRef<number>(0);
   /** Our published offer's DTLS fingerprint: with its timestamp, what decides who rings when both call at once. */
   const myOfferFingerprintRef = useRef<string>("");
   /** Whether a picture was on at any point, which is what the chat log calls a video call. */
@@ -553,12 +558,13 @@ export function useWebRTC({
    * The `ts` of what this side says next (`stamp`): now, or 1 ms after the last thing it said. The contact takes only a
    * signal later than the last one it heard from this side (WISP 601, Time): one dated by a clock set back since was
    * dropped there, so Cancel left the call ringing and the next call did not ring. A clock set back by more than a
-   * contact takes ahead of its own (CALL_SIGNAL_FUTURE_MS) was the wrong one: dated after it, every signal would be refused.
+   * contact takes ahead of its own (CALL_SIGNAL_MAX_AGE_MS: a signal read from the call record carries no `at`, and is
+   * taken only that close to the reader's clock) was the wrong one: dated after it, every signal would be refused.
    */
   const lastSentRef = useRef(0);
   const stamp = useCallback(() => {
     const now = Date.now(), last = lastSentRef.current;
-    return (lastSentRef.current = last >= now && last - now < CALL_SIGNAL_FUTURE_MS ? last + 1 : now);
+    return (lastSentRef.current = last >= now && last - now < CALL_SIGNAL_MAX_AGE_MS ? last + 1 : now);
   }, []);
   /** A restart offer is being made. */
   const restartBusyRef = useRef(false);
@@ -1146,6 +1152,7 @@ export function useWebRTC({
 
         const offerTs = stamp();
         myOfferTimestampRef.current = offerTs;
+        myOfferAtRef.current = Date.now();
         myOfferFingerprintRef.current = params.f ?? "";
 
         const signal: CallSignal = {
@@ -1622,7 +1629,9 @@ export function useWebRTC({
       receivedLineRef.current = addCallEventMessage?.("call_received", signalHasVideo(signal), undefined, signal.ts) || null;
       pendingOfferRef.current = signal;
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
-      if (answersOffer(signal, myOfferTimestampRef.current)) {
+      // An answer that names its offer (`o`) names its `ts`; one that does not (apps up to 1.0.2) is held by when it was
+      // heard here against when the offer went out, on this clock.
+      if (answersOffer(signal, signal.o !== undefined ? myOfferTimestampRef.current : myOfferAtRef.current)) {
         lastProcessedSignalRef.current = signal.ts;
         if (callStateRef.current === "offering") {
           handleAnswer(signal);
@@ -1639,7 +1648,7 @@ export function useWebRTC({
       if (callStateRef.current === "incoming") {
         setMissedAt(performance.now() - ringingSinceRef.current < BURST_RING_MS ? performance.now() : null);
         addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
-      } else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && callSignalHeardAt(signal) > myOfferTimestampRef.current) {
+      } else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && callSignalHeardAt(signal) > myOfferAtRef.current) {
         // Our call still rang there: the contact declined it (a side that rings sends nothing else).
         addCallEventMessage?.("call_rejected", callHadVideoRef.current);
         hangUp(false, false);
