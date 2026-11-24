@@ -43,7 +43,7 @@ import { usePresence } from "./hooks/useOwnStatus";
 import { useIsLocked } from "./contexts/LockScreenContext";
 import { StatusPickerHost } from "./components/StatusPicker";
 import { ReconnectedSaid } from "./components/ReconnectedSaid";
-import { focusLost } from "./lib/focus";
+import { focusLost, focusOffScreen } from "./lib/focus";
 
 /**
  * Which chats stay loaded: the one the address points at, and the one on a
@@ -110,6 +110,28 @@ function useOnScreenLink(): string | null {
     told.current = null;
   }, []);
   return onScreen;
+}
+
+/**
+ * A phone's page change took the focused control away (a chat's Back, Profile's Identities): back on the chat list, the
+ * row of the chat or group just left takes the focus (New chat when it has none), as a Settings section's Back gives it
+ * to the section's row; any other page, its title (layout/Page.tsx), as a Settings section's opening does. A chat or a
+ * group opened puts the focus where it wants it (hooks/useOpenedHeading.ts).
+ */
+function focusOnPhonePage(left: string, shown: string) {
+  if (chatRouteSession(shown) || groupRouteId(shown)) return;
+  const visible = (el: HTMLElement | null | undefined) => (el && !el.closest("[hidden], [inert]") && (el.checkVisibility?.() ?? true) ? el : null);
+  if (shown !== "/") {
+    visible(document.querySelector<HTMLElement>("main h1[tabindex='-1']"))?.focus({ preventScroll: true });
+    return;
+  }
+  const chat = chatRouteSession(left), group = groupRouteId(left);
+  const row = chat
+    ? [...document.querySelectorAll<HTMLElement>("[data-testid='chat-row']")].find(r => r.dataset.chat === chat)?.querySelector<HTMLElement>("[data-testid='chat-row-open']")
+    : group ? [...document.querySelectorAll<HTMLElement>("[data-testid='group-row']")].find(r => r.dataset.group === group)?.querySelector<HTMLElement>("[data-testid='group-row-open']") : null;
+  const next = visible(row) ?? [...document.querySelectorAll<HTMLElement>("[data-testid='sidebar-new-chat']")].find(n => visible(n));
+  next?.focus({ preventScroll: true });
+  next?.scrollIntoView?.({ block: "nearest" });
 }
 
 function useLoadedChats() {
@@ -223,11 +245,14 @@ export function App() {
   // document: the next Tab would start again at the top. The open page takes it, as the skip link gives it. After the
   // pages' own effects (children first), so a page that puts the focus somewhere keeps it there. Not at the start: the
   // first Tab goes to the skip link.
+  // On a phone, where the chat or page left stays mounted but hidden a moment with the focus: see `focusOnPhonePage`.
   const shownPath = useRef(pathname);
   useEffect(() => {
-    if (shownPath.current === pathname) return;
+    const left = shownPath.current;
+    if (left === pathname) return;
     shownPath.current = pathname;
-    if (!isMobile && focusLost()) mainRef.current?.focus({ preventScroll: true });
+    if (!isMobile) { if (focusLost()) mainRef.current?.focus({ preventScroll: true }); }
+    else if (focusOffScreen()) focusOnPhonePage(left, pathname);
   }, [pathname, isMobile]);
   // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
   // profile closing): after the bubbles' layout cleanups have handed it over.
