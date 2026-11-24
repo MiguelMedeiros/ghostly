@@ -30,5 +30,3 @@ export const reader = {
   chapters: "Chapters",
   repo: "repository",
 };
-
-export type ReaderCopy = typeof reader;
