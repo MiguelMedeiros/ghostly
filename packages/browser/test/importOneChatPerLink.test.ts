@@ -73,6 +73,8 @@ const callsOf = (method: string) => engine.calls.filter(([m]) => m === method);
 
 /** A page starting over `disk` (a restart: the page's modules start over, the engine's store stays). */
 async function pageStart(disk: MemoryStorage) {
+  // The page before is gone: its 5 s tick with it.
+  vi.clearAllTimers();
   vi.resetModules();
   vi.stubGlobal("localStorage", disk);
   vi.stubGlobal("window", new EventTarget());
@@ -185,6 +187,70 @@ describe("the first-run import of the engine's links", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(callsOf("exportLinks")).toHaveLength(1);
     expect(rows()).toBe(N);
+  });
+
+  it("a chat deleted while the import cannot finish still takes its link with it, and only its own", async () => {
+    const disk = new MemoryStorage();
+    madeChats(disk);
+    await pageStart(disk);
+    await start();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // localStorage lost for good, the mark too, but for one chat: the others' links say they have a chat this page can't read.
+    const partial = new MemoryStorage();
+    partial.setItem("ghostly_s0", disk.getItem("ghostly_s0")!);
+    await pageStart(partial);
+    await start();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(callsOf("removeLink")).toEqual([]);
+
+    storage.deleteSession("s0");
+    window.dispatchEvent(new Event("session-updated"));
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    const removed = callsOf("removeLink").map(([, params]) => (params as { linkId: string }).linkId);
+    expect(removed.length).toBeGreaterThan(0);
+    expect(new Set(removed)).toEqual(new Set(["link-0"]));
+    expect(partial.getItem(MARK)).toBeNull();
+  });
+
+  it("an import that cannot finish is tried less and less often (up to every 5 min), and sooner once a chat is stored", async () => {
+    const disk = new MemoryStorage();
+    madeChats(disk);
+    await pageStart(disk);
+    await start();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    const empty = new MemoryStorage();
+    await pageStart(empty);
+    await start();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    const inTen = callsOf("exportLinks").length;
+    expect(inTen).toBeGreaterThan(1);
+    expect(inTen).toBeLessThanOrEqual(10);
+    // Still tried, about every 5 min.
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    const inThirty = callsOf("exportLinks").length - inTen;
+    expect(inThirty).toBeGreaterThanOrEqual(5);
+    expect(inThirty).toBeLessThanOrEqual(7);
+
+    // A chat stored or deleted (here or by another page): tried again within seconds, once however many come.
+    let before = callsOf("exportLinks").length;
+    for (let i = 0; i < 10; i++) {
+      window.dispatchEvent(new Event("session-updated"));
+      await vi.advanceTimersByTimeAsync(5_000);
+    }
+    expect(callsOf("exportLinks").length - before).toBe(1);
+
+    // After the next timed try, another page's write of the old rows: the import finds them and marks at once.
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    before = callsOf("exportLinks").length;
+    for (const [key, value] of disk.items) if (key !== MARK) empty.setItem(key, value);
+    window.dispatchEvent(Object.assign(new Event("storage"), { key: "ghostly_s0" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(callsOf("exportLinks").length - before).toBe(1);
+    expect(empty.getItem(MARK)).toBe("1");
+    expect(rows()).toBe(N);
+    expect(callsOf("removeLink")).toEqual([]);
   });
 
   it("leaves chats already stored twice as they are: none deleted, none added", async () => {

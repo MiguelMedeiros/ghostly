@@ -431,12 +431,44 @@ function noteChats(linkIds: string[]): void {
 
 /** The first-run import under way: every reconcile meanwhile waits for it, none starts its own. */
 let importing: Promise<boolean> | undefined;
-/** No import before this time: one that could not finish is tried at the next 5 s tick, not at every engine state. */
+/**
+ * No import before this time. One that could not finish is tried again later each time, 4 s then twice as long up to
+ * 5 min (its old rows may never read back: each try sends every link's keys over the RPC), and sooner once a chat is
+ * stored or deleted (`importSoon`). `importDue` is the time the waits alone set.
+ */
 let importAfter = 0;
+let importDue = 0;
 const IMPORT_AGAIN_MS = 4_000;
+const IMPORT_AGAIN_MAX_MS = 5 * 60_000;
+/** The wait after the next import that cannot finish. */
+let importWait = IMPORT_AGAIN_MS;
+/** When the last import ran. */
+let importTried = 0;
+/** An import already came sooner since the last one the waits set: no other one until that wait ends. */
+let importSooner = false;
 
 function importLinks(): Promise<boolean> {
   return (importing ??= importOnce().finally(() => { importing = undefined; }));
+}
+
+/**
+ * A chat stored or deleted (by this page or another): the old rows the import waits for may read back now, so it runs
+ * again 4 s after the last at the soonest. Once per wait: a chat busy with messages does not make it a poll.
+ */
+function importSoon(): void {
+  if (importSooner) return;
+  importSooner = true;
+  importAfter = Math.min(importAfter, importTried + IMPORT_AGAIN_MS);
+}
+
+/** When the next import may run, after one that finished (`done`) or not. */
+function importRan(done: boolean, started: number): void {
+  const now = Date.now();
+  importTried = now;
+  importSooner = !done && started < importDue;
+  if (done) importWait = IMPORT_AGAIN_MS;
+  importDue = importAfter = now + importWait;
+  if (!done) importWait = Math.min(importWait * 2, IMPORT_AGAIN_MAX_MS);
 }
 
 /**
@@ -444,10 +476,12 @@ function importLinks(): Promise<boolean> {
  * Never a second chat for a link that has one: one stored here (read again after the engine's answer, so one stored
  * meanwhile counts), or one the engine was told this page keeps (`hasChat`) while this page's storage read without it.
  * The mark is not written then: the read was not the whole storage, and no link goes for want of a chat (below) until
- * a later import finds them.
+ * a later import finds them, but one whose chat was deleted here.
  */
 async function importOnce(): Promise<boolean> {
+  const started = Date.now();
   let changed = false;
+  let done = false;
   try {
     let unread = false;
     for (const link of await engine.call("exportLinks")) {
@@ -463,14 +497,16 @@ async function importOnce(): Promise<boolean> {
     if (unread) return false;
     localStorage.setItem(MIGRATED_KEY, "1");
     changed = true;
+    done = true;
     return true;
   } catch {
-    // No room to store them (or the mark): imported again at the next reconcile. Until then no link goes for want of
+    // No room to store them (or the mark): imported again at the next try. Until then no link goes for want of
     // its chat below.
     return false;
   } finally {
+    // Before the event: the reconcile it starts reads the next time.
+    importRan(done, started);
     if (changed) notifySessionsChanged();
-    importAfter = Date.now() + IMPORT_AGAIN_MS;
   }
 }
 /**
@@ -566,7 +602,8 @@ async function reconcile(fromState = false): Promise<void> {
   for (const link of state.links) {
     if (peers.has(link.peerPubKeyZ32)) continue;
     later = true;
-    if (!imported) continue;
+    // One whose chat was deleted here had a chat, whatever the import could read: it goes even while that cannot finish.
+    if (!imported && !wasDeleted(link.peerPubKeyZ32)) continue;
     // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
     if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
@@ -625,8 +662,9 @@ export function startSessionSync(): void {
     // One whose changes the tick still holds is mirrored when it ends, from what changed only.
     for (const [linkId, messages] of engine.messages) if (!engine.changing(linkId)) mirrorNew(linkId, messages);
   });
-  // Deleting a chat only touches localStorage; notice it without waiting for the peer to speak.
-  window.addEventListener("session-updated", () => void reconcile());
+  // Deleting a chat only touches localStorage; notice it without waiting for the peer to speak. An import that could
+  // not finish may find its chats now.
+  window.addEventListener("session-updated", () => { importSoon(); void reconcile(); });
   // Another page of this app (a second tab of the extension, whose pages share one peer) wrote a chat: what it
   // mirrored first is already stored, so this page's mirror adds nothing and would never tell its chat to read again.
   // A chat cleared (`key` null: storage cleared) counts too.

@@ -118,7 +118,8 @@ describe("the first run", () => {
     expect(storage.listSessions()).toEqual([]);
 
     localStorage.setItem = write;
-    await vi.advanceTimersByTimeAsync(5_000);
+    // At the next try: the waits between them grow to 5 min at most (a chat stored or deleted brings it sooner).
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(storage.listSessions()).toHaveLength(1);
     expect(localStorage.getItem("gb-sessions-imported")).toBe("1");
     expect(engine.calls.filter(([m]) => m === "removeLink")).toEqual([]);
