@@ -7,6 +7,7 @@ import { Sidebar } from "../../components/Sidebar";
 import { ANNOUNCE_WINDOW_MS, MessageAnnouncer, type Announceable } from "../../components/chat/MessageAnnouncer";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { forgetInstalledApps } from "../../lib/apps/installed";
+import { isolate } from "../../lib/ownStatus";
 import { messageSnippet } from "../../lib/replies";
 import { saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
@@ -33,7 +34,9 @@ const CARD: AppCard = { kind: "app", id: appCardId(REF), ref: REF, digest: "ExPD
   version: "1.2.0", url: "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp", opened: true };
 /** What the bubble shows where it draws no card. */
 const TEXT = "Your move after lunch, the board is set";
-const LINE = "🧩 App: Chess 1.2.0";
+const LINE = `🧩 App: ${isolate("Chess")} 1.2.0`;
+/** The line as a quote and the pinned bar say it: a snippet keeps no direction marks (`replySnippet`). */
+const QUOTED = "🧩 App: Chess 1.2.0";
 const NOW = Date.now();
 const WIRE = "A".repeat(22), REPLY = "B".repeat(22);
 
@@ -69,15 +72,15 @@ describe("a 1:1 chat's page", () => {
     expect(screen.queryByTestId("app-card")).not.toBeInTheDocument();
     expect(quote()).toHaveTextContent(TEXT);
     expect(screen.getByTestId("pinned-snippet")).toHaveTextContent(TEXT);
-    expect(document.body).not.toHaveTextContent(LINE);
+    expect(document.body).not.toHaveTextContent(QUOTED);
   });
 
   it("with Apps on: the bubble draws the card, and the quote and the pinned bar say its line", async () => {
     showApps();
     openChat();
     await screen.findByTestId("app-card");
-    await waitFor(() => expect(quote()).toHaveTextContent(LINE));
-    expect(screen.getByTestId("pinned-snippet")).toHaveTextContent(LINE);
+    await waitFor(() => expect(quote()).toHaveTextContent(QUOTED));
+    expect(screen.getByTestId("pinned-snippet")).toHaveTextContent(QUOTED);
   });
 });
 
@@ -102,7 +105,7 @@ describe("a group's page, with Apps on", () => {
     const quote = within(document.querySelector<HTMLElement>(`[data-message-id="${MINE}"]`)!).getByTestId("reply-quote-snippet");
     expect(quote).toHaveTextContent(TEXT);
     expect(screen.getByTestId("pinned-snippet")).toHaveTextContent(TEXT);
-    expect(document.body).not.toHaveTextContent(LINE);
+    expect(document.body).not.toHaveTextContent(QUOTED);
   });
 });
 
@@ -110,7 +113,7 @@ describe("a quote's or the pinned bar's line", () => {
   const message = { text: TEXT, card: CARD };
   it("is the text unless the chat draws the card", () => {
     expect(messageSnippet(message)).toBe(TEXT);
-    expect(messageSnippet(message, undefined, true)).toBe(LINE);
+    expect(messageSnippet(message, undefined, true)).toBe(QUOTED);
   });
 });
 

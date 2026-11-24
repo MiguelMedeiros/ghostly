@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import type { SavedMessage, StoredMessage } from "@ghostly/browser/shared/types";
 import { SidebarSaved } from "../../components/saved/SidebarSaved";
+import { isolate } from "../../lib/ownStatus";
 import { saveSession } from "../../lib/storage";
 import { Saved } from "../../pages/Saved";
 import { groupView, linkView } from "../fakeEngine";
@@ -90,7 +91,7 @@ describe("the Saved view", () => {
     try {
       profile([saved(message("link-1", "peer_1", { text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`,
         card: { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url, opened: true } }))], undefined, "zh");
-      await waitFor(() => expect(texts()).toEqual(["🧩 应用：Chess 1.2.0"]));
+      await waitFor(() => expect(texts()).toEqual([`🧩 应用：${isolate("Chess")} 1.2.0`]));
     } finally { hideApps(); }
   });
 
