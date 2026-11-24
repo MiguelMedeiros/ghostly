@@ -1,7 +1,7 @@
 import { act, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { Route, Routes } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, GroupPayNote, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupPaymentComposer } from "../../components/GroupPaymentComposer";
 import { GroupChat } from "../../pages/GroupChat";
@@ -107,6 +107,44 @@ describe("GroupPaymentComposer: whom first", () => {
     await user.click(screen.getAllByTestId("group-pay-recipient")[0]);
     await user.click(screen.getByTestId("payment-recipient-change"));
     expect(screen.getAllByTestId("group-pay-recipient")).toHaveLength(3);
+  });
+
+  // Choose another goes with the cards it stands on: the list that came back focused nothing, so the focus fell to the page.
+  it("back from the cards by keyboard: the focus goes to the row just left, the member's or Everyone's", async () => {
+    const { user } = composer();
+    for (const row of [() => screen.getAllByTestId("group-pay-recipient")[0], () => screen.getByTestId("group-pay-everyone")]) {
+      await user.click(row());
+      act(() => screen.getByTestId("payment-recipient-change").focus());
+      await user.keyboard("{Enter}");
+      expect(document.activeElement).toBe(row());
+    }
+  });
+
+  it("opens on Everyone when no member can be paid one to one", () => {
+    composer({ edges: [] });
+    expect(document.activeElement).toBe(screen.getByTestId("group-pay-everyone"));
+  });
+
+  // The list shows about six rows and comes back at its top; the focus kept the page still, so it landed out of view.
+  it("in a long list, the row the focus lands on is brought into the list's view", async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => member({ key: `m${i}`.padEnd(52, "y"), nick: `M${i}`, edge: edge(`edge-m${i}`) }));
+    const links = ten.map((_, i) => linkView({ id: `edge-m${i}`, peerPubKeyZ32: `peer-m${i}`, capabilities: edges[0].capabilities }));
+    const big = group({ members: [members[0], ...ten] });
+    const scrolled = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function () {});
+    const last = () => scrolled.mock.contexts[scrolled.mock.contexts.length - 1];
+    try {
+      fakeEngine.setState({ groups: [big], edges: [], wallet: everyWallet() });
+      const first = renderApp(<GroupPaymentComposer group={big} onClose={() => {}} />);
+      expect(last()).toBe(screen.getByTestId("group-pay-everyone"));
+      first.unmount();
+      fakeEngine.setState({ groups: [big], edges: links, wallet: everyWallet() });
+      const { user } = renderApp(<GroupPaymentComposer group={big} onClose={() => {}} />);
+      await user.click(screen.getAllByTestId("group-pay-recipient")[7]);
+      act(() => screen.getByTestId("payment-recipient-change").focus());
+      await user.keyboard("{Enter}");
+      expect(document.activeElement).toBe(screen.getAllByTestId("group-pay-recipient")[7]);
+      expect(last()).toBe(screen.getAllByTestId("group-pay-recipient")[7]);
+    } finally { scrolled.mockRestore(); }
   });
 
   // The sheet's head is mirrored in a right-to-left language (the step back at the right): its chevron still pointing
@@ -293,6 +331,39 @@ describe("GroupChat: payments in the timeline", () => {
     openGroup(history("edge-a"), { payments: paying("edge-a") });
     await screen.findByTestId("group-payment");
     expect(screen.queryByTestId("group-pay-note")).not.toBeInTheDocument();
+  });
+
+  // A 1:1 chat's payment sheet takes the focus to its first card and, on Escape, gives it to the message field: the
+  // group's whom-to-pay list left it on the + behind its backdrop, and Escape from the list dropped it to the page.
+  it("+ → Payment by keyboard: the focus goes to the first member who can be paid, and Escape gives it to the message field", async () => {
+    const view = openGroup([]);
+    act(() => screen.getByTestId("composer-more").focus());
+    await view.user.keyboard("{Enter}");
+    act(() => screen.getByTestId("payment-button").focus());
+    await view.user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(screen.getAllByTestId("group-pay-recipient")[0]);
+    await view.user.keyboard("{Escape}");
+    expect(screen.queryByTestId("group-pay-recipients")).toBeNull();
+    expect(document.activeElement).toBe(view.container.querySelector(".composer-textarea"));
+  });
+
+  // On a touch screen the message field would bring the keyboard up: the + takes it, as a conversion's Cancel gives it.
+  it("on a touch screen, Escape from the whom-to-pay list gives the focus to the +, no field", async () => {
+    const matchMedia = window.matchMedia.bind(window);
+    const media = vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+      ? ({ ...matchMedia(query), matches: query === "(any-pointer: coarse)" } as MediaQueryList) : matchMedia(query));
+    const fields: string[] = [];
+    const seen = (e: FocusEvent) => { const tag = (e.target as HTMLElement).tagName; if (tag === "TEXTAREA" || tag === "INPUT") fields.push(tag); };
+    try {
+      const view = openGroup([]);
+      await view.user.click(screen.getByTestId("composer-more"));
+      await view.user.click(screen.getByTestId("payment-button"));
+      document.addEventListener("focusin", seen);
+      await view.user.keyboard("{Escape}");
+      expect(screen.queryByTestId("group-pay-recipients")).toBeNull();
+      expect(screen.getByTestId("composer-more")).toHaveFocus();
+      expect(fields).toEqual([]);
+    } finally { document.removeEventListener("focusin", seen); media.mockRestore(); }
   });
 
   it("+ → Payment opens whom-to-pay; with nobody else in the group it says so", async () => {
