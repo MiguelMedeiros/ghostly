@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Chat } from "../../pages/Chat";
 import { saveSession, setStorageProfile as setProfile } from "../../lib/storage";
@@ -40,8 +40,10 @@ describe("Delete for everyone on a file sent from this page", () => {
   });
 
   it("is not offered on a file that never left (no room for its copy), which the engine has no row of", async () => {
-    const { user } = openChat([file({ delivery: "failed", deliveryError: "Not enough space on this device" })]);
+    const { user, engine } = openChat([file({ delivery: undefined })]);
     const bubble = (await screen.findByText("notes.txt")).closest<HTMLElement>(`[data-message-id="${SENT}"]`)!;
+    act(() => engine.update({ transfers: { "chat-1-out-AbCdEfGhIjKlMnOp": { state: "failed", direction: "out", transferred: 0, size: 3000, error: "Not enough space on this device to send it", retry: false } } } as never));
+    await waitFor(() => expect(within(bubble).getByTestId("message-delivery")).toHaveAttribute("data-delivery", "failed"));
     await user.click(within(bubble).getByTestId("message-options"));
     expect(screen.getByTestId("message-delete")).toBeInTheDocument();
     expect(screen.queryByTestId("message-delete-everyone")).toBeNull();
