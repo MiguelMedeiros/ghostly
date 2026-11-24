@@ -68,6 +68,31 @@ it("invite links opened while locked each make their chat after the unlock, up t
   expect(listSessions()).toHaveLength(3);
 }, 60_000);
 
+// covers: invite.link, profiles.lock
+/*
+ * A link that comes after the one refused past the limit, still under the lock (one already held again, or a group's
+ * link): the refusal, not yet said, stays to be said after the unlock. Wiped, the refused link was lost with no word.
+ */
+it.each([
+  ["an invite link already held", (codes: string[]) => `#${codes[0]}`],
+  ["a group's link", () => "#/join/group2/after"],
+])("the refusal of an invite link past the limit is still said after the unlock when %s comes next", async (_, next) => {
+  const codes = [createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode];
+  window.location.hash = `#${codes[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const hash of [`#${codes[1]}`, `#${codes[2]}`, `#${codes[3]}`, next(codes)]) {
+    window.location.hash = hash;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(3));
+  expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
+}, 60_000);
+
 // covers: invite.invalid, invite.link, profiles.lock
 /*
  * An invite link the app refuses (here a damaged one: its end cut off) opened while the app is locked: it leaves the address at once,

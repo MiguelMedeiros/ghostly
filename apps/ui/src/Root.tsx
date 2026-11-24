@@ -146,14 +146,14 @@ function ChatLinkIntake() {
     if (isDeviceCode(rest)) { setInvalid(null); linkTaken("invite"); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
     if (reading.ok) {
-      // A good link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
-      setInvalid(null);
+      // A good link answers for itself: an earlier link's refusal, kept until closed, would read as this one's. Under the
+      // lock only a link it holds does: one held already, or refused past the limit, leaves a refusal not yet said.
       linkTaken("invite");
-      if (!locked.current) { open(reading.keys); return; }
+      if (!locked.current) { setInvalid(null); open(reading.keys); return; }
       const list = held.current;
       const keys = reading.keys;
       if (!list.some((k) => k.seedB64 === keys.seedB64 && k.peerPubKeyB64 === keys.peerPubKeyB64)) {
-        if (list.length < LINK_CHATS_WAITING) list.push(keys);
+        if (list.length < LINK_CHATS_WAITING) { setInvalid(null); list.push(keys); }
         else setInvalid("join.tooManyLinks");
       }
       setHeldCount(list.length);
@@ -170,7 +170,8 @@ function ChatLinkIntake() {
     linkTaken("invite");
     navigate("/", { replace: true });
   }, [pathname, hash, navigate, open]);
-  useOtherLink("invite", useCallback(() => setInvalid(null), []));
+  // Not under the lock: a refusal made there is said only after it, whatever came next.
+  useOtherLink("invite", useCallback(() => { if (!locked.current) setInvalid(null); }, []));
 
   useEffect(() => {
     if (!heldCount || waits) return;
@@ -318,12 +319,12 @@ function GroupLinkIntake() {
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
-    // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
+    // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's. Only a link
+    // it holds does: one waiting already, or refused past the limit, leaves the refusal of the one before it.
     else {
-      setProblem(null);
       const list = held.current;
       if (!list.some((entry) => entry.link === link)) {
-        if (list.length < LINK_GROUPS_WAITING) list.push({ link, after: otherLinks.current });
+        if (list.length < LINK_GROUPS_WAITING) { setProblem(null); list.push({ link, after: otherLinks.current }); }
         else setProblem({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
       }
       setHeldCount(list.length);
@@ -331,7 +332,8 @@ function GroupLinkIntake() {
     linkTaken("group");
     navigate("/", { replace: true });
   }, [pathname, hash, navigate, t]);
-  useOtherLink("group", useCallback(() => { otherLinks.current += 1; setProblem(null); }, []));
+  // While links wait for the unlock, a refusal made among them (one past the limit) is said after it, whatever came next.
+  useOtherLink("group", useCallback(() => { otherLinks.current += 1; if (!held.current.length) setProblem(null); }, []));
   useEffect(() => {
     if (!heldCount || isLocked || !hasUnlocked || !groupsLoaded) return;
     const list = held.current.splice(0);

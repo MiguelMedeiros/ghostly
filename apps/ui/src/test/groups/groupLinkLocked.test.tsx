@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { createChatInvite } from "@ghostly/core";
 import { afterEach, expect, it, vi } from "vitest";
 import { Root } from "../../Root";
 import { fakeEngine } from "../fakeEngine";
@@ -67,4 +68,29 @@ it("groups' links opened while locked are each joined after the unlock, up to th
   expect(screen.getByTestId("group-link-invalid-title")).toHaveTextContent("Too many group links opened");
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(joins).toHaveLength(3);
+});
+
+// covers: groups.link.join, profiles.lock
+/*
+ * A link that comes after the one refused past the limit, still under the lock (one already held again, or an invite
+ * link): the refusal, not yet acted on, stays to be said after the unlock. Wiped, the refused link was lost with no word.
+ */
+it.each([
+  ["a group's link already held", () => "#/join/group2/one"],
+  ["an invite link", () => `#${createChatInvite().inviteCode}`],
+])("the refusal of a group's link past the limit is still said after the unlock when %s comes next", async (_, next) => {
+  const joins: unknown[] = [];
+  fakeEngine.on("joinGroupByLink", (params) => { joins.push(params); return { groupId: "g1" }; });
+  window.location.hash = "#/join/group2/one";
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const hash of ["#/join/group2/two", "#/join/group2/three", "#/join/group2/four", next()]) {
+    go(hash);
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(joins).toEqual([{ link: "group2/one" }, { link: "group2/two" }, { link: "group2/three" }]));
+  expect(screen.getByTestId("group-link-invalid-title")).toHaveTextContent("Too many group links opened");
 });
