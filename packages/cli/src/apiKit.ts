@@ -46,6 +46,8 @@ export interface CallScope {
 }
 
 export type Method = (ctx: ApiContext, params: Params, call?: CallScope) => Promise<unknown>;
+/** A method's own lookup of the thing its params name, as its handler makes it first: throws what the handler would. */
+export type Lookup = (ctx: ApiContext, params: Params) => unknown;
 
 /**
  * The scope of the call running now (`callApi`), however deep: a wait still open when its client's connection closes

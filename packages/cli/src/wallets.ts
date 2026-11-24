@@ -2,7 +2,7 @@ import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { parsePaymentAmount, type WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
-import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Lookup, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
@@ -343,6 +343,15 @@ function mintNotOffered(error: unknown): CliError | undefined {
   return new CliError("engine", `${words}: its mint is not one of yours, and it is on this machine or a local network (add a mint there only if you run it yourself)`);
 }
 
+/** The payment `payment reclaim` names, one this profile keeps. */
+function paymentToReclaim(ctx: ApiContext, params: Params): void {
+  const id = str(params, "payment", true);
+  if (!state(ctx).payments[id]) throw new CliError("not_found", `No payment ${JSON.stringify(id)} (ghostly payment list)`);
+}
+
+/** What a one-shot looks up before any chat starts (api.ts `startOnceFound`). */
+export const PAYMENT_LOOKUPS: Record<string, Lookup> = { "payment.reclaim": paymentToReclaim };
+
 const WALLETS: Record<string, Method> = {
   async "wallet.list"(ctx, params) {
     await federationsOpen(ctx);
@@ -598,7 +607,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "payment.reclaim"(ctx, params) {
-    if (!state(ctx).payments[str(params, "payment", true)]) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} (ghostly payment list)`);
+    paymentToReclaim(ctx, params);
     await node(ctx).reclaimPayment({ paymentId: str(params, "payment", true) });
     const p = state(ctx).payments[str(params, "payment", true)];
     return p ? paymentJson(p) : { paymentId: str(params, "payment", true) };
