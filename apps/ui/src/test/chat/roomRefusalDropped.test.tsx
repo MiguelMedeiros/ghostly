@@ -35,7 +35,7 @@ const bubbles: [string, (file: ChatFile) => ReactElement, Partial<ChatFile>][] =
 /** Chat 1 offers a 30 MB file; chat 2 (Bob) has two taken files still coming. */
 function world() {
   saveSession({
-    id: "chat2", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: "Ym9i", encKeyB64: "a2V5", createdAt: 1, nick: "Bob",
+    id: "5e4c22ff", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: "bob", encKeyB64: "a2V5", createdAt: 1, nick: "Bob",
     messages: [
       { id: "m1", text: "", sender: "peer", timestamp: 1, file: { id: "chat2-in-big", name: "backup.iso", size: 25 * MB, mime: "application/octet-stream" } },
       { id: "m2", text: "", sender: "peer", timestamp: 2, file: { id: "chat2-in-song", name: "song.flac", size: 10 * MB, mime: "audio/flac" } },
