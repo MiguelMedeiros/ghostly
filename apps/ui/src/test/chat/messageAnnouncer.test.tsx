@@ -1,6 +1,7 @@
 import { act, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANNOUNCE_CLEAR_MS, ANNOUNCE_WINDOW_MS, MessageAnnouncer, type Announceable } from "../../components/chat/MessageAnnouncer";
+import { isolate } from "../../lib/ownStatus";
 import { renderApp } from "../render";
 import { hideApps, showApps } from "../apps/showApps";
 import { fakeEngine, paymentView } from "../fakeEngine";
@@ -125,7 +126,7 @@ describe("a new message, read out to a screen reader", () => {
       const view = renderApp(<MessageAnnouncer chat="c" linkId="link-1" messages={HISTORY} nameOf={nameOf} />, { language: "zh" });
       view.rerender(<MessageAnnouncer chat="c" linkId="link-1" messages={[...HISTORY, peer(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${card.url}`, { card })]} nameOf={nameOf} />);
       wait(ANNOUNCE_WINDOW_MS);
-      expect(region()).toHaveTextContent(/^Alice：🧩 应用：Chess 1\.2\.0$/);
+      expect(region().textContent).toBe(`Alice：🧩 应用：${isolate("Chess")} ${isolate("1.2.0")}`);
     } finally { hideApps(); }
   });
 
