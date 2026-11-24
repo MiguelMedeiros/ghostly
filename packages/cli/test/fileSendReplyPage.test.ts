@@ -110,4 +110,16 @@ describe("file send --reply", () => {
     expect(inGroup.node.getMessage).toHaveBeenCalledWith("group:g1", "k:0:3");
     expect(inGroup.reads()).toBe(0);
   });
+
+  it("a reply to a message that is not there is answered before the group's pace and --voice, as before", async () => {
+    // Files of the minute taken: still not_found, the reply first (released order).
+    const paced = fake(true);
+    paced.node.groupFileCheck.mockReturnValue({ error: "This group's files of the minute are taken", refused: true } as never);
+    await expect(callApi(paced.ctx, "file.send", { chat: "group:g1", path, reply: "k:0:9" })).rejects.toMatchObject({ code: "not_found" });
+    expect(paced.node.groupFileCheck).not.toHaveBeenCalled();
+    // --voice on a file that is not audio: still not_found, not bad_request.
+    const voice = fake(true);
+    await expect(callApi(voice.ctx, "file.send", { chat: "Alice", path, reply: "peer_gone", voice: true })).rejects.toMatchObject({ code: "not_found" });
+    expect(voice.node.sendFile).not.toHaveBeenCalled();
+  });
 });
