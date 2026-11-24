@@ -26,6 +26,7 @@ import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, S
 import { ColorSwatches } from "../components/ColorSwatches";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { useMyAvatar } from "../hooks/useAvatars";
 import { activeProfileId, currentProfile, listProfiles } from "../lib/profiles";
 import { tryLockPassword, waitSeconds } from "../lib/lockAttempts";
@@ -127,6 +128,11 @@ export function Settings() {
   const { t, languageNotLoaded, retryLanguage } = useI18n();
   const { lock } = useLockScreen();
   const update = useUpdate();
+  // Check now found a version this install only links to (a Linux .deb or .rpm): Download takes the button's place, and
+  // the focus goes on to it, not to the page. Only to Download: a button left there (Check now once the ⓘ goes, as a
+  // check starts on its own) can turn into Update and restart, and the next Enter would install. The row takes it then.
+  const updateRow = useRef<HTMLDivElement>(null);
+  useFocusKept(updateRow, () => updateRow.current?.querySelector<HTMLElement>("a[data-update-action]") ?? null);
   const chosenLanguageName = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native ?? settings.language;
   const install = useInstallState();
   // Wake-up push (WISP 401 § Wake-up push): the installed web app only.
@@ -895,6 +901,7 @@ export function Settings() {
           <Row label={t("updates.auto")} hint={t("updates.autoDescription")}>
             <Switch label={t("updates.auto")} checked={settings.checkForUpdates} onChange={(on) => updateCheckForUpdates(on)} />
           </Row>
+          <div ref={updateRow}>
           <Row
             label={<span data-testid="update-status">
               {update.update
@@ -913,7 +920,7 @@ export function Settings() {
             </> : undefined}
             hint={update.lastCheckedAt ? t("updates.lastChecked", { when: formatAt(update.lastCheckedAt, { timeStyle: "medium" }, t.language) }) : undefined}>
             {update.update && update.update.apply === "manual" ? (
-              <a {...externalLinkProps(update.downloadUrl)} className="px-4 py-2 min-h-10 inline-flex items-center rounded-lg text-sm transition-colors bg-accent forced-colors:border forced-colors:border-[color:ButtonText] hover:bg-accent-hover text-on-accent font-semibold">
+              <a {...externalLinkProps(update.downloadUrl)} data-update-action className="px-4 py-2 min-h-10 inline-flex items-center rounded-lg text-sm transition-colors bg-accent forced-colors:border forced-colors:border-[color:ButtonText] hover:bg-accent-hover text-on-accent font-semibold">
                 {t("updates.download")}
               </a>
             ) : update.update ? (
@@ -926,6 +933,7 @@ export function Settings() {
               </Button>
             )}
           </Row>
+          </div>
         </Section>
       )}
       </SettingsGroup>
