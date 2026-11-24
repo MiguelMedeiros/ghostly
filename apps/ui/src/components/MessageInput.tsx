@@ -710,12 +710,13 @@ export function MessageInput({
 
   /**
    * The payment sheet closed (its Close, Escape, a click outside): the focus in it goes to the message field, as a sent
-   * payment's does, not to the page. On a touch screen the field would bring the keyboard up: there it falls.
+   * payment's does, not to the page. On a touch screen the field would bring the keyboard up: there it goes to the +.
+   * A group's list of whom to pay is a sheet of its own.
    */
   const closePayment = () => {
     const at = document.activeElement;
     setShowPayment(false);
-    if (at?.closest(".composer-sheet") && !touchOnly()) textareaRef.current?.focus({ preventScroll: true });
+    if (at?.closest('.composer-sheet, [data-testid="group-pay-recipients"]')) (touchOnly() ? plusRef : textareaRef).current?.focus({ preventScroll: true });
   };
 
   /** Whatever the composer has open over it. */
