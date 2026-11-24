@@ -526,6 +526,13 @@ const METHODS: Record<string, Method> = {
       if (key === "hyperdhtRelay" && value) {
         warning = (warning ? `${warning}. ` : "") + "This CLI runs HyperDHT itself and does not dial through hyperdhtRelay: it uses it only with Hide my IP from contacts, which comes in a later release. It is kept for the apps this profile moves to";
       }
+      // `GHOSTLY_PKARR_RELAYS` and `GHOSTLY_IROH_RELAYS` pin the relays of the process that runs the profile (this one,
+      // or its daemon; runtime/engine.ts): the setting is kept and not read while the variable is set. It was taken with
+      // exit 0 and nothing said, while `status` went on naming the variable's relays.
+      const variable = { relays: "GHOSTLY_PKARR_RELAYS", irohRelays: "GHOSTLY_IROH_RELAYS" }[key as "relays" | "irohRelays"] as string | undefined;
+      if (variable && process.env[variable]?.trim()) {
+        warning = (warning ? `${warning}. ` : "") + `${variable} is set where this profile runs, and only its relays are used: ${key} is kept for when the profile runs without it`;
+      }
       patch[key] = value;
     }
     await node(ctx).updateSettings({ settings: patch }).catch((error: unknown) => { throw relayRefused(error, patch); });
