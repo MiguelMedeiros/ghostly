@@ -676,6 +676,36 @@ describe("listen with an allowlist and --turns", () => {
     expect(ids).toEqual(["first", "keyed", "second", "third"]);
   });
 
+  it("a chat whose contact key is not known yet is asked as its event comes, not behind a slow hook: its later events never pause the feed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const cursor = join(dir, "cursor"), gate = join(dir, "gate"), got = join(dir, "got");
+    const peerOf = vi.fn(async (chat: string) => ({ c1: KEY, c2: OTHER_KEY })[chat] ?? null);
+    const handle = eventHandler({
+      types: [], cursor, print: false, write: () => true, exec: `while [ ! -f '${gate}' ]; do sleep 0.05; done; cat >> '${got}'`,
+      allow: new Allowlist(new Set(), new Set([KEY]), new Set(), peerOf),
+    });
+    let paused = 0;
+    const feed = new Feed(handle, undefined, () => paused++, () => {});
+    let last!: GhostlyEvent;
+    try {
+      // Right after the start no chat's key is known: the owner's first event holds the hook.
+      feed.take(received("c1", "first", "one"));
+      // Another contact's chat, never asked before: its lookup starts now, not once the hook ends.
+      feed.take(received("c2", "learn", "x"));
+      await new Promise((resolve) => setImmediate(resolve));
+      for (let i = 0; i < MAX_BEHIND + 10; i++) feed.take(received("c2", `c${i}`, "spam"));
+      feed.take(last = received("c1", "second", "two"));
+      // Before, each of them waited for its lookup behind the hook: behind 1012, and the feed paused.
+      expect(paused).toBe(0);
+      expect(handle.behind()).toBeLessThanOrEqual(3);
+    } finally { writeFileSync(gate, ""); }
+    await vi.waitFor(() => expect(readFileSync(cursor, "utf8").trim()).toBe(String(last.seq)));
+    // One lookup per chat: c2's later events are decided by the key it brought back.
+    expect(peerOf.mock.calls.map(([chat]) => chat)).toEqual(["c1", "c2"]);
+    const ids = readFileSync(got, "utf8").trim().split("\n").map((line) => (JSON.parse(line) as { message: { id: string } }).message.id);
+    expect(ids).toEqual(["first", "second"]);
+  });
+
   it("a step that throws is said on stderr; the cursor moves on and later events are still handled", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
     const cursor = join(dir, "cursor");

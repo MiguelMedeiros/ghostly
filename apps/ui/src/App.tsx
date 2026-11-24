@@ -30,7 +30,6 @@ import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake, useFilesMoving } from "./lib/keepAwake";
 import { useStayConnected } from "./lib/stayConnected";
 import { useCallOnSync } from "./hooks/useCallOnSync";
-import { setChatOnCall } from "./lib/chatsOnCall";
 import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
 import { useGroupDownloadsSync } from "./lib/groupDownloads";
@@ -148,8 +147,6 @@ function useLoadedChats() {
   }, []);
 
   const onCallChange = useCallback((sessionId: string, onCall: boolean) => {
-    // Said to the pages that delete chats, too: none is deleted under its call (lib/chatsOnCall.ts).
-    setChatOnCall(sessionId, onCall);
     setCallSessions((current) =>
       onCall ? (current.includes(sessionId) ? current : [...current, sessionId]) : current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current);
     if (onCall) setRingSessions((current) => (current.includes(sessionId) ? current.filter((id) => id !== sessionId) : current));

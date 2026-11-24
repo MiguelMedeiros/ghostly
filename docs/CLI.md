@@ -310,10 +310,10 @@ Safety rules the CLI enforces:
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
   `chat request`, the comment of `pay` to a Lightning address, the name of `group create` and `group rename`, the
   name contacts see in `profile set`, `profile create --name` and `settings set nick`, a file's name and type in `file send`,
-  the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
+  the name of `service add`, the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
   `forwardMessages`, `sendGroupFile` caption and file name, `sendFile`'s file name, payment memos of `sendPayment`,
   `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,
-  `lnurlInvoice`'s comment, the name of `createGroup` and `renameGroup`, `updateSettings`' nick, `setOwnStatus`'
+  `lnurlInvoice`'s comment, the name of `createGroup`, `renameGroup` and `addService`, `updateSettings`' nick, `setOwnStatus`'
   text and the note or profile fields of `nostrDraft` through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5) unless
   `--force`, before anything is sent or asked of a server.
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group create` and `group link`, for a group's link, and `invite create`, for the invite it makes).

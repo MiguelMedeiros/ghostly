@@ -1322,6 +1322,9 @@ export class ChatFiles {
     }
     const bytes = binary ? data : fromBase64Url(data);
     if (!bytes.length || bytes.length > FILE_LIMITS.chunkBytes || offset + bytes.length > record.file.size) return;
+    // A sender never has more than its window unconfirmed, so no more waits to be written: past it, the bytes are not
+    // held but asked for again (the gap above) once the storage caught up.
+    if (incoming.written - incoming.stored >= FILE_LIMITS.chatWindowBytes) return;
     incoming.written += bytes.length;
     const target = incoming.target;
     incoming.writing = incoming.writing.then(async () => {

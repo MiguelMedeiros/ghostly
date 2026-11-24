@@ -1,0 +1,1 @@
+A receiver holds at most 2 MiB of a file received and not yet stored, the most a sender within the flow limits can have unconfirmed. Data past that is not taken: the receiver answers the next chunk as a gap (`pf-accept` at what it has) and takes it again once it stored what it holds. A sender within the limits never sees a difference. No new frame.
