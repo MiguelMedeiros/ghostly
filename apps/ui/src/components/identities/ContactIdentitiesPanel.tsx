@@ -14,6 +14,7 @@ import { hasIdentityActivity } from "./activityNetworks";
 import { contactBadges } from "./contactBadges";
 import { ContactFacePicker } from "./ContactFacePicker";
 import { useContactFace } from "./contactFace";
+import { chipLinks } from "./contactLinks";
 import { PeerAvatar } from "../Avatar";
 import { PeerPresenceLine } from "../PresenceMarks";
 import { AvatarOpener } from "../AvatarViewer";
@@ -65,7 +66,7 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   // activity's chips show): not the whole state, nor the chat's whole view (their typing, presence, round trip time),
   // each of which drew the panel and every card again while it stayed open.
   const link = useEngineValue(state => panelLink(linkOfPeer(state?.links, peerKey)));
-  const links = useEngineValue(state => (state?.links ?? []).map((l): ChipLink => ({ id: l.id, peerPubKeyZ32: l.peerPubKeyZ32, identities: l.identities && { received: l.identities.received } })));
+  const links = useEngineValue(state => chipLinks(state?.links));
   const { t, language } = useI18n();
   const ref = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null);
   const titleId = useId();
