@@ -108,6 +108,35 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     for (const [name, requests] of [["file wait", wait.requests], ["file save", save.requests]] as const) expect(requests, name).toBeLessThan(24);
   });
 
+  it("file accept and file save --wait given a waiting offer's id alone take it over the chat they start", async () => {
+    // Over 25 MiB, Carol's file waits for Bob's `file accept`. His daemon hears the offer, then stops.
+    const bytes = Buffer.alloc(30 * 1024 * 1024);
+    for (let i = 0; i < bytes.length; i += 4096) bytes[i] = (i / 4096) % 251;
+    const path = join(carol, "large.bin");
+    writeFileSync(path, bytes);
+    const daemon = new Running(["--home", bob, "daemon"], bobEnv);
+    running.push(daemon);
+    await daemon.waitFor((l) => l.daemon === "ready");
+    ok(await ghostly(["--home", carol, "file", "send", "bob", path, "--wait", "none"], { env: carolEnv }));
+    let offered: string | undefined;
+    for (const until = Date.now() + 60_000; !offered && Date.now() < until; await new Promise((r) => setTimeout(r, 500))) {
+      const { files } = ok(await ghostly(["--home", bob, "file", "list", "carol"], { env: bobEnv })) as { files: { file: { id: string; size: number }; transfer: { waitingFor?: string } | null }[] };
+      offered = files.find((f) => f.file.size === bytes.length && f.transfer?.waitingFor === "me")?.file.id;
+    }
+    expect(offered, "Bob's daemon heard the offer").toBeDefined();
+    ok(await ghostly(["--home", bob, "daemon", "stop"], { env: bobEnv }));
+    await daemon.exited(20_000);
+    // The chat the id names must be started for both: with none, accept answered "No such file transfer" and the save
+    // waited out its timeout.
+    const accept = await counted(["file", "accept", offered!]);
+    expect(ok(accept.result)).toMatchObject({ file: offered, action: "accept" });
+    const saved = join(bob, "large.bin");
+    const save = await counted(["file", "save", offered!, "--wait", "--timeout", "120", "--path", saved]);
+    expect(ok(save.result)).toMatchObject({ file: offered, size: bytes.length });
+    expect(readFileSync(saved).equals(bytes)).toBe(true);
+    expect(accept.requests, "file accept").toBeLessThan(24);
+  }, 240_000);
+
   it("starts every chat for a call that names none and makes none", () => {
     expect(oneChatOnly("invite.join", { invite: "ghostly1…" })).toBe(true);
     expect(oneChatOnly("invite.create", {})).toBe(true);
