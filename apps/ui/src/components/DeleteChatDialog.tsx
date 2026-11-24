@@ -6,7 +6,7 @@ import {useBackdropDismiss, useBackCloses} from "../hooks/useDismiss";
 /**
  * "Delete chat?" for a contact chat. `title`, `body` and `confirm`: a group's own words (a group I am no longer in, or
  * an invitation), which name no contact's copy; the title names the group, so the name is not said again under it.
- * `callOn`: a call is on or rings in the chat (lib/chatsOnCall.ts): it says to end the call first, and Delete is off.
+ * `callOn`: a call is on in the chat, not one that only rings in (lib/chatsOnCall.ts): it says to end the call first, and Delete is off.
  */
 export function DeleteChatDialog({name, onClose, onConfirm, title, body, confirm: confirmLabel, callOn=false}: {name:string; onClose():void; onConfirm():void; title?:string; body?:string; confirm?:string; callOn?:boolean}) {
   const {t}=useI18n(); const id=useId();

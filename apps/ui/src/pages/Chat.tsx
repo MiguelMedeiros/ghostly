@@ -7,7 +7,7 @@ import { useComposition } from "../hooks/useComposition";
 import { useOpenedHeading } from "../hooks/useOpenedHeading";
 import { draftDirection } from "../lib/documentLanguage";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
-import { setChatOnCall } from "../lib/chatsOnCall";
+import { setChatOnCall, setChatRingsIn } from "../lib/chatsOnCall";
 import { callHoldsService, useCallService } from "../lib/callService";
 import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
 import { asksEachAlone } from "../desktop/androidMediaDenied";
@@ -389,7 +389,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   useEffect(() => { if (callState === "offering" || callState === "incoming") setCallNoPath(sessionId, false); }, [callState, sessionId]);
   const noPathShown = useCallNoPath(sessionId);
 
-  useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); }, [onCallChange, sessionId]);
+  useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); setChatRingsIn(sessionId, null); }, [onCallChange, sessionId]);
 
   const incomingHasVideo = ringing.video;
 
@@ -773,12 +773,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
   // So is one waking its contact for a call: the wait, and the call it places, go on there too.
-  // Nor is it deleted under its call, from here or from the chat list (lib/chatsOnCall.ts).
+  // Nor is it deleted under its call, from here or from the chat list (lib/chatsOnCall.ts); a call that only rings in
+  // does not hold it: deleting the chat declines that call first.
   const onCall = callState !== "idle" || wakeCall.waking;
+  const ringsIn = callState === "incoming" && !wakeCall.waking;
+  const callHoldsChat = onCall && !ringsIn;
+  const rejectCall = webrtc.rejectCall;
   useEffect(() => {
     onCallChange(sessionId, onCall);
-    setChatOnCall(sessionId, onCall);
-  }, [onCallChange, sessionId, onCall]);
+    setChatOnCall(sessionId, callHoldsChat);
+  }, [onCallChange, sessionId, onCall, callHoldsChat]);
+  useEffect(() => { setChatRingsIn(sessionId, ringsIn ? rejectCall : null); }, [sessionId, ringsIn, rejectCall]);
 
   // What the contact last said on the session wins over a name read out of an older message.
   const contactNick = profileNick !== undefined ? profileNick : peerNick;
@@ -860,8 +865,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   if (holdForUnlock) return null;
 
   const handleDelete = () => {
-    if (onCall) return;
+    if (callHoldsChat) return;
     if (confirmDelete) {
+      if (ringsIn) webrtc.rejectCall();
       deleteSession(params.sessionId);
       setChatFolder(params.sessionId, undefined);
       // Chrome keeps the extension's notifications past the page: a click on one opened a chat that is not there.
@@ -1440,7 +1446,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
-      {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} callOn={onCall} />}
+      {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} callOn={callHoldsChat} />}
       {showTechInfo && techInfo && (
         <TechInfoDialog onClose={() => setShowTechInfo(false)} returnFocus={optionsRef}>
         <div className="p-4 space-y-4 text-sm">
