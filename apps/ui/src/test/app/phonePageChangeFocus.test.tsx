@@ -9,12 +9,12 @@ import { renderApp } from "../render";
 vi.mock("../../hooks/useIsMobile", () => ({ MOBILE_QUERY: "(max-width: 767px)", useIsMobile: () => true }));
 
 /** A page's own control that opens another page: Back, or a Profile tile. It goes with the page it was on. */
-function Leave({ to, label }: { to: string; label: string }) {
+function Leave({ to, label, testId }: { to: string; label: string; testId?: string }) {
   const navigate = useNavigate();
-  return <button type="button" onClick={() => navigate(to)}>{label}</button>;
+  return <button type="button" data-testid={testId} onClick={() => navigate(to)}>{label}</button>;
 }
 
-vi.mock("../../pages/Chat", () => ({ Chat: () => <Leave to="/" label="Back from chat" /> }));
+vi.mock("../../pages/Chat", () => ({ Chat: () => <Leave to="/" label="Back from chat" testId="chat-back" /> }));
 vi.mock("../../components/Sidebar", () => ({
   Sidebar: () => (
     <nav>
@@ -52,7 +52,7 @@ function renderPages(route: string) {
       <Route path="/" element={<App />}>
         <Route index element={null} />
         <Route path="chat/:sessionId" element={null} />
-        <Route path="group/:groupId" element={<Leave to="/" label="Back from group" />} />
+        <Route path="group/:groupId" element={<><Leave to="/" label="Back from group" testId="chat-back" /><Leave to="/" label="Leave group" /></>} />
         <Route path="profile" element={<><h1 tabIndex={-1}>Profile</h1><Leave to="/identities" label="Identities" /><Leave to="/" label="Chats" /><Leave to="/name" label="Name" /><Leave to="/wallet" label="Wallets" /></>} />
         <Route path="identities" element={<h1 tabIndex={-1}>Identities</h1>} />
         <Route path="name" element={<Named />} />
@@ -92,6 +92,14 @@ describe("a page change on a phone that takes the focused control away", () => {
     renderPages("/group/gone");
     press("Back from group");
     expect(screen.getByTestId("sidebar-new-chat")).toHaveFocus();
+  });
+
+  // Leave and Delete hand the focus past the group's row, which is going (GroupInvitation.tsx `focusPastRow`).
+  it("leaves the list alone when a conversation's own control other than Back took it home", () => {
+    renderPages("/group/g1");
+    press("Leave group");
+    expect(screen.getByRole("button", { name: "Book club" })).not.toHaveFocus();
+    expect(screen.getByTestId("sidebar-new-chat")).not.toHaveFocus();
   });
 
   it("gives the page opened to its title", () => {

@@ -116,14 +116,16 @@ function useOnScreenLink(): string | null {
 const PAGE_TITLE_WAIT_MS = 10_000;
 
 /**
- * A phone's page change took the focused control away (a chat's Back, Profile's Identities): back on the chat list, the
- * row of the chat or group just left takes the focus (New chat when it has none), as a Settings section's Back gives it
- * to the section's row; any other page, its title (layout/Page.tsx), as a Settings section's opening does. A chat or a
- * group opened puts the focus where it wants it (hooks/useOpenedHeading.ts). A page of the menu opened for the first
- * time draws its title once its file is there (components/MenuPage.tsx): watched for until then, unless something took
- * the focus meanwhile. Returns what stops the watch.
+ * A phone's page change took the focused control away (`pressed`: a chat's Back, Profile's Identities): back on the chat
+ * list from a chat's or a group's Back, the row of the conversation just left takes the focus (New chat when it has
+ * none), as a Settings section's Back gives it to the section's row; from another page, New chat. Any other page, its
+ * title (layout/Page.tsx), as a Settings section's opening does. A conversation's other ways home (Leave, Delete, Cancel
+ * joining) hand the focus on themselves, past its row that is going (GroupInvitation.tsx `focusPastRow`), and a chat or
+ * a group opened puts it where it wants it (hooks/useOpenedHeading.ts). A page of the menu opened for the first time
+ * draws its title once its file is there (components/MenuPage.tsx): watched for until then, unless something took the
+ * focus meanwhile. Returns what stops the watch.
  */
-function focusOnPhonePage(left: string, shown: string): (() => void) | undefined {
+function focusOnPhonePage(left: string, shown: string, pressed: Element | null): (() => void) | undefined {
   if (chatRouteSession(shown) || groupRouteId(shown)) return;
   const visible = (el: HTMLElement | null | undefined) => (el && !el.closest("[hidden], [inert]") && (el.checkVisibility?.() ?? true) ? el : null);
   if (shown !== "/") {
@@ -144,6 +146,7 @@ function focusOnPhonePage(left: string, shown: string): (() => void) | undefined
     return stop;
   }
   const chat = chatRouteSession(left), group = groupRouteId(left);
+  if ((chat || group) && !pressed?.matches("[data-testid='chat-back']")) return;
   const row = chat
     ? [...document.querySelectorAll<HTMLElement>("[data-testid='chat-row']")].find(r => r.dataset.chat === chat)?.querySelector<HTMLElement>("[data-testid='chat-row-open']")
     : group ? [...document.querySelectorAll<HTMLElement>("[data-testid='group-row']")].find(r => r.dataset.group === group)?.querySelector<HTMLElement>("[data-testid='group-row-open']") : null;
@@ -263,14 +266,21 @@ export function App() {
   // document: the next Tab would start again at the top. The open page takes it, as the skip link gives it. After the
   // pages' own effects (children first), so a page that puts the focus somewhere keeps it there. Not at the start: the
   // first Tab goes to the skip link.
-  // On a phone, where the chat or page left stays mounted but hidden a moment with the focus: see `focusOnPhonePage`.
+  // On a phone, where the chat or page left stays mounted but hidden a moment with the focus: see `focusOnPhonePage`,
+  // which reads the control that had the focus last (the page gone, the focus is on the document).
   const shownPath = useRef(pathname);
+  const lastFocused = useRef<Element | null>(null);
+  useEffect(() => {
+    const focused = (e: FocusEvent) => { lastFocused.current = e.target instanceof Element ? e.target : null; };
+    document.addEventListener("focusin", focused);
+    return () => document.removeEventListener("focusin", focused);
+  }, []);
   useEffect(() => {
     const left = shownPath.current;
     if (left === pathname) return;
     shownPath.current = pathname;
     if (!isMobile) { if (focusLost()) mainRef.current?.focus({ preventScroll: true }); }
-    else if (focusOffScreen()) return focusOnPhonePage(left, pathname);
+    else if (focusOffScreen()) return focusOnPhonePage(left, pathname, lastFocused.current);
   }, [pathname, isMobile]);
   // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
   // profile closing): after the bubbles' layout cleanups have handed it over.
