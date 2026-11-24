@@ -270,6 +270,16 @@ function withWhole(session: ChatSession, list = whole.get(session.id)): ChatSess
  */
 const unsaved = new Map<string, string>();
 
+/**
+ * Writes this page made to its chats' keys (a session stored, refused or removed), counted: the session sync tells by it
+ * that no chat was stored since it last read them all, without reading them all again (`platform/sync.ts`). Another
+ * page's writes are not counted: their `storage` event has the sync read them.
+ */
+let chatWrites = 0;
+export function sessionWrites(): number {
+  return chatWrites;
+}
+
 /** A key as this page last wrote it: what localStorage refused to take, or what it holds. */
 function readKey(key: string): string | null {
   return unsaved.get(key) ?? localStorage.getItem(key);
@@ -278,6 +288,7 @@ function readKey(key: string): string | null {
 /** Writes a key, or keeps it in this page when localStorage refuses it (`unsaved`). Whether localStorage took it. */
 function writeKey(key: string, value: string): boolean {
   const held = unsaved.size > 0;
+  if (isSessionKey(key)) chatWrites++;
   try {
     localStorage.setItem(key, value);
     unsaved.delete(key);
@@ -291,6 +302,7 @@ function writeKey(key: string, value: string): boolean {
 }
 
 function forgetKey(key: string): void {
+  if (isSessionKey(key)) chatWrites++;
   if (unsaved.delete(key) && !unsaved.size) tellUnsaved();
   localStorage.removeItem(key);
 }
@@ -305,6 +317,7 @@ export function retryUnsaved(): void {
     try {
       localStorage.setItem(key, value);
       unsaved.delete(key);
+      if (isSessionKey(key)) chatWrites++;
     } catch {
       // still no room for it
     }

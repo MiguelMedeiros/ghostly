@@ -2,6 +2,7 @@ import {
   addMessages,
   deleteMessages,
   saveSession,
+  sessionWrites,
   setEngineMessages,
   STORED_MESSAGES,
   ensureSession,
@@ -29,7 +30,7 @@ import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications
 import { stopAppsIn } from "../../../../apps/ui/src/lib/apps/open";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { AttachMark } from "../shared/rpc";
-import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
+import type { LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
 import { forgetServicesOf } from "../host";
 import { viewerTag } from "@ghostly/core";
@@ -410,12 +411,32 @@ function mirrorPeerNick(session: ChatSession, link: LinkView): boolean {
 
 const ensuring = new Set<string>();
 /**
- * The last reconcile that left nothing for later: every chat had its link and every link its chat. With the same
- * engine state and the same sessions (none stored differently since), the next one has nothing to do either.
+ * The last reconcile that left nothing for later: every chat had its link and every link its chat. With links the same
+ * in what it reads and the same sessions (none stored differently since), the next one has nothing to do either.
  */
-let settled: { state: EngineState; sessions: ChatSession[] } | undefined;
+let settled: { links: LinkView[]; edges?: LinkView[]; prefix: string; writes: number; sessions: ChatSession[] } | undefined;
 
-async function reconcile(): Promise<void> {
+/**
+ * Whether two states' chats (or group edges) are the same in what a reconcile reads of them. Every state is a new object,
+ * up to 20 a second while a file moves, and most change nothing here.
+ */
+function sameLinks(a: readonly LinkView[] | undefined, b: readonly LinkView[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((x, i) => {
+    const y = b[i];
+    return x === y || (x.id === y.id && x.peerPubKeyZ32 === y.peerPubKeyZ32 && x.deliveryMode === y.deliveryMode && x.peerNick === y.peerNick
+      && x.identitySharedAt === y.identitySharedAt && x.pairing?.peerKey === y.pairing?.peerKey && x.pairing?.status === y.pairing?.status
+      && (x.lastReaction === y.lastReaction || JSON.stringify(x.lastReaction ?? null) === JSON.stringify(y.lastReaction ?? null)));
+  });
+}
+
+/**
+ * `fromState`: run for an engine state alone. With links the same as at the last settled reconcile, and no chat stored
+ * by this page since (`sessionWrites`), the stored chats are not read back at all. `session-updated`, another page's
+ * write (its `storage` event) and the 5 s tick still read them all.
+ */
+async function reconcile(fromState = false): Promise<void> {
   const state = engine.state;
   if (!state) return;
 
@@ -443,9 +464,17 @@ async function reconcile(): Promise<void> {
     }
   }
 
-  const sessions = listShownSessions();
   const last = settled;
-  if (last?.state === state && last.sessions.length === sessions.length && sessions.every((s) => last.sessions.includes(s))) return;
+  const linksAsSettled = !!last && last.prefix === getPrefix() && sameLinks(last.links, state.links) && sameLinks(last.edges, state.edges);
+  if (fromState && linksAsSettled && last.writes === sessionWrites()) return;
+  const sessions = listShownSessions();
+  if (linksAsSettled && last.sessions.length === sessions.length) {
+    const had = new Set(last.sessions);
+    if (sessions.every((s) => had.has(s))) {
+      settled = { ...last, links: state.links, edges: state.edges, writes: sessionWrites() };
+      return;
+    }
+  }
   settled = undefined;
   const peers = new Set(sessions.map((s) => s.peerPubKeyB64));
   let renamed = false;
@@ -498,7 +527,7 @@ async function reconcile(): Promise<void> {
     // What the contact's apps opened from this chat kept on this device goes with it (their origins).
     void forgetServicesOf({ tag: viewerTag(link.myPubKeyZ32) });
   }
-  if (!later && !renamed) settled = { state, sessions };
+  if (!later && !renamed) settled = { links: state.links, edges: state.edges, prefix: getPrefix(), writes: sessionWrites(), sessions };
 }
 
 /**
@@ -543,7 +572,7 @@ export function startSessionSync(): void {
   engine.start();
   engine.onMessages(mirrorNew);
   engine.subscribe(() => {
-    void reconcile();
+    void reconcile(true);
     // A list mirrored already, into a session nothing wrote since, has nothing new (reconcile mirrors the link's names).
     // One whose changes the tick still holds is mirrored when it ends, from what changed only.
     for (const [linkId, messages] of engine.messages) if (!engine.changing(linkId)) mirrorNew(linkId, messages);
