@@ -462,6 +462,11 @@ export interface CommunityState {
    */
   seen: Record<string, Record<string, { high: number; window: number[]; gap?: [number, number, number]; floor?: number }>>;
   nicks: Record<string, string>;
+  /**
+   * Member → the time of the frame its name in `nicks` came from, or of the moment an edge last said it (`setNick`): a
+   * name from an older frame is not taken. Absent in older states.
+   */
+  nickAt?: Record<string, number>;
   /** Recent frames from everyone (mine included), oldest first. */
   store: CommunityMessageFrame[];
   /**
@@ -2577,7 +2582,12 @@ export class CommunitySession {
     // Exactly one of: text, an application frame for the group, a payload for one member.
     if ([text !== undefined, isObject(parsed.x), isObject(parsed.p)].filter(Boolean).length !== 1) return false;
     const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
-    if (nick && this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
+    // Only from a frame newer than the one the name I hold came from: a catch-up's older message, or one said again
+    // under a newer commit, never brings back a name the member changed since.
+    if (nick && raw.ts > (this.state.nickAt?.[raw.s] ?? 0)) {
+      (this.state.nickAt ??= {})[raw.s] = raw.ts;
+      if (this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
+    }
     let onRow: boolean | void = false, fleeting = false;
     if (text !== undefined) {
       const mentions = validMentions(parsed.m, text, false);
@@ -2863,6 +2873,8 @@ export class CommunitySession {
   setNick(key: string, nick: string | undefined): Promise<void> {
     return this.serialize(async () => {
       const clean = sanitizeNick(nick);
+      // Said now on an edge: a message written before it no longer names the member.
+      if (clean) (this.state.nickAt ??= {})[key] = this.hooks.clock?.() ?? Date.now();
       if ((this.state.nicks[key] ?? undefined) === clean) return;
       if (clean) this.state.nicks[key] = clean; else delete this.state.nicks[key];
       await this.persist();
