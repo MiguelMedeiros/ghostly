@@ -129,9 +129,10 @@ export function Settings() {
   const { lock } = useLockScreen();
   const update = useUpdate();
   // Check now found a version this install only links to (a Linux .deb or .rpm): Download takes the button's place, and
-  // the focus goes on to it, not to the page.
+  // the focus goes on to it, not to the page. Only to Download: a button left there (Check now once the ⓘ goes, as a
+  // check starts on its own) can turn into Update and restart, and the next Enter would install. The row takes it then.
   const updateRow = useRef<HTMLDivElement>(null);
-  useFocusKept(updateRow, () => updateRow.current?.querySelector<HTMLElement>("[data-update-action]") ?? null);
+  useFocusKept(updateRow, () => updateRow.current?.querySelector<HTMLElement>("a[data-update-action]") ?? null);
   const chosenLanguageName = LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native ?? settings.language;
   const install = useInstallState();
   // Wake-up push (WISP 401 § Wake-up push): the installed web app only.
@@ -923,11 +924,11 @@ export function Settings() {
                 {t("updates.download")}
               </a>
             ) : update.update ? (
-              <Button variant="primary" data-update-action onClick={() => void update.install()} loading={update.stage === "installing"}>
+              <Button variant="primary" onClick={() => void update.install()} loading={update.stage === "installing"}>
                 {update.stage === "installing" ? t("updates.installing") : t(update.update.apply === "restart" ? "updates.restart" : "updates.reload")}
               </Button>
             ) : (
-              <Button data-update-action onClick={() => void update.check()} loading={update.stage === "checking"}>
+              <Button onClick={() => void update.check()} loading={update.stage === "checking"}>
                 {update.stage === "checking" ? t("updates.checking") : t("updates.checkNow")}
               </Button>
             )}
