@@ -68,7 +68,7 @@ import {
 import { deleteAllSessions, listSessions } from "../lib/storage";
 import { stopPlayingFrom } from "../lib/nowPlaying";
 import { chatPath } from "../lib/url";
-import { anyChatOnCall, useAnyChatOnCall } from "../lib/chatsOnCall";
+import { anyChatOnCall, declineAllRingsIn, useAnyChatOnCall } from "../lib/chatsOnCall";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
@@ -510,6 +510,8 @@ export function Settings() {
   };
   const deleteChats = () => {
     if (anyChatOnCall()) return;
+    // A call that only rings in holds no chat back: it is declined before its chat goes (lib/chatsOnCall.ts).
+    declineAllRingsIn();
     // What plays on from one of them (the now-playing bar) stops with it, as with a chat deleted from the chat list.
     for (const session of listSessions()) stopPlayingFrom(chatPath(session.id), false);
     deleteAllSessions();
