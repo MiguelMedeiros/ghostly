@@ -130,7 +130,9 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
       if (transfer.wait === "day") return tr("chat.file.daySpent", { size });
       return transfer.transferred > 0 ? tr("chat.file.waitingDone", { done }) : tr("chat.file.waitingSize", { size });
     case "asking": return incoming ? tr("chat.file.askingYou", { size }) : tr("chat.file.askingThem", { name: peerName, size });
-    case "queued": return incoming ? tr("chat.file.queuedHere", { done }) : tr("chat.file.queuedThere", { name: peerName, done });
+    // Either way it waits its turn: the contact answered busy, or this side holds it back behind the contact's 256
+    // unfinished files, never offered (the contact's device knows nothing of it, so the line names nobody).
+    case "queued": return tr("chat.file.queuedHere", { done });
     case "paused": return `${transfer.pausedBy === "peer" ? tr("chat.file.pausedBy", { name: peerName }) : tr("chat.file.paused")} · ${of}`;
     // Sent from here, it arrived: what is left is the contact's check (and too late to cancel).
     case "verifying": return transfer.direction === "out" ? tr("chat.file.verifyingThere", { name: peerName, size }) : tr("chat.file.verifying", { size });

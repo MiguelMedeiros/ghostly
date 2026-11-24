@@ -184,7 +184,6 @@
     "pausedBy": "{{name}} が一時停止",
     "preparing": "準備中… {{progress}}",
     "queuedHere": "順番待ち · {{done}} 完了",
-    "queuedThere": "{{name}} 側で順番待ち · {{done}} 完了",
     "resendHint": "もう一度送ります。相手がすでに受け取った分から続けます。",
     "restoring": "読み込み中… · {{size}}",
     "resume": "再開",

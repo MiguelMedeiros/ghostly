@@ -66,3 +66,11 @@ it("a sent file waiting its turn here on an open session reads as queued, not as
   t.changed("offered");
   expect(t.view()).toMatchObject({ state: "transferring", stalled: true });
 });
+
+it("a sent file waiting its turn here arms no stall check: nothing looks at it again each minute", async () => {
+  vi.useFakeTimers();
+  const t = desk();
+  const before = vi.getTimerCount();
+  t.changed("queued");
+  expect(vi.getTimerCount()).toBe(before);
+});
