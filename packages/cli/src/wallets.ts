@@ -467,9 +467,11 @@ const WALLETS: Record<string, Method> = {
     // Which wallet pays is named, never guessed from the invoice: test mints issue `lnbc` invoices too, and a guess
     // must never be what makes real money move. Testnet unless `network` says mainnet.
     const n = network(params);
+    // Whole sats, read before the mint or the address's server hears of the payment.
+    const amount = num(params, "amount", 0, { min: 1, whole: true });
+    const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0, { whole: true });
     if (!isInvoice(text)) {
       // A Lightning address or an LNURL (`payShape`).
-      const amount = num(params, "amount", 0, { min: 1 });
       if (!amount) throw new CliError("bad_request", "amount is required to pay a Lightning address or LNURL");
       // Asked before the address's server hears of the payment (and its comment).
       if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
@@ -482,9 +484,8 @@ const WALLETS: Record<string, Method> = {
     await federationsOpen(ctx);
     const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
     // With an invoice, --amount is what the payer expects it to ask: the invoice's writer never decides past it.
-    const expected = isInvoice(text) ? num(params, "amount", 0, { min: 1 }) : 0;
+    const expected = isInvoice(text) ? amount : 0;
     if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${satsText(quote.amount)}, not the ${expected} given with --amount`);
-    const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${satsText(quote.feeReserve)}, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
     const source = (quote as { source?: string }).source ?? quote.mint;
@@ -552,7 +553,7 @@ const WALLETS: Record<string, Method> = {
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This request is for real money (Mainnet): pass --confirm-real to confirm this payment", { network: n });
     const via = params.via === undefined ? undefined : oneOf(params, "via", ["lightning"] as const, "lightning");
     await federationsOpen(ctx);
-    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(card ? { card } : {}), ...real(params) });
+    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0, { whole: true }) } : {}), ...(card ? { card } : {}), ...real(params) });
     return paymentJson(state(ctx).payments[paymentId] ?? request);
   },
 

@@ -1,4 +1,4 @@
-import { type Command, net, card, memo, confirmReal, force, sats, pageLimit, pairs } from "./shared";
+import { type Command, net, card, memo, confirmReal, force, sats, pageLimit, pairs, inRange } from "./shared";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "../words";
 import { CliError, shownValue } from "../errors";
 
@@ -24,6 +24,12 @@ function requestAmount(value: string | undefined, method: unknown): number | str
   return value!;
 }
 
+/**
+ * `--amount` and `--max-fee`: whole sats, a usage error in the flag's words before the profile opens. Before, 1.5 went
+ * on to the address's server and a 0 or -1 was the API's `bad_request` (exit 1) naming `amount` or `maxFee`.
+ */
+const wholeSats = (options: Parameters<typeof inRange>[0], flag: string, min: number) => inRange(options, flag, "a whole number of sats", min, Number.MAX_SAFE_INTEGER, true);
+
 /** Wallets and payments: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
   "chat accept": {
@@ -44,7 +50,7 @@ export const commands: Record<string, Command> = {
   "chat pay-request": {
     method: "chat.payRequest", usage: "chat pay-request <chat> <payment> [--via lightning] [--max-fee sats] [--card <id>] [--confirm-real]", summary: "Pay a contact's request",
     args: ["chat", "payment"], options: { via: { type: "string", choices: ["lightning"], description: "lightning: pay its invoice instead of ecash" }, "max-fee": { type: "number", description: "Refuse a fee above this" }, card, "confirm-real": confirmReal },
-    params: ({ options }, a) => ({ chat: a.chat, payment: a.payment, via: options.via, maxFee: options["max-fee"], card: options.card, confirmReal: options["confirm-real"] === true }),
+    params: ({ options }, a) => ({ chat: a.chat, payment: a.payment, via: options.via, maxFee: wholeSats(options, "max-fee", 0), card: options.card, confirmReal: options["confirm-real"] === true }),
   },
   "chat request": {
     method: "chat.request", usage: "chat request <chat> <sats> [--memo t] [--method m] [--rail cashu|lightning] [--network testnet] [--card <id>] [--force]", summary: "Ask a contact to pay (with --method usdt the amount is in USDT: 5 is 5 USDT)",
@@ -56,7 +62,7 @@ export const commands: Record<string, Command> = {
   "pay": {
     method: "pay", usage: "pay <invoice|lightning-address|lnurl> [--amount sats] [--network n] [--max-fee sats] [--card <id>] [--comment t] [--chat <chat>] [--confirm-real] [--force]", summary: "Pay over Lightning from Testnet, or --network mainnet with --confirm-real. paid false: not settled yet (pending at the mint or the card's source, or its answer lost); it settles by itself, is never paid twice, and its note says what is set aside and where to look",
     args: ["target"], options: { amount: { type: "number", description: "Sats, for an address or LNURL; with an invoice, refuse it unless it asks exactly this" }, network: net, "max-fee": { type: "number", description: "Refuse a fee above this" }, card, comment: { type: "string", description: "For the address's owner" }, chat: { type: "string", description: "The chat the invoice came from: on Testnet its contact is told it was paid" }, "confirm-real": confirmReal, force },
-    params: ({ options }, { target }) => ({ target, amount: options.amount, network: options.network, maxFee: options["max-fee"], card: options.card, comment: options.comment, chat: options.chat, confirmReal: options["confirm-real"] === true, force: options.force === true }),
+    params: ({ options }, { target }) => ({ target, amount: wholeSats(options, "amount", 1), network: options.network, maxFee: wholeSats(options, "max-fee", 0), card: options.card, comment: options.comment, chat: options.chat, confirmReal: options["confirm-real"] === true, force: options.force === true }),
   },
   "payment check": { method: "payment.check", usage: "payment check <chat> <payment>", summary: "Paid from another wallet: the contact's app looks now", args: ["chat", "payment"], params: (_, a) => ({ chat: a.chat, payment: a.payment }) },
   "payment list": {
