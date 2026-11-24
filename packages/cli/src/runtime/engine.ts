@@ -6,7 +6,7 @@ import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFI
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
-import { CliError, shownValue } from "../errors";
+import { CliError, shownRelay, shownValue } from "../errors";
 import { joinLogLine } from "../joinLog";
 import { nativePublicKey } from "../nativeEd25519";
 import { nodeLocalFetch } from "../services";
@@ -79,7 +79,7 @@ export function pkarrRelays(env = process.env): string[] | null {
   if (!relays.length) return null;
   // Two relays split by ';' or a space were taken as one URL.
   const bad = relays.find((url) => !/^https?:\/\/[^/\s]/i.test(url) || /[\s;]/.test(url) || !URL.canParse(url));
-  if (bad) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${shownValue(bad)}`);
+  if (bad) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${shownValue(shownRelay(bad))}`);
   return relays;
 }
 
@@ -91,7 +91,8 @@ export function pkarrRelays(env = process.env): string[] | null {
 export function irohRelays(env = process.env): string[] | null {
   const relays = (env.GHOSTLY_IROH_RELAYS ?? "").split(",").map((url) => url.trim()).filter(Boolean);
   if (!relays.length) return null;
-  const bad = relays.map((url) => irohRelayProblem(url)).find(Boolean);
+  // The problem ends with the URL as given: said without its credentials (`shownRelay`).
+  const bad = relays.map((url) => irohRelayProblem(url)?.replace(url, () => shownRelay(url))).find(Boolean);
   if (bad) throw new CliError("usage", `GHOSTLY_IROH_RELAYS: ${bad}`);
   // More than the endpoint takes left every chat's Iroh refused, the profile running with none.
   if (relays.length > MAX_IROH_RELAYS) throw new CliError("usage", `GHOSTLY_IROH_RELAYS: use at most ${MAX_IROH_RELAYS} Iroh relays, not ${relays.length}`);
