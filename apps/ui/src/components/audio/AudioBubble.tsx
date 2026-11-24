@@ -332,7 +332,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
       </div>
       {offered && (
         <div className="mt-1.5 px-1" data-testid="audio-offer">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Not turned off by a room shown less than its size: that room may be old, and the engine reads it again. */}
             <button ref={acceptRef} type="button" data-testid="audio-accept" onClick={() => act("accept")}
               className={`text-xs px-3 py-1 max-md:min-h-11 max-md:px-4 rounded-full bg-accent text-on-accent border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}>
@@ -349,7 +349,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
         </div>
       )}
       {controls && !offered && !group && (canPause || pausedHere || canCancel) && (
-        <div className="flex gap-1.5 mt-1 px-1">
+        <div className="flex flex-wrap gap-1.5 mt-1 px-1">
           {canPause && <button type="button" className={pill} data-testid="audio-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={pill} data-testid="audio-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
           {canCancel && <button type="button" className={pill} data-testid="audio-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}
