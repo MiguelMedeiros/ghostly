@@ -374,13 +374,14 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                     type="button"
                     data-testid="video-accept"
                     onClick={() => act("accept")}
-                    className={`flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}
+                    className={`tap-target flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none ${FORCED_EDGE} cursor-pointer disabled:opacity-50 disabled:cursor-default`}
                   >
                     <DownloadIcon size={18} />
                     {t("chat.media.downloadSize", { size: statusSize(file.size, t) })}
                   </button>
-                  {/* A group's video (WISP 503) is downloaded or not: nothing to decline. */}
-                  {!group && <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>}
+                  {/* A group's video (WISP 503) is downloaded or not: nothing to decline. On a phone 44 px tall, as a file's
+                      Decline: a bare word took taps on 16 px. It fits under Download in the shortest frame (96 px). */}
+                  {!group && <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="max-md:min-h-11 max-md:px-3 text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>}
                 </>
               ) : showRing ? (
                 <ProgressRing percent={percent} paused={transfer?.stage === "paused" || transfer?.stage === "waiting" || !!transfer?.stalled} />

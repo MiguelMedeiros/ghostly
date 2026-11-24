@@ -658,6 +658,14 @@ describe("a video not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("decline"));
   });
 
+  // Decline was a bare 12 px word: a phone's tap landed on 16 px of height, under a file's 44 px Decline.
+  it("Download and Decline take a thumb's tap on a phone, as a file's do", () => {
+    const file = video();
+    show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size });
+    expect(screen.getByTestId("video-accept")).toHaveClass("tap-target");
+    expect(screen.getByTestId("video-decline")).toHaveClass("max-md:min-h-11");
+  });
+
   it("Download keeps its size on one line, inside the frame", () => {
     const file = video();
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 12 * 1024 * MB });
