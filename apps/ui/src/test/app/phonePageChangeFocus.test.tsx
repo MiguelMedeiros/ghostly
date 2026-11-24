@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useEffect, useRef, useState } from "react";
 import { Route, Routes, useNavigate } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "../render";
 
 // covers: app.keyboard, app.mobile-layout
@@ -14,7 +14,13 @@ function Leave({ to, label }: { to: string; label: string }) {
   return <button type="button" onClick={() => navigate(to)}>{label}</button>;
 }
 
-vi.mock("../../pages/Chat", () => ({ Chat: () => <Leave to="/" label="Back from chat" /> }));
+/** A chat draws its own title; "bob" is on a call, so it stays loaded, hidden, once its Their profile is pressed. */
+vi.mock("../../pages/Chat", () => ({
+  Chat: ({ sessionId, onCallChange }: { sessionId: string; onCallChange: (id: string, onCall: boolean) => void }) => {
+    useEffect(() => { if (sessionId === "bob") onCallChange(sessionId, true); }, [sessionId, onCallChange]);
+    return <><h1 tabIndex={-1}>Chat {sessionId}</h1><Leave to="/" label="Back from chat" /><Leave to="/profile" label="Their profile" /></>;
+  },
+}));
 vi.mock("../../components/Sidebar", () => ({
   Sidebar: () => (
     <nav>
@@ -22,12 +28,21 @@ vi.mock("../../components/Sidebar", () => ({
       <div data-testid="group-row" data-group="g2"><button type="button" data-testid="group-row-open">Other group</button></div>
       <div data-testid="chat-row" data-chat="s1"><button type="button" data-testid="chat-row-open">Alice</button></div>
       <div data-testid="group-row" data-group="g1"><button type="button" data-testid="group-row-open">Book club</button></div>
+      <div hidden><div data-testid="chat-row" data-chat="s9"><button type="button" data-testid="chat-row-open">Filtered out</button></div></div>
     </nav>
   ),
 }));
 vi.mock("../../components/MobileTabBar", () => ({ MobileTabBar: () => null }));
 vi.mock("../../components/InstallApp", () => ({ InstallSteps: () => null }));
 vi.mock("../../hooks/useAppCommands", () => ({ useAppCommands: () => {} }));
+
+/** The app's own way to a page, with no control pressed. */
+let go: (to: string) => void = () => {};
+function Go() {
+  const navigate = useNavigate();
+  useEffect(() => { go = navigate; }, [navigate]);
+  return null;
+}
 
 /** A page that puts the focus in its own field as it opens. */
 function Named() {
@@ -41,7 +56,7 @@ let drawLate: () => void = () => {};
 function Late() {
   const [drawn, setDrawn] = useState(false);
   useEffect(() => { drawLate = () => setDrawn(true); }, []);
-  return drawn ? <h1 tabIndex={-1}>Wallets</h1> : null;
+  return <><Go />{drawn && <h1 tabIndex={-1}>Wallets</h1>}</>;
 }
 
 const { App } = await import("../../App");
@@ -53,7 +68,7 @@ function renderPages(route: string) {
         <Route index element={null} />
         <Route path="chat/:sessionId" element={null} />
         <Route path="group/:groupId" element={<Leave to="/" label="Back from group" />} />
-        <Route path="profile" element={<><h1 tabIndex={-1}>Profile</h1><Leave to="/identities" label="Identities" /><Leave to="/" label="Chats" /><Leave to="/name" label="Name" /><Leave to="/wallet" label="Wallets" /></>} />
+        <Route path="profile" element={<><h1 tabIndex={-1}>Profile</h1><Leave to="/identities" label="Identities" /><Leave to="/" label="Chats" /><Leave to="/name" label="Name" /><Leave to="/wallet" label="Wallets" /><Leave to="/chat/s1" label="Message" /></>} />
         <Route path="identities" element={<h1 tabIndex={-1}>Identities</h1>} />
         <Route path="name" element={<Named />} />
         <Route path="wallet" element={<Late />} />
@@ -76,10 +91,19 @@ function press(label: string) {
  * (or New chat); any other page, its title, as a Settings section's on a phone.
  */
 describe("a page change on a phone that takes the focused control away", () => {
+  // Stylesheets are left out of these tests: a chat kept loaded off screen is `hidden`, so it hides here.
+  let sheet: HTMLStyleElement;
+  beforeEach(() => {
+    sheet = document.createElement("style");
+    sheet.textContent = ".hidden { display: none; }";
+    document.head.append(sheet);
+  });
+  afterEach(() => { sheet.remove(); });
+
   it("gives a chat's Back to that chat's row in the list", () => {
     renderPages("/chat/s1");
     press("Back from chat");
-    expect(screen.getByTestId("chat-row-open")).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Alice" })).toHaveFocus();
   });
 
   it("gives a group's Back to that group's row, not another group's", () => {
@@ -102,10 +126,32 @@ describe("a page change on a phone that takes the focused control away", () => {
     expect(screen.getByRole("heading", { name: "Identities" })).toHaveFocus();
   });
 
+  it("gives Back to New chat when the conversation's row is not shown", () => {
+    renderPages("/chat/s9");
+    press("Back from chat");
+    expect(screen.getByTestId("sidebar-new-chat")).toHaveFocus();
+  });
+
+  it("gives the page opened its own title, not that of a chat kept loaded for its call", async () => {
+    renderPages("/chat/bob");
+    await act(async () => {});
+    press("Their profile");
+    expect(screen.getByRole("heading", { name: "Chat bob", hidden: true })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Profile" })).toHaveFocus();
+  });
+
+  it("leaves a chat opened to put the focus where it wants it", () => {
+    renderPages("/profile");
+    press("Message");
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it("gives a page drawn a moment later its title once it is there", async () => {
     renderPages("/profile");
     press("Wallets");
     expect(document.activeElement).toBe(document.body);
+    // Later than right away: the watch lasts a while.
+    await new Promise((r) => setTimeout(r, 30));
     act(() => drawLate());
     await waitFor(() => expect(screen.getByRole("heading", { name: "Wallets" })).toHaveFocus());
   });
@@ -121,6 +167,19 @@ describe("a page change on a phone that takes the focused control away", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(tab).toHaveFocus();
     tab.remove();
+  });
+
+  it("stops waiting for a page's title once another page is open", async () => {
+    renderPages("/profile");
+    press("Wallets");
+    act(() => go("/"));
+    (document.activeElement as HTMLElement).blur();
+    const title = document.createElement("h1");
+    title.tabIndex = -1;
+    act(() => { document.querySelector("main")!.append(title); });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(title).not.toHaveFocus();
+    title.remove();
   });
 
   it("gives the list to New chat when no conversation was left", () => {

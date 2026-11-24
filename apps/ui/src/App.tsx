@@ -127,7 +127,8 @@ function focusOnPhonePage(left: string, shown: string): (() => void) | undefined
   if (chatRouteSession(shown) || groupRouteId(shown)) return;
   const visible = (el: HTMLElement | null | undefined) => (el && !el.closest("[hidden], [inert]") && (el.checkVisibility?.() ?? true) ? el : null);
   if (shown !== "/") {
-    const title = () => visible(document.querySelector<HTMLElement>("main h1[tabindex='-1']"));
+    // Not the first one: a chat kept loaded (a call, a mini-app) draws its own, hidden, before the page.
+    const title = () => [...document.querySelectorAll<HTMLElement>("main h1[tabindex='-1']")].find((h) => visible(h)) ?? null;
     const now = title();
     if (now) { now.focus({ preventScroll: true }); return; }
     const main = document.querySelector("main");
