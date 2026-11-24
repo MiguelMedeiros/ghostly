@@ -21,8 +21,11 @@ const listed = new Set(TYPECHECKS.map((t: { cmd: string[] }) => tsconfigOf(t.cmd
 describe("npm run typecheck", () => {
   // test:affected types a change against TYPECHECKS; a workspace missing there (the CLI was) is never type-checked
   // before CI.
-  it("checks the tsconfig of every workspace's own typecheck, from the list test:affected reads", () => {
+  it("runs the list test:affected reads", () => {
     expect(manifest("package.json").scripts?.typecheck).toBe("node tools/scripts/typecheck.mjs");
+  });
+
+  it("the list has the tsconfig of every workspace's own typecheck", () => {
     const workspaces = git("ls-files", ...(manifest("package.json").workspaces ?? []).map((w) => `:(glob)${w}/package.json`));
     expect(workspaces).toContain("packages/cli/package.json");
     const missing: string[] = [];
