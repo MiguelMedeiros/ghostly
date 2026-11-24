@@ -295,8 +295,9 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
     const home = w.document;
     const exec = describe(proto, "execCommand");
     const fresh = !!exec && exec.configurable === true && typeof exec.value === "function";
-    const watched = !!describe(home, "ghostlyClipboardGuard");
-    if (!fresh && watched) return;
+    const mark = describe(home, "ghostlyClipboardGuard");
+    const watched = !!mark;
+    if (!fresh && watched) return !!exec && exec.configurable === false && mark.configurable === false;
     if (!watched) define(home, "ghostlyClipboardGuard", { value: true });
     const own = "<script>(" + noClipboardWrites + ")(window)<" + "/script>";
     const close = "<" + "/script>";
@@ -306,8 +307,18 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
     const slice = text.prototype.slice;
     const index = text.prototype.indexOf;
     const listen = w.EventTarget.prototype.addEventListener;
+    const above = w.Object.getPrototypeOf;
+    const Known = w.WeakSet;
+    const known = typeof Known === "function" ? new Known() : null;
+    const has = known && Known.prototype.has;
+    const add = known && Known.prototype.add;
     const shut = (inner) => {
-      try { if (inner && inner !== w) noClipboardWrites(inner); } catch (e) {}
+      try {
+        if (!inner || inner === w || apply(above, null, [inner]) === null) return;
+        const doc = inner.document;
+        if (known !== null && apply(has, known, [doc])) return;
+        if (noClipboardWrites(inner) === true && known !== null) apply(add, known, [doc]);
+      } catch (e) {}
     };
     const count = describe(w, "length").get;
     const view = describe(proto, "defaultView").get;

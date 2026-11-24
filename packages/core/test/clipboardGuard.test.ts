@@ -511,3 +511,57 @@ describe("the clipboard guard's cookies", () => {
     }
   });
 });
+
+/**
+ * The guard looks over the page's frames as each insertion returns: what that costs must not grow with the frames it
+ * cannot go into (another origin's, where each try threw a SecurityError) or has already guarded for good.
+ */
+describe("the clipboard guard's look over the frames", () => {
+  /** A window of the page's own origin; `reads` counts the guard's runs in it (each reads its `Reflect` first). */
+  function realm(frames: unknown[] = []) {
+    class Doc { execCommand() { return true; } }
+    class Node { appendChild<T>(child: T) { return child; } }
+    const counted = { reads: 0 };
+    const w: Record<string, unknown> = {
+      Object, String, TypeError, WeakSet,
+      Document: Doc,
+      Node,
+      Event: class { get eventPhase() { return 0; } },
+      EventTarget: { prototype: { addEventListener() {} } },
+      Element: { prototype: {} },
+      DocumentFragment: { prototype: {} },
+      NodeList: { prototype: { get length() { return 0; } } },
+      MutationObserver: class { observe() {} },
+      document: null,
+    };
+    Object.defineProperty(w, "Reflect", { get() { counted.reads++; return Reflect; } });
+    Object.defineProperty(w, "length", { get() { return frames.length; } });
+    frames.forEach((frame, i) => { w[i] = frame; });
+    Object.defineProperty(Doc.prototype, "defaultView", { get() { return w; } });
+    w.document = new Doc();
+    return { w, Doc, Node, counted };
+  }
+
+  it("leaves a frame of another origin untouched, and runs once more only in a frame whose document is new", () => {
+    let touched = 0;
+    const other = new Proxy(Object.create(null) as object, {
+      getPrototypeOf: () => null,
+      get() { touched++; throw new Error("SecurityError"); },
+    });
+    const frame = realm();
+    const page = realm([other, frame.w]);
+    new Function("window", CLIPBOARD_GUARD_SCRIPT)(page.w);
+    const insert = () => new page.Node().appendChild({});
+    for (let i = 0; i < 20; i++) insert();
+    expect(touched).toBe(0);
+    // Its first run guarded it, the next found it so: no more after that, however many insertions.
+    expect(frame.counted.reads).toBe(2);
+    expect(Object.getOwnPropertyDescriptor(frame.Doc.prototype, "execCommand")?.configurable).toBe(false);
+    // The frame loads another document in the same window: the next insertion's look watches it.
+    frame.w.document = new frame.Doc();
+    insert();
+    expect(Object.getOwnPropertyDescriptor(frame.w.document as object, "ghostlyClipboardGuard")?.value).toBe(true);
+    for (let i = 0; i < 20; i++) insert();
+    expect(frame.counted.reads).toBe(4);
+  });
+});
