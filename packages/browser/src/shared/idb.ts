@@ -534,14 +534,21 @@ export const fileStore = {
    * greatest. A link's file ids share its prefix (`<link>-in-`, `group-<id>-out-`…), so the range holds little else, and
    * whatever else it holds is not theirs. A read per file was 16,000 requests at every start with 200 files per chat
    * and 300 per group (50 chats, 20 groups).
+   *
+   * Only the ids come off the `byLink` index; the records are read from the store itself, over the same range. WebKit
+   * (the macOS app) hands back a record read through an index with its Blob missing its stored bytes, and for a File
+   * dropped or pasted in it then reaches for the path the File came from: the network process refuses that and ends
+   * the page, at every start.
    */
   async listForLink(linkId: string): Promise<StoredFile[]> {
     const tx = (await openDb()).transaction([STORES.files, STORES.fileState], "readonly");
-    const files = await wrap<StoredFile[]>(tx.objectStore(STORES.files).index("byLink").getAll(linkId));
-    if (!files.length) return files;
+    const store = tx.objectStore(STORES.files);
     // Strings sort by UTF-16 code unit, as IndexedDB orders its keys.
-    const ids = files.map(file => file.id).sort();
-    const states = new Map((await wrap<FileState[]>(tx.objectStore(STORES.fileState).getAll(IDBKeyRange.bound(ids[0], ids[ids.length - 1])))).map(state => [state.id, state]));
+    const ids = (await wrap(store.index("byLink").getAllKeys(linkId)) as string[]).sort();
+    if (!ids.length) return [];
+    const range = IDBKeyRange.bound(ids[0], ids[ids.length - 1]);
+    const files = (await wrap<StoredFile[]>(store.getAll(range))).filter(file => file.linkId === linkId);
+    const states = new Map((await wrap<FileState[]>(tx.objectStore(STORES.fileState).getAll(range))).map(state => [state.id, state]));
     return files.map(file => withState(file, states.get(file.id)));
   },
   /** The id of every group a stored file is of (`linkId` `group:<id>`), read off the index: no record is loaded. */
