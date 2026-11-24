@@ -223,21 +223,22 @@ export const LINT = {
 
 /**
  * Type checks: every tsc program `npm run typecheck` runs (tools/scripts/typecheck.mjs), one per tsconfig.
- * `sources`: this package and the ones it imports, so a change to @ghostly/core rechecks its importers too (an API
- * change breaks them, not core). `seconds`: about what each took alone on a 4-core machine, so `npm run typecheck`
- * starts the longest first.
+ * `sources`: every file the program reaches from its tsconfig's `include` (its package and what that imports), so a
+ * change to @ghostly/core rechecks its importers too (an API change breaks them, not core); affected.test.ts walks the
+ * imports and names a file left out. `seconds`: about what each took alone on a 4-core machine, so
+ * `npm run typecheck` starts the longest first.
  */
 export const TYPECHECKS = [
-  { name: "core", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/core/tsconfig.json"], sources: ["packages/core/**"], seconds: 24 },
-  { name: "browser", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/browser/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/**"], seconds: 18 },
+  { name: "core", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/core/tsconfig.json"], sources: ["packages/core/**", "apps/website/lib/invite.ts"], seconds: 24 },
+  { name: "browser", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/browser/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/**", "apps/ui/src/{contexts,hooks,lib,locales}/**", "packages/iroh-web/pkg/**"], seconds: 18 },
   { name: "sdk", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/sdk/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/sdk/**"], seconds: 8 },
-  { name: "ui (root tsconfig)", cmd: ["npx", "tsc", "--noEmit"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "apps/ui/src/**", "tsconfig.json", "apps/ui/vite-env.d.ts"], seconds: 76 },
-  { name: "extension", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/extension/src/**", "apps/extension/tsconfig.json"], seconds: 40 },
-  { name: "extension tests", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.test.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "apps/ui/src/**", "apps/extension/**"], seconds: 63 },
-  { name: "web", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/web/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/web/**"], seconds: 55 },
-  { name: "cli", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/cli/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "apps/ui/src/**", "apps/web/appsTestFlag.ts", "packages/cli/**"], seconds: 28 },
-  { name: "e2e", cmd: ["npx", "tsc", "--noEmit", "-p", "e2e"], sources: ["e2e/**", "packages/core/src/**"], seconds: 21 },
-  { name: "chess", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/mini/chess/tsconfig.json"], sources: ["packages/core/src/**", "apps/mini/chess/**"], seconds: 3 },
+  { name: "ui (root tsconfig)", cmd: ["npx", "tsc", "--noEmit"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "apps/ui/src/**", "apps/ui/scripts/built-in-apps.mjs", "apps/web/**", "packages/iroh-web/pkg/**", "tsconfig.json", "apps/ui/vite-env.d.ts"], seconds: 76 },
+  { name: "extension", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "packages/iroh-web/pkg/**", "apps/extension/src/**", "apps/extension/tsconfig.json"], seconds: 40 },
+  { name: "extension tests", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.test.json"], sources: ["packages/core/src/**", "packages/browser/**", "packages/react/src/**", "apps/ui/src/**", "packages/iroh-web/pkg/**", "tools/vitest.shared.ts", "apps/extension/**"], seconds: 63 },
+  { name: "web", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/web/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "packages/iroh-web/pkg/**", "apps/web/**"], seconds: 55 },
+  { name: "cli", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/cli/tsconfig.json"], sources: ["packages/core/{src,test/support}/**", "packages/browser/{src,test/helpers}/**", "apps/ui/src/**", "apps/web/appsTestFlag.ts", "packages/iroh-web/pkg/**", "native/transports/hyperdht/**", "native/translation/package.json", "tools/vitest.{shared,shards}.ts", "packages/cli/**"], seconds: 28 },
+  { name: "e2e", cmd: ["npx", "tsc", "--noEmit", "-p", "e2e"], sources: ["e2e/**", "packages/core/src/**", "packages/browser/{src,test/helpers}/**", "packages/cli/test/support/**", "apps/extension/test/atlas.mjs", "apps/ui/src/lib/mp3Encode.ts", "apps/ui/src/test/**", "apps/web/{appsTestFlag,runnerPolicy}.ts", "tools/vitest.shared.ts"], seconds: 21 },
+  { name: "chess", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/mini/chess/tsconfig.json"], sources: ["packages/core/src/**", "apps/mini/chess/**", "tools/vitest.shared.ts"], seconds: 3 },
 ];
 export const TYPECHECK_WHOLE = ["tsconfig.json", "packages/*/tsconfig*.json"];
 
@@ -547,7 +548,7 @@ export function usingStrings(changed, files, strings) {
  * through a workspace package (packageImports: `@ghostly/core` is core's barrel, `@ghostly/browser/x` is
  * packages/browser/src/x). A module not in `files` (a .json, a deleted file) is kept but not followed.
  *
- * @param {string} entry  the bundle's entry file
+ * @param {string | string[]} entry  the bundle's entry file, or several (a tsc program's included files)
  * @param {Record<string, string>} files  path → text of the files to follow
  * @param {Record<string, [string, string][]>} [packages]  the workspaces' exports (workspaceExports)
  * @returns {Set<string>}
@@ -555,7 +556,7 @@ export function usingStrings(changed, files, strings) {
 export function bundleReaches(entry, files, packages) {
   const byModule = new Map(Object.keys(files).map((p) => [stripExt(p), p]));
   const out = new Set();
-  const queue = [stripExt(entry)];
+  const queue = [entry].flat().map(stripExt);
   while (queue.length) {
     const mod = queue.pop();
     const path = byModule.get(mod) ?? byModule.get(`${mod}/index`);
