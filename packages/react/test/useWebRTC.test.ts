@@ -249,6 +249,36 @@ describe("placing a call", () => {
     expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_ended", false, 5000);
   });
 
+  // The contact takes only a signal later than the last one it heard from this side (WISP 601, Time): one dated by a
+  // clock set back since was dropped there. Cancel left the call ringing, and the next call did not ring at all.
+  it("a hang-up, and the next call's offer, are dated after what this side said last though the device's clock was set back", async () => {
+    const call = renderCall();
+    await offered(call);
+    const offer = JSON.parse(call.published[0]!) as { ts: number };
+    vi.setSystemTime(Date.now() - 60_000);
+
+    act(() => call.result.current.hangUp());
+    const hangUp = JSON.parse(call.published[1]!) as { t: string; ts: number };
+    expect(hangUp.t).toBe("h");
+    expect(hangUp.ts).toBeGreaterThan(offer.ts);
+
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[1].grant();
+    await settle();
+    const next = JSON.parse(call.published[call.published.length - 1]!) as { t: string; ts: number };
+    expect(next.t).toBe("o");
+    expect(next.ts).toBeGreaterThan(hangUp.ts);
+  });
+
+  it("a clock set back by more than a contact takes ahead of its own dates what this side says by the clock again", async () => {
+    const call = renderCall();
+    await offered(call);
+    // The clock was an hour ahead, and is right now: an hour ahead, a contact whose clock is right refuses every signal.
+    vi.setSystemTime(Date.now() - 60 * 60_000);
+    act(() => call.result.current.hangUp());
+    expect(JSON.parse(call.published[1]!)).toMatchObject({ t: "h", ts: Date.now() });
+  });
+
   it("a call nobody answers hangs up after RING_MS and says \"No answer\" for a while", async () => {
     const call = renderCall();
     const { stream, pc } = await offered(call);
