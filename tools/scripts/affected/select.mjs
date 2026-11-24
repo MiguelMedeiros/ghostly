@@ -222,19 +222,22 @@ export const LINT = {
 };
 
 /**
- * Type checks, one per tsconfig `npm run typecheck` checks. `sources`: this package and the ones it imports, so a
- * change to @ghostly/core rechecks its importers too (an API change breaks them, not core).
+ * Type checks: every tsc program `npm run typecheck` runs (tools/scripts/typecheck.mjs), one per tsconfig.
+ * `sources`: this package and the ones it imports, so a change to @ghostly/core rechecks its importers too (an API
+ * change breaks them, not core). `seconds`: about what each took alone on a 4-core machine, so `npm run typecheck`
+ * starts the longest first.
  */
 export const TYPECHECKS = [
-  { name: "core", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/core/tsconfig.json"], sources: ["packages/core/**"] },
-  { name: "browser", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/browser/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/**"] },
-  { name: "sdk", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/sdk/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/sdk/**"] },
-  { name: "ui (root tsconfig)", cmd: ["npx", "tsc", "--noEmit"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "apps/ui/src/**", "tsconfig.json", "apps/ui/vite-env.d.ts"] },
-  { name: "extension", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/extension/src/**", "apps/extension/tsconfig.json"] },
-  { name: "extension tests", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.test.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "apps/ui/src/**", "apps/extension/**"] },
-  { name: "web", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/web/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/web/**"] },
-  { name: "e2e", cmd: ["npx", "tsc", "--noEmit", "-p", "e2e"], sources: ["e2e/**", "packages/core/src/**"] },
-  { name: "chess", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/mini/chess/tsconfig.json"], sources: ["packages/core/src/**", "apps/mini/chess/**"] },
+  { name: "core", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/core/tsconfig.json"], sources: ["packages/core/**"], seconds: 24 },
+  { name: "browser", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/browser/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/**"], seconds: 18 },
+  { name: "sdk", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/sdk/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/sdk/**"], seconds: 8 },
+  { name: "ui (root tsconfig)", cmd: ["npx", "tsc", "--noEmit"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/**", "apps/ui/src/**", "tsconfig.json", "apps/ui/vite-env.d.ts"], seconds: 76 },
+  { name: "extension", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/extension/src/**", "apps/extension/tsconfig.json"], seconds: 40 },
+  { name: "extension tests", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/extension/tsconfig.test.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "apps/ui/src/**", "apps/extension/**"], seconds: 63 },
+  { name: "web", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/web/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "packages/react/src/**", "apps/ui/src/**", "apps/web/**"], seconds: 55 },
+  { name: "cli", cmd: ["npx", "tsc", "--noEmit", "-p", "packages/cli/tsconfig.json"], sources: ["packages/core/src/**", "packages/browser/src/**", "apps/ui/src/**", "apps/web/appsTestFlag.ts", "packages/cli/**"], seconds: 28 },
+  { name: "e2e", cmd: ["npx", "tsc", "--noEmit", "-p", "e2e"], sources: ["e2e/**", "packages/core/src/**"], seconds: 21 },
+  { name: "chess", cmd: ["npx", "tsc", "--noEmit", "-p", "apps/mini/chess/tsconfig.json"], sources: ["packages/core/src/**", "apps/mini/chess/**"], seconds: 3 },
 ];
 export const TYPECHECK_WHOLE = ["tsconfig.json", "packages/*/tsconfig*.json"];
 

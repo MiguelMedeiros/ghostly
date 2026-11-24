@@ -207,8 +207,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Side by side: each is one process at a time (eslint, then tsc after tsc), the runner has 4 cores, and in a row they
-      # took 71 + 144 s. Each one's output is printed whole once both are done, so the annotations still come from it.
+      # Side by side on the runner's 4 cores: eslint is one process, and `npm run typecheck` runs its tsc programs three
+      # at a time (tools/scripts/typecheck.mjs; one after another they took 144 s, eslint 71). Each one's output is
+      # printed whole once both are done, so the annotations still come from it.
       - name: ESLint and TypeScript check
         run: |
           npm run lint > "$RUNNER_TEMP/lint.log" 2>&1 &
