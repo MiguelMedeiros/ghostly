@@ -446,7 +446,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
         </div>
       )}
       {controls && !offered && !group && (canPause || pausedHere || canCancel) && (
-        <div className="flex gap-1.5 mt-1 px-1">
+        <div className="flex flex-wrap gap-1.5 mt-1 px-1">
           {canPause && <button type="button" className={linkButton} data-testid="video-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="video-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
           {canCancel && <button type="button" className={linkButton} data-testid="video-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}
