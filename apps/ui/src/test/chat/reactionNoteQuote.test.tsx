@@ -5,6 +5,7 @@ import type { GroupMemberView, ReactionNote } from "@ghostly/browser/shared/type
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { forgetInstalledApps } from "../../lib/apps/installed";
+import { isolate } from "../../lib/ownStatus";
 import { reactionNoteText } from "../../lib/reactions";
 import { saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
@@ -53,7 +54,7 @@ describe("reactionNoteText in Portuguese", () => {
     expect(reactionNoteText(note({ kind: { voice: 7_000 } }), "Ana", pt)).toBe('Você reagiu com ❤️ a "🎤 Mensagem de voz (0:07)"');
     expect(reactionNoteText(note({ snippet: "🎬 Video (0:12)", kind: { video: 12_000 } }), "Ana", pt)).toBe('Você reagiu com ❤️ a "🎬 Vídeo (0:12)"');
     const app = note({ snippet: "🧩 Opened Chess 1.2.0 in this chat (Ghostly app)", kind: { app: { ref: REF, title: "Chess", version: "1.2.0" } } });
-    expect(reactionNoteText(app, "Ana", pt, { appCards: true })).toBe('Você reagiu com ❤️ a "🧩 App: Chess 1.2.0"');
+    expect(reactionNoteText(app, "Ana", pt, { appCards: true })).toBe(`Você reagiu com ❤️ a "🧩 App: ${isolate("Chess")} ${isolate("1.2.0")}"`);
     expect(reactionNoteText(app, "Ana", pt, { appCards: false })).toBe('Você reagiu com ❤️ a "🧩 Opened Chess 1.2.0 in this chat (Ghostly app)"');
     // A plain text, or a note kept from before the engine said what its message is.
     expect(reactionNoteText(note({ snippet: "almoço?" }), "Ana", pt)).toBe('Você reagiu com ❤️ a "almoço?"');
