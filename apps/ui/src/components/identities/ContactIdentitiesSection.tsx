@@ -4,6 +4,7 @@ import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import { Button, Row, Section } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
+import { sharingLinks } from "./contactLinks";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 
 /** What needs a look comes first: a revoked or unconfirmed proof, then the verified ones, then the rest. */
@@ -15,7 +16,8 @@ const ORDER: Record<string, number> = { revoked: 0, unconfirmed: 0, verified: 1 
  */
 export function ContactIdentitiesSection() {
   // Only the chats a contact shared identities in, and those: the page stays open, and drew this again on every state.
-  const links = useEngineValue(state => (state?.links ?? []).flatMap(link => (link.identities?.received.length ? [{ peerPubKeyZ32: link.peerPubKeyZ32, identities: { received: link.identities.received } }] : [])));
+  // The same list while no chat's changed (contactLinks.ts), so a state that changes none costs no walk of them all.
+  const links = useEngineValue(state => sharingLinks(state?.links));
   const nav = useAppNavigation();
   const { t } = useI18n();
   const chats = links.length ? chatsByPeer() : new Map();
