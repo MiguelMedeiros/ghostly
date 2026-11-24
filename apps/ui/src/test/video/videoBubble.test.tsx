@@ -662,8 +662,10 @@ describe("a video not here yet", () => {
   it("Download and Decline take a thumb's tap on a phone, as a file's do", () => {
     const file = video();
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size });
-    expect(screen.getByTestId("video-accept")).toHaveClass("tap-target");
+    expect(screen.getByTestId("video-accept")).toHaveClass("max-md:min-h-11");
     expect(screen.getByTestId("video-decline")).toHaveClass("max-md:min-h-11");
+    // Both fit the shortest frame only with no gap between them on a phone.
+    expect(screen.getByTestId("video-accept").parentElement).toHaveClass("max-md:gap-0");
   });
 
   it("Download keeps its size on one line, inside the frame", () => {
