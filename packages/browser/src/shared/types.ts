@@ -79,6 +79,12 @@ export interface StoredLink {
   createdAt: number;
   label?: string;
   /**
+   * The page told the engine it keeps a chat (a session) for this link (`noteChats`). The page's first-run import of
+   * links (`exportLinks`) never makes another chat for it: its chat exists, even when the page's storage read without it.
+   * Local only, never on the wire.
+   */
+  hasChat?: true;
+  /**
    * The name the contact asked to be shown by, as they last said it. `""` means a paired contact said they
    * have none (removed, or not shared); absent means nothing was heard yet.
    */

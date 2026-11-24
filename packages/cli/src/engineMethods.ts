@@ -101,6 +101,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   deleteMessage: "{ linkId, messageId }",
   removeMessage: "{ linkId, messageId }",
   exportLinks: "",
+  noteChats: "{ linkIds }",
   sendFile: "{ linkId, file, timestamp, replyTo?, forwarded? }",
   sendGroupFile: "{ groupId, file, caption?, replyTo?, forwarded? }",
   groupFileCheck: "{ groupId }",

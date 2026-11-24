@@ -938,7 +938,7 @@ export const LIMITED_MODE_ERROR = "Ghostly could not check which device is activ
 export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi>([
   "setActiveLink", "renameLink", "updateSettings", "disconnect",
   "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage", "chatsFound",
-  "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "walletBackupReminder",
+  "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "noteChats", "walletBackupReminder",
   // Presence and a set status: a settings write and a word on live sessions (none in limited mode), as typing.
   "setPresence", "setOwnStatus", "clearOwnStatus", "getOwnStatus",
   // Saved messages are marks on this device only, a settings record (`engine/saved.ts`): nothing is sent. Refused,
@@ -4255,7 +4255,23 @@ export class GhostlyNode implements EngineImplementation {
       createdAt: stored.createdAt,
       inviteCode: stored.inviteCode,
       label: stored.label,
+      ...(stored.hasChat && { hasChat: true as const }),
     }));
+  }
+
+  /**
+   * The page keeps a chat for each of these links: noted on the link's record, which the page reads more surely than
+   * its own storage. Its first-run import then never makes a second chat for the link (a restart whose storage read
+   * empty listed every chat twice). A group's link has no chat of its own.
+   */
+  async noteChats({ linkIds }: { linkIds: string[] }): Promise<void> {
+    if (!Array.isArray(linkIds)) return;
+    for (const linkId of new Set(linkIds)) {
+      const live = typeof linkId === "string" ? this.links.get(linkId) : undefined;
+      if (!live || live.stored.group || live.stored.hasChat) continue;
+      await db.patchLink(linkId, { hasChat: true }, true);
+      live.stored = { ...live.stored, hasChat: true };
+    }
   }
 
   /**
