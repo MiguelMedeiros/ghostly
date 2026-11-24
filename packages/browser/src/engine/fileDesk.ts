@@ -810,18 +810,20 @@ export class FileDesk {
    *
    * Time it waits on a person (an offer not answered yet, a pause) is not time stuck: its quiet spell starts when it goes
    * on. Before, a file accepted after its offer waited a minute read as stuck at once, "Ask again" beside it, for as
-   * long as it waited its turn behind other files.
+   * long as it waited its turn behind other files. So is a sent file waiting its turn here, on an open session, behind
+   * the ones the contact has (`ChatFiles.offerNext`): "Send again" beside it offered nothing.
    */
   private stalled(linkId: string, id: string, record: FileTransferRecord, progress: boolean): boolean {
     if (transferEnded(record)) { this.unwatch(id); return false; }
     const now = elapsed();
-    const waiting = record.state === "asking" || record.state === "paused";
+    const waiting = record.state === "asking" || record.state === "paused"
+      || (record.direction === "out" && record.state === "queued" && !!this.chats.get(linkId)?.files.live);
     if (progress || waiting || !this.moved.has(id) || this.moved.get(id)!.waiting) this.moved.set(id, { at: now, ...(waiting && { waiting }) });
     if (progress || waiting) this.restored.delete(id);
     const movedAt = this.moved.get(id)!.at;
     const stalled = transferStalled(record, movedAt, this.restored.has(id), now);
     // Only what can be stuck is looked at again (not an offer waiting for an answer, nor a pause).
-    if (!stalled && !this.stallChecks.has(id) && transferStalled(record, 0, true, now)) {
+    if (!stalled && !waiting && !this.stallChecks.has(id) && transferStalled(record, 0, true, now)) {
       const check = setTimeout(() => {
         this.stallChecks.delete(id);
         const chat = this.chats.get(linkId), wireId = record.id;
@@ -897,7 +899,8 @@ export class FileDesk {
     if (record.state === "asking") return { ...base, state: "transferring", stage: record.waitingFor === "busy" ? "queued" : "asking" };
     if (record.state === "paused") return { ...base, state: "transferring", stage: "paused", pausedBy: record.pausedBy };
     if (!live) return { ...base, state: "transferring", stage: "waiting" };
-    if (record.state === "queued" && record.direction === "in") return { ...base, state: "transferring", stage: "queued" };
+    // Sent, it waits its turn here: the contact has as many of this side's files as it takes (`ChatFiles.offerNext`).
+    if (record.state === "queued") return { ...base, state: "transferring", stage: "queued" };
     if (record.state === "verifying") return { ...base, state: "transferring", stage: "verifying" };
     return { ...base, state: "transferring" };
   }
