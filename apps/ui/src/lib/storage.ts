@@ -922,6 +922,20 @@ export function sessionIdForPeer(peerPubKeyB64: string): string | undefined {
 }
 
 /**
+ * `sessionIdForPeer` for many contacts: every chat's keys read once, when this is called, not once per contact asked
+ * for. For one pass (an engine state): a chat stored after it is not in it.
+ */
+export function sessionIdsByPeer(): (peerPubKeyB64: string) => string | undefined {
+  const byPeer = new Map<string, ChatKeys[]>();
+  for (const c of chatKeys()) {
+    const matches = byPeer.get(c.peer);
+    if (matches) matches.push(c);
+    else byPeer.set(c.peer, [c]);
+  }
+  return (peerPubKeyB64) => firstOf(byPeer.get(peerPubKeyB64) ?? [])?.id;
+}
+
+/**
  * Each chat's id, my seed in it and its contact's key, in no order, read as `sessionIdForPeer` reads them: what an
  * invite's ownership check needs, with no chat's messages.
  */
