@@ -1,4 +1,5 @@
 import { sep } from "node:path";
+import { sanitizeMime } from "@ghostly/core";
 import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
 import { VOICE_LIMITS } from "@ghostly/core/voice";
 import type { Parsed } from "../args";
@@ -74,6 +75,12 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => {
       // Empty (an unset variable in a script), it sent the file as no reply: an id the chat lacks is exit 3.
       if (options.reply === "") throw new CliError("usage", "--reply needs a message id");
+      // A type the files' rule refuses (core `sanitizeMime`) went as application/octet-stream with exit 0: the contact
+      // got a file to download, not the picture or the text asked for, and nothing said why.
+      if (options.mime === "") throw new CliError("usage", "--mime needs a type");
+      if (typeof options.mime === "string" && sanitizeMime(options.mime) !== options.mime.toLowerCase()) {
+        throw new CliError("usage", `--mime takes a type such as text/plain or image/png, with no parameters, not ${shownValue(options.mime)}`);
+      }
       const voice = voiceOf(options), seconds = timeout(options, LONG_WAIT_SECONDS);
       return { chat: a.chat, path: sendable(here(a.path)!), name: options.name, mime: options.mime, ...voice, reply: options.reply, force: options.force === true, wait: options.wait, timeout: seconds };
     },

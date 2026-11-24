@@ -593,6 +593,14 @@ describe("the argument parser", () => {
     expect(params("file send", ["alice", sound, "--voice"])).toMatchObject({ voice: true, peaks: undefined });
     expect(params("file send", ["alice", sound, "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
     expect(params("file send", ["alice", sound])).toMatchObject({ voice: undefined, peaks: undefined });
+    // A --mime that is no type went as application/octet-stream with exit 0: the contact got a file to download, not
+    // the picture or the text asked for, and nothing said why.
+    const mime = "--mime takes a type such as text/plain or image/png, with no parameters, not";
+    usage("file send", ["alice", "a.txt", "--mime", "text"], `${mime} "text"`);
+    usage("file send", ["alice", "a.txt", "--mime", "bad mime"], `${mime} "bad mime"`);
+    usage("file send", ["alice", "a.txt", "--mime", "text/plain; charset=utf-8"], `${mime} "text/plain; charset=utf-8"`);
+    usage("file send", ["alice", "a.txt", "--mime", ""], "--mime needs a type");
+    expect(params("file send", ["alice", sound, "--mime", "Text/Markdown"])).toMatchObject({ mime: "Text/Markdown" });
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
