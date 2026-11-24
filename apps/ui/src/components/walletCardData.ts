@@ -5,7 +5,7 @@ import type {Translate} from '../contexts/I18nContext';
 import {english} from '../lib/english';
 import {providerLabel} from './wallet/providers/providerText';
 import { formatAmount, formatTokenAmount } from "../lib/amount";
-export type {ChatRail,WalletCard,WalletRail} from './walletCardTypes';
+export type {WalletCard,WalletRail} from './walletCardTypes';
 export const CASHU_MINT_SOURCE = 'cashu-mint';
 /** The fee limit an on-chain payment starts with, in sats: a small transaction at a few sat/vB. The review shows the real fee. */
 export const ONCHAIN_FEE_CAP = 2_000;
