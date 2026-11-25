@@ -445,7 +445,8 @@ The audio contract, one Unix socket per call:
   `rejected`, `unanswered`, `crossed`, `failed`, `stopped`).
 - **Silence.** `call.stalled` says the contact's packets stopped for 5 s (its side may have died), `call.resumed` that
   they came back; after 15 s with none the call ends as `failed`.
-- **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg.
+- **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg. Ctrl-C stops
+  the pipe, not the call (exit 130, and stderr says how to end it: `ghostly call hangup <call>`).
 
 **When a call does not connect** (it stays `connecting`, then ends `failed`): the daemon's log lists the candidates
 each side offered and every ICE state, and `call list` shows `stats.ice` (the state and the pair). A VPN that is the
