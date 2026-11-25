@@ -293,6 +293,17 @@ describe("app publish", () => {
     await expect(publishApp(leaky, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "fixtures/cut.pem" } });
   }, 60_000);
 
+  it("reads a long body after a key header without running out of stack: 8 MB of data publishes, with an end it is a key", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    // A header, then more body than the scan's stack held (about 5.6 M characters): an engine error, no file named.
+    const long = `-----BEGIN PRIVATE KEY-----\n${"MC4CAQAwBQYDK2VwBCIEI-".repeat(8 * 1024 * 1024 / 22)}`;
+    const dir = appFolder(manifest, new Map([...files, ["data.txt", new TextEncoder().encode(long)]]));
+    expect(await publishApp(dir, key)).toMatchObject({ files: ["data.txt", "index.html"] });
+    const leaky = appFolder(manifest, new Map([...files, ["data.txt", new TextEncoder().encode(`${long}\n-----END PRIVATE KEY-----\n`)]]));
+    await expect(publishApp(leaky, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "data.txt" } });
+  }, 60_000);
+
   it("refuses a source with a query or fragment, where a private repository's link carries its token, and writes no bundle", async () => {
     const { manifest, files } = chess();
     const key = vectorKey(tmp(), "publisher");
