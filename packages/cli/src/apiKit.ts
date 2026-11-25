@@ -102,6 +102,15 @@ export function num(params: Params, name: string, fallback: number, { min = 0, m
 export function sinceSeq(params: Params, fallback: number): number {
   return num(params, "since", fallback, { whole: true });
 }
+/**
+ * Whether a param is given: JSON's null is left out, as `str`, `num` and `bool` read it. A guard that checked `undefined`
+ * alone let a null through to them, read as 0 or false: `{"on":null}` wiped call and group auto's chats where a left-out
+ * `on` only reads them, `{"shareProfile":null}` stopped sharing the profile, and a null `hold` or `days` was 0 (bug hunt,
+ * 2026-11-25). A switch that is on when left out (`group.link`, `chat.accept`) keeps reading null as off.
+ */
+export function given(params: Params, name: string): boolean {
+  return params[name] !== undefined && params[name] !== null;
+}
 export function bool(params: Params, name: string): boolean {
   const value = params[name];
   if (value === undefined || value === null) return false;

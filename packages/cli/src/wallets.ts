@@ -2,7 +2,7 @@ import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { parsePaymentAmount, type WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
-import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Lookup, type Method, type Params } from "./apiKit";
+import { bool, chatOf, given, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Lookup, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
@@ -356,7 +356,7 @@ const WALLETS: Record<string, Method> = {
   async "wallet.list"(ctx, params) {
     await federationsOpen(ctx);
     const s = state(ctx);
-    const only = params.network === undefined ? null : network(params);
+    const only = !given(params, "network") ? null : network(params);
     const wallets = (s.wallet.wallets ?? []).filter((w) => !only || w.network === only).map((w) => walletJson(w, s));
     const offers = (s.wallet.offers ?? []).filter((o) => !only || o.network === only).map((o) => {
       const gap = NODE_GAPS[o.type];
@@ -493,7 +493,7 @@ const WALLETS: Record<string, Method> = {
     // With an invoice, --amount is what the payer expects it to ask: the invoice's writer never decides past it.
     const expected = isInvoice(text) ? num(params, "amount", 0, { min: 1 }) : 0;
     if (expected && quote.amount !== expected) throw new CliError("refused", `The invoice asks ${satsText(quote.amount)}, not the ${expected} given with --amount`);
-    const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
+    const maxFee = !given(params, "maxFee") ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${satsText(quote.feeReserve)}, more than the ${maxFee} allowed`);
     const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
     const source = (quote as { source?: string }).source ?? quote.mint;
@@ -525,11 +525,11 @@ const WALLETS: Record<string, Method> = {
     const memo = memoOf(params, "request");
     const card = cardParam(params);
     const link = chatOf(ctx, params);
-    const method = params.method === undefined ? undefined : oneOf(params, "method", PAY_METHODS, "cashu");
+    const method = !given(params, "method") ? undefined : oneOf(params, "method", PAY_METHODS, "cashu");
     const n = network(params);
     const amount = method === "usdt" && typeof params.amount === "string" ? tokenUnits(params.amount, netView(state(ctx), n)?.usdt?.decimals ?? 6) : num(params, "amount", 0, { min: 1 });
     if (!amount) throw new CliError("bad_request", "amount is required");
-    const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
+    const rail = !given(params, "rail") ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
     await federationsOpen(ctx);
     const { paymentId } = await node(ctx).requestPayment({
       linkId: link.id, amount, timestamp: sentAt(), network: n,
@@ -559,9 +559,9 @@ const WALLETS: Record<string, Method> = {
     // The request says which network it is paid on: real money or test coins, never the choice of the payer.
     const n = paymentNetwork(request);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This request is for real money (Mainnet): pass --confirm-real to confirm this payment", { network: n });
-    const via = params.via === undefined ? undefined : oneOf(params, "via", ["lightning"] as const, "lightning");
+    const via = !given(params, "via") ? undefined : oneOf(params, "via", ["lightning"] as const, "lightning");
     await federationsOpen(ctx);
-    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(params.maxFee !== undefined ? { maxFee: num(params, "maxFee", 0) } : {}), ...(card ? { card } : {}), ...real(params) });
+    await node(ctx).payRequest({ linkId: link.id, paymentId, network: n, ...(via ? { via } : {}), ...(given(params, "maxFee") ? { maxFee: num(params, "maxFee", 0) } : {}), ...(card ? { card } : {}), ...real(params) });
     return paymentJson(state(ctx).payments[paymentId] ?? request);
   },
 
@@ -569,14 +569,14 @@ const WALLETS: Record<string, Method> = {
   async "chat.accept"(ctx, params) {
     const link = chatOf(ctx, params);
     // No method: what it takes now, with nothing changed.
-    if (params.method === undefined) {
-      if (params.on !== undefined || params.networks !== undefined) throw new CliError("bad_request", "on and networks change one method: name it");
+    if (!given(params, "method")) {
+      if (given(params, "on") || given(params, "networks")) throw new CliError("bad_request", "on and networks change one method: name it");
       return { chat: link.id, methods: link.paymentMethods ?? null, networks: link.paymentNetworks ?? null };
     }
     const method = oneOf(params, "method", CHAT_METHODS, "cashu");
     // On unless `on` says otherwise, as `chat accept <chat> <method>` does; an `on` that is no boolean is refused.
     const on = params.on === undefined || bool(params, "on");
-    const nets = params.networks === undefined ? undefined : (() => {
+    const nets = !given(params, "networks") ? undefined : (() => {
       const value = params.networks;
       if (!Array.isArray(value) || !value.every((v) => v === "mainnet" || v === "testnet")) throw new CliError("bad_request", "networks must list mainnet and/or testnet");
       // An empty list names no network: the method would stay on while it is taken nowhere.
@@ -590,7 +590,7 @@ const WALLETS: Record<string, Method> = {
 
   async "payment.list"(ctx, params) {
     const s = state(ctx);
-    const chat = params.chat === undefined ? null : chatOf(ctx, params, s).id;
+    const chat = !given(params, "chat") ? null : chatOf(ctx, params, s).id;
     const payments = Object.values(s.payments).filter((p) => !chat || p.linkId === chat).sort((a, b) => b.createdAt - a.createdAt).map(paymentJson);
     return { payments };
   },

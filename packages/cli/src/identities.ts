@@ -4,7 +4,7 @@ import { parseProofBunker } from "@ghostly/browser/proofs/nostr";
 import { SignerTimeout, type IdentityProofProvider, type IdentitySigner, type SignerField, type SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
 import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
-import { chatOf, node, num, ownChatOf, state, str, type ApiContext, type Lookup, type Method, type Params } from "./apiKit";
+import { chatOf, given, node, num, ownChatOf, state, str, type ApiContext, type Lookup, type Method, type Params } from "./apiKit";
 import { CliError, shownValue } from "./errors";
 
 /**
@@ -124,7 +124,7 @@ function withSubject(p: IdentityProofProvider, signer: IdentitySigner<unknown>, 
 
 async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
   const normalized = canonical(p, subject);
-  const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays, whole: true });
+  const days = !given(params, "days") ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays, whole: true });
   return node(ctx).beginIdentityProof({ provider: p.id, subject: normalized, ...(days ? { validityDays: days } : {}) });
 }
 
