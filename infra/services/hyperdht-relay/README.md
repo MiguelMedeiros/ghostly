@@ -43,7 +43,7 @@ are in WISP 103, "Browser profile".
 | WebSockets at once (when full, an address that would hold fewer than the one holding the most gets in, in place of that one's oldest client; once per 10 s per address) | 512 | `GHOSTLY_RELAY_CLIENTS` |
 | from one address | 16 | `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS` |
 | largest message | 256 KiB | `GHOSTLY_RELAY_PAYLOAD_BYTES` |
-| bytes a client sends per second, burst | 512 KiB/s, 4 MiB | `GHOSTLY_RELAY_BYTES_PER_SECOND`, `GHOSTLY_RELAY_BURST_BYTES` |
+| bytes an address sends per second, burst, over all its clients, closed ones too (each message counts 64 bytes more) | 512 KiB/s, 4 MiB | `GHOSTLY_RELAY_BYTES_PER_SECOND`, `GHOSTLY_RELAY_BURST_BYTES` |
 | keys one client listens on | 16 | `GHOSTLY_RELAY_LISTENS` |
 | listens per client per minute, refused ones too (an app starts at most 8 on start or reconnect) | 60 | `GHOSTLY_RELAY_LISTENS_PER_MINUTE` |
 | dials per client per minute | 60 | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
