@@ -37,6 +37,18 @@ const CUTS: readonly [RegExp, string][] = [
   [/\b(Sec-WebSocket-(?:Key|Accept)):[ \t]*\S+/gi, `$1: ${HIDDEN}`],
 ];
 
+/**
+ * At Verbose, libjuice's ICE work (each STUN check sent and received, its answer, each candidate and pair) comes with
+ * both libraries' lines on every datagram, some 20 for each: a call's audio made over 2,000 lines a second. From that
+ * level only the ICE agent's own lines are kept; every other level is kept whole.
+ */
+const VERBOSE_KEPT = /Received STUN datagram|STUN entry \d+:|STUN Binding|check (?:succeeded|failed)|STUN username|nominat|pair|candidate|resolv|description|TURN|Remote agent|socket bound/i;
+
+/** Whether a line at `level` goes out (see VERBOSE_KEPT). */
+export function rtcLogKept(level: string, message: string): boolean {
+  return level !== "Verbose" || VERBOSE_KEPT.test(message);
+}
+
 /** One of libdatachannel's lines with its secrets cut out (see the module's note). */
 export function rtcLogLine(message: string): string {
   return CUTS.reduce((text, [pattern, to]) => text.replace(pattern, to), message);
@@ -55,7 +67,9 @@ export function startRtcLog(
   if (!level) return false;
   try {
     // A description comes as one message of many lines: each goes on its own line under the first, indented.
-    lib.initLogger(level, (said, message) => write(`ghostly: rtc ${said}: ${rtcLogLine(message).split(/\r?\n|\r/).filter(Boolean).join("\n  ")}\n`));
+    lib.initLogger(level, (said, message) => {
+      if (rtcLogKept(said, message)) write(`ghostly: rtc ${said}: ${rtcLogLine(message).split(/\r?\n|\r/).filter(Boolean).join("\n  ")}\n`);
+    });
     return true;
   } catch {
     return false;

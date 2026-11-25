@@ -166,8 +166,9 @@ test("the Desktop app on a Mac and a headless bot call each other, with audio bo
   // The bot's processes inherit this: the same HyperDHT network as the app.
   process.env.GHOSTLY_HYPERDHT_BOOTSTRAP = bootstrap;
   // libdatachannel's and libjuice's lines (STUN checks out and in, remote candidates, ICE states; their secrets cut) in
-  // the bot's stderr: the job's log, and bot-stderr.log on a failure.
-  const bot = new HeadlessBot({ GHOSTLY_RTC_LOG: "Debug" });
+  // the bot's stderr: the job's log, and bot-stderr.log on a failure. libjuice says its checks only at Verbose (Debug
+  // gave the ICE states alone); the CLI keeps only the ICE agent's lines from that level, none for each datagram.
+  const bot = new HeadlessBot({ GHOSTLY_RTC_LOG: "Verbose" });
   const apps: MacDesktop[] = [];
   let alice: DesktopPerson | undefined;
   const keep = async (name: string, body: string) => {
