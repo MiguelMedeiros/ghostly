@@ -815,9 +815,10 @@ export class FileDesk {
   private stalled(linkId: string, id: string, record: FileTransferRecord, progress: boolean): boolean {
     if (transferEnded(record)) { this.unwatch(id); return false; }
     const now = elapsed();
-    // Sent, connected and not offered yet: it waits its turn behind the contact's limit (`ChatFiles.offerIfRoom`), and
-    // "Send again" could not send it sooner. Not connected, it waits for a session, which "Send again" may knock for.
-    const turn = record.direction === "out" && record.state === "queued" && !!this.chats.get(linkId)?.files.live;
+    // Connected and queued, it waits its turn: sent, behind the contact's limit (`ChatFiles.offerIfRoom`); received,
+    // behind the files arriving here (`ChatFiles.startIncoming`). "Send again" or "Ask again" could not move it sooner.
+    // Not connected, it waits for a session, which either may knock for.
+    const turn = record.state === "queued" && !!this.chats.get(linkId)?.files.live;
     const waiting = record.state === "asking" || record.state === "paused" || turn;
     if (progress || waiting || !this.moved.has(id) || this.moved.get(id)!.waiting) this.moved.set(id, { at: now, ...(waiting && { waiting }) });
     if (progress || waiting) this.restored.delete(id);
