@@ -25,11 +25,12 @@
  *   window away) has those inputs listened for again as the call returns, before its new page adds any of its own;
  * - runs in a frame's window before the page holds it, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`): what a frame
  *   element hands out is guarded first, the frames of the document and of its shadow trees are gone over as one loads
- *   (an empty frame's first load fires as it is put in the page) and as the page changes, the document's frames as
- *   each call that puts nodes in a page returns (`appendChild`, `append`, `innerHTML`, `insertNode`, `document.write`
- *   and the like, an `execCommand`), so the window of a frame read by its index in the task that put it in is guarded
- *   before the page holds it, whatever its answer, each `srcdoc` frame gets
- *   this script first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
+ *   (an empty frame's first load fires as it is put in the page) and as the page changes (the whole page once, then
+ *   only what each change put in it and the frames whose `srcdoc` it set: no change costs more as the page grows), the
+ *   document's frames as each call that puts nodes in a page returns (`appendChild`, `append`, `innerHTML`,
+ *   `insertNode`, `document.write` and the like, an `execCommand`), so the window of a frame read by its index in the
+ *   task that put it in is guarded before the page holds it, whatever its answer, each `srcdoc` frame gets this script
+ *   first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
  *   a `javascript:` URL is refused (its own Trusted Types default policy; one passes every other string on as it is,
  *   or, once the page made its own `default` policy, to that one's rules: the page's `createPolicy("default")` gets the
  *   guard's policy back with them, a kind of string they have no rule for passes on as it is, and the copy of itself it
@@ -115,17 +116,54 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
     };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
+    const getter = (kind, name) => {
+      try {
+        const found = describe(kind.prototype, name);
+        return found && typeof found.get === "function" ? found.get : null;
+      } catch (e) { return null; }
+    };
+    const kindOf = getter(w.MutationRecord, "type");
+    const targetOf = getter(w.MutationRecord, "target");
+    const addedOf = getter(w.MutationRecord, "addedNodes");
+    const nodeType = getter(w.Node, "nodeType");
+    const matches = elements.matches;
+    const within = elements.querySelectorAll;
+    const piecemeal = kindOf !== null && targetOf !== null && addedOf !== null && nodeType !== null && typeof matches === "function" && typeof within === "function";
+    const framed = "iframe[srcdoc]";
+    const each = (node) => {
+      if (apply(nodeType, node, []) !== 1) return;
+      if (apply(matches, node, [framed])) first(node);
+      const frames = apply(within, node, [framed]);
+      for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+    };
     const watch = (root, all) => {
-      const scan = () => {
+      const look = () => {
         try {
-          const frames = apply(all, root, ["iframe[srcdoc]"]);
+          const frames = apply(all, root, [framed]);
           for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
         } catch (e) {}
+      };
+      const changed = (records) => {
+        let whole = !piecemeal;
+        try {
+          for (let r = 0; !whole && r < records.length; r++) {
+            const record = records[r];
+            const target = apply(targetOf, record, []);
+            if (apply(kindOf, record, []) !== "childList") {
+              if (apply(nodeType, target, []) === 1 && apply(matches, target, [framed])) first(target);
+              continue;
+            }
+            const added = apply(addedOf, record, []);
+            for (let i = apply(size, added, []); i-- > 0;) each(added[i]);
+          }
+        } catch (e) { whole = true; }
+        if (whole) look();
         sweep();
       };
-      apply(observe, new Observer(scan), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
+      apply(observe, new Observer(changed), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
       apply(listen, root, ["load", sweep, true]);
-      scan();
+      look();
+      sweep();
       return root;
     };
     if (fresh) {
@@ -434,4 +472,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-uz1O5F3/UKws27ckIAadEQHaTuunp9OFQnfATPkFOas='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-mGfLfp1PFOMe5YyTINPv0CrWYQz0/TJSSX9CzjDlCeE='";
