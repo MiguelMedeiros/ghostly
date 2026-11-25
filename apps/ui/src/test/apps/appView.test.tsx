@@ -486,12 +486,28 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     await act(() => open(REF, "link-1"));
     const app = screen.getByTestId("mini-app");
     expect(within(app).getByTestId("app-connection-options")).toHaveClass("h-[44px]", "w-[44px]");
-    expect(within(app).getByTestId("mini-app-close")).toHaveClass("h-11", "w-11");
+    expect(within(app).getByTestId("mini-app-close")).toHaveClass("h-[44px]", "w-[44px]");
     // Back as the chat header's Back right under it: 36 px wide only under 340 px (the name keeps its room), its tap
     // still 44 × 44 px there (`.tap-target`).
     const back = within(app).getByTestId("mini-app-back");
-    expect(back).toHaveClass("h-11", "w-11", "max-[340px]:w-9", "tap-target");
+    expect(back).toHaveClass("h-[44px]", "w-[44px]", "max-[340px]:w-[36px]", "tap-target");
     expect(back).not.toHaveClass("w-9");
+  });
+
+  it("on a phone, its Back, the contact's picture and Close are sized in px, not rem: the title keeps its room at a large text size", async () => {
+    // In rem they grew with the browser's text size (88 px at 200 %) and left the 15 px title one letter, "C…"
+    // (e2e/web/apps-panel-text-size-phone.spec.ts measures it in Chromium; happy-dom lays nothing out).
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === MOBILE_QUERY || query === PHONE_HEADER_QUERY
+      ? ({ ...matchMedia(query), matches: true, addEventListener: () => {}, removeEventListener: () => {} } as MediaQueryList) : matchMedia(query));
+    panel();
+    await act(() => open(REF, "link-1"));
+    const app = screen.getByTestId("mini-app");
+    const rem = /^(?:max-\[\d+px\]:)?(?:w|h|size)-(?:9|11)$/;
+    for (const id of ["mini-app-back", "mini-app-avatar", "mini-app-close"]) {
+      expect([...within(app).getByTestId(id).classList].filter((name) => rem.test(name)), id).toEqual([]);
+    }
+    expect(within(app).getByTestId("mini-app-avatar")).toHaveClass("w-[36px]", "h-[36px]");
   });
 
   it("a full-screen app on a phone is as any app there: over the chat, with Back", async () => {
