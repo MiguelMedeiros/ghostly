@@ -144,7 +144,8 @@ function walk(dir, out = []) {
 }
 const files = walk("").map((p) => p.split(sep).join("/"));
 const isSpec = (p) => p.startsWith("e2e/") && /\.spec\.[cm]?[jt]sx?$/.test(p);
-const isUnit = (p) => !p.startsWith("e2e/") && /\.test\.[cm]?[jt]sx?$/.test(p);
+// e2e/ has Vitest files too (e2e/matrix's scenario tests): a `.test.` file is a unit test wherever it is.
+const isUnit = (p) => /\.test\.[cm]?[jt]sx?$/.test(p);
 const isRust = (p) => p.endsWith(".rs");
 
 const tested = { specs: 0, specsTagged: 0, units: 0, unitsTagged: 0, rust: 0, guarded: 0 };
