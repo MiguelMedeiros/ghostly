@@ -9,6 +9,7 @@ import type { CallRate, PlaybackQueue } from "./pcm";
 import { envSwitch } from "../envSwitch";
 import { CliError } from "../errors";
 import { rtcThreads } from "../runtime/rtcThreads";
+import { startRtcLog } from "./rtcLog";
 
 /**
  * A call's media on Node (WISP 601, WISP 1100 § Calls): libdatachannel (node-datachannel, the same native module
@@ -113,6 +114,8 @@ export function loadCallStack(): Promise<CallStack | string> {
     try {
       const ndc = (await import("node-datachannel")) as unknown as CallStack["ndc"] & { default?: CallStack["ndc"] };
       const lib = (ndc.PeerConnection ? ndc : ndc.default!) as CallStack["ndc"];
+      // `GHOSTLY_RTC_LOG=<level>`: libdatachannel's and libjuice's own lines in stderr, secrets cut. Off unless set.
+      startRtcLog(lib);
       // opusscript's module itself (its factory is synchronous), not its wrapper: see `opusCodec`.
       const native = (createRequire(import.meta.url)("opusscript/build/opusscript_native_wasm.js") as () => OpusNative)();
       const opus = (rate: CallRate): OpusCodec => opusCodec(native, rate);
