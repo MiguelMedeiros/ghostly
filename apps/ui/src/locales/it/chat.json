@@ -45,6 +45,8 @@
   "deleteForEveryone": "Elimina per tutti",
   "deleteForEveryoneGroupHint": "Eliminato anche dai dispositivi dei membri. Le app precedenti mostrano \"Messaggio rimosso\"; le copie salvate restano.",
   "deleteForEveryoneHint": "Eliminato anche dai dispositivi del tuo contatto. Le app precedenti mostrano \"Messaggio rimosso\"; le copie salvate restano.",
+  "deleteForEveryoneHintDhtContact": "Eliminato qui ora. I dispositivi del tuo contatto lo eliminano solo se la chat torna in connessione diretta entro una settimana: la chat del tuo contatto è in Solo DHT, finché non la consente di nuovo. Le app precedenti mostrano \"Messaggio rimosso\"; le copie salvate restano.",
+  "deleteForEveryoneHintDhtYou": "Eliminato qui ora. I dispositivi del tuo contatto lo eliminano solo se la chat torna in connessione diretta entro una settimana: questa chat è in Solo DHT, cambialo dall'icona di connessione. Le app precedenti mostrano \"Messaggio rimosso\"; le copie salvate restano.",
   "deleteMessage": "Elimina messaggio",
   "deleteMessageHint": "Eliminato solo qui. Il tuo contatto conserva la sua copia.",
   "deleteSendingFileHint": "Eliminato solo qui. L'invio si ferma; il tuo contatto non riceverà il file.",
