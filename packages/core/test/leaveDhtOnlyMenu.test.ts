@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import { setLinkTraceSink } from "../src/linkTrace";
+import { NativeWorld } from "./support/nativeWorld";
 import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, invitationWhere, open, useFakeWorld, yieldToLoop, type Opened } from "./support/pairingWorld";
 
 // covers: invite.delivery-mode, transport.chat-switch, chat.paired.reconnect
@@ -85,29 +86,54 @@ describe("DHT only and back from the Connection menu, after a first pairing", ()
  * offer timed out, 80 to 106 s later (bug hunt 2026-11-25, two CLI daemons: 90 s in 3 of 3).
  */
 describe("DHT only and back from the Connection menu, while the contact's offer still stands", () => {
+  /** Two chats paired a moment before, the answerer `phase` ms on DHT only, then leaving it: up to the offer answered. */
+  async function answering(contact: "open" | "in the background", phase: number): Promise<{ me: Opened; them: Opened; left: number; mine: string }> {
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitationWhere("inviter");
+    const inviter = open(made.inviter, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
+    await run(2_000);
+    const joiner = open(made.joiner, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
+    expect(await until(() => live(inviter) && live(joiner), 60_000), "first pairing").toBeLessThan(Infinity);
+    const [me, them] = [joiner, inviter];
+    expect(me.link.dialer).toBe("contact");
+    me.link.setChatActive(true);
+    them.link.setChatActive(contact === "open");
+    await run(10_000);
+    await settle(me.link.setDeliveryMode("dht"));
+    await run(phase);
+
+    const left = Date.now(), mine = me.link.myPubKeyZ32.slice(0, 6);
+    await settle(me.link.setDeliveryMode("stream"));
+    // The store write between the two: the contact's offer answered.
+    expect(await until(() => trace.some(step => step.t >= left && step.me === mine && step.step === "datalink" && (step as { state?: string }).state === "connecting"), 5_000), "the contact's offer answered").toBeLessThan(Infinity);
+    return { me, them, left, mine };
+  }
+
   for (const choice of ["automatic", "webrtc"] as const) for (const contact of ["open", "in the background"] as const) for (const phase of [3_000, 20_000]) {
     it(`is live again at once · the answerer chooses ${choice} · the contact's chat ${contact} · ${phase / 1000} s on the DHT`, async () => {
-      const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitationWhere("inviter");
-      const inviter = open(made.inviter, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
-      await run(2_000);
-      const joiner = open(made.joiner, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
-      expect(await until(() => live(inviter) && live(joiner), 60_000), "first pairing").toBeLessThan(Infinity);
-      const [me, them] = [joiner, inviter];
-      expect(me.link.dialer).toBe("contact");
-      me.link.setChatActive(true);
-      them.link.setChatActive(contact === "open");
-      await run(10_000);
-      await settle(me.link.setDeliveryMode("dht"));
-      await run(phase);
-
-      const left = Date.now(), mine = me.link.myPubKeyZ32.slice(0, 6);
-      await settle(me.link.setDeliveryMode("stream"));
-      // The store write between the two: the contact's offer answered.
-      expect(await until(() => trace.some(step => step.t >= left && step.me === mine && step.step === "datalink" && (step as { state?: string }).state === "connecting"), 5_000), "the contact's offer answered").toBeLessThan(Infinity);
+      const { me, them, left } = await answering(contact, phase);
       await settle(choice === "automatic" ? me.link.setTransportPreference("webrtc/1", true, true) : me.link.setTransportPreference("webrtc/1", true, false, true));
       const took = await until(() => live(me) && live(them), 180_000) === Infinity ? Infinity : Date.now() - left;
       expect(trace.filter(step => step.t >= left && step.step === "attempt-timeout"), "no offer waited out").toEqual([]);
       expect(took, "live again after leaving DHT only").toBeLessThanOrEqual(10_000);
     }, 120_000);
   }
+
+  // The chat's stored Fallback off: the menu applies WebRTC alone, and the answer still carries the chat.
+  it("is live again at once · the answerer chooses WebRTC with Fallback off", async () => {
+    const { me, them, left } = await answering("open", 3_000);
+    await settle(me.link.setTransportPreference("webrtc/1", false, false, true));
+    const took = await until(() => live(me) && live(them), 180_000) === Infinity ? Infinity : Date.now() - left;
+    expect(trace.filter(step => step.t >= left && step.step === "attempt-timeout"), "no offer waited out").toEqual([]);
+    expect(took, "live again after leaving DHT only").toBeLessThanOrEqual(10_000);
+  }, 120_000);
+
+  // HyperDHT with Fallback off: WebRTC may not carry the chat, so the answer under way is given up, not opened.
+  it("opens no WebRTC channel · the answerer chooses HyperDHT with Fallback off", async () => {
+    const { me, mine } = await answering("open", 3_000);
+    me.link.registerEndpoint(new NativeWorld().endpoint("hyperdht/1", "me")); // its listener, back as node.ts brings it
+    const applied = Date.now();
+    await settle(me.link.setTransportPreference("hyperdht/1", false, false, true));
+    await run(30_000);
+    expect(trace.filter(step => step.t >= applied && step.me === mine && step.step === "datalink" && (step as { state?: string }).state === "open"), "no WebRTC channel opened").toEqual([]);
+  }, 120_000);
 });
