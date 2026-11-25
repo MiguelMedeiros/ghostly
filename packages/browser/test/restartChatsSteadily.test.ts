@@ -293,18 +293,18 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
     expect(turns["line"], "waiting").toEqual(["chat-1", "chat-2"]);
     // Held while it waits: it starts on DHT only, where no live session resumes (and no data link opens to end a turn).
     await settled(node.setChatTransport({ linkId: "chat-1", transport: "dht" }));
-    expect(node["links"].get("chat-1")?.link, "started").toBeDefined();
+    expect(node["links"].get("chat-1")?.link, "started").toBeInstanceOf(GhostLink);
     expect(turns["running"].has("chat-1"), "a turn held on DHT only").toBe(false);
     // chat-0's turn ends (its contact read away, here, or done by hand): the one left in line takes it. Before, chat-1
     // kept a turn on DHT only and chat-2 never started.
     turns.finished("chat-0");
-    expect(node["links"].get("chat-2")?.link, "the chat behind starts").toBeDefined();
+    expect(node["links"].get("chat-2")?.link, "the chat behind starts").toBeInstanceOf(GhostLink);
   }, 60_000);
 
   it("goes back to Automatic at once", async () => {
     const { node, id } = await waiting();
     await settled(node.setChatTransport({ linkId: id, transport: "auto" }));
-    expect(node["links"].get(id)?.link, "started").toBeDefined();
+    expect(node["links"].get(id)?.link, "started").toBeInstanceOf(GhostLink);
     expect((node["resumeTurns"] as ResumeTurns)["line"]).toEqual([]);
   }, 60_000);
 
@@ -393,7 +393,7 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
   it("keeps a chat on its live link at once", async () => {
     const { node, id } = await waiting();
     await settled(node.setDeliveryMode({ linkId: id, mode: "stream" }));
-    expect(node["links"].get(id)?.link, "started").toBeDefined();
+    expect(node["links"].get(id)?.link, "started").toBeInstanceOf(GhostLink);
     expect((node["resumeTurns"] as ResumeTurns)["line"]).toEqual([]);
   }, 60_000);
 });
