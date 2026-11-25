@@ -12,7 +12,7 @@ import {
 } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { HandoffPasswordError, startPakeGiver, startPakeTaker, type HandoffVerifier, type PakeGiver, type PakeTaker } from "./handoffPake";
-import { MAX_EARLIER_SETS, MAX_FETCH_FILES, forkTimes, isEarlierSet, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type FetchFile, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
+import { MAX_EARLIER_SETS, MAX_FETCH_FILES, forkTimes, isEarlierSet, isFetchFile, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type FetchFile, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
 import type { TurnOutcome } from "./turn";
 import type { HandoffTakerFacts } from "./handoffWallets";
 
@@ -337,7 +337,18 @@ function idsOf(files: readonly HandoffFile[]): Record<string, string[]> {
  */
 const DEVICES_PART = "devices";
 function devicesBytes(record: DeviceRecord | null): Uint8Array | null {
-  return record?.earlierSets.length ? new TextEncoder().encode(JSON.stringify({ earlierSets: record.earlierSets })) : null;
+  if (!record?.earlierSets.length && !record?.fetchFiles?.length) return null;
+  // The files a move left for later on another device, not fetched here yet: the taker fetches them from there. The
+  // earlier sets always, empty or not: a taker from before `fetchFiles` reads only them, and refuses a part without.
+  return new TextEncoder().encode(JSON.stringify({ earlierSets: record.earlierSets, ...(record.fetchFiles?.length ? { fetchFiles: record.fetchFiles } : {}) }));
+}
+
+/** The giver's files to fetch a part `devices` carries: none for a part from before them, null for a part that is not one. */
+function givenFetchFiles(bytes: Uint8Array): FetchFile[] | null {
+  let files: unknown;
+  try { files = (JSON.parse(new TextDecoder().decode(bytes)) as { fetchFiles?: unknown } | null)?.fetchFiles; } catch { return null; }
+  if (files === undefined) return [];
+  return Array.isArray(files) && files.length <= MAX_FETCH_FILES && files.every(isFetchFile) ? files : null;
 }
 
 /**
@@ -915,8 +926,16 @@ export class HandoffGiver {
     // Pass 2 is under way: its own wait (no `handoff-verified` within ten minutes) replaces the wait for the taker.
     if (pass === 2) this.arm(HANDOFF_TIMINGS.verifiedMs, () => this.backToActive());
     const later = session.peer!.later;
-    const files = await this.ports.source.files();
+    const own = await this.ports.source.files();
     const held = this.have!.d;
+    // A file an earlier move left for later on another device, not fetched here yet, that the taker holds (moved back to
+    // the device that has it): named as any file it holds, so it is copied in there from its frozen copy, not dropped
+    // with it. Never read here. The rest go in the part `devices` (`devicesBytes`).
+    const ownIds = new Set(own.map((file) => file.id));
+    const fetching = ((await this.ports.records.read().catch(() => null))?.fetchFiles ?? [])
+      .filter((file) => held.has(file.sha256))
+      .flatMap((file) => file.ids.filter((id) => !ownIds.has(id)).map((id) => ({ id, size: file.size, sha256: file.sha256 })));
+    const files = [...own, ...fetching];
     const behind = fileParts(files.filter((file) => isLater(file, later) && !held.has(file.sha256)));
     const send = fileParts(files.filter((file) => !held.has(file.sha256) && !isLater(file, later)));
     const byDigest = new Map(files.map((file) => [file.sha256, file]));
@@ -942,6 +961,7 @@ export class HandoffGiver {
     this.planned = { total: parts.reduce((sum, part) => sum + part[1], 0), later: behind.reduce((sum, part) => sum + part[1], 0), parts };
     this.laterParts = behind;
     this.allFiles = files;
+    this.ownFiles = own;
     for (const frame of handoffManifestFrames({ pass, parts, later: behind, ids: idsOf(files) })) this.out(frame);
     this.paused = false;
     this.changed();
@@ -968,6 +988,8 @@ export class HandoffGiver {
   private stallTimer: ReturnType<typeof setInterval> | undefined;
   private laterParts: HandoffPart[] = [];
   private allFiles: HandoffFile[] = [];
+  /** The files with their bytes on this device: what its frozen copy holds once it releases. */
+  private ownFiles: HandoffFile[] = [];
 
   /** Pass 1 confirmed: freeze, write `releasing`, reload. The engine does the stopping (`GiverPorts.quiesce`). */
   private async quiesce(): Promise<void> {
@@ -1014,8 +1036,8 @@ export class HandoffGiver {
     if (toSlot < 0) return;
     const signed = await signTurnRelease(this.ports.turnAddress, this.turn + 1, fromSlot, toSlot, fromBase64Url(from), h, (bytes) => this.ports.sign(bytes));
     const release = { turn: this.turn + 1, to: from, h: toBase64Url(h), s: toBase64Url(signed.signature) };
-    const heldFiles = heldFilesOf(this.allFiles);
-    const leftFiles: LeftFile[] = this.allFiles.filter((file) => later.has(file.sha256)).map((file) => ({ sha256: file.sha256, size: file.size, where: file.id }));
+    const heldFiles = heldFilesOf(this.ownFiles);
+    const leftFiles: LeftFile[] = this.ownFiles.filter((file) => later.has(file.sha256)).map((file) => ({ sha256: file.sha256, size: file.size, where: file.id }));
     // Standby first, durably: from this write on this device is on standby, whether the frame below arrives or not.
     await this.ports.records.move("standby", {
       // What it gave is still here, frozen: the copy a forced takeover starts from if the taker is lost (WISP 06).
@@ -1725,11 +1747,18 @@ export class HandoffTaker {
     this.bundle = null; this.devices = null;
     const record = await this.ports.records.read();
     const earlierSets = devices ? withEarlierSets(record!.earlierSets, devices.bytes) : undefined;
-    if (earlierSets === null) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
+    const given = devices ? givenFetchFiles(devices.bytes) : [];
+    if (earlierSets === null || given === null) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
     this.h = h;
     // The files left for later go with the install too: the profile this device runs fetches them from the giver
-    // (`handoffFiles.ts`), and Remove of that device says they are still there.
-    const fetchFiles: FetchFile[] = [...this.behind.values()].flatMap(([, size, digest]) => (this.ids[digest]?.length ? [{ sha256: digest, size, ids: this.ids[digest]!.slice(0, 64), on: this.peer! }] : [])).slice(0, MAX_FETCH_FILES);
+    // (`handoffFiles.ts`), and Remove of that device says they are still there. So do the ones an earlier move left on
+    // another device that the giver had not fetched yet, from where they are; one copied in here is here.
+    const own = toBase64Url(this.ports.ownKey);
+    const copied = new Set(files.map((file) => file.sha256));
+    const fetchFiles: FetchFile[] = [
+      ...[...this.behind.values()].flatMap(([, size, digest]) => (this.ids[digest]?.length ? [{ sha256: digest, size, ids: this.ids[digest]!.slice(0, 64), on: this.peer! }] : [])),
+      ...given.filter((file) => file.on !== own && !copied.has(file.sha256)),
+    ].slice(0, MAX_FETCH_FILES);
     // The earlier sets go into this device's record with the same write, so the install carries them under the staged
     // name; kept should the handoff stop, as a staying device keeps its own (it delivers their frames all the same).
     await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", h: toBase64Url(h), at: this.now() }, ...(earlierSets ? { earlierSets } : {}), fetchFiles: fetchFiles.length ? fetchFiles : undefined });

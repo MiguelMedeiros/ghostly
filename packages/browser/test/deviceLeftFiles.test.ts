@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { HANDOFF_PIECE_BYTES, handoffFileRequestFrame, randomBytes, seedSigner, toBase64Url, type DeviceFrame } from "@ghostly/core";
+import { HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, handoffFileRequestFrame, randomBytes, seedSigner, toBase64Url, type DeviceFrame } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type FetchFile, type StoredDeviceState } from "../src/devices/state";
 import { HandoffGiver, HandoffTaker, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource, type HandoffStaging, type HandoffStagingHost } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
@@ -22,7 +22,9 @@ const filesModule = (): Promise<FilesModule> => import("../src/devices/handoffFi
 const PASSWORD = "a long lock password";
 const giverKey = seedSigner(sha256(new TextEncoder().encode("left files giver")));
 const takerKey = seedSigner(sha256(new TextEncoder().encode("left files taker")));
-const A = toBase64Url(giverKey.publicKey), B = toBase64Url(takerKey.publicKey);
+const thirdKey = seedSigner(sha256(new TextEncoder().encode("left files third")));
+const A = toBase64Url(giverKey.publicKey), B = toBase64Url(takerKey.publicKey), C = toBase64Url(thirdKey.publicKey);
+type Signer = typeof giverKey;
 const D = toBase64Url(new Uint8Array(32).fill(0xd0));
 const turnAddress = new Uint8Array(32).fill(0xaa);
 const N = 100;
@@ -39,9 +41,9 @@ function bytesOf(length: number): Uint8Array {
 }
 const digestOf = (bytes: Uint8Array) => toBase64Url(sha256(bytes));
 
-const set = [{ key: A, name: "Desktop" }, { key: B, name: "Phone" }];
-const recordFor = (profile: string, own: number, state: "active" | "standby"): DeviceRecord =>
-  firstRecord(profile, state, { turn: N, d: D, deviceSet: set, ownSlot: own, activeSlot: 0, turnPacket: "AAAA" });
+const set = [{ key: A, name: "Desktop" }, { key: B, name: "Phone" }, { key: C, name: "Tablet" }];
+const recordFor = (profile: string, own: number, state: "active" | "standby", active = 0): DeviceRecord =>
+  firstRecord(profile, state, { turn: N, d: D, deviceSet: set, ownSlot: own, activeSlot: active, turnPacket: "AAAA" });
 
 class Records implements HandoffRecords {
   constructor(public record: DeviceRecord) {}
@@ -52,7 +54,7 @@ class Records implements HandoffRecords {
 
 type Handler = { receive(from: string, frame: DeviceFrame): unknown; linkChanged(key: string, live: boolean): void };
 
-/** The device link between A and B: frames in order, a new transcript at every session, nothing across a drop. */
+/** The device link between two devices: frames in order, a new transcript at every session, nothing across a drop. */
 class Link {
   live = true;
   transcript = bytesToHex(randomBytes(32));
@@ -91,16 +93,18 @@ class Link {
     } finally { this.flushing = false; }
   }
 
+  private other(key: string): string { return [...this.handlers.keys()].find((k) => k !== key)!; }
+
   drop(): void {
     this.live = false;
     this.queue = [];
-    for (const [key, handler] of this.handlers) handler.linkChanged(key === A ? B : A, false);
+    for (const [key, handler] of this.handlers) handler.linkChanged(this.other(key), false);
   }
 
   reconnect(): void {
     this.transcript = bytesToHex(randomBytes(32));
     this.live = true;
-    for (const [key, handler] of this.handlers) handler.linkChanged(key === A ? B : A, true);
+    for (const [key, handler] of this.handlers) handler.linkChanged(this.other(key), true);
   }
 
   frames(type: string, from?: string): DeviceFrame[] {
@@ -143,7 +147,8 @@ class Storage implements HandoffStagingHost {
       },
       finish: async (file) => { space.held.set(file.id, file); },
       discard: async (id) => { space.files.delete(id); space.held.delete(id); },
-      copyHeld: async () => {},
+      // What the frozen copy holds is copied in: its bytes are not looked at here, its staged record is.
+      copyHeld: async (copies) => { for (const { file } of copies) space.held.set(file.id, file); },
       copyStaged: async (fromId, file) => { space.files.set(file.id, space.files.get(fromId)!.slice()); space.held.set(file.id, file); },
       restore: async () => {},
       dropRest: async () => {},
@@ -188,29 +193,33 @@ interface World {
 const stops: (() => void)[] = [];
 afterEach(() => { for (const stop of stops.splice(0)) stop(); });
 
-function world(): World {
-  const w = { link: new Link(), profile: new Profile(), storage: new Storage(), live: new LiveFiles(), quiesced: 0, reloads: 0,
-    giverRecords: new Records(recordFor("ghostly_a", 0, "active")), takerRecords: new Records(recordFor("ghostly", 1, "standby")) } as unknown as World;
+/** A move from the device of `from` to the device of `to`, with their records; A to B by default. */
+function world(pair: { from: Signer; to: Signer; giverRecords: Records; takerRecords: Records; profile?: Profile } = {
+  from: giverKey, to: takerKey, giverRecords: new Records(recordFor("ghostly_a", 0, "active")), takerRecords: new Records(recordFor("ghostly", 1, "standby")),
+}): World {
+  const giverAt = toBase64Url(pair.from.publicKey), takerAt = toBase64Url(pair.to.publicKey);
+  const w = { link: new Link(), profile: pair.profile ?? new Profile(), storage: new Storage(), live: new LiveFiles(), quiesced: 0, reloads: 0,
+    giverRecords: pair.giverRecords, takerRecords: pair.takerRecords } as unknown as World;
   w.makeGiver = (phase) => {
     const giver = new HandoffGiver({
-      ownKey: giverKey.publicKey, sign: async (bytes) => giverKey.sign(bytes), turnAddress, links: w.link.end(A, B), records: w.giverRecords,
+      ownKey: pair.from.publicKey, sign: async (bytes) => pair.from.sign(bytes), turnAddress, links: w.link.end(giverAt, takerAt), records: w.giverRecords,
       self: async () => self(), source: w.profile, verifier: async () => (phase === "gated" ? null : verifier()), busy: async () => null,
       ...(phase === "active" ? { quiesce: async (patch: DevicePatch) => { w.quiesced += 1; await w.giverRecords.move("releasing", patch); } } : {}),
       ...(phase === "gated" ? { backToActive: async () => {}, dropDatabases: async () => {} } : {}),
     });
-    w.link.attach(A, giver);
+    w.link.attach(giverAt, giver);
     stops.push(() => giver.stop());
     return giver;
   };
   w.makeTaker = () => {
     const taker = new HandoffTaker({
-      ownKey: takerKey.publicKey, sign: async (bytes) => takerKey.sign(bytes), turnAddress, links: w.link.end(B, A), records: w.takerRecords,
+      ownKey: pair.to.publicKey, sign: async (bytes) => pair.to.sign(bytes), turnAddress, links: w.link.end(takerAt, giverAt), records: w.takerRecords,
       self: async () => self(), staging: w.storage, reload: () => { w.reloads += 1; },
-      take: async () => ({ kind: "start", read: { result: "mine", good: true, seen: 0n, invalid: [], unsigned: [], conditions: {}, record: { sequence: (N + 1) * 2 ** 20 + 1 } } }) as unknown as TurnOutcome,
+      take: async () => ({ kind: "start", read: { result: "mine", good: true, seen: 0n, invalid: [], unsigned: [], conditions: {}, record: { sequence: (w.giverRecords.record.releasedTurn ?? N + 1) * 2 ** 20 + 1 } } }) as unknown as TurnOutcome,
       install: async (staged, patch) => { await w.takerRecords.amend(patch); w.takerRecords.record = { ...w.takerRecords.record, profile: staged }; },
       standbyUnder: async () => {}, forget: async () => {},
     });
-    w.link.attach(B, taker);
+    w.link.attach(takerAt, taker);
     stops.push(() => taker.stop());
     return taker;
   };
@@ -241,7 +250,8 @@ async function move(w: World, later: number): Promise<void> {
   w.taker = w.makeTaker();
   await w.taker.resume();
   await until(() => w.reloads === 2);
-  await w.takerRecords.move("active");
+  // The turn it took is its own from here on, as a move after this one starts from it.
+  await w.takerRecords.move("active", { turn: w.giverRecords.record.releasedTurn });
   expect([w.giverRecords.record.state, w.takerRecords.record.state]).toEqual(["standby", "active"]);
 }
 
@@ -367,6 +377,98 @@ describe("a move on mobile data: files over the limit stay on the old device", (
     await fetcher.kick();
     await until(() => w.takerRecords.record.fetchFiles === undefined);
     expect(filesOn(w.takerRecords.record, A)).toBeNull();
+  });
+
+  it("moved back before it came: copied in from the old device's frozen copy, which the install drops", async () => {
+    const w = world();
+    const small = w.profile.add("small", bytesOf(1_000));
+    const large = w.profile.add("large", bytesOf(70_000));
+    await move(w, LATER);
+    w.giver.stop(); w.taker.stop();
+    // B runs the profile with the small file's bytes and none of the large one's; on Wi-Fi now, the profile moves back.
+    const onB = new Profile();
+    onB.add("small", w.profile.files_.get("small")!);
+    const back = world({ from: takerKey, to: giverKey, giverRecords: w.takerRecords, takerRecords: w.giverRecords, profile: onB });
+    await move(back, 0);
+    const staged = back.storage.spaces.get(back.storage.pointer)!;
+    expect([...staged.held.values()].map((file) => [file.id, file.sha256]).sort()).toEqual([["large", large.sha256], ["small", small.sha256]].sort());
+    expect(back.takerRecords.record.fetchFiles).toBeUndefined();
+    // B's frozen copy never had its bytes: a pull from B later is not told it holds them.
+    expect(back.giverRecords.record.heldFiles?.map((file) => file.id)).toEqual(["small"]);
+  });
+
+  it("moved on to a third device before it came: that device fetches it from the one that still holds it", async () => {
+    const { filesOn } = await filesModule();
+    const w = world();
+    w.profile.add("small", bytesOf(1_000));
+    const large = w.profile.add("large", bytesOf(70_000));
+    w.profile.add("large-twin", w.profile.files_.get("large")!);
+    await move(w, LATER);
+    w.giver.stop(); w.taker.stop();
+    const onB = new Profile();
+    onB.add("small", w.profile.files_.get("small")!);
+    // The third device, on standby, read the turn the move gave B.
+    const third = new Records({ ...recordFor("ghostly", 2, "standby", 1), turn: N + 1 });
+    const onward = world({ from: takerKey, to: thirdKey, giverRecords: w.takerRecords, takerRecords: third, profile: onB });
+    await move(onward, 0);
+    expect(onward.takerRecords.record.fetchFiles).toEqual([{ sha256: large.sha256, size: large.size, ids: ["large", "large-twin"], on: A }]);
+    expect(filesOn(onward.takerRecords.record, A)).toEqual({ count: 1, bytes: large.size });
+  });
+
+  it("moved back to a device that lost it meanwhile: nothing to fetch from itself", async () => {
+    const w = world();
+    w.profile.add("small", bytesOf(1_000));
+    const large = w.profile.add("large", bytesOf(70_000));
+    await move(w, LATER);
+    w.giver.stop(); w.taker.stop();
+    // Its frozen copy no longer holds the file (its storage was cleared): it says so in its next pull.
+    await w.giverRecords.amend({ heldFiles: w.giverRecords.record.heldFiles!.filter((file) => file.sha256 !== large.sha256) });
+    const onB = new Profile();
+    onB.add("small", w.profile.files_.get("small")!);
+    const back = world({ from: takerKey, to: giverKey, giverRecords: w.takerRecords, takerRecords: w.giverRecords, profile: onB });
+    await move(back, 0);
+    expect([...back.storage.spaces.get(back.storage.pointer)!.held.keys()]).toEqual(["small"]);
+    expect(back.takerRecords.record.fetchFiles).toBeUndefined();
+  });
+
+  it("moved on to a device whose frozen copy holds it: copied in there, not fetched", async () => {
+    const w = world();
+    w.profile.add("small", bytesOf(1_000));
+    const large = w.profile.add("large", bytesOf(70_000));
+    await move(w, LATER);
+    w.giver.stop(); w.taker.stop();
+    const onB = new Profile();
+    onB.add("small", w.profile.files_.get("small")!);
+    // The third device ran the profile once, with that file.
+    const third = new Records({ ...recordFor("ghostly", 2, "standby", 1), turn: N + 1, heldFiles: [{ sha256: large.sha256, size: large.size, id: "large" }] });
+    const onward = world({ from: takerKey, to: thirdKey, giverRecords: w.takerRecords, takerRecords: third, profile: onB });
+    await move(onward, 0);
+    expect([...onward.storage.spaces.get(onward.storage.pointer)!.held.keys()].sort()).toEqual(["large", "small"]);
+    expect(onward.takerRecords.record.fetchFiles).toBeUndefined();
+  });
+
+  it("a device that does not answer gives the next one its turn: a file on another device is not held behind it", async () => {
+    const { LeftFilesFetcher } = await filesModule();
+    vi.useFakeTimers();
+    try {
+      const onA = { sha256: digestOf(new Uint8Array([1])), size: 70_000, ids: ["on-a"], on: A };
+      const onC = { sha256: digestOf(new Uint8Array([2])), size: 70_000, ids: ["on-c"], on: C };
+      const records = new Records({ ...recordFor("ghostly", 1, "active", 1), fetchFiles: [onA, onC] });
+      const asked: string[] = [];
+      const links: HandoffLinks = { live: () => true, transcript: () => "ab".repeat(32), send: (key) => { asked.push(key); } };
+      // A's link is up but nothing on it answers (a build that does not serve files left for later); C would.
+      const fetcher = new LeftFilesFetcher({ links, records, store: new LiveFiles(), metered: () => false });
+      stops.push(() => fetcher.stop());
+      await fetcher.kick();
+      expect(asked).toEqual([A]);
+      await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + 1_000);
+      expect(asked).toEqual([A, C]);
+      // Neither answers: asked in turn again, never given up on.
+      await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + 1_000);
+      expect(asked).toEqual([A, C, A]);
+      await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + 1_000);
+      expect(asked).toEqual([A, C, A, C]);
+    } finally { vi.useRealTimers(); }
   });
 
   it("a take that lost keeps no list: the files were for the profile it would have run", () => {
