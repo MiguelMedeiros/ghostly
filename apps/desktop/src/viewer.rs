@@ -1114,6 +1114,16 @@ fn viewer_settings(settings: &webkit2gtk::Settings) {
     settings.set_enable_fullscreen(false);
 }
 
+/// The window's web view on Linux, as it is made, before the page runs: its settings, and no print dialog.
+#[cfg(target_os = "linux")]
+fn viewer_webview(webview: &webkit2gtk::WebView) {
+    use webkit2gtk::WebViewExt;
+    if let Some(settings) = WebViewExt::settings(webview) {
+        viewer_settings(&settings);
+    }
+    crate::app_sandbox::no_print(webview);
+}
+
 pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
@@ -1222,12 +1232,7 @@ fn frame_guards(relay_only: bool) -> Vec<&'static str> {
 /// webview, so it goes off again here, as in an app window. WebView2's only fills the webview: the title stays.
 fn no_element_fullscreen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
     #[cfg(target_os = "linux")]
-    let done = window.with_webview(|platform| {
-        use webkit2gtk::WebViewExt;
-        if let Some(settings) = WebViewExt::settings(&platform.inner()) {
-            viewer_settings(&settings);
-        }
-    });
+    let done = window.with_webview(|platform| viewer_webview(&platform.inner()));
     #[cfg(target_os = "macos")]
     let done = window.with_webview(|platform| {
         crate::app_sandbox::webkit::no_element_fullscreen(platform.inner())
@@ -2966,5 +2971,15 @@ mod download_tests {
         assert!(settings.enables_fullscreen(), "WebKitGTK's default");
         viewer_settings(&settings);
         assert!(!settings.enables_fullscreen());
+    }
+
+    /// A contact's page that calls `print()` gets it back at once, and no print dialog is up: WebKitGTK's own is
+    /// modal to every window of the app.
+    #[test]
+    #[ignore = "needs a display and a process of its own (app_sandbox::print_in)"]
+    fn a_contacts_page_shows_no_print_dialog() {
+        let (returned, dialog) = crate::app_sandbox::print_in(viewer_webview);
+        assert!(!dialog, "a print dialog was up");
+        assert!(returned, "print() did not return");
     }
 }

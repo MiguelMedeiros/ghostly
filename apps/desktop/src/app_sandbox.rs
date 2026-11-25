@@ -1783,6 +1783,86 @@ fn app_settings(settings: &webkit2gtk::Settings, guard: Guard) {
     }
 }
 
+/// An app window's web view on Linux, as it is made, before its page runs: its settings, and no print dialog.
+#[cfg(target_os = "linux")]
+fn app_webview(webview: &webkit2gtk::WebView, guard: Guard) {
+    use webkit2gtk::WebViewExt;
+    if let Some(settings) = WebViewExt::settings(webview) {
+        app_settings(&settings, guard);
+    }
+    no_print(webview);
+}
+
+/// No print dialog for the page of an app or contact window on Linux: the page's `print()` returns at once, with
+/// nothing shown. WebKitGTK's own dialog is modal to the whole app, and the page's `print()` waits on it: a page that
+/// calls it again at each Cancel would keep every Ghostly window from a click.
+#[cfg(target_os = "linux")]
+pub fn no_print(webview: &webkit2gtk::WebView) {
+    use webkit2gtk::WebViewExt;
+    webview.connect_print(|_, _| true);
+}
+
+/// Whether a page's `print()` returned and whether a print dialog was up, in a web view `prepare` was given. GTK and
+/// WebKit belong to the first thread that uses them, so a test that calls this needs a display and a process of its
+/// own: `xvfb-run -a cargo test --manifest-path apps/desktop/Cargo.toml --lib -- --ignored --exact <test>`.
+/// GTK runs on a thread that never ends: WebKit stops the process when the thread it started on does.
+#[cfg(all(test, target_os = "linux"))]
+pub fn print_in(prepare: fn(&webkit2gtk::WebView)) -> (bool, bool) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(print_once(prepare));
+        loop {
+            std::thread::park();
+        }
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the page never ran")
+}
+
+#[cfg(all(test, target_os = "linux"))]
+fn print_once(prepare: fn(&webkit2gtk::WebView)) -> (bool, bool) {
+    use gtk::glib;
+    use gtk::prelude::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use webkit2gtk::WebViewExt;
+    gtk::init().expect("GTK");
+    let window = gtk::OffscreenWindow::new();
+    let webview = webkit2gtk::WebView::new();
+    window.add(&webview);
+    window.show_all();
+    prepare(&webview);
+    webview.load_html(
+        "<script>window.print(); document.title = 'returned';</script>",
+        Some("https://example.test/"),
+    );
+    // A dialog that is up is cancelled, so its nested main loop gives the page's `print()` back.
+    let dialog = Rc::new(Cell::new(false));
+    let seen = dialog.clone();
+    let watch = glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        for toplevel in gtk::Window::list_toplevels() {
+            if toplevel.type_().name() != "GtkPrintUnixDialog" {
+                continue;
+            }
+            seen.set(true);
+            if let Ok(shown) = toplevel.downcast::<gtk::Dialog>() {
+                shown.response(gtk::ResponseType::Cancel);
+            }
+        }
+        glib::ControlFlow::Continue
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let returned = || webview.title().is_some_and(|title| title == "returned");
+    while !returned() && std::time::Instant::now() < deadline {
+        glib::MainContext::default().iteration(false);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    watch.remove();
+    let result = (returned(), dialog.get());
+    unsafe { window.destroy() };
+    result
+}
+
 /// The WebKitGTK side of an app window on Linux, the counterpart of `webkit`: a user content filter made from
 /// the same rule list (public API, required), and `WebKitSettings` for DNS prefetch and WebRTC (public API,
 /// best effort). WebKitGTK has no switch for `<link rel=preconnect>`: the filter is what is measured for it.
@@ -1846,9 +1926,7 @@ mod webkitgtk {
         store: &Path,
         done: impl FnOnce(Result<(), String>) + 'static,
     ) {
-        if let Some(settings) = WebViewExt::settings(webview) {
-            super::app_settings(&settings, guard);
-        }
+        super::app_webview(webview, guard);
         if !guard.rules {
             return done(Ok(()));
         }
@@ -3219,6 +3297,18 @@ mod tests {
             app_settings(&settings, Guard::parse(guard).unwrap());
             assert!(!settings.enables_fullscreen(), "{guard}");
         }
+    }
+
+    /// An app window's page that calls `print()` gets it back at once, and no print dialog is up: WebKitGTK's own is
+    /// modal to every window of the app. What `webkitgtk::harden` does to the web view, whatever the guard.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "needs a display and a process of its own (print_in)"]
+    fn an_app_window_on_linux_shows_no_print_dialog() {
+        let (returned, dialog) =
+            print_in(|webview| app_webview(webview, Guard::parse("full").unwrap()));
+        assert!(!dialog, "a print dialog was up");
+        assert!(returned, "print() did not return");
     }
 
     /// The same on macOS, where wry turns it on at build: what `webkit::no_element_fullscreen` does to a
