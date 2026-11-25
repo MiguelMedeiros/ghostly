@@ -332,7 +332,18 @@ describe("sending files", () => {
     expect(await (await services.getFile(sent[0].id))?.text()).toBe("%PDF-1.7 report");
   });
 
-  it("keeps the pictures just sent within a budget of bytes, the newest always", async () => {
+  it("keeps the last 8 pictures just sent", async () => {
+    withLinks(chat({ id: "count-link" }));
+    const sent = [];
+    for (let i = 0; i < 9; i++) sent.push((await services.sendFile("peer-1", new File([PNG], `${i}.png`, { type: "image/png" }))).file);
+    const get = vi.spyOn(fileStore, "get");
+    try {
+      for (const file of sent) await services.getFile(file.id);
+      expect(get.mock.calls.map(([id]) => id)).toEqual([sent[0].id]);
+    } finally { get.mockRestore(); }
+  });
+
+  it("keeps the pictures just sent within a budget of bytes", async () => {
     withLinks(chat({ id: "budget-link" }));
     // Three pictures of 12 MiB each (a PNG with a second, large IDAT, which the metadata strip keeps): over 32 MiB
     // together, so the oldest is read back.

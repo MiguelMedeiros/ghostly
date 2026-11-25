@@ -61,8 +61,8 @@ function keepUnsent(fileId: string, transfer: FileTransferState): void {
 }
 /**
  * The last few pictures and voice notes sent from this page, as they were handed over (a recording, a paste, a pick):
- * their bubble shows them at once from these bytes, without reading the stored copy back. Small files only, at most
- * `JUST_SENT_BYTES` together (the newest always); gone on a reload. They are copies in memory (`detached`), so any
+ * their bubble shows them at once from these bytes, without reading the stored copy back. Small files only (each
+ * under `JUST_SENT_BYTES`), at most that much together; gone on a reload. They are copies in memory (`detached`), so any
  * other file, whose bubble never reads its bytes, is not kept: 8 files of 15 MiB held 120 MiB for the page's life.
  */
 const justSent = new Map<string, Blob>();
@@ -74,7 +74,7 @@ function keepJustSent(id: string, blob: Blob, file: { image?: unknown; voice?: u
   let bytes = 0;
   for (const kept of justSent.values()) bytes += kept.size;
   for (const [oldest, kept] of justSent) {
-    if (justSent.size <= 1 || (justSent.size <= JUST_SENT_MAX && bytes <= JUST_SENT_BYTES)) break;
+    if (justSent.size <= JUST_SENT_MAX && bytes <= JUST_SENT_BYTES) break;
     justSent.delete(oldest);
     bytes -= kept.size;
   }
