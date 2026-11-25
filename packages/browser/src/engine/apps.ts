@@ -1031,8 +1031,10 @@ export class Apps {
   async builtIns(): Promise<BuiltInAppOffer[]> {
     const list = this.host.builtIns ?? BUILT_IN_APPS;
     if (!list.length || !this.host.readBuiltIn) return [];
-    const [installed, marks] = await Promise.all([this.installed(), this.builtInMarks()]);
-    return builtInsDue(list, new Set(installed.map((a) => a.ref)), marks).map((app) => ({
+    // Only which are installed, by their keys: asked with the installed list at each of its reads, which reads every
+    // record whole already (each with its manifest, a waiting update's and its revocations).
+    const [installed, marks] = await Promise.all([store(STORES.apps, "readonly").then((s) => wrap(s.getAllKeys())), this.builtInMarks()]);
+    return builtInsDue(list, new Set(installed as string[]), marks).map((app) => ({
       ref: builtInRef(app), publisher: app.publisher, name: app.name, fingerprint: appFingerprint(app.publisher), digest: app.digest, url: app.url,
       title: app.title, tagline: app.tagline,
     }));
