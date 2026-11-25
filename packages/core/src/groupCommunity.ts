@@ -482,8 +482,8 @@ export interface CommunityState {
   nicks: Record<string, string>;
   /**
    * Member → the time of the frame its name in `nicks` came from, or of the moment an edge last said it (`setNick`): a
-   * name from an older frame is not taken. None for a frame past `COMMUNITY_LIMITS.lastingAheadMs` ahead of my clock.
-   * Absent in older states.
+   * name from an older frame is not taken. A time past `COMMUNITY_LIMITS.lastingAheadMs` ahead of my clock is kept, but
+   * gives way to a frame within it. Absent in older states.
    */
   nickAt?: Record<string, number>;
   /** Recent frames from everyone (mine included), oldest first. */
@@ -2656,12 +2656,12 @@ export class CommunitySession {
     const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
     // Only from a frame newer than the one the name I hold came from: a catch-up's older message, or one said again
     // under a newer commit, never brings back a name the member changed since. A time further ahead of my clock than
-    // `COMMUNITY_LIMITS.lastingAheadMs` is no time (as for `keepLasting`): its name is taken, but holds no later one off.
+    // `COMMUNITY_LIMITS.lastingAheadMs` (as for `keepLasting`) still orders that member's frames, but gives way to a frame
+    // within it: the member's clock was set right.
     const nickBound = (this.hooks.clock?.() ?? Date.now()) + COMMUNITY_LIMITS.lastingAheadMs;
     const nickAt = this.state.nickAt?.[raw.s] ?? 0;
-    if (nick && (raw.ts > nickAt || nickAt > nickBound)) {
-      if (raw.ts <= nickBound) (this.state.nickAt ??= {})[raw.s] = raw.ts;
-      else if (this.state.nickAt) delete this.state.nickAt[raw.s];
+    if (nick && (raw.ts > nickAt || (nickAt > nickBound && raw.ts <= nickBound))) {
+      (this.state.nickAt ??= {})[raw.s] = raw.ts;
       if (this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
     }
     let onRow: boolean | void = false, fleeting = false;
