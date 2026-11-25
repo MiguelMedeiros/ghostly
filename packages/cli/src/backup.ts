@@ -48,6 +48,16 @@ type BackupRecord =
 const HOLDS = "holds.json";
 const SETTINGS = ["groups.json", "calls.json", HOLDS, "apps.json"];
 
+/**
+ * What a restore takes of a record. Each setting is a short list (chats and their keys, holds, served apps): ~100 bytes
+ * an entry, so 1 MiB is thousands of them. The largest record is the head with a light backup's file ids (~50 bytes
+ * each): 16 MiB is some 300,000 files. A record this CLI does not know is skipped only while small: a newer one's would
+ * be a few fields, and a large one is only unpacked and parsed for nothing.
+ */
+const MAX_RECORD_BYTES = 16 * 1024 * 1024;
+const MAX_SETTING_BYTES = 1024 * 1024;
+const MAX_UNKNOWN_RECORD_BYTES = 64 * 1024;
+
 /** A setting's text, or null for one the profile never wrote. */
 const readSetting = (dir: string, name: string) => readFile(join(dir, name), "utf8").catch(unlessGone);
 
@@ -491,7 +501,7 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
   let work: ProfilePaths | null = null;
   try {
     let reader: BackupReader | null;
-    try { reader = await BackupReader.open(source, passphrase); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
+    try { reader = await BackupReader.open(source, passphrase, undefined, { recordBytes: MAX_RECORD_BYTES }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
     if (!reader) {
       const payload = await readWhole(file, passphrase ?? "");
       stop?.throwIfAborted();
@@ -530,11 +540,13 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
         const value = parse(record.json);
         if (value.t === "end") { ended = value.files === files && value.bytes === bytes; if (!ended) throw new CliError("refused", "This backup is damaged: it was changed or cut short"); continue; }
         if (value.t === "setting") {
+          if (typeof value.text === "string" && Buffer.byteLength(value.text) > MAX_SETTING_BYTES) throw new CliError("refused", "This backup is too large to restore");
           if (SETTINGS.includes(value.name) && typeof value.text === "string") {
             try { await writeFile(join(paths.dir, value.name), value.text, { mode: 0o600, flag: "wx" }); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", "This backup is damaged: it was changed or cut short") : error; }
           }
           continue;
         }
+        if (value.t !== "file" && record.json.length > MAX_UNKNOWN_RECORD_BYTES) throw new CliError("refused", "This backup is too large to restore");
         if (value.t !== "file" || !Number.isSafeInteger(value.size) || value.size < 0) continue;
         let target: string;
         if (value.kind === "store") { target = join(paths.db, "snapshot.bin"); stored = true; }

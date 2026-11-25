@@ -22,6 +22,13 @@ export const FRAME_BYTES = 1024 * 1024;
 const MAX_FRAME_BYTES = 64 * 1024 * 1024;
 /** One piece of JSON, decompressed: past it the backup is refused, not read. */
 const MAX_JSON_BYTES = 256 * 1024 * 1024;
+/**
+ * All the JSON of one backup, decompressed: this much, and this many times the bundle's size. A profile's records
+ * (rows of messages, keys, settings) shrink a few times under gzip, never dozens; one of a few MB that unpacks to
+ * gigabytes was made to, and a restore would spend minutes and as much disk on it. File bytes are never compressed.
+ */
+const MAX_JSON_TOTAL_FLOOR = 64 * 1024 * 1024;
+const MAX_JSON_PER_BUNDLE_BYTE = 64;
 const MAX_HEADER_BYTES = 4096;
 /**
  * JSON shorter than this is written plain: gzip makes a record of a file (a few dozen bytes) larger, and costs a
@@ -214,6 +221,9 @@ export async function backupProtection(source: BackupSource): Promise<"passphras
 
 const DAMAGED = "This backup is damaged: it was changed or cut short";
 
+/** A reader whose every record is small (the CLI's profile) refuses a larger one before decompressing it all. */
+export interface BackupLimits { recordBytes?: number }
+
 /** Reads a version 2 backup record by record. Nothing of a frame is handed out before it passed its check. */
 export class BackupReader {
   private frame = 0;
@@ -221,25 +231,32 @@ export class BackupReader {
   private block: Uint8Array = new Uint8Array();
   private blockAt = 0;
   private done = false;
+  /** JSON this backup may still hand out, decompressed (`MAX_JSON_TOTAL_FLOOR`). */
+  private jsonLeft: number;
+  private readonly recordBytes: number;
 
-  private constructor(private readonly source: BackupSource, private readonly key: CryptoKey | null, private readonly base: Uint8Array, private chain: Uint8Array, start: number, private readonly signal?: AbortSignal) { this.at = start; }
+  private constructor(private readonly source: BackupSource, private readonly key: CryptoKey | null, private readonly base: Uint8Array, private chain: Uint8Array, start: number, private readonly signal?: AbortSignal, limits?: BackupLimits) {
+    this.at = start;
+    this.jsonLeft = MAX_JSON_TOTAL_FLOOR + MAX_JSON_PER_BUNDLE_BYTE * source.size;
+    this.recordBytes = Math.min(MAX_JSON_BYTES, limits?.recordBytes ?? MAX_JSON_BYTES);
+  }
 
   get protection(): "passphrase" | "none" { return this.key ? "passphrase" : "none"; }
 
   /** Null when `source` is not a version 2 backup. `passphrase` is needed, and used, only for a sealed one. */
-  static async open(source: BackupSource, passphrase?: string, signal?: AbortSignal): Promise<BackupReader | null> {
+  static async open(source: BackupSource, passphrase?: string, signal?: AbortSignal, limits?: BackupLimits): Promise<BackupReader | null> {
     const found = await readBackupHeader(source);
     if (!found) return null;
     check(signal);
     const { header, line } = found;
-    if (header.protection === "none") return new BackupReader(source, null, new Uint8Array(), await sha256(line), line.length, signal);
+    if (header.protection === "none") return new BackupReader(source, null, new Uint8Array(), await sha256(line), line.length, signal, limits);
     let key: CryptoKey, base: Uint8Array;
     try {
       base = fromBase64Url(header.cipher!.nonce);
       if (base.length !== 7) throw new Error("nonce");
       key = await keyFrom(passphrase ?? "", fromBase64Url(header.kdf!.salt), header.kdf!.iterations);
     } catch { throw new Error("Unsupported backup encryption"); }
-    return new BackupReader(source, key, base, await sha256(line), line.length, signal);
+    return new BackupReader(source, key, base, await sha256(line), line.length, signal, limits);
   }
 
   /** Bytes of the source read so far (for progress). */
@@ -287,7 +304,10 @@ export class BackupReader {
       return null;
     }
     if (kind === KIND.bytes) return { bytes: plain };
-    const text = kind === KIND.gzipJson ? await through(plain, new DecompressionStream("gzip"), MAX_JSON_BYTES).catch((error: unknown) => { throw error instanceof Error && error.message.startsWith("This backup is too large") ? error : new Error(DAMAGED); }) : plain;
+    const limit = Math.min(this.recordBytes, this.jsonLeft);
+    const text = kind === KIND.gzipJson ? await through(plain, new DecompressionStream("gzip"), limit).catch((error: unknown) => { throw error instanceof Error && error.message.startsWith("This backup is too large") ? error : new Error(DAMAGED); }) : plain;
+    if (text.length > limit) throw new Error("This backup is too large to restore");
+    this.jsonLeft -= text.length;
     return { json: new TextDecoder().decode(text) };
   }
 }
