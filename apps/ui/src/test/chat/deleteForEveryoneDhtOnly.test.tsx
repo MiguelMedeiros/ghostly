@@ -2,7 +2,7 @@ import { act, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readStatusCard, statusCardText } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
-import type { ChatMessage } from "../../lib/storage";
+import type { ChatMessage } from "../../lib/types";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
