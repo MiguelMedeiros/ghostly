@@ -645,9 +645,15 @@ const FORMER_SOURCES_KEPT = 16;
 /** `InstalledApp.formerSources` as kept: a list, at most `FORMER_SOURCES_KEPT`. */
 const formerOf = (app: InstalledApp): string[] => Array.isArray(app.formerSources) ? app.formerSources.slice(0, FORMER_SOURCES_KEPT) : [];
 
-/** Where an installed app's publisher's revocations are read: where it came from, the sources it names, and its earlier ones. */
+/** Where a waiting update's publisher's revocations are read: where it was found and the sources it names (at most a manifest's). */
+const pendingUrlsOf = (app: InstalledApp): string[] => app.pending ? [app.pending.from, ...(app.pending.manifest.sources ?? []).slice(0, APP_BUNDLE_LIMITS.sources)] : [];
+
+/**
+ * Where an installed app's publisher's revocations are read: where it came from, the sources it names, its earlier ones,
+ * and the waiting update's own places (Accept judges it with what the record holds).
+ */
 function revocationUrlsOf(installed: InstalledApp | undefined): string[] {
-  return installed ? [installed.from, ...(installed.manifest.sources ?? []), ...formerOf(installed)] : [];
+  return installed ? [installed.from, ...(installed.manifest.sources ?? []), ...formerOf(installed), ...pendingUrlsOf(installed)] : [];
 }
 
 /** `InstalledApp.formerSources` once another version replaces `installed`: its own first, then where it came from and the sources it named. */
@@ -2157,8 +2163,12 @@ export class Apps {
       }
       fail("unlisted", "The store no longer lists this update");
     }
+    // Its publisher's revocations beside where it waits and the sources it names are read now, as Install reads a
+    // carried version's: one revoked there since the check found it is not installed.
+    const version = versionOf(read.bundle.manifest, pending.digest);
+    const beside = await this.readStopping(version, pendingUrlsOf(installed));
     // With the ones this profile kept too (`APP_REVOCATIONS_KEY`): an install screen that showed it revoked kept them.
-    const run = this.runStatus(versionOf(read.bundle.manifest, pending.digest), this.storeViews(stores), [...(installed.revocations ?? []), ...await this.keptRevocationsOf(ref)]);
+    const run = this.runStatus(version, this.storeViews(stores), [...(installed.revocations ?? []), ...beside, ...await this.keptRevocationsOf(ref)]);
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     const plan = planAppUpdate(installed, { ...versionOf(read.bundle.manifest, pending.digest), permissions: read.bundle.manifest.permissions });
