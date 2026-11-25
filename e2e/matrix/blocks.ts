@@ -651,7 +651,7 @@ async function mainnetUi({ a, b, combo }: World): Promise<void> {
       if (combo.rail === "ln-mint") {
         await wallet(p, "lightning-mainnet");
         await expect(p.page.getByTestId("wallet-card-lightning-mainnet")).toContainText(containing("Invoices via Cashu"));
-        await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-current")).toContainText("Cashu mints");
+        await expect(p.page.getByTestId("lightning-source").getByTestId("lightning-source-current")).toContainText(containing("Cashu mints"));
       }
       made.add(p);
       continue;
