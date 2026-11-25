@@ -127,7 +127,7 @@ import {
 import type { AppRangeAsk, AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { SavedMessages } from "./saved";
 import { ChatTextSearch } from "./chatSearch";
-import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, committed, type StoredFile } from "../shared/idb";
+import { DEPARTED_KEY, STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, committed, type StoredFile } from "../shared/idb";
 import { Apps, type AppDataExport, type AppDataExportText, type AppFileAt, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
 import { boundedAppFetch } from "./appFetch";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
@@ -2478,6 +2478,7 @@ export class GhostlyNode implements EngineImplementation {
 
     const links = await db.getLinks();
     this.unshareServicesOfGone(links);
+    this.lastRunDeparted = await this.takeDepartedMark();
     if (this.options.deferChats) for (const stored of links) {
       if (!stored.group) this.deferredChats.add(stored.id);
       // A group's edges, not the entry sessions of a join that waits for its admin: those go on as they did.
@@ -2984,6 +2985,27 @@ export class GhostlyNode implements EngineImplementation {
    */
   depart(options: { quitting?: boolean } = {}): void {
     for (const live of this.links.values()) live.link?.depart(options);
+    // For the next start (`lastRunDeparted`). Not waited for: a stop takes longer than this write (its links' leave
+    // packets go out first), and a page closing may not have the time anyway; that start then takes the contacts for
+    // still holding their sessions, and only looks for their answers less often.
+    void store(STORES.settings, "readwrite").then((settings) => committed(settings.put({ at: Date.now() }, DEPARTED_KEY))).catch(() => {});
+  }
+
+  /**
+   * Whether this app's last run said goodbye (`depart`) as it ended. Not (a crash, a kill): a contact live with it then
+   * still holds that session, and answers a resume only once it finds it gone (`GhostLinkOptions.resumeUnannounced`).
+   * Read at start, and taken away, so a crash in this run is not taken for a goodbye.
+   */
+  private lastRunDeparted = true;
+  private async takeDepartedMark(): Promise<boolean> {
+    try {
+      const mark = await wrap((await store(STORES.settings, "readonly")).get(DEPARTED_KEY));
+      if (mark === undefined) return false;
+      await committed((await store(STORES.settings, "readwrite")).delete(DEPARTED_KEY));
+      return true;
+    } catch {
+      return true;
+    }
   }
 
   /**
@@ -9513,6 +9535,8 @@ export class GhostlyNode implements EngineImplementation {
         automatic: stored.preferredTransport === undefined },
       // Live when this app last ran: the contact may still hold that session, and is reached again at once (WISP 100).
       resume: resumed.resume,
+      // That run ended with no goodbye: the contact answers only once it finds the session gone.
+      resumeUnannounced: !!resumed.resume && !this.lastRunDeparted,
       // An offer from before that live stretch began is not answered after a restart (a relay that missed its clearing).
       resumeFloor: resumed.floor,
       pairing: credentials ? {
