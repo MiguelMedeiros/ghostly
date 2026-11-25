@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GhostlyEvent } from "../src/events";
 
+// covers: headless.cli
+
 // Each cursor write is a file written and renamed over the last: about 0.17 ms of a blocked loop and a disk block.
 const fs = vi.hoisted(() => ({ renames: [] as string[] }));
 vi.mock("node:fs", async (original) => {
