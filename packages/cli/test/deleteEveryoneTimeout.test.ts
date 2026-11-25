@@ -16,10 +16,10 @@ const group = { id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: 
 const row = (linkId: string, id: string): StoredMessage => ({ linkId, id, text: "purgecanary77", sender: "me", timestamp: 1, via: "datalink", delivery: "delivered" });
 
 /** A node where no member's edge ever takes a frame and no contact ever confirms a removal. */
-function fake(mode: "daemon" | "one-shot" = "daemon") {
+function fake(mode: "daemon" | "one-shot" = "daemon", patch: Partial<LinkView> = {}) {
   const rows = [row("chat-one", "me_1"), row("group:g1", "mine:0:3")];
   const node = {
-    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [link], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
+    chatView: chatViewOf, groupView: groupViewOf, getState: () => ({ links: [{ ...link, ...patch }], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     getMessages: vi.fn(async () => []), groupMessages: vi.fn(async () => []),
     removeMessage: vi.fn(async ({ linkId, messageId }: { linkId: string; messageId: string }) => {
@@ -82,6 +82,30 @@ describe("message delete --everyone whose wait times out", () => {
     expect(await timedOut(callApi(ctx, "chat.delete", { chat: "group:g1", message: "mine:0:3", everyone: true, timeout: 2, purge: true }))).toMatchObject({
       code: "timeout", details: { deleted: "mine:0:3", purged: true },
       message: "Timed out after 2 s: the message is gone here and no member's edge took its removal yet (it goes when one opens). Its removal goes with this profile's next command, or keep it online with `ghostly daemon --detach`",
+    });
+  });
+});
+
+/**
+ * A removal goes on the live session only (WISP 400 § Delete for everyone, "Delivery"), which a chat on the DHT only
+ * (either side's choice) does not open: the timeout said it "still goes by itself", and it never went. As a pin's.
+ */
+describe("message delete --everyone in a chat on the DHT only: the timeout says it waits for a live session", () => {
+  const mine = { deliveryMode: "dht" } as unknown as Partial<LinkView>;
+  const theirs = { dhtDelivery: { peerMode: "dht" } } as unknown as Partial<LinkView>;
+  const gone = "Timed out after 2 s: the message is gone here and the contact has not confirmed yet";
+
+  it("says whose choice keeps it there and what ends it, in place of \"still goes by itself\"; the details stay as they were", async () => {
+    vi.useFakeTimers();
+    for (const mode of ["daemon", "one-shot"] as const) {
+      const failure = await timedOut(callApi(fake(mode, mine).ctx, "chat.delete", { chat: "Alice", message: "me_1", everyone: true, wait: "confirmed", timeout: 2 })) as { code: string; message: string; details: object };
+      expect(failure.code).toBe("timeout");
+      expect(failure.message).not.toMatch(/goes by itself|next command|daemon --detach/);
+      expect(failure.message).toBe(`${gone}. Its removal goes only on a live session, and this chat is on the DHT only: it goes once you choose a live transport (ghostly chat transport Alice auto)`);
+      expect(failure.details).toEqual({ messageId: "me_1", deleted: "me_1" });
+    }
+    expect(await timedOut(callApi(fake("daemon", theirs).ctx, "chat.delete", { chat: "Alice", message: "me_1", everyone: true, wait: "confirmed", timeout: 2 }))).toMatchObject({
+      code: "timeout", message: `${gone}. Its removal goes only on a live session, and the contact keeps this chat on the DHT only: it goes once they choose a live transport`,
     });
   });
 });
