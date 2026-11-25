@@ -203,7 +203,8 @@ test.describe("on a phone a system line that wraps", () => {
  * Cancel and Delete were 40 px tall, the reply and edit bars' × 36 px wide, the pinned message 42 px tall, the details'
  * × 28 px and its Copy as JSON 26 px tall, the select bar's Cancel 34 px and its Forward 41 px tall, the Forward dialog's
  * Cancel and Send 41 px tall. The details' copy values stay 24 px tall rows in a dense list, so only its × and Copy as
- * JSON are measured there.
+ * JSON are measured there. In the bubble itself, a long key's Show all and Copy and a code block's Copy were 20 px tall
+ * (Copy 26 px wide); a spoiler and a written time sit inside a sentence, as a link in text does, and are left out.
  */
 test("on a phone a message's Delete question, reply and edit bars, pin, details, select bar and Forward are 44 px targets", { tag: ["@feature:app.mobile-layout", "@feature:chat.paired.delete-message", "@feature:chat.replies", "@feature:chat.edit", "@feature:chat.pins", "@feature:chat.paired.message-details", "@feature:chat.forward"] }, async ({ peer }, testInfo) => {
   test.setTimeout(4 * 60_000);
@@ -258,6 +259,16 @@ test("on a phone a message's Delete question, reply and edit bars, pin, details,
   await page.getByTestId("forward-target").first().click();
   await expect(page.getByTestId("forward-send")).toBeEnabled();
   await measure("Forward dialog", "[data-testid=forward-dialog] button");
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+
+  // In the message itself: a long key's Show all and Copy, a code block's Copy (20 px tall, Copy 26 px wide). The key has
+  // a line under it: on a message's last line the time beside its end stays on top of Copy's lower edge (a message of
+  // mine has its delivery mark there, a control of its own).
+  await say(bob, `key ${"Zm9vYmFy".repeat(16)}\nfrom the Mac`);
+  await say(bob, "```js\nconst a = 1;\n```");
+  await expect(chat(alice).getByTestId("rich-codeblock")).toBeVisible();
+  await measure("long key and code block", "[data-testid=rich-blob-toggle], [data-testid=rich-blob-copy], [data-testid=rich-codeblock-copy]");
 
   expect(small, "a message's controls under 44 × 44 px on a phone").toEqual([]);
 });
