@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_CALL_SFU, NO_PICTURE_METADATA, groupCallSfu, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
-import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, notInYet, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, nobodyJoined, notInYet, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError, localFileError } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
@@ -161,6 +161,12 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     const group = joined(ctx, params);
     // The one invited reads the group from then on: a contact's own name or a prefix of its id never names it.
     const link = ownChatOf(ctx, params);
+    // A chat whose invite nobody took has no contact to come online: the engine's "Invite them when they are online"
+    // sent the admin to wait for nobody. A community's own refusal (share its link) and a member's (only the admin) stay.
+    if (group.profile !== "community" && group.isAdmin && nobodyJoined(link)) {
+      const ref = shellWord(str(params, "chat", true), link.id);
+      throw new CliError("unavailable", `Nobody joined chat ${ref} yet: invite them once they take its invite and are online (ghostly chat wait ${ref})`);
+    }
     await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
     return view(ctx, group.id, params);
   },
