@@ -298,10 +298,10 @@ function GroupLinkIntake() {
   const groupsLoaded = useEngineValue((state) => !!state?.groupsLoaded);
   /**
    * The links waiting for the unlock (and the engine's groups), oldest first, each once: as many as links may join
-   * (`LINK_GROUPS_WAITING`), each joined in turn after. One past them is refused. With each, what `otherLinks` was when
-   * it came.
+   * (`LINK_GROUPS_WAITING`), each joined in turn after. One past them is refused. With each, the group it names and what
+   * `otherLinks` was when it came.
    */
-  const held = useRef<{ link: string; after: number }[]>([]);
+  const held = useRef<{ link: string; id: string | null; after: number }[]>([]);
   const [heldCount, setHeldCount] = useState(0);
   const [problem, setProblem] = useState<Problem | null>(null);
   /** The groups this intake is joining, until the engine answers: links that come together count each other. */
@@ -322,10 +322,16 @@ function GroupLinkIntake() {
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
     // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's. Only a link
     // it holds does: one waiting already, or refused past the limit, leaves the refusal of the one before it.
+    // A link to a group already here takes no place among them, as after the unlock, nor does a newer link to a group
+    // held already: it takes that one's (its link reset, the newest is the one joined).
     else {
       const list = held.current;
+      const id = linkGroupId(link);
+      const here = (group: string | null) => group !== null && (engine.state?.groups ?? []).some((known) => known.id === group);
+      const before = id === null ? -1 : list.findIndex((entry) => entry.id === id);
+      if (before >= 0 && list[before].link !== link) list.splice(before, 1);
       if (!list.some((entry) => entry.link === link)) {
-        if (list.length < LINK_GROUPS_WAITING) { setProblem(null); list.push({ link, after: otherLinks.current }); }
+        if (here(id) || list.filter((entry) => !here(entry.id)).length < LINK_GROUPS_WAITING) { setProblem(null); list.push({ link, id, after: otherLinks.current }); }
         else setProblem({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
       }
       setHeldCount(list.length);
@@ -340,19 +346,20 @@ function GroupLinkIntake() {
     const list = held.current.splice(0);
     setHeldCount(0);
     const groups = engine.state?.groups ?? [];
-    for (const { link: code, after } of list) {
+    for (const { link: code, id, after } of list) {
       const refuse = (refusal: Problem) => { if (otherLinks.current === after) setProblem(refusal); };
-      const id = linkGroupId(code);
       if (id && !groups.some((group) => group.id === id) && !joining.current.has(id)
         && new Set([...linkGroupsWaiting(groups), ...joining.current]).size >= LINK_GROUPS_WAITING) {
         refuse({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
         continue;
       }
-      if (id) joining.current.add(id);
+      // One here already makes no group wait to be let in: counted, a new group's link after it was refused.
+      const joins = !!id && !groups.some((group) => group.id === id);
+      if (joins) joining.current.add(id);
       engine.call("joinGroupByLink", { link: code })
         .then(({ groupId }) => nav.conversation(groupPath(groupId)))
         .catch((cause: unknown) => refuse(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
-        .finally(() => { if (id) joining.current.delete(id); });
+        .finally(() => { if (joins) joining.current.delete(id); });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [heldCount, isLocked, hasUnlocked, groupsLoaded]);
