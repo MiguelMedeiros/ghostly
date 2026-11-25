@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { rtcLogLevel, rtcLogLine, startRtcLog } from "../src/calls/rtcLog";
+import { rtcLogKept, rtcLogLevel, rtcLogLine, startRtcLog } from "../src/calls/rtcLog";
 // covers: headless.calls
 
 /*
@@ -81,6 +81,29 @@ describe("GHOSTLY_RTC_LOG", () => {
     expect(out).toContain(`pwd=<hidden>`);
     // Lines with nothing to hide stay as they are.
     for (const plain of ["juice: STUN fingerprint check succeeded", "Changed ICE state to checking", "juice: STUN entry 3: Sending request to 10.0.0.5:50000 (6 retransmissions left)"]) expect(rtcLogLine(plain)).toBe(plain);
+  });
+
+  it("at Verbose, keeps the ICE agent's checks and candidates, not the lines each datagram brings", () => {
+    // Over 2,000 lines a second on a call's audio, from about 20 lines per datagram; the checks are what the log is for.
+    const at = (message: string) => `rtc::impl::IceTransport::LogCallback@391: juice: ${message}`;
+    for (const kept of [
+      "Received STUN datagram from 10.0.0.5:50000", "STUN entry 3: Sending request to 10.0.0.5:50000 (6 retransmissions left)",
+      "STUN entry 3: Failed", "Received STUN Binding success response from peer", "Sending STUN Binding response",
+      "STUN local ufrag check failed, expected=\"a\", actual=\"b\"", "Got a nominated pair (controlled)", "Candidate pair check succeeded",
+      "Adding remote candidate: a=candidate:1 1 UDP 2122317823 10.0.0.5 50000 typ host", "UDP socket bound to 10.0.0.9:51234",
+    ]) expect(rtcLogKept("Verbose", at(kept)), kept).toBe(true);
+    for (const dropped of [
+      "Receiving datagram", "Received datagram, size=120", "Sending datagram, size=120", "Not a STUN message: magic number invalid",
+      "Received non-STUN datagram from 10.0.0.5:50000", "STUN selected entry matching incoming address", "Received application datagram",
+      "Entering poll on 2 sockets for 20 ms", "Leaving poll", "Bookkeeping...", "Writing STUN attribute type 0x0006, length=9",
+    ]) expect(rtcLogKept("Verbose", at(dropped)), dropped).toBe(false);
+    expect(rtcLogKept("Verbose", "rtc::impl::DtlsSrtpTransport::recvMedia@301: Incoming SRTP packet, size=120")).toBe(false);
+    expect(rtcLogKept("Verbose", "rtc::IsRtcp@54: Demultiplexing RTCP and RTP with payload type, value=111")).toBe(false);
+    // Below Verbose, every line.
+    for (const level of ["Debug", "Info", "Warning"]) expect(rtcLogKept(level, "PeerConnectionWrapper::state@811: state() called")).toBe(true);
+    const out: string[] = [];
+    startRtcLog(fakeLib([["Verbose", at("Received datagram, size=120")], ["Verbose", at("Received STUN datagram from 10.0.0.5:50000")]]), { GHOSTLY_RTC_LOG: "Verbose" }, (text) => out.push(text));
+    expect(out).toEqual([`ghostly: rtc Verbose: ${at("Received STUN datagram from 10.0.0.5:50000")}\n`]);
   });
 
   it("loading the call stack sets the logger only when GHOSTLY_RTC_LOG names a level", async () => {
