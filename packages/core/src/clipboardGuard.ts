@@ -21,7 +21,8 @@
  *   form, a checkbox, a double click or the app's own context menu copies on the person's tap, and nothing else does
  *   (not on load, not from a timer or a promise after a tap). `execCommand("paste")` is refused. Every other command
  *   passes as it is. The wrapped `execCommand` is left fixed in place (not writable, not configurable), once per
- *   window;
+ *   window. A page that rewrites itself (`document.open()`, which takes every listener of the document and of its
+ *   window away) has those inputs listened for again as the call returns, before its new page adds any of its own;
  * - runs in a frame's window before the page holds it, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`): what a frame
  *   element hands out is guarded first, the frames of the document and of its shadow trees are gone over as one loads
  *   (an empty frame's first load fires as it is put in the page) and as the page changes, the document's frames as
@@ -185,14 +186,17 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         for (let i = 0; i < shutters.length; i++) { try { shutters[i](); } catch (e) {} }
       };
       const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
-      for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
       const followed = (event) => {
         if (open === 0) return;
         const found = trust(event);
         if (found !== null) follows = { event: event, trusted: found, at: tapped, next: follows };
       };
-      apply(listen, w, ["submit", followed, true]);
-      apply(listen, w, ["change", followed, true]);
+      const hear = () => {
+        for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
+        apply(listen, w, ["submit", followed, true]);
+        apply(listen, w, ["change", followed, true]);
+      };
+      hear();
       const tapping = () => {
         if (tap !== null && dispatching(tap, trusted) && recent(tapped)) return true;
         for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted) && recent(f.at)) return true;
@@ -337,7 +341,12 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
       const reopen = proto.open;
       proto.open = function () {
         const got = apply(reopen, this, arguments);
-        try { if (apply(view, this, []) === w) apply(listen, this, ["load", sweep, true]); } catch (e) {}
+        try {
+          if (apply(view, this, []) === w) {
+            apply(listen, this, ["load", sweep, true]);
+            hear();
+          }
+        } catch (e) {}
         return got;
       };
       const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
@@ -425,4 +434,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-GQzOHQubK9NTonmQhyHQhV2gUnNdff7hJrWBqiB3vlM='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-uz1O5F3/UKws27ckIAadEQHaTuunp9OFQnfATPkFOas='";
