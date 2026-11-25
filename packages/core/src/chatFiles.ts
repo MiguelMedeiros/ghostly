@@ -1237,7 +1237,8 @@ export class ChatFiles {
       }
       if (record.state === "paused" && record.pausedBy === "me") { this.send({ t: "pf-wait", id, why: "paused" }); return; }
       if (paused) {
-        if (record.state !== "paused") { record.state = "paused"; record.pausedBy = "peer"; this.changed(existing); void this.checkpoint(existing); }
+        // Paused there while it arrived, it gives its turn here to the next one waiting, as a pause here does (`pause`).
+        if (record.state !== "paused") { record.state = "paused"; record.pausedBy = "peer"; this.changed(existing); void this.checkpoint(existing); this.startNext(); }
         return;
       }
       if (record.state === "paused") { record.state = "queued"; record.pausedBy = undefined; this.changed(existing); }
