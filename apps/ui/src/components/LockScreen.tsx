@@ -41,6 +41,8 @@ export function LockScreen() {
   const [answering, setAnswering] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const screenRef = useRef<HTMLDialogElement>(null);
+  /** The element the keyboard was on when the lock came on, given the focus back at the unlock. */
+  const returnTo = useRef<HTMLElement | null>(null);
   const waitSeconds = retryAt ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : 0;
 
   // Counts the wait down after too many wrong passwords, and stops with it: a locked app left alone runs no timer.
@@ -61,6 +63,10 @@ export function LockScreen() {
   useLayoutEffect(() => {
     const lockScreen = screenRef.current;
     if (!isLocked || !lockScreen) return;
+    // Where the keyboard was as the lock came on (a message being typed when the time ran out): it goes back there once
+    // unlocked. The dialog then leaves the page, it is not closed, and the browser's own return of the focus never comes.
+    const before = document.activeElement;
+    returnTo.current = before instanceof HTMLElement && before !== document.body && !lockScreen.contains(before) ? before : null;
     const show = () => {
       if (lockScreen.open) return;
       try {
@@ -117,6 +123,11 @@ export function LockScreen() {
     if (!isLocked) {
       setPassword("");
       setError(false);
+      // Unless it is gone (Lock Now left Settings for home), or something has the focus already (a call answered here).
+      const back = returnTo.current;
+      returnTo.current = null;
+      const free = !document.activeElement || document.activeElement === document.body;
+      if (back?.isConnected && free) back.focus({ preventScroll: true });
     }
   }, [isLocked]);
 
