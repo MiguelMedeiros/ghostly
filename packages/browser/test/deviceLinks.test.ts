@@ -308,6 +308,24 @@ describe("the device links of a profile on this device", () => {
     expect(await until(() => liveBetween(desktop, phone), 35_000)).toBe(true);
   });
 
+  it("offer WebRTC again less and less often while it never connects and no native transport runs", async () => {
+    rtc.blocked = true;
+    const d = newDeviceSetSecret();
+    const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone");
+    await write(desktop, "active", d, [desktop, phone]);
+    await write(phone, "standby", d, [desktop, phone]);
+    await settled(Promise.all([desktop.links.start(), phone.links.start()]));
+    await run(60_000);
+    const published = () => [...pkarr.publishesByKey.values()].reduce((a, b) => a + b, 0);
+    const reads = pkarr.reads, publishes = published();
+    await run(20 * 60_000);
+    // The wait before each new offer doubles (20 s, 40 s, 80 s, 160 s, then 5 min): 60 publishes and about 590 reads in
+    // 20 minutes (43 and 474 with no new offer at all; 184 and 1,243 with a new offer every 20 s).
+    expect(published() - publishes).toBeLessThanOrEqual(80);
+    expect(pkarr.reads - reads).toBeLessThanOrEqual(700);
+    expect(liveBetween(desktop, phone)).toBe(false);
+  }, 120_000);
+
   // Repeated: which device dials depends on the keys, and the computer's link must offer WebRTC again where it dials.
   it("go back to WebRTC when the link that went on without it started its Iroh but nothing connects over it", { timeout: 60_000, repeats: 5 }, async () => {
     // The phone's Iroh starts, the computer's never does (a relay it cannot reach): no session opens over Iroh.
