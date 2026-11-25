@@ -54,12 +54,12 @@ async function daemonWithCall(on: () => boolean): Promise<{ dir: string; audio: 
   return { dir, audio, emit: (event) => { for (const c of subscribed) c.write(JSON.stringify({ event: { seq: ++seq, id: `e${seq}`, at: Date.now(), ...event } }) + "\n"); } };
 }
 
-function pipe(dir: string): { said: () => string; exit: Promise<number | null> } {
+function pipe(dir: string): { said: () => string; exit: Promise<number | null>; interrupt(): void } {
   const child = spawn(process.execPath, [BIN, "--home", dir, "call", "pipe"], { env: testEnv(), stdio: ["pipe", "pipe", "pipe"] });
   let said = "";
   child.stderr.on("data", (d) => (said += d));
   child.stdout.resume();
-  return { said: () => said, exit: new Promise((resolve) => child.once("exit", resolve)) };
+  return { said: () => said, exit: new Promise((resolve) => child.once("exit", resolve)), interrupt: () => child.kill("SIGINT") };
 }
 
 /**
@@ -103,5 +103,18 @@ describe("call pipe's end", { timeout: 30_000 }, () => {
     program.end();
     expect(await run.exit).toBe(0);
     expect(run.said()).toContain(`ghostly: call ${CALL}: the call ended\n`);
+  });
+
+  // It died by the signal with no word, and the call went on in silence.
+  it("Ctrl-C: says the call goes on and how to end it, and leaves with 130", async () => {
+    const daemon = await daemonWithCall(() => true);
+    const run = pipe(daemon.dir);
+    await daemon.audio;
+    await expect.poll(run.said).toContain("on stdin/stdout");
+    run.interrupt();
+    expect(await run.exit).toBe(130);
+    expect(run.said()).toContain(`ghostly: call ${CALL}: stopped (Ctrl-C); the call goes on (ghostly call hangup ${CALL} ends it)\n`);
+    expect(run.said()).toContain('"code":"interrupted"');
+    expect(run.said()).not.toContain("the call ended");
   });
 });

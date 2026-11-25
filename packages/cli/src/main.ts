@@ -1832,8 +1832,21 @@ async function callPipeCommand(argv: string[]): Promise<void> {
     process.stderr.write(`ghostly: call ${call.call}: nothing reads its audio any more; the call goes on\n`);
     socket.destroy();
   });
+  // Ctrl-C stops the pipe, not the call: it says so, with how to end the call, and leaves with 130 as a command stopped
+  // with Ctrl-C does. It died by the signal with no word, and the contact went on hearing silence.
+  let stopped = false;
+  process.once("SIGINT", () => {
+    stopped = true;
+    const words = `stopped (Ctrl-C); the call goes on (ghostly call hangup ${call.call} ends it)`;
+    process.stderr.write(`ghostly: call ${call.call}: ${words}\n`);
+    failures.write(jsonOut({ error: new CliError("interrupted", words[0].toUpperCase() + words.slice(1)).toJSON() }, pretty ? 2 : undefined) + "\n");
+    socket.destroy();
+    client.close();
+    exit(EXIT.interrupted);
+  });
   socket.pipe(process.stdout);
   socket.on("close", () => void (async () => {
+    if (stopped) return;
     if (!readerGone) process.stderr.write(`ghostly: call ${call.call}: ${await whyClosed()}\n`);
     client.close();
     exit(0);

@@ -1205,7 +1205,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           <CallEventIcon type={type} hasVideo={hasVideo} />
           <span>{callEventText(t, type, hasVideo, callLineCount(message.callEvent)) ?? message.text}</span>
           {duration !== undefined && duration >= 1000 && (
-            <span className="text-text-muted">({formatCallLength(duration, t)})</span>
+            // Whole on one line: on a narrow phone the line breaks between its words, never inside the length.
+            <span className="text-text-muted whitespace-nowrap">({formatCallLength(duration, t)})</span>
           )}
           <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
