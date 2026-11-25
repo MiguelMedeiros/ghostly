@@ -1,6 +1,13 @@
 {
   "about": "About",
   "appearance": "Appearance",
+  "blocked": {
+    "hint": "Block a contact from their chat's menu: nothing they send reaches you, on any of your devices.",
+    "none": "No blocked contacts",
+    "title": "Blocked contacts",
+    "unblock": "Unblock",
+    "unblockLabel": "Unblock {{name}}"
+  },
   "changePassword": "Change password",
   "chatListDensities": {
     "comfortable": "Comfortable",
@@ -156,6 +163,7 @@
   "searchEmpty": "No settings match",
   "searchWords": {
     "account": "account",
+    "blocked": "block, blocked, unblock, contact, ignore",
     "camera": "video, webcam",
     "chatList": "compact, comfortable, rows",
     "clearData": "reset, erase, wipe",

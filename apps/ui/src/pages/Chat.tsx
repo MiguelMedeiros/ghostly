@@ -7,6 +7,7 @@ import { useComposition } from "../hooks/useComposition";
 import { useOpenedHeading } from "../hooks/useOpenedHeading";
 import { draftDirection } from "../lib/documentLanguage";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
+import { isolate } from "../lib/ownStatus";
 import { setChatOnCall, setChatRingsIn } from "../lib/chatsOnCall";
 import { callHoldsService, useCallService } from "../lib/callService";
 import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
@@ -214,6 +215,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const { t, language } = useI18n();
   const { settings } = useSettings();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmBlock, setConfirmBlock] = useState(false);
 
   const session = useMemo(() => (sessionId ? loadSession(sessionId) : null), [sessionId]);
   const sharedNick = useShareProfile() ? settings.defaultNickname : "";
@@ -886,6 +888,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     }
   };
 
+  // Block contact (the engine's `setContactBlocked`): by the contact's key, so every chat with it; the chat stays and
+  // nothing tells the contact. Unblocking asks nothing: it only lets the contact be heard again.
+  const blockKey = chatLink && params.peerPubKeyB64 ? params.peerPubKeyB64 : undefined;
+  const setBlocked = (blocked: boolean) => {
+    setConfirmBlock(false);
+    if (blockKey) void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked }).catch(() => {});
+  };
+
   const statusLabel = contactStatus(deliveryPeer, paired, status);
 
   const truncatedPeerKey = publicKeyLabel(params.peerPubKeyB64);
@@ -1193,6 +1203,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                   </MenuItem>
                 : rarerRows(closeMenu)}
               <MenuSeparator />
+              {blockKey && (chatLink?.blocked
+                ? <MenuItem testId="chat-unblock" onClick={() => { closeMenu(); setBlocked(false); }}
+                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /></svg>}>
+                    {t("chat.menu.unblock")}
+                  </MenuItem>
+                : <MenuItem testId="chat-block" danger onClick={() => { setConfirmBlock(true); closeMenu(); }}
+                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></svg>}>
+                    {t("chat.menu.block")}
+                  </MenuItem>)}
               <MenuItem danger onClick={() => { setConfirmDelete(true); closeMenu(); }}
                 icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>}>
                 {t("sidebar.deleteChat")}
@@ -1458,6 +1477,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
       {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} callOn={callHoldsChat} />}
+      {confirmBlock && blockKey && <DeleteChatDialog name={shownName} title={t("chat.block.title", { name: isolate(shownName) })} body={t("chat.block.body")}
+        confirm={t("chat.block.confirm")} onClose={() => setConfirmBlock(false)} onConfirm={() => setBlocked(true)} />}
       {showTechInfo && techInfo && (
         <TechInfoDialog onClose={() => setShowTechInfo(false)} returnFocus={optionsRef}>
         <div className="p-4 space-y-4 text-sm">

@@ -224,7 +224,7 @@ describe("a chat's ⋮ menu, in groups", () => {
     await user.click(await screen.findByTestId("chat-options"));
     const menu = screen.getByTestId("chat-options-menu");
     expect(menu).toHaveAttribute("data-menu", "sheet");
-    expect(layout(menu)).toEqual(["call-video", "chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-identity-badges", "—", "chat-more-open", "—", "Delete chat"]);
+    expect(layout(menu)).toEqual(["call-video", "chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-identity-badges", "—", "chat-more-open", "—", "chat-block", "Delete chat"]);
     expect(within(menu).getByTestId("chat-more-open")).toHaveTextContent("More…");
     // Without a bot's task going, no Tasks row and no count on ⋮.
     expect(within(menu).queryByTestId("chat-tasks")).not.toBeInTheDocument();
@@ -261,7 +261,7 @@ describe("a chat's ⋮ menu, in groups", () => {
     await user.click(await screen.findByTestId("chat-options"));
     const menu = screen.getByTestId("chat-options-menu");
     expect(menu).toHaveAttribute("data-menu", "popover");
-    expect(layout(menu).filter(row => row !== "chat-hold-open")).toEqual(["chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-folder-open", "chat-refresh", "chat-tech-info", "—", "Delete chat"]);
+    expect(layout(menu).filter(row => row !== "chat-hold-open")).toEqual(["chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-folder-open", "chat-refresh", "chat-tech-info", "—", "chat-block", "Delete chat"]);
   });
 });
 

@@ -29,6 +29,11 @@
     "save": "Salva audio",
     "tooLarge": "Troppo grande per riprodurlo qui. Scaricalo per ascoltarlo."
   },
+  "block": {
+    "body": "Non potrà più chiamarti né inviarti nulla, e niente glielo dice. La chat resta. Sbloccalo da questo menu o in Opzioni → Privacy e sicurezza.",
+    "confirm": "Blocca",
+    "title": "Bloccare {{name}}?"
+  },
   "compat": {
     "burned": "La chat è stata distrutta",
     "continued": "Hai invitato il tuo contatto in una nuova chat.",
@@ -279,6 +284,7 @@
     "wantsToSend": "{{name}} vuole inviarlo · restano {{size}}"
   },
   "menu": {
+    "block": "Blocca contatto",
     "continueNew": "Continua in una nuova chat",
     "hold": "Trattieni messaggi…",
     "more": "Altro…",
@@ -288,6 +294,7 @@
     "pin": "Fissa chat",
     "refresh": "Aggiorna",
     "techInfo": "Info tecniche",
+    "unblock": "Sblocca contatto",
     "unpin": "Sblocca chat"
   },
   "message": {

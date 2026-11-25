@@ -29,6 +29,11 @@
     "save": "Salvar áudio",
     "tooLarge": "Grande demais para tocar aqui. Baixe para ouvir."
   },
+  "block": {
+    "body": "Essa pessoa não poderá mais ligar nem enviar nada para você, e nada avisa a ela. A conversa fica. Desbloqueie por este menu ou em Ajustes → Privacidade e segurança.",
+    "confirm": "Bloquear",
+    "title": "Bloquear {{name}}?"
+  },
   "compat": {
     "burned": "A conversa foi apagada",
     "continued": "Você convidou seu contato para uma nova conversa.",
@@ -278,6 +283,7 @@
     "wantsToSend": "{{name}} quer enviar · sobram {{size}}"
   },
   "menu": {
+    "block": "Bloquear contato",
     "continueNew": "Continuar numa nova conversa",
     "hold": "Reter mensagens…",
     "more": "Mais…",
@@ -287,6 +293,7 @@
     "pin": "Fixar conversa",
     "refresh": "Atualizar",
     "techInfo": "Informações técnicas",
+    "unblock": "Desbloquear contato",
     "unpin": "Desafixar conversa"
   },
   "message": {
