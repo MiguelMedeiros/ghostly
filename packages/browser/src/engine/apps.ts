@@ -2476,6 +2476,14 @@ export class Apps {
     // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
     // version not found yet): a file that changes does not pile up.
     const revocations = before || after ? [...(before ?? []), ...(after ?? [])] : null;
+    // Each one read is kept beside the record too (`APP_REVOCATIONS_KEY`): the record keeps only those that stop one of
+    // these versions, and a file read later without one (moved, or serving part of the list) drops it from there.
+    const keptAlready = new Set(kept.map((r) => canonicalJson(r)));
+    if (revocations?.some((r) => !keptAlready.has(canonicalJson(r)))) {
+      const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+      keepRevocations(tx.objectStore(STORES.settings), new Map([[app.ref, revocations]]));
+      await done(tx);
+    }
     // A store's index carries some too: those that stop one of these are kept, as a store may drop them or be removed.
     const versions = this.versionsOf(app);
     const stays = revocations ? stopping(versions, app.revocations ?? []) : app.revocations ?? [];
