@@ -188,3 +188,16 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
   }
   return undefined;
 }
+
+/**
+ * `localFileError` for a file that holds a secret (`--passphrase-file`, `x401 credential add <file>`): one not there
+ * is not named, as the word given may be the secret itself typed in its place, and no length tells a short passphrase
+ * from a path. `flag`: what the command calls the file; `holds`: what is in it. A file there (a folder, one not
+ * allowed) is named as `localFileError` names it.
+ */
+export function secretFileError(error: unknown, file: string, flag: string, holds: string): CliError | undefined {
+  const local = localFileError(error, file);
+  const code = local && (error as { code?: unknown }).code;
+  if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP" || code === "ENAMETOOLONG") return new CliError(local!.code, `${flag} names no file: give the path of the file that holds ${holds}`);
+  return local;
+}

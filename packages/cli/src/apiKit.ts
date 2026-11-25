@@ -3,7 +3,7 @@ import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 import { shellWord } from "./shellWord";
 import type { CallManager } from "./calls/manager";
 import type { EventHub } from "./events";
@@ -244,10 +244,10 @@ function noChat(ref: string, groups: readonly GroupView[], onlyChat?: string): C
   // A name two groups share is still a group's: it read `No chat "Crew"`, as if nothing had it.
   // Their ids too, as `findGroup`'s refusal carries them, for a script that reads them.
   const shared = groupsSharing(ref, groups);
-  if (shared) return new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat${onlyChat ? `: ${onlyChat}` : ""} (ghostly chat list)`, { matches: shared });
+  if (shared) return new CliError("not_found", `${shownValue(ref)} names more than one group, not a chat${onlyChat ? `: ${onlyChat}` : ""} (ghostly chat list)`, { matches: shared });
   const group = groupNamed(ref, groups);
-  if (group) return new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
-  return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
+  if (group) return new CliError("not_found", `${shownValue(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
+  return new CliError("not_found", `No chat ${shownValue(ref)} (ghostly chat list)`);
 }
 
 /** A chat or group ref as a next step shows it: as given, quoted only when it holds more than a word (see `shellWord`). */
@@ -292,13 +292,14 @@ export function sharedGroupIds(error: unknown): string[] | undefined {
 /** `findChat`, and whether only what the contact controls (`theirName`: a prefix of the id, its own name) found the chat. */
 function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupView[] = [], onlyChat?: string): { link: LinkView; theirName: boolean } {
   // "" (an unset variable in a script) is a prefix of every id: it took the only chat.
-  if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no chat`);
+  if (!ref.trim()) throw new CliError("bad_request", `${shownValue(ref)} names no chat`);
   const exact = links.find((link) => link.id === ref);
   if (exact) return { link: exact, theirName: false };
   const contact = contactKeyOf(ref);
   if (contact !== undefined) {
     const byKey = links.filter((link) => link.peerPubKeyZ32 === contact);
     if (byKey.length === 1) return { link: byKey[0], theirName: false };
+    // A contact key is public: said whole, though longer than `shownValue` prints.
     if (byKey.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: byKey.map((link) => link.id) });
     throw new CliError("not_found", `No chat with ${JSON.stringify(ref)} (ghostly chat list)`);
   }
@@ -309,7 +310,7 @@ function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupV
   // here (a chat labelled `group:Crew` was that chat for `chat show` and the group Crew for `send`). A chat labelled so
   // before labels were refused (`chatName`) is named by its id.
   if (groupPrefixed(ref) !== null) {
-    if (byLabel.length && !groupNamed(ref, groups)) throw new CliError("not_found", `${JSON.stringify(ref)} names a group, never a chat: name the chat labelled so by its id, and give it another name (ghostly chat rename <chat> <name>)`, { matches: byLabel.map((link) => link.id) });
+    if (byLabel.length && !groupNamed(ref, groups)) throw new CliError("not_found", `${shownValue(ref)} names a group, never a chat: name the chat labelled so by its id, and give it another name (ghostly chat rename <chat> <name>)`, { matches: byLabel.map((link) => link.id) });
     throw noChat(ref, groups, onlyChat);
   }
   // A chat's id no chat has (one removed since: a bot kept it from an event) is no chat. Its contact and whoever saw its
@@ -318,7 +319,7 @@ function chatBy(links: readonly LinkView[], ref: string, groups: readonly GroupV
   if (!byLabel.length && CHAT_ID_SHAPED.test(key)) throw noChat(ref, groups, onlyChat);
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
-  if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
+  if (found.length > 1) throw new CliError("bad_request", `${shownValue(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
   throw noChat(ref, groups, onlyChat);
 }
 
@@ -350,7 +351,7 @@ export function findOwnNamedChats(links: readonly LinkView[], refs: readonly str
 
 /** `findOwnNamedChat`'s refusal: `ref` found `chat` only by what its contact chose. */
 export function namedByThem(ref: string, chat: { chat: string; name: string | null; contact: string | undefined }): CliError {
-  return new CliError("bad_request", `${JSON.stringify(ref)} names a chat only by what its contact chose (a prefix of its id, its own name): use the chat's id, its contact's key or a label given here (ghostly chat rename <chat> <name>)`, chat);
+  return new CliError("bad_request", `${shownValue(ref)} names a chat only by what its contact chose (a prefix of its id, its own name): use the chat's id, its contact's key or a label given here (ghostly chat rename <chat> <name>)`, chat);
 }
 
 /**
@@ -374,16 +375,16 @@ const invitedOnly = (group: GroupView) => group.status === undefined && !!group.
 export function findGroup(groups: readonly GroupView[], given: string): GroupView {
   const ref = groupPrefixed(given) ?? given;
   // Each refusal echoes the ref as given (`"group:k86q"`), not the part after `group:`: what the person typed.
-  if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(given)} names no group`);
+  if (!ref.trim()) throw new CliError("bad_request", `${shownValue(given)} names no group`);
   const exact = groups.find((group) => group.id === ref);
   if (exact) return exact;
   const key = nameKey(ref);
   for (const among of [groups.filter((group) => !invitedOnly(group)), groups.filter(invitedOnly)]) {
     const found = among.filter((group) => namedAs(key, group.name) || group.id.startsWith(ref));
     if (found.length === 1) return found[0];
-    if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(given)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
+    if (found.length > 1) throw new CliError("bad_request", `${shownValue(given)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
   }
-  throw new CliError("not_found", `No group ${JSON.stringify(given)} (ghostly group list)`);
+  throw new CliError("not_found", `No group ${shownValue(given)} (ghostly group list)`);
 }
 
 /**
@@ -406,7 +407,7 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
     if (CHAT_ID_SHAPED.test(nameKey(ref)) || contactKeyOf(ref) !== undefined) throw error;
     try { return { group: findGroup(groups, ref) }; } catch (inner) {
       if (!(inner instanceof CliError) || inner.code !== "not_found") throw inner;
-      throw new CliError("not_found", `No chat or group ${JSON.stringify(ref)} (ghostly chat list, ghostly group list)`);
+      throw new CliError("not_found", `No chat or group ${shownValue(ref)} (ghostly chat list, ghostly group list)`);
     }
   }
   if (!chat.theirName) return { link: chat.link };
@@ -414,7 +415,7 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
   if (exact) return { group: exact };
   const key = nameKey(ref);
   const also = groups.filter((group) => !invitedOnly(group) && (group.id.startsWith(ref) || namedAs(key, group.name)));
-  if (also.length) throw new CliError("bad_request", `${JSON.stringify(ref)} names a chat (by what its contact chose) and a group: use the chat's id or group:<id>`, { chat: chat.link.id, groups: also.map((group) => group.id) });
+  if (also.length) throw new CliError("bad_request", `${shownValue(ref)} names a chat (by what its contact chose) and a group: use the chat's id or group:<id>`, { chat: chat.link.id, groups: also.map((group) => group.id) });
   return { link: chat.link };
 }
 
@@ -591,7 +592,7 @@ export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupVi
     let chat: LinkView;
     try { chat = findChat(links, ref); } catch { throw error; }
     const shown = shellWord(ref, chat.id);
-    throw new CliError("not_found", `${JSON.stringify(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
+    throw new CliError("not_found", `${shownValue(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
   }
 }
 

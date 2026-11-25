@@ -11,7 +11,7 @@ import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_
 import { callRef } from "./commands/calls";
 import { fileHere, here, inRange,INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
-import { asCliError, CliError, type ErrorCode, EXIT, localFileError, SINGLE_DEVICE } from "./errors";
+import { asCliError, CliError, type ErrorCode, EXIT, localFileError, secretFileError, SINGLE_DEVICE } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { identityWaitLines } from "./identityWait";
@@ -1069,7 +1069,7 @@ async function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): Pro
   if (file === "-" && process.stdin.isTTY) throw new CliError("usage", "--passphrase-file - reads stdin: pipe the passphrase in (… | ghostly profile …), or name a file");
   let value: string;
   if (file === "-") value = (await readStdin()).replace(/\r?\n$/, "");
-  else try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw localFileError(error, file) ?? error; }
+  else try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw secretFileError(error, file, "--passphrase-file", "the passphrase") ?? error; }
   if (!value) throw new CliError("bad_request", `${file === "-" ? "Stdin" : file} is empty: it holds the backup's passphrase`);
   return value;
 }
@@ -1776,7 +1776,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     // terminal) as a join or a redeem says it, a usage error.
     try { params.credential = params.file === "-" ? await credentialFromStdin(readStdin, process.stdin.isTTY === true) : readInput(params.file as string); }
     // A file not there, a folder, one not allowed: said as every other file the CLI reads.
-    catch (error) { throw (error instanceof CliError && error) || localFileError(error, params.file as string) || new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { throw (error instanceof CliError && error) || secretFileError(error, params.file as string, "<file>", "the SD-JWT VC the issuer sent, or - to read it from stdin") || new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
     if (!params.credential) throw new CliError("bad_request", `${params.file as string} is empty: it holds the SD-JWT VC the issuer sent`);
     delete params.file;
   }
