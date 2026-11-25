@@ -45,6 +45,23 @@ describe("a link preview of a link that holds a secret", () => {
     expect(previewableLink("https://news.example/story?id=9")).toBe("https://news.example/story?id=9");
   });
 
+  it("is not made when the words around the link say its key is a secret", () => {
+    const hex = "a".repeat(32) + "b".repeat(32);
+    for (const text of [
+      `password reset link: https://app.example/reset/${hex}`,
+      `my seed backup https://paste.example/${hex}`,
+      `https://paste.example/${hex} is my seed`,
+      `pass\u200bword reset link: https://app.example/reset/${hex}`,
+      `bitcoind rpcpassword https://node.example/${hex}`,
+    ]) {
+      expect(findSecret(text)).not.toBeNull();
+      expect(previewableLink(text)).toBeNull();
+    }
+    // A bare hash in a link is not asked about at Send, and keeps its card; so does a link beside someone else's key.
+    expect(previewableLink(`https://explorer.example/tx/${hex}`)).toBe(`https://explorer.example/tx/${hex}`);
+    expect(previewableLink(`my seed ${hex}\n\n${"-".repeat(48)}\nhttps://news.example/story`)).toBe("https://news.example/story");
+  });
+
   it("goes to the next link of the text when that one holds none", () => {
     expect(previewableLink(`${SECRET_LINKS[0]} and https://news.example/story`)).toBe("https://news.example/story");
   });
