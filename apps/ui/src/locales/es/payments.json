@@ -315,7 +315,9 @@
     "redeem": "Canjear",
     "redeemed": "Canjeado ✓",
     "redeemedFee": "Canjeado ✓ (la mint se quedó con {{fee}} de comisión)",
-    "redeeming": "Canjeando…"
+    "redeeming": "Canjeando…",
+    "unnamedUnitRequest": "Pide ecash en otra unidad",
+    "unnamedUnitToken": "Un token en otra unidad"
   },
   "mode": {
     "accept": "Aceptar",

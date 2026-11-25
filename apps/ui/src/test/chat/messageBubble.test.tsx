@@ -490,6 +490,19 @@ describe("MessageBubble: money in a message", () => {
     expect(within(card).queryByTestId("token-redeem")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["token", "cashu-token-bubble", "A token in another unit"],
+    ["request", "cashu-request-bubble", "Asks for ecash in another unit"],
+  ] as const)("names an ecash %s's unit only when it looks like one, never its sender's sentence", async (kind, testId, line) => {
+    // A unit is whatever the sender wrote: it was the card's own big line, "A sat, redeemed: 50,000 sats ✓ token".
+    const unit = "sat, redeemed: 50,000 sats ✓";
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: kind === "token" ? { kind, amount: 500, unit, mint: "https://mint.example.com", accepted: false } : { kind, amount: 500, unit, mints: ["https://mint.example.com"] } }));
+    bubble({ text: kind === "token" ? TOKEN : "creqA" + "o".repeat(40) });
+    const card = await screen.findByTestId(testId);
+    expect(within(card).getByTestId("money-other-unit")).toHaveTextContent(line);
+    expect(card).not.toHaveTextContent("redeemed: 50,000");
+  });
+
   it("leaves a payment's text to its payment bubble", () => {
     bubble({ text: INVOICE, paymentId: "pay-9" });
     expect(screen.queryByTestId("invoice-bubble")).not.toBeInTheDocument();
