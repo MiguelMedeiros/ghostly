@@ -5,6 +5,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
+// covers: chat.paired.block
 
 /**
  * GhostLink is replaced by a recorder, as in nodeLinks.test.ts: the engine builds it with its callbacks, and a test
