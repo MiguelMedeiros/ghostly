@@ -264,14 +264,19 @@ function carriesLink(text: string, url: string): boolean {
   return false;
 }
 
-/** `text` in lower case, each character at its place (one whose lower case is longer, as "İ", is kept as it is). */
+/**
+ * `text` in lower case, each character at its place (one whose lower case is longer, as "İ", is kept as it is), with
+ * every sigma as "σ": a capital Σ that ends a word is "ς" when the whole string is lowered but "σ" when it is lowered
+ * alone, so the link and a text with an "İ" ("İzmir https://a.example/ΟΔΟΣ") would differ there. Only finds where to
+ * look: the address found is still compared as the browser reads it.
+ */
 function foldCase(text: string): string {
   const lower = text.toLowerCase();
-  if (lower.length === text.length) return lower;
-  return Array.from(text, (char) => {
-    const folded = char.toLowerCase();
-    return folded.length === char.length ? folded : char;
+  const folded = lower.length === text.length ? lower : Array.from(text, (char) => {
+    const low = char.toLowerCase();
+    return low.length === char.length ? low : char;
   }).join("");
+  return folded.replace(/ς/g, "σ");
 }
 
 /** A web address as the browser reads it ("HTTPS://X.EXAMPLE" is "https://x.example/"), or nothing when it is none. */
