@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
-import { useEffect, useState, type ComponentProps } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { CallButtons } from "../../components/CallButtons";
 import { CallOverlay } from "../../components/CallOverlay";
@@ -388,6 +388,45 @@ describe("a call for a screen reader and the keys", () => {
     expect(screen.queryByTestId("call-window")).toBeNull();
     expect(screen.getByTestId("call-audio")).toHaveFocus();
     localStorage.removeItem("ghostly_call_mini");
+  });
+
+  it("answered by End and answer and then ended, gives the focus to its chat's call button, not to the page", async () => {
+    // Two chats: Bob's call is on with the focus on its Mute; Carol rings, and End and answer ends Bob's call and opens
+    // Carol's. The card's way back (Bob's Mute) went with Bob's call, so Carol's window had no opener to go back to.
+    const contact = { ring: () => {}, hangUp: () => {} };
+    function TwoChats() {
+      const [on, setOn] = useState<"Bob" | "Carol" | null>("Bob");
+      const [ringing, setRinging] = useState(false);
+      // The header of the chat on screen: Carol's, once End and answer opened it.
+      const callButton = useRef<HTMLButtonElement>(null);
+      useEffect(() => {
+        contact.ring = () => setRinging(true);
+        contact.hangUp = () => setOn(null);
+      }, []);
+      return (
+        <>
+          <CallButtons audioRef={callButton} blocked={null} busy={!!on} onCall={vi.fn()} />
+          {on && <CallOverlay key={on} callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff remoteHasVideo={false}
+            callStartedAt={Date.now()} peerName={on} onHangUp={() => setOn(null)} onToggleMute={vi.fn()} onToggleVideo={vi.fn()}
+            returnFocus={on === "Carol" ? () => callButton.current : undefined} />}
+          {ringing && <IncomingCallNotification peerName="Carol" hasVideo={false} onCall
+            onAcceptAudio={() => { setRinging(false); setOn("Carol"); }} onAcceptVideo={vi.fn()} onReject={vi.fn()} />}
+        </>
+      );
+    }
+    const { user } = renderApp(<TwoChats />);
+    screen.getByTestId("call-mute").focus();
+    await act(async () => contact.ring());
+    expect(screen.getByRole("alertdialog", { name: "Carol" })).toHaveFocus();
+    await user.tab();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "End and answer" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("call-window")).toHaveTextContent("Carol");
+
+    await act(async () => contact.hangUp());
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
   });
 
   it("says the call's state in words as it moves on, never the running clock", () => {
