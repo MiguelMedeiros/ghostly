@@ -33,11 +33,49 @@ const TONE_MEDIA = `
   const context = new AudioContext();
   window.__e2eContext = context;
   const Native = window.RTCPeerConnection;
+  // Each call connection's ICE, as WebKit's stats say it, sampled every second while it is not connected (and at each
+  // ICE state): which pairs were checked, how many checks went out and came in, which answers came back. Read only when
+  // the test fails (app-call-ice.json), for a call stuck in ICE checking on this runner.
+  window.__e2eIce = [];
+  const iceSample = async (pc, trace, why) => {
+    const out = [];
+    try {
+      (await pc.getStats()).forEach((s) => {
+        if (s.type === "candidate-pair") out.push({ t: "pair", l: s.localCandidateId, r: s.remoteCandidateId, state: s.state, nominated: s.nominated, rqOut: s.requestsSent, rqIn: s.requestsReceived, rsOut: s.responsesSent, rsIn: s.responsesReceived, bytesOut: s.bytesSent, bytesIn: s.bytesReceived });
+        else if (s.type === "local-candidate" || s.type === "remote-candidate") out.push({ t: s.type, id: s.id, address: s.address ?? s.ip, port: s.port, type: s.candidateType, net: s.networkType });
+        else if (s.type === "transport") out.push({ t: "transport", ice: s.iceState, dtls: s.dtlsState, pair: s.selectedCandidatePairId });
+      });
+    } catch (error) { out.push({ error: String(error) }); }
+    trace.samples.push({ ms: Date.now() - trace.born, why, out });
+    if (trace.samples.length > 24) trace.samples.splice(1, 1);
+  };
   window.RTCPeerConnection = class extends Native {
     constructor(...args) {
       super(...args);
       window.__e2ePeers.push(this);
       this.addEventListener("track", (event) => { if (event.track.kind === "audio") window.__e2eRemote = new MediaStream([event.track]); });
+      const trace = { born: Date.now(), events: [], samples: [] };
+      this.__e2eTrace = trace;
+      window.__e2eIce.push(trace);
+      const note = (what) => trace.events.push([Date.now() - trace.born, what]);
+      this.addEventListener("iceconnectionstatechange", () => {
+        note("ice " + this.iceConnectionState);
+        if (this.iceConnectionState !== "closed") void iceSample(this, trace, "ice " + this.iceConnectionState);
+      });
+      this.addEventListener("icegatheringstatechange", () => note("gathering " + this.iceGatheringState));
+      this.addEventListener("connectionstatechange", () => note("connection " + this.connectionState));
+      const tick = setInterval(() => {
+        if (this.connectionState === "connected" || this.connectionState === "closed" || Date.now() - trace.born > 60000) { clearInterval(tick); return; }
+        void iceSample(this, trace, "tick");
+      }, 1000);
+    }
+    async setLocalDescription(...args) {
+      this.__e2eTrace?.events.push([Date.now() - this.__e2eTrace.born, "local " + (args[0]?.type ?? "implicit")]);
+      return super.setLocalDescription(...args);
+    }
+    async setRemoteDescription(...args) {
+      this.__e2eTrace?.events.push([Date.now() - this.__e2eTrace.born, "remote " + args[0]?.type]);
+      return super.setRemoteDescription(...args);
     }
   };
   MediaDevices.prototype.getUserMedia = async (constraints = {}) => {
@@ -127,7 +165,9 @@ test("the Desktop app on a Mac and a headless bot call each other, with audio bo
   const env = { GHOSTLY_PKARR_RELAYS: relayUrl, GHOSTLY_HYPERDHT_BOOTSTRAP: bootstrap };
   // The bot's processes inherit this: the same HyperDHT network as the app.
   process.env.GHOSTLY_HYPERDHT_BOOTSTRAP = bootstrap;
-  const bot = new HeadlessBot();
+  // libdatachannel's and libjuice's lines (STUN checks out and in, remote candidates, ICE states; their secrets cut) in
+  // the bot's stderr: the job's log, and bot-stderr.log on a failure.
+  const bot = new HeadlessBot({ GHOSTLY_RTC_LOG: "Debug" });
   const apps: MacDesktop[] = [];
   let alice: DesktopPerson | undefined;
   const keep = async (name: string, body: string) => {
@@ -204,10 +244,14 @@ test("the Desktop app on a Mac and a headless bot call each other, with audio bo
     if (alice) {
       const log = await alice.app.execute<string[] | null>(`return window.__e2eLog ?? null;`).catch(() => null);
       const sdp = await alice.app.execute<string[] | null>(`return (window.__e2ePeers ?? []).map((pc) => pc.connectionState + "\\n" + (pc.localDescription?.sdp ?? "") + "\\n---remote---\\n" + (pc.remoteDescription?.sdp ?? ""));`).catch(() => null);
-      if (sdp?.length) await keep("app-call-sdp.txt", sdp.join("\n\n======\n\n"));
+      // The ICE passwords out: the report is public, like the bot's log (packages/cli/src/calls/rtcLog.ts).
+      if (sdp?.length) await keep("app-call-sdp.txt", sdp.join("\n\n======\n\n").replace(/^(a=ice-pwd:).*$/gm, "$1<hidden>"));
+      const ice = await alice.app.execute<string | null>(`return JSON.stringify(window.__e2eIce ?? null, null, 1);`).catch(() => null);
+      if (ice) await keep("app-call-ice.json", ice);
       await keep("app-page.txt", `${await alice.snapshot().catch((e: unknown) => String(e))}\n\n--- console ---\n${(log ?? []).join("\n")}`);
     }
     await keep("bot-events.txt", bot.events.map((e) => JSON.stringify(e)).join("\n"));
+    await bot.attachLogs(testInfo);
     for (const d of apps) await keep(`${d.bundleId}-log.txt`, d.log.join(""));
     throw error;
   } finally {
