@@ -35,8 +35,13 @@ export const SCRIPT_NAMES: Record<BitcoinScriptType, string> = {
   p2wsh: "script / multisig (P2WSH)", "witness-unknown": "future SegWit version",
 };
 
+/** A BIP-21 link (`bitcoin:<address>?amount=…`), as wallets show and QR codes write it, the scheme in any case. */
+const BIP21 = /^bitcoin:([^?]*)(?:\?[\s\S]*)?$/i;
+
 function normalizeAddress(input: string): string {
-  const value = input.trim();
+  const trimmed = input.trim();
+  // Only the address before the query counts: nothing in it (an amount, a label, another address) is read.
+  const value = BIP21.exec(trimmed)?.[1] ?? trimmed;
   let info;
   try { info = decodeAnyBitcoinAddress(value); } catch (e) {
     throw Object.assign(new Error(e instanceof BitcoinAddressError ? e.message : "Enter a Bitcoin address"), { cause: e });
