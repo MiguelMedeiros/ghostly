@@ -3,7 +3,7 @@ import { isLocalHost } from "../localHost";
 import { parseMessage } from "./blocks";
 import { findEntities } from "./entities";
 import { findLocation } from "./location";
-import { findSecret } from "./secrets";
+import { findSecret, hasSecretBeside } from "./secrets";
 import type { Block, Segment } from "./types";
 
 /**
@@ -129,7 +129,7 @@ const IMAGE_LINK = /\.(gif|png|jpe?g|webp|svg|avif)(\?\S*)?$/i;
  * that same address, outside a spoiler: none in code, and none a card would read longer or shorter than the bubble
  * opens it ("[DC](https://…/Washington,_D.C.)"), or the card would open another page.
  * Not one a spoiler hides either (its card would say what the spoiler covers), nor one whose address holds a secret
- * `findSecret` knows. Null when none.
+ * `findSecret` knows, alone or with the words around it ("my seed: https://…/<64 hex>"). Null when none.
  */
 export function previewableLink(text: string): string | null {
   // Read only once a link could get a card: the composer asks on every key, of drafts that may be long.
@@ -143,8 +143,9 @@ export function previewableLink(text: string): string | null {
     if (!/\.[a-z]{2,}$/i.test(url.hostname) && !/^[\d.]+$/.test(url.hostname)) continue;
     if (!(drawn ??= bubbleLinks(text).shown).has(link)) continue;
     // Its address holds what the composer asks about before a message goes (a token, a key): reading the page would
-    // hand it to the site before that question, and whatever the answer.
-    if (findSecret(link)) continue;
+    // hand it to the site before that question, and whatever the answer. Some keys are asked about only for the words
+    // beside them, which may be outside the link.
+    if (findSecret(link) || hasSecretBeside(text, link)) continue;
     return link;
   }
   return null;
