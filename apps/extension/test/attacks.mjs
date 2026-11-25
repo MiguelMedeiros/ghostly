@@ -202,6 +202,7 @@ try {
   check("image from another app is refused", out.img === "blocked" && !reached("evil-img"));
   check("another app cannot be framed", !reached("evil-iframe"));
   check("no extension APIs in the app", out.chrome === false);
+  check("Ghostly's own page in a frame of the app's cannot be read by its index", out.ownPage === "cross-origin", out.ownPage);
   // Before the navigation below, which takes the tab off Evil's page.
   await evilTab.locator("#tap").click();
   await evilTab.locator("#copied").filter({ hasText: /./ }).waitFor({ timeout: 10_000 });
