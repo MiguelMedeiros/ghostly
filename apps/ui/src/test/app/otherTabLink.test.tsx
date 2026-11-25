@@ -112,4 +112,11 @@ describe("the waiting screen", () => {
     expect(screen.getByRole("status")).toBe(said);
     expect(said).toHaveTextContent("Your link opened in Ghostly in your other tab.");
   });
+
+  it("is drawn in the person's theme, as the page under it is, not always in dark colours", () => {
+    render(<OtherTab state="plain" t={translatorFor("en")} />);
+    const screenStyle = screen.getByTestId("other-tab").style;
+    expect(screenStyle.background).toContain("var(--theme-app-bg");
+    expect(screenStyle.color).toContain("var(--theme-text-secondary");
+  });
 });
