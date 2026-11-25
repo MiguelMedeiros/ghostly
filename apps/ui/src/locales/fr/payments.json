@@ -315,7 +315,9 @@
     "redeem": "Encaisser",
     "redeemed": "Encaissé ✓",
     "redeemedFee": "Encaissé ✓ (la mint a gardé {{fee}} comme frais)",
-    "redeeming": "Encaissement…"
+    "redeeming": "Encaissement…",
+    "unnamedUnitRequest": "Demande de l'ecash dans une autre unité",
+    "unnamedUnitToken": "Un jeton dans une autre unité"
   },
   "mode": {
     "accept": "Accepter",

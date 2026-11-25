@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { MoneyQr } from "./MoneyQr";
-import { parseEngineError, type Bolt11Invoice, type LightningDestination, type PaymentMethodName } from "@ghostly/core";
+import { isNamedUnit, parseEngineError, type Bolt11Invoice, type LightningDestination, type PaymentMethodName } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { CASHU_MINT_SOURCE, holdsLess, lightningNetworkFor } from "./walletCardData";
 import { NetworkTag, satsIn, unitFor } from "./NetworkTag";
@@ -427,6 +427,9 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
     unit: network && inspection.unit === "sat" ? satsIn(t, network) : inspection.unit,
   });
 
+  // A unit is its sender's text: named only when it looks like one, as a refusal names it (core `ecashUnitError`).
+  const named = isNamedUnit(inspection.unit);
+
   if (inspection.kind === "request") {
     // Paid at one of the mints it names: the money that would leave is theirs, when they are all of one network.
     const networks = new Set(inspection.mints.map(mintNetwork));
@@ -438,7 +441,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
         tag={money.tag}
         amount={inspection.amount}
         unit={money.unit}
-        otherUnit={inspection.unit === "sat" ? undefined : t("payments.invoice.otherUnitRequest", { unit: inspection.unit })}
+        otherUnit={inspection.unit === "sat" ? undefined : named ? t("payments.invoice.otherUnitRequest", { unit: inspection.unit }) : t("payments.invoice.unnamedUnitRequest")}
         lines={[inspection.description, inspection.mints.length > 0 ? t("payments.invoice.mints", { mints: namesText(inspection.mints.map(host), t) }) : undefined]}
         qr={value}
       >
@@ -459,7 +462,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
       tag={money.tag}
       amount={inspection.amount}
       unit={money.unit}
-      otherUnit={otherUnit ? t("payments.invoice.otherUnitToken", { unit: inspection.unit }) : undefined}
+      otherUnit={otherUnit ? named ? t("payments.invoice.otherUnitToken", { unit: inspection.unit }) : t("payments.invoice.unnamedUnitToken") : undefined}
       lines={[inspection.memo, t("payments.invoice.mint", { mint: host(inspection.mint) }), !inspection.accepted && !mine ? t(otherUnit ? "payments.invoice.onlySat" : "payments.invoice.mintNotAdded") : undefined]}
       qr={value}
     >
