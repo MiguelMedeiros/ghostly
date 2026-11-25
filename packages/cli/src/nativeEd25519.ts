@@ -11,15 +11,16 @@ import type { AppSignatureFastPath, PublicKeyFastPath } from "@ghostly/core";
 const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 /** PKCS #8 of an Ed25519 private key (RFC 8410), before its 32-byte seed. */
 const PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");
-/** The key objects of the keys seen lately: a list repeats its publishers. */
+/** The key objects of the keys seen lately: a list repeats its publishers, a group its members (up to 256). */
 const keys = new Map<string, KeyObject>();
+const KEYS_MAX = 1024;
 
 export const nativeEd25519: AppSignatureFastPath = (signature, message, publicKey) => {
   const id = Buffer.from(publicKey).toString("hex");
   let key = keys.get(id);
   if (!key) {
     key = createPublicKey({ key: Buffer.concat([SPKI_PREFIX, publicKey]), format: "der", type: "spki" });
-    if (keys.size >= 256) keys.clear();
+    if (keys.size >= KEYS_MAX) keys.clear();
     keys.set(id, key);
   }
   return verify(null, message, key, signature);
