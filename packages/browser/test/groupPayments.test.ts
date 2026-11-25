@@ -580,4 +580,19 @@ describe("GroupPayments: a pass grows with the payments kept, not with their squ
     // Each record's request once (and a few for the notes said): searching every record per request read it 100,000 times.
     expect(reads).toBeLessThan(3 * a.payments.length);
   });
+
+  it("a burst of payment changes waiting for a pass shares it: one pass, not one per change", async () => {
+    let passes = 0;
+    const engine = new GroupPayments({ payments: () => { passes++; return [pay({ id: "req-00001", linkId: "group:g1", group: "g1" })]; }, edgeOf: () => undefined, edges: () => new Map(),
+      membership: () => ({ me: A, members }), send: () => {}, messages: async () => [], putMessage: async () => {} });
+    await Promise.all(Array.from({ length: 20 }, () => engine.sync()));
+    // The first starts at once; the 19 after it wait together for one more, which reads every change they made.
+    expect(passes).toBeLessThanOrEqual(2);
+    // A change made while a pass runs is not lost: another pass follows it.
+    passes = 0;
+    const first = engine.sync();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await Promise.all([first, engine.sync()]);
+    expect(passes).toBe(2);
+  });
 });

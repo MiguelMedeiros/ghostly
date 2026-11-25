@@ -227,6 +227,8 @@ export class GroupPayments {
   /** Per group, how many times it was forgotten in this run: notes read from its history before that are not kept. */
   private readonly ends = new Map<string, number>();
   private queue = Promise.resolve();
+  /** A `sync` pass queued and not started yet, while nothing was queued after it. */
+  private waitingPass?: Promise<void>;
 
   constructor(private readonly host: GroupPaymentsHost) {}
 
@@ -243,7 +245,14 @@ export class GroupPayments {
   }
 
   /** Says what changed about this device's own payments in groups. The engine calls it whenever payments change. */
-  sync(): Promise<void> { return this.run(() => this.author()); }
+  sync(): Promise<void> {
+    // A pass still waiting, last in line, reads the payments when it starts: it says this change too. Twenty saves in a
+    // row each queueing its own pass took 370 ms with 3,000 group payments, to say nothing new.
+    if (this.waitingPass) return this.waitingPass;
+    const pass = this.run(() => { if (this.waitingPass === pass) this.waitingPass = undefined; return this.author(); });
+    this.waitingPass = pass;
+    return pass;
+  }
 
   /** An edge came up: the member hears again what I said lately, in case it missed it. */
   edgeReady(groupId: string, linkId: string): Promise<void> {
@@ -269,6 +278,8 @@ export class GroupPayments {
   }
 
   private run(task: () => Promise<void>): Promise<void> {
+    // Anything queued after a waiting pass is not seen by it: the next change queues a pass of its own.
+    this.waitingPass = undefined;
     const next = this.queue.then(task, task);
     this.queue = next.catch(() => {});
     return next;
