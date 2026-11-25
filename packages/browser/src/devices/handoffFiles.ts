@@ -123,6 +123,8 @@ export class LeftFilesFetcher {
   private current: Fetching | null = null;
   /** Devices the person asked to fetch from now, whatever the connection costs. */
   private asked = new Set<string>();
+  /** Devices that said nothing for `stuckMs` to their last request: the others go first, until each had its turn. */
+  private silent = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
   private queue: Promise<unknown> = Promise.resolve();
@@ -176,7 +178,11 @@ export class LeftFilesFetcher {
       if (!record || record.state !== "active" || !record.fetchFiles?.length) return;
       const listed = new Set(record.deviceSet.flatMap((slot) => (slot ? [slot.key] : [])));
       const metered = this.ports.metered();
-      const file = record.fetchFiles.find((f) => listed.has(f.on) && this.ports.links.live(f.on) && (!metered || this.asked.has(f.on)));
+      const can = record.fetchFiles.filter((f) => listed.has(f.on) && this.ports.links.live(f.on) && (!metered || this.asked.has(f.on)));
+      // The files a move left on several devices (it moved again before they came): one that does not answer does not
+      // hold back the others; when none answered, each is asked again in turn.
+      let file = can.find((f) => !this.silent.has(f.on));
+      if (!file && can.length) { this.silent.clear(); file = can[0]; }
       if (!file) return;
       const sealing = fileKey(record, this.ports.links, file.on);
       if (!sealing) return;
@@ -204,7 +210,7 @@ export class LeftFilesFetcher {
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.exclusive(async () => { this.drop(); }).then(() => this.kick());
+      void this.exclusive(async () => { if (this.current) this.silent.add(this.current.peer); this.drop(); }).then(() => this.kick());
     }, HANDOFF_TIMINGS.stuckMs);
   }
 
