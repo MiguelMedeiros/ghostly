@@ -20,6 +20,11 @@ import { GroupChat } from "../../pages/GroupChat";
 
 vi.unmock("@ghostly/browser/platform/sync");
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
+// The real one, counted: the picker reads a share's text (up to 64 MiB) once, not on each letter typed in its search.
+vi.mock("../../lib/incomingShare", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../lib/incomingShare")>();
+  return { ...real, sharePreview: vi.fn(real.sharePreview) };
+});
 
 // covers: app.pwa.share-target
 describe("a share into the app", () => {
@@ -517,6 +522,17 @@ describe("a share into the app", () => {
       expect(screen.getByTestId("share-search")).toHaveValue("");
       expect(screen.getAllByTestId("share-chat")).toHaveLength(31);
       expect(takeShareFor("chat1")?.text).toBe("one");
+    });
+
+    it("reads the shared text once per share, not on each letter typed in the search", async () => {
+      receiveShare(share({ text: "Look İSTANBUL", url: "https://a.example" }));
+      const { user } = picker();
+      settled();
+      const read = vi.mocked(sharePreview).mock.calls.length;
+      await user.click(screen.getByTestId("share-search"));
+      await user.keyboard("anabel");
+      expect(screen.getByTestId("share-search")).toHaveValue("anabel");
+      expect(vi.mocked(sharePreview).mock.calls.length).toBe(read);
     });
 
     it("Cancel drops the share and goes home", async () => {
