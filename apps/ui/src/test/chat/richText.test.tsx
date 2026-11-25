@@ -243,6 +243,9 @@ describe("long blobs", () => {
     const rule = /\.rich-blob\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
     expect(rule).toMatch(/display:\s*inline-flex;/);
     expect(rule).toMatch(/(^|[;\s])width:\s*100%;/);
+    // On a phone Copy's 46px hit area reaches 13px under the key's line: the next line's time must stay off it.
+    const phone = /@media \(width < 768px\) \{\s*\.rich-blob\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(phone).toMatch(/margin-block-end:\s*14px;/);
   });
 });
 

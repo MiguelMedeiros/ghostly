@@ -111,6 +111,11 @@
   max-width: 100%;
   white-space: nowrap;
 }
+/* On a phone Show all and Copy reach 13px past the key's line (46px hit areas, above): the next line, right under it,
+   must not carry the message's time over their lower edge. */
+@media (width < 768px) {
+  .rich-blob { margin-block-end: 14px; }
+}
 .rich-blob-text {
   min-width: 0;
   flex: 1 1 auto;
