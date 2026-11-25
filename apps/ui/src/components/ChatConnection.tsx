@@ -75,9 +75,11 @@ const SAID_BESIDE_SCENE = new Set<LabelState>(["offline", "issue", "publication"
  * large as the two beside it there, a 44px target.
  *
  * While a call is on in the chat (`callOn`), DHT only is off, with why: it closes the live link the call's hang-up
- * crosses, and the call would talk on with no way to end it from either side.
+ * crosses, and the call would talk on with no way to end it from either side. A contact's call that only rings in does
+ * not keep it off (a contact who called again as soon as one was declined kept the chat on its direct link): DHT only
+ * declines it first (`declineRingIn`), while the live link is there for the decline to cross.
  */
-export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, scene = false, testIdPrefix = "", phone, callOn = false }: {
+export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, scene = false, testIdPrefix = "", phone, callOn = false, declineRingIn }: {
   peerKey: string;
   paired?: boolean;
   /** This side's key in the chat. */
@@ -92,8 +94,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   testIdPrefix?: string;
   /** A phone's header: as large as the call and ⋮ beside it. */
   phone?: boolean;
-  /** A call is on in this chat (placed, ringing in or connected), until it ends. */
+  /** A call is on in this chat (placed, answered or connected), until it ends; not one that only rings in. */
   callOn?: boolean;
+  /** Declines the contact's call that only rings in this chat, while one does: DHT only does it first. */
+  declineRingIn?: () => void;
 }) {
   // What it shows of the engine's state, compared by content: the whole state drew the chat's header on every change.
   const { link, ghostlyOnline, relayOnly, directBlocked, clockOffMs, discovery } = useEngineValue((state) => ({
@@ -340,7 +344,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2 min-w-0">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
         {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined} relayOnly={relayOnly}
-          onChoose={choice => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: choice }))} />}
+          onChoose={choice => { if (choice === "dht") declineRingIn?.(); void run(() => engine.call("setChatTransport", { linkId: link.id, transport: choice })); }} />}
         <label className="connection-switch-row mt-1 flex min-h-11 items-center justify-between gap-2 rounded-lg px-2.5"><span className="text-text-primary">{t("connection.panel.fallback")}</span>
           <span className="connection-switch"><input type="checkbox" role="switch" aria-label={t("connection.panel.fallback")} aria-checked={link?.transportFallback??true} checked={link?.transportFallback??true} disabled={!link || dht}
             onChange={e => link && void run(() => engine.call("setTransportPreference", {linkId:link.id,preferred,fallback:e.target.checked}))} /><span className="connection-switch-track" aria-hidden="true" /></span>

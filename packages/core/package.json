@@ -1,7 +1,7 @@
 {
   "name": "@ghostly/core",
   "private": true,
-  "version": "1.13.8",
+  "version": "1.13.9",
   "type": "module",
   "description": "Shared Ghost protocol: identity, crypto, Pkarr records, services, WebRTC signaling and DataChannel framing",
   "main": "./src/index.ts",
