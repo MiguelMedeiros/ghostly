@@ -90,6 +90,47 @@ describe("a share into the app", () => {
       expect(shareText(share({ text: "Code: ghost-42 here", url: "ghost-42" }))).toBe("Code: ghost-42 here");
     });
 
+    it("its link is not repeated when a capital Σ ends a word of it, whatever else the text holds", () => {
+      // Lowered alone, the link's last Σ is a final "ς"; in a text with an "İ" it was lowered one letter at a time ("σ").
+      const url = "https://a.example/ΟΔΟΣ";
+      for (const text of [`İzmir ${url}`, `${url} İzmir`, `İzmir ${url}.`, `İzmir (${url})`, `İzmir *${url}*`, `Ζ ${url}`]) {
+        expect(shareText(share({ text, url }))).toBe(text);
+      }
+      expect(shareText(share({ text: "İzmir https://a.example/ΑΣ/x", url: "https://a.example/ΑΣ/x" }))).toBe("İzmir https://a.example/ΑΣ/x");
+      // In the host, which is read in any case.
+      expect(shareText(share({ text: "Look HTTPS://ΟΔΟΣ", url: "https://οδοσ" }))).toBe("Look HTTPS://ΟΔΟΣ");
+      expect(shareText(share({ text: "İzmir https://οδοσ", url: "https://ΟΔΟΣ/" }))).toBe("İzmir https://οδοσ");
+      // A final ς is another letter: in the path, or in the host, it is another page.
+      expect(shareText(share({ text: "Look https://a.example/ΟΔΟς", url }))).toBe(`Look https://a.example/ΟΔΟς\n${url}`);
+      expect(shareText(share({ text: `Look ${url}`, url: "https://a.example/ΟΔΟς" }))).toBe(`Look ${url}\nhttps://a.example/ΟΔΟς`);
+      expect(shareText(share({ text: "İzmir https://a.example/οδοσ", url: "https://a.example/οδος" })))
+        .toBe("İzmir https://a.example/οδοσ\nhttps://a.example/οδος");
+      expect(shareText(share({ text: "Look https://οδος/", url: "https://ΟΔΟΣ/" }))).toBe("Look https://οδος/\nhttps://ΟΔΟΣ/");
+    });
+
+    it("its link's host is compared as the browser reads it, in the scripts whose case is not plain", () => {
+      const same: [string, string][] = [
+        ["İzmir HTTPS://ΟΔΟΣ.EXAMPLE/p", "https://οδοσ.example/p"],
+        ["Look https://ıstanbul.example/p", "https://ıstanbul.example/p"],
+        ["Look HTTPS://İSTANBUL.EXAMPLE/p", "https://İstanbul.example/p"],
+        ["Look HTTPS://I\u0307.EXAMPLE/p", "https://i\u0307.example/p"],
+        ["Look HTTPS://ﬁ.EXAMPLE/p", "https://ﬁ.example/p"],
+        ["Look https://Ꭰ.example/p", "https://ꭰ.example/p"],
+        ["İzmir https://ꭰ.example/p", "https://Ꭰ.example/p"],
+        ["Look https://Ა.example/p", "https://ა.example/p"],
+        ["İzmir https://ა.example/p", "https://Ა.example/p"],
+        ["İzmir HTTPS://𐐀.EXAMPLE/p", "https://𐐨.example/p"],
+      ];
+      for (const [text, url] of same) expect(shareText(share({ text, url }))).toBe(text);
+      // Another host or page as the browser reads it: a path's "ẞ" is not "ß"; "I" is "i", not "ı".
+      const other: [string, string][] = [
+        ["Look https://a.example/STRAẞE", "https://a.example/STRAßE"],
+        ["Look HTTPS://ISTANBUL.EXAMPLE/p", "https://ıstanbul.example/p"],
+        ["Look https://a.example/e\u0301", "https://a.example/é"],
+      ];
+      for (const [text, url] of other) expect(shareText(share({ text, url }))).toBe(`${text}\n${url}`);
+    });
+
     it("a text where the link turns up at every character is read at once, not once per place (any website can post one)", () => {
       const started = performance.now();
       expect(shareText(share({ text: "(".repeat(60_000), url: "(" })).startsWith("(".repeat(60_000))).toBe(true);
