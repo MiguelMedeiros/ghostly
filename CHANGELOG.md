@@ -4,6 +4,119 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.13.9
+
+### Security
+
+**Groups**
+
+- In a private group, the messages a member keeps to pass on to someone who was away are now limited per author, so one member can no longer push out the other members' messages waiting there.
+
+**Chat**
+
+- An invite link that would start a new chat now always counts toward the limit on chats waiting from links: a link made to look like a chat already here no longer slips past it.
+
+**Calls**
+
+- A contact's call that is still ringing no longer keeps you from putting their chat on DHT only or holding it off its direct link (app and CLI): the ringing call is declined first.
+
+**Apps**
+
+- An app update waiting for your approval is now checked against its publisher's revocations where that update is published, before it installs.
+- In Ghostly Desktop, a contact's app that sends far more requests than allowed (over 500 in one second) is now stopped and its window closed, as on the web.
+
+**Desktop**
+
+- Ghostly Desktop now holds identity checks and Lightning address lookups to their own size and time limits while it reads them.
+
+**Transports**
+
+- A HyperDHT channel no longer spends quadratic time on a frame that arrives in many small pieces.
+
+**CLI**
+
+- When a relay address in `GHOSTLY_IROH_RELAYS`, `GHOSTLY_PKARR_RELAYS` or `ghostly settings set` is refused, the error no longer repeats the address's user name, password or query.
+
+### Fixed
+
+**Apps**
+
+- An app card's line in the chat list, Saved and what a screen reader says keeps the app's title in its own direction: in Arabic, a card with no version, "Chess!", read "!Chess", and an Arabic title in an English line showed its version before it.
+- Reading the installed apps (each Apps page visit, each update check) no longer reads every installed app's record a second time just to see which built-in apps to offer: their names alone are read.
+- A contact's shared app with an embed from another site (a map, a video) no longer slows down each time it adds to its page.
+
+**Files**
+
+- On a phone, an audio file's Download, Decline, Pause, Resume and Cancel take a 44 px tap, as a file's and a voice message's do, and so do a video offer's Download and Decline. Before, the audio ones took taps on 20 to 24 px of height, and the video's Decline was a bare word 16 px tall.
+- In the list of files still coming under an offer that has no room beside them, each row names its file and its chat again, and its Cancel is read aloud with the file's name. Before, every row on the web and on Desktop said "A file" from the contact's fallback name, so nothing told which Cancel cancelled what.
+
+**Calls**
+
+- After your device's clock was set back a little (an automatic time correction), Cancel and End call now reach your contact, and your next call rings there. Each signal was dated by the clock, so your contact's app dropped it as older than the last one it heard from you.
+- On a phone, a call's small window no longer re-measures the message field at every frame while the keyboard is up. It did so about 60 times a second, each time forcing the page to lay itself out again, for as long as you typed beside a call. It now measures the field only when the field changes size.
+
+**Chat**
+
+- On the web, the chat list no longer reads every saved key again for each chat whose first sync is under way, on every change of the app's state, while the app starts: the chats' keys are read once per change, and not at all once no chat is mid-sync. With 300 chats each of those changes took up to 169 ms in Chromium when every chat was mid-sync (about 0.56 ms per chat mid-sync); now about 0.6 ms in all.
+- A file, a picture or a voice message you sent from the web or Desktop app now offers Delete for everyone, as a text does. Before, its menu had only Delete message, which left it on your contact's device.
+- Files past the 256 a contact can have waiting, sent in one go, show as queued while they wait their turn. Before, after a minute they read "Not moving" with a Send again that sent nothing and left the file's spinner turning.
+- On a phone, a long key's Show all and Copy and a code block's Copy in a message take a thumb's 44 px; they were 20 px tall.
+- A link shared into Ghostly from another app no longer goes in the message twice when the shared text already holds it in bold, italic, strike or spoiler marks, or between < and >.
+- A voice message or audio file that is deleted while it plays, by you or by its sender for everyone, now stops. Before, it played on to its end with the now-playing bar, the message already gone from the chat.
+- On the web and in the browser extension, an update from the app's engine that changes nothing about your chats (a file moving, a link checking in) no longer makes the page read every chat back from its storage: with 300 chats, each such update cost the page about half a millisecond, up to 20 times a second while a file moved.
+
+**CLI**
+
+- `ghostly app publish` refuses an app folder holding a private key written inside a JSON or JS string, its line breaks as `\n` (a cloud service account's `private_key`, a key pasted into code), as it refuses a key file: such a key went out in the public bundle.
+- `ghostly call`: after the computer's clock, running more than 10 minutes ahead, was put right, a call placed from a daemon that was already running rings at your contact again, and its hang-up reaches them. The daemon kept dating its signals in that chat after the ones the wrong clock had dated, so your contact's app dropped each one as from the future until the daemon restarted.
+- Right after a restart, a chat put on the DHT only (`ghostly chat transport <chat> dht`, `ghostly chat disconnect --hold`) while it still waited its turn to resume no longer keeps that turn for as long as it stays there: the chats behind it in line start. Each such chat held one of the turns for the rest of the run, and ten of them left every other chat offline until it was opened or written to.
+- `file save`, `file wait` and `file accept`, `cancel` and the other file actions, given a chat's file by its id alone and run without a daemon, start that chat only, as they do with the chat named: they started every saved chat and group first, one relay request per chat and 0.6 to 2 s more with 20 chats.
+- `ghostly group invite` of a chat whose invite nobody took yet says nobody joined it and names `ghostly chat wait`, instead of asking you to invite a contact who is not there "when they are online".
+- A one-shot command that changes a long chat (`ghostly send`, `edit`, `react` and the like, with no daemon running) no longer reads the chat's whole history a second time just to report its own message as an event. In a chat of 100,000 messages, `ghostly send` took 2.3 s and 365 MB, and now takes 1.5 s and 315 MB. The events it reports are unchanged.
+- `ghostly chat transport <chat> hyperdht` (or `iroh`) on a chat still waiting its turn after a restart now answers in about the time one listener takes to start, instead of waiting behind every other chat's listener first: with HyperDHT out of reach, 83 s with 12 chats before it said "Transport unavailable".
+
+**Wallets**
+
+- In the Desktop app, a Lightning address or LNURL service that never answers Look up or Get invoice is given up on after 15 seconds, as on the web and in the CLI. Before, the app waited up to two and a half minutes.
+
+**Desktop**
+
+- On a Mac, a copy of the Desktop app given its own bundle id after it was built (a second app to test with) now keeps its own log, data and cache folders, named after that id. Before, it wrote into the main app's log and shared its data folder, while WebKit already kept each app's pages apart. On its first launch the copy starts from what the shared folder held, so the files it had are still there.
+- On a Mac, a file dragged or pasted into a chat or a group is kept as a copy of its bytes, never as a reference to the temporary folder it was dropped from.
+- On a Mac, the app opens again when a chat holds a file that was dragged or pasted in: it was closed at every start, and showed "Ghostly could not open" after three tries.
+- A restart while the app was still closing no longer lists every chat twice: a chat is never added again for a contact that already has one. Chats already listed twice stay as they are.
+- Settings, Updates: when Check now, pressed from the keyboard, finds a version to download by hand (the Linux .deb and .rpm), the focus goes on to Download. Before, it fell to the page and the next Tab started from the top.
+
+**Extension**
+
+- A contact's app in the browser extension loads its videos, pictures and scripts without each one being copied twice on the way, which took a moment and a lot of memory for a large video.
+
+**Web**
+
+- Group links to groups you are already in no longer count toward the 3 group links that may wait to be let in. Before, after a few of them (opened while the app was locked, or one after the other), a new group's link was refused with "Too many group links opened", though no group was waiting. A second link to the same group, opened while locked (after its link was reset), now takes the place of the first instead of taking a second place.
+- Two or more invite links, or two or more group links, opened while the app is locked (or a tab that takes the profile over opens them on its lock screen) are each opened after you unlock, one after the other. Before, only the last one was kept: the others were lost without a word. Up to 3 invite links and 3 group links are kept under the lock; one more is refused with the usual "Too many" notice, shown after you unlock.
+
+**Identities**
+
+- A contact's identities beside the chat, Identities → From your contacts and the chat list no longer build an entry for every chat and compare them all on each change of the app's state (up to 20 a second while a file moves) only to find nothing changed: each chat's entry is built once and kept while its chat is unchanged, and the three share one list per state (with 2,000 chats, up to about 1 ms less work on each change while a contact's identities or the Identities page are open, and about 0.2 ms always).
+
+**Accessibility**
+
+- On a phone at a larger text size, a file's, a song's and a voice message's Accept (or Download) and Decline, and the Pause, Resume and Cancel of a file, song, video or voice message on its way, now wrap onto a second line inside the bubble. Before, at 200% text, a file offer's Decline ran out of the bubble.
+- On a phone, or a window too narrow for the chat list beside the chat, pressing a chat's or a group's Back with the keyboard now leaves the focus on that conversation's row in the list, and a control that opens another page (Profile's Chats, Wallets, Services, Settings and Identities, Identities' Edit profile) on that page's title. Before, it fell to the document, and the next Tab started again at the top.
+
+**Relays**
+
+- A HyperDHT relay set to 1 to 3 handshakes at a time (`GHOSTLY_RELAY_HANDSHAKES`) lets a client that hands it its key take incoming connections again, as Ghostly's own browsers already could: with 1, it refused every one of them. Its log line for that limit names the count it really keeps.
+
+**Everywhere**
+
+- Web: a tab of one profile, reloaded after another tab switched to a different profile, no longer starts in the other profile's colours and language before its own appear.
+
+**Website**
+
+- The map of what Ghostly is made of on ghostly.tools/developers says the web app, the extension and the CLI reach Iroh through n0's public relays and Ghostly's own (iroh.miguelmedeiros.dev) by default, as the privacy page and the agents FAQ do. It named n0's alone.
+
 ## 1.13.8
 
 ### Security
