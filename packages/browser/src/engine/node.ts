@@ -2990,11 +2990,11 @@ export class GhostlyNode implements EngineImplementation {
    */
   depart(options: { quitting?: boolean } = {}): void {
     for (const live of this.links.values()) live.link?.depart(options);
-    // For the next start (`lastRunDeparted`), waited for by a stop (`shutdown`). A page closing may not have the time to
-    // write it: that start then takes the contacts for still holding their sessions, and looks for their answers less often.
-    this.departedMark = store(STORES.settings, "readwrite").then((settings) => committed(settings.put({ at: Date.now() }, DEPARTED_KEY))).catch(() => {});
+    // For the next start (`lastRunDeparted`). Not waited for: a stop takes longer than this write (its links' leave
+    // packets go out first), and a page closing may not have the time anyway; that start then takes the contacts for
+    // still holding their sessions, and only looks for their answers less often.
+    void store(STORES.settings, "readwrite").then((settings) => committed(settings.put({ at: Date.now() }, DEPARTED_KEY))).catch(() => {});
   }
-  private departedMark?: Promise<unknown>;
 
   /**
    * Whether this app's last run said goodbye (`depart`) as it ended. Not (a crash, a kill): a contact live with it then
@@ -3097,8 +3097,6 @@ export class GhostlyNode implements EngineImplementation {
       this.nativeQueue,
       // An outbox stopping may hand a message to the hold: the hold's writes are waited for after it.
       Promise.allSettled([...this.outboxes.values()].map(outbox => outbox.stop())).then(() => this.hold.stop()),
-      // The goodbye's mark for the next start (`depart`).
-      this.departedMark,
     ]);
   }
 
