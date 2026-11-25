@@ -4,7 +4,7 @@ import { neventEncode, noteEncode, nprofileEncode, npubEncode } from "nostr-tool
 import { describe, expect, it } from "vitest";
 import { IDENTITY_PROVIDERS } from "../src/proofs/registry";
 import { MAINNET, SIGNET, testBitcoinWallet } from "./helpers/bitcoinSign";
-// covers: proofs.contract, proofs.bitcoin, proofs.domain, proofs.nostr, proofs.openpgp
+// covers: proofs.contract, proofs.bitcoin, proofs.domain.dns, proofs.domain.https, proofs.nostr, proofs.openpgp, proofs.ssh.github, proofs.ssh.gitlab, proofs.atproto
 
 /**
  * Add takes back the link a provider writes for its own subjects (`publicUri`), the way wallets, Nostr clients and
