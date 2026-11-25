@@ -72,7 +72,8 @@ describe("a community member given a message frame", () => {
 
     await alice.sendText("hello");
     await net.settle();
-    expect(net.texts.get("bob")).toEqual(["hello"]);    expect(asked).toEqual([alice.myKey]);
+    expect(net.texts.get("bob")).toEqual(["hello"]);
+    expect(asked).toEqual([alice.myKey]);
 
     // Another of alice's frames whose text was changed on the way: refused, by the async check and the strict one.
     await alice.sendText("second");
