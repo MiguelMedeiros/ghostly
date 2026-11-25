@@ -3,7 +3,7 @@ import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
 import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, askPeer, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
 import servicesEn from "../../ui/src/locales/en/services.json";
-import { CLIPBOARD_GUARD_HASH, VIEWER_GUARD_CSP } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_CSP } from "@ghostly/core";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -273,8 +273,19 @@ describe("viewer tabs", () => {
     expect(world.callsTo("debugger.sendCommand").map(([, method, params]) => [method, params])).toEqual([
       ["Fetch.enable", { patterns: [{ urlPattern: "https://*.invalid/*", requestStage: "Request" }] }],
       ["Page.enable", undefined],
+      ["Page.addScriptToEvaluateOnNewDocument", { source: CLIPBOARD_GUARD_SCRIPT }],
     ]);
     expect(world.tabs.get(tabId)!.url).toBe(`https://${SERVICE}.${PEER}.${TAG}.invalid/`);
+  });
+
+  it("runs the clipboard guard in each new document of the tab as it commits, from before the app's first page", async () => {
+    // DevTools runs it in every new document of the tab, frames included, before the app's first page.
+    await openViewer(world);
+    const sent = world.calls.findIndex(({ api, args }) => api === "debugger.sendCommand" && args[1] === "Page.addScriptToEvaluateOnNewDocument");
+    const navigated = world.calls.findIndex(({ api }) => api === "tabs.update");
+    expect(sent).toBeGreaterThanOrEqual(0);
+    expect(world.calls[sent].args[2]).toEqual({ source: CLIPBOARD_GUARD_SCRIPT });
+    expect(navigated).toBeGreaterThan(sent);
   });
 
   it("opens the same contact's app in another origin for another profile's chat with them", async () => {
