@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { HANDOFF_PIECE_BYTES, handoffFileRequestFrame, randomBytes, seedSigner, toBase64Url, type DeviceFrame } from "@ghostly/core";
+import { HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, handoffFileRequestFrame, randomBytes, seedSigner, toBase64Url, type DeviceFrame } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type FetchFile, type StoredDeviceState } from "../src/devices/state";
 import { HandoffGiver, HandoffTaker, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource, type HandoffStaging, type HandoffStagingHost } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
@@ -445,6 +445,30 @@ describe("a move on mobile data: files over the limit stay on the old device", (
     await move(onward, 0);
     expect([...onward.storage.spaces.get(onward.storage.pointer)!.held.keys()].sort()).toEqual(["large", "small"]);
     expect(onward.takerRecords.record.fetchFiles).toBeUndefined();
+  });
+
+  it("a device that does not answer gives the next one its turn: a file on another device is not held behind it", async () => {
+    const { LeftFilesFetcher } = await filesModule();
+    vi.useFakeTimers();
+    try {
+      const onA = { sha256: digestOf(new Uint8Array([1])), size: 70_000, ids: ["on-a"], on: A };
+      const onC = { sha256: digestOf(new Uint8Array([2])), size: 70_000, ids: ["on-c"], on: C };
+      const records = new Records({ ...recordFor("ghostly", 1, "active", 1), fetchFiles: [onA, onC] });
+      const asked: string[] = [];
+      const links: HandoffLinks = { live: () => true, transcript: () => "ab".repeat(32), send: (key) => { asked.push(key); } };
+      // A's link is up but nothing on it answers (a build that does not serve files left for later); C would.
+      const fetcher = new LeftFilesFetcher({ links, records, store: new LiveFiles(), metered: () => false });
+      stops.push(() => fetcher.stop());
+      await fetcher.kick();
+      expect(asked).toEqual([A]);
+      await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + 1_000);
+      expect(asked).toEqual([A, C]);
+      // Neither answers: asked in turn again, never given up on.
+      await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + 1_000);
+      expect(asked).toEqual([A, C, A]);
+      await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.stuckMs + 1_000);
+      expect(asked).toEqual([A, C, A, C]);
+    } finally { vi.useRealTimers(); }
   });
 
   it("a take that lost keeps no list: the files were for the profile it would have run", () => {
