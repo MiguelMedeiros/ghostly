@@ -288,6 +288,26 @@ describe("the device links of a profile on this device", () => {
     expect(liveBetween(phone, computer)).toBe(false);
   }, 120_000);
 
+  // Repeated: which device dials depends on the keys, and the answerer is whichever device does not.
+  it("go live soon after the answering device could not answer the first offer, with no native transport to go on with", { timeout: 60_000, repeats: 3 }, async () => {
+    // A web page with no Iroh and no HyperDHT relay (the web e2e). The device that answers finds no ICE candidate for its
+    // first answer (Chromium's gathering stalls under load): it gives up and says nothing, and the offer stood for 90 s.
+    const d = newDeviceSetSecret();
+    const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone");
+    // The lower rendezvous key dials; each device's own is the one the other device's link reads.
+    const own = (device: TestDevice, other: TestDevice) => deviceLinkParams(d, other.key.publicKey, device.key.publicKey).peerPubKeyZ32;
+    const answerer = own(desktop, phone) < own(phone, desktop) ? phone : desktop;
+    rtc.noCandidates.add(answerer.name);
+    await write(desktop, "active", d, [desktop, phone]);
+    await write(phone, "standby", d, [desktop, phone]);
+    await settled(Promise.all([desktop.links.start(), phone.links.start()]));
+    // Its gathering recovers once the first answer was given up (three stalls of 3 s).
+    setTimeout(() => rtc.noCandidates.delete(answerer.name), 15_000);
+    // The device that dials offers again after `DEVICE_RTC_MS`, and the other looks fast for it: live in about 24 s, not
+    // after the first offer's 90 s and the backoff (106 s).
+    expect(await until(() => liveBetween(desktop, phone), 35_000)).toBe(true);
+  });
+
   // Repeated: which device dials depends on the keys, and the computer's link must offer WebRTC again where it dials.
   it("go back to WebRTC when the link that went on without it started its Iroh but nothing connects over it", { timeout: 60_000, repeats: 5 }, async () => {
     // The phone's Iroh starts, the computer's never does (a relay it cannot reach): no session opens over Iroh.
