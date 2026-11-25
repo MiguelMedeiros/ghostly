@@ -1140,6 +1140,12 @@ html[data-standalone="true"] {
     padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
     overflow-y: auto;
   }
+
+  /* Delete chat goes beside the answers, not under them: under End and answer's words it was 48 px below a 320 px screen. */
+  .incoming-call-answers {
+    flex-direction: row;
+    justify-content: center;
+  }
 }
 
 /* A connected call on a phone on its side (320-480 px high, 320-350 in a browser): the avatars and names are centred in

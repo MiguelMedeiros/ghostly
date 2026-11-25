@@ -16,6 +16,11 @@ interface IncomingCallNotificationProps {
    * as it came: with the camera for a video call) and Decline. Never two calls at once (WISP 601, "On a call already").
    */
   onCall?: boolean;
+  /**
+   * Delete chat, as in the chat's ⋮ (it asks first, then declines the ring and deletes the chat): a contact who rings
+   * again after each Decline can still be removed for good, without a dialog to reach first (agents#8557).
+   */
+  onDelete?: () => void;
 }
 
 const ICON = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -58,6 +63,7 @@ export function IncomingCallNotification({
   onAcceptVideo,
   onReject,
   onCall = false,
+  onDelete,
 }: IncomingCallNotificationProps) {
   const { t } = useI18n();
   const box = useRef<HTMLDivElement>(null);
@@ -142,40 +148,49 @@ export function IncomingCallNotification({
           </div>
         </div>
 
-        {onCall ? (
-          // On a call already: two choices, each named under its button, since no icon says "End and answer".
-          <div className="flex items-start justify-center gap-10 max-md:gap-6">
-            <div className="flex w-24 flex-col items-center gap-2">
+        {/* The answers, and under them Delete chat, kept together: on a phone they sit at the bottom, in thumb reach. */}
+        <div className="incoming-call-answers flex flex-col items-center gap-4">
+          {onCall ? (
+            // On a call already: two choices, each named under its button, since no icon says "End and answer".
+            <div className="flex items-start justify-center gap-10 max-md:gap-6">
+              <div className="flex w-24 flex-col items-center gap-2">
+                <button onClick={onReject} className={DECLINE} title={t("calls.decline")} aria-label={t("calls.decline")}>
+                  <DeclineIcon />
+                </button>
+                <span aria-hidden="true" className="text-text-secondary text-xs">{t("calls.decline")}</span>
+              </div>
+              <div className="flex w-24 flex-col items-center gap-2">
+                <button ref={endAndAnswer} onClick={hasVideo ? onAcceptVideo : onAcceptAudio} className={ACCEPT} data-testid="end-and-answer"
+                  title={t("calls.endAndAnswer")} aria-label={t("calls.endAndAnswer")}>
+                  {hasVideo ? <VideoIcon /> : <PhoneIcon />}
+                </button>
+                <span aria-hidden="true" className="text-text-secondary text-xs">{t("calls.endAndAnswer")}</span>
+              </div>
+            </div>
+          ) : (
+            // On a phone the gap gives way first (the screen less its 2rem sides and three 72px buttons), so on a
+            // 320-375px phone the buttons stay round instead of being squeezed into ovals.
+            <div className="flex items-center justify-center gap-4 max-md:gap-[clamp(0.5rem,calc((100vw-4rem-216px)/2),3rem)]">
               <button onClick={onReject} className={DECLINE} title={t("calls.decline")} aria-label={t("calls.decline")}>
                 <DeclineIcon />
               </button>
-              <span aria-hidden="true" className="text-text-secondary text-xs">{t("calls.decline")}</span>
-            </div>
-            <div className="flex w-24 flex-col items-center gap-2">
-              <button ref={endAndAnswer} onClick={hasVideo ? onAcceptVideo : onAcceptAudio} className={ACCEPT} data-testid="end-and-answer"
-                title={t("calls.endAndAnswer")} aria-label={t("calls.endAndAnswer")}>
-                {hasVideo ? <VideoIcon /> : <PhoneIcon />}
+              <button ref={acceptAudio} onClick={onAcceptAudio} className={ACCEPT} title={t("calls.acceptAudio")} aria-label={t("calls.acceptAudio")}>
+                <PhoneIcon />
               </button>
-              <span aria-hidden="true" className="text-text-secondary text-xs">{t("calls.endAndAnswer")}</span>
+              {hasVideo && (
+                <button onClick={onAcceptVideo} className={ACCEPT} title={t("calls.acceptVideo")} aria-label={t("calls.acceptVideo")}>
+                  <VideoIcon />
+                </button>
+              )}
             </div>
-          </div>
-        ) : (
-          // On a phone the gap gives way first (the screen less its 2rem sides and three 72px buttons), so on a
-          // 320-375px phone the buttons stay round instead of being squeezed into ovals.
-          <div className="flex items-center justify-center gap-4 max-md:gap-[clamp(0.5rem,calc((100vw-4rem-216px)/2),3rem)]">
-            <button onClick={onReject} className={DECLINE} title={t("calls.decline")} aria-label={t("calls.decline")}>
-              <DeclineIcon />
+          )}
+          {onDelete && (
+            <button type="button" onClick={onDelete} data-testid="incoming-call-delete-chat"
+              className="min-h-11 rounded-lg px-4 text-sm text-danger-ink hover:bg-danger/15 focus-visible:ring-2 focus-visible:ring-danger">
+              {t("sidebar.deleteChat")}
             </button>
-            <button ref={acceptAudio} onClick={onAcceptAudio} className={ACCEPT} title={t("calls.acceptAudio")} aria-label={t("calls.acceptAudio")}>
-              <PhoneIcon />
-            </button>
-            {hasVideo && (
-              <button onClick={onAcceptVideo} className={ACCEPT} title={t("calls.acceptVideo")} aria-label={t("calls.acceptVideo")}>
-                <VideoIcon />
-              </button>
-            )}
-          </div>
-        )}
+          )}
+        </div>
         {/* In the card from the start, empty until a newer offer changes the call's kind: a region added with its text
             is not read by every screen reader. */}
         <p role="status" className="sr-only" data-testid="incoming-call-kind-said">
