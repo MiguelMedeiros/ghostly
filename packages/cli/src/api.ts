@@ -7,7 +7,7 @@ import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
 import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwards";
 import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
-import { asCliError, CliError } from "./errors";
+import { asCliError, CliError, shownRelay } from "./errors";
 import { shellWord } from "./shellWord";
 import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inCall, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
@@ -124,7 +124,9 @@ export function settingsInEffect(settings: Settings): Settings {
 function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
   if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address|Use an? \S+ relay address)\b/.test(error.message)) return error;
   const keys = ["relays", "irohRelays", "hyperdhtRelay"].filter((key) => Object.hasOwn(patch, key));
-  return new CliError("bad_request", `${keys.join(", ") || "relays"}: ${error.message.replace(/^Enter /, "give ").replace(/^(Not|Use) /, (word) => word.toLowerCase())}`);
+  // The address the engine names, as given, without its credentials (`shownRelay`).
+  const said = error.message.replace(/^(.*? relay address: )([\s\S]+)$/, (_, words: string, address: string) => words + shownRelay(address));
+  return new CliError("bad_request", `${keys.join(", ") || "relays"}: ${said.replace(/^Enter /, "give ").replace(/^(Not|Use) /, (word) => word.toLowerCase())}`);
 }
 
 // ---------- chat names ----------
@@ -187,9 +189,12 @@ const inviteShown = new WeakMap<ApiContext, () => void>();
  * (that call ended only when its media stalled out, 16 s later). Removing the chat (`chat remove`) is refused the same
  * way: the call talked on in a chat gone from this device, and its hang-up had no chat left to cross. `engine.call`
  * refuses the raw calls that do the same (`removeLink`, `setChatTransport` / `setDeliveryMode` to `dht`).
+ *
+ * A contact's call that only rings in is not refused for: one who called again as soon as a call was declined kept the
+ * chat in the list, or on its direct link, for as long as they wanted. It is declined first (`declineRingingIn`).
  */
-function noCallOn(ctx: ApiContext, linkId: string, then: string, ringingInToo = true): void {
-  const call = ctx.calls.list().find((c) => c.chat === linkId && (ringingInToo || !ringsIn(c)));
+function noCallOn(ctx: ApiContext, linkId: string, then: string): void {
+  const call = ctx.calls.list().find((c) => c.chat === linkId && !ringsIn(c));
   if (call) throw new CliError("busy", `A call is on in this chat: hang it up first (ghostly call hangup ${linkId}), then ${then}`, { call: call.call });
 }
 
@@ -199,10 +204,10 @@ function ringsIn(call: Record<string, unknown>): boolean {
 }
 
 /**
- * Removing a chat is not refused for a call that only rings in it: a contact who called again as soon as one was
- * declined kept the chat from ever being removed (`call hangup`, then `chat remove`, met their next call in between).
- * The calls ringing in it are declined first, while the chat is there for the decline to cross; a call that is on
- * still refuses (`noCallOn`).
+ * Removing a chat, or putting it on DHT only, is not refused for a call that only rings in it: a contact who called
+ * again as soon as one was declined kept the chat from ever being removed or taken off its direct link (`call hangup`,
+ * then `chat remove`, met their next call in between). The calls ringing in it are declined first, while the chat and
+ * its live link are there for the decline to cross; a call that is on still refuses (`noCallOn`).
  */
 async function declineRingingIn(ctx: ApiContext, linkId: string): Promise<void> {
   for (const call of ctx.calls.list()) {
@@ -942,7 +947,7 @@ const METHODS: Record<string, Method> = {
   async "chat.remove"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass --yes (yes: true over the socket) to go on");
-    noCallOn(ctx, link.id, "remove the chat", false);
+    noCallOn(ctx, link.id, "remove the chat");
     if (!bool(params, "force")) noRemovalOnItsWay(ctx, [link.id]);
     await declineRingingIn(ctx, link.id);
     await node(ctx).removeLink({ linkId: link.id });
@@ -957,8 +962,10 @@ const METHODS: Record<string, Method> = {
     const name = str(params, "transport", true);
     const transport = Object.hasOwn(TRANSPORT_NAMES, name) ? TRANSPORT_NAMES[name] : undefined;
     if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
-    if (transport === "dht") noCallOn(ctx, link.id, "put the chat on DHT only");
-    else if (transport !== "auto") transportOffered(link, transport);
+    if (transport === "dht") {
+      noCallOn(ctx, link.id, "put the chat on DHT only");
+      await declineRingingIn(ctx, link.id);
+    } else if (transport !== "auto") transportOffered(link, transport);
     await node(ctx).setChatTransport({ linkId: link.id, transport });
     // A choice made during a hold (`chat disconnect --hold`) ends it: its time running out takes nothing back.
     await releaseHold(ctx, link.id, "lifted", true);
@@ -986,7 +993,10 @@ const METHODS: Record<string, Method> = {
       node(ctx).disconnect({ linkId: link.id });
       return chatJson(findChat(state(ctx).links, link.id));
     }
-    if (minutes > 0) noCallOn(ctx, link.id, "hold the chat");
+    if (minutes > 0) {
+      noCallOn(ctx, link.id, "hold the chat");
+      await declineRingingIn(ctx, link.id);
+    }
     if (minutes === 0) await releaseHold(ctx, link.id, "lifted");
     else await holdChat(ctx, link, minutes);
     return { ...chatJson(findChat(state(ctx).links, link.id)), heldUntil: holdOf(ctx, link.id) };
@@ -1235,12 +1245,13 @@ const METHODS: Record<string, Method> = {
     const problem = engineParamsProblem(method, args);
     if (problem) throw wrong(problem);
     // Removing the chat or putting it on DHT only is refused mid-call, as `chat remove` and `chat transport dht` are.
+    const toDht = (method === "setChatTransport" && args?.transport === "dht") || (method === "setDeliveryMode" && args?.mode === "dht");
     if (typeof args?.linkId === "string") {
       if (method === "removeLink") {
-        noCallOn(ctx, args.linkId, "remove the chat", false);
+        noCallOn(ctx, args.linkId, "remove the chat");
         if (!bool(params, "force")) noRemovalOnItsWay(ctx, [args.linkId]);
       }
-      else if ((method === "setChatTransport" && args.transport === "dht") || (method === "setDeliveryMode" && args.mode === "dht")) noCallOn(ctx, args.linkId, "put the chat on DHT only");
+      else if (toDht) noCallOn(ctx, args.linkId, "put the chat on DHT only");
     }
     if (args && ENGINE_SENDS.has(method) && !bool(params, "force")) await guardEngineSend(ctx, method, args);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
@@ -1249,7 +1260,7 @@ const METHODS: Record<string, Method> = {
     if (method === "setActiveLink") inviteShown.get(ctx)?.();
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
-    if (method === "removeLink" && typeof args?.linkId === "string") await declineRingingIn(ctx, args.linkId);
+    if ((method === "removeLink" || toDht) && typeof args?.linkId === "string") await declineRingingIn(ctx, args.linkId);
     const removedPeer = method === "removeLink" ? state(ctx).links.find((link) => link.id === args?.linkId)?.peerPubKeyZ32 : undefined;
     try {
       const result = (await target.call(node(ctx), args)) ?? null;

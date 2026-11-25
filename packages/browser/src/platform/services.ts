@@ -60,14 +60,24 @@ function keepUnsent(fileId: string, transfer: FileTransferState): void {
   try { localStorage.setItem(unsent.key, JSON.stringify(files)); } catch { /* no room: it is said while this page lives */ }
 }
 /**
- * The last few files sent from this page, as they were handed over (a recording, a paste, a pick): their bubble shows
- * them at once from these bytes, without reading the stored copy back. Small files only; gone on a reload.
+ * The last few pictures and voice notes sent from this page, as they were handed over (a recording, a paste, a pick):
+ * their bubble shows them at once from these bytes, without reading the stored copy back. Small files only (each
+ * under `JUST_SENT_BYTES`), at most that much together; gone on a reload. They are copies in memory (`detached`), so any
+ * other file, whose bubble never reads its bytes, is not kept: 8 files of 15 MiB held 120 MiB for the page's life.
  */
 const justSent = new Map<string, Blob>();
 const JUST_SENT_MAX = 8;
-function keepJustSent(id: string, blob: Blob): void {
+const JUST_SENT_BYTES = 32 * 1024 * 1024;
+function keepJustSent(id: string, blob: Blob, file: { image?: unknown; voice?: unknown }): void {
+  if (!file.image && !file.voice) return;
   justSent.set(id, blob);
-  while (justSent.size > JUST_SENT_MAX) justSent.delete(justSent.keys().next().value!);
+  let bytes = 0;
+  for (const kept of justSent.values()) bytes += kept.size;
+  for (const [oldest, kept] of justSent) {
+    if (justSent.size <= JUST_SENT_MAX && bytes <= JUST_SENT_BYTES) break;
+    justSent.delete(oldest);
+    bytes -= kept.size;
+  }
 }
 /** A stored service target's origin (`http://localhost:3400`), or null for one that no longer parses. */
 function originOf(target: string | undefined): string | null {
@@ -120,6 +130,19 @@ async function sendable(source: File): Promise<File> {
     return copying(Promise.reject(error));
   }
   return stripped ? new File([stripped], source.name, { type: source.type, lastModified: source.lastModified }) : source;
+}
+
+/**
+ * A small file's bytes as a File of their own, read once into memory, under the name, type and date it was picked
+ * with: what is kept in IndexedDB and digested. In WebKit (the macOS app) a File dropped or pasted in, and a Blob made
+ * from it or sliced off it, still points at the path it came from (`/var/folders/…/WebKitDropDestination-…/x.pdf`), a
+ * temporary folder that goes away; a record kept with it then reaches for that path when it is read. Only for files up
+ * to `SMALL_FILE_BYTES`: a larger one is copied into file storage a piece at a time (`FileBytes.stage`).
+ */
+async function detached(source: File): Promise<File> {
+  const bytes = await source.arrayBuffer();
+  if (bytes.byteLength !== source.size) throw new Error("The file is shorter than it says");
+  return new File([bytes], source.name, { type: source.type, lastModified: source.lastModified });
 }
 
 /**
@@ -448,10 +471,12 @@ export const servicesPlatform: ServicesPlatform | null = {
     const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video, image: file.image };
     const transfer = { state: "transferring" as const, transferred: 0, size: file.size };
     if (source.size <= SMALL_FILE_BYTES) {
-      // Its digest from the bytes in hand (a recording in memory): sending never has to read the stored copy back whole.
-      const digest = await copying(blobDigest(source));
-      keepJustSent(file.id, new Blob([source], { type: file.mime }));
-      await copying(fileStore.put({ id: file.id, linkId: link.id, blob: source, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer }));
+      // Kept as a copy of its bytes, never the picked File (`detached`), and digested from that copy: sending never has
+      // to read the stored copy back whole, and what is kept is what was digested.
+      const kept = await copying(detached(source));
+      const digest = await copying(blobDigest(kept));
+      keepJustSent(file.id, new Blob([kept], { type: file.mime }), file);
+      await copying(fileStore.put({ id: file.id, linkId: link.id, blob: kept, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer }));
       try {
         await engine.call("sendFile", { linkId: link.id, file, timestamp, ...(replyTo && { replyTo }) });
       } catch (error) {
@@ -521,8 +546,10 @@ export const servicesPlatform: ServicesPlatform | null = {
     const record = { id: file.id, linkId: `group:${groupId}`, createdAt: timestamp, direction: "out" as const, metadata, transfer: { state: "transferring" as const, transferred: 0, size: file.size } };
     await copying((async () => {
       if (source.size <= SMALL_FILE_BYTES) {
-        keepJustSent(file.id, new Blob([source], { type: mime }));
-        await fileStore.put({ ...record, blob: source, digest: await blobDigest(source) });
+        // A copy of its bytes, never the picked File (`detached`).
+        const kept = await detached(source);
+        keepJustSent(file.id, new Blob([kept], { type: mime }), file);
+        await fileStore.put({ ...record, blob: kept, digest: await blobDigest(kept) });
       } else {
         const bytes = await fileBytes();
         await fileStore.put({ ...record, bytes: bytes.kind, digest: await bytes.stage(file.id, source) });

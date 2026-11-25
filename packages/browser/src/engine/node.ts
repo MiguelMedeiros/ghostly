@@ -938,7 +938,7 @@ export const LIMITED_MODE_ERROR = "Ghostly could not check which device is activ
 export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi>([
   "setActiveLink", "renameLink", "updateSettings", "disconnect",
   "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage", "chatsFound",
-  "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "walletBackupReminder",
+  "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "noteChats", "walletBackupReminder",
   // Presence and a set status: a settings write and a word on live sessions (none in limited mode), as typing.
   "setPresence", "setOwnStatus", "clearOwnStatus", "getOwnStatus",
   // Saved messages are marks on this device only, a settings record (`engine/saved.ts`): nothing is sent. Refused,
@@ -4255,7 +4255,23 @@ export class GhostlyNode implements EngineImplementation {
       createdAt: stored.createdAt,
       inviteCode: stored.inviteCode,
       label: stored.label,
+      ...(stored.hasChat && { hasChat: true as const }),
     }));
+  }
+
+  /**
+   * The page keeps a chat for each of these links: noted on the link's record, which the page reads more surely than
+   * its own storage. Its first-run import then never makes a second chat for the link (a restart whose storage read
+   * empty listed every chat twice). A group's link has no chat of its own.
+   */
+  async noteChats({ linkIds }: { linkIds: string[] }): Promise<void> {
+    if (!Array.isArray(linkIds)) return;
+    for (const linkId of new Set(linkIds)) {
+      const live = typeof linkId === "string" ? this.links.get(linkId) : undefined;
+      if (!live || live.stored.group || live.stored.hasChat) continue;
+      await db.patchLink(linkId, { hasChat: true }, true);
+      live.stored = { ...live.stored, hasChat: true };
+    }
   }
 
   /**
@@ -5805,6 +5821,9 @@ export class GhostlyNode implements EngineImplementation {
       const before = waiting.stored.deliveryMode;
       waiting.stored = { ...waiting.stored, deliveryMode: "dht" };
       this.resumeTurns.now(linkId);
+      // Started there, it resumes no live session (`resumesAtStart`): no resume window or data link ends its turn, and
+      // the chats behind it in line never started. It gives the turn back at once.
+      this.resumeTurns.finished(linkId);
       if (!waiting.link) waiting.stored = { ...waiting.stored, deliveryMode: before };
     } else this.resumeTurns.now(linkId);
     await this.switchDeliveryMode(linkId, mode);
@@ -5904,8 +5923,9 @@ export class GhostlyNode implements EngineImplementation {
     } else if (transport !== "auto" && transport !== "webrtc/1" && live?.link && !live.link.availableTransports.includes(transport)
       && transport in this.nativeFactories) {
       // Just started (it waited its turn): its listeners come up behind it, HyperDHT's in 1 to 6 s. The one it names
-      // was not there yet, and the choice was refused.
-      await this.ensureNativeEndpoints(linkId, false, transport);
+      // was not there yet, and the choice was refused. Chosen for, the chat is in use: its start goes before every
+      // other chat's in the transport's queue, which waited for each one's (83 s with 12 chats, HyperDHT out of reach).
+      await this.ensureNativeEndpoints(linkId, true, transport);
       if (this.transportChoices.get(linkId) !== choice) return;
     }
     if (transport !== "auto") {

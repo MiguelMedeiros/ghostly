@@ -494,13 +494,14 @@ async function viewerAnswer(headers: [string, string][], bodyB64: string, resour
   const own = viewerResponseHeaders(headers);
   const body = (async function* () { yield fromBase64(bodyB64); })();
   const answer = await guardViewerAnswer(own, body, destinationOf(resourceType, own), PAGE_GUARDS);
+  // Ghostly's policy is the header's last one, after the contact's.
+  const policed = withViewerPolicy(answer.headers).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value }));
+  // What passes as it was (no page, or one that runs no script) goes on as it came: a video of up to 32 MiB is not
+  // decoded, copied and encoded again here.
+  if (answer.body === body) return { headers: policed, body: bodyB64 };
   const parts: Uint8Array[] = [];
   for await (const part of answer.body) parts.push(part);
-  return {
-    // Ghostly's policy is the header's last one, after the contact's.
-    headers: withViewerPolicy(answer.headers).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value })),
-    body: toBase64(concatBytes(...parts)),
-  };
+  return { headers: policed, body: toBase64(concatBytes(...parts)) };
 }
 
 /**

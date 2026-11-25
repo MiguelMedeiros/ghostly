@@ -274,10 +274,37 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
     expect(dialled, "WebRTC peer connections").toBe(0);
   }, 60_000);
 
+  it("gives the turn back once it starts on DHT only: the chats behind it in line still start", async () => {
+    // Three chats live when the app last ran, one turn: chat-0 resumes, chat-1 and chat-2 wait.
+    for (let i = 0; i < 3; i++) {
+      const { inviter: app, joiner: contact } = invitationWhere(i % 2 ? "joiner" : "inviter");
+      await db.putLink({
+        ...app.params, id: `chat-${i}`, label: `c${i}`, createdAt: app.createdAt, participationSeed: app.seedB64,
+        pairedPeerKey: peerKeyOf(contact), peerTrust: { version: 1, verifiedKey: peerKeyOf(contact) }, peerTransports: ["webrtc/1"],
+        transportHistory: [{ id: `h${i}`, at: Date.now() - MIN - i * 1_000, kind: "live", transport: "webrtc/1" }],
+      } as unknown as StoredLink);
+    }
+    const node = engine(unlimited(), { resumesAtOnce: 1 });
+    // Started with the clock still: fake time run during the start (`settled`), more of it the slower the machine, let
+    // chat-0's first read find its contact away and end its turn, then chat-1's and chat-2's, before the line is read.
+    await node.start();
+    const turns = node["resumeTurns"] as ResumeTurns;
+    expect([...turns["running"]], "resuming").toEqual(["chat-0"]);
+    expect(turns["line"], "waiting").toEqual(["chat-1", "chat-2"]);
+    // Held while it waits: it starts on DHT only, where no live session resumes (and no data link opens to end a turn).
+    await settled(node.setChatTransport({ linkId: "chat-1", transport: "dht" }));
+    expect(node["links"].get("chat-1")?.link, "started").toBeInstanceOf(GhostLink);
+    expect(turns["running"].has("chat-1"), "a turn held on DHT only").toBe(false);
+    // chat-0's turn ends (its contact read away, here, or done by hand): the one left in line takes it. Before, chat-1
+    // kept a turn on DHT only and chat-2 never started.
+    turns.finished("chat-0");
+    expect(node["links"].get("chat-2")?.link, "the chat behind starts").toBeInstanceOf(GhostLink);
+  }, 60_000);
+
   it("goes back to Automatic at once", async () => {
     const { node, id } = await waiting();
     await settled(node.setChatTransport({ linkId: id, transport: "auto" }));
-    expect(node["links"].get(id)?.link, "started").toBeDefined();
+    expect(node["links"].get(id)?.link, "started").toBeInstanceOf(GhostLink);
     expect((node["resumeTurns"] as ResumeTurns)["line"]).toEqual([]);
   }, 60_000);
 
@@ -308,6 +335,42 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
     expect(node["links"].get(id)?.stored.preferredTransport, "Automatic, chosen last").toBeUndefined();
   }, 60_000);
 
+  /**
+   * Its listener's start went in the transport's queue after every other chat's (bug hunt, 2026-11-24): with HyperDHT
+   * out of reach, each listen failing in 6 s, `chat transport` answered 83 s on with 12 chats starting. Chosen for, the
+   * chat is in use: its start goes first, and the answer comes in about one listen.
+   */
+  it("answers in about one listen while the other chats' listeners start", async () => {
+    let listens = 0;
+    const listen = async (): Promise<NativeEndpoint> => {
+      listens++;
+      await new Promise((resolve) => setTimeout(resolve, 6_000));
+      throw new Error("could not listen");
+    };
+    const others = 6, rows: StoredLink[] = [];
+    for (let i = 0; i <= others; i++) {
+      const { inviter: app, joiner: contact } = invitationWhere("inviter");
+      // The last one, live longest ago, waits its turn.
+      rows.push({
+        ...app.params, id: `chat-${i}`, label: `c${i}`, createdAt: app.createdAt, participationSeed: app.seedB64,
+        pairedPeerKey: peerKeyOf(contact), peerTrust: { version: 1, verifiedKey: peerKeyOf(contact) }, peerTransports: ["webrtc/1", "hyperdht/1"],
+        transportHistory: [{ id: `h${i}`, at: Date.now() - MIN - i * 1_000, kind: "live", transport: "webrtc/1" }],
+      } as unknown as StoredLink);
+      await db.putLink(rows[i]);
+    }
+    // A relay out of reach: no contact is found away, so no turn ends while the listeners start.
+    const silent = new RelayTransport({ fetch: (async () => { throw new TypeError("fetch failed"); }) as typeof fetch, relays: [RELAY], requestsPerMinute: Infinity, log: () => {} });
+    const node = engine(silent, { resumesAtOnce: others, nativeTransports: { "hyperdht/1": listen } });
+    await settled(node.start());
+    const id = rows[others].id;
+    expect((node["resumeTurns"] as ResumeTurns)["line"], "the chat waits its turn").toEqual([id]);
+    await run(1_000);
+    const asked = Date.now();
+    await expect(settled(node.setChatTransport({ linkId: id, transport: "hyperdht/1" }))).rejects.toThrow("Transport unavailable");
+    // The start under way (6 s at most), then its own.
+    expect(Date.now() - asked, `ms, ${listens} listens`).toBeLessThanOrEqual(12_500);
+  }, 60_000);
+
   it("leaves a chat waiting for a choice it refuses", async () => {
     const { node, id } = await waiting();
     await expect(settled(node.setTransportPreference({ linkId: id, preferred: "webrtc/1", fallback: "yes" as unknown as boolean }))).rejects.toThrow("Transport unavailable");
@@ -330,7 +393,7 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
   it("keeps a chat on its live link at once", async () => {
     const { node, id } = await waiting();
     await settled(node.setDeliveryMode({ linkId: id, mode: "stream" }));
-    expect(node["links"].get(id)?.link, "started").toBeDefined();
+    expect(node["links"].get(id)?.link, "started").toBeInstanceOf(GhostLink);
     expect((node["resumeTurns"] as ResumeTurns)["line"]).toEqual([]);
   }, 60_000);
 });

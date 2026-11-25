@@ -118,7 +118,8 @@ describe("the first run", () => {
     expect(storage.listSessions()).toEqual([]);
 
     localStorage.setItem = write;
-    await vi.advanceTimersByTimeAsync(5_000);
+    // At the next try: the waits between them grow to 5 min at most (a chat stored or deleted brings it sooner).
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(storage.listSessions()).toHaveLength(1);
     expect(localStorage.getItem("gb-sessions-imported")).toBe("1");
     expect(engine.calls.filter(([m]) => m === "removeLink")).toEqual([]);
@@ -216,7 +217,8 @@ describe("keeping links and chats in step", () => {
     imported();
     storage.saveSession(session({ deliveryMode: "stream" }));
     await start([link({ createdAt: 1, deliveryMode: "dht" })]);
-    expect(engine.calls).toEqual([]);
+    // Only told the engine that this link has its chat here (the first-run import reads that).
+    expect(engine.calls).toEqual([["noteChats", { linkIds: ["link-1"] }]]);
     expect(storage.loadSession("s1")?.deliveryMode).toBe("dht");
   });
 
@@ -479,6 +481,29 @@ describe("a long chat, on every update", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(chatParses()).toBe(1);
     expect(sync.sessionForPeer("peer-1")?.label).toBe("Work");
+  });
+
+  it("reads no stored chat back for a state whose links changed in nothing it reads, with nothing stored since", async () => {
+    await settledChat();
+    // A file moving: up to 20 states a second, each a new object, its links as they were.
+    const walks = vi.spyOn(localStorage, "key");
+    for (let i = 0; i < 20; i++) await stateChanges();
+    expect(walks).not.toHaveBeenCalled();
+
+    // What it reads changed: the next state is looked at whole.
+    engine.state = { links: [{ ...engine.state!.links[0], deliveryMode: "dht" }] };
+    for (const listener of engine.stateListeners) listener();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(walks).toHaveBeenCalled();
+    expect(storage.loadSession("s1")!.deliveryMode).toBe("dht");
+  });
+
+  it("a chat stored since is looked at on the next state, no other word needed", async () => {
+    await settledChat();
+    const stale = storage.loadSession("s1")!;
+    storage.saveSession({ ...stale, deliveryMode: "dht" });
+    await stateChanges();
+    expect(storage.loadSession("s1")!.deliveryMode).toBe("stream");
   });
 
   it("still sees a chat changed or deleted elsewhere while nothing else moves", async () => {

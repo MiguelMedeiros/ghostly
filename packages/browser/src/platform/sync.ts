@@ -2,6 +2,7 @@ import {
   addMessages,
   deleteMessages,
   saveSession,
+  sessionWrites,
   setEngineMessages,
   STORED_MESSAGES,
   ensureSession,
@@ -29,7 +30,7 @@ import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications
 import { stopAppsIn } from "../../../../apps/ui/src/lib/apps/open";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { AttachMark } from "../shared/rpc";
-import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
+import type { LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
 import { forgetServicesOf } from "../host";
 import { viewerTag } from "@ghostly/core";
@@ -409,13 +410,132 @@ function mirrorPeerNick(session: ChatSession, link: LinkView): boolean {
 }
 
 const ensuring = new Set<string>();
-/**
- * The last reconcile that left nothing for later: every chat had its link and every link its chat. With the same
- * engine state and the same sessions (none stored differently since), the next one has nothing to do either.
- */
-let settled: { state: EngineState; sessions: ChatSession[] } | undefined;
 
-async function reconcile(): Promise<void> {
+/** Links the engine was told this page keeps a chat for (`noteChats`), this page life; and those on their way. */
+const chatsNoted = new Set<string>();
+const chatsNoting = new Set<string>();
+
+/**
+ * Tells the engine which links have their chat here: its record of it outlives a read of this page's storage that comes
+ * back without the chats (a restart while another instance still held it), and the first-run import reads it.
+ */
+function noteChats(linkIds: string[]): void {
+  const fresh = linkIds.filter((id) => !chatsNoted.has(id) && !chatsNoting.has(id));
+  if (!fresh.length) return;
+  for (const id of fresh) chatsNoting.add(id);
+  engine
+    .call("noteChats", { linkIds: fresh })
+    .then(() => { for (const id of fresh) chatsNoted.add(id); }, () => {})
+    .finally(() => { for (const id of fresh) chatsNoting.delete(id); });
+}
+
+/** The first-run import under way: every reconcile meanwhile waits for it, none starts its own. */
+let importing: Promise<boolean> | undefined;
+/**
+ * No import before this time. One that could not finish is tried again later each time, 4 s then twice as long up to
+ * 5 min (its old rows may never read back: each try sends every link's keys over the RPC), and sooner once a chat is
+ * stored or deleted (`importSoon`). `importDue` is the time the waits alone set.
+ */
+let importAfter = 0;
+let importDue = 0;
+const IMPORT_AGAIN_MS = 4_000;
+const IMPORT_AGAIN_MAX_MS = 5 * 60_000;
+/** The wait after the next import that cannot finish. */
+let importWait = IMPORT_AGAIN_MS;
+/** When the last import ran. */
+let importTried = 0;
+/** An import already came sooner since the last one the waits set: no other one until that wait ends. */
+let importSooner = false;
+
+function importLinks(): Promise<boolean> {
+  return (importing ??= importOnce().finally(() => { importing = undefined; }));
+}
+
+/**
+ * A chat stored or deleted (by this page or another): the old rows the import waits for may read back now, so it runs
+ * again 4 s after the last at the soonest. Once per wait: a chat busy with messages does not make it a poll.
+ */
+function importSoon(): void {
+  if (importSooner) return;
+  importSooner = true;
+  importAfter = Math.min(importAfter, importTried + IMPORT_AGAIN_MS);
+}
+
+/** When the next import may run, after one that finished (`done`) or not. */
+function importRan(done: boolean, started: number): void {
+  const now = Date.now();
+  importTried = now;
+  importSooner = !done && started < importDue;
+  if (done) importWait = IMPORT_AGAIN_MS;
+  importDue = importAfter = now + importWait;
+  if (!done) importWait = Math.min(importWait * 2, IMPORT_AGAIN_MAX_MS);
+}
+
+/**
+ * Links made before the UI kept sessions (or by another Ghostly page) become chats, once: true once done and marked.
+ * Never a second chat for a link that has one: one stored here (read again after the engine's answer, so one stored
+ * meanwhile counts), or one the engine was told this page keeps (`hasChat`) while this page's storage read without it.
+ * The mark is not written then: the read was not the whole storage, and no link goes for want of a chat (below) until
+ * a later import finds them, but one whose chat was deleted here.
+ */
+async function importOnce(): Promise<boolean> {
+  const started = Date.now();
+  let changed = false;
+  let done = false;
+  try {
+    let unread = false;
+    for (const link of await engine.call("exportLinks")) {
+      if (findSession(link.seedB64, link.peerPubKeyZ32)) continue;
+      if (link.hasChat) { unread = true; continue; }
+      const id = ensureSession(
+        { profile: link.profile, deliveryMode: link.deliveryMode, seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
+        { inviteCode: link.inviteCode, createdAt: link.createdAt },
+      );
+      changed = true;
+      if (link.label) updateSessionLabel(id, link.label);
+    }
+    if (unread) return false;
+    localStorage.setItem(MIGRATED_KEY, "1");
+    changed = true;
+    done = true;
+    return true;
+  } catch {
+    // No room to store them (or the mark): imported again at the next try. Until then no link goes for want of
+    // its chat below.
+    return false;
+  } finally {
+    // Before the event: the reconcile it starts reads the next time.
+    importRan(done, started);
+    if (changed) notifySessionsChanged();
+  }
+}
+/**
+ * The last reconcile that left nothing for later: every chat had its link and every link its chat. With links the same
+ * in what it reads and the same sessions (none stored differently since), the next one has nothing to do either.
+ */
+let settled: { links: LinkView[]; edges?: LinkView[]; prefix: string; writes: number; sessions: ChatSession[] } | undefined;
+
+/**
+ * Whether two states' chats (or group edges) are the same in what a reconcile reads of them. Every state is a new object,
+ * up to 20 a second while a file moves, and most change nothing here.
+ */
+function sameLinks(a: readonly LinkView[] | undefined, b: readonly LinkView[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  return a.every((x, i) => {
+    const y = b[i];
+    return x === y || (x.id === y.id && x.peerPubKeyZ32 === y.peerPubKeyZ32 && x.deliveryMode === y.deliveryMode && x.peerNick === y.peerNick
+      && x.identitySharedAt === y.identitySharedAt && x.pairing?.peerKey === y.pairing?.peerKey && x.pairing?.status === y.pairing?.status
+      && (x.lastReaction === y.lastReaction || JSON.stringify(x.lastReaction ?? null) === JSON.stringify(y.lastReaction ?? null)));
+  });
+}
+
+/**
+ * `fromState`: run for an engine state alone. With links the same as at the last settled reconcile, and no chat stored
+ * by this page since (`sessionWrites`), the stored chats are not read back at all. `session-updated`, another page's
+ * write (its `storage` event) and the 5 s tick still read them all.
+ */
+async function reconcile(fromState = false): Promise<void> {
   const state = engine.state;
   if (!state) return;
 
@@ -423,39 +543,31 @@ async function reconcile(): Promise<void> {
     try { localStorage.setItem(MIGRATED_KEY, "1"); } catch { /* no room: the old mark still counts */ }
   }
   let imported = !!localStorage.getItem(MIGRATED_KEY) || !!localStorage.getItem(OLD_MIGRATED_KEY);
-  if (!imported) {
-    try {
-      // Links made before the UI kept sessions (or by another Ghostly page).
-      for (const link of await engine.call("exportLinks")) {
-        if (findSession(link.seedB64, link.peerPubKeyZ32)) continue;
-        const id = ensureSession(
-          { profile: link.profile, deliveryMode: link.deliveryMode, seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
-          { inviteCode: link.inviteCode, createdAt: link.createdAt },
-        );
-        if (link.label) updateSessionLabel(id, link.label);
-      }
-      localStorage.setItem(MIGRATED_KEY, "1");
-      imported = true;
-      notifySessionsChanged();
-    } catch {
-      // No room to store them (or the mark): imported again at the next reconcile. Until then no link goes for want of
-      // its chat below.
+  if (!imported && Date.now() >= importAfter) imported = await importLinks();
+
+  const last = settled;
+  const linksAsSettled = !!last && last.prefix === getPrefix() && sameLinks(last.links, state.links) && sameLinks(last.edges, state.edges);
+  if (fromState && linksAsSettled && last.writes === sessionWrites()) return;
+  const sessions = listShownSessions();
+  if (linksAsSettled && last.sessions.length === sessions.length) {
+    const had = new Set(last.sessions);
+    if (sessions.every((s) => had.has(s))) {
+      settled = { ...last, links: state.links, edges: state.edges, writes: sessionWrites() };
+      return;
     }
   }
-
-  const sessions = listShownSessions();
-  const last = settled;
-  if (last?.state === state && last.sessions.length === sessions.length && sessions.every((s) => last.sessions.includes(s))) return;
   settled = undefined;
   const peers = new Set(sessions.map((s) => s.peerPubKeyB64));
   let renamed = false;
   let later = false;
+  const kept: string[] = [];
 
   for (const shown of sessions) {
     // Changed here (its delivery mode, its latest reaction or identity share), never the one the other readers hold.
     const session = { ...shown };
     const live = engine.linkByPeer(session.peerPubKeyB64);
     if (live) {
+      kept.push(live.id);
       // The note of a reaction whose row the change tick still holds goes in with that row, when the tick ends.
       const waiting = engine.changing(live.id);
       if (waiting) later = true;
@@ -485,11 +597,13 @@ async function reconcile(): Promise<void> {
       .finally(() => ensuring.delete(session.id));
   }
   if (renamed) notifySessionsChanged();
+  noteChats(kept);
 
   for (const link of state.links) {
     if (peers.has(link.peerPubKeyZ32)) continue;
     later = true;
-    if (!imported) continue;
+    // One whose chat was deleted here had a chat, whatever the import could read: it goes even while that cannot finish.
+    if (!imported && !wasDeleted(link.peerPubKeyZ32)) continue;
     // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
     if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
@@ -498,7 +612,7 @@ async function reconcile(): Promise<void> {
     // What the contact's apps opened from this chat kept on this device goes with it (their origins).
     void forgetServicesOf({ tag: viewerTag(link.myPubKeyZ32) });
   }
-  if (!later && !renamed) settled = { state, sessions };
+  if (!later && !renamed) settled = { links: state.links, edges: state.edges, prefix: getPrefix(), writes: sessionWrites(), sessions };
 }
 
 /**
@@ -543,13 +657,14 @@ export function startSessionSync(): void {
   engine.start();
   engine.onMessages(mirrorNew);
   engine.subscribe(() => {
-    void reconcile();
+    void reconcile(true);
     // A list mirrored already, into a session nothing wrote since, has nothing new (reconcile mirrors the link's names).
     // One whose changes the tick still holds is mirrored when it ends, from what changed only.
     for (const [linkId, messages] of engine.messages) if (!engine.changing(linkId)) mirrorNew(linkId, messages);
   });
-  // Deleting a chat only touches localStorage; notice it without waiting for the peer to speak.
-  window.addEventListener("session-updated", () => void reconcile());
+  // Deleting a chat only touches localStorage; notice it without waiting for the peer to speak. An import that could
+  // not finish may find its chats now.
+  window.addEventListener("session-updated", () => { importSoon(); void reconcile(); });
   // Another page of this app (a second tab of the extension, whose pages share one peer) wrote a chat: what it
   // mirrored first is already stored, so this page's mirror adds nothing and would never tell its chat to read again.
   // A chat cleared (`key` null: storage cleared) counts too.

@@ -41,7 +41,9 @@
  *   members read once). The apps' origins under a services host share its site: one an app set for the whole host
  *   would be read by every other contact's app open at once. The bridge drops those left from before as it starts
  *   (apps/web/src/svc/clearSite.ts, with the setter it kept before this ran). Both fixed in place, once per window.
- * A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
+ * A look over the frames passes by a frame of another origin without touching it (its prototype reads as null; this
+ * script cannot run there) and by one whose document it already found guarded for good, so an insertion costs little
+ * in an app with embeds. A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
  * bridge's guard reaches the app's frame then): there this script only watches the new document. Each document it
  * watches is marked (`ghostlyClipboardGuard`, fixed in place): the bridge reads that to know the guard ran in the page
  * it shows. It uses nothing the page can change after it ran (the page's own code runs later, in the same realm).
@@ -60,8 +62,9 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
     const home = w.document;
     const exec = describe(proto, "execCommand");
     const fresh = !!exec && exec.configurable === true && typeof exec.value === "function";
-    const watched = !!describe(home, "ghostlyClipboardGuard");
-    if (!fresh && watched) return;
+    const mark = describe(home, "ghostlyClipboardGuard");
+    const watched = !!mark;
+    if (!fresh && watched) return !!exec && exec.configurable === false && mark.configurable === false;
     if (!watched) define(home, "ghostlyClipboardGuard", { value: true });
     const own = "<script>(" + noClipboardWrites + ")(window)<" + "/script>";
     const close = "<" + "/script>";
@@ -71,8 +74,18 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
     const slice = text.prototype.slice;
     const index = text.prototype.indexOf;
     const listen = w.EventTarget.prototype.addEventListener;
+    const above = w.Object.getPrototypeOf;
+    const Known = w.WeakSet;
+    const known = typeof Known === "function" ? new Known() : null;
+    const has = known && Known.prototype.has;
+    const add = known && Known.prototype.add;
     const shut = (inner) => {
-      try { if (inner && inner !== w) noClipboardWrites(inner); } catch (e) {}
+      try {
+        if (!inner || inner === w || apply(above, null, [inner]) === null) return;
+        const doc = inner.document;
+        if (known !== null && apply(has, known, [doc])) return;
+        if (noClipboardWrites(inner) === true && known !== null) apply(add, known, [doc]);
+      } catch (e) {}
     };
     const count = describe(w, "length").get;
     const view = describe(proto, "defaultView").get;
@@ -412,4 +425,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-fUB6roSomw2nFm3l8BJTg9A9LswF+7PzLHyU0ot0T48='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-GQzOHQubK9NTonmQhyHQhV2gUnNdff7hJrWBqiB3vlM='";

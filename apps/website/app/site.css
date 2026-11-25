@@ -214,9 +214,6 @@ body {
 .accent {
   color: var(--cyan);
 }
-.accent-green {
-  color: var(--mint);
-}
 .text-gradient-animated {
   background: linear-gradient(135deg, #22d3ee 0%, #00a884 50%, #22d3ee 100%);
   background-size: 200% auto;
@@ -608,15 +605,6 @@ body {
   gap: 18px;
   max-width: 760px;
   margin-bottom: clamp(40px, 6vw, 72px);
-}
-.section-head--center {
-  text-align: center;
-  margin-inline: auto;
-  justify-items: center;
-}
-.divider-glow {
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(34, 211, 238, 0.35), transparent);
 }
 .bg-grid {
   background-image:

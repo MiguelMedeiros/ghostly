@@ -4,6 +4,7 @@ import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/typ
 import { engine, linkOfPeer } from "@ghostly/browser/platform/engine";
 import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import { badgeState, isGood } from "./contactBadges";
+import { receivedByKey } from "./contactLinks";
 import { useEngineValue } from "../../lib/identities";
 import { keyedStorage } from "../../lib/keyedStorage";
 import { getPrefix } from "../../lib/storage";
@@ -156,16 +157,13 @@ const subscribeVersion = (listener: () => void) => subscribeChoices(() => { vers
 /** For a list of contacts that reads `faceChoice` itself: a number that changes when any contact's choice does. */
 export const useFaceChoices = (): number => useSyncExternalStore(subscribeVersion, () => version.n);
 
-/** Each contact's received identities, by key, for `useEngineValue`: all a list of contacts reads to show their faces. */
-const receivedByKey = (state: typeof engine.state): [peerKey: string, received: ReceivedIdentityView[]][] =>
-  (state?.links ?? []).flatMap((l) => (l.identities?.received ? [[l.peerPubKeyZ32, l.identities.received] as [string, ReceivedIdentityView[]]] : []));
-
 /**
  * For a list of contacts: a function from a contact key to its face, redrawn when a contact's identities or any choice
  * change: not on every engine state, which drew the whole chat list each time.
  */
 export function useContactFaces(): (peerKey: string | undefined) => ContactFace | undefined {
-  const received = useEngineValue(receivedByKey);
+  // Each contact's received identities, by key: the same list while no chat's changed (contactLinks.ts).
+  const received = useEngineValue((state) => receivedByKey(state?.links));
   const v = useFaceChoices();
   // The first chat with a key, as `receivedOf` finds it.
   const byKey = useMemo(() => new Map([...received].reverse()), [received]);

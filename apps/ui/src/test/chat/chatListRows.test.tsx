@@ -6,6 +6,7 @@ import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { formatListTime, previewText } from "../../lib/chatList";
 import { languageTag } from "../../lib/documentLanguage";
+import { isolate } from "../../lib/ownStatus";
 import { LOCALES as translations } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
@@ -165,7 +166,7 @@ describe("the chat list's rows (compact, the default)", () => {
     fakeEngine.on("appList", () => []);
     try {
       renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "zh" });
-      expect(within(rowOf("Ana")).getByTestId("chat-row-preview")).toHaveTextContent(/^🧩 应用：Chess 1\.2\.0$/);
+      expect(within(rowOf("Ana")).getByTestId("chat-row-preview").textContent).toBe(`🧩 应用：${isolate("Chess")} ${isolate("1.2.0")}`);
     } finally { hideApps(); }
   });
 

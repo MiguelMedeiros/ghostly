@@ -358,6 +358,43 @@ describe("chat disconnect --hold", () => {
     expect(node.removeLink).toHaveBeenCalledWith({ linkId: "chat-two" });
   });
 
+  // The same contact kept the chat on its direct link, too: DHT only and a hold were refused while their call rang in.
+  // A call that only rings in is declined, while the live link is there for the decline to cross, and the chat goes to
+  // the DHT; a call this side placed still refuses.
+  it("chat transport dht, disconnect --hold and the raw DHT only calls decline a call that only rings in, then go through", async () => {
+    const { ctx, node, calls } = fake();
+    calls.push({ call: "c0", chat: "chat-one", state: "ringing", direction: "out" });
+    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" })).rejects.toMatchObject({ code: "busy", details: { call: "c0" } });
+    await expect(callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 1 })).rejects.toMatchObject({ code: "busy", details: { call: "c0" } });
+    expect(ctx.calls.hangup).not.toHaveBeenCalled();
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    calls.length = 0;
+
+    const declinedFirst = (ref: string, then: { mock: { invocationCallOrder: number[] } }) => {
+      expect(ctx.calls.hangup).toHaveBeenCalledWith(ref);
+      const declined = vi.mocked(ctx.calls.hangup).mock.invocationCallOrder.at(-1)!;
+      expect(declined).toBeLessThan(then.mock.invocationCallOrder.at(-1)!);
+    };
+    calls.push({ call: "c1", chat: "chat-one", state: "ringing", direction: "in" });
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "dht" });
+    declinedFirst("c1", node.setChatTransport);
+
+    calls.push({ call: "c2", chat: "chat-two", state: "ringing", direction: "in" });
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 1 });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-two", transport: "dht" });
+    declinedFirst("c2", node.setChatTransport);
+
+    calls.push({ call: "c3", chat: "chat-one", state: "ringing", direction: "in" });
+    await callApi(ctx, "engine.call", { method: "setChatTransport", params: { linkId: "chat-one", transport: "dht" }, yes: true });
+    declinedFirst("c3", node.setChatTransport);
+    calls.push({ call: "c4", chat: "chat-one", state: "ringing", direction: "in" });
+    await callApi(ctx, "engine.call", { method: "setDeliveryMode", params: { linkId: "chat-one", mode: "dht" }, yes: true });
+    expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-one", mode: "dht" });
+    declinedFirst("c4", node.setDeliveryMode);
+    expect(calls).toEqual([]);
+  });
+
   // `engine removeLink`, `setChatTransport dht` and `setDeliveryMode dht` are the same switches, refused the same way.
   it("the raw engine calls that remove the chat or put it on DHT only are refused while a call is on in it", async () => {
     const { ctx, node, calls } = fake();

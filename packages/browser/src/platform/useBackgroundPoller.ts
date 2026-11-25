@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type * as Desktop from "../../../../apps/ui/src/hooks/useBackgroundPoller";
-import { sessionIdForPeer } from "../../../../apps/ui/src/lib/storage";
+import { sessionIdsByPeer } from "../../../../apps/ui/src/lib/storage";
 import { engine } from "./engine";
 import { startSessionSync } from "./sync";
 
@@ -10,10 +10,13 @@ const hasState = () => !!engine.state;
 /** The chats mid-sync, but the open one, one id a line: a string, so a state with the same ones draws nothing. */
 function syncingIds(activeSessionId: string | null): string {
   const ids: string[] = [];
+  let sessionOf: ((peerPubKeyZ32: string) => string | undefined) | undefined;
   for (const link of engine.state?.links ?? []) {
     if (!link.poll.polling || link.lastSyncAt > 0) continue;
-    // By the chats' keys alone: on every state at a start, while each link makes its first read.
-    const id = sessionIdForPeer(link.peerPubKeyZ32);
+    // By the chats' keys alone, read once for the state (none while no link reads): on every state at a start, while
+    // each link makes its first read. Read again for each link, they grew with the square of the chats.
+    sessionOf ??= sessionIdsByPeer();
+    const id = sessionOf(link.peerPubKeyZ32);
     if (id && id !== activeSessionId) ids.push(id);
   }
   return ids.join("\n");

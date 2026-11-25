@@ -1,13 +1,13 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { oneChatOnly, oneGroupOnly, readsNoHistory } from "../src/main";
+import { chatOnly, oneChatOnly, oneGroupOnly, readsNoHistory } from "../src/main";
 import { ghostly, home, hyperdhtTestnet, ok, Running } from "./support/cli";
 // covers: headless.one-shot, headless.groups
 
-/** Pkarr relays on loopback that keep one store between them: each counts the requests that came to it. */
+/** Pkarr relays on loopback that keep one store between them: each keeps the key each request that came to it named. */
 async function relays(count: number) {
   const packets = new Map<string, Buffer>();
   return Promise.all(Array.from({ length: count }, async () => {
@@ -16,8 +16,8 @@ async function relays(count: number) {
       const chunks: Buffer[] = [];
       request.on("data", (c: Buffer) => chunks.push(c));
       request.on("end", () => {
-        relay.requests.push(request.method ?? "?");
         const key = new URL(request.url ?? "/", "http://relay").pathname.slice(1);
+        relay.requests.push(key);
         if (request.method === "PUT") {
           const body = Buffer.concat(chunks), known = packets.get(key);
           if (body.length >= 72 && (!known || body.readBigUInt64BE(64) >= known.readBigUInt64BE(64))) packets.set(key, body);
@@ -40,6 +40,10 @@ async function relays(count: number) {
  * It started every saved chat: each put its records and its leave packet on the relays, and with 12 unused invites
  * saved one `send` took the relays' 30 requests a minute (60 on two). Bob's requests come to a relay of his own,
  * which shares its store with Carol's: only his are counted.
+ *
+ * What is counted is the keys the requests name: one chat's are 3 to 5, every saved chat's about 30. The requests
+ * themselves grow with the time a one-shot takes (a chat that waits for its contact reads two keys every 2 s): a
+ * `chat wait` that took 20 s on a busy core made 25, over the 24 it was held to.
  */
 describe("a one-shot about one chat", { timeout: 180_000 }, () => {
   let bobRelay: Awaited<ReturnType<typeof relays>>[number], carolRelay: typeof bobRelay;
@@ -70,11 +74,11 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     bobRelay?.close(); carolRelay?.close();
   }, 30_000);
 
-  /** Bob's relay requests while `args` runs as a one-shot on his profile. */
+  /** The keys Bob's relay requests named while `args` runs as a one-shot on his profile. */
   const counted = async (args: string[]) => {
     bobRelay.requests.length = 0;
     const result = await ghostly(["--home", bob, ...args], { env: bobEnv });
-    return { result, requests: bobRelay.requests.length };
+    return { result, keys: new Set(bobRelay.requests).size };
   };
 
   it("invite join starts the joined chat only, and send and chat wait the chat they name", async () => {
@@ -89,16 +93,64 @@ describe("a one-shot about one chat", { timeout: 180_000 }, () => {
     expect(ok(wait.result)).toMatchObject({ live: true });
     expect(ok(send.result)).toMatchObject({ chat: join.result.json.chat, delivery: expect.stringMatching(/^(sent|delivered)$/) });
     expect(ok(task.result)).toMatchObject({ chat: join.result.json.chat, delivery: "delivered" });
-    // 13 chats started asked the relay its whole 30 a minute; the one chat named asks it 6 to 20 times.
-    for (const [name, requests] of [["invite join", join.requests], ["chat wait", wait.requests], ["send", send.requests], ["task send", task.requests]] as const) {
-      expect(requests, name).toBeLessThan(24);
+    // 13 chats started asked the relay about some 30 keys; the one chat named asks about 3 to 5.
+    for (const [name, keys] of [["invite join", join.keys], ["chat wait", wait.keys], ["send", send.keys], ["task send", task.keys]] as const) {
+      expect(keys, name).toBeLessThan(10);
     }
   });
+
+  it("file wait and file save given a file's id alone start the chat it is of only", async () => {
+    // The chat with Carol the test above joined: a file sent to it, then named by its id alone.
+    const path = join(bob, "note.txt");
+    writeFileSync(path, "a file for carol\n");
+    const sent = ok(await ghostly(["--home", bob, "file", "send", "carol", path], { env: bobEnv })) as { file: { id: string } };
+    const wait = await counted(["file", "wait", sent.file.id, "--timeout", "60"]);
+    const save = await counted(["file", "save", sent.file.id, "--path", join(bob, "saved.txt")]);
+    expect(ok(wait.result)).toMatchObject({ file: sent.file.id, state: "done" });
+    expect(ok(save.result)).toMatchObject({ file: sent.file.id, size: 17 });
+    // Read as about no chat, each started the 13 saved ones: some 30 keys.
+    for (const [name, keys] of [["file wait", wait.keys], ["file save", save.keys]] as const) expect(keys, name).toBeLessThan(10);
+  });
+
+  it("file accept and file save --wait given a waiting offer's id alone take it over the chat they start", async () => {
+    // Over 25 MiB, Carol's file waits for Bob's `file accept`. His daemon hears the offer, then stops.
+    const bytes = Buffer.alloc(30 * 1024 * 1024);
+    for (let i = 0; i < bytes.length; i += 4096) bytes[i] = (i / 4096) % 251;
+    const path = join(carol, "large.bin");
+    writeFileSync(path, bytes);
+    const daemon = new Running(["--home", bob, "daemon"], bobEnv);
+    running.push(daemon);
+    await daemon.waitFor((l) => l.daemon === "ready");
+    ok(await ghostly(["--home", carol, "file", "send", "bob", path, "--wait", "none"], { env: carolEnv }));
+    let offered: string | undefined;
+    for (const until = Date.now() + 60_000; !offered && Date.now() < until; await new Promise((r) => setTimeout(r, 500))) {
+      const { files } = ok(await ghostly(["--home", bob, "file", "list", "carol"], { env: bobEnv })) as { files: { file: { id: string; size: number }; transfer: { waitingFor?: string } | null }[] };
+      offered = files.find((f) => f.file.size === bytes.length && f.transfer?.waitingFor === "me")?.file.id;
+    }
+    expect(offered, "Bob's daemon heard the offer").toBeDefined();
+    ok(await ghostly(["--home", bob, "daemon", "stop"], { env: bobEnv }));
+    await daemon.exited(20_000);
+    // The chat the id names must be started for both: with none, accept answered "No such file transfer" and the save
+    // waited out its timeout.
+    const accept = await counted(["file", "accept", offered!]);
+    expect(ok(accept.result)).toMatchObject({ file: offered, action: "accept" });
+    const saved = join(bob, "large.bin");
+    const save = await counted(["file", "save", offered!, "--wait", "--timeout", "120", "--path", saved]);
+    expect(ok(save.result)).toMatchObject({ file: offered, size: bytes.length });
+    expect(readFileSync(saved).equals(bytes)).toBe(true);
+    expect(accept.keys, "file accept").toBeLessThan(10);
+  }, 240_000);
 
   it("starts every chat for a call that names none and makes none", () => {
     expect(oneChatOnly("invite.join", { invite: "ghostly1…" })).toBe(true);
     expect(oneChatOnly("invite.create", {})).toBe(true);
     expect(oneChatOnly("file.send", { chat: "carol", path: "a.txt" })).toBe(true);
+    // A 1:1 chat's file named by its id alone is about that chat; a group's file goes over the groups' edges.
+    for (const method of ["file.save", "file.wait", "file.action"]) {
+      expect(oneChatOnly(method, { file: "chat1-in-abc" }), method).toBe(true);
+      expect(chatOnly(method, { file: "chat1-out-abc" }), method).toBe(true);
+      expect(chatOnly(method, { file: "group-g1-in-abc" }), method).toBe(false);
+    }
     expect(oneChatOnly("usage.send", { all: true })).toBe(false);
     // A call whose chat may name a group leaves the other 1:1 chats unstarted too; its groups start (`chatOnly` is false).
     expect(oneChatOnly("task.send", { chat: "Sala" })).toBe(true);
@@ -221,7 +273,7 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
     const result = await ghostly(["--home", dave, ...args], { env: daveEnv });
     // `ok` prints stderr: a one-shot that failed says each side's steps with it.
     if (result.code !== 0) result.stderr += `\nlink steps since the one-shot started:\n${steps(since)}`;
-    return { result, requests: daveRelay.requests.length };
+    return { result, keys: new Set(daveRelay.requests).size };
   };
 
   it("group send and group react start the groups only, and an edge takes each", async () => {
@@ -230,9 +282,8 @@ describe("a one-shot about one group", { timeout: 300_000 }, () => {
     expect(sent).toMatchObject({ group, sent: true });
     const react = await counted(["group", "react", group, sent.messageId as string, "👍", "--timeout", "60"]);
     expect(ok(react.result)).toMatchObject({ group, sent: true });
-    // 13 chats started asked the relay its whole 30 a minute and more, the six other groups' edges 31 to 47 times; the
-    // group alone asks it 3 to 17 times.
-    for (const [name, requests] of [["group send", send.requests], ["group react", react.requests]] as const) expect(requests, name).toBeLessThan(24);
+    // 13 chats started asked the relay about 36 keys, the six other groups' edges about 14; the group alone about 2.
+    for (const [name, keys] of [["group send", send.keys], ["group react", react.keys]] as const) expect(keys, name).toBeLessThan(6);
   });
 
   it("leaves the 1:1 chats unstarted only for what goes over the group's edges", () => {

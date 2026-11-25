@@ -89,7 +89,7 @@ export function BlobView({ atom }: { atom: Atom<"blob", null> }) {
     <span data-testid="rich-blob" data-open={open || undefined} className={`rich-blob ${open ? "rich-blob-open" : ""}`}>
       <code dir="ltr" className="rich-blob-text">{atom.text}</code>
       <span className="rich-blob-actions">
-        <button type="button" data-testid="rich-blob-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="rich-action">
+        <button type="button" data-testid="rich-blob-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="rich-action tap-target">
           {open ? t("chat.rich.showLess") : t("chat.rich.showAll")}
         </button>
         <CopyButton text={atom.text} testId="rich-blob-copy" />

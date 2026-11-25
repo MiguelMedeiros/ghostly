@@ -33,6 +33,14 @@ export function shownValue(value: unknown): string {
   return secretValue(value) ?? JSON.stringify(value);
 }
 
+/**
+ * A relay address as a refusal quotes it: without its `user:password@`, `?query` or `#fragment` (a relay's credentials
+ * or token), parsed or not. The rest is said as given, so the person sees which one was refused.
+ */
+export function shownRelay(value: string): string {
+  return value.replace(/[?#][\s\S]*$/, "").replace(/^([a-z][a-z0-9+.-]*:\/*)?[\s\S]*@/i, "$1");
+}
+
 /** What `shownValue` says in place of a long or secret-looking word, else undefined (the word may be printed). */
 export function secretValue(value: string): string | undefined {
   if (/^cashu[AB]/.test(value)) return "(a Cashu token)";

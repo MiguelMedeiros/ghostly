@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 import type { BrowserHost } from "@ghostly/browser/host";
@@ -6,7 +6,7 @@ import type { ProfileOpenFailure } from "@ghostly/browser/shared/idb";
 import { ProfileGate } from "../../components/ProfileUnavailable";
 import { UpdateBanner } from "../../components/UpdateBanner";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
-import { UpdateProvider } from "../../contexts/UpdateContext";
+import { UpdateProvider, useUpdate } from "../../contexts/UpdateContext";
 import type { FoundUpdate } from "../../lib/updates";
 import { loadSettings, saveSettings } from "../../lib/settings";
 import { Settings } from "../../pages/Settings";
@@ -87,6 +87,48 @@ describe("Settings → Updates, from the keyboard", () => {
     browserDropsFocus();
     expect(restart).toHaveFocus();
     installed();
+  });
+
+  it("an update this client only links to (a Linux .deb or .rpm): the focus is on Download", async () => {
+    const { answer } = host();
+    const { user } = renderSettings();
+    screen.getByRole("button", { name: "Check now" }).focus();
+    await user.keyboard("{Enter}");
+    browserDropsFocus();
+    await answer(MANUAL);
+    expect(screen.getByRole("link", { name: /Download/ })).toHaveFocus();
+  });
+
+  it("the focus on a failed check's ⓘ, a check on its own finds a restart update: the next Enter does not install", async () => {
+    const { answer } = host();
+    const updates = (fakeEngine as BrowserHost).updates!;
+    const pending = updates.check;
+    let installs = 0;
+    updates.install = () => { installs++; return Promise.resolve(); };
+    updates.check = () => Promise.reject(new Error("error sending request for url (https://github.com/x)"));
+    let checkOnItsOwn: () => Promise<void> = async () => {};
+    function OnItsOwn() { checkOnItsOwn = useUpdate().check; return null; }
+    const { user } = renderApp(
+      <LockScreenProvider>
+        <UpdateProvider>
+          <OnItsOwn />
+          <Routes><Route path="/settings" element={<Settings />} /></Routes>
+        </UpdateProvider>
+      </LockScreenProvider>,
+      { route: "/settings" },
+    );
+    await user.click(screen.getByRole("button", { name: "Check now" }));
+    const status = await screen.findByText("Could not check for updates");
+    const row = status.parentElement!.parentElement!.parentElement!;
+    const why = within(row).getByTestId("row-info");
+    why.focus();
+    await user.keyboard("{Enter}");
+    updates.check = pending;
+    act(() => { void checkOnItsOwn(); });
+    await answer(RESTART);
+    expect(document.activeElement).not.toBeInstanceOf(HTMLButtonElement);
+    await user.keyboard("{Enter}");
+    expect(installs).toBe(0);
   });
 });
 

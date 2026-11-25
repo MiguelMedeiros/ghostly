@@ -42,7 +42,7 @@ const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", s
  * person stays in the chat, as with a dialog or a sheet (lib/layerHistory.ts). Beside the chat it is part of the page,
  * and Back leaves the chat as usual.
  */
-export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status, callOn }: {
+export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status, callOn, declineRingIn }: {
   linkId: string;
   sessionId: string;
   contact: AppContact;
@@ -53,6 +53,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   status?: string;
   /** A call is on in the chat: its connection control offers no DHT only meanwhile. */
   callOn?: boolean;
+  /** Declines the contact's call that only rings in the chat: DHT only does it first (`ChatConnection`). */
+  declineRingIn?: () => void;
 }) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -230,7 +232,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           {/* The chat's connection control, the same as in its header: on a phone held upright, 44 px to tap as there. */}
-          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} phone={phoneHeader} />
+          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} declineRingIn={declineRingIn} phone={phoneHeader} />
           {/* Named for what it does next ("Full width", "Show the chat"), so it is no toggle: "Show the chat, pressed" was
               read with the chat hidden. */}
           {!withBack && (

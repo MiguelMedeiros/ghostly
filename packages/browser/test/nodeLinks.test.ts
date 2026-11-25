@@ -2912,3 +2912,20 @@ describe("private groups through the engine", () => {
     expect(node.getState().groups.find(g => g.id === groupId)).toMatchObject({ profile: "community", isAdmin: true, entryLink: link });
   });
 });
+
+describe("the page's chats, as the engine keeps them", () => {
+  it("a link the page said it keeps a chat for says so in exportLinks, after a restart too; others and unknown ids change nothing", async () => {
+    const kept = row(), other = row();
+    const { node } = await started(kept, other);
+    await node.noteChats({ linkIds: [kept.id, kept.id, "no-such-chat"] });
+    const exported = () => node.exportLinks().map((l) => [l.peerPubKeyZ32, l.hasChat]);
+    expect(exported()).toEqual(expect.arrayContaining([[kept.peerPubKeyZ32, true], [other.peerPubKeyZ32, undefined]]));
+    expect((await saved(kept.id))?.hasChat).toBe(true);
+    expect((await saved(other.id))?.hasChat).toBeUndefined();
+    await node.shutdown();
+
+    const again = engine();
+    await again.node.start();
+    expect(again.node.exportLinks().find((l) => l.peerPubKeyZ32 === kept.peerPubKeyZ32)?.hasChat).toBe(true);
+  });
+});

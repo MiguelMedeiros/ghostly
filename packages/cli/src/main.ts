@@ -174,7 +174,16 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
   // A usage report to every 1:1 chat (`--all`) needs no group.
   if (method === "usage.send") return params.all === true;
   if (chatOrGroup(method, params)) return false;
-  return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+  return method.startsWith("chat.") || chatFileOnly(method, params) || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+}
+
+/**
+ * A 1:1 chat's file named by its id alone (`file save <file>`, `file wait`, `file accept`…): the id starts with its chat's
+ * (`<chat>-in-`, `<chat>-out-`), so the call is about that chat, as with `<chat>` given, and `startNamedChats` starts it.
+ * Read as about none, a one-shot started every saved chat and group: with 20 chats, 20 relay requests and 0.6-2 s more.
+ */
+function chatFileOnly(method: string, params: Record<string, unknown>): boolean {
+  return method.startsWith("file.") && params.chat === undefined && typeof params.file === "string" && !params.file.startsWith("group-");
 }
 
 /** A command whose `chat` may name a group as well: a one-shot for it starts the groups' sessions. */
@@ -210,7 +219,7 @@ export function newChatOnly(method: string): boolean {
  * whose chat may name a group (`chatOrGroup`: a bot's `task send`): the groups start for it, the other 1:1 chats do not.
  */
 export function oneChatOnly(method: string, params: Record<string, unknown>): boolean {
-  return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
+  return newChatOnly(method) || chatFileOnly(method, params) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
 /**

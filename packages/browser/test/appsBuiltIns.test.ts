@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { canonicalJsonBytes } from "@ghostly/core";
 import type { BuiltInApp } from "../src/engine/appDefaults";
 import { AppFetchError } from "../src/engine/appFetch";
@@ -89,6 +89,21 @@ describe("offered, not installed", () => {
     await store.install({ digest: preview.digest, grant: ["chat"] });
     expect(await store.builtIns()).toEqual([]);
     expect((await store.list()).map((a) => a.ref)).toEqual([REF]);
+  });
+
+  it("which apps are installed is read from their references, not from every record whole", async () => {
+    const v1 = await bundle({ name: "notes" });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net, { readBuiltIn, builtIns: [chess()] });
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    // Asked with the installed list at each of its reads (every Apps page visit, every update check): a record holds its
+    // whole manifest, a waiting update's and its revocations, and the list itself has just read them all.
+    const getAll = vi.spyOn(IDBObjectStore.prototype, "getAll");
+    try {
+      expect((await store.builtIns()).map((a) => a.ref)).toEqual([REF]);
+      expect(getAll.mock.contexts.filter((s) => (s as IDBObjectStore).name === STORES.apps)).toHaveLength(0);
+    } finally { getAll.mockRestore(); }
   });
 });
 

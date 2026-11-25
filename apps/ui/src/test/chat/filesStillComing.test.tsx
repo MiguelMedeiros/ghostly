@@ -33,10 +33,13 @@ const offer = (patch: Partial<ChatFile> = {}): ChatFile => ({ id: OFFER, name: "
 const taken = (size: number, transferred: number, patch: Partial<FileTransferState> = {}): FileTransferState =>
   ({ state: "transferring", direction: "in", size, transferred, ...patch });
 
-/** Chat 1 offers a 30 MB file; chat 2 (Bob) has two taken files still coming; other transfers hold no room. */
+/**
+ * Chat 1 offers a 30 MB file; chat 2 (Bob) has two taken files still coming; other transfers hold no room. Bob's chat is
+ * stored under its own id, not its link's, and found by his key, as in the app.
+ */
 function world(offerPatch: Partial<FileTransferState> = {}) {
   saveSession({
-    id: "chat2", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: "Ym9i", encKeyB64: "a2V5", createdAt: 1, nick: "Bob",
+    id: "5e4c22ff", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: "bob", encKeyB64: "a2V5", createdAt: 1, nick: "Bob",
     messages: [
       { id: "m1", text: "", sender: "peer", timestamp: 1, file: { id: "chat2-in-big", name: "backup.iso", size: 25 * MB, mime: "application/octet-stream" } },
       { id: "m2", text: "", sender: "peer", timestamp: 2, file: { id: "chat2-in-paused", name: "song.flac", size: 10 * MB, mime: "audio/flac" } },

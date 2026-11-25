@@ -78,7 +78,7 @@ import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
 import { CueChat } from "../lib/cues";
-import { NowPlayingChat, pauseForCall, stopPlayingFrom } from "../lib/nowPlaying";
+import { NowPlayingChat, pauseForCall, stopPlayingFrom, stopPlayingMessages } from "../lib/nowPlaying";
 import { usePlatformValue } from "../hooks/useServicesPlatform";
 import {
   isSessionPinned,
@@ -195,7 +195,10 @@ function editableText(message: ChatMessage): boolean {
  * text, a card, a file or a voice message), not a payment, a request, a notice or a call line, nor one still waiting.
  */
 function removableForEveryone(message: ChatMessage): boolean {
-  return message.sender === "me" && !!message.ref && message.delivery !== "waiting" && !message.paymentId && !message.systemEvent && !message.callEvent;
+  // By the id the contact knows it by (`replyTarget`), as Reply, React and Pin read it: a file or a voice message sent
+  // from this page has a row the page made itself, with no `ref`, and its id is in its file's. One that never left this
+  // device (no room for its copy) is the bubble's to leave out: it reads the transfer (`fileNeverSent`).
+  return message.sender === "me" && !!replyTarget(message) && message.delivery !== "waiting" && !message.paymentId && !message.systemEvent && !message.callEvent;
 }
 
 /**
@@ -483,6 +486,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
    * pressed: a row is drawn again only when what it shows changes (`MessageRow`), so it holds them from an earlier draw.
    */
   const forgetMessage = useHandler(async (messageId: string, waiting = false): Promise<void> => {
+    // What plays from it stops with it, before its bubble leaves the screen and would hand it to the bar.
+    stopPlayingMessages([messageId]);
     if (waiting) {
       if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
       deleteMessage(messageId);
@@ -550,6 +555,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
     if (result.error) throw new Error(result.error);
     engine.tellChangesNow();
+    stopPlayingMessages([messageId]);
     deleteMessage(messageId);
     forgetSentOriginal(sessionId, messageId);
   });
@@ -1089,7 +1095,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined}
-            scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle"} />
+            scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle" && !ringsIn}
+            declineRingIn={ringsIn ? rejectCall : undefined} />
           <CallButtons phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
@@ -1484,7 +1491,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         never moves. */}
     {appHere && params && (
       <ChatAppPanel linkId={appHere} sessionId={sessionId} contact={{ name: shownName, named: !isAnonymous }}
-        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle"} />
+        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle" && !ringsIn}
+        declineRingIn={ringsIn ? rejectCall : undefined} />
     )}
     {/* Why an app did not open here, over the app that covers the chat: over the whole window, above its panel. */}
     <Toast toast={appWhy} onDismiss={dismissAppWhy} testId="chat-app-why" />

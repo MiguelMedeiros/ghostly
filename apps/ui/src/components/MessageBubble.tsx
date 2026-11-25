@@ -1053,7 +1053,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
   /** Delete for everyone, confirmed: a refused one stays, with why under it, as a refused Send again. */
-  const deleteForEveryone = onDeleteForEveryone && (() => {
+  // Not a file whose copy into this device failed: it never left, the engine has no row of it and would refuse.
+  const deleteForEveryone = fileUnsent ? undefined : onDeleteForEveryone && (() => {
     setRefused(null);
     void Promise.resolve(onDeleteForEveryone()).catch(refuse(shown));
   });
