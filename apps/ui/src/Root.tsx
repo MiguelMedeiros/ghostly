@@ -331,9 +331,10 @@ function GroupLinkIntake() {
       const before = id === null ? -1 : list.findIndex((entry) => entry.id === id);
       if (before >= 0 && list[before].link !== link) list.splice(before, 1);
       if (!list.some((entry) => entry.link === link)) {
-        // Only a link that takes a place clears a refusal: one to a group here, past a refused one, leaves it said.
+        // Only a link that takes a place clears a refusal: one to a group here, or one that took a held link's place,
+        // past a refused one, leaves it said.
         const room = list.filter((entry) => !here(entry.id)).length < LINK_GROUPS_WAITING;
-        if (room || here(id)) { if (room) setProblem(null); list.push({ link, id, after: otherLinks.current }); }
+        if (room || here(id)) { if (room && before < 0) setProblem(null); list.push({ link, id, after: otherLinks.current }); }
         else setProblem({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
       }
       setHeldCount(list.length);
