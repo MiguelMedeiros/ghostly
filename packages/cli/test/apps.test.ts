@@ -263,6 +263,9 @@ describe("app publish", () => {
       ["deploy/server.key", generateKeyPairSync("ec", { namedCurve: "P-256", publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "sec1", format: "pem", cipher: "aes-256-cbc", passphrase: "hunter2" } }).privateKey],
       // An OpenPGP secret key (`gpg --export-secret-keys --armor`): a "PRIVATE KEY BLOCK", here with a version header.
       ["signing/secret.asc", `-----BEGIN PGP PRIVATE KEY BLOCK-----\nVersion: GnuPG v2.4.5\n\n${"lQOYBGVt3n8BCADKz1x9".repeat(4)}\n=Xk2Q\n-----END PGP PRIVATE KEY BLOCK-----\n`],
+      // A key in a JSON or JS string, its line breaks written `\n`: a cloud service account's file, a key pasted into code.
+      ["firebase-adminsdk.json", JSON.stringify({ type: "service_account", private_key: generateKeyPairSync("rsa", { modulusLength: 2048, publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "pkcs8", format: "pem" } }).privateKey }, null, 2)],
+      ["config.js", `export const key = ${JSON.stringify(readFileSync(key, "utf8").replace(/\n/g, "\r\n"))};\n`],
     ] as const) {
       const leaky = appFolder(manifest, files);
       mkdirSync(dirname(join(leaky, path)), { recursive: true });
