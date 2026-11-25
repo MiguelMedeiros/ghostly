@@ -879,7 +879,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       stopPlayingFrom(chatPath(params.sessionId), true);
       // The chat list keeps its own copy: without this it shows the deleted chat until its next refresh.
       window.dispatchEvent(new Event("session-updated"));
-      nav.home();
+      // From a ringing card over another chat (or Settings), the person stays where they are.
+      if (visible) nav.home();
     } else {
       setConfirmDelete(true);
     }
@@ -1396,6 +1397,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           onReject={webrtc.rejectCall}
           // On a call in another chat: End and answer ends it first (useWebRTC), or Decline. Never two calls at once.
           onCall={webrtc.otherCallOn}
+          onDelete={() => setConfirmDelete(true)}
         />,
         callLayer ?? document.body,
       )}
