@@ -2,6 +2,7 @@ import { createPublicKey, verify as nodeVerify } from "node:crypto";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { setVerifyFastPath, toZ32, utf8Encode, verify } from "../src";
+// covers: core.crypto
 
 /*
  * A host's faster Ed25519 check (the CLI's node:crypto) for every signature the engine checks never changes what

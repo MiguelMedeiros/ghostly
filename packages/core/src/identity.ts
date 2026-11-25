@@ -136,7 +136,10 @@ const KEYS_FIT_MAX = 1024;
 /** Whether each key seen lately is a canonical encoding of a point not of small order: the same signers come back. */
 const keysFit = new Map<string, boolean>();
 
-/** Whether a fast path may be asked about this signature and key (`VerifyFastPath`). */
+/**
+ * Whether a fast path may be asked about this signature and key (`VerifyFastPath`). App signatures keep their own twin
+ * in `appStatements.ts`: the website copies that file alone (`apps/website/lib/store-core`).
+ */
 export function ed25519FastPathTakes(signature: Uint8Array, publicKey: Uint8Array): boolean {
   if (signature.length !== 64 || publicKey.length !== 32) return false;
   let below = false;
