@@ -506,7 +506,10 @@ body {
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
-  outline: none;
+}
+/* The site's ring, drawn inside the item: the menu's padding and the 2px between items hold it. */
+.nav-open-menu a:focus-visible {
+  outline-offset: -2px;
 }
 .nav-open-menu a small {
   font-size: 12.5px;
