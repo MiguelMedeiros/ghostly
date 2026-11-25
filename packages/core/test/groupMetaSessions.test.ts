@@ -764,6 +764,35 @@ describe("group name, group-community/1", () => {
     expect(net.names.map(n => n.name)).not.toContain("Ghostly Support");
   });
 
+  for (const order of ["role first", "in order"] as const) it(`a creator given back the role of a group whose name was never signed does not undo the rename made meanwhile (${order})`, async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    // Handed on before names were signed at creation: nobody holds a statement.
+    for (const m of [alice, bob, carol]) { delete m.session.state.meta; delete m.session.state.metaPast; }
+    // Alice is away while Bob renames it and hands the role back to her.
+    net.away.set("alice", []);
+    later();
+    await bob.session.rename("Reading club");
+    await bob.session.transferAdmin(alice.session.myKey);
+    await net.settle();
+    const held = net.away.get("alice")!;
+    net.away.delete("alice");
+    const meta = held.filter(h => h.frame.t === "group-meta"), rest = held.filter(h => h.frame.t !== "group-meta");
+    for (const h of order === "role first" ? [...rest, ...meta] : held) await alice.session.handle(h.from, clone(h.frame));
+    await net.settle();
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    expect(alice.session.isAdmin).toBe(true);
+    // She signs no name of her own over Bob's: the members that took his rename keep it.
+    expect(groupMetaBody(alice.session.state.meta).name).not.toBe("Ghosts");
+    expect([bob.session.name, carol.session.name]).toEqual(["Reading club", "Reading club"]);
+    if (order === "in order") expect(alice.session.name).toBe("Reading club");
+    expect(net.names.filter(n => n.name === "Ghosts")).toEqual([]);
+  });
+
   it("a member away at the rename gets it from another member when back; what an app from before names kept shows it once updated", async () => {
     const net = new Net();
     const alice = net.create("alice");
