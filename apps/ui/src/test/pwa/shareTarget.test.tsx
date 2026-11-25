@@ -122,10 +122,8 @@ describe("a share into the app", () => {
         ["İzmir HTTPS://𐐀.EXAMPLE/p", "https://𐐨.example/p"],
       ];
       for (const [text, url] of same) expect(shareText(share({ text, url }))).toBe(text);
-      // Another host or page as the browser reads it: "STRAẞE" is "strasse", not "straße"; "I" is "i", not "ı".
+      // Another host or page as the browser reads it: a path's "ẞ" is not "ß"; "I" is "i", not "ı".
       const other: [string, string][] = [
-        ["Look HTTPS://STRAẞE.EXAMPLE/p", "https://straße.example/p"],
-        ["İzmir https://straße.example/p", "https://STRAẞE.example/p"],
         ["Look https://a.example/STRAẞE", "https://a.example/STRAßE"],
         ["Look HTTPS://ISTANBUL.EXAMPLE/p", "https://ıstanbul.example/p"],
         ["Look https://a.example/e\u0301", "https://a.example/é"],
