@@ -64,7 +64,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const [removing, setRemoving] = useState<GroupMemberView | null>(null);
   /** The member whose Hand over admin was pressed: the one admin role leaves me for them, so it is asked first too. */
   const [promoting, setPromoting] = useState<GroupMemberView | null>(null);
-  /** What the dialog's live line says: whom the admin role went to, whom I removed, the group's new name. */
+  /** What the dialog's live line says: whom the admin role went to, whom I removed, the group's new name or picture. */
   const [said, setSaid] = useState("");
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
@@ -115,9 +115,19 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const removePicture = () => {
     if (busy !== null) return;
     const from = document.activeElement;
+    setSaid("");
     void run("picture", async () => {
       await engine.call("setGroupPicture", { groupId: live.id, picture: null });
       if (document.activeElement === from || focusLost()) pictureInput.current?.focus();
+      setSaid(t("group.event.pictureRemovedYou"));
+    });
+  };
+  // The file field keeps the focus, only its label changing: the new picture is said once it is set.
+  const pickPicture = (file: File) => {
+    setSaid("");
+    void run("picture", async () => {
+      await engine.call("setGroupPicture", { groupId: live.id, picture: await avatarFromFile(file, MAX_GROUP_PICTURE_LENGTH) });
+      setSaid(t("group.event.pictureChangedYou"));
     });
   };
   // A contact just invited: their row, which says so in place of the Invite that had the focus.
@@ -199,7 +209,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
             <label data-testid="group-picture-pick" className={`inline-flex cursor-pointer items-center rounded text-xs font-medium text-accent hover:underline has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent max-md:min-h-11 ${busy !== null ? "pointer-events-none opacity-40" : ""}`}>
               {live.picture ? t("group.members.changePicture") : t("group.members.addPicture")}
               <input ref={pictureInput} data-testid="group-picture-input" type="file" accept="image/*" className="sr-only" disabled={busy !== null && busy !== "picture"}
-                onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file && busy === null) void run("picture", async () => engine.call("setGroupPicture", { groupId: live.id, picture: await avatarFromFile(file, MAX_GROUP_PICTURE_LENGTH) })); }} />
+                onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file && busy === null) pickPicture(file); }} />
             </label>
             {live.picture && <button type="button" data-testid="group-picture-remove" aria-disabled={busy !== null || undefined} onClick={removePicture}
               className="text-xs text-text-muted hover:text-danger aria-disabled:opacity-40 max-md:min-h-11">{t("group.members.removePicture")}</button>}
@@ -254,8 +264,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
         setPromoting(null); setSaid("");
         void run(key, async () => { await engine.call("makeGroupAdmin", { groupId: live.id, key }); setSaid(t("group.event.admin", { name: isolate(name) })); });
       }} />}
-    {/* The role handed over, a member removed or the group renamed, said once: the focus goes to the list (or Rename) and
-        what changed goes with the row's buttons, the row or the field, silently. */}
+    {/* The role handed over, a member removed, the group renamed or its picture changed, said once: the focus goes to the
+        list (or Rename, or the picture's field) and what changed goes with the row's buttons, the row or a label, silently. */}
     <p role="status" data-testid="group-members-live" className="sr-only">{said}</p>
     {secret && <SecretGuardDialog finding={secret} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void rename(true); }} />}
     {/* A community whose link is off says so here too: "anyone with the link can join" no longer holds, and a member has no link panel. */}
