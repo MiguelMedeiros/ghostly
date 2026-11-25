@@ -659,7 +659,7 @@ describe("updates", () => {
     expect(await bundleIds()).toEqual([`app-${v4.digest}`]);
   });
 
-  it("an update the person accepts while a check reads its publisher's revocation of it keeps its files", async () => {
+  it("an update the person accepts while a check reads its publisher's revocation of it is refused, and the version installed keeps its files", async () => {
     const v1 = await bundle({ sources: [BUNDLE_URL] });
     net.put(BUNDLE_URL, v1.bytes);
     const store = apps(net);
@@ -681,12 +681,16 @@ describe("updates", () => {
     });
     const check = store.checkUpdates();
     await started;
-    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, digest: v2.digest });
+    // Accept reads that file too (beside where the update waits): it is refused once the read answers.
+    const accepting = store.acceptUpdate({ ref: v1.ref });
     release();
+    await expect(accepting).rejects.toThrow(/^revoked/);
     await check;
     net.fetch.mockImplementation(answer);
-    expect((await store.list())[0], "the version accepted is the one installed").toMatchObject({ sequence: 2, digest: v2.digest });
-    expect(await bundleIds(), "it keeps the files it runs from").toEqual([`app-${v2.digest}`]);
+    expect((await store.list())[0], "the version installed stays").toMatchObject({ sequence: 1, digest: v1.digest, run: { status: "ok" } });
+    await store.checkUpdates();
+    expect((await store.list())[0]!.pending).toBeUndefined();
+    expect(await bundleIds(), "it keeps the files it runs from").toEqual([`app-${v1.digest}`]);
   });
 
   it("a lower sequence is never installed over a higher one", async () => {
@@ -766,8 +770,10 @@ describe("updates", () => {
     });
     const check = store.checkUpdates();
     await started;
-    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, digest: v2.digest });
+    // Accept reads the same file (beside where the update waits): it goes on once that read answers.
+    const accepting = store.acceptUpdate({ ref: v1.ref });
     release();
+    expect(await accepting).toMatchObject({ sequence: 2, digest: v2.digest });
     await check;
     const after = (await store.list())[0]!;
     expect(after, "the check does not put back the version it read").toMatchObject({ sequence: 2, digest: v2.digest, permissions: ["chat", "name"], run: { status: "ok" } });
@@ -793,14 +799,21 @@ describe("updates", () => {
     let reading!: () => void;
     const started = new Promise<void>((resolve) => { reading = resolve; });
     const answer = net.fetch.getMockImplementation()!;
+    // The check's read of v3 waits until Accept is done, so the check finds it only after the person's yes.
+    let found!: () => void;
+    const v3Held = new Promise<void>((resolve) => { found = resolve; });
     net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).endsWith("/ghostly-revoke.json")) { reading(); await held; }
+      if (String(input) === v3Url) await v3Held;
       return answer(input, init);
     });
     const check = store.checkUpdates();
     await started;
-    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, digest: v2.digest });
+    // Accept reads the same file (beside where the update waits): it goes on once that read answers.
+    const accepting = store.acceptUpdate({ ref: v1.ref });
     release();
+    expect(await accepting).toMatchObject({ sequence: 2, digest: v2.digest });
+    found();
     await check;
     net.fetch.mockImplementation(answer);
     const after = (await store.list())[0]!;
