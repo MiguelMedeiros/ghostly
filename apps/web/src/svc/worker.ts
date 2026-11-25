@@ -119,7 +119,7 @@ export function said(status: number, text: string, lang?: string, dir?: string):
   const html = `<!doctype html><html${language}${direction}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(text)}</title>`
     + `<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font:15px/1.5 system-ui,sans-serif;text-align:center}p{max-width:32em;margin:0}</style>`
     + `</head><body><p>${escape(text)}</p></body></html>`;
-  return new Response(html, { status, headers: isolated({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `${frameAncestors()}; default-src 'none'; style-src 'unsafe-inline'` }) });
+  return new Response(html, { status, headers: isolated({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `${frameAncestors()}; default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'` }) });
 }
 
 /**
@@ -181,7 +181,7 @@ async function goOn(request: Request): Promise<Response> {
   goHash ??= crypto.subtle.digest("SHA-256", new TextEncoder().encode(GO_SCRIPT))
     .then((digest) => `'sha256-${btoa(String.fromCharCode(...new Uint8Array(digest)))}'`);
   const html = `<!doctype html><meta charset="utf-8"><script data-go="${token}">${GO_SCRIPT}</script>`;
-  return new Response(html, { status: 200, headers: isolated({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "same-origin", "content-security-policy": `${frameAncestors()}; default-src 'none'; script-src ${await goHash}` }) });
+  return new Response(html, { status: 200, headers: isolated({ "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "same-origin", "content-security-policy": `${frameAncestors()}; default-src 'none'; script-src ${await goHash}; form-action 'none'; base-uri 'none'` }) });
 }
 
 /** The navigation a "go on" page asked for again (its token in the referrer, the same address): taken, once. */
