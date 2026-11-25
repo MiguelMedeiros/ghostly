@@ -162,12 +162,13 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     // The one invited reads the group from then on: a contact's own name or a prefix of its id never names it.
     const link = ownChatOf(ctx, params);
     // A chat whose invite nobody took has no contact to come online: the engine's "Invite them when they are online"
-    // sent the admin to wait for nobody. A community's own refusal (share its link) and a member's (only the admin) stay.
-    if (group.profile !== "community" && group.isAdmin && nobodyJoined(link)) {
+    // sent the admin to wait for nobody. Only that sentence is said again, after the engine's own refusals (a community,
+    // a member, managing off, a member already, the cap), which keep their codes.
+    await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id }).catch((error: unknown) => {
+      if (!nobodyJoined(link) || !(error instanceof Error) || error.message !== "This contact is not connected right now. Invite them when they are online.") throw error;
       const ref = shellWord(str(params, "chat", true), link.id);
       throw new CliError("unavailable", `Nobody joined chat ${ref} yet: invite them once they take its invite and are online (ghostly chat wait ${ref})`);
-    }
-    await node(ctx).inviteToGroup({ groupId: group.id, linkId: link.id });
+    });
     return view(ctx, group.id, params);
   },
   async "group.remove"(ctx, params) {

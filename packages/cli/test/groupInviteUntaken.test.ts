@@ -16,4 +16,15 @@ describe("group invite of a chat nobody joined yet", () => {
     expect(refused.message).toBe("Nobody joined chat bob yet: invite them once they take its invite and are online (ghostly chat wait bob)");
     expect(ok(await ghostly(["--home", dir, "group", "show", "Crew"])).members).toHaveLength(1);
   });
+
+  // The engine's refusals that come before the chat being up keep their codes: a permanent one read as `unavailable`
+  // is retried by a bot, and waiting for the contact could not help it.
+  it("keeps the engine's earlier refusals, as managing the group off on this device", { timeout: 60_000 }, async () => {
+    const dir = home("group-invite-untaken-off");
+    ok(await ghostly(["--home", dir, "invite", "create", "--label", "bob"]));
+    const groupId = ok(await ghostly(["--home", dir, "group", "create", "Crew", "--mesh"])).group as string;
+    ok(await ghostly(["--home", dir, "engine", "setGroupManage", JSON.stringify({ groupId, on: false })]));
+    const refused = error(await ghostly(["--home", dir, "group", "invite", "Crew", "bob"]), "engine", 1);
+    expect(refused.message).toBe("Managing this group is off on this device. Turn on Manage groups from this device first.");
+  });
 });
