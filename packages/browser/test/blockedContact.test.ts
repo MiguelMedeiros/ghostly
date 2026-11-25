@@ -84,7 +84,7 @@ async function started(...rows: StoredLink[]) {
   return { node, events, linkOf };
 }
 const viewOf = (node: GhostlyNode, id: string) => node.getState().links.find((l) => l.id === id)!;
-const offer = JSON.stringify({ t: "o", id: "call-1", sdp: "v=0", video: false });
+const offer = JSON.stringify({ t: "o", ts: Date.now(), u: "ufrag", p: "a".repeat(22), f: "0".repeat(64), s: "actpass" });
 
 beforeEach(async () => {
   links.length = 0;
@@ -124,6 +124,29 @@ describe("a blocked contact", () => {
     linkOf(other.id).options.events.onCallSignal(offer);
     expect(await db.getMessages(other.id)).toHaveLength(1);
     expect(events.onCallSignal).toHaveBeenCalledWith(other.id, offer);
+  });
+
+  it("rings no more for an offer heard before; its edits, payments, files, typing and status are dropped too", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const peer = linkOf(chat.id).options.events;
+    peer.onCallSignal(offer);
+    expect(node["offersWaiting"].has(chat.id)).toBe(true);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    expect(node["offersWaiting"].has(chat.id)).toBe(false);
+    // Confirmed (not asked for again in a minute) though its message is not here.
+    expect(await node["receiveEdit"](chat.id, { id: "missing", text: "changed", ts: Date.now() } as never)).toBe(true);
+    const pay = vi.spyOn(node["desk"], "onPayment"), request = vi.spyOn(node["desk"], "onPaymentRequest"), ask = vi.spyOn(node["desk"], "onPaymentAsk");
+    await peer.onPayment({ id: "p1" } as never);
+    await peer.onPaymentRequest({ id: "p2" } as never);
+    await peer.onPaymentAsk({ id: "p3" } as never);
+    expect([pay, request, ask].map((spy) => spy.mock.calls.length)).toEqual([0, 0, 0]);
+    // A file offer is declined as a deleted one is (`FileDesk.weigh`), and one under way is not kept.
+    expect(node["fileDesk"]["deps"].deleted(chat.id, "peer_f1")).toBe(true);
+    Object.assign(linkOf(chat.id), { peerTyping: true, peerTypingActivity: null, peerStatus: { status: { text: "busy" } } });
+    peer.onPeerTyping(true);
+    expect(viewOf(node, chat.id)).not.toHaveProperty("peerTyping");
+    expect(viewOf(node, chat.id)).not.toHaveProperty("peerStatus");
   });
 
   it("is told not to wake this app; unblocked, it is heard again", async () => {
