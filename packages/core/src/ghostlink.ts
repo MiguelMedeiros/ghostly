@@ -2752,7 +2752,8 @@ export class GhostLink {
           const offeredAt = standing?.at ?? Date.now();
           this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }), ...(woke && { woke }), ...(knockMissed && { knockMissed }) } : undefined;
           this.offerMade = { epoch, at: offeredAt };
-          this.offerShares = resume && !!this.options.resumeUnannounced;
+          // The restart's own resume only: one a wake starts later in the run (`resumeAfterAbsence`) looks at its own pace.
+          this.offerShares = resume && !woke && !!this.options.resumeUnannounced;
           const gate = this.dialGate;
           this.dialGate = undefined;
           // The contact's offer, read while this one still gathers, is answered in its place: the dial is over then, not
