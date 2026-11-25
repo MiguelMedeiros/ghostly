@@ -481,9 +481,9 @@ export interface CommunityState {
   seen: Record<string, Record<string, { high: number; window: number[]; gap?: [number, number, number]; floor?: number }>>;
   nicks: Record<string, string>;
   /**
-   * Member → the time (the member's clock) of the newest frame a name in `nicks` came from, or my clock less
-   * `COMMUNITY_LIMITS.lastingAheadMs` when an edge last said it (`setNick`): a name from an older frame is not taken.
-   * None for a frame past `COMMUNITY_LIMITS.lastingAheadMs` ahead of mine. Absent in older states.
+   * Member → the time of the frame its name in `nicks` came from, or of the moment an edge last said it (`setNick`): a
+   * name from an older frame is not taken. None for a frame past `COMMUNITY_LIMITS.lastingAheadMs` ahead of my clock.
+   * Absent in older states.
    */
   nickAt?: Record<string, number>;
   /** Recent frames from everyone (mine included), oldest first. */
@@ -2949,13 +2949,8 @@ export class CommunitySession {
   setNick(key: string, nick: string | undefined): Promise<void> {
     return this.serialize(async () => {
       const clean = sanitizeNick(nick);
-      // Said now on an edge: a message written before it no longer names the member. My clock is not the member's, so
-      // the time held is mine less `COMMUNITY_LIMITS.lastingAheadMs` (never lowering it): a rename the member writes
-      // after this, from a clock up to that far behind mine, is still taken.
-      if (clean) {
-        const floor = (this.hooks.clock?.() ?? Date.now()) - COMMUNITY_LIMITS.lastingAheadMs;
-        if (floor > (this.state.nickAt?.[key] ?? 0)) (this.state.nickAt ??= {})[key] = floor;
-      }
+      // Said now on an edge: a message written before it no longer names the member.
+      if (clean) (this.state.nickAt ??= {})[key] = this.hooks.clock?.() ?? Date.now();
       if ((this.state.nicks[key] ?? undefined) === clean) return;
       if (clean) this.state.nicks[key] = clean; else delete this.state.nicks[key];
       await this.persist();
