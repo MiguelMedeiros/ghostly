@@ -856,9 +856,12 @@ export class CommunitySession {
     const draft: Omit<CommunityCommit, "sig" | "c"> = { v: 2, g, e: 0, p: "", k: "create", m: rosterHash(roster), by: me.pubKeyZ32, x: entry.pubKeyZ32, n, ts: now };
     const commit = signCommunity({ ...draft, c: confirmationTag(epochKeys(secret, g, 0).confirm, communityUntaggedHash(draft)) }, me.seed);
     const h = communityCommitHash(commit);
-    return { id: g, name: sanitizeNick(name) ?? "Group", profile: COMMUNITY_PROFILE, seedB64: me.seedB64, createdAt: now, chain: [commit], side: [],
+    const first = sanitizeNick(name) ?? "Group", signed = groupName(first);
+    // The name signed from the start: a joiner shows the one the member who let it in said only until this reaches it.
+    const meta = signed ? signGroupMeta({ g, e: 0, h, r: 1, ts: now }, encodeGroupMetaBody({ name: signed }), me.seed, me.pubKeyZ32) : undefined;
+    return { id: g, name: first, profile: COMMUNITY_PROFILE, seedB64: me.seedB64, createdAt: now, chain: [commit], side: [],
       secrets: { [h]: toBase64Url(secret) }, entry: { key: entry.pubKeyZ32, seedB64: entry.seedB64 }, rv: toBase64Url(randomBytes(32)),
-      status: "active", seq: 0, seqH: h, seen: {}, nicks: {}, store: [], pendingLeaves: [] };
+      status: "active", seq: 0, seqH: h, seen: {}, nicks: {}, store: [], pendingLeaves: [], ...(meta && { meta }) };
   }
 
   /**
@@ -1726,6 +1729,7 @@ export class CommunitySession {
       }
     }
     this.hooks.changed();
+    await this.signName(now);
     await this.renewLasting();
     return { commit, hash, secret };
   }
@@ -1827,6 +1831,8 @@ export class CommunitySession {
       if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
       // A member whose signed leave I hold has gone: the role would stay with nobody (a leave never names the admin).
       if (this.state.pendingLeaves.some(r => r.s === memberKey && leaveStands({ g: this.id, ...r }, this.ancestry(this.topHash)))) throw new Error("This member has left the group. Make someone else the admin.");
+      // The name signed while I still may: after the commit it is the new admin's, who only knows its welcome's.
+      await this.signName(now);
       await this.commit("role", { s: memberKey }, now);
     });
   }
@@ -3189,6 +3195,24 @@ export class CommunitySession {
     // when it was set: a member holding nothing tells it from a new admin's change by that (`metaAuthor`).
     const meta = this.state.meta;
     if (this.isAdmin && meta && (meta.by !== this.myKey || !this.mainIndex.has(meta.h))) await this.publishMeta(meta.body, meta.ts, true);
+    await this.signName(this.hooks.clock?.() ?? Date.now());
+  }
+
+  /**
+   * A group made before its name was signed at creation (`create`): the admin who made it signs the name it gave it, at
+   * its next commit (before one handing the role on, `transferAdmin`) or the next one it takes, so a joiner does not keep
+   * for good the one the member who let it in said. Only that admin: any other member's name came in a welcome, and the
+   * admin's word for it would make what that welcome said everyone's. Inside `serialize`.
+   */
+  private async signName(now: number): Promise<void> {
+    const name = groupName(this.state.name);
+    if (!this.isAdmin || !name || groupMetaBody(this.state.meta).name !== undefined || !this.madeIt) return;
+    await this.publishMeta(encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), name }), now, true);
+  }
+
+  /** Whether this device made the group and never got in again (a welcome for me would have named it). */
+  private get madeIt(): boolean {
+    return this.state.chain[0].by === this.myKey && !this.state.chain.some(c => c.k === "add" && c.s === this.myKey);
   }
 
   private async fork(reason: string): Promise<void> {

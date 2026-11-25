@@ -555,12 +555,12 @@ class Net {
     member.session = new CommunitySession(state, this.hooks(name));
     return member;
   }
-  /** `by` admits a newcomer; the newcomer is not reachable until it meets someone. */
-  async admit(by: Member, name: string): Promise<Member> {
+  /** `by` admits a newcomer (`welcome`: fields its welcome says otherwise); the newcomer is not reachable until it meets someone. */
+  async admit(by: Member, name: string, welcome: Record<string, unknown> = {}): Promise<Member> {
     const seedB64 = createIdentity().seedB64;
     const frames = await by.session.admit(identityFromSeedB64(seedB64).pubKeyZ32);
     await this.settle();
-    const joined = CommunitySession.join({ g: by.session.id, host: by.session.entryKey }, clone(frames.slice(0, -1)), clone(frames[frames.length - 1]), seedB64);
+    const joined = CommunitySession.join({ g: by.session.id, host: by.session.entryKey }, clone(frames.slice(0, -1)), { ...clone(frames[frames.length - 1]), ...welcome }, seedB64);
     if ("error" in joined) throw new Error(joined.error);
     const member: Member = { name, session: null as unknown as CommunitySession, saved: joined.state };
     this.members.set(name, member);
@@ -700,6 +700,68 @@ describe("group name, group-community/1", () => {
     expect([bob.session.name, carol.session.name, carol.session.picture]).toEqual(["Book club", "Book club", undefined]);
     expect(net.names.filter(n => n.at === "bob").map(n => n.name)).toEqual(["Book club"]);
     expect(new CommunitySession(clone(bob.saved), { save: async () => {}, broadcast: () => {}, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} }).name).toBe("Book club");
+  });
+
+  it("a group's name is the admin's word from its creation: a welcome naming it otherwise lasts only until the statement comes", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    expect(JSON.parse(alice.session.state.meta!.body)).toEqual({ name: "Ghosts" });
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    // Bob lets Carol in, his welcome naming the group otherwise; Carol then meets Alice.
+    const carol = await net.admit(bob, "carol", { name: "Ghostly Support" });
+    expect(carol.session.name).toBe("Ghostly Support");
+    await net.meet(alice, carol);
+    expect(carol.session.name).toBe("Ghosts");
+    // Signed before she got in: no line in anyone's history.
+    expect(net.names).toEqual([]);
+  });
+
+  it("the admin of a group whose name was never signed signs it at its next commit", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    // As a group made before names were signed at creation: no statement.
+    delete alice.session.state.meta;
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    expect(JSON.parse(alice.session.state.meta!.body)).toEqual({ name: "Ghosts" });
+    expect(bob.session.state.meta?.body).toBe(alice.session.state.meta!.body);
+    expect(net.names).toEqual([]);
+  });
+
+  it("a group whose name was never signed, handed by its creator to a member whose welcome named it otherwise, keeps the creator's name", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const carol = await net.admit(alice, "carol");
+    await net.meet(alice, carol);
+    // Carol lets Bob in, her welcome naming the group otherwise.
+    const bob = await net.admit(carol, "bob", { name: "Ghostly Support" });
+    await net.meet(alice, bob); await net.meet(bob, carol);
+    // As a group made before names were signed at creation: nobody holds a statement.
+    for (const m of [alice, bob, carol]) { delete m.session.state.meta; delete m.session.state.metaPast; }
+    expect([alice.session.name, bob.session.name, carol.session.name]).toEqual(["Ghosts", "Ghostly Support", "Ghosts"]);
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    await net.meet(bob, carol);
+    expect(bob.session.isAdmin).toBe(true);
+    expect([alice.session.name, bob.session.name, carol.session.name]).toEqual(["Ghosts", "Ghosts", "Ghosts"]);
+    expect(net.names.map(n => n.name)).not.toContain("Ghostly Support");
+  });
+
+  it("a new admin who never got the name signed at creation takes it, not the one its welcome said", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const carol = await net.admit(alice, "carol");
+    await net.meet(alice, carol);
+    // Bob, let in with a welcome naming the group otherwise, has synced with nobody when the role moves to him.
+    const bob = await net.admit(alice, "bob", { name: "Ghostly Support" });
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    expect(bob.session.isAdmin).toBe(true);
+    expect(bob.session.state.meta?.by).not.toBe(alice.session.myKey);
+    await net.meet(bob, carol); await net.meet(alice, bob);
+    expect([alice.session.name, bob.session.name, carol.session.name]).toEqual(["Ghosts", "Ghosts", "Ghosts"]);
+    expect(net.names.map(n => n.name)).not.toContain("Ghostly Support");
   });
 
   it("a member away at the rename gets it from another member when back; what an app from before names kept shows it once updated", async () => {
@@ -967,7 +1029,9 @@ describe("group call node, group-community/1 (WISP 602)", () => {
     later(10 * 60_000 + 1);
     await s.handle(statement.from, statement.frame);
     await net.settle();
-    expect([bob.session.call, carol.session.call]).toEqual([undefined, { sfu: SFU, e2ee: 1 }]);
+    // What Bob signed again stays the group's metadata (the name signed at its creation, no node), for Carol too.
+    expect([bob.session.call, carol.session.call]).toEqual([undefined, undefined]);
+    expect(carol.session.state.meta!.by).toBe(bob.session.myKey);
   });
 
   it("a new admin who removes the former admin takes their statement no more", async () => {

@@ -3,19 +3,21 @@ import { CommunityWorld, RELAY_NETWORK, sameRun, seededRandom, type Peer } from 
 // covers: groups.community.catch-up, groups.protocol.community-topology
 
 /**
- * A community of 36 on two hubs, the admin's and a member's carrying 19. That member's app is killed: it never comes
+ * A community of 36 on two hubs, the admin's and a member's carrying 18. That member's app is killed: it never comes
  * back. Its members all asked the admin's hub, which opened their 19 edges at once on its relays' 60 requests a minute
  * and brought almost none up for two minutes; they gave it up after a minute each, and 7 stepped up in the same second
  * as hubs with no edge to anyone: 232 s until everyone had everyone's lines (2026-11-13). Now a few of them step in for
  * the hub they lost, one for every 8 it carried, in turns by rank for its key, and the others ask them.
+ * The seed picks a run with that shape. Every key and nonce comes from it, so a change that draws one more (a frame
+ * sealed for a joiner) makes the joiners after it other people, on other hubs: then pick another seed of that shape.
  */
-describe("a community of 36 whose hub carrying 19 is killed, the admin's hub the only one left (relays' budget)", { timeout: 120_000 }, () => {
+describe("a community of 36 whose hub carrying 18 is killed, the admin's hub the only one left (relays' budget)", { timeout: 120_000 }, () => {
   let restore = () => {};
   afterEach(() => { restore(); restore = () => {}; });
 
   it("a few of its members step in for it, each carrying some, and everyone hears everyone within 150 s", async () => {
-    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(17));
-    restore = sameRun(world, 17);
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(6));
+    restore = sameRun(world, 6);
     const admin = world.add("admin");
     const id = await admin.groups.create("Town");
     const link = await admin.groups.enableLink(id);
