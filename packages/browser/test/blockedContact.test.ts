@@ -105,19 +105,21 @@ describe("a blocked contact", () => {
     expect(viewOf(node, again.id).blocked).toBe(true);
     expect(viewOf(node, other.id).blocked).toBeUndefined();
     events.onAttention.mockClear();
+    const reacted = vi.spyOn(node["reactions"], "receive");
 
     for (const id of [chat.id, again.id]) {
       const peer = linkOf(id).options.events;
       await peer.onMessage({ id: "w2", text: "after", timestamp: Date.now() + 1_000, via: "datalink" });
       peer.onCallSignal(offer);
       // Confirmed, so the contact does not say them again, and dropped.
-      expect(await peer.onReaction({ id: "r1", messageId: "w1", emoji: "👍", timestamp: Date.now() } as never)).toBe(true);
+      expect(await peer.onReaction({ id: "w1", e: "👍", n: 1 })).toBe(true);
       expect(await peer.onPin({ id: "w1", timestamp: Date.now() } as never)).toBe(true);
     }
     expect((await db.getMessages(chat.id)).map((m) => m.text)).toEqual(["before"]);
     expect(await db.getMessages(again.id)).toEqual([]);
     expect(events.onCallSignal).not.toHaveBeenCalled();
     expect(events.onAttention).not.toHaveBeenCalled();
+    expect(reacted).not.toHaveBeenCalled();
     expect(viewOf(node, chat.id).pin).toBeUndefined();
     // Another contact is heard as before.
     await linkOf(other.id).options.events.onMessage({ id: "w3", text: "hi", timestamp: Date.now(), via: "datalink" });
