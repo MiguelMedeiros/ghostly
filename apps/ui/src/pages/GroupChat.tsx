@@ -1025,16 +1025,20 @@ export function GroupChat() {
       {(error || (group.status && group.status !== "active")) && <div ref={noticeRef} tabIndex={-1} role={knockingAgain ? undefined : "status"} data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {knockingAgain ? <div role="status">{error && <Notice problem={error} className="text-xs" />}</div> : error && <Notice problem={error} className="text-xs" />}
         {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}
-        {knockingAgain ? <div className={`flex items-center justify-between gap-3${error ? " mt-2" : ""}`}>
-          <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
+        {/* On a phone the buttons go under the line, together, once it would be narrower than 12rem: beside both it was
+            squeezed to a column a few words wide, or a letter or two (Try again with Cancel joining, Spanish, 320 px). */}
+        {knockingAgain ? <div className={`flex flex-wrap items-center justify-end gap-x-3 gap-y-2${error ? " mt-2" : ""}`}>
+          <p data-testid="group-rejoin-line" className="min-w-0 flex-[1_1_12rem]"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
             {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{staleText}</span>}</p>
           {/* Said once per change, politely, as the first join's card says it: the step just reached, or the two-minute hint. */}
           <p role="status" data-testid="group-rejoin-live" className="sr-only">{joinAnnouncement}</p>
-          {linkUnanswered && <button data-testid="group-link-retry" onClick={e => tryAgain(e.currentTarget)}
-            className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
-          {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}
-          <button ref={cancelJoinRef} data-testid="group-rejoin-cancel" onClick={() => void act(async () => { await engine.call("declineGroupInvitation", { groupId }); optionsRef.current?.focus(); })}
-            className="min-h-11 shrink-0 rounded-lg px-3 text-xs text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.cancel")}</button>
+          <div className="flex flex-wrap justify-end gap-2">
+            {linkUnanswered && <button data-testid="group-link-retry" onClick={e => tryAgain(e.currentTarget)}
+              className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover forced-colors:border forced-colors:border-[color:ButtonText] focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
+            {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}
+            <button ref={cancelJoinRef} data-testid="group-rejoin-cancel" onClick={() => void act(async () => { await engine.call("declineGroupInvitation", { groupId }); optionsRef.current?.focus(); })}
+              className="min-h-11 shrink-0 rounded-lg px-3 text-xs text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.cancel")}</button>
+          </div>
         </div>
         : !error && (group.profile === "community" && group.status === "removed" ? t("group.chat.removedCommunity") : outOfIt)}
       </div>}
