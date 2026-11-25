@@ -7,7 +7,7 @@ import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
 import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwards";
 import { findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
-import { asCliError, CliError, shownRelay } from "./errors";
+import { asCliError, CliError, shownRelay, shownValue } from "./errors";
 import { shellWord } from "./shellWord";
 import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inCall, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
@@ -168,7 +168,7 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
       // A member's key is that member, whatever another member calls itself.
       const byKey = group.members.filter((m) => !m.me && m.key === ref);
       const matches = byKey.length ? byKey : group.members.filter((m) => !m.me && (m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower));
-      if (matches.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`);
+      if (matches.length > 1) throw new CliError("bad_request", `${shownValue(ref)} names more than one member`);
       if (!matches.length) throw noMember(group, ref);
       key = matches[0].key;
       spelled = [matches[0].nick?.trim(), ref, key.slice(0, 8)].filter((s): s is string => !!s);
@@ -926,7 +926,7 @@ const METHODS: Record<string, Method> = {
       // a second command to learn it cannot be deleted at all. A history that cannot be read keeps that hint.
       const group = error instanceof CliError ? error.details?.group : undefined;
       const theirs = typeof group === "string" && ref !== "<message>" ? await messageOf(ctx, `group:${group}`, ref).catch(() => undefined) : undefined;
-      if (theirs && theirs.sender !== "me") throw new CliError("not_found", `${JSON.stringify(typed)} is a group, and ${JSON.stringify(ref)} is another member's message in it: only its author deletes a group's message, for everyone`, { group });
+      if (theirs && theirs.sender !== "me") throw new CliError("not_found", `${shownValue(typed)} is a group, and ${shownValue(ref)} is another member's message in it: only its author deletes a group's message, for everyone`, { group });
       throw error;
     }
     const messageId = str(params, "message", true);
@@ -1502,11 +1502,11 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (sho
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, named); } catch (inner) {
       // A name two groups share is still a group's (it read `No chat`): the hint, with no one group's id to name.
-      if (sharedGroupIds(inner)) throw new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat: ${hint("<group>")}`);
+      if (sharedGroupIds(inner)) throw new CliError("not_found", `${shownValue(ref)} names more than one group, not a chat: ${hint("<group>")}`);
       throw error;
     }
     const shown = shellWord(named, group.id);
-    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ${hint(shown, group.id)}`, { group: group.id });
+    throw new CliError("not_found", `${shownValue(ref)} is a group, not a chat: ${hint(shown, group.id)}`, { group: group.id });
   }
 }
 
@@ -1554,8 +1554,8 @@ function editRefusalWords(error: string, ref: string, place: RefPlace): string {
  * it off this device), one of mine deleted already says so (the chat's deleted ids), and any other is not here.
  */
 function deleteNotMine(ctx: ApiContext, target: { linkId: string; group: boolean }, ref: string, theirs: StoredMessage | undefined, place: RefPlace, purge: boolean): CliError {
-  if (theirs && target.group) return new CliError("not_found", `${JSON.stringify(ref)} is another member's message: only its author deletes a group's message, for everyone`);
-  if (theirs) return new CliError("not_found", `${JSON.stringify(ref)} is the contact's message: only your own messages are deleted for everyone (ghostly message delete ${shellWord(place.ref, "<chat>")} ${shellWord(theirs.id, "<message>")}${purge ? " --purge" : ""} deletes it on this device)`);
+  if (theirs && target.group) return new CliError("not_found", `${shownValue(ref)} is another member's message: only its author deletes a group's message, for everyone`);
+  if (theirs) return new CliError("not_found", `${shownValue(ref)} is the contact's message: only your own messages are deleted for everyone (ghostly message delete ${shellWord(place.ref, "<chat>")} ${shellWord(theirs.id, "<message>")}${purge ? " --purge" : ""} deletes it on this device)`);
   const deleted = !target.group && node(ctx).deletedIdsOf(target.linkId).includes(ref);
   return noMessage(ref, place, deleted ? { tail: ": it was deleted already" } : {});
 }

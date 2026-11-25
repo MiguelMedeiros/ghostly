@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { contactKeyOf, groupPrefixed, nameKey, namedByThem } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
-import { CliError, localFileError } from "./errors";
+import { CliError, localFileError, shownValue } from "./errors";
 import { shellWord } from "./shellWord";
 import type { GhostlyEvent } from "./events";
 import { jsonOut } from "./jsonOut";
@@ -152,7 +152,7 @@ async function fromChat(ref: string, call: (method: string, params: Record<strin
 
 /** `--group`'s refusal: `ref` found `group` only by its name or a prefix of its id, both chosen by others. */
 function namedByAdmin(ref: string, group: { id: string; name?: string | null }): CliError {
-  return new CliError("bad_request", `${JSON.stringify(ref)} names a group only by what others chose (its name, a prefix of its id): use its id: ghostly listen --group ${shellWord(group.id, group.id)}`, { group: group.id, name: group.name ?? null });
+  return new CliError("bad_request", `${shownValue(ref)} names a group only by what others chose (its name, a prefix of its id): use its id: ghostly listen --group ${shellWord(group.id, group.id)}`, { group: group.id, name: group.name ?? null });
 }
 
 /**
@@ -168,7 +168,7 @@ async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" |
     if (other === "chat" && contactKeyOf(ref) === undefined) await fromChat(ref, call);
     const named = error.details[other] as string;
     const shown = shellWord(named, error.details[other] as string);
-    throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
+    throw new CliError("not_found", `${shownValue(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }
 

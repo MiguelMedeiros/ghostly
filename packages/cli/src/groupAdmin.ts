@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_CALL_SFU, NO_PICTURE_METADATA, groupCallSfu, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, nobodyJoined, notInYet, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError, localFileError } from "./errors";
+import { CliError, localFileError, shownValue } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
@@ -35,11 +35,11 @@ export function findMember(group: GroupView, ref: string, myName?: string, byKey
   const matches = byKey.length ? byKey : others.filter((m) => m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower);
   if (matches.length === 1) {
     if (byKeyOnly && !matches[0].key.startsWith(ref)) {
-      throw new CliError("bad_request", `${JSON.stringify(ref)} names a member only by the name it gave itself: use its key`, { member: matches[0].key, name: matches[0].nick ?? null });
+      throw new CliError("bad_request", `${shownValue(ref)} names a member only by the name it gave itself: use its key`, { member: matches[0].key, name: matches[0].nick ?? null });
     }
     return matches[0];
   }
-  throw matches.length ? new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`) : noMember(group, ref, myName);
+  throw matches.length ? new CliError("bad_request", `${shownValue(ref)} names more than one member`) : noMember(group, ref, myName);
 }
 
 /**
@@ -48,8 +48,8 @@ export function findMember(group: GroupView, ref: string, myName?: string, byKey
  */
 export function noMember(group: GroupView, ref: string, myName?: string): CliError {
   const mine = !!myName?.trim() && myName.trim().toLowerCase() === ref.toLowerCase();
-  if (mine || group.members.some((m) => m.me && m.key.startsWith(ref))) return new CliError("bad_request", `${JSON.stringify(ref)} is you: name another member of ${group.name}`);
-  return new CliError("not_found", `No member ${JSON.stringify(ref)} in ${group.name}`);
+  if (mine || group.members.some((m) => m.me && m.key.startsWith(ref))) return new CliError("bad_request", `${shownValue(ref)} is you: name another member of ${group.name}`);
+  return new CliError("not_found", `No member ${shownValue(ref)} in ${group.name}`);
 }
 
 /**
