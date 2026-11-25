@@ -6778,7 +6778,7 @@ export class GhostlyNode implements EngineImplementation {
    * opens). An edge that took my own pin counts for `groupTaken` (`pinKey`).
    */
   private sendGroupPinFrame(groupId: string, member: string): void {
-    const pin = this.groups.pinOf(groupId), edge = this.memberEdges(groupId).get(member);
+    const pin = this.groups.pinToSay(groupId), edge = this.memberEdges(groupId).get(member);
     // One whose number does not hold counts as none: no member takes it.
     if (!pin?.k || !pin.sig || !edge || this.groups.isCommunityGroup(groupId) || !pinNumberHolds(pin.n)) return;
     const frame: GroupPinFrame = { t: "group-pin", g: groupId, id: pin.id, n: pin.n, k: pin.k, sig: pin.sig };
