@@ -46,6 +46,31 @@ describe("a group's picture in the app", () => {
     expect(engine.callsTo("setGroupPicture").slice(-1)[0]).toEqual({ groupId: "group-1", picture: null });
   });
 
+  // The file field keeps the focus and only its label changes (Add a picture, Change picture): nothing said it was set.
+  it("says to a screen reader once a picture was set or removed, and nothing when the engine refused the next", async () => {
+    fakeEngine.update({ groups: [admin()] });
+    const { user, engine } = renderApp(<GroupMembersDialog group={admin()} onClose={() => {}} />);
+    const live = screen.getByTestId("group-members-live");
+    const ok = () => engine.on("setGroupPicture", () => undefined);
+    const refuse = () => engine.on("setGroupPicture", () => { throw new Error("Only the admin can change the group's picture"); });
+    const pick = (name: string) => user.upload(screen.getByTestId("group-picture-input"), new File([new Uint8Array([1])], name, { type: "image/png" }));
+    ok();
+    await pick("a.png");
+    await waitFor(() => expect(live.textContent).toBe("You changed the group's picture"));
+    fakeEngine.update({ groups: [admin({ picture: PICTURE })] });
+    refuse();
+    await user.click(await screen.findByTestId("group-picture-remove"));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(live, "the picture set before is not said again as this removal's").toBeEmptyDOMElement();
+    ok();
+    await user.click(screen.getByTestId("group-picture-remove"));
+    await waitFor(() => expect(live.textContent).toBe("You removed the group's picture"));
+    refuse();
+    await pick("b.png");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(live, "the removal before is not said again as this picture's").toBeEmptyDOMElement();
+  });
+
   it("says what the engine refused", async () => {
     fakeEngine.update({ groups: [admin()] });
     const { user, engine } = renderApp(<GroupMembersDialog group={admin()} onClose={() => {}} />);
