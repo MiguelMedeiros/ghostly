@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useToast } from "../hooks/useToast";
 import { Toast } from "./ui/Toast";
@@ -10,13 +11,15 @@ interface CallButtonsProps {
   onCall: (withVideo: boolean) => void;
   /** A phone's header: the voice call alone, as large as ⋮ beside it; the video call is a row of the ⋮ menu. */
   phone?: boolean;
+  /** The voice call button: where the focus goes back when a call answered from elsewhere ends (CallOverlay's returnFocus). */
+  audioRef?: Ref<HTMLButtonElement>;
 }
 
 /**
  * The chat header's call buttons: a voice call and a video call. There is no button for the screen here: it is
  * shared from inside a call, voice or video (CallOverlay).
  */
-export function CallButtons({ blocked, busy, onCall, phone }: CallButtonsProps) {
+export function CallButtons({ blocked, busy, onCall, phone, audioRef }: CallButtonsProps) {
   const { t } = useI18n();
   // `aria-disabled`, not `disabled`: a disabled button gives up the keyboard focus, and the call that ends has nowhere
   // to give it back; nor is it reached at all, so the reason in its title (its description, the label being its name)
@@ -33,6 +36,7 @@ export function CallButtons({ blocked, busy, onCall, phone }: CallButtonsProps) 
     <>
       {/* Audio call button */}
       <button
+        ref={audioRef}
         onClick={() => press(false)}
         aria-disabled={off || undefined}
         className={`${phone ? "w-[44px] h-[44px] flex items-center justify-center" : "p-2 max-md:px-2 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer ${offLook}`}
