@@ -27,8 +27,11 @@ const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, "0"
 const unhex = (s: string) => Uint8Array.from(s.match(/../g)!, x => parseInt(x, 16));
 
 function normalizeNostrKey(input: string): string {
-  const value = input.trim();
-  if (HEX64.test(value.toLowerCase())) return value.toLowerCase();
+  const trimmed = input.trim();
+  // A NIP-21 link (`nostr:npub1…`, the scheme in any case) names a key only as an npub: a profile or an event is refused.
+  const link = /^nostr:/i.test(trimmed);
+  const value = link ? trimmed.slice("nostr:".length) : trimmed;
+  if (!link && HEX64.test(value.toLowerCase())) return value.toLowerCase();
   if (value.startsWith("npub1")) {
     try { const decoded = nip19Decode(value); if (decoded.type === "npub") return decoded.data; } catch { /* fall through */ }
   }
