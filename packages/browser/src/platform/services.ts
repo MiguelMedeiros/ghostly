@@ -60,14 +60,24 @@ function keepUnsent(fileId: string, transfer: FileTransferState): void {
   try { localStorage.setItem(unsent.key, JSON.stringify(files)); } catch { /* no room: it is said while this page lives */ }
 }
 /**
- * The last few files sent from this page, as they were handed over (a recording, a paste, a pick): their bubble shows
- * them at once from these bytes, without reading the stored copy back. Small files only; gone on a reload.
+ * The last few pictures and voice notes sent from this page, as they were handed over (a recording, a paste, a pick):
+ * their bubble shows them at once from these bytes, without reading the stored copy back. Small files only, at most
+ * `JUST_SENT_BYTES` together (the newest always); gone on a reload. They are copies in memory (`detached`), so any
+ * other file, whose bubble never reads its bytes, is not kept: 8 files of 15 MiB held 120 MiB for the page's life.
  */
 const justSent = new Map<string, Blob>();
 const JUST_SENT_MAX = 8;
-function keepJustSent(id: string, blob: Blob): void {
+const JUST_SENT_BYTES = 32 * 1024 * 1024;
+function keepJustSent(id: string, blob: Blob, file: { image?: unknown; voice?: unknown }): void {
+  if (!file.image && !file.voice) return;
   justSent.set(id, blob);
-  while (justSent.size > JUST_SENT_MAX) justSent.delete(justSent.keys().next().value!);
+  let bytes = 0;
+  for (const kept of justSent.values()) bytes += kept.size;
+  for (const [oldest, kept] of justSent) {
+    if (justSent.size <= 1 || (justSent.size <= JUST_SENT_MAX && bytes <= JUST_SENT_BYTES)) break;
+    justSent.delete(oldest);
+    bytes -= kept.size;
+  }
 }
 /** A stored service target's origin (`http://localhost:3400`), or null for one that no longer parses. */
 function originOf(target: string | undefined): string | null {
@@ -465,7 +475,7 @@ export const servicesPlatform: ServicesPlatform | null = {
       // to read the stored copy back whole, and what is kept is what was digested.
       const kept = await copying(detached(source));
       const digest = await copying(blobDigest(kept));
-      keepJustSent(file.id, new Blob([kept], { type: file.mime }));
+      keepJustSent(file.id, new Blob([kept], { type: file.mime }), file);
       await copying(fileStore.put({ id: file.id, linkId: link.id, blob: kept, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer }));
       try {
         await engine.call("sendFile", { linkId: link.id, file, timestamp, ...(replyTo && { replyTo }) });
@@ -538,7 +548,7 @@ export const servicesPlatform: ServicesPlatform | null = {
       if (source.size <= SMALL_FILE_BYTES) {
         // A copy of its bytes, never the picked File (`detached`).
         const kept = await detached(source);
-        keepJustSent(file.id, new Blob([kept], { type: mime }));
+        keepJustSent(file.id, new Blob([kept], { type: mime }), file);
         await fileStore.put({ ...record, blob: kept, digest: await blobDigest(kept) });
       } else {
         const bytes = await fileBytes();

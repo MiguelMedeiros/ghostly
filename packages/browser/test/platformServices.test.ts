@@ -313,6 +313,43 @@ describe("sending files", () => {
     expect(await services.getFile(file.id)).toBeNull();
   });
 
+  it("keeps in memory only what a bubble draws at once: a picture or a voice note, not any other file", async () => {
+    // The copy of a small file's bytes (above) is memory: a PDF's bubble never reads it, so it is read from the store.
+    withLinks(chat({ id: "kept-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const pdf = () => new File(["%PDF-1.7 report"], "report.pdf", { type: "application/pdf" });
+    const sent = [
+      (await services.sendFile("peer-1", pdf())).file,
+      (await services.sendGroupFile!("g1", pdf())).file,
+      (await services.sendFile("peer-1", new File([PNG], "a.png", { type: "image/png" }))).file,
+      (await services.sendFile("peer-1", new File(["OggS voice"], "voice.ogg", { type: "audio/ogg" }), { voice: { duration: 1_000, peaks: [1, 2, 3] } })).file,
+    ];
+    const get = vi.spyOn(fileStore, "get");
+    try {
+      for (const file of sent) await services.getFile(file.id);
+      expect(get.mock.calls.map(([id]) => id)).toEqual([sent[0].id, sent[1].id]);
+    } finally { get.mockRestore(); }
+    expect(await (await services.getFile(sent[0].id))?.text()).toBe("%PDF-1.7 report");
+  });
+
+  it("keeps the pictures just sent within a budget of bytes, the newest always", async () => {
+    withLinks(chat({ id: "budget-link" }));
+    // Three pictures of 12 MiB each (a PNG with a second, large IDAT, which the metadata strip keeps): over 32 MiB
+    // together, so the oldest is read back.
+    const data = 12 * 1024 * 1024;
+    const idat = new Uint8Array(12 + data);
+    new DataView(idat.buffer).setUint32(0, data);
+    idat.set(ascii("IDAT"), 4);
+    const big = (name: string) => new File([PNG.subarray(0, -12), idat, PNG.subarray(-12)], name, { type: "image/png" });
+    const sent = [];
+    for (const name of ["1.png", "2.png", "3.png"]) sent.push((await services.sendFile("peer-1", big(name))).file);
+    const get = vi.spyOn(fileStore, "get");
+    try {
+      for (const file of sent) await services.getFile(file.id);
+      expect(get.mock.calls.map(([id]) => id)).toEqual([sent[0].id]);
+    } finally { get.mockRestore(); }
+  });
+
   // covers: files.image.metadata
   it("a picture goes without its metadata, to a chat and to a group: what is stored and digested is the stripped copy", async () => {
     withLinks(chat({ id: "exif-link" }));
