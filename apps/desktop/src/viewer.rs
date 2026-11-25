@@ -418,14 +418,17 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
         for (let i = 0; i < shutters.length; i++) { try { shutters[i](); } catch (e) {} }
       };
       const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
-      for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
       const followed = (event) => {
         if (open === 0) return;
         const found = trust(event);
         if (found !== null) follows = { event: event, trusted: found, at: tapped, next: follows };
       };
-      apply(listen, w, ["submit", followed, true]);
-      apply(listen, w, ["change", followed, true]);
+      const hear = () => {
+        for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
+        apply(listen, w, ["submit", followed, true]);
+        apply(listen, w, ["change", followed, true]);
+      };
+      hear();
       const tapping = () => {
         if (tap !== null && dispatching(tap, trusted) && recent(tapped)) return true;
         for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted) && recent(f.at)) return true;
@@ -570,7 +573,12 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
       const reopen = proto.open;
       proto.open = function () {
         const got = apply(reopen, this, arguments);
-        try { if (apply(view, this, []) === w) apply(listen, this, ["load", sweep, true]); } catch (e) {}
+        try {
+          if (apply(view, this, []) === w) {
+            apply(listen, this, ["load", sweep, true]);
+            hear();
+          }
+        } catch (e) {}
         return got;
       };
       const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
