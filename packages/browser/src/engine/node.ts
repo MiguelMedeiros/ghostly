@@ -3085,6 +3085,8 @@ export class GhostlyNode implements EngineImplementation {
       this.groups.flush(),
       // The quotes of messages removed within the last seconds: swept now, or the replies keep their lines (WISP 400).
       this.quoteSweeps.stop(),
+      // A removed proof's revocation still on its way: a CLI one-shot that removed it would otherwise never publish it.
+      this.identities.published(),
       ...WALLET_NETWORKS.flatMap((network) => [this.arkWallets, this.barkWallets, this.fedimintWallets, this.sparkWallets, this.usdtWallets, this.lightnings, this.bitcoins]
         .map((wallets) => wallets[network].stop())),
       // The Cashu wallet too: its polls would otherwise go on writing after the stop.

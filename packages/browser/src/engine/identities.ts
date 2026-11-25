@@ -174,6 +174,8 @@ export class IdentityProofs {
   private wakeRecheck: (() => void) | undefined;
   /** Revocations not published because the app was offline: published when the network comes back (`networkBack`). */
   private unpublished = new Set<string>();
+  /** A removal's revocation still on its way to the relays: the engine's shutdown waits for it (`published`). */
+  private publishing = new Set<Promise<void>>();
   private running = false;
   /** "Clear all data" (`revokeAll`): a revocation lookup or a proof's save still on its way writes nothing. */
   private ended = false;
@@ -421,8 +423,13 @@ export class IdentityProofs {
     await this.save((proofs, revocations) => proofs.some(p => identityStatement(p.binding).id === id)
       ? [proofs.filter(p => identityStatement(p.binding).id !== id), wasShared ? [...revocations, revocation] : revocations]
       : [proofs, revocations]);
-    if (wasShared) void this.publishRevocation(revocation).catch(() => {});
-    else { this.seeds.get(id)?.fill(0); this.seeds.delete(id); }
+    if (wasShared) {
+      // Not waited for here, but at the shutdown: a CLI one-shot `identity remove` ended before it reached any relay,
+      // and the next start of a daemon was the first to publish it.
+      const publish = this.publishRevocation(revocation).catch(() => {});
+      this.publishing.add(publish);
+      void publish.finally(() => this.publishing.delete(publish));
+    } else { this.seeds.get(id)?.fill(0); this.seeds.delete(id); }
   }
 
   /**
@@ -448,6 +455,11 @@ export class IdentityProofs {
   private everShared(p: StoredIdentityProof): boolean {
     const id = identityStatement(p.binding).id;
     return !!p.shared || this.host.linkIds().some(l => this.host.ledger(l)?.shared.some(s => s.id === id));
+  }
+
+  /** Ends once every removal's revocation still on its way to the relays went or failed. */
+  async published(): Promise<void> {
+    await Promise.allSettled([...this.publishing]);
   }
 
   private async publishRevocation(r: Revocation): Promise<void> {
