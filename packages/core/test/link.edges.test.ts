@@ -21,6 +21,7 @@ import {
   DEPARTED_READ_MS,
   UNUSED_INVITE_WAIT_MAX_MS,
   countUnusedInvite,
+  offerLookWait,
   type LinkSessionEvents,
   type LinkSessionOptions,
 } from "../src/link";
@@ -745,6 +746,37 @@ describe("LinkSession discovery errors", () => {
 });
 
 describe("LinkSession poll pacing", () => {
+  it("resume offers that share their looks wait their count's share, and one on screen, stopped or answered leaves the count", async () => {
+    const net = network();
+    const relays = net.transport();
+    const chats = Array.from({ length: 5 }, () => session(createLink().mine, relays));
+    const look = async (chat: (typeof chats)[number]) => { chat.s.pollNow(); await settle(); return lastPoll(chat.ev); };
+    for (const chat of chats) chat.s.start();
+    await settle();
+    for (const chat of chats) { chat.s.setFastPoll(true, true, true); await chat.s.setRtcSignal('{"t":"o"}'); }
+    await settle();
+    for (const chat of chats) expect(await look(chat)).toBe(offerLookWait(5));
+    // The chat on screen looks at its own pace, and is no longer counted.
+    chats[0].s.setActive(true);
+    expect(await look(chats[0])).toBe(I.fast);
+    expect(await look(chats[4])).toBe(offerLookWait(4));
+    // A chat that stops (removed) leaves the count at once.
+    await chats[1].s.stop(false);
+    expect(await look(chats[4])).toBe(offerLookWait(3));
+    // So does one whose offer was answered (its window ended), at its next read.
+    chats[2].s.setFastPoll(false);
+    await look(chats[2]);
+    expect(await look(chats[4])).toBe(offerLookWait(2));
+    // Another app's relays (another transport) share nothing with these.
+    const other = session(createLink().mine, net.transport());
+    other.s.start();
+    await settle();
+    other.s.setFastPoll(true, true, true);
+    await other.s.setRtcSignal('{"t":"o"}');
+    expect(await look(other)).toBe(offerLookWait(1));
+    for (const chat of [...chats, other]) await chat.s.stop(false);
+  });
+
   it("waits at the active pace for a contact never seen, then falls back to the background pace", async () => {
     const { a } = pair();
     a.s.start();
