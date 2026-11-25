@@ -1,4 +1,4 @@
-import { bool, list, onlyKeys, str, type Lookup, type Method } from "../apiKit";
+import { bool, given, list, onlyKeys, str, type Lookup, type Method } from "../apiKit";
 import { CliError } from "../errors";
 
 /** What a one-shot looks up before any chat starts (api.ts `startOnceFound`): `hangup`'s call or chat, when it names one. */
@@ -29,7 +29,7 @@ export const CALL_METHODS: Record<string, Method> = {
   async "call.auto"(ctx, params) {
     // A key misspelt next to on (`From`) left the chats out: auto-answer on for every contact.
     onlyKeys(params, "call.auto", ["on", "from", "rate"]);
-    const on = params.on === undefined ? undefined : bool(params, "on");
+    const on = !given(params, "on") ? undefined : bool(params, "on");
     // The chats and the rate go with on: true, as `call auto --from` refuses them without on: before, from with on:
     // false turned auto-answer off for every chat, and from alone only read the setting, each without a word.
     if (on !== true && (list(params, "from").length > 0 || (params.rate !== undefined && params.rate !== null))) throw new CliError("bad_request", "from and rate go with on: true");

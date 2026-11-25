@@ -1765,3 +1765,38 @@ describe("settings set relays or irohRelays while a variable pins them", () => {
     } finally { vi.unstubAllEnvs(); }
   });
 });
+
+describe("a param sent as null", () => {
+  // Found in a bug hunt: the methods that checked `undefined` alone handed a null to `bool` and `num`, which read it as
+  // false and 0. A bot that writes every field (null for the ones it leaves out) turned these off with exit 0.
+  it("is left out, as every helper reads it: nothing is turned off, wiped or made 0", async () => {
+    const { ctx, node } = fake();
+    const calls = Object.assign(node, {
+      setChatPaymentMethods: vi.fn(async () => undefined), disconnect: vi.fn(),
+      setOwnStatus: vi.fn(async () => undefined), getOwnStatus: () => ({ status: null }),
+    });
+    const auto = { on: true, from: ["chat-one"] };
+    Object.assign(ctx.calls, { getAuto: vi.fn(() => auto), setAuto: vi.fn(() => ({ on: false, from: [] })) });
+    Object.assign(ctx.groupAuto, { get: vi.fn(() => auto), set: vi.fn(() => ({ on: false, from: [] })) });
+
+    await callApi(ctx, "profile.set", { name: "Bot", shareProfile: null });
+    expect(calls.updateSettings).toHaveBeenLastCalledWith({ settings: { nick: "Bot" } });
+
+    // No method named is what the chat takes, with nothing changed, as with the method left out: it turned Cashu off.
+    await expect(callApi(ctx, "chat.accept", { chat: "chat-one", method: null, on: false })).rejects.toThrow("on and networks change one method: name it");
+    expect(await callApi(ctx, "chat.accept", { chat: "chat-one", method: null })).toEqual({ chat: "chat-one", methods: null, networks: null });
+    expect(calls.setChatPaymentMethods).not.toHaveBeenCalled();
+
+    expect(await callApi(ctx, "call.auto", { on: null })).toEqual({ autoAnswer: auto });
+    expect(ctx.calls.setAuto).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "group.auto", { on: null })).toEqual({ autoJoin: auto });
+    expect(ctx.groupAuto.set).not.toHaveBeenCalled();
+
+    // A plain disconnect, not a hold of 0 minutes (which only ends a hold).
+    await callApi(ctx, "chat.disconnect", { chat: "chat-one", hold: null });
+    expect(calls.disconnect).toHaveBeenCalledWith({ linkId: "chat-one" });
+
+    await callApi(ctx, "status.set", { text: "hi", until: null });
+    expect(calls.setOwnStatus).toHaveBeenCalledTimes(1);
+  });
+});

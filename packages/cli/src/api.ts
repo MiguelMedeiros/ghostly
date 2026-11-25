@@ -10,7 +10,7 @@ import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PA
 import { asCliError, CliError } from "./errors";
 import { shellWord } from "./shellWord";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inCall, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, given, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inCall, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type CallScope, type Lookup, type Method, type Params, type RefPlace,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -479,7 +479,7 @@ const METHODS: Record<string, Method> = {
     return statusJson(node(ctx).getOwnStatus().status);
   },
   async "status.set"(ctx, params) {
-    const until = params.until === undefined ? undefined : num(params, "until", 0, { min: 1, whole: true });
+    const until = !given(params, "until") ? undefined : num(params, "until", 0, { min: 1, whole: true });
     const status = checkOwnStatus({ text: str(params, "text"), emoji: str(params, "emoji"), availability: str(params, "availability"), until }, (field) => field, "bad_request");
     // Every contact reads it, as the name they see.
     guardText(status.text, bool(params, "force"), "status", "set it");
@@ -500,7 +500,7 @@ const METHODS: Record<string, Method> = {
     if (params.name !== undefined) patch.nick = checkShownName(params.name);
     // Every contact reads it, as a message's text.
     guardText(patch.nick, bool(params, "force"), "name", "set it");
-    if (params.shareProfile !== undefined) patch.shareProfile = bool(params, "shareProfile");
+    if (given(params, "shareProfile")) patch.shareProfile = bool(params, "shareProfile");
     await node(ctx).updateSettings({ settings: patch });
     return METHODS["profile.get"](ctx, {});
   },
@@ -1039,7 +1039,7 @@ const METHODS: Record<string, Method> = {
    */
   async "chat.disconnect"(ctx, params) {
     const link = chatNotGroupLink(ctx, params);
-    const minutes = params.hold === undefined ? undefined : num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
+    const minutes = !given(params, "hold") ? undefined : num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
     // `--hold 0` still ends a hold, one an older version put on a waiting invite too.
     if (minutes !== 0) somebodyJoined(link);
     if (minutes === undefined) {
@@ -1111,7 +1111,7 @@ const METHODS: Record<string, Method> = {
   /** Invitations over the chats named accepted by the daemon itself (`group auto on --from`); no argument: the setting. */
   async "group.auto"(ctx, params) {
     onlyKeys(params, "group.auto", ["on", "from"]);
-    const on = params.on === undefined ? undefined : bool(params, "on");
+    const on = !given(params, "on") ? undefined : bool(params, "on");
     // The chats go with on: true, as `group auto --from` refuses them without on: before, from with on: false dropped
     // every chat on the list, and from alone only read the setting, each without a word.
     if (on !== true && list(params, "from").length > 0) throw new CliError("bad_request", "from goes with on: true");
