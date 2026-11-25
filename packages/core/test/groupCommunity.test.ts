@@ -281,6 +281,26 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(bob.session.state.nicks[carol.session.myKey]).toBe("Carol New");
   });
 
+  it("an older catch-up message after the edge said the new name keeps the new name", async () => {
+    const net = new Net();
+    const now = 1_800_000_000_000;
+    net.now = () => now;
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    const carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    // Bob comes back: the edge says Carol's new name, then the catch-up hands him one she wrote an hour ago.
+    bob.online = false;
+    const sent = await carol.session.sendText("before rename", "Carol Old", now - 3_600_000);
+    if ("error" in sent) throw new Error(sent.error);
+    await net.settle();
+    const [older] = carol.session.state.store.filter(f => f.s === carol.session.myKey).slice(-1);
+    bob.online = true;
+    await bob.session.setNick(carol.session.myKey, "Carol New");
+    await bob.session.handle(carol.session.myKey, clone(older));
+    expect(bob.session.state.nicks[carol.session.myKey]).toBe("Carol New");
+  });
+
   it("adding derives the next secret: members compute it, the newcomer cannot go back", async () => {
     const net = new Net();
     const alice = net.create("alice");
