@@ -76,3 +76,38 @@ describe("DHT only and back from the Connection menu, after a first pairing", ()
     }, 120_000);
   }
 });
+
+/**
+ * Back within the contact's 90 s offer: the contact offered again the moment the live session closed and has not read
+ * DHT only yet, so leaving it answers that offer (`streamBlockChanged`). The daemon writes the choice to its store
+ * before it applies the transport (node.ts setChatTransport), and the offer is read and answered meanwhile: applying
+ * Automatic or WebRTC cancelled that answer as an outdated attempt, and the chat came back only once the contact's
+ * offer timed out, 80 to 106 s later (bug hunt 2026-11-25, two CLI daemons: 90 s in 3 of 3).
+ */
+describe("DHT only and back from the Connection menu, while the contact's offer still stands", () => {
+  for (const choice of ["automatic", "webrtc"] as const) for (const contact of ["open", "in the background"] as const) for (const phase of [3_000, 20_000]) {
+    it(`is live again at once · the answerer chooses ${choice} · the contact's chat ${contact} · ${phase / 1000} s on the DHT`, async () => {
+      const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitationWhere("inviter");
+      const inviter = open(made.inviter, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
+      await run(2_000);
+      const joiner = open(made.joiner, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
+      expect(await until(() => live(inviter) && live(joiner), 60_000), "first pairing").toBeLessThan(Infinity);
+      const [me, them] = [joiner, inviter];
+      expect(me.link.dialer).toBe("contact");
+      me.link.setChatActive(true);
+      them.link.setChatActive(contact === "open");
+      await run(10_000);
+      await settle(me.link.setDeliveryMode("dht"));
+      await run(phase);
+
+      const left = Date.now(), mine = me.link.myPubKeyZ32.slice(0, 6);
+      await settle(me.link.setDeliveryMode("stream"));
+      // The store write between the two: the contact's offer answered.
+      expect(await until(() => trace.some(step => step.t >= left && step.me === mine && step.step === "datalink" && (step as { state?: string }).state === "connecting"), 5_000), "the contact's offer answered").toBeLessThan(Infinity);
+      await settle(choice === "automatic" ? me.link.setTransportPreference("webrtc/1", true, true) : me.link.setTransportPreference("webrtc/1", true, false, true));
+      const took = await until(() => live(me) && live(them), 180_000) === Infinity ? Infinity : Date.now() - left;
+      expect(trace.filter(step => step.t >= left && step.step === "attempt-timeout"), "no offer waited out").toEqual([]);
+      expect(took, "live again after leaving DHT only").toBeLessThanOrEqual(10_000);
+    }, 120_000);
+  }
+});
