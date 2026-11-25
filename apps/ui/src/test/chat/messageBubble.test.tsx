@@ -654,6 +654,12 @@ describe("MessageBubble: system lines", () => {
     expect(time).toHaveClass("whitespace-nowrap", "shrink-0");
   });
 
+  // At 320 px in Spanish and Portuguese a call's length showed "(1 min" on one line and "2 s)" on the next.
+  it.each(["es", "pt", "en"] as const)("keeps a call's length whole on one line in %s", (language) => {
+    renderApp(<MessageBubble message={message({ sender: "system", text: "Audio call ended", callEvent: { type: "call_ended", duration: 62_000 } })} peerPubKey="peer" />, { language });
+    expect(screen.getByText("(1 min 2 s)")).toHaveClass("whitespace-nowrap");
+  });
+
   it("lets a system line be deleted too, from its menu", async () => {
     const { user } = bubble({ sender: "system", text: "Call ended", callEvent: { type: "call_ended" } }, { onDelete: () => {} });
     await user.click(screen.getByTestId("message-options"));
