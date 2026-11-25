@@ -116,6 +116,7 @@ export const UNIT_PROJECTS = [
       ".github/security-allowlist.json": ["securityScanAllowlist"],
       "rust-toolchain.toml": ["rustToolchain"],
       "Cargo.toml": ["androidNativeWorkflow"],
+      "{apps/desktop/tauri.e2e.conf.json,tsconfig.json}": ["desktopMacBuild"],
       // Its postinstall: matched even when its "scripts" alone changed (a change elsewhere in it runs everything).
       "package.json": ["releaseInstallScripts", "webAppsTestFlag"],      "{native/transports/Cargo.toml,native/transports/iroh-web/**,packages/iroh-web/pkg/**}": ["irohWebBuild"],
       "{packages/cli/vite.config.ts,packages/cli/vitest.config.ts,packages/cli/test/support/cli.ts}": ["affected"],
