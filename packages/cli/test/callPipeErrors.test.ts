@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { describe, expect, it } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
@@ -67,6 +67,22 @@ describe("call pipe's failures", { timeout: 60_000 }, () => {
       expect(await pipeFails(dir, "unavailable", 1)).toBe("That call has no audio yet: answer it first");
     } finally {
       server.close();
+    }
+  });
+
+  // The call ended between `call.get` and the connect: its socket is gone (ENOENT), or a file stays where nothing
+  // listens (ECONNREFUSED). It said "No such file or folder: the path", or Node's raw "connect ECONNREFUSED …".
+  it("the call ended before its audio socket was reached", async () => {
+    const gone = home("call-pipe-socket-gone");
+    const stale = join(gone, "stale.sock");
+    writeFileSync(stale, "");
+    for (const socket of [join(gone, "gone.sock"), stale]) {
+      const { dir, server } = await daemonAnswering({ result: { call: "0123456789ab", audio: { socket, token: "t", rate: 48000 } } });
+      try {
+        expect(await pipeFails(dir, "not_found", 3)).toBe("No call 0123456789ab: it ended (ghostly call list)");
+      } finally {
+        server.close();
+      }
     }
   });
 

@@ -1817,7 +1817,13 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   }
   const audio = call.audio;
   const socket = connect(audio.socket);
-  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  // The call ended between `call.get` and here: its socket is gone, or a file stays where nothing listens. It said
+  // "No such file or folder: the path", or Node's raw "connect ECONNREFUSED …".
+  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); }).catch((error: unknown) => {
+    client.close();
+    const code = (error as { code?: unknown }).code;
+    throw code === "ENOENT" || code === "ECONNREFUSED" ? new CliError("not_found", `No call ${call.call}: it ended (ghostly call list)`) : error;
+  });
   // The call's token first: until it comes, the socket is nobody's (WISP 1100 § Calls).
   socket.write(`${audio.token}\n`);
   process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
