@@ -3,7 +3,7 @@ import { createChatInvite, createDeviceInvite } from "@ghostly/core";
 import { afterEach, expect, it, vi, describe } from "vitest";
 import { Root } from "../../Root";
 import { takeDeviceLink } from "../../lib/devices";
-import { listSessions } from "../../lib/storage";
+import { ensureSession, listSessions } from "../../lib/storage";
 import { readInvite } from "../../lib/url";
 import { axeViolations } from "../axe";
 import { fakeEngine } from "../fakeEngine";
@@ -95,6 +95,34 @@ it.each([
   rerender(<Root />);
   await waitFor(() => expect(listSessions()).toHaveLength(3));
   expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
+}, 60_000);
+
+// covers: invite.link, profiles.lock
+/*
+ * Invite links to chats already here (joined before, or this profile's own invite) opened while locked: they only open
+ * their chat, so they take no place among the links that may make chats, as with the app unlocked. A new contact's
+ * invite that comes after them still makes its chat after the unlock, with no "too many" refusal.
+ */
+it("invite links to chats already here, opened while locked, leave room for a new one after the unlock", async () => {
+  const joined = [createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode];
+  for (const code of joined) { const reading = readInvite(code); if (reading.ok) ensureSession(reading.keys); }
+  const fresh = createChatInvite().inviteCode;
+  window.location.hash = `#${joined[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const code of [joined[1], joined[2], fresh]) {
+    window.location.hash = `#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+  expect(listSessions()).toHaveLength(3);
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(4));
+  const reading = readInvite(fresh);
+  expect(listSessions().some((s) => reading.ok && s.peerPubKeyB64 === reading.keys.peerPubKeyB64)).toBe(true);
+  expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
 }, 60_000);
 
 // covers: invite.invalid, invite.link, profiles.lock
