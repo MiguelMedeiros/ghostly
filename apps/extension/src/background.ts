@@ -1,4 +1,4 @@
-import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, concatBytes, fromBase64, guardViewerAnswer, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, concatBytes, fromBase64, guardViewerAnswer, toBase64, utf8Encode, viewerResponseHeaders, withViewerPolicy } from "@ghostly/core";
 import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerPage, type ViewerReply, type ViewerTaken } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
@@ -487,6 +487,14 @@ const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRe
 const sandboxed = (policy: string) => `${policy}; sandbox allow-scripts allow-same-origin allow-forms`;
 
 /**
+ * The policy of Ghostly's own page in the tab (`answerFailed`): nothing loads or frames, its style its own. It is on the
+ * app's origin, so the app can frame it and reach its window, where the guards never run: a `data:` frame put there
+ * would copy on a timer, as no page of the app's may (`VIEWER_GUARD_CSP`). Desktop's `OWN_ANSWER_CSP` and the web
+ * runner's `ownPolicy` (apps/web/src/svc/worker.ts) are the same.
+ */
+const OWN_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; base-uri 'none'";
+
+/**
  * What each page of the app runs first, as on the web (apps/web/src/svc/worker.ts): the clipboard guard. No policy or
  * sandbox flag keeps a page off `execCommand("copy")`, which Chromium lets write for seconds after a tap. The WebRTC
  * guard is not needed: no tab opens while Hide my IP from contacts is on.
@@ -886,7 +894,7 @@ async function answerFailed(tabId: number, requestId: string, binding: ViewerBin
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
-      { name: "content-security-policy", value: sandboxed(viewerServicePolicy(false)) },
+      { name: "content-security-policy", value: sandboxed(OWN_PAGE_CSP) },
     ],
     body: toBase64(utf8Encode(html)),
   }, binding);

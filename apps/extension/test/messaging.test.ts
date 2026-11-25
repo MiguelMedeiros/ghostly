@@ -341,7 +341,7 @@ describe("viewer tabs", () => {
     expect(request.init.maxResponseBytes).toBe(32 * 1024 * 1024);
   });
 
-  it("serves every answer with Ghostly's connection policy after the contact's own, the error page's too", async () => {
+  it("serves every answer with Ghostly's connection policy after the contact's own; the error page loads and frames nothing", async () => {
     const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'; sandbox allow-scripts allow-same-origin allow-forms";
     const policies = (params: Record<string, unknown>) =>
       (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
@@ -355,11 +355,19 @@ describe("viewer tabs", () => {
     engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"], ["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
     expect(policies((await pauseRequest(world, tabId, { url }, "Document")).params)).toEqual([`default-src * http: ws: ${CLIPBOARD_GUARD_HASH}, img-src *, ${VIEWER_GUARD_CSP}, ${policy}`]);
 
+    // The error page is on the app's origin, which can frame it and reach its window: a `data:` frame put in it would
+    // run where the clipboard guard never does. It needs nothing but its own style.
+    const own = "default-src 'none'; style-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-same-origin allow-forms";
     const offline = await httpError("offline", "offline");
     engineControl().respond = async () => {
       throw offline;
     };
-    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([own]);
+    // The app can make it on purpose: a page it answers with a file to save.
+    engineControl().respond = async () => okResponse("PK", 200, [["content-type", "application/zip"], ["content-disposition", "attachment"]]);
+    const download = (await pauseRequest(world, tabId, { url: `${url}a.zip` }, "Document")).params;
+    expect(download.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "download" });
+    expect(policies(download)).toEqual([own]);
   });
 
   it("shows a page the contact's app answers as a file to save as the error page, not a download: the tab's own navigation has no sandbox", async () => {

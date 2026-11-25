@@ -86,7 +86,7 @@ describe("the services worker", () => {
       expect(page.headers.get("referrer-policy")).toBe("same-origin");
       const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(GO_SCRIPT)));
       expect(page.headers.get("content-security-policy"))
-        .toBe(`frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; script-src 'sha256-${btoa(String.fromCharCode(...digest))}'`);
+        .toBe(`frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; script-src 'sha256-${btoa(String.fromCharCode(...digest))}'; form-action 'none'; base-uri 'none'`);
       const token = /<script data-go="([0-9a-f-]+)">/.exec(await page.text())?.[1];
       expect(token).toBeTruthy();
       // Nothing reached the contact: in another site's frame the page never renders, and no one asks again.
@@ -322,7 +322,7 @@ describe("the services worker", () => {
       const response = await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
       expect(response.status).toBe(503);
       expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
-      expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; style-src 'unsafe-inline'");
+      expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'");
       const html = await response.text();
       expect(html).toContain('<html lang="ar" dir="rtl">');
       expect(html).toContain("<p>لا يمكن الوصول &#60;b&#62;إليه&#60;/b&#62;</p>");
