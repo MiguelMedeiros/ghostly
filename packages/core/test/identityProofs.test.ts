@@ -4,7 +4,7 @@ import { createIdentity } from "../src/identity";
 import {
   emptyIdentityLedger, IDENTITY_CHECK_UNAVAILABLE, IdentityCheckUnavailable, identityRefusal, identityStatement, identityStatementText, IdentityExchange, isIdentityBinding, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, identityRevocationValue, IDENTITY_REVOCATION_LABEL, signIdentityPresentation, verifyIdentityPresentation, IDENTITY_CHALLENGE_WINDOW,
-  type IdentityBinding, type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
+  type IdentityBinding, type IdentityDisplay, type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
   IDENTITY_REUSE_CHECK_S,
 } from "../src/identityProofs";
 import { lastSharedWithMe } from "../src/identityTimeline";
@@ -650,7 +650,8 @@ describe("identity timeline, from the exchange", () => {
 
 describe("a share asked again after its result was lost", () => {
   /** Alice shares; Bob verifies and keeps it, but his result never reaches her (the link closed during his check). */
-  async function lostResult(second: () => Promise<VerifiedIdentity>) {
+  /** `display`: a public name Bob looked up for the proof meanwhile. */
+  async function lostResult(second: () => Promise<VerifiedIdentity>, display?: IdentityDisplay) {
     const w = world(), { alice, bob } = w.ids;
     let check = 0;
     let release!: () => void;
@@ -668,6 +669,7 @@ describe("a share asked again after its result was lost", () => {
     await vi.waitFor(() => expect(w.ledger(bob, alice).received[0]?.status).toBe("verified"));
     await new Promise(r => setTimeout(r, 0));
     expect(w.ledger(alice, bob).shared[0].status).toBe("pending");
+    if (display) w.ledger(bob, alice).received[0].display = display;
     // Reconnect past the hour a verified check is reused for (`IDENTITY_REUSE_CHECK_S`): the share still pending is asked
     // again, and Bob checks it a second time.
     w.online.add(`${alice}>${bob}`);
@@ -701,5 +703,23 @@ describe("a share asked again after its result was lost", () => {
     expect(w.ledger(alice, bob).shared[0].status).toBe("accepted");
     expect(card(alice, bob)).toEqual(["shared:verified"]);
     expect(card(bob, alice)).toEqual(["shared:verified"]);
+  });
+
+  const looked: IdentityDisplay = { name: "Alice PGP", source: "keys.openpgp.org", fetchedAt: 1 };
+  it("a second check that passes keeps the public name looked up for the proof", async () => {
+    const { w, alice, bob } = await lostResult(async () => ({ subject: externalKey, source: "Test signature" }), looked);
+    expect(w.ledger(bob, alice).received).toEqual([expect.objectContaining({ status: "verified", checkedAt: w.now(), display: looked })]);
+  });
+
+  it("a second check that names another subject drops the name looked up for the first", async () => {
+    const { w, alice, bob } = await lostResult(async () => ({ subject: "someone-else", source: "Test signature" }), looked);
+    const [r] = w.ledger(bob, alice).received;
+    expect(r).toMatchObject({ status: "verified", verified: { subject: "someone-else" } });
+    expect(r).not.toHaveProperty("display");
+  });
+
+  it("a second check that fails keeps the looked-up name on the unconfirmed copy, as a re-check does", async () => {
+    const { w, alice, bob } = await lostResult(async () => { throw new Error("The record is gone"); }, looked);
+    expect(w.ledger(bob, alice).received[0]).toMatchObject({ status: "unconfirmed", display: looked });
   });
 });
