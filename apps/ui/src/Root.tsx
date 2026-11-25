@@ -139,11 +139,12 @@ function ChatLinkIntake() {
   useEffect(() => {
     // A device code's link that names the profile, opened while the app was open already: the join host takes it.
     const named = namedDeviceLink(pathname, hash);
-    if (named) { setInvalid(null); linkTaken("invite"); offerDeviceLink(named); navigate("/", { replace: true }); return; }
+    if (named) { if (!held.current.length) setInvalid(null); linkTaken("invite"); offerDeviceLink(named); navigate("/", { replace: true }); return; }
     const rest = inviteRouteCode(pathname);
     if (!rest) return;
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
-    if (isDeviceCode(rest)) { setInvalid(null); linkTaken("invite"); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
+    // While invites wait for the unlock, it leaves a refusal made among them (one past the limit) to be said after it.
+    if (isDeviceCode(rest)) { if (!held.current.length) setInvalid(null); linkTaken("invite"); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
     if (reading.ok) {
       // A good link answers for itself: an earlier link's refusal, kept until closed, would read as this one's. Under the
@@ -170,8 +171,8 @@ function ChatLinkIntake() {
     linkTaken("invite");
     navigate("/", { replace: true });
   }, [pathname, hash, navigate, open]);
-  // Not under the lock: a refusal made there is said only after it, whatever came next.
-  useOtherLink("invite", useCallback(() => { if (!locked.current) setInvalid(null); }, []));
+  // While invites wait for the unlock, a refusal made among them (one past the limit) is said after it, whatever came next.
+  useOtherLink("invite", useCallback(() => { if (!held.current.length) setInvalid(null); }, []));
 
   useEffect(() => {
     if (!heldCount || waits) return;

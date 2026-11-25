@@ -1,10 +1,12 @@
 import { render, waitFor, act, screen } from "@testing-library/react";
-import { createChatInvite } from "@ghostly/core";
+import { createChatInvite, createDeviceInvite } from "@ghostly/core";
 import { afterEach, expect, it, vi, describe } from "vitest";
 import { Root } from "../../Root";
+import { takeDeviceLink } from "../../lib/devices";
 import { listSessions } from "../../lib/storage";
 import { readInvite } from "../../lib/url";
 import { axeViolations } from "../axe";
+import { fakeEngine } from "../fakeEngine";
 
 // covers: invite.link, profiles.lock
 
@@ -21,7 +23,7 @@ vi.mock("../../contexts/LockScreenContext", async (importOriginal) => ({
   }),
 }));
 
-afterEach(() => { window.location.hash = ""; lock.isLocked = true; });
+afterEach(() => { window.location.hash = ""; lock.isLocked = true; takeDeviceLink(); });
 
 it("an invite link opened while locked makes its chat only after the lock is passed", async () => {
   const code = createChatInvite().inviteCode;
@@ -76,6 +78,8 @@ it("invite links opened while locked each make their chat after the unlock, up t
 it.each([
   ["an invite link already held", (codes: string[]) => `#${codes[0]}`],
   ["a group's link", () => "#/join/group2/after"],
+  ["a device code's link", () => `#${createDeviceInvite(new Uint8Array(32).fill(7)).code}`],
+  ["a device code's link that names the profile", () => `#Ana#${createDeviceInvite(new Uint8Array(32).fill(7)).code}`],
 ])("the refusal of an invite link past the limit is still said after the unlock when %s comes next", async (_, next) => {
   const codes = [createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode];
   window.location.hash = `#${codes[0]}`;
@@ -218,6 +222,29 @@ describe("a refused invite link and the lock screen", () => {
     rerender(<Root />);
     await waitFor(() => expect(listSessions()).toHaveLength(1));
     await waitFor(() => expect(window.location.hash).toBe(`#/chat/${listSessions()[0].id}`));
+    expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+  }, 60_000);
+
+  /*
+   * A refusal said before the lock is no link's past the limit: a group's link held under it answers for itself, and the
+   * notice left there would sit over the group that link opens after the unlock.
+   */
+  it("a refusal said before the lock goes when a group's link held under it opens its group after the unlock", async () => {
+    fakeEngine.on("joinGroupByLink", () => ({ groupId: "g1" }));
+    lock.isLocked = false;
+    const { rerender } = render(<Root />);
+    await screen.findByTestId("sidebar");
+    go(`#/${damaged()}`);
+    expect(await screen.findByTestId("invite-link-invalid")).toHaveTextContent(REFUSAL);
+
+    lock.isLocked = true;
+    rerender(<Root />);
+    go("#/join/group2/abc");
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+
+    lock.isLocked = false;
+    rerender(<Root />);
+    await waitFor(() => expect(window.location.hash).toBe("#/group/g1"));
     expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
   }, 60_000);
 });
