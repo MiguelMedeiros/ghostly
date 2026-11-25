@@ -10692,6 +10692,10 @@ export class GhostlyNode implements EngineImplementation {
    * The chats before every group link, whatever order they come in: leaving limited mode, the network back on and
    * "Hide my IP" switched start the links in the engine's order, every private group's edges first, and with 10 mesh
    * groups of 32 the chat about to be opened waited for 310 edges to derive their keys and seal their records.
+   *
+   * Chats last live in the same millisecond (a restart brings many back on one round of relay answers) go in the order
+   * of their ids, whatever order they come in: the line was the caller's list before (the stored order at start, the
+   * order chats were added in when the network came back), so which of them took the first turns hung on who asked.
    */
   private nativeStartOrder(linkIds: string[]): string[] {
     const isChat = (id: string) => { const stored = this.links.get(id)?.stored; return !!stored && !stored.group; };
@@ -10704,7 +10708,7 @@ export class GhostlyNode implements EngineImplementation {
     }));
     const chats = [...rank.keys()].sort((a, b) => {
       const x = rank.get(a)!, y = rank.get(b)!;
-      return Number(y.nativeOnly) - Number(x.nativeOnly) || y.recent - x.recent;
+      return Number(y.nativeOnly) - Number(x.nativeOnly) || y.recent - x.recent || (a < b ? -1 : a > b ? 1 : 0);
     });
     chats.forEach((id, place) => traceLink(this.links.get(id)!.myPubKeyZ32, "native-order", { place, ...rank.get(id) }));
     return [...chats, ...linkIds.filter(id => !rank.has(id))];
