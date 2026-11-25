@@ -180,7 +180,10 @@ async function digestOf(source: FileSource): Promise<string> {
 function profileSource(database: string): HandoffSource {
   let db: IDBDatabase | null = null;
   let files = new Map<string, { file: HandoffFile; source: FileSource }>();
-  const digests = new Map<string, string>();
+  // Hashes read here, by file id, with the size they were read at: the source lives as long as the engine, and a file
+  // cut short then written whole again (an app's files fetched back) is not offered under the short one's hash.
+  const digests = new Map<string, { size: number; sha256: string }>();
+  const hashedAt = (id: string, size: number) => { const held = digests.get(id); return held?.size === size ? held.sha256 : undefined; };
   const open = async () => (db ??= await openAsStored(database));
   async function load(): Promise<Map<string, { file: HandoffFile; source: FileSource }>> {
     const peer = await open();
@@ -197,9 +200,9 @@ function profileSource(database: string): HandoffSource {
       // group file's digest is its author's from the announcement on, before any byte came: until its bytes passed it
       // (`done`), what is stored under it can be another file a member served whole, so it is read and hashed.
       const checked = !file.group || file.direction === "out" || file.transfer?.state === "done";
-      let sha = digests.get(file.id) ?? (checked && typeof file.digest === "string" && DIGEST.test(file.digest) ? file.digest : undefined);
+      let sha = hashedAt(file.id, source.size) ?? (checked && typeof file.digest === "string" && DIGEST.test(file.digest) ? file.digest : undefined);
       if (!sha) { sha = await digestOf(source).catch(() => undefined); if (!sha) continue; }
-      digests.set(file.id, sha);
+      digests.set(file.id, { size: source.size, sha256: sha });
       found.set(file.id, { file: { id: file.id, size: source.size, sha256: sha }, source });
     }
     // The apps' bundles, where their records say they are: one not here (it needs its files on this device too) is not.
@@ -213,13 +216,14 @@ function profileSource(database: string): HandoffSource {
       const size = store ? await store.size(id).catch(() => null) : null;
       if (!store || !size) continue;
       const kept = size === length ? sha256 : undefined;
-      let sha = digests.get(id) ?? kept;
+      // The record's own first: written again whole meanwhile, the file got it then.
+      let sha = kept ?? hashedAt(id, size);
       if (!sha) {
         sha = await store.digest(id).catch(() => undefined);
         if (sha && size === length && !sha256) await keepBundleHash(peer, ref, digest, kind, sha).catch(() => {});
       }
       if (!sha) continue;
-      digests.set(id, sha);
+      digests.set(id, { size, sha256: sha });
       found.set(id, { file: { id, size, sha256: sha }, source: { size, read: (offset, length) => store.read(id, offset, length) } });
     }
     return found;
