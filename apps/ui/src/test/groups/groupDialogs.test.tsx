@@ -155,6 +155,40 @@ describe("GroupMembersDialog", () => {
     expect(live.textContent).toBe("⁨Alice⁩ is now the admin");
   });
 
+  // The focus goes to the list and the member's row goes with them: nothing said that the removal went through.
+  it.each(["mesh", "community"] as const)("says whom I removed once Remove went through, and nothing when the engine refused the next (%s)", async profile => {
+    const { user, engine } = members_(groupView({ status: "active", isAdmin: true, profile, members }));
+    const live = screen.getByTestId("group-members-live");
+    engine.on("removeGroupMember", () => undefined);
+    await user.click(within(row(ALICE)).getByTestId("group-remove-member"));
+    await user.click(screen.getByTestId("group-remove-confirm"));
+    expect(live.textContent).toBe("You removed ⁨Alice⁩");
+    engine.on("removeGroupMember", () => { throw new Error("Only the admin can do that"); });
+    await user.click(within(row(BOB)).getByTestId("group-remove-member"));
+    await user.click(screen.getByTestId("group-remove-confirm"));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(live, "the removal before is not said again as this one's").toBeEmptyDOMElement();
+  });
+
+  // Save closes the field and Rename takes the focus back: the heading's new name was not read.
+  it("says the group's new name once Rename went through, cleaned as the engine keeps it, and nothing when it refused the next", async () => {
+    const { user, engine } = members_(groupView({ status: "active", isAdmin: true, members }));
+    const live = screen.getByTestId("group-members-live");
+    const renameTo = async (name: string) => {
+      await user.click(screen.getByTestId("group-rename"));
+      await user.clear(screen.getByTestId("group-rename-input"));
+      await user.type(screen.getByTestId("group-rename-input"), `${name}{Enter}`);
+    };
+    engine.on("renameGroup", () => undefined);
+    await renameTo("Book  club");
+    expect(screen.queryByTestId("group-rename-input")).not.toBeInTheDocument();
+    expect(live.textContent).toBe("You renamed the group to “⁨Book club⁩”");
+    engine.on("renameGroup", () => { throw new Error("Only the admin can rename the group"); });
+    await renameTo("Chess club");
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(live, "the rename before is not said again as this one's").toBeEmptyDOMElement();
+  });
+
   // The ask stays open while the member's leave arrives: the engine then refuses with core's "Not a member", which read
   // in English in every language.
   it.each(["mesh", "community"] as const)("a Hand over admin or Remove confirmed after the member left says so in the language (%s)", async profile => {

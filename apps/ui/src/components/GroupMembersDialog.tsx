@@ -64,7 +64,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const [removing, setRemoving] = useState<GroupMemberView | null>(null);
   /** The member whose Hand over admin was pressed: the one admin role leaves me for them, so it is asked first too. */
   const [promoting, setPromoting] = useState<GroupMemberView | null>(null);
-  /** What the dialog's live line says: whom the admin role went to. */
+  /** What the dialog's live line says: whom the admin role went to, whom I removed, the group's new name. */
   const [said, setSaid] = useState("");
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
@@ -106,7 +106,9 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     if (!groupName(name)) return;
     const found = confirmed ? null : findSecret(name);
     if (found) { setSecret(found); return; }
-    await run("rename", async () => { await engine.call("renameGroup", { groupId: live.id, name }); endNaming(); });
+    setSaid("");
+    // Rename takes the focus back, the new name only in the heading: said once, as the engine keeps it.
+    await run("rename", async () => { await engine.call("renameGroup", { groupId: live.id, name }); endNaming(); setSaid(t("group.event.renamedYou", { group: isolate(groupName(name)!) })); });
   };
   // Change picture's file field: where the focus goes once Remove, gone with the picture, has done its work.
   const pictureInput = useRef<HTMLInputElement>(null);
@@ -241,14 +243,19 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
     </div>}
     {error && <Notice problem={error} className="mt-3 text-sm" />}
     {removing && <RemoveMemberDialog name={memberName(removing, t, sameNamed(live.members))} linkOn={!!live.entryLink} returnFocus={list} onClose={() => setRemoving(null)}
-      onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
+      onConfirm={() => {
+        const key = removing.key, name = memberName(removing, t, sameNamed(live.members));
+        setRemoving(null); setSaid("");
+        void run(key, async () => { await engine.call("removeGroupMember", { groupId: live.id, key }); setSaid(t("group.event.goneByYou", { name: isolate(name) })); });
+      }} />}
     {promoting && <MakeAdminDialog name={memberName(promoting, t, sameNamed(live.members))} linkEnds={!!live.entryLink && live.profile !== "community"} returnFocus={list} onClose={() => setPromoting(null)}
       onConfirm={() => {
         const key = promoting.key, name = memberName(promoting, t, sameNamed(live.members));
         setPromoting(null); setSaid("");
         void run(key, async () => { await engine.call("makeGroupAdmin", { groupId: live.id, key }); setSaid(t("group.event.admin", { name: isolate(name) })); });
       }} />}
-    {/* The role handed over, said once: the focus goes to the list and the row's buttons go with the role, silently. */}
+    {/* The role handed over, a member removed or the group renamed, said once: the focus goes to the list (or Rename) and
+        what changed goes with the row's buttons, the row or the field, silently. */}
     <p role="status" data-testid="group-members-live" className="sr-only">{said}</p>
     {secret && <SecretGuardDialog finding={secret} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void rename(true); }} />}
     {/* A community whose link is off says so here too: "anyone with the link can join" no longer holds, and a member has no link panel. */}
