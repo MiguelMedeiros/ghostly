@@ -56,6 +56,13 @@ it("says each limit with the value it is set to", () => {
   }
 });
 
+it("says the handshake shares a relay set to 1 to 4 handshakes really keeps", () => {
+  const shares = (handshakes: number) => ["listen share", "incoming"].map(kind => limitReasons({ ...DEFAULT_LIMITS, handshakes }).get(`refused handshake ${kind}`)?.split(" waiting")[0]);
+  expect(shares(1)).toEqual(["1 incoming handshake", "1 incoming handshake"]);
+  expect(shares(3)).toEqual(["1 incoming handshake", "3 incoming handshakes"]);
+  expect(shares(4)).toEqual(["1 incoming handshake", "3 incoming handshakes"]);
+});
+
 it("lists every limit's log word in the README, for an operator who searches it", () => {
   const readme = readFileSync(new URL("../../../infra/services/hyperdht-relay/README.md", import.meta.url), "utf8");
   for (const kind of limitReasons(DEFAULT_LIMITS).keys()) expect(readme).toContain(`\`${kind}\``);
