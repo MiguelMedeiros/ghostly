@@ -232,6 +232,55 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(bob.session.state.nicks[carol.session.myKey]).toBe("Carol New");
   });
 
+  it("a member's name said from a clock far ahead gives way to the member's next one", async () => {
+    const net = new Net();
+    const now = 1_800_000_000_000;
+    net.now = () => now;
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    const carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    // Carol's clock runs a day ahead, then is set right.
+    for (const [text, nick, at] of [["hi", "Carol Ahead", now + 86_400_000], ["hi again", "Carol Fixed", now + 1000]] as const) {
+      const sent = await carol.session.sendText(text, nick, at);
+      if ("error" in sent) throw new Error(sent.error);
+      await net.settle();
+    }
+    expect(net.texts(bob)).toEqual(expect.arrayContaining(["hi", "hi again"]));
+    expect(bob.session.state.nicks[carol.session.myKey]).toBe("Carol Fixed");
+  });
+
+  it("a name an edge says is no time of the member's: a later rename from a clock behind mine is taken, an older message still is not", async () => {
+    const net = new Net();
+    const now = 1_800_000_000_000;
+    net.now = () => now;
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    const carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    // Carol's clock runs 5 minutes behind Bob's: the edge says her name, then she renames.
+    await bob.session.setNick(carol.session.myKey, "Carol Edge");
+    const renamed = await carol.session.sendText("renamed", "Carol Renamed", now - 4 * 60_000);
+    if ("error" in renamed) throw new Error(renamed.error);
+    await net.settle();
+    expect(bob.session.state.nicks[carol.session.myKey]).toBe("Carol Renamed");
+
+    // Carol's clock runs 5 minutes ahead: a message she wrote before the edge said her newer name comes late.
+    bob.online = false;
+    for (const [text, nick, at] of [["old", "Carol Old", now + 4 * 60_000], ["new", "Carol New", now + 5 * 60_000]] as const) {
+      const sent = await carol.session.sendText(text, nick, at);
+      if ("error" in sent) throw new Error(sent.error);
+    }
+    await net.settle();
+    const [older, newer] = carol.session.state.store.filter(f => f.s === carol.session.myKey).slice(-2);
+    bob.online = true;
+    await bob.session.handle(carol.session.myKey, clone(newer));
+    await bob.session.setNick(carol.session.myKey, "Carol New");
+    await bob.session.handle(carol.session.myKey, clone(older));
+    expect(net.texts(bob)).toEqual(expect.arrayContaining(["old", "new"]));
+    expect(bob.session.state.nicks[carol.session.myKey]).toBe("Carol New");
+  });
+
   it("adding derives the next secret: members compute it, the newcomer cannot go back", async () => {
     const net = new Net();
     const alice = net.create("alice");

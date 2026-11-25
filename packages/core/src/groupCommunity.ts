@@ -481,8 +481,8 @@ export interface CommunityState {
   seen: Record<string, Record<string, { high: number; window: number[]; gap?: [number, number, number]; floor?: number }>>;
   nicks: Record<string, string>;
   /**
-   * Member → the time of the frame its name in `nicks` came from, or of the moment an edge last said it (`setNick`): a
-   * name from an older frame is not taken. Absent in older states.
+   * Member → the time (the member's clock) of the newest frame a name in `nicks` came from: a name from an older frame
+   * is not taken. None for a frame past `COMMUNITY_LIMITS.lastingAheadMs` ahead of mine. Absent in older states.
    */
   nickAt?: Record<string, number>;
   /** Recent frames from everyone (mine included), oldest first. */
@@ -2654,9 +2654,13 @@ export class CommunitySession {
     if ([text !== undefined, isObject(parsed.x), isObject(parsed.p)].filter(Boolean).length !== 1) return false;
     const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
     // Only from a frame newer than the one the name I hold came from: a catch-up's older message, or one said again
-    // under a newer commit, never brings back a name the member changed since.
-    if (nick && raw.ts > (this.state.nickAt?.[raw.s] ?? 0)) {
-      (this.state.nickAt ??= {})[raw.s] = raw.ts;
+    // under a newer commit, never brings back a name the member changed since. A time further ahead of my clock than
+    // `COMMUNITY_LIMITS.lastingAheadMs` is no time (as for `keepLasting`): its name is taken, but holds no later one off.
+    const nickBound = (this.hooks.clock?.() ?? Date.now()) + COMMUNITY_LIMITS.lastingAheadMs;
+    const nickAt = this.state.nickAt?.[raw.s] ?? 0;
+    if (nick && (raw.ts > nickAt || nickAt > nickBound)) {
+      if (raw.ts <= nickBound) (this.state.nickAt ??= {})[raw.s] = raw.ts;
+      else if (this.state.nickAt) delete this.state.nickAt[raw.s];
       if (this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
     }
     let onRow: boolean | void = false, fleeting = false;
@@ -2944,8 +2948,8 @@ export class CommunitySession {
   setNick(key: string, nick: string | undefined): Promise<void> {
     return this.serialize(async () => {
       const clean = sanitizeNick(nick);
-      // Said now on an edge: a message written before it no longer names the member.
-      if (clean) (this.state.nickAt ??= {})[key] = this.hooks.clock?.() ?? Date.now();
+      // Said now on an edge. `nickAt` keeps the time of the member's newest message whose name I took: my clock is not
+      // the member's, so a rename the member writes after this, from a clock behind mine, is still taken.
       if ((this.state.nicks[key] ?? undefined) === clean) return;
       if (clean) this.state.nicks[key] = clean; else delete this.state.nicks[key];
       await this.persist();
