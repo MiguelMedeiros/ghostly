@@ -945,6 +945,12 @@ export class Groups {
   /** A group's pin now (WISP 400 § Pinned message), the latest one taken, unpinned or not. */
   pinOf(groupId: string): StoredPin | undefined { return this.record(groupId)?.pin; }
 
+  /**
+   * The pin said over an edge as it opens: none while it names a message deleted for everyone. A member let in after
+   * the deletion (or back after a removal) never got it, and would show a pin its members do not.
+   */
+  pinToSay(groupId: string): StoredPin | undefined { return this.pinGone(groupId) ? undefined : this.pinOf(groupId); }
+
   /** Keeps a pin when it is newer than the group's (the last pin wins): true when it was. */
   async setPin(groupId: string, pin: StoredPin): Promise<boolean> {
     const group = this.record(groupId);
@@ -981,12 +987,17 @@ export class Groups {
   }
 
   private pinned(view: GroupView): GroupView {
-    const record = this.record(view.id), kept = record?.pin;
+    const kept = this.pinOf(view.id);
     // The pinned message was deleted for everyone: nothing of it stays, its pin neither (agents#1646). The pin is kept
     // as it came, so the same pin said again (a catch-up) is no newer, and shown as unpinned.
-    const gone = !!kept?.id && !!record?.removedIds?.some(id => id === kept.id || id === kept.messageId);
-    const pin = pinView(gone ? { ...kept!, id: "", messageId: undefined } : kept);
+    const pin = pinView(this.pinGone(view.id) ? { ...kept!, id: "", messageId: undefined } : kept);
     return pin ? { ...view, pin } : view;
+  }
+
+  /** Whether the group's pin names a message its author deleted for everyone (shown as unpinned: `pinned`). */
+  private pinGone(groupId: string): boolean {
+    const record = this.record(groupId), kept = record?.pin;
+    return !!kept?.id && !!record?.removedIds?.some(id => id === kept.id || id === kept.messageId);
   }
 
   private meshViews(): GroupView[] {
