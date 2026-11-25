@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { useMyAvatar } from "../hooks/useAvatars";
@@ -11,10 +11,15 @@ import { InstallMenuItem } from "./InstallApp";
 import { openJoinAnother } from "../lib/devices";
 import { listText } from "../lib/listText";
 import { StatusMenuItem } from "./StatusPicker";
+import { safeAreaInsets } from "../hooks/useFloatingBox";
 
 const LockIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
 );
+
+/** The popover's gap over the account bar (`mb-1`), and what it keeps clear of the top of the window. */
+const POPOVER_GAP = 4;
+const POPOVER_MARGIN = 8;
 
 /**
  * The switcher itself: the active profile on top in its colors, which opens the Profile page, and its status (StatusPicker.tsx); the others
@@ -36,6 +41,20 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
   const { current, others } = glances;
   const items = () => [...(menuRef.current?.querySelectorAll<HTMLElement>("[role^='menuitem']") ?? [])];
 
+  // Over the account bar the popover is as tall as its rows: on a phone on its side (390px high) a second profile
+  // already put its top off the screen, with nothing to scroll. It takes the room above the bar and scrolls in it.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (variant !== "popover" || !menu) return;
+    const fit = () => {
+      const bar = menu.offsetParent?.getBoundingClientRect();
+      if (!bar) return;
+      menu.style.maxHeight = `${Math.max(0, Math.floor(bar.top - safeAreaInsets().top - POPOVER_GAP - POPOVER_MARGIN))}px`;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [variant, others.length]);
   // The most likely next step has focus: the first other profile, or adding one (past this profile and its status).
   useEffect(() => { items()[2]?.focus(); }, []);
   // Back (Android's back gesture) closes it alone, as every other menu and sheet.
@@ -73,7 +92,7 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
     <div ref={menuRef} role="menu" aria-label={t("profileSwitcher.title")} data-testid="profile-switcher" onKeyDown={onKeyDown}
       className={variant === "sheet"
         ? "profile-switcher-sheet fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t border-border bg-panel-header p-2 pb-safe shadow-2xl"
-        : "profile-switcher-popover absolute left-2 right-2 bottom-full mb-1 z-50 max-w-80 rounded-xl border border-border bg-panel-header p-1.5 shadow-2xl"}>
+        : "profile-switcher-popover absolute left-2 right-2 bottom-full mb-1 z-50 max-w-80 overflow-y-auto overscroll-contain rounded-xl border border-border bg-panel-header p-1.5 shadow-2xl"}>
       {variant === "sheet" && <div aria-hidden="true" className="mx-auto mb-2 mt-0.5 h-1 w-9 rounded-full bg-border-bright" />}
       <div className="flex items-center justify-between gap-2 px-3 pt-1 pb-1.5">
         <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("profileSwitcher.title")}</span>

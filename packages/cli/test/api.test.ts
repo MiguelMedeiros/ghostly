@@ -1625,6 +1625,9 @@ describe("settings", () => {
       [{ hyperdhtRelay: "ftp://x" }, "Use a wss:// relay address", "hyperdhtRelay: use a wss:// relay address"],
       // One past what a contact reads (pairedTransports.ts relayUrlTooLong).
       [{ irohRelays: ["https://x.example/long"] }, "Use a shorter relay address: https://x.example/long", "irohRelays: use a shorter relay address: https://x.example/long"],
+      // A relay's user:password@ and ?query are not said back.
+      [{ irohRelays: ["https://alice:s3cret@iroh.lan/?token=t0k"] }, "Not a relay address: https://alice:s3cret@iroh.lan/?token=t0k", "irohRelays: not a relay address: https://iroh.lan/"],
+      [{ hyperdhtRelay: "wss://alice:s3cret@relay.lan/#t0k" }, "Not a relay address: wss://alice:s3cret@relay.lan/#t0k", "hyperdhtRelay: not a relay address: wss://relay.lan/"],
     ];
     for (const [patch, engine, said] of refusals) {
       node.updateSettings.mockRejectedValueOnce(new Error(engine));
@@ -1639,6 +1642,7 @@ describe("settings", () => {
       [["ftp://x"], "relays: not a relay address: ftp://x"],
       [["ftp://relay.example.org"], "relays: use an https:// relay address: ftp://relay.example.org"],
       [["wss://relay.example.org", "notaurl"], "relays: use an https:// relay address: wss://relay.example.org"],
+      [["wss://alice:s3cret@relay.example.org/?token=t0k"], "relays: not a relay address: wss://relay.example.org/"],
     ];
     for (const [relays, said] of refusals) {
       await expect(callApi(ctx, "settings.set", { relays })).rejects.toMatchObject({ code: "bad_request", message: said });

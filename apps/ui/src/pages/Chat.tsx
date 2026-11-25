@@ -638,7 +638,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // On a touch screen the focus goes to the chat's name as it opens, not to the page (hooks/useOpenedHeading.ts).
   const headingRef = useRef<HTMLHeadingElement>(null);
   useOpenedHeading(headingRef, visible ? sessionId : null);
-  const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), callButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (sessionId) {
@@ -1093,8 +1093,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined}
-            scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle"} />
-          <CallButtons phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
+            scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle" && !ringsIn}
+            declineRingIn={ringsIn ? rejectCall : undefined} />
+          <CallButtons audioRef={callButtonRef} phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
           {/* Options dropdown */}
@@ -1414,6 +1415,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           layer={callLayer}
           pinned={!visible}
           onReturnToChat={() => nav.conversation(chatPath(sessionId))}
+          // Answered by End and answer, the call has no button of its own to give the focus back to: this chat's has it.
+          returnFocus={() => (visible ? callButtonRef.current : null)}
           callState={webrtc.callState}
           localStream={webrtc.localStream}
           remoteStream={webrtc.remoteStream}
@@ -1490,7 +1493,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         never moves. */}
     {appHere && params && (
       <ChatAppPanel linkId={appHere} sessionId={sessionId} contact={{ name: shownName, named: !isAnonymous }}
-        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle"} />
+        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle" && !ringsIn}
+        declineRingIn={ringsIn ? rejectCall : undefined} />
     )}
     {/* Why an app did not open here, over the app that covers the chat: over the whole window, above its panel. */}
     <Toast toast={appWhy} onDismiss={dismissAppWhy} testId="chat-app-why" />

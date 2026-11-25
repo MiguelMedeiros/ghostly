@@ -61,7 +61,10 @@ describe("settings set", () => {
   it("refuses a HyperDHT relay with a login or a token, which every contact would be told, and keeps none", { timeout: 60_000 }, async () => {
     const dir = home("settings-hyperdht-relay");
     for (const bad of ["wss://alice:hunter2@relay.example", "wss://relay.example/?token=s3cr3t", "wss://relay.example/#s3cr3t"]) {
-      expect(error(await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", bad]), "bad_request", 1).message).toBe(`hyperdhtRelay: not a relay address: ${bad}`);
+      // The refusal names the relay without its login, password, query or fragment.
+      const { message } = error(await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", bad]), "bad_request", 1);
+      expect(message).toMatch(/^hyperdhtRelay: not a relay address: wss:\/\/relay\.example\/?$/);
+      expect(message).not.toMatch(/alice|hunter2|s3cr3t/);
     }
     // None kept: the default (none) is what `settings get` shows.
     expect(ok(await ghostly(["--home", dir, "settings", "get"])).hyperdhtRelay).toBe("");

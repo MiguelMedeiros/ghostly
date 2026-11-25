@@ -126,7 +126,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `button update <chat\|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none\|confirmed\|sent] [--timeout s]` | Answer a question you sent with `send --button` (WISP 406 · Message Buttons): `--chosen` shows which button won, `--close` takes presses no more, `--text` changes the text (shown as edited; refused if blank, or if it looks like a secret, unless `--force`); the buttons and, unless given, the text stay. `<message>` is the `messageId` send gave. Answers `{chat \| group, buttons, messageId, card, edits}` |
 | `call auto [on\|off] [--from <chat>]… [--rate n]` | Answer calls by themselves, from anyone or the chats named (kept in the profile) |
 | `call hangup [<chat\|call>]`, `call list`, `call flush [<chat\|call>]` | Hang up (or decline); calls on now; drop the audio queued and not played yet |
-| `call pipe [<chat\|call>]` | A call's audio on stdin and stdout, for shell pipelines (sox, ffmpeg) |
+| `call pipe [<chat\|call>]` | A call's audio on stdin and stdout, for shell pipelines (sox, ffmpeg). Ctrl-C stops the pipe and the call goes on (exit 130; stderr says how to end it) |
 | `call start <chat> [--rate 48000]`, `call answer [<chat\|call>] [--rate n]` | Voice calls (daemon): the result names the call's audio socket ([Calls](#calls)) |
 | `chat accept <chat> [<method> [--off] [--networks mainnet,testnet]]` | Which ways of paying the chat takes (no method: the ones it takes now, per network) |
 | `chat connect <chat>`, `chat disconnect <chat> [--hold <minutes>]` | Reconnect now (ends a hold; a contact whose app is not there is `unavailable`, the dial's own words in `details.reason`); close the live session, or with `--hold` stay off the direct link that long ([Staying off the direct link](#staying-off-the-direct-link)) |
@@ -245,7 +245,8 @@ chat's own "DHT only" choice (WISP 400: either side choosing it keeps both off t
 time is up. Meanwhile text still goes over the DHT (a text of about 248 bytes at most once sealed, an edit about
 214; a longer text is refused up to 256 bytes and waits past them, a longer edit is refused), files, calls and
 typing wait, and the contact's app shows the chat as DHT only. A hold, or `chat transport <chat> dht`, while a call
-is on in the chat is refused (`busy`): hang the call up first. `chat connect`, or `--hold 0`, ends it early. The
+is on in the chat is refused (`busy`): hang the call up first (a contact's call that only rings in is declined, and
+the chat goes to the DHT). `chat connect`, or `--hold 0`, ends it early. The
 hold is kept in the profile folder, and a `profile backup` carries it: a daemon that restarts (or a restored copy
 that starts) takes it back when its time is up, and a DHT only the chat had chosen itself (`chat transport dht`) is
 never undone by it. A `chat transport` chosen during a hold ends the

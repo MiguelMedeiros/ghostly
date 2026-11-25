@@ -2686,8 +2686,12 @@ export class GhostLink {
     // is currently offline.
     if (!this.isDataLinkOpen) {
       // Invalidate an older, incomplete attempt. A late native dial must not
-      // install a session using preferences that have since been changed.
-      if (this.channel || this.dialing || this.dataLink.state !== "idle") this.disconnect();
+      // install a session using preferences that have since been changed. Not this side's answer to the contact's
+      // offer while WebRTC may carry the chat: leaving DHT only answers it (`streamBlockChanged`) just before the menu
+      // applies the transport picked, and cancelled, the contact's offer waited out its 90 s before it offered again.
+      // A session it opens elsewhere than chosen moves there (the switch intent).
+      const answering = this.attempt?.side === "answered" && (fallback || preferred === "webrtc/1");
+      if (!answering && (this.channel || this.dialing || this.dataLink.state !== "idle")) this.disconnect();
       // Someone chose: the dialling side tries at once, the choice first.
       if (automatic || choice) this.dialNow();
       return;

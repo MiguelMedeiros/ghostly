@@ -42,9 +42,17 @@ describe("the Desktop host's identity reads", () => {
     vi.stubGlobal("fetch", page);
     invoke.mockImplementation(async (command) => command === "hold_fetch" ? { status: 200, contentType: "application/did+json", bodyB64: btoa("{}") } : undefined);
     const answer = await read()("https://contact.example/.well-known/did.json", { headers: { accept: "application/did+json" } });
-    expect(invoke).toHaveBeenCalledWith("hold_fetch", { url: "https://contact.example/.well-known/did.json", headers: [["accept", "application/did+json"]] });
+    expect(invoke).toHaveBeenCalledWith("hold_fetch", { url: "https://contact.example/.well-known/did.json", headers: [["accept", "application/did+json"]], maxBytes: 64 * 1024, timeoutMs: 10_000 });
     expect(page).not.toHaveBeenCalled();
     expect(answer).toMatchObject({ status: 200, contentType: "application/did+json", text: "{}" });
+  });
+
+  it("tell Rust the read's own size and time, not a held item's, and refuse what Rust found past the size", async () => {
+    invoke.mockImplementation(async () => ({ status: 200, contentType: "", bodyB64: "" }));
+    await boundedIdentityFetch({ online: () => true, timeoutMs: 7_000, fetcher: identityFetch() })("https://contact.example/x", { maxBytes: 256 * 1024 });
+    expect(invoke).toHaveBeenCalledWith("hold_fetch", expect.objectContaining({ maxBytes: 256 * 1024, timeoutMs: 7_000 }));
+    invoke.mockImplementation(async () => { throw "The held item is too large"; });
+    await expect(read()("https://contact.example/.well-known/did.json")).rejects.toThrow("Identity check response too large");
   });
 
   it("fail when Rust refuses a name that leads to this machine or its network", async () => {
