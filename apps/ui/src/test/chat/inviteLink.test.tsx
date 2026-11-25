@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { createChatInvite, createDeviceInvite } from "@ghostly/core";
+import { createChatInvite, createDeviceInvite, createIdentity, createLink, encodeInviteCode } from "@ghostly/core";
 import { afterEach, expect, it, describe } from "vitest";
 import { Root } from "../../Root";
 import { deleteSession, ensureSession, listSessions, LINK_CHATS_WAITING, linkChatsWaiting, saveSession } from "../../lib/storage";
@@ -195,6 +195,27 @@ describe("how many link-made chats may wait for an answer", () => {
     expect(linkChatsWaiting()).toBe(LINK_CHATS_WAITING - 1);
     await follow(codes[codes.length - 1]);
     await waitFor(() => expect(listSessions()).toHaveLength(LINK_CHATS_WAITING + 1));
+  }, 120_000);
+
+  it("a link with a joined chat's seed but another contact's keys makes a new chat, so it counts toward the limit", async () => {
+    const { invite, inviteCode } = createChatInvite();
+    const reading = readInvite(inviteCode);
+    if (!reading.ok) throw new Error("a fresh invite reads");
+    const joined = ensureSession(reading.keys);
+    const others = Array.from({ length: LINK_CHATS_WAITING + 3 }, () =>
+      encodeInviteCode({ ...invite, peerPubKeyZ32: createIdentity().pubKeyZ32, encKeyB64: createLink().mine.encKeyB64 }));
+    window.location.hash = "#/";
+    render(<Root />);
+    for (const code of others) await follow(code);
+
+    // Each would make a chat of its own: only the first ones may, the others are refused.
+    expect(listSessions()).toHaveLength(1 + LINK_CHATS_WAITING);
+    expect(await screen.findByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
+
+    // The joined chat's own link still opens it, with no place taken.
+    await follow(inviteCode);
+    await waitFor(() => expect(window.location.hash).toBe(`#/chat/${joined}`));
+    expect(listSessions()).toHaveLength(1 + LINK_CHATS_WAITING);
   }, 120_000);
 
   it("an invite the person pasted or scanned in Join is not counted, and is not held back", () => {
