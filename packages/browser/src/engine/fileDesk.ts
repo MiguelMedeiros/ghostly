@@ -35,7 +35,7 @@ export interface FileDeskDeps {
   receivedBytes(linkId: string): number;
   /** Wire ids this chat used already, in either direction. */
   wireIds(linkId: string): Set<string> | undefined;
-  /** A message the person deleted here: a transfer for it is not taken. */
+  /** A message the person deleted here, or any of a blocked contact's (`setContactBlocked`): a transfer for it is not taken. */
   deleted(linkId: string, messageId: string): boolean;
   /** A message the chat holds already (a new file must not take the id of the contact's text, say). */
   messageExists?(linkId: string, messageId: string): Promise<boolean>;

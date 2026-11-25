@@ -1185,7 +1185,7 @@ export class GhostlyNode implements EngineImplementation {
     writable: (linkId) => this.links.get(linkId)?.link?.filesWritable(),
     receivedBytes: (linkId) => this.links.get(linkId)?.files.receivedBytes ?? 0,
     wireIds: (linkId) => this.links.get(linkId)?.files.wireIds,
-    deleted: (linkId, messageId) => !!this.links.get(linkId)?.stored.deletedIds?.includes(messageId),
+    deleted: (linkId, messageId) => !!this.links.get(linkId)?.stored.deletedIds?.includes(messageId) || this.blockedChat(this.links.get(linkId)?.stored),
     messageExists: (linkId, messageId) => db.hasMessage(linkId, messageId),
     namesMine: (linkId, wireId) => this.namesMine(linkId, wireId),
     storeMessage: (message) => this.storeMessage(message),
@@ -3758,6 +3758,33 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
+  async setContactBlocked({ peerPubKeyZ32, blocked }: { peerPubKeyZ32: string; blocked: boolean }): Promise<void> {
+    if (typeof peerPubKeyZ32 !== "string" || !peerPubKeyZ32) throw new Error("Name the contact's key");
+    const list = this.settings.blockedContacts ?? [];
+    if (list.includes(peerPubKeyZ32) === blocked) return;
+    const chats = [...this.links.values()].filter(({ stored }) => stored.profile && !stored.group && stored.peerPubKeyZ32 === peerPubKeyZ32);
+    // A contact told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
+    if (blocked && chats.some(({ stored }) => stored.wakeToken)) await this.rotateWake();
+    const next = blocked ? [...list, peerPubKeyZ32] : list.filter(key => key !== peerPubKeyZ32);
+    this.settings = { ...this.settings, blockedContacts: next };
+    if (!next.length) delete this.settings.blockedContacts;
+    await db.putSettings(this.settings);
+    for (const live of chats) {
+      // An offer heard before the block rings no more, and holds no handoff back.
+      if (blocked) this.offersWaiting.delete(live.stored.id);
+      if (blocked && live.stored.wakeToken) { live.stored = { ...live.stored, wakeToken: undefined }; await db.patchLink(live.stored.id, { wakeToken: undefined }); }
+      // Blocked: the contact forgets how to wake this app (now, or on its next session); unblocked: it gets a new token.
+      await this.shareWake(live.stored.id);
+      this.chatChanged(live.stored.id);
+    }
+    this.emitState();
+  }
+
+  /** A 1:1 chat whose contact is blocked here (`setContactBlocked`): nothing it sends is taken. */
+  private blockedChat(stored: StoredLink | undefined): boolean {
+    return !!stored && !stored.group && !!stored.peerPubKeyZ32 && !!this.settings.blockedContacts?.includes(stored.peerPubKeyZ32);
+  }
+
   async setWakeMuted({ linkId, muted }: { linkId: string; muted: boolean }): Promise<void> {
     if (linkId.startsWith("group:")) return this.setGroupWakeMuted(linkId.slice("group:".length), muted);
     const live = this.links.get(linkId);
@@ -3907,7 +3934,7 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     const own = this.settings.wake;
     if (!live?.link?.supportsWake) return;
-    if (live.stored.wakeMuted) { live.link.sendWake(null); return; }
+    if (live.stored.wakeMuted || this.blockedChat(live.stored)) { live.link.sendWake(null); return; }
     if (!own) return;
     let token = live.stored.wakeToken;
     if (!token) {
@@ -4679,6 +4706,8 @@ export class GhostlyNode implements EngineImplementation {
   private async receiveEdit(linkId: string, edit: WireEdit): Promise<boolean> {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group) return false;
+    // A blocked contact's is confirmed and dropped: what shows of its messages stays as it was.
+    if (this.blockedChat(live.stored)) return true;
     const id = `peer_${edit.id}`;
     // A refused payment's line is the app's (`shared/refusals.ts`), under an id the contact's payment gave its time to:
     // no edit or removal of the contact's takes it.
@@ -7911,6 +7940,8 @@ export class GhostlyNode implements EngineImplementation {
     delete (settings as Partial<Settings>).wakeOnline;
     delete (settings as Partial<Settings>).wakeMutedGroups;
     delete (settings as Partial<Settings>).wakeHeldBy;
+    // Only through setContactBlocked, which also tells each blocked contact not to wake this app.
+    delete (settings as Partial<Settings>).blockedContacts;
     delete (settings as Partial<Settings>).wakeRenew;
     // Only through setGroupTransport, which starts the group's edges again on it.
     delete (settings as Partial<Settings>).groupTransports;
@@ -9920,13 +9951,18 @@ export class GhostlyNode implements EngineImplementation {
             ...(stored.profile && message.card && { card: message.card }),
           });
         },
-        onCallSignal: (signal) => { this.callSignalHeard(linkId, signal); this.events.onCallSignal(linkId, signal); },
+        // A blocked contact's never rings: no page, host or CLI hears it, and nothing answers it.
+        onCallSignal: (signal) => {
+          if (this.blockedChat(live.stored)) return;
+          this.callSignalHeard(linkId, signal); this.events.onCallSignal(linkId, signal);
+        },
         // Presence, not a message: only the state shows it, nothing is stored or counted.
         onPeerTyping: () => this.chatChanged(linkId),
         // So are presence and a set status; a status that ends leaves the view when it does.
         onPeerStatus: state => { this.chatChanged(linkId); this.redrawAtStatusEnd(linkId, state.status?.until); },
         // Taken (shown, older than what is shown, or waiting for its message) is confirmed; no room left is not.
-        onReaction: async reaction => (await this.reactions.receive(linkId, "peer", reaction)) !== "dropped",
+        // A blocked contact's is confirmed and dropped, so it is not said again.
+        onReaction: async reaction => this.blockedChat(live.stored) || (await this.reactions.receive(linkId, "peer", reaction)) !== "dropped",
         onReactionReceipt: n => this.reactionReceipt(linkId, n),
         onReactionsTaken: n => this.reactionReceipt(linkId, n, true),
         // A new session: everything not confirmed is said again on it.
@@ -9934,6 +9970,7 @@ export class GhostlyNode implements EngineImplementation {
         // A pin is always taken (shown, or older than the one shown), so always confirmed.
         // One that would not be kept (`keepLinkPin`'s rule) reads no row; confirmed all the same, so it is not said again.
         onPin: async pin => {
+          if (this.blockedChat(live.stored)) return true;
           if (pinIsNewer(this.links.get(linkId)?.stored.pin, pin)) await this.keepLinkPin(linkId, await this.pinCame(linkId, "peer", pin));
           return true;
         },
@@ -9942,9 +9979,10 @@ export class GhostlyNode implements EngineImplementation {
         onAppFrame: this.appsOn ? event => this.events.onAppFrame?.(linkId, event) : undefined,
         onAppRangeTask: this.appsOn ? task => this.appRangeAsked(linkId, task) : undefined,
         // Each way of paying is checked where it is used: what this chat does not allow is dropped or refused.
-        onPaymentRequest: (request) => this.desk.onPaymentRequest(linkId, request),
-        onPaymentAsk: (ask) => this.desk.onPaymentAsk(linkId, ask),
-        onPayment: (payment) => this.desk.onPayment(linkId, payment),
+        // A blocked contact's request, ask or payment is not answered: its ecash stays its own to take back.
+        onPaymentRequest: (request) => this.blockedChat(live.stored) ? undefined : this.desk.onPaymentRequest(linkId, request),
+        onPaymentAsk: (ask) => this.blockedChat(live.stored) ? undefined : this.desk.onPaymentAsk(linkId, ask),
+        onPayment: (payment) => this.blockedChat(live.stored) ? undefined : this.desk.onPayment(linkId, payment),
         onPaymentResult: async (result) => {
           await this.desk.onPaymentResult(linkId, result);
           // Its receipt, whatever the answer (the bubble says taken or refused): the contact's app has the payment.
@@ -11033,6 +11071,8 @@ export class GhostlyNode implements EngineImplementation {
     // Its place, in the order rows come (before anything is awaited).
     message = this.placed(message, place);
     const live = this.links.get(message.linkId);
+    // A blocked contact's: dropped with nothing shown, counted or notified; the chat keeps what it had.
+    if (message.sender === "peer" && this.blockedChat(live?.stored)) return false;
     // A chat deleted in this run takes no row again: none would ever be shown, nor deleted with it. Nor does one deleted
     // while this store is under way (its reply looked for, its row written), even when the same invite was joined again
     // meanwhile under the same id: checked after every wait below (`kept`).
@@ -11140,10 +11180,12 @@ export class GhostlyNode implements EngineImplementation {
       groups: live.link?.groupsSupport ?? false,
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
       callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
-      ...(stored.profile && !stored.group && live.link?.peerTyping ? typingView(live.link.peerTypingActivity) : {}),
+      // A blocked contact's typing and status show nothing either.
+      ...(stored.profile && !stored.group && live.link?.peerTyping && !this.blockedChat(stored) ? typingView(live.link.peerTypingActivity) : {}),
       ...(stored.profile && !stored.group && live.link?.peerStatus?.presence ? { peerPresence: live.link.peerStatus.presence } : {}),
-      ...(stored.profile && !stored.group && live.link?.peerStatus?.status ? { peerStatus: live.link.peerStatus.status } : {}),
+      ...(stored.profile && !stored.group && live.link?.peerStatus?.status && !this.blockedChat(stored) ? { peerStatus: live.link.peerStatus.status } : {}),
       ...(stored.profile && !stored.group && { wakeToken: this.settings.wake ? stored.wakeToken : undefined, peerWakes: !!stored.peerWake, ...(stored.wakeMuted && { wakeMuted: true }) }),
+      ...(this.blockedChat(stored) && { blocked: true as const }),
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       // The pinned message was deleted for everyone: nothing of it stays, its pin neither, as in a group (`Groups.pinned`).
       // The pin is kept as it came, so the same pin said again is no newer; one kept before it was marked, by `removedRefs`.
