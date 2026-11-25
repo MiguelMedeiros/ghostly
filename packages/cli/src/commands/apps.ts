@@ -1,5 +1,5 @@
 import { CliError, shownValue } from "../errors";
-import { here, localStat, readInput, type Command } from "./shared";
+import { fileHere, here, localStat, readInput, type Command } from "./shared";
 
 /**
  * `app serve --grant`: chat or name (appServe.ts's GRANTABLE), or internet and files, which the method refuses with
@@ -15,7 +15,7 @@ function grants(values: unknown): void {
 /** The key file a command signs with: always named, never a default, never on the command line itself. */
 function keyFile(value: unknown, usage: string): string {
   if (typeof value !== "string" || !value) throw new CliError("usage", `--key <file> is needed: ghostly ${usage}`);
-  return value;
+  return fileHere(value)!;
 }
 
 /**
@@ -75,7 +75,7 @@ export const commands: Record<string, Command> = {
       out: { type: "string", description: "Where the bundle goes (default <dir>/app.ghostlyapp); the bundle there is the version this one follows" },
       sequence: { type: "number", description: "This version's sequence, higher than the bundle at --out's (default: one more than it)" },
     },
-    run: async ({ options }, a) => (await import("../apps")).publishApp(a.dir!, keyFile(options.key, "app publish <dir> --key <file> [--out <file>] [--sequence n]"), here(options.out), options.sequence as number | undefined),
+    run: async ({ options }, a) => (await import("../apps")).publishApp(a.dir!, keyFile(options.key, "app publish <dir> --key <file> [--out <file>] [--sequence n]"), fileHere(options.out), options.sequence as number | undefined),
   },
   "app revoke": {
     method: "app.revoke", usage: "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]",
