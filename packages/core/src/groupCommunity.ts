@@ -2,7 +2,7 @@ import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { pacer } from "./appBundle";
 import { concatBytes, fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
-import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
+import { identityFromSeedB64, publicKeyFromZ32, sign, verify, verifyAsync } from "./identity";
 import { sanitizeNick, unwrapPasted } from "./text";
 import {
   confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, groupCallKey, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
@@ -2601,8 +2601,9 @@ export class CommunitySession {
     // would be dropped below whether the signature holds or not.
     if (this.isDuplicate(raw)) { this.handedInAnswer(from, raw, now); return false; }
     // Signed by its author before anything else, so a frame no member wrote takes no member's place among those waiting
-    // (`park`).
-    if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
+    // (`park`). By the host's async check where it gives one (a page's WebCrypto): inside `serialize`, nothing else of
+    // this session runs meanwhile.
+    if (!(await verifyAsync(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s)))) return false;
     // Someone removed is heard no more, even for an epoch it was in (whose secret it still holds); one who left, for
     // what it wrote before its leave only (and for the epochs it was in: the roster check below).
     if (!this.heardAfterOut(raw)) return false;
