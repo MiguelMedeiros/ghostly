@@ -13,6 +13,7 @@ const READS = [
   "events", "status", "chat history", "chat list", "chat show", "message details", "group history", "group list", "group show",
   "file list", "payment list", "wallet history", "wallet list", "identity contact", "identity list", "identity providers",
   "service list", "service peer", "call auto", "group auto", "chat accept", "call list", "app served", "x401 credential list", "saved list", "status show",
+  "contact blocked",
 ];
 /**
  * Changes that stay on this device: no contact and no relay hears of them. This profile's status too: no relay carries
@@ -22,6 +23,8 @@ const READS = [
 const LOCAL_WRITES = [
   "app serve", "app unserve", "chat remove", "chat rename", "identity cancel", "saved add", "saved remove", "service add", "status clear", "status set",
   "x401 credential add", "x401 credential remove", "x401 key new", "lightning default", "lightning rename",
+  // The blocked contact is told not to wake this app on its next session, as a set status is said.
+  "contact block", "contact unblock",
 ];
 /**
  * Said on a live session only: a one-shot starts the chat or group as it says it, so it reaches nobody (it waited for

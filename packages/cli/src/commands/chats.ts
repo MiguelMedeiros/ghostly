@@ -92,6 +92,9 @@ export const commands: Record<string, Command> = {
     options: { until: { type: "string", choices: ["live", "text", "paired"], description: "live (default), text or paired" }, timeout: { type: "number", description: "Seconds (default 60)" } },
     params: ({ options }, { chat }) => ({ chat, until: options.until, timeout: timeout(options, LONG_WAIT_SECONDS) }),
   },
+  "contact block": { method: "contact.block", usage: "contact block <chat>", summary: "Block a chat's contact: nothing it sends is kept or rings, in every chat with it; the chats stay", args: ["chat"], params: (_, { chat }) => ({ chat }) },
+  "contact blocked": { method: "contact.blocked", usage: "contact blocked", summary: "The contacts blocked here, with their chats" },
+  "contact unblock": { method: "contact.unblock", usage: "contact unblock <chat|key>", summary: "Unblock a contact, by one of its chats or its key", args: ["chat"], params: (_, { chat }) => ({ chat }) },
   "forward": {
     method: "chat.forward", usage: "forward <chat|group> <message>... --to <chat|group>... [--force] [--wait none|sent] [--timeout s]",
     summary: "Forward messages (texts, files from the bytes here) to up to 5 chats and groups, as new messages of yours",

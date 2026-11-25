@@ -44,6 +44,8 @@ export interface ChatJson {
   compatibility: boolean;
   /** The contact sent a picture (checked by the engine; `engine getState` has it). */
   peerPicture: boolean;
+  /** Its contact is blocked here (`contact block`): nothing it sends is kept or rings. */
+  blocked: boolean;
 }
 
 /**
@@ -97,6 +99,7 @@ export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
     invite: link.pairing?.status === "ready" || !link.inviteCode ? null : showSecret === true ? link.inviteCode : "<hidden>",
     compatibility: !link.profile,
     peerPicture: !!link.peerAvatar,
+    blocked: !!link.blocked,
   };
 }
 
