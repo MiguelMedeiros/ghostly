@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { describe, expect, it, vi } from "vitest";
+import { nativeEd25519 } from "../src/nativeEd25519";
 // covers: headless.one-shot
 
 // noble's ed25519 is frozen: a spy cannot go on it, so the module hands out a counting verify.
@@ -28,5 +29,43 @@ describe("a signature the CLI's engine checks", () => {
     forged[0] ^= 1;
     expect(verify(forged, message, key)).toBe(false);
     expect(verify(signature, utf8Encode("another frame"), key)).toBe(false);
+  });
+
+  it("is refused by Node's check alone and by noble's strict check alike when S is out of range, the key is of small order or a bit is flipped", () => {
+    const L = ed25519.Point.Fn.ORDER;
+    const le = (n: bigint) => Uint8Array.from({ length: 32 }, (_, i) => Number((n >> BigInt(8 * i)) & 0xffn));
+    const sOf = (sig: Uint8Array) => sig.subarray(32).reduceRight((n, b) => (n << 8n) | BigInt(b), 0n);
+    const withS = (sig: Uint8Array, s: bigint) => Uint8Array.from([...sig.subarray(0, 32), ...le(s)]);
+    const seed = randomBytes(32), key = ed25519.getPublicKey(seed), message = new TextEncoder().encode("a group frame");
+    const good = ed25519.sign(message, seed);
+    const flipped = good.slice();
+    flipped[40] ^= 1;
+    // A point of order 2.
+    const orderTwo = le((1n << 255n) - 20n);
+    const cases: [string, Uint8Array, Uint8Array][] = [
+      ["S + L", withS(good, sOf(good) + L), key],
+      ["S = L", withS(good, L), key],
+      ["small-order key (order 2)", good, orderTwo],
+      ["one bit flipped", flipped, key],
+    ];
+    const refused = (check: () => boolean) => { try { return !check(); } catch { return true; } };
+    for (const [name, sig, pub] of cases) {
+      expect({ name, native: refused(() => nativeEd25519(sig, message, pub)) }).toEqual({ name, native: true });
+      expect({ name, noble: refused(() => ed25519.verify(sig, message, pub, { zip215: false })) }).toEqual({ name, noble: true });
+    }
+    expect(nativeEd25519(good, message, key)).toBe(true);
+    expect(ed25519.verify(good, message, key, { zip215: false })).toBe(true);
+  });
+
+  it("keeps a small-order key away from Node's check, which alone takes the identity key's constant signature", async () => {
+    await import("../src/runtime/engine");
+    const { verify } = await import("@ghostly/core");
+    const le = (n: bigint) => Uint8Array.from({ length: 32 }, (_, i) => Number((n >> BigInt(8 * i)) & 0xffn));
+    const identity = le(1n), identitySig = Uint8Array.from([...identity, ...le(0n)]);
+    const message = new TextEncoder().encode("any message at all");
+    // Node's (OpenSSL's) cofactorless check says yes for any message: that is why the gate never asks it about such a key.
+    expect(nativeEd25519(identitySig, message, identity)).toBe(true);
+    expect(ed25519.verify(identitySig, message, identity, { zip215: false })).toBe(false);
+    expect(verify(identitySig, message, identity)).toBe(false);
   });
 });
