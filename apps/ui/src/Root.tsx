@@ -101,8 +101,9 @@ function ChatLinkIntake() {
   const locked = useRef(waits);
   locked.current = waits;
   /**
-   * The invites links brought while locked or asking, oldest first, each once, kept in memory only: as many as links may
-   * make chats (`LINK_CHATS_WAITING`), each made in turn after. One past them is refused, said after the unlock.
+   * The invites links brought while locked or asking, oldest first, each once, kept in memory only: as many new chats'
+   * as links may make (`LINK_CHATS_WAITING`), each made in turn after, and any to chats already here. One past them is
+   * refused, said after the unlock.
    */
   const held = useRef<SessionKeys[]>([]);
   const [heldCount, setHeldCount] = useState(0);
@@ -151,10 +152,14 @@ function ChatLinkIntake() {
       // lock only a link it holds does: one held already, or refused past the limit, leaves a refusal not yet said.
       linkTaken("invite");
       if (!locked.current) { setInvalid(null); open(reading.keys); return; }
+      // A link to a chat already here (joined, or this profile's own invite) takes no place among them, as after the
+      // unlock: it makes no chat. Only a link that takes a place clears a refusal: one to a chat here, past a refused
+      // one, leaves it said.
       const list = held.current;
       const keys = reading.keys;
       if (!list.some((k) => k.seedB64 === keys.seedB64 && k.peerPubKeyB64 === keys.peerPubKeyB64)) {
-        if (list.length < LINK_CHATS_WAITING) { setInvalid(null); list.push(keys); }
+        const room = list.filter((k) => classifyInvite(k).kind === "new").length < LINK_CHATS_WAITING;
+        if (room || classifyInvite(keys).kind !== "new") { if (room) setInvalid(null); list.push(keys); }
         else setInvalid("join.tooManyLinks");
       }
       setHeldCount(list.length);
