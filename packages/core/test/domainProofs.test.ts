@@ -15,6 +15,14 @@ describe('domain names', () => {
     expect(normalizeDomain(' Example.COM. ')).toBe('example.com');
     expect(normalizeDomain('https://Sub.Example.com/')).toBe('sub.example.com');
     expect(normalizeDomain('bücher.de')).toBe('xn--bcher-kva.de');
+    // NIP-05's root identifier names the domain itself; a web address is taken over http too, or with its slash.
+    expect(normalizeDomain('_@Example.com')).toBe('example.com');
+    expect(normalizeDomain('_@bücher.de')).toBe('xn--bcher-kva.de');
+    expect(normalizeDomain('_@xn--bcher-kva.de')).toBe('xn--bcher-kva.de');
+    expect(normalizeDomain('http://Sub.Example.com')).toBe('sub.example.com');
+    expect(normalizeDomain('HTTP://example.com/')).toBe('example.com');
+    expect(normalizeDomain('example.com/')).toBe('example.com');
+    expect(normalizeDomain('_@example.com.')).toBe('example.com');
     expect(dnsProofName('Example.com')).toBe('_ghostly.example.com');
     expect(wellKnownUrl('example.com')).toBe('https://example.com/.well-known/ghostly.json');
     expect(wellKnownUrl('example.com', 'nip05')).toBe('https://example.com/.well-known/nostr.json?name=_');
@@ -24,8 +32,11 @@ describe('domain names', () => {
     ['', /Enter a domain/], ['example', /full domain/], ['127.0.0.1', /IP address/], ['0x7f.1', /IP address/], ['[::1]', /without a path/],
     ['localhost', /full domain/], ['app.localhost', /private networks/], ['printer.local', /private networks/], ['nas.home.arpa', /private networks/],
     ['x.internal', /private networks/], ['a.onion', /private networks/], ['example.com:8443', /without a path/],
-    ['example.com/path', /without a path/], ['http://example.com', /without a path/], ['https://example.com/x', /without a path/],
-    ['user@example.com', /without a path/], ['-bad.com', /not a valid/], ['a_b.com', /not a valid/], [`${'a'.repeat(64)}.com`, /not a valid|too long/],
+    ['example.com/path', /without a path/], ['http://example.com/x', /without a path/], ['https://example.com/x', /without a path/],
+    ['user@example.com', /without a path/], ['_@_@example.com', /without a path/], ['_@example.com/x', /without a path/],
+    ['_@https://example.com', /without a path/], ['https://_@example.com', /without a path/], ['http://example.com:8080', /without a path/],
+    ['ftp://example.com', /without a path/], ['example.com//', /without a path/], ['_ @example.com', /without a path/], ['_@', /Enter a domain/],
+    ['/', /Enter a domain/], ['_@printer.local', /private networks/], ['-bad.com', /not a valid/], ['a_b.com', /not a valid/], [`${'a'.repeat(64)}.com`, /not a valid|too long/],
     [`${'abcdefgh.'.repeat(28)}com`, /too long/],
   ])('refuses %j', (input, message) => {
     expect(() => normalizeDomain(input)).toThrow(message);
