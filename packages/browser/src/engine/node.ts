@@ -9666,10 +9666,12 @@ export class GhostlyNode implements EngineImplementation {
       groupsSupport: !!stored.profile,
       // Heard only while this is the chat's link: once the chat is deleted, nothing it hears is acted on.
       events: whileChat({
+        // Its chat's view alone is built again: with the relays out of reach, each waiting invite's publish fails every 4 s,
+        // and 40 of them built every chat's and group's view about 40 times a minute on an idle daemon (bug hunt, 2026-11-25).
         onPairingProgress: progress => {
           if (knockCue(live.pairingProgress, progress)) this.cueFeedback({ cue: "knock", key: `${linkId}:${progress.startedAt}` }, linkId);
           live.pairingProgress = progress;
-          this.emitState();
+          this.chatChanged(linkId);
         },
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
@@ -9738,7 +9740,7 @@ export class GhostlyNode implements EngineImplementation {
           live.discoveryError = error ?? undefined;
           // The contact's packet cannot be read: the listener let go while it was away listens again (`contactGone`).
           if (live.goneListener && this.contactUnread(live)) this.listenAgain(live);
-          this.emitState();
+          this.chatChanged(linkId);
         },
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
           const patch = { peerDescriptors, peerTransports, peerFallback };
