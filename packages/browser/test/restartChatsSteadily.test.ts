@@ -285,7 +285,9 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
       } as unknown as StoredLink);
     }
     const node = engine(unlimited(), { resumesAtOnce: 1 });
-    await settled(node.start());
+    // Started with the clock still: fake time run during the start (`settled`), more of it the slower the machine, let
+    // chat-0's first read find its contact away and end its turn, then chat-1's and chat-2's, before the line is read.
+    await node.start();
     const turns = node["resumeTurns"] as ResumeTurns;
     expect([...turns["running"]], "resuming").toEqual(["chat-0"]);
     expect(turns["line"], "waiting").toEqual(["chat-1", "chat-2"]);
