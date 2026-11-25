@@ -304,6 +304,28 @@ describe("MessageBubble: a picture link under each shell's img-src", () => {
   });
 
   it.each([
+    ["the site answers 404", async () => new Response("", { status: 404 })],
+    ["what comes is over the 5 MiB a picture may have", async () => answer(new Uint8Array(6 * 1024 * 1024))],
+    ["what comes is a page, not a picture", async () => answer(new TextEncoder().encode("<html>".repeat(100_000)))],
+  ])("my own picture link is read once for a bubble drawn again, not again each time, when %s", async (_, respond) => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(respond);
+    const url = "https://cdn.example.com/photos/cat.png";
+    let now = 1_700_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    for (let i = 0; i < 3; i++) {
+      const { unmount } = bubble({ text: url, sender: "me" });
+      expect(await screen.findByRole("link", { name: url })).toHaveAttribute("href", url);
+      unmount();
+    }
+    expect(fetched).toHaveBeenCalledTimes(1);
+    // Some minutes later the site may answer: the bubble drawn again asks it again.
+    now += 5 * 60_000;
+    bubble({ text: url, sender: "me" });
+    expect(await screen.findByRole("link", { name: url })).toBeInTheDocument();
+    expect(fetched).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
     ["a chat", {}],
     ["a group", { linkId: "group:g1" }],
   ])("in %s, a contact's picture shown once and edited to another address asks again before it is read", async (_, props) => {
