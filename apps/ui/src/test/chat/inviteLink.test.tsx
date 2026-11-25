@@ -4,6 +4,7 @@ import { afterEach, expect, it, describe } from "vitest";
 import { Root } from "../../Root";
 import { deleteSession, ensureSession, listSessions, LINK_CHATS_WAITING, linkChatsWaiting, saveSession } from "../../lib/storage";
 import { readInvite, inviteRouteCode } from "../../lib/url";
+import { problemText } from "../../lib/problemText";
 import { takeDeviceLink, takeDeviceLinkFromAddress } from "../../lib/devices";
 import { fakeEngine } from "../fakeEngine";
 
@@ -197,7 +198,12 @@ describe("how many link-made chats may wait for an answer", () => {
     await waitFor(() => expect(listSessions()).toHaveLength(LINK_CHATS_WAITING + 1));
   }, 120_000);
 
-  it("a link with a joined chat's seed but another contact's keys makes a new chat, so it counts toward the limit", async () => {
+  /*
+   * A link with a joined chat's seed but another contact's keys makes no chat: the engine keys a chat by its own seed, so
+   * such a chat had the joined chat's link, and what was typed there went to the joined chat's contact. It is refused as
+   * an invalid invite, and takes no place.
+   */
+  it("a link with a joined chat's seed but another contact's keys makes no chat, and is refused", async () => {
     const { invite, inviteCode } = createChatInvite();
     const reading = readInvite(inviteCode);
     if (!reading.ok) throw new Error("a fresh invite reads");
@@ -208,15 +214,32 @@ describe("how many link-made chats may wait for an answer", () => {
     render(<Root />);
     for (const code of others) await follow(code);
 
-    // Each would make a chat of its own: only the first ones may, the others are refused.
-    expect(listSessions()).toHaveLength(1 + LINK_CHATS_WAITING);
-    expect(await screen.findByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
+    expect(listSessions()).toHaveLength(1);
+    expect(await screen.findByTestId("invite-link-invalid")).toHaveTextContent("Invalid invite. Ask for a new one.");
+    expect(linkChatsWaiting()).toBe(0);
 
-    // The joined chat's own link still opens it, with no place taken.
+    // The joined chat's own link still opens it, and a new invite still makes its chat.
     await follow(inviteCode);
     await waitFor(() => expect(window.location.hash).toBe(`#/chat/${joined}`));
-    expect(listSessions()).toHaveLength(1 + LINK_CHATS_WAITING);
+    await follow(createChatInvite().inviteCode);
+    await waitFor(() => expect(listSessions()).toHaveLength(2));
   }, 120_000);
+
+  it("such an invite pasted in Join or tapped on a card makes no chat either, said as an invalid invite", () => {
+    const { invite, inviteCode } = createChatInvite();
+    const reading = readInvite(inviteCode);
+    if (!reading.ok) throw new Error("a fresh invite reads");
+    const joined = ensureSession(reading.keys);
+    const other = readInvite(encodeInviteCode({ ...invite, peerPubKeyZ32: createIdentity().pubKeyZ32, encKeyB64: createLink().mine.encKeyB64 }));
+    if (!other.ok) throw new Error("the other invite reads");
+
+    let refusal: unknown;
+    try { ensureSession(other.keys); } catch (cause) { refusal = cause; }
+    expect(problemText(refusal).title).toBe("Invalid invite. Ask for a new one.");
+    expect(listSessions().map((session) => session.id)).toEqual([joined]);
+    // The joined chat's own keys are still its chat.
+    expect(ensureSession(reading.keys)).toBe(joined);
+  });
 
   it("an invite the person pasted or scanned in Join is not counted, and is not held back", () => {
     for (let at = 0; at < LINK_CHATS_WAITING + 2; at++) {

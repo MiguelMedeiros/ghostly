@@ -117,6 +117,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That message is not in this chat", "packages/browser/src/engine/node.ts"],
   ["No message to forward", "packages/browser/src/engine/node.ts"],
   ["There is no room left on this device for a new chat", "apps/ui/src/lib/storage.ts"],
+  ["This invite's keys belong to another chat on this device", "apps/ui/src/lib/storage.ts"],
   // Any engine call whose storage write the browser refused for want of space (engine/server.ts): Chromium's message is empty.
   ["Not enough space on this device (QuotaExceededError)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],
   ["Not enough space on this device (QuotaExceededError: The quota has been exceeded.)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],

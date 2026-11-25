@@ -1349,11 +1349,16 @@ export function sessionLinkParams(session: ChatSession): LinkParams {
 /** What `ensureSession` throws when a new chat could not be stored: the storage is full (errorText.ts says it). */
 export const NO_ROOM_FOR_CHAT = "There is no room left on this device for a new chat";
 
+/** What `ensureSession` throws for keys whose own seed is another contact's chat here (errorText.ts says it as an invalid invite). */
+export const SEED_OF_ANOTHER_CHAT = "This invite's keys belong to another chat on this device";
+
 /**
  * The id of the session for these keys, stored first if it is new. Chats are
  * routed by this id so the keys never reach the address bar or the history.
  * A new one that could not be stored (or its invite, which the chat shows) throws
- * `NO_ROOM_FOR_CHAT`: its id would open no chat.
+ * `NO_ROOM_FOR_CHAT`: its id would open no chat. One whose own seed is a stored chat's
+ * with another contact throws `SEED_OF_ANOTHER_CHAT`: the engine keys a chat by its own
+ * seed, so it would run on that chat's link, and what is typed in it would go to that contact.
  */
 export function ensureSession(
   keys: SessionKeys,
@@ -1361,6 +1366,7 @@ export function ensureSession(
 ): string {
   const existing = findSession(keys.seedB64, keys.peerPubKeyB64);
   if (existing && existing.profile !== keys.profile) throw new Error("Invitation profile does not match this stored conversation");
+  if (!existing && chatKeys().some((chat) => chat.seed === keys.seedB64)) throw new Error(SEED_OF_ANOTHER_CHAT);
   const id = existing?.id ?? newSessionId();
   if (!existing) {
     const saved = saveSession({
