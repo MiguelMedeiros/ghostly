@@ -3,7 +3,7 @@ import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/ty
 import { callApi, type ApiContext } from "../src/api";
 import { chatJson } from "../src/views";
 import { chatViewOf } from "./support/chatView";
-// covers: headless.cli
+// covers: headless.cli, chat.paired.block
 
 const BOB = "b".repeat(52), CAROL = "c".repeat(52);
 /** An engine that keeps the block list as the real one does (`setContactBlocked`), and marks each chat of a blocked key. */
