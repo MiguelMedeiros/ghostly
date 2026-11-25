@@ -2,13 +2,13 @@ import { appendFileSync, existsSync, readdirSync, readFileSync, rmSync } from "n
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink, setPublicKeyFastPath } from "@ghostly/core";
+import { ACTIVE_DHT_POLL_MS, DAEMON_WATCH_PEER_IDLE_MS, fromBase64Url, RTC_CONFIG, setLinkTraceSink, setPublicKeyFastPath, setVerifyFastPath } from "@ghostly/core";
 import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
 import { CliError, shownRelay, shownValue } from "../errors";
 import { joinLogLine } from "../joinLog";
-import { nativePublicKey } from "../nativeEd25519";
+import { nativeEd25519, nativePublicKey } from "../nativeEd25519";
 import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
@@ -26,6 +26,8 @@ import { rtcThreads } from "./rtcThreads";
 
 // Every chat's keys are derived again at each start, and a one-shot is a start: by Node's Ed25519, not noble's.
 setPublicKeyFastPath(nativePublicKey);
+// And every signature the engine checks (each group frame, record and packet it takes), ~17x faster; only a yes counts.
+setVerifyFastPath(nativeEd25519);
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
