@@ -587,3 +587,34 @@ describe("payments in one millisecond", () => {
     expect(times[3]).toBeGreaterThan(Math.max(...times.slice(0, 3)));
   });
 });
+
+describe("a wallet or payment param sent as null", () => {
+  // Found in a bug hunt: a null went past an `undefined` check to `oneOf` and `num`, read as Testnet, Cashu, Lightning or
+  // 0: a null network listed Testnet only, a null maxFee refused any fee, a null via paid over Lightning.
+  it("is left out, as on the command line", async () => {
+    const { ctx, node } = fake();
+    const listed = await callApi(ctx, "wallet.list", { network: null }) as { offers: { type: string; network: string }[] };
+    expect(listed.offers).toContainEqual(expect.objectContaining({ type: "spark", network: "mainnet" }));
+    expect((await callApi(ctx, "payment.list", { chat: null }) as { payments: { id: string }[] }).payments.map((p) => p.id)).toEqual(["req", "test"]);
+
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", networks: null });
+    expect(node.setChatPaymentMethods).toHaveBeenLastCalledWith({ linkId: "chat-one", methods: { cashu: true } });
+    // No method is what the chat takes, nothing changed: it turned Cashu on (or off with on: false).
+    expect(await callApi(ctx, "chat.accept", { chat: "Alice", method: null })).toMatchObject({ chat: "chat-one" });
+    await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: null, on: false })).rejects.toThrow("on and networks change one method: name it");
+    // A null on or networks next to no method is left out too: a read, not refused.
+    expect(await callApi(ctx, "chat.accept", { chat: "Alice", on: null })).toMatchObject({ chat: "chat-one" });
+    expect(await callApi(ctx, "chat.accept", { chat: "Alice", networks: null })).toMatchObject({ chat: "chat-one" });
+    expect(node.setChatPaymentMethods).toHaveBeenCalledTimes(1);
+
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", maxFee: null })).resolves.toMatchObject({ feeReserve: 3, paid: true });
+
+    await callApi(ctx, "chat.request", { chat: "Alice", amount: 10, method: null, rail: null });
+    expect(node.requestPayment.mock.lastCall![0]).not.toHaveProperty("method");
+    expect(node.requestPayment.mock.lastCall![0]).not.toHaveProperty("rail");
+
+    await callApi(ctx, "chat.payRequest", { chat: "Alice", payment: "test", via: null, maxFee: null });
+    expect(node.payRequest.mock.lastCall![0]).not.toHaveProperty("via");
+    expect(node.payRequest.mock.lastCall![0]).not.toHaveProperty("maxFee");
+  });
+});
