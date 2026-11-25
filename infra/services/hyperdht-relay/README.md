@@ -55,7 +55,7 @@ are in WISP 103, "Browser profile".
 | ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |
 | a client's part of a handshake (its answer) | 15 s | `GHOSTLY_RELAY_HANDSHAKE_MS` |
-| handshakes waiting on one client's answer at once (its dials and incoming ones; one key's incoming ones at most a quarter, and a quarter kept for its dials) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
+| handshakes waiting on one client's answer at once (its dials and incoming ones; one key's incoming ones at most a quarter but at least one, and a quarter rounded down kept for its dials: none at 1 to 3) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
 
 Past a limit the client is dropped, or its socket is paused (the byte rate), or an incoming stream past
 `streams` is closed, or a handshake past `handshakes` is refused (`refused handshake <why>` in the log). Topic lookups and announcements
@@ -80,7 +80,7 @@ at most 5 a minute, then one count a minute while it goes on (`refused address (
 | `dropped stream limit` | a client dialling past `streams` open | `GHOSTLY_RELAY_STREAMS` |
 | `dropped queue`, `closed far queue` | a client holding more than `queuedBytes` unread or untaken, or one of its streams half of it (closed, the client stays) | `GHOSTLY_RELAY_QUEUED_BYTES` |
 | `dropped queue total` | the client holding the most, while all of them hold more than `queuedTotalBytes` | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
-| `refused handshake limit`, `refused handshake listen share`, `refused handshake incoming` | a handshake past `handshakes` waiting on one client, past a quarter of it on one of its keys, or incoming ones past the three quarters left after its dials' | `GHOSTLY_RELAY_HANDSHAKES` |
+| `refused handshake limit`, `refused handshake listen share`, `refused handshake incoming` | a handshake past `handshakes` waiting on one client, past a quarter of it (at least one) on one of its keys, or incoming ones past what is left after its dials' quarter rounded down (all of it at 1 to 3) | `GHOSTLY_RELAY_HANDSHAKES` |
 
 The rest name no limit: `refused stopping` (a new client while the relay stops), `refused origin "<origin>"` (see
 `GHOSTLY_RELAY_ORIGINS` below), `refused listen <code>` (HyperDHT refused the listen, `KEYPAIR_ALREADY_USED` for a key
