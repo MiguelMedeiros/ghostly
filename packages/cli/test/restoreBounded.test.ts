@@ -16,10 +16,11 @@ import { profilePaths } from "../src/profiles";
  * CLI's backups hold, and leaves no profile when it refuses one.
  */
 
-/** PBKDF2 at the real 600,000 rounds is slow on a loaded machine: run fewer. */
+/** PBKDF2 at the real 600,000 rounds is slow on a loaded machine: run fewer (the restore derives its key as bits). */
 beforeEach(() => {
-  const derive = crypto.subtle.deriveKey.bind(crypto.subtle);
+  const derive = crypto.subtle.deriveKey.bind(crypto.subtle), deriveBits = crypto.subtle.deriveBits.bind(crypto.subtle);
   vi.spyOn(crypto.subtle, "deriveKey").mockImplementation(((algorithm: Pbkdf2Params, ...rest: [CryptoKey, AesKeyGenParams, boolean, KeyUsage[]]) => derive({ ...algorithm, iterations: 1_000 }, ...rest)) as typeof crypto.subtle.deriveKey);
+  vi.spyOn(crypto.subtle, "deriveBits").mockImplementation(((algorithm: Pbkdf2Params, ...rest: [CryptoKey, number]) => deriveBits({ ...algorithm, iterations: 1_000 }, ...rest)) as typeof crypto.subtle.deriveBits);
 });
 afterEach(() => { vi.restoreAllMocks(); });
 

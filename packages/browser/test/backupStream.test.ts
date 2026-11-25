@@ -208,14 +208,14 @@ describe("a backup written a piece at a time (envelope version 2)", () => {
 
   it("a reader given a smaller cap per record refuses a larger one", async () => {
     const bundle = await make(PASS, async (writer) => { await writer.json(JSON.stringify({ pad: "a".repeat(2 * MIB) })); });
-    const reader = (await BackupReader.open(bytesSource(bundle), PASS, undefined, { recordBytes: MIB }))!;
+    const reader = (await BackupReader.open(bytesSource(bundle), PASS, undefined, { limits: { recordBytes: MIB } }))!;
     await expect(reader.next()).rejects.toThrow("This backup is too large to restore");
   });
 
   it("a reader given a smaller total refuses a bundle whose JSON adds up past it", async () => {
     const record = JSON.stringify({ pad: "a".repeat(MIB) });
     const bundle = await make(PASS, async (writer) => { for (let i = 0; i < 3; i++) await writer.json(record); });
-    const open = async () => (await BackupReader.open(bytesSource(bundle), PASS, undefined, { totalBytes: 2 * MIB + 1024, perByte: 1 }))!;
+    const open = async () => (await BackupReader.open(bytesSource(bundle), PASS, undefined, { limits: { totalBytes: 2 * MIB + 1024, perByte: 1 } }))!;
     const reader = await open();
     expect((await reader.next())?.json).toBe(record);
     expect((await reader.next())?.json).toBe(record);

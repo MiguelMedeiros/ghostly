@@ -1,10 +1,11 @@
-import { randomBytes } from "node:crypto";
+import { createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { identityFromSeedB64 } from "@ghostly/core";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { open as openEnvelope } from "@ghostly/browser/backup/envelope";
-import { BackupReader, BackupWriter, FRAME_BYTES, readBackupHeader, type BackupSource } from "@ghostly/browser/backup/stream";
+import { BackupReader, BackupWriter, FRAME_BYTES, readBackupHeader, type BackupSource, type FrameCrypto } from "@ghostly/browser/backup/stream";
 import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from "@ghostly/browser/backup/light";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { bool, str, type Method } from "./apiKit";
@@ -348,6 +349,28 @@ async function fileSource(path: string): Promise<BackupSource & { close(): Promi
   };
 }
 
+const TAG_BYTES = 16;
+/**
+ * A restore's frames checked with node:crypto and inflated with node:zlib, at once: through WebCrypto and a
+ * DecompressionStream, async calls per frame, a backup of 200,000 tiny records took ~6 s to open (~36 s gzipped), so
+ * many small records cost far more than their bytes.
+ */
+const nodeFrames: FrameCrypto = {
+  sha256: (...parts) => { const hash = createHash("sha256"); for (const part of parts) hash.update(part); return hash.digest(); },
+  open: (key, iv, additionalData, sealed) => {
+    if (sealed.length < TAG_BYTES) throw new Error("A frame shorter than its tag");
+    const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
+    decipher.setAAD(additionalData);
+    decipher.setAuthTag(sealed.subarray(sealed.length - TAG_BYTES));
+    return Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - TAG_BYTES)), decipher.final()]);
+  },
+  gunzip: (bytes, limit) => {
+    try { return gunzipSync(bytes, { maxOutputLength: Math.max(1, limit) }); } catch (error) {
+      throw new Error((error as { code?: string }).code === "ERR_BUFFER_TOO_LARGE" || error instanceof RangeError ? "This backup is too large to restore" : "A frame that does not inflate", { cause: error });
+    }
+  },
+};
+
 /** A version 1 backup is one JSON object, and `seal` writes its format first. */
 const VERSION_1_START = /^\s*\{\s*"format"\s*:\s*"ghostly-backup"/;
 
@@ -513,7 +536,7 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
   let work: ProfilePaths | null = null;
   try {
     let reader: BackupReader | null;
-    try { reader = await BackupReader.open(source, passphrase, undefined, RESTORE_LIMITS); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
+    try { reader = await BackupReader.open(source, passphrase, undefined, { limits: RESTORE_LIMITS, frames: nodeFrames }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
     if (!reader) {
       const payload = await readWhole(file, passphrase ?? "");
       stop?.throwIfAborted();
@@ -532,18 +555,28 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
     work = await restoringFolder(home, name);
     const paths = work;
     await mkdir(paths.db, { recursive: true, mode: 0o700 });
-    let out: { handle: FileHandle; left: number; store: boolean } | null = null, files = 0, bytes = 0, ended = false, stored = false;
+    // A file's frames are held up to FRAME_BYTES and written together: one write per frame, however small, cost ~35 µs.
+    let out: { handle: FileHandle; left: number; store: boolean; held: Uint8Array[]; heldBytes: number } | null = null, files = 0, bytes = 0, ended = false, stored = false;
+    const flush = async (file: NonNullable<typeof out>) => {
+      if (file.held.length) await file.handle.write(file.held.length === 1 ? file.held[0] : Buffer.concat(file.held));
+      file.held = [];
+      file.heldBytes = 0;
+    };
     try {
       for (let record = await next(); record; record = await next()) {
         if (ended) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
         if (record.bytes) {
           if (!out || record.bytes.length > out.left) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
-          await out.handle.write(record.bytes);
+          if (!record.bytes.length) continue;
+          out.held.push(record.bytes);
+          out.heldBytes += record.bytes.length;
           out.left -= record.bytes.length;
+          if (out.heldBytes >= FRAME_BYTES) await flush(out);
           continue;
         }
         if (out) {
           if (out.left) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
+          await flush(out);
           await out.handle.close();
           const store = out.store;
           out = null;
@@ -564,7 +597,7 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
         let target: string;
         if (value.kind === "store") { target = join(paths.db, "snapshot.bin"); stored = true; }
         else { target = inside(paths.files, value.path); await mkdir(dirname(target), { recursive: true, mode: 0o700 }); files += 1; bytes += value.size; }
-        out = { handle: await open(target, "wx", 0o600), left: value.size, store: value.kind === "store" };
+        out = { handle: await open(target, "wx", 0o600), left: value.size, store: value.kind === "store", held: [], heldBytes: 0 };
       }
       if (out || !ended || !stored) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
     } finally { await out?.handle.close().catch(() => {}); }
