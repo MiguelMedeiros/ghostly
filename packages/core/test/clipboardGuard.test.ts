@@ -110,7 +110,16 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   const tasks: (() => void)[] = [];
   const urgent: (() => void)[] = [];
   const frames: (() => void)[] = [];
-  class Doc { execCommand(command: string) { return command !== ""; } }
+  const listeners = new Map<string, ((event: Ev) => void)[]>();
+  /** Whether `document.open()` takes the listeners away (a browser ignores it in some states: then nothing goes). */
+  let clears = true;
+  /** How many listeners were asked for on the window, the ones already there too. */
+  let asked = 0;
+  class Doc {
+    execCommand(command: string) { return command !== ""; }
+    // HTML's document open steps: every listener of the document and, for its window's own document, of the window.
+    open() { if (clears && this === w.document) listeners.clear(); return this; }
+  }
   let now = 10_000;
   class Ev { phase = 0; stamp = now; get eventPhase() { return this.phase; } get timeStamp() { return this.stamp; } }
   class Port {
@@ -123,13 +132,16 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
     port2 = new Port();
     constructor() { this.port1.other = this.port2; this.port2.other = this.port1; }
   }
-  const listeners = new Map<string, ((event: Ev) => void)[]>();
   const w: Record<string, unknown> = {
     Reflect, Object, String, TypeError,
     Document: Doc,
     Event: Ev,
+    // As a browser's: a listener already there for that type is not added twice (the guard's are all capturing).
     EventTarget: { prototype: { addEventListener(this: unknown, type: string, listener: (event: Ev) => void) {
-      if (this === w) listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+      if (this !== w) return;
+      asked++;
+      const there = listeners.get(type) ?? [];
+      if (!there.includes(listener)) listeners.set(type, [...there, listener]);
     } } },
     Element: { prototype: {} },
     DocumentFragment: { prototype: {} },
@@ -142,7 +154,8 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   if (closers.channel) Object.assign(w, { MessageChannel: Channel, MessagePort: Port });
   if (closers.postTask) w.scheduler = { postTask(task: () => void, options: { priority?: string }) { if (options.priority === "user-blocking") urgent.push(task); return Promise.resolve(); } };
   if (closers.frame) w.requestAnimationFrame = (frame: () => void) => { frames.push(frame); return frames.length; };
-  Object.defineProperty(Doc.prototype, "defaultView", { get() { return w; } });
+  // A document of the window's own realm that is not its page (`createHTMLDocument`) has no window.
+  Object.defineProperty(Doc.prototype, "defaultView", { get(this: unknown) { return this === w.document ? w : null; } });
   w.document = new Doc();
   new Function("window", CLIPBOARD_GUARD_SCRIPT)(w);
   const doc = w.document as Doc;
@@ -162,6 +175,10 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   const run = (queue: (() => void)[]) => { for (const task of queue.splice(0)) task(); };
   return {
     copy, dispatch, listeners,
+    /** The page rewrites itself: `document.open()` as it calls it (the guard's, if it wrapped it), on `on`. */
+    rewrite: (on: object = doc, clearing = true) => { clears = clearing; (Doc.prototype.open as (this: object) => unknown).call(on); clears = true; },
+    asked: () => asked,
+    newDocument: () => new Doc(),
     /** The page keeps the thread for `ms` (a busy loop): time passes, no task runs. */
     spin: (ms: number) => { now += ms; },
     now: () => now,
@@ -324,6 +341,57 @@ describe("the clipboard guard's taps and what a tap sets off", () => {
     expect(got).toBe(true);
     page.dispatch("click", true, undefined, () => page.dispatch("submit", true, () => { got = page.copy(); }));
     expect(got).toBe(false);
+  });
+
+  it("listens for the person's inputs again once the page rewrites itself with document.open()", () => {
+    // document.open() takes every listener of the document and of its window away: a copy button of the rewritten page
+    // copies on a tap again, a form of it on the submit a tap fires, and still nothing outside a tap.
+    const page = tapWindow();
+    const inputs = [...page.listeners.keys()].sort();
+    page.rewrite();
+    expect([...page.listeners.keys()].sort()).toEqual(inputs);
+    const got: Record<string, boolean> = {};
+    page.dispatch("click", true, () => { got.click = page.copy(); });
+    page.endTask();
+    page.dispatch("click", true, undefined, () => page.dispatch("submit", true, () => { got.submit = page.copy(); }));
+    page.endTask();
+    page.dispatch("submit", true, () => { got.load = page.copy(); });
+    page.dispatch("click", false, () => { got.untrusted = page.copy(); });
+    expect(got).toEqual({ click: true, submit: true, load: false, untrusted: false });
+  });
+
+  it("adds its listeners back once for each document.open(), and none twice where that took none away", () => {
+    const page = tapWindow();
+    const each = page.asked();
+    expect(each).toBe(15);
+    page.rewrite();
+    page.rewrite();
+    expect(page.asked()).toBe(3 * each);
+    for (const [type, kept] of page.listeners) expect(kept, type).toHaveLength(1);
+    // One the browser ignores (called while the page is still parsed) takes nothing away: the guard asks for its own
+    // again, and the browser keeps a listener already there once.
+    page.rewrite(undefined, false);
+    expect(page.listeners.size).toBe(15);
+    for (const [type, kept] of page.listeners) expect(kept, type).toHaveLength(1);
+    // A document of the window's realm that is not its page (no window of its own): nothing of the window's.
+    const asked = page.asked();
+    page.rewrite(page.newDocument());
+    expect(page.asked()).toBe(asked);
+    expect(page.listeners.size).toBe(15);
+  });
+
+  it("listens again in a frame's own window when the page writes that frame with document.open()", () => {
+    // A frame's window runs a guard of its own, whose `document.open()` is the one `frame.contentDocument.open()`
+    // calls: the frame's taps count again there, and the page's own window is left as it was.
+    const page = tapWindow();
+    const frame = tapWindow();
+    const asked = page.asked();
+    frame.rewrite();
+    let got: boolean | undefined;
+    frame.dispatch("click", true, () => { got = frame.copy(); });
+    expect(got).toBe(true);
+    expect(page.asked()).toBe(asked);
+    expect(page.listeners.size).toBe(15);
   });
 });
 

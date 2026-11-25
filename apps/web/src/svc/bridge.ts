@@ -28,12 +28,35 @@ const activationOf = describe(Navigator.prototype, "userActivation")?.get;
 const activeOf = typeof UserActivation === "undefined" ? undefined : describe(UserActivation.prototype, "isActive")?.get;
 const clock = Date.now;
 const portPost = MessagePort.prototype.postMessage;
+const Observer = MutationObserver;
 
 /**
  * How long a tap or a key in the app's page counts as the person's (a browser's activation lasts about 5 s): a link the
  * app opens later is not opened for them.
  */
 const INPUT_COUNTS_MS = 5_000;
+
+/** Adds a listener to a window, as `addEventListener` does. */
+export type Listen = (type: string, listener: EventListener, options?: boolean | AddEventListenerOptions) => void;
+
+/**
+ * Adds listeners to `win`, the window of the app's page `doc`, and adds them back each time that page rewrites itself
+ * with `document.open()`, which takes every listener of the document and of its window away: the page's own children
+ * are replaced then. A listener still there is not added twice (the browser keeps one once).
+ */
+export function keptListening(win: Window, doc: Document): Listen {
+  const kept: Parameters<Listen>[] = [];
+  const again = new Observer(() => {
+    // Only while it is the window's page: once the window shows another, these are not that one's.
+    if (win.document !== doc) { again.disconnect(); return; }
+    for (const [type, listener, options] of kept) win.addEventListener(type, listener, options);
+  });
+  again.observe(doc, { childList: true });
+  return (type, listener, options) => {
+    kept.push([type, listener, options]);
+    win.addEventListener(type, listener, options);
+  };
+}
 
 /**
  * Whether the person is using the app's page in `win` now: they pressed or tapped in it in the last few seconds, and
@@ -42,10 +65,10 @@ const INPUT_COUNTS_MS = 5_000;
  * makes right after, this one and the app's: no input of the app's page came with it. False where the browser cannot
  * say. The app's page can stop its own inputs reaching here, which only makes it open nothing.
  */
-export function watchUse(win: Window): () => boolean {
+export function watchUse(win: Window, listen: Listen = (type, listener, options) => win.addEventListener(type, listener, options)): () => boolean {
   let input = -Infinity;
   const seen = (event: Event) => { if (event.isTrusted) input = clock(); };
-  for (const type of ["pointerdown", "keydown", "touchend"]) win.addEventListener(type, seen, true);
+  for (const type of ["pointerdown", "keydown", "touchend"]) listen(type, seen, true);
   return () => {
     if (clock() - input > INPUT_COUNTS_MS) return false;
     try {
@@ -105,7 +128,7 @@ export function guardRan(doc: Document): boolean {
  * another site in a new tab (`outsideLink` in opener.ts). A name one of the page's frames has stays that frame's. Not
  * a guard: the page can skip it, or ask for any link, and the app's page decides what opens.
  */
-export function forwardLinks(win: Window, ask: (url: string) => void): void {
+export function forwardLinks(win: Window, ask: (url: string) => void, listen: Listen = (type, listener, options) => win.addEventListener(type, listener, options)): void {
   const blank = (target: unknown) => typeof target === "string" && target.toLowerCase() === "_blank";
   // This page or a frame around it, never a new window.
   const here = (target: string) => ["_self", "_parent", "_top"].includes(target.toLowerCase());
@@ -113,7 +136,7 @@ export function forwardLinks(win: Window, ask: (url: string) => void): void {
   // The browser finds the window a name points to: with no address it loads nothing there, and the sandbox refuses
   // the new window a name nobody has would open (null), which leaves the person's tap in place.
   const named = (target: string) => apply(open, win, ["", target]) !== null;
-  win.addEventListener("click", (event) => {
+  const clicked = (event: MouseEvent) => {
     if (event.defaultPrevented || event.button !== 0) return;
     const link = event.composedPath().find((node) => ["a", "area"].includes((node as Element).localName)) as HTMLAnchorElement | undefined;
     if (!link?.href) return;
@@ -121,7 +144,8 @@ export function forwardLinks(win: Window, ask: (url: string) => void): void {
     if (!target || here(target) || (!blank(target) && named(target))) return;
     event.preventDefault();
     ask(link.href);
-  });
+  };
+  listen("click", clicked as EventListener);
   win.open = function (url?: string | URL, target?: string, features?: string) {
     if (target && !blank(target)) {
       const found = apply(open, win, [url, target, features]) as Window | null;
@@ -216,11 +240,13 @@ function start(): void {
       if (!doc || !win || linked.has(doc)) return;
       linked.add(doc);
       // Only one the person opens in the app (`watchUse`): the app's page checks its own activation too, which a tap
-      // on Ghostly's Open, or one in Ghostly's page, gives it for seconds while the app's page loads or runs.
-      const using = watchUse(win);
-      forwardLinks(win, (url) => { if (using()) window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__); });
+      // on Ghostly's Open, or one in Ghostly's page, gives it for seconds while the app's page loads or runs. Each
+      // listener here stays when the page rewrites itself (`keptListening`).
+      const listen = keptListening(win, doc);
+      const using = watchUse(win, listen);
+      forwardLinks(win, (url) => { if (using()) window.parent.postMessage({ type: BRIDGE_OPEN_LINK, url }, __SERVICES_APP_ORIGIN__); }, listen);
       // The app loads another page in its frame: looked at again until that one is parsed.
-      win.addEventListener("pagehide", () => look(frame, doc), { once: true });
+      listen("pagehide", () => look(frame, doc), { once: true });
     } catch { /* a page that is not HTML: nothing to hand on */ }
   };
   // Looks whether a page of the app other than `left` is parsed, until one is, and hands its links on then: shown, it
