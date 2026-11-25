@@ -100,8 +100,12 @@ function ChatLinkIntake() {
   const waits = isLocked || asking;
   const locked = useRef(waits);
   locked.current = waits;
-  /** The invite a link brought while locked or asking: the last one, kept in memory only. */
-  const [held, setHeld] = useState<SessionKeys | null>(null);
+  /**
+   * The invites links brought while locked or asking, oldest first, each once, kept in memory only: as many as links may
+   * make chats (`LINK_CHATS_WAITING`), each made in turn after. One past them is refused, said after the unlock.
+   */
+  const held = useRef<SessionKeys[]>([]);
+  const [heldCount, setHeldCount] = useState(0);
   const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | "join.tooManyLinks" | "join.chatGone" | null>(null);
 
   const open = useCallback((keys: SessionKeys) => {
@@ -135,18 +139,26 @@ function ChatLinkIntake() {
   useEffect(() => {
     // A device code's link that names the profile, opened while the app was open already: the join host takes it.
     const named = namedDeviceLink(pathname, hash);
-    if (named) { setInvalid(null); linkTaken("invite"); offerDeviceLink(named); navigate("/", { replace: true }); return; }
+    if (named) { if (!held.current.length) setInvalid(null); linkTaken("invite"); offerDeviceLink(named); navigate("/", { replace: true }); return; }
     const rest = inviteRouteCode(pathname);
     if (!rest) return;
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
-    if (isDeviceCode(rest)) { setInvalid(null); linkTaken("invite"); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
+    // While invites wait for the unlock, it leaves a refusal made among them (one past the limit) to be said after it.
+    if (isDeviceCode(rest)) { if (!held.current.length) setInvalid(null); linkTaken("invite"); offerDeviceLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
     if (reading.ok) {
-      // A good link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
-      setInvalid(null);
+      // A good link answers for itself: an earlier link's refusal, kept until closed, would read as this one's. Under the
+      // lock only a link it holds does: one held already, or refused past the limit, leaves a refusal not yet said.
       linkTaken("invite");
-      if (locked.current) { setHeld(reading.keys); navigate("/", { replace: true }); }
-      else open(reading.keys);
+      if (!locked.current) { setInvalid(null); open(reading.keys); return; }
+      const list = held.current;
+      const keys = reading.keys;
+      if (!list.some((k) => k.seedB64 === keys.seedB64 && k.peerPubKeyB64 === keys.peerPubKeyB64)) {
+        if (list.length < LINK_CHATS_WAITING) { setInvalid(null); list.push(keys); }
+        else setInvalid("join.tooManyLinks");
+      }
+      setHeldCount(list.length);
+      navigate("/", { replace: true });
       return;
     }
     // Read as the router reads it (a trailing slash too): one address, one answer.
@@ -159,13 +171,15 @@ function ChatLinkIntake() {
     linkTaken("invite");
     navigate("/", { replace: true });
   }, [pathname, hash, navigate, open]);
-  useOtherLink("invite", useCallback(() => setInvalid(null), []));
+  // While invites wait for the unlock, a refusal made among them (one past the limit) is said after it, whatever came next.
+  useOtherLink("invite", useCallback(() => { if (!held.current.length) setInvalid(null); }, []));
 
   useEffect(() => {
-    if (!held || waits) return;
-    setHeld(null);
-    open(held);
-  }, [held, waits, open]);
+    if (!heldCount || waits) return;
+    const list = held.current.splice(0);
+    setHeldCount(0);
+    for (const keys of list) open(keys);
+  }, [heldCount, waits, open]);
 
   // Kept until closed, and said only once the lock is passed and the question answered: under the lock screen nobody
   // can read it, and a refusal that went before the unlock left the link looking as if it did nothing.
@@ -282,16 +296,21 @@ function GroupLinkIntake() {
   const nav = useAppNavigation();
   const { isLocked, hasUnlocked } = useLockScreen();
   const groupsLoaded = useEngineValue((state) => !!state?.groupsLoaded);
-  const [code, setCode] = useState("");
+  /**
+   * The links waiting for the unlock (and the engine's groups), oldest first, each once: as many as links may join
+   * (`LINK_GROUPS_WAITING`), each joined in turn after. One past them is refused. With each, what `otherLinks` was when
+   * it came.
+   */
+  const held = useRef<{ link: string; after: number }[]>([]);
+  const [heldCount, setHeldCount] = useState(0);
   const [problem, setProblem] = useState<Problem | null>(null);
   /** The groups this intake is joining, until the engine answers: links that come together count each other. */
   const joining = useRef(new Set<string>());
   /**
-   * Bumped each time the other intake takes a link, and what it was when the held link came: a refusal that comes later
-   * (a join still on its way, or held until the unlock) belongs to a link that no longer answers for itself.
+   * Bumped each time the other intake takes a link: a refusal that comes later (a join still on its way, or held until
+   * the unlock) belongs to a link that no longer answers for itself.
    */
   const otherLinks = useRef(0);
-  const codeAfter = useRef(0);
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
@@ -301,31 +320,42 @@ function GroupLinkIntake() {
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
-    // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's.
-    else { setProblem(null); setCode(link); codeAfter.current = otherLinks.current; }
+    // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's. Only a link
+    // it holds does: one waiting already, or refused past the limit, leaves the refusal of the one before it.
+    else {
+      const list = held.current;
+      if (!list.some((entry) => entry.link === link)) {
+        if (list.length < LINK_GROUPS_WAITING) { setProblem(null); list.push({ link, after: otherLinks.current }); }
+        else setProblem({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
+      }
+      setHeldCount(list.length);
+    }
     linkTaken("group");
     navigate("/", { replace: true });
   }, [pathname, hash, navigate, t]);
-  useOtherLink("group", useCallback(() => { otherLinks.current += 1; setProblem(null); }, []));
+  // While links wait for the unlock, a refusal made among them (one past the limit) is said after it, whatever came next.
+  useOtherLink("group", useCallback(() => { otherLinks.current += 1; if (!held.current.length) setProblem(null); }, []));
   useEffect(() => {
-    if (!code || isLocked || !hasUnlocked || !groupsLoaded) return;
-    setCode("");
-    const after = codeAfter.current;
-    const refuse = (refusal: Problem) => { if (otherLinks.current === after) setProblem(refusal); };
+    if (!heldCount || isLocked || !hasUnlocked || !groupsLoaded) return;
+    const list = held.current.splice(0);
+    setHeldCount(0);
     const groups = engine.state?.groups ?? [];
-    const id = linkGroupId(code);
-    if (id && !groups.some((group) => group.id === id) && !joining.current.has(id)
-      && new Set([...linkGroupsWaiting(groups), ...joining.current]).size >= LINK_GROUPS_WAITING) {
-      refuse({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
-      return;
+    for (const { link: code, after } of list) {
+      const refuse = (refusal: Problem) => { if (otherLinks.current === after) setProblem(refusal); };
+      const id = linkGroupId(code);
+      if (id && !groups.some((group) => group.id === id) && !joining.current.has(id)
+        && new Set([...linkGroupsWaiting(groups), ...joining.current]).size >= LINK_GROUPS_WAITING) {
+        refuse({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
+        continue;
+      }
+      if (id) joining.current.add(id);
+      engine.call("joinGroupByLink", { link: code })
+        .then(({ groupId }) => nav.conversation(groupPath(groupId)))
+        .catch((cause: unknown) => refuse(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
+        .finally(() => { if (id) joining.current.delete(id); });
     }
-    if (id) joining.current.add(id);
-    engine.call("joinGroupByLink", { link: code })
-      .then(({ groupId }) => nav.conversation(groupPath(groupId)))
-      .catch((cause: unknown) => refuse(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
-      .finally(() => { if (id) joining.current.delete(id); });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
-  }, [code, isLocked, hasUnlocked, groupsLoaded]);
+  }, [heldCount, isLocked, hasUnlocked, groupsLoaded]);
   return problem ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
 }
 
