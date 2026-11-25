@@ -882,7 +882,8 @@ describe("an edit that names me no more", { timeout: 120_000 }, () => {
     expect(marks()).toEqual(pinged);
 
     expect(await bob.edits.edit(id, messageId!, "no ping after all")).toMatchObject({ error: null });
-    await world.until(() => textOf(carol.peer, messageId!) === "no ping after all", 60_000);
+    // The "@" goes back once the history is read (`unmark`), a few steps after the text changed.
+    await world.until(() => textOf(carol.peer, messageId!) === "no ping after all" && (marks().lastMentionAt ?? 0) <= first, 60_000);
     expect(carol.peer.messages.find(m => m.id === messageId)!.mentioned).toBeUndefined();
     // Back to the mention before it; the message is still the newest, unread.
     const edited = marks();
