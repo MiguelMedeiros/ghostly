@@ -57,6 +57,14 @@ test("the terms name the default relays the project runs among what it runs", ()
   assert.doesNotMatch(section, /nothing else that Ghostly depends on|do not run any relay/);
 });
 
+test("the /developers map's Iroh block names Ghostly's own relay among the default ones", () => {
+  const own = defaultHosts("packages/browser/src/platform/irohWeb.ts", "DEFAULT_IROH_RELAYS").filter((host) => host.endsWith(".miguelmedeiros.dev"));
+  assert.deepEqual(own, ["iroh.miguelmedeiros.dev"]);
+  const block = read("apps/website/lib/composition.ts").match(/b\("iroh",[^\n]*/);
+  assert.ok(block, "the composition map has an Iroh block");
+  assert.match(block[0], /Ghostly's own/, `the Iroh block says the default relays include Ghostly's own: ${block[0]}`);
+});
+
 test("the privacy page and /developers name every resolver a domain lookup may ask, in its order", () => {
   const names = dohResolvers();
   assert.deepEqual(names, ["Quad9", "Cloudflare", "Google"]);
