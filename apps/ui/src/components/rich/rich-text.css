@@ -94,11 +94,13 @@
   .rich-spoiler:hover { background: GrayText; }
 }
 
-/* A long blob: one line with its actions, or all of it wrapped anywhere. */
+/* A long blob: one line with its actions, or all of it wrapped anywhere. A line of the message's own, but inline: as a
+   block, the line break typed after it started one more, empty, line in the message's pre-wrap text. */
 .rich-blob {
-  display: flex;
+  display: inline-flex;
   align-items: baseline;
   gap: 8px;
+  width: 100%;
   max-width: 100%;
   white-space: nowrap;
 }
