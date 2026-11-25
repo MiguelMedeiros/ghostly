@@ -45,6 +45,8 @@
   "deleteForEveryone": "Supprimer pour tous",
   "deleteForEveryoneGroupHint": "Supprimé aussi sur les appareils des membres. Les anciennes applis affichent « Message supprimé » ; les copies gardées restent.",
   "deleteForEveryoneHint": "Supprimé aussi sur les appareils de votre contact. Les anciennes applis affichent « Message supprimé » ; les copies gardées restent.",
+  "deleteForEveryoneHintDhtYou": "Supprimé ici maintenant. Les appareils de votre contact le suppriment quand la discussion retrouve une liaison directe : cette discussion est en DHT seule, changez-le depuis l'icône de connexion. Les anciennes applis affichent « Message supprimé » ; les copies gardées restent.",
+  "deleteForEveryoneHintDhtContact": "Supprimé ici maintenant. Les appareils de votre contact le suppriment quand la discussion retrouve une liaison directe : la discussion de votre contact est en DHT seule, jusqu'à ce qu'il l'autorise à nouveau. Les anciennes applis affichent « Message supprimé » ; les copies gardées restent.",
   "deleteMessage": "Supprimer le message",
   "deleteMessageHint": "Supprimé uniquement ici. Votre contact garde sa copie.",
   "deleteSendingFileHint": "Supprimé uniquement ici. L'envoi s'arrête ; votre contact ne recevra pas le fichier.",

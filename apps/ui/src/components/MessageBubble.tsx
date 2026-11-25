@@ -28,7 +28,7 @@ import { canRetryFile, fileHeld, fileNeverSent } from "../lib/fileStatus";
 import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
-import { useDhtOnly, waitsForLive } from "../lib/delivery";
+import { useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { useEngineValue } from "../lib/engineState";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer, useTransferValue } from "../hooks/useServicesPlatform";
@@ -672,11 +672,17 @@ function ForwardItem({ file, sender, onForward }: { file?: ChatFile; sender: "me
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply, onEdit, onReact, onPin, pinned, onSave, saved, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
+function MessageMenu({ onDelete, onDeleteForEveryone, group, dhtOnly, onDetails, onReply, onEdit, onReact, onPin, pinned, onSave, saved, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
   onDelete?: () => void;
   onDeleteForEveryone?: () => void;
   /** A group's message: Delete for everyone takes it off the members' devices, not a contact's. */
   group?: boolean;
+  /**
+   * The 1:1 chat is on DHT only, and whose choice that is: a removal goes on the live session only, never over the DHT
+   * (WISP 400 § Delete for everyone), so Delete for everyone says the contact's copy goes once the chat is live again.
+   * Not said in a group (`group`): its removal goes over the members' edges.
+   */
+  dhtOnly?: DhtOnlyBy;
   onDetails: () => void;
   /** Answers the message (WISP 400 § Replies): the first row. */
   onReply?: () => void;
@@ -732,7 +738,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
   // A file still on its way stops on both sides when its message is deleted (the engine's deleteMessage): the contact
   // keeps no copy of it, so the hint says what happens instead.
   const { transfer } = useTransfer(download?.file.id);
-  const deleteHint = confirm === "everyone" ? t(group ? "chat.deleteForEveryoneGroupHint" : "chat.deleteForEveryoneHint") : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
+  const everyoneHint = group ? "chat.deleteForEveryoneGroupHint" : dhtOnly === "you" ? "chat.deleteForEveryoneHintDhtYou"
+    : dhtOnly === "contact" ? "chat.deleteForEveryoneHintDhtContact" : "chat.deleteForEveryoneHint";
+  const deleteHint = confirm === "everyone" ? t(everyoneHint) : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
     : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
   const confirmed = confirm === "everyone" ? onDeleteForEveryone : onDelete;
   // The hint describes the confirmation and its Delete: the focus lands on Cancel, and a screen reader said only the
@@ -1025,8 +1033,10 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const fileUnsent = !!message.file && fileNeverSent(failedTransfer);
   const fileFailed = fileRetry || fileUnsent;
   const shown = fileFailed ? "failed" as const : message.delivery;
-  // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
-  const live = waitsForLive(isMe && !fileFailed ? message : undefined, useDhtOnly(peerPubKey));
+  // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online. So does my removal
+  // of a message there (Delete for everyone).
+  const dhtOnly = useDhtOnly(peerPubKey);
+  const live = waitsForLive(isMe && !fileFailed ? message : undefined, dhtOnly);
   /** Why a Send again or a Cancel sending was refused (no storage to hold it, a file gone): shown while the mark it came from stays. */
   const [refused, setRefused] = useState<{ problem: Problem; on: typeof shown } | null>(null);
   const refuse = (on: typeof shown) => (error: unknown) => setRefused({ problem: problemText(error, t), on });
@@ -1238,7 +1248,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // The admin's mark beside their name, out of it: a member can take the admin's name, never this.
   const nickEl = nameEl && author?.admin ? <div className="flex items-center gap-1.5">{nameEl}<AdminMark testId="message-nick-admin" /></div> : nameEl;
   const menu = !choosing && (
-    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? deleteForEveryone : undefined} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
+    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? deleteForEveryone : undefined} group={inGroup} dhtOnly={dhtOnly} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
       onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />
   );
 
@@ -1342,7 +1352,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={deleteForEveryone} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
+      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={deleteForEveryone} group={inGroup} dhtOnly={dhtOnly} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
       {/* A group member's picture at the start of the line (the reading direction's), or its empty place. */}
       {!isMe && author && <SenderAvatar author={author} onOpen={choosing ? undefined : onOpenAuthor} />}
       {/* The bubble, and its reactions under it. */}
