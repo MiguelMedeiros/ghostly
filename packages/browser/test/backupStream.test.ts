@@ -212,6 +212,18 @@ describe("a backup written a piece at a time (envelope version 2)", () => {
     await expect(reader.next()).rejects.toThrow("This backup is too large to restore");
   });
 
+  it("a reader given a smaller total refuses a bundle whose JSON adds up past it", async () => {
+    const record = JSON.stringify({ pad: "a".repeat(MIB) });
+    const bundle = await make(PASS, async (writer) => { for (let i = 0; i < 3; i++) await writer.json(record); });
+    const open = async () => (await BackupReader.open(bytesSource(bundle), PASS, undefined, { totalBytes: 2 * MIB + 1024, perByte: 1 }))!;
+    const reader = await open();
+    expect((await reader.next())?.json).toBe(record);
+    expect((await reader.next())?.json).toBe(record);
+    await expect(reader.next()).rejects.toThrow("This backup is too large to restore");
+    // At the default (64 MiB plus 64 times the bundle) the same bundle reads whole.
+    expect(await readAll(bundle, PASS)).toHaveLength(3);
+  });
+
   it("a short piece of JSON is written plain, a long one compressed, and both read back", async () => {
     const short = JSON.stringify({ t: "file", id: "f-1", name: "note.txt", size: 20_480 });
     const long = JSON.stringify({ t: "head", ids: Array.from({ length: 200 }, (_, i) => `contact-${i}`) });
