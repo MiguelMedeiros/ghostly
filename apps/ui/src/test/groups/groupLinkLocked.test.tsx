@@ -122,3 +122,29 @@ it("links to groups already here, opened while locked, leave room for a new grou
   await waitFor(() => expect(fakeEngine.callsTo("joinGroupByLink").map((c) => c.link)).toEqual(links));
   expect(screen.queryByTestId("group-link-invalid")).toBeNull();
 });
+
+// covers: groups.link.join, profiles.lock
+/*
+ * A link to a group already here that comes after a new group's link refused past the limit, still under the lock: it
+ * goes to the engine, and the refusal stays to be said after the unlock. Cleared by it, the refused link was lost with no
+ * word.
+ */
+it("a link to a group already here, opened after a refused one while locked, leaves the refusal said", async () => {
+  const id = (n: number) => `Group${String(n).padStart(17, "0")}`;
+  fakeEngine.on("joinGroupByLink", ({ link }) => ({ groupId: String(link) }));
+  fakeEngine.update({ groups: [groupView({ id: id(0), profile: "community" })] });
+  const link = (n: number) => encodeCommunityLink({ g: id(n), host: createIdentity().pubKeyZ32 });
+  const links = [link(1), link(2), link(3), link(4), link(0)];
+  window.location.hash = `#/join/${links[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const next of links.slice(1)) {
+    go(`#/join/${next}`);
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(fakeEngine.callsTo("joinGroupByLink").map((c) => c.link)).toEqual([links[0], links[1], links[2], links[4]]));
+  expect(screen.getByTestId("group-link-invalid-title")).toHaveTextContent("Too many group links opened");
+});
