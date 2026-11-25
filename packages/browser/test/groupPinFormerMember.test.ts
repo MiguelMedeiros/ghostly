@@ -11,7 +11,7 @@ import { CommunityWorld, type Peer } from "./communityWorld";
  * to the other edges) and sendGroupPinFrame when an edge opens.
  */
 const sendPin = (peer: Peer, groupId: string, to: string) => {
-  const pin = peer.groups.pinOf(groupId), edge = peer.host.edges(groupId).get(to);
+  const pin = peer.groups.pinToSay(groupId), edge = peer.host.edges(groupId).get(to);
   if (!pin?.k || !pin.sig || !edge) return;
   const frame: GroupPinFrame = { t: "group-pin", g: groupId, id: pin.id, n: pin.n, k: pin.k, sig: pin.sig };
   try { peer.host.sendOnLink(edge, frame as never); } catch { /* said when it opens */ }
@@ -101,5 +101,36 @@ describe("a private group's pin after its pinner leaves", { timeout: 300_000 }, 
     await carol.groups.leave(id);
     await world.run(30_000);
     for (const p of [alice, bob]) expect(p.groups.pinOf(id)?.id).toBe(pinned.id);
+  });
+});
+
+describe("a private group's pin of a message deleted for everyone", { timeout: 300_000 }, () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("a member let in after the pinned message was deleted for everyone shows no pin either", async () => {
+    const world = new CommunityWorld();
+    vi.spyOn(Date, "now").mockImplementation(() => world.now);
+    const [alice, bob, carol] = ["alice", "bob", "carol"].map(n => addPeer(world, n));
+    const id = await alice.groups.create("Trip", "mesh");
+    const link = await alice.groups.enableLink(id);
+    await bob.groups.joinByLink(link);
+    await world.until(() => world.member(bob, id), 5 * 60_000);
+    await world.run(60_000);
+    await bob.groups.send(id, "meet at 9");
+    await world.run(10_000);
+    const messageId = alice.messages.find(m => m.text === "meet at 9")!.id;
+    await pin(world, alice, id, messageId);
+    await world.run(10_000);
+    expect(bob.groups.pinOf(id)?.id).toBe(messageId);
+    // Bob deletes it for everyone, as forgetGroupMessage does on each side: noted as removed, its row gone.
+    for (const p of [alice, bob]) {
+      await p.groups.removed(id, messageId);
+      p.messages.splice(p.messages.findIndex(m => m.id === messageId), 1);
+    }
+    for (const p of [alice, bob]) expect(p.groups.view(id)?.pin?.id ?? "").toBe("");
+    await carol.groups.joinByLink(link);
+    await world.until(() => world.member(carol, id), 5 * 60_000);
+    await world.run(120_000);
+    for (const p of [alice, bob, carol]) expect(p.groups.view(id)?.pin?.id ?? "").toBe("");
   });
 });
