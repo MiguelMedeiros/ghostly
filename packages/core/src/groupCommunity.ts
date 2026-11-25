@@ -3214,9 +3214,12 @@ export class CommunitySession {
     await this.publishMeta(encodeGroupMetaBody({ ...groupMetaBody(this.state.meta), name }), now, true);
   }
 
-  /** Whether this device made the group and never got in again (a welcome for me would have named it). */
+  /**
+   * Whether this device made the group, never got in again (a welcome for me would have named it) and has held the role
+   * ever since (given back, its name may undo a rename made meanwhile that it has not taken yet).
+   */
   private get madeIt(): boolean {
-    return this.state.chain[0].by === this.myKey && !this.state.chain.some(c => c.k === "add" && c.s === this.myKey);
+    return this.state.chain[0].by === this.myKey && !this.state.chain.some(c => (c.k === "add" && c.s === this.myKey) || c.k === "role");
   }
 
   private async fork(reason: string): Promise<void> {
