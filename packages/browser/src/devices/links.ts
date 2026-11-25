@@ -967,12 +967,12 @@ export class DeviceLinks implements DeviceLinkEngine {
    * endpoint, and the link never went live. It starts again as on an app with no WebRTC, for this run (`withRtc` aside), as a group's edge
    * does (node.ts `edgeWithoutRtc`): its native endpoints run and its packet lists no `webrtc/1`, the other device starts
    * its own for it as for a Linux Desktop, and the two meet over Iroh's relay. Only with no session open, and only
-   * where this app has a native transport to go on with.
+   * where this app has a native transport to go on with: else WebRTC is tried again once the wait ran out (`rtcAgain`).
    */
   private withoutRtc(running: Running, waited = false): void {
     // A link that runs its native endpoints already (the other device has no WebRTC) has nothing more to go on with.
     if (this.stopped || running.rtcOff || running.native || !this.createPeerConnection || running.link.isDataLinkOpen) return;
-    if (!Object.values(this.nativeFactories()).some(Boolean)) return;
+    if (!Object.values(this.nativeFactories()).some(Boolean)) { if (waited) this.rtcAgain(running); return; }
     // Back from a round without WebRTC that started nothing (`withRtc`): a stalled attempt does not end this one at once,
     // the wait does, which doubles each time. Else the two would take turns every few seconds.
     if (!waited && this.rtcBacks.get(running.id)) { this.waitForRtc(running); return; }
@@ -1026,6 +1026,25 @@ export class DeviceLinks implements DeviceLinkEngine {
   private withRtc(running: Running): void {
     if (this.stopped || !this.createPeerConnection || !running.native || running.link.isDataLinkOpen || this.running.get(running.id) !== running) return;
     this.rtcBacks.set(running.id, (this.rtcBacks.get(running.id) ?? 0) + 1);
+    this.reopen(running);
+  }
+
+  /**
+   * No session opened over WebRTC by `DEVICE_RTC_MS`, and this app has no native transport to go on with (a web page
+   * with no Iroh and no HyperDHT relay): the side that dials starts its link again, with a new offer. The other device
+   * may have given up its answer to the first one and said nothing (its ICE gathering stalled under load), and that
+   * offer stood for its whole attempt (90 s) before the next. The side that answers looks fast for that new offer: it
+   * reads at the background pace after an answer it gave up (30 s). The wait before the next round doubles (`rtcBacks`).
+   */
+  private rtcAgain(running: Running): void {
+    if (this.stopped || running.link.isDataLinkOpen || this.running.get(running.id) !== running) return;
+    this.rtcBacks.set(running.id, (this.rtcBacks.get(running.id) ?? 0) + 1);
+    if (running.link.dialer === "you") this.reopen(running);
+    else running.link.expectPeer();
+  }
+
+  /** The link closed with nothing said, and the same one opened again with WebRTC. */
+  private reopen(running: Running): void {
     const run = this.queue.catch(() => {}).then(async () => {
       if (this.stopped || this.running.get(running.id) !== running || running.link.isDataLinkOpen) return;
       this.running.delete(running.id);
