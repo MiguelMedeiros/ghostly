@@ -336,13 +336,21 @@ pub async fn link_preview_fetch(url: String, kind: String) -> Result<PreviewResp
 }
 
 /// A held item or manifest from the storage a contact chose (WISP 404), or an identity's proof or public data:
-/// public addresses only, see `hold_fetch`.
+/// public addresses only, see `hold_fetch`. A read that takes less than a held item says so (`max_bytes`, `timeout_ms`):
+/// Rust stops there.
 #[tauri::command]
 pub async fn hold_fetch(
     url: String,
     headers: Option<Vec<(String, String)>>,
+    max_bytes: Option<u64>,
+    timeout_ms: Option<u64>,
 ) -> Result<HoldResponse, String> {
-    hold_fetch::fetch(url, headers.unwrap_or_default()).await
+    hold_fetch::fetch(
+        url,
+        headers.unwrap_or_default(),
+        hold_fetch::Limits::new(max_bytes, timeout_ms),
+    )
+    .await
 }
 
 /// A token or moderation request to the call node a group names (WISP 602): public addresses only, see `hold_fetch`.

@@ -1192,21 +1192,36 @@ export class GroupSession {
   }
   /**
    * A frame I cannot read (of an epoch from before I was let in), kept to hand on: in the state, as the app holds no row
-   * for it. False: kept already.
+   * for it. Full, the oldest of the author who holds the most of the log goes (`trimRelay`), as with edits (`keepEdit`):
+   * frames no keeper can read, as many as an answer hands on past the author's pace, push out only the author's own.
+   * False: this one went.
    */
   private carry(frame: GroupMessageFrame): boolean {
-    const key = frameKey(frame);
-    if (this.kept().some(f => frameKey(f) === key)) return false;
     (this.state.relay ??= []).push(frame);
-    this.trimRelay();
-    return true;
+    this.trimRelay(frame.s);
+    return this.state.relay.includes(frame);
+  }
+  /** Kept to hand on already, as read or as carried. */
+  private holds(frame: GroupMessageFrame): boolean {
+    const key = frameKey(frame);
+    return this.kept().some(f => frameKey(f) === key);
   }
   /** The frames kept to hand on, oldest first: the state's, then the ones the app holds with its messages. */
   private kept(): GroupMessageFrame[] { return this.onRows ? [...(this.state.relay ?? []), ...this.onRows] : this.state.relay ?? []; }
-  private trimRelay(): void {
+  /** The oldest go once the log is full; `author` (one carried): the oldest of the author holding the most (it on a tie). */
+  private trimRelay(author?: string): void {
     const old = this.state.relay ?? [], rows = this.onRows ?? [];
     let bytes = old.reduce((sum, f) => sum + frameBytes(f), 0) + rows.reduce((sum, f) => sum + frameBytes(f), 0);
-    while (old.length + rows.length > GROUP_LIMITS.relay || bytes > GROUP_LIMITS.relayBytes) bytes -= frameBytes((old.length ? old : rows).shift()!);
+    while (old.length + rows.length > GROUP_LIMITS.relay || bytes > GROUP_LIMITS.relayBytes) {
+      if (author === undefined) { bytes -= frameBytes((old.length ? old : rows).shift()!); continue; }
+      const byCount = old.length + rows.length > GROUP_LIMITS.relay;
+      const held = new Map<string, number>();
+      for (const f of [...old, ...rows]) held.set(f.s, (held.get(f.s) ?? 0) + (byCount ? 1 : frameBytes(f)));
+      let most = author;
+      for (const [s, amount] of held) if (amount > held.get(most)!) most = s;
+      const from = old.some(f => f.s === most) ? old : rows;
+      bytes -= frameBytes(from.splice(from.findIndex(f => f.s === most), 1)[0]);
+    }
   }
 
   private pruneSecrets(): void {
@@ -2017,8 +2032,11 @@ export class GroupSession {
     // From before I was one (a hub let in after the message): nothing to read either, but the author's whole signed
     // frame for the members who can, kept and passed on as is while the author is in the roster. Hubs change, and a line
     // said while none was up reaches most members only through whoever is a hub now (WISP 902 § Catch-up, "Carried unread").
+    // At its author's pace too (below), once it is new here (another hub's copy costs nothing); one not taken is dropped,
+    // as an edit is: I name nothing of an epoch I cannot read in a sync.
     if (!rosterHas(commit.m, this.myKey)) {
-      if ((!relayed || signedWhole) && this.handsOn(raw.s) && this.carry(clean(raw))) { this.persistSoon(); this.took(clean(raw)); }
+      if ((!relayed || signedWhole) && this.handsOn(raw.s) && !this.holds(raw)
+        && this.paced(this.messagePace, raw.s, frameBytes(raw), relayed && (answer || waited)) && this.carry(clean(raw))) { this.persistSoon(); this.took(clean(raw)); }
       return;
     }
     // Whole: from its author's own edge, or handed on with the author's signature over every field. Anything else a
