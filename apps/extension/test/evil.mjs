@@ -64,6 +64,27 @@ const PAGE = `<!doctype html>
       saved.contentDocument.body.append(inner);
     } catch {}
 
+    // The same page in a frame of this page's, navigated there: read by its index as it loads, before any guard's sweep,
+    // its window would hand out an execCommand the guard never wrapped.
+    const navigated = document.createElement("iframe");
+    document.body.append(navigated);
+    const index = window.length - 1;
+    navigated.src = "/save?from=evil-own";
+    out.ownPage = await new Promise((resolve) => {
+      const until = Date.now() + 10_000;
+      const look = () => {
+        try {
+          const doc = window[index].document;
+          if (doc.URL.includes("/save")) return resolve("readable: " + doc.readyState + ", execCommand " + typeof window[index].Document.prototype.execCommand);
+        } catch {
+          return resolve("cross-origin");
+        }
+        if (Date.now() > until) return resolve("never loaded");
+        setTimeout(look, 0);
+      };
+      look();
+    });
+
     // One level up from this app's own host: the whole viewer site before the fix.
     document.cookie = "planted=1; Domain=" + parent + "; Path=/; Secure; SameSite=None";
     out.cookieAfterPlant = document.cookie;

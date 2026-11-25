@@ -355,9 +355,9 @@ describe("viewer tabs", () => {
     engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"], ["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
     expect(policies((await pauseRequest(world, tabId, { url }, "Document")).params)).toEqual([`default-src * http: ws: ${CLIPBOARD_GUARD_HASH}, img-src *, ${VIEWER_GUARD_CSP}, ${policy}`]);
 
-    // The error page is on the app's origin, which can frame it and reach its window: a `data:` frame put in it would
-    // run where the clipboard guard never does. It needs nothing but its own style.
-    const own = "default-src 'none'; style-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-same-origin allow-forms";
+    // The error page is one the clipboard guard never runs in, and the app can frame it and read its window by index as
+    // it loads: it gets an origin of its own (an empty sandbox), and needs nothing but its own style.
+    const own = "default-src 'none'; style-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; base-uri 'none'; sandbox";
     const offline = await httpError("offline", "offline");
     engineControl().respond = async () => {
       throw offline;
@@ -432,7 +432,9 @@ describe("viewer tabs", () => {
     const errorPage = sandboxes((await pauseRequest(world, tabId, { url })).params);
 
     // The contact's own sandbox may name allow-popups: Chrome takes the flags every policy allows, so Ghostly's decides.
-    for (const flags of [served.at(-1), errorPage.at(-1)]) expect(flags).toEqual(["allow-scripts", "allow-same-origin", "allow-forms"]);
+    expect(served.at(-1)).toEqual(["allow-scripts", "allow-same-origin", "allow-forms"]);
+    // The error page runs nothing and has an origin of its own: no flag at all.
+    expect(errorPage).toEqual([[]]);
   });
 
   it("opens no tab while Hide my IP from contacts is on, and says why", async () => {

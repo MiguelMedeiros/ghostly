@@ -487,12 +487,13 @@ const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRe
 const sandboxed = (policy: string) => `${policy}; sandbox allow-scripts allow-same-origin allow-forms`;
 
 /**
- * The policy of Ghostly's own page in the tab (`answerFailed`): nothing loads or frames, its style its own. It is on the
- * app's origin, so the app can frame it and reach its window, where the guards never run: a `data:` frame put there
- * would copy on a timer, as no page of the app's may (`VIEWER_GUARD_CSP`). Desktop's `OWN_ANSWER_CSP` and the web
- * runner's `ownPolicy` (apps/web/src/svc/worker.ts) are the same.
+ * The policy of Ghostly's own page in the tab (`answerFailed`): nothing loads or frames, its style its own, and an
+ * origin of its own (an empty `sandbox`: no script, form or popup either; the page is static). The guards never run in
+ * it, and the app can frame it and read its window by index from the moment it commits, so on the app's origin its
+ * `execCommand` would copy on a timer, as no page of the app's may (`OWN_ORIGIN_CSP` in packages/core/src/viewerGuard.ts).
+ * Desktop's `OWN_ANSWER_CSP` and the web runner's `ownPolicy` (apps/web/src/svc/worker.ts) load nothing either.
  */
-const OWN_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; base-uri 'none'";
+const OWN_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; base-uri 'none'; sandbox";
 
 /**
  * What each page of the app runs first, as on the web (apps/web/src/svc/worker.ts): the clipboard guard. No policy or
@@ -894,7 +895,7 @@ async function answerFailed(tabId: number, requestId: string, binding: ViewerBin
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
-      { name: "content-security-policy", value: sandboxed(OWN_PAGE_CSP) },
+      { name: "content-security-policy", value: OWN_PAGE_CSP },
     ],
     body: toBase64(utf8Encode(html)),
   }, binding);
