@@ -71,11 +71,23 @@ export function IncomingCallNotification({
   // app. The call takes an entry again.
   useBackCloses(() => {});
   useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
+    let before = document.activeElement as HTMLElement | null;
     const card = box.current;
+    // An open <dialog> (Delete chat?, Forward) is modal: everything outside it, this card too, takes no click and no
+    // focus. It makes way as Escape would close it (its own cancel), and once it is gone the card takes the focus; it
+    // goes back to where the dialog put it on leaving (what opened it).
+    const open = [...document.querySelectorAll<HTMLDialogElement>("dialog[open]")];
+    for (const dialog of open.reverse()) dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
     if (card) focusBackOf.set(card, before);
     card?.focus({ preventScroll: true });
+    const gone = open.length ? setTimeout(() => {
+      if (!card?.isConnected || card.contains(document.activeElement)) return;
+      if (document.activeElement && document.activeElement !== document.body) before = document.activeElement as HTMLElement;
+      focusBackOf.set(card, before);
+      card.focus({ preventScroll: true });
+    }) : undefined;
     return () => {
+      clearTimeout(gone);
       if (document.activeElement && document.activeElement !== document.body) return;
       let back = before;
       // The target may be a button inside a card gone (the user had tabbed to it): the card that held it has the entry.
