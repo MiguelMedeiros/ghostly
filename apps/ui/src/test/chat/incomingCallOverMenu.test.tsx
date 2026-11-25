@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { act, fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { IncomingCallNotification } from "../../components/IncomingCallNotification";
@@ -61,17 +61,17 @@ describe("a layer opened over an open menu", () => {
   });
 
   it("a window that holds the menu, made modal again while it is open (a call out of its small window): the menu still closes on Escape", async () => {
-    let grow = () => {};
+    const call: { grow?: () => void } = {};
     function Call() {
       const ref = useRef<HTMLDivElement>(null);
       const [mini, setMini] = useState(true);
-      grow = () => setMini(false);
+      useEffect(() => { call.grow = () => setMini(false); }, []);
       useTabTrap(ref, !mini);
       return <div ref={ref} role="dialog" aria-modal={!mini} aria-label="Call"><ChatMenu /></div>;
     }
     const { user } = renderApp(<Call />);
     await user.click(screen.getByRole("button", { name: "Chat options" }));
-    act(() => grow());
+    act(() => call.grow!());
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
   });
