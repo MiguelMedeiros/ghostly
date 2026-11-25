@@ -543,6 +543,13 @@ export function isEarlierSet(value: unknown): value is EarlierDeviceSet {
   return set.pending.length <= MAX_DEVICES && (set.foreign === undefined || set.foreign === true) && optional(set.removed, bytes);
 }
 
+/** One file to fetch as a record keeps it, and as a handoff's part `devices` carries it. */
+export function isFetchFile(value: unknown): value is FetchFile {
+  const file = value as Partial<FetchFile> | null;
+  return !!file && typeof file === "object" && bytes(file.sha256) && count(file.size, Number.MAX_SAFE_INTEGER) && bytes(file.on)
+    && Array.isArray(file.ids) && file.ids.length > 0 && file.ids.length <= 64 && file.ids.every(text);
+}
+
 /** Why a stored record cannot be trusted. The gate then starts nothing (see `gate.ts`). */
 export class DeviceRecordError extends Error {
   constructor(what: string) {
@@ -602,9 +609,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   }
   if (r.fetchFiles !== undefined) {
     if (!Array.isArray(r.fetchFiles) || r.fetchFiles.length > MAX_FETCH_FILES) return bad("fetchFiles");
-    for (const file of r.fetchFiles as Partial<FetchFile>[]) {
-      if (!file || !bytes(file.sha256) || !count(file.size, Number.MAX_SAFE_INTEGER) || !bytes(file.on) || !Array.isArray(file.ids) || !file.ids.length || file.ids.length > 64 || !file.ids.every(text)) return bad("a file to fetch");
-    }
+    if (!r.fetchFiles.every(isFetchFile)) return bad("a file to fetch");
   }
   if (r.heldFiles !== undefined) {
     if (!Array.isArray(r.heldFiles)) return bad("heldFiles");
