@@ -53,7 +53,7 @@ function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, link
     await vi.waitFor(() => expect(posts(label).some((m) => m.id === id)).toBe(true));
     return posts(label).find((m) => m.id === id)!;
   };
-  return { host, calls, hooks, open, request, posts, answer, stops, closed: (label: string) => handlers.get(APP_CLOSED_EVENT)!({ payload: label }) };
+  return { host, calls, hooks, open, request, posts, answer, stops, closed: (label: string) => handlers.get(APP_CLOSED_EVENT)!({ payload: label }), emit: (event: string, payload: unknown) => handlers.get(event)!({ payload }) };
 }
 
 describe("opening an app on Desktop", () => {
@@ -363,6 +363,27 @@ describe("opening an app on Desktop", () => {
     closed("app-2");
     expect(stops).toEqual(["closed", "stopped"]);
     await vi.waitFor(() => expect(host.calls.filter((c) => c.op === "chat.close")).toHaveLength(2));
+  });
+
+  it("stops the app for protocol when Rust closed its window for asking ten times the rate, as the web does", async () => {
+    const { open, request, answer, stops, emit, host } = setup();
+    await open(REF, LINK);
+    request("app-1", { id: 1, type: "writing", args: [] });
+    await answer("app-1", 1);
+    // Anything else from Rust is only a close.
+    emit(APP_CLOSED_EVENT, { label: "app-9", reason: "protocol" });
+    emit(APP_CLOSED_EVENT, { reason: "protocol" });
+    emit(APP_CLOSED_EVENT, null);
+    expect(stops).toEqual([]);
+    emit(APP_CLOSED_EVENT, { label: "app-1", reason: "protocol" });
+    expect(stops).toEqual(["protocol"]);
+    await vi.waitFor(() => expect(host.calls.filter((c) => c.op === "chat.close")).toHaveLength(1));
+
+    await open(REF, LINK);
+    request("app-2", { id: 1, type: "writing", args: [] });
+    await answer("app-2", 1);
+    emit(APP_CLOSED_EVENT, { label: "app-2", reason: "unknown" });
+    expect(stops).toEqual(["protocol", "stopped"]);
   });
 
   it("brings the app's window to the front when it is opened again in the same chat, and its chat closes once with it", async () => {

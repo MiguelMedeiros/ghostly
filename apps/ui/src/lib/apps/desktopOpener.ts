@@ -4,7 +4,8 @@
  * (`createBroker`), here in the Ghostly window, one per app window, so the API, its checks and its caps are the same:
  *
  * - The runner in the app window asks `app_broker`. Rust answers `start` itself (the entry it holds for that window),
- *   checks every other request (the caller's label, 66 KiB, 50 a second) and hands it here as `ghostly-app-request`
+ *   checks every other request (the caller's label, 66 KiB, 50 a second; past 500 in a second it closes the window and
+ *   says `ghostly-app-closed` with `protocol`) and hands it here as `ghostly-app-request`
  *   with the window's label; the broker knows the app by that label, never by anything the app says.
  * - The broker's answers and events go back through `app_post`: an answer to the request waiting for it (the
  *   result of the app's `app_broker` call), an event into that window alone; bytes go raw (`app_post_bytes`). A `file` answer names where the bytes lie
@@ -86,9 +87,14 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     held.requests.push(payload.request);
     early.set(payload.label, held);
   });
-  void listen<string>(APP_CLOSED_EVENT, ({ payload }) => {
-    early.delete(payload);
-    brokers.get(payload)?.stop("stopped");
+  // The label alone when the window closed; with `protocol` when Rust stopped an app that asked ten times the rate,
+  // as the web broker stops it.
+  void listen<string | { label?: unknown; reason?: unknown }>(APP_CLOSED_EVENT, ({ payload }) => {
+    const label = typeof payload === "string" ? payload : payload?.label;
+    if (typeof label !== "string") return;
+    const reason: AppStopReason = typeof payload === "object" && payload?.reason === "protocol" ? "protocol" : "stopped";
+    early.delete(label);
+    brokers.get(label)?.stop(reason);
   });
 
   function deliver(broker: Broker, request: unknown) {
