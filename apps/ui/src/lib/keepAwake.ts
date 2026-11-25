@@ -73,11 +73,13 @@ export function keepAwakeWanted(setting: boolean, set: DeviceSetView | null, han
  * Whether a file is on its way now, sent or received, in a chat or a group: being copied, moving, in line behind another
  * or checked. Not one that waits for a connection (the contact away), for a person's answer, or was paused, nor one that
  * stopped moving (`stalled`, it waits for its person's "Send again"): nothing would come of staying awake for those.
+ * Nor a sent one not offered yet (`unoffered`): the files ahead of it hold on their own while they move, and while
+ * they wait for answers it held for as long as nobody gave one.
  */
 export function filesMoving(transfers: Readonly<Record<string, FileTransferView>> | undefined): boolean {
   if (!transfers) return false;
   for (const transfer of Object.values(transfers)) {
-    if (transfer.state !== "transferring" || transfer.stalled) continue;
+    if (transfer.state !== "transferring" || transfer.stalled || transfer.unoffered) continue;
     if (transfer.stage !== "waiting" && transfer.stage !== "asking" && transfer.stage !== "paused") return true;
   }
   return false;
