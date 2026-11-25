@@ -203,7 +203,8 @@ is shared. The contact's app never trusts the sender's check.
   person may list, one switch at a time and off by default, in the `alsoKnownAs` of their profile's public
   DID ([draft 310-did-dht](../../../../docs/wisps/310-did-dht.md)). Pure and offline: no fetch. No comma in it
   (did:dht separates the list with commas). Leave it out when the identity has no URI of its own (a bare SSH key,
-  an OpenID account).
+  an OpenID account). `subject.normalize` takes it back as the same subject (people paste the link other apps
+  copy), and refuses every other link form: test/identityLinkForms.test.ts checks each provider.
 
 ## Expiry and re-checks
 
