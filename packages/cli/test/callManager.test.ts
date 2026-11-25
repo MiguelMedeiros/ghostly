@@ -1115,6 +1115,23 @@ describe("two call managers", { timeout: 60_000 }, () => {
       await a.calls.stopAll();
       await b.calls.stopAll();
     });
+
+    it("a call placed after this side's clock, a day ahead, was fixed rings: its signals are not dated after the ones the wrong clock dated", async () => {
+      const real = Date.now();
+      let at = real + 24 * 60 * 60_000;
+      const { a, b } = pairOfManagers({ now: () => at, nowB: () => real, callPaceMs: 0, quickRedialMs: 0 });
+      // Dated a day ahead of the contact's clock: dropped there (CALL_SIGNAL_FUTURE_MS), it never rang.
+      await a.calls.start("chat-ab", {});
+      await a.calls.hangup(undefined);
+      expect(b.events.filter((e) => e.type === "call.incoming")).toEqual([]);
+      at = real;
+      await a.calls.start("chat-ab", {});
+      await until(() => b.events.find((e) => e.type === "call.incoming"), 2000);
+      const offers = signalsOf(a, "o").map((s) => (JSON.parse(s!) as { ts: number }).ts);
+      expect(offers.at(-1)).toBe(real);
+      await a.calls.stopAll();
+      await b.calls.stopAll();
+    });
   });
 
   it("a call answered seconds after it rang sends its answer at once, though the STUN server never answers: its candidates were gathered as it rang", async () => {

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
+import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_FUTURE_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/types";
 import { dhtOnly, findChat, findOwnNamedChats } from "../apiKit";
 import { CliError } from "../errors";
@@ -205,9 +205,12 @@ export class CallManager {
   /**
    * A new signal's timestamp in a chat: now, or 1 ms after the last one sent there. The contact drops a signal no
    * newer than the last it heard, so a redial or a hang-up in the same millisecond as the signal before it would be lost.
+   * A clock set back by more than a contact takes ahead of its own (CALL_SIGNAL_FUTURE_MS) was the wrong one: dated
+   * after it, every signal in that chat was refused there until the daemon restarted.
    */
   private stamp(chat: string): number {
-    const ts = Math.max(this.now, (this.lastSent.get(chat) ?? 0) + 1);
+    const now = this.now, last = this.lastSent.get(chat) ?? 0;
+    const ts = last >= now && last - now < CALL_SIGNAL_FUTURE_MS ? last + 1 : now;
     this.lastSent.set(chat, ts);
     return ts;
   }
