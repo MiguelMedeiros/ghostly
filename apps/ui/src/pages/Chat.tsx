@@ -893,7 +893,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const blockKey = chatLink && params.peerPubKeyB64 ? params.peerPubKeyB64 : undefined;
   const setBlocked = (blocked: boolean) => {
     setConfirmBlock(false);
-    if (blockKey) void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked }).catch(() => {});
+    if (!blockKey) return;
+    // Blocked while it rings (the ringing card's Block contact): the ring stops here and nothing goes to the caller,
+    // no decline and no line in the chat, as if this app were closed.
+    if (blocked && ringsIn) webrtc.hangUp(false, false);
+    void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked }).catch(() => {});
   };
 
   const statusLabel = contactStatus(deliveryPeer, paired, status);
@@ -1417,6 +1421,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           // On a call in another chat: End and answer ends it first (useWebRTC), or Decline. Never two calls at once.
           onCall={webrtc.otherCallOn}
           onDelete={() => setConfirmDelete(true)}
+          onBlock={blockKey && !chatLink?.blocked ? () => setConfirmBlock(true) : undefined}
         />,
         callLayer ?? document.body,
       )}
