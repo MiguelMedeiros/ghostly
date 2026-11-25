@@ -242,7 +242,8 @@ chat's own "DHT only" choice (WISP 400: either side choosing it keeps both off t
 time is up. Meanwhile text still goes over the DHT (a text of about 248 bytes at most once sealed, an edit about
 214; a longer text is refused up to 256 bytes and waits past them, a longer edit is refused), files, calls and
 typing wait, and the contact's app shows the chat as DHT only. A hold, or `chat transport <chat> dht`, while a call
-is on in the chat is refused (`busy`): hang the call up first. `chat connect`, or `--hold 0`, ends it early. The
+is on in the chat is refused (`busy`): hang the call up first (a contact's call that only rings in is declined, and
+the chat goes to the DHT). `chat connect`, or `--hold 0`, ends it early. The
 hold is kept in the profile folder, and a `profile backup` carries it: a daemon that restarts (or a restored copy
 that starts) takes it back when its time is up, and a DHT only the chat had chosen itself (`chat transport dht`) is
 never undone by it. A `chat transport` chosen during a hold ends the

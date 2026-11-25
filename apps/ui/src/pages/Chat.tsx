@@ -1095,7 +1095,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined}
-            scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle"} />
+            scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle" && !ringsIn}
+            declineRingIn={ringsIn ? rejectCall : undefined} />
           <CallButtons phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
@@ -1490,7 +1491,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         never moves. */}
     {appHere && params && (
       <ChatAppPanel linkId={appHere} sessionId={sessionId} contact={{ name: shownName, named: !isAnonymous }}
-        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle"} />
+        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle" && !ringsIn}
+        declineRingIn={ringsIn ? rejectCall : undefined} />
     )}
     {/* Why an app did not open here, over the app that covers the chat: over the whole window, above its panel. */}
     <Toast toast={appWhy} onDismiss={dismissAppWhy} testId="chat-app-why" />
