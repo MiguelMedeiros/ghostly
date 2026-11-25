@@ -1,3 +1,5 @@
+import { startRtcLog } from "../calls/rtcLog";
+
 /**
  * How long no WebRTC connection is open before libdatachannel's threads are let go. For tests,
  * `GHOSTLY_TEST_RTC_IDLE_MS=<ms>` sets it.
@@ -44,7 +46,12 @@ export class RtcThreads {
 
 /** The process's one count: the chats' connections and the calls' share libdatachannel's threads. */
 export const rtcThreads = new RtcThreads(async () => {
-  const ndc = (await import("node-datachannel")) as unknown as { cleanup?: () => void; default?: { cleanup(): void } };
+  type Lib = { cleanup(): void } & Parameters<typeof startRtcLog>[0];
+  const ndc = (await import("node-datachannel")) as unknown as Partial<Lib> & { default?: Lib };
+  const lib = (ndc.cleanup ? ndc : ndc.default!) as Lib;
   // A connection made while the module loaded keeps them.
-  if (rtcThreads.idle) (ndc.cleanup ?? ndc.default!.cleanup)();
+  if (!rtcThreads.idle) return;
+  lib.cleanup();
+  // `cleanup()` drops node-datachannel's logger too: `GHOSTLY_RTC_LOG`'s, if set, goes on with the next connection.
+  startRtcLog(lib);
 });
