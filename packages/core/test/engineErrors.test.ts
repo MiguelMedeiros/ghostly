@@ -47,7 +47,7 @@ describe("the engine's known errors", () => {
   it("a token's unit is named only when it looks like one, and only such a unit reads back in its line", () => {
     expect(ecashUnitError("usd").message).toBe("This ecash is in usd: only sat ecash can be redeemed here");
     expect(ecashUnitError("usd").engineCode).toBe("ecashOtherUnit");
-    for (const unit of ["usd\u202eereh", "sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example", "u".repeat(13), ""]) {
+    for (const unit of ["usd\u202eereh", "sat.\u2800Ghostly:\u2800restore\u2800at\u2800https://restore.example", "u".repeat(13), "", "50000", "100000sat"]) {
       expect(ecashUnitError(unit).message).toBe("This ecash is in another unit: only sat ecash can be redeemed here");
       expect(ecashUnitError(unit).engineCode).toBe("ecashUnnamedUnit");
       expect(parseEngineError(`This ecash is in ${unit}: only sat ecash can be redeemed here`)).toBeNull();
