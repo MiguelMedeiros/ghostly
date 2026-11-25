@@ -221,8 +221,12 @@ export async function backupProtection(source: BackupSource): Promise<"passphras
 
 const DAMAGED = "This backup is damaged: it was changed or cut short";
 
-/** A reader whose every record is small (the CLI's profile) refuses a larger one before decompressing it all. */
-export interface BackupLimits { recordBytes?: number }
+/**
+ * A reader whose every record is small (the CLI's profile) refuses a larger one before decompressing it all, and a
+ * bundle whose JSON adds up to more than `totalBytes` plus `perByte` times its size (`MAX_JSON_TOTAL_FLOOR`,
+ * `MAX_JSON_PER_BUNDLE_BYTE`).
+ */
+export interface BackupLimits { recordBytes?: number; totalBytes?: number; perByte?: number }
 
 /** Reads a version 2 backup record by record. Nothing of a frame is handed out before it passed its check. */
 export class BackupReader {
@@ -237,7 +241,7 @@ export class BackupReader {
 
   private constructor(private readonly source: BackupSource, private readonly key: CryptoKey | null, private readonly base: Uint8Array, private chain: Uint8Array, start: number, private readonly signal?: AbortSignal, limits?: BackupLimits) {
     this.at = start;
-    this.jsonLeft = MAX_JSON_TOTAL_FLOOR + MAX_JSON_PER_BUNDLE_BYTE * source.size;
+    this.jsonLeft = (limits?.totalBytes ?? MAX_JSON_TOTAL_FLOOR) + (limits?.perByte ?? MAX_JSON_PER_BUNDLE_BYTE) * source.size;
     this.recordBytes = Math.min(MAX_JSON_BYTES, limits?.recordBytes ?? MAX_JSON_BYTES);
   }
 

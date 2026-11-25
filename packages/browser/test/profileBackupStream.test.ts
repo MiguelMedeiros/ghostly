@@ -111,6 +111,20 @@ it("a version 1 bundle, as apps before this one made them, still restores whole"
   }
 });
 
+it("a version 1 bundle of a few hundred KB that unpacks to far more is refused before anything is written", async () => {
+  await seed();
+  const peer = await snapshotDatabase("ghostly");
+  const bundle = await seal(await encode({ format: "ghostly-profile", version: 1, createdAt: 1, profile: { name: "Diary", builtIn: false }, storage: { pad: "A".repeat(100 * MIB) }, databases: { peer, ark: {} } }), PASS);
+  expect(bundle.length).toBeLessThan(MIB);
+  const before = await databases();
+  // What it gives, not the 100 MiB a failure would print.
+  const outcome = (run: Promise<unknown>) => run.then(() => "opened", (error: Error) => error.message);
+  expect(await outcome(openProfileBackup(bundle, PASS))).toBe("This backup is too large to restore");
+  expect(await outcome(restoreProfileBackup(bundle, PASS))).toBe("This backup is too large to restore");
+  expect(await databases()).toEqual(before);
+  expect(listProfiles().map((p) => p.id)).toEqual([""]);
+}, 120_000);
+
 it("a profile whose database a newer version made is refused before anything is written, not restored as one this version cannot open", async () => {
   await seed();
   // The profile as a newer app keeps it: its database one version up.

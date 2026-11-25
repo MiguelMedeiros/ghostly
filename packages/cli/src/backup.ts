@@ -44,14 +44,20 @@ const HOLDS = "holds.json";
 const SETTINGS = ["groups.json", "calls.json", HOLDS, "apps.json"];
 
 /**
- * What a restore takes of a record. Each setting is a short list (chats and their keys, holds, served apps): ~100 bytes
- * an entry, so 1 MiB is thousands of them. The largest record is the head with a light backup's file ids (~50 bytes
- * each): 16 MiB is some 300,000 files. A record this CLI does not know is skipped only while small: a newer one's would
- * be a few fields, and a large one is only unpacked and parsed for nothing.
+ * What a backup holds of a record, as JSON: a writer writes no more, a restore takes no more, and measures it before
+ * parsing it (JSON of nested brackets costs a hundred times more to parse than its size suggests). The largest record
+ * is the head with a light backup's file ids (~50 bytes each): 16 MiB is some 300,000 files. Each setting is a short
+ * list (chats and their keys, holds, served apps): ~100 bytes an entry, so 1 MiB is thousands of them. Every other
+ * record (a file's, and one a newer CLI writes) is a few fields.
  */
 const MAX_RECORD_BYTES = 16 * 1024 * 1024;
 const MAX_SETTING_BYTES = 1024 * 1024;
-const MAX_UNKNOWN_RECORD_BYTES = 64 * 1024;
+const MAX_SMALL_RECORD_BYTES = 64 * 1024;
+/**
+ * The CLI writes every record but the head and the settings plain: all a bundle's JSON unpacks to is the bundle's
+ * own size plus these (`BackupLimits`).
+ */
+const RESTORE_LIMITS = { recordBytes: MAX_RECORD_BYTES, totalBytes: MAX_RECORD_BYTES + SETTINGS.length * MAX_SETTING_BYTES, perByte: 1 };
 
 /** A setting's text, or null for one the profile never wrote. */
 const readSetting = (dir: string, name: string) => readFile(join(dir, name), "utf8").catch(unlessGone);
@@ -258,6 +264,12 @@ export const BACKUP_METHODS: Record<string, Method> = {
       for (const file of all) (!light || (await kept(file)) ? files : leftOut).push(file);
       const storeSize = (await stat(store)).size, bytes = files.reduce((sum, file) => sum + file.size, 0);
       const leftOutBytes = leftOut.reduce((sum, file) => sum + file.size, 0);
+      // Never a record a restore refuses (`MAX_RECORD_BYTES`): the backup is refused now, not when it is restored.
+      const head = JSON.stringify({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) } satisfies BackupRecord);
+      if (head.length > MAX_RECORD_BYTES) throw new CliError("refused", `A light backup of this profile leaves out too many files to list (${leftOut.length}): make a full backup`);
+      const records = settings.map(({ name, text }) => ({ name, json: JSON.stringify({ t: "setting", name, text } satisfies BackupRecord) }));
+      const large = records.find((record) => record.json.length > MAX_SETTING_BYTES);
+      if (large) throw new CliError("refused", `${large.name} of this profile is too large for a backup (over ${MAX_SETTING_BYTES / 1024 / 1024} MiB)`);
 
       writing = true;
       out = await open(partial, "wx", 0o600);
@@ -265,7 +277,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       let writer: BackupWriter;
       try { writer = await BackupWriter.start({ write: async (chunk) => { await handle.write(chunk); } }, unsealed ? null : passphrase!); } catch (error) { throw localFileError(error, path) ?? new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
       const put = (record: BackupRecord) => writer.json(JSON.stringify(record));
-      await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) });
+      await writer.json(head);
       await put({ t: "file", kind: "store", size: storeSize });
       const buffer = new Uint8Array(FRAME_BYTES);
       await copyIn(writer, buffer, store, storeSize, undefined, gone);
@@ -279,7 +291,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
         copied++;
         copiedBytes += file.size;
       }
-      for (const { name, text } of settings) await put({ t: "setting", name, text });
+      for (const { json } of records) await writer.json(json);
       await put({ t: "end", files: copied, bytes: copiedBytes });
       const written = await writer.finish();
       await handle.sync();
@@ -427,7 +439,7 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
   let work: ProfilePaths | null = null;
   try {
     let reader: BackupReader | null;
-    try { reader = await BackupReader.open(source, passphrase, undefined, { recordBytes: MAX_RECORD_BYTES }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
+    try { reader = await BackupReader.open(source, passphrase, undefined, RESTORE_LIMITS); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
     if (!reader) {
       const payload = await readWhole(file, passphrase ?? "");
       stop?.throwIfAborted();
@@ -457,16 +469,17 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
           continue;
         }
         if (out) { if (out.left) throw new CliError("refused", "This backup is damaged: it was changed or cut short"); await out.handle.close(); out = null; }
+        // Measured before it is parsed: a setting's record no larger than any this CLI writes, every other one small.
+        if (record.json.length > MAX_SETTING_BYTES) throw new CliError("refused", "This backup is too large to restore");
         const value = parse(record.json);
+        if (value.t !== "setting" && record.json.length > MAX_SMALL_RECORD_BYTES) throw new CliError("refused", "This backup is too large to restore");
         if (value.t === "end") { ended = value.files === files && value.bytes === bytes; if (!ended) throw new CliError("refused", "This backup is damaged: it was changed or cut short"); continue; }
         if (value.t === "setting") {
-          if (typeof value.text === "string" && Buffer.byteLength(value.text) > MAX_SETTING_BYTES) throw new CliError("refused", "This backup is too large to restore");
           if (SETTINGS.includes(value.name) && typeof value.text === "string") {
             try { await writeFile(join(paths.dir, value.name), value.text, { mode: 0o600, flag: "wx" }); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", "This backup is damaged: it was changed or cut short") : error; }
           }
           continue;
         }
-        if (value.t !== "file" && record.json.length > MAX_UNKNOWN_RECORD_BYTES) throw new CliError("refused", "This backup is too large to restore");
         if (value.t !== "file" || !Number.isSafeInteger(value.size) || value.size < 0) continue;
         let target: string;
         if (value.kind === "store") { target = join(paths.db, "snapshot.bin"); stored = true; }
