@@ -57,14 +57,14 @@ describe("a signature the CLI's engine checks", () => {
     expect(ed25519.verify(good, message, key, { zip215: false })).toBe(true);
   });
 
-  it("keeps a small-order key away from Node's check, which alone takes the identity key's constant signature", async () => {
+  it("keeps a small-order key away from Node's check, whatever Node's own answer for it", async () => {
     await import("../src/runtime/engine");
     const { verify } = await import("@ghostly/core");
     const le = (n: bigint) => Uint8Array.from({ length: 32 }, (_, i) => Number((n >> BigInt(8 * i)) & 0xffn));
     const identity = le(1n), identitySig = Uint8Array.from([...identity, ...le(0n)]);
     const message = new TextEncoder().encode("any message at all");
-    // Node's (OpenSSL's) cofactorless check says yes for any message: that is why the gate never asks it about such a key.
-    expect(nativeEd25519(identitySig, message, identity)).toBe(true);
+    // Node's own check said yes to this for any message on Node 22.23 and no on Node 24 and 26, so it is not pinned
+    // here: the gate never asks it about a key of small order, and noble's strict check answers.
     expect(ed25519.verify(identitySig, message, identity, { zip215: false })).toBe(false);
     expect(verify(identitySig, message, identity)).toBe(false);
   });
