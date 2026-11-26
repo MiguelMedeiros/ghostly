@@ -2405,7 +2405,8 @@ describe("one pull request alone", () => {
   describe("a lone pull request whose second rebase was never pushed, held or a draft since", () => {
     // Its head is still the first rebase, so the mark's sha is not its head. That pushed the second rebase again before
     // looking at a hold: a held branch was force-pushed, and a review's hold, which ends on a new head, ended on the
-    // train's own push, so a pull request with changes needed landed.
+    // train's own push, so a pull request with changes needed landed. Parked, its position comment lost the mark, so after
+    // the hold nothing pushed that rebase and a red first one waited for good.
     const unpushed = async () => {
       const repo = fakeRepo();
       repo.add(11, { behind: true });
@@ -2420,34 +2421,72 @@ describe("one pull request alone", () => {
       return { repo, first, pushes: repo.pushes.length };
     };
 
-    it("leaves a branch put on hold alone", async () => {
+    /** The hold is over: the next run pushes the promised second rebase, with `retried` kept. */
+    const pushedAfter = async (repo: ReturnType<typeof fakeRepo>, first: string, pushes: number, now?: number) => {
+      expect((await repo.run(now === undefined ? undefined : { now })).inFlight).toBe(11);
+      expect(repo.pushes).toHaveLength(pushes + 1);
+      const second = repo.pulls.get(11)!.sha;
+      expect(second).not.toBe(first);
+      expect(repo.alone(11)).toMatchObject({ sha: second, retried: true });
+    };
+
+    it("leaves a branch put on hold alone, and pushes the second rebase once the hold comes off", async () => {
       const { repo, first, pushes } = await unpushed();
       repo.pulls.get(11)!.labels.push(HOLD);
-      expect((await repo.run()).inFlight).toBeNull();
+      for (let i = 0; i < 2; i++) expect((await repo.run()).inFlight).toBeNull();
       expect(repo.pulls.get(11)!.sha).toBe(first);
       expect(repo.pushes).toHaveLength(pushes);
+      expect(repo.alone(11)).toMatchObject({ retried: true, from: first });
+      repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
+      await pushedAfter(repo, first, pushes);
+      repo.settle([11]);
+      expect((await repo.run()).failed).toEqual([11]);
+      expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
     });
 
-    it("leaves a draft alone", async () => {
+    it("leaves a draft alone, and pushes the second rebase once it is ready again", async () => {
       const { repo, first, pushes } = await unpushed();
       repo.pulls.get(11)!.draft = true;
       await repo.run();
       expect(repo.pulls.get(11)!.sha).toBe(first);
       expect(repo.pushes).toHaveLength(pushes);
+      repo.pulls.get(11)!.draft = false;
+      await pushedAfter(repo, first, pushes);
+      repo.settle();
+      await repo.run();
+      expect(repo.landed).toContain("#11");
     });
 
-    it("does not land one a reviewer asked changes of on its head", async () => {
+    it("does not land one a reviewer asked changes of on its head, and pushes the second rebase once approved", async () => {
       const { repo, first, pushes } = await unpushed();
       const now = Date.now();
-      repo.comments.set(11, [
-        ...(repo.comments.get(11) ?? []),
-        { id: 777, body: `Review: changes needed (head ${first.slice(0, 7)})`, user: { login: "MiguelMedeiros" }, created_at: new Date(now - 60_000).toISOString(), author_association: "OWNER" },
-      ]);
+      const review = (id: number, verdict: string, at: number) => ({ id, body: `Review: ${verdict} (head ${first.slice(0, 7)})`, user: { login: "MiguelMedeiros" }, created_at: new Date(at).toISOString(), author_association: "OWNER" });
+      repo.comments.set(11, [...(repo.comments.get(11) ?? []), review(777, "changes needed", now - 60_000)]);
       await repo.run({ now });
       expect(repo.pushes).toHaveLength(pushes);
       repo.settle();
       await repo.run({ now: now + 60_000 });
       expect(repo.landed).not.toContain("#11");
+      expect(repo.pushes).toHaveLength(pushes);
+      repo.comments.set(11, [...(repo.comments.get(11) ?? []), review(778, "approved", now + 90_000)]);
+      await pushedAfter(repo, first, pushes, now + 120_000);
+      repo.settle();
+      await repo.run({ now: now + 180_000 });
+      expect(repo.landed).toContain("#11");
+    });
+
+    it("keeps the mark of one whose rebase was pushed, held while its CI ran: red after the hold, it gets its second run", async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run();
+      const first = repo.pulls.get(11)!.sha;
+      const pushes = repo.pushes.length;
+      repo.pulls.get(11)!.labels.push(HOLD);
+      expect((await repo.run()).inFlight).toBeNull();
+      expect(repo.alone(11)).toMatchObject({ sha: first, retried: false });
+      repo.settle([11]);
+      repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
+      await pushedAfter(repo, first, pushes);
     });
   });
 
