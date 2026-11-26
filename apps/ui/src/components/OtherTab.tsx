@@ -21,12 +21,13 @@ const WORDS: Record<OtherTabState, [TranslationKey, TranslationKey]> = {
  * profile (or, opened for a share or a link, that it went to that tab). Drawn by the web entry before any provider
  * exists, so it is handed its translator, in the profile's language as the app would be. Redrawn in place as the share
  * or link goes over, its words are a polite status, so a screen reader hears whether the tab can be closed. The whole
- * width: `#root` is a flex row, where a box with no width is only as wide as its words, against the left edge.
+ * width: `#root` is a flex row, where a box with no width is only as wide as its words, against the left edge. In the
+ * profile's theme, which the boot guard put on <html> (a light one was drawn dark, under a light browser bar).
  */
 export function OtherTab({ state, t }: { state: OtherTabState; t: Translate }) {
   const [said, hint] = WORDS[state];
   return (
-    <div data-testid="other-tab" data-state={state} style={{ width: "100%", boxSizing: "border-box", height: "100vh", display: "grid", placeItems: "center", background: "#0b141a", color: "#8696a0", font: "15px system-ui", textAlign: "center", padding: 24 }}>
+    <div data-testid="other-tab" data-state={state} style={{ width: "100%", boxSizing: "border-box", height: "100vh", display: "grid", placeItems: "center", background: "var(--theme-app-bg, #0b141a)", color: "var(--theme-text-secondary, #8696a0)", font: "15px system-ui", textAlign: "center", padding: 24 }}>
       <div>
         <div style={{ fontSize: 48 }} aria-hidden="true">👻</div>
         <div role="status" aria-live="polite" aria-atomic="true" data-testid="other-tab-said">
