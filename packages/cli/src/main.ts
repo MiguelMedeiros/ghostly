@@ -1242,11 +1242,16 @@ async function startedDaemon(g: Globals, seconds: number): Promise<DaemonClient 
   }
 }
 
-/** `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all). */
+/**
+ * `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all), at most a day, as the
+ * socket calls' waits (`answerWithin`): past about 24.8 days a Node timer fires after 1 ms, and `daemon stop` sent a
+ * healthy daemon SIGTERM at once.
+ */
 function seconds(parsed: Parsed, fallback: number): number {
   const value = parsed.options.timeout;
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !(value > 0)) throw new CliError("usage", "--timeout takes a number of seconds above 0");
+  if (value > 86_400) throw new CliError("usage", `--timeout takes at most 86400 seconds (a day), not ${value}`);
   return value;
 }
 
