@@ -80,11 +80,12 @@ export interface BrowserHost {
   requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
   /**
    * Runs `task` (the share's `addService`, right after `requestLocalAccess` said yes) while no `forgetLocalAccess` or
-   * `releaseUnusedLocalAccess`, from this page or another, can give `originPattern` back. Resolves false without running
-   * it when the access went back between the two: ask again. Left out where nothing gives access back under a share
-   * (Desktop keeps one list per profile, in Rust).
+   * `releaseUnusedLocalAccess`, from this page or another, can give `originPattern` back or take `origin` off the
+   * allowed addresses; `origin` is allowed again there, next to its app. Resolves false without running it when the
+   * access went back between the two: ask again. Left out where nothing gives access back under a share (Desktop keeps
+   * one list per profile, in Rust).
    */
-  withLocalAccess?(originPattern: string, task: () => Promise<void>): Promise<boolean>;
+  withLocalAccess?(originPattern: string, origin: string, task: () => Promise<void>): Promise<boolean>;
   /**
    * May the peer reach `origin` for a contact now? The extension: only an address the person allowed in this browser
    * for this profile (not one that came with a restored or moved profile). Left out where nothing else is asked.

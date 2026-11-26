@@ -334,7 +334,7 @@ export const servicesPlatform: ServicesPlatform | null = {
       const granted = await host.requestLocalAccess(pattern, origin);
       if (!granted) break;
       if (!host.withLocalAccess) return add();
-      if (await host.withLocalAccess(pattern, add)) return;
+      if (await host.withLocalAccess(pattern, origin, add)) return;
     }
     throw new Error("Ghostly needs your permission to reach that local address");
   },
