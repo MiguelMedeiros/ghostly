@@ -248,11 +248,11 @@ function fakeRepo() {
       rebased.add(sha);
       return { baseSha: tips[base], sha };
     },
-    /** A push with a lease: refused once the branch is no longer at `expected`. */
+    /** A push with a lease: refused once the branch is no longer at `expected`. It moves every open pull request the branch heads. */
     pushHead: async (branch: string, sha: string, expected: string) => {
-      const p = [...pulls.values()].find((x) => x.open && x.branch === branch)!;
-      if (p.sha !== expected) return { ok: false, message: "! [rejected] (stale info)" };
-      p.sha = sha;
+      const heads = [...pulls.values()].filter((x) => x.open && x.branch === branch);
+      if (heads[0].sha !== expected) return { ok: false, message: "! [rejected] (stale info)" };
+      for (const p of heads) p.sha = sha;
       pushes.push(`${branch}=${sha}`);
       return { ok: true };
     },
@@ -2402,6 +2402,122 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
   });
 
+  describe("a lone pull request whose second rebase was never pushed, held or a draft since", () => {
+    // Its head is still the first rebase, so the mark's sha is not its head. That pushed the second rebase again before
+    // looking at a hold: a held branch was force-pushed, and a review's hold, which ends on a new head, ended on the
+    // train's own push, so a pull request with changes needed landed. Parked, its position comment lost the mark, so after
+    // the hold nothing pushed that rebase and a red first one waited for good.
+    const unpushed = async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run();
+      const first = repo.pulls.get(11)!.sha;
+      repo.settle([11]);
+      const push = repo.git.pushHead;
+      repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access 'https://github.com/…': Could not resolve host: github.com" });
+      await repo.run();
+      repo.git.pushHead = push;
+      expect(repo.alone(11)).toMatchObject({ retried: true, from: first });
+      return { repo, first, pushes: repo.pushes.length };
+    };
+
+    /** The hold is over: the next run pushes the promised second rebase, with `retried` kept. */
+    const pushedAfter = async (repo: ReturnType<typeof fakeRepo>, first: string, pushes: number, now?: number) => {
+      expect((await repo.run(now === undefined ? undefined : { now })).inFlight).toBe(11);
+      expect(repo.pushes).toHaveLength(pushes + 1);
+      const second = repo.pulls.get(11)!.sha;
+      expect(second).not.toBe(first);
+      expect(repo.alone(11)).toMatchObject({ sha: second, retried: true });
+    };
+
+    it("leaves a branch put on hold alone, and pushes the second rebase once the hold comes off", async () => {
+      const { repo, first, pushes } = await unpushed();
+      repo.pulls.get(11)!.labels.push(HOLD);
+      for (let i = 0; i < 2; i++) expect((await repo.run()).inFlight).toBeNull();
+      expect(repo.pulls.get(11)!.sha).toBe(first);
+      expect(repo.pushes).toHaveLength(pushes);
+      expect(repo.alone(11)).toMatchObject({ retried: true, from: first });
+      repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
+      await pushedAfter(repo, first, pushes);
+      repo.settle([11]);
+      expect((await repo.run()).failed).toEqual([11]);
+      expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
+    });
+
+    it("leaves a draft alone, and pushes the second rebase once it is ready again", async () => {
+      const { repo, first, pushes } = await unpushed();
+      repo.pulls.get(11)!.draft = true;
+      await repo.run();
+      expect(repo.pulls.get(11)!.sha).toBe(first);
+      expect(repo.pushes).toHaveLength(pushes);
+      repo.pulls.get(11)!.draft = false;
+      await pushedAfter(repo, first, pushes);
+      repo.settle();
+      await repo.run();
+      expect(repo.landed).toContain("#11");
+    });
+
+    it("does not land one a reviewer asked changes of on its head, and pushes the second rebase once approved", async () => {
+      const { repo, first, pushes } = await unpushed();
+      const now = Date.now();
+      const review = (id: number, verdict: string, at: number) => ({ id, body: `Review: ${verdict} (head ${first.slice(0, 7)})`, user: { login: "MiguelMedeiros" }, created_at: new Date(at).toISOString(), author_association: "OWNER" });
+      repo.comments.set(11, [...(repo.comments.get(11) ?? []), review(777, "changes needed", now - 60_000)]);
+      await repo.run({ now });
+      expect(repo.pushes).toHaveLength(pushes);
+      repo.settle();
+      await repo.run({ now: now + 60_000 });
+      expect(repo.landed).not.toContain("#11");
+      expect(repo.pushes).toHaveLength(pushes);
+      repo.comments.set(11, [...(repo.comments.get(11) ?? []), review(778, "approved", now + 90_000)]);
+      await pushedAfter(repo, first, pushes, now + 120_000);
+      repo.settle();
+      await repo.run({ now: now + 180_000 });
+      expect(repo.landed).toContain("#11");
+    });
+
+    it("keeps the mark of one whose rebase was pushed, held while its CI ran: red after the hold, it gets its second run", async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run();
+      const first = repo.pulls.get(11)!.sha;
+      const pushes = repo.pushes.length;
+      repo.pulls.get(11)!.labels.push(HOLD);
+      expect((await repo.run()).inFlight).toBeNull();
+      expect(repo.alone(11)).toMatchObject({ sha: first, retried: false });
+      repo.settle([11]);
+      repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
+      await pushedAfter(repo, first, pushes);
+    });
+
+    it("lets another one go alone while it is parked, and that one keeps its mark: red, it gets its second run, then the parked one flies", async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run();
+      repo.pulls.get(11)!.labels.push(HOLD);
+      repo.add(12, { behind: true });
+      expect((await repo.run()).inFlight).toBe(12);
+      const first = repo.pulls.get(12)!.sha;
+      repo.settle([12]);
+      for (let i = 0; i < 2; i++) await repo.run();
+      repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
+      expect(repo.alone(11)).not.toBeNull();
+      const r = await repo.run();
+      expect(r.inFlight).toBe(12);
+      expect(repo.pulls.get(12)!.sha).not.toBe(first);
+      expect(repo.alone(12)).toMatchObject({ sha: repo.pulls.get(12)!.sha, retried: true });
+      expect(repo.alone(11)).not.toBeNull();
+      repo.settle([12]);
+      expect((await repo.run()).failed).toEqual([12]);
+      expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+      repo.settle();
+      for (let i = 0; i < 3 && !repo.landed.includes("#11"); i++) {
+        await repo.run();
+        repo.settle();
+      }
+      expect(repo.landed).toContain("#11");
+    });
+  });
+
   it("sends a lone pull request that changes a workflow and is behind dev to a coordinator, with no rebase push", async () => {
     // Before, it was rebased and pushed, GitHub refused the push, and it left the line with `queue:failed`.
     const repo = fakeRepo();
@@ -2654,6 +2770,69 @@ describe("one pull request alone", () => {
     expect(later.merged).toEqual([12]);
     expect(later.log.join("\n")).not.toMatch(/CI never started on #11/);
     expect(repo.pushes.filter((p) => p.startsWith("fix-11="))).toHaveLength(1);
+  });
+
+  /** #12 from #11's branch into `epic/x`, open and not queued: one head, two pull requests. */
+  const twin = (repo: ReturnType<typeof fakeRepo>, extra: Partial<Pr> = {}) => repo.pulls.set(12, { ...repo.pulls.get(11)!, number: 12, base: "epic/x", labels: [], open: true, ...extra });
+
+  it("goes the batch way, pushing nothing to its branch, when another open pull request into another base heads it, and lands there", async () => {
+    // Alone, the train rebased fix-11 onto dev and pushed it: #12's head moved too (the epic's pull request then held
+    // dev's commits), and the next run refused #11's green run as not its own (#12 ran it too), so neither moved.
+    const repo = fakeRepo();
+    repo.add(11, { ci: running, behind: true });
+    repo.drafts.set("h11", fastGreen);
+    twin(repo);
+    const r = await repo.run();
+    expect(repo.pushes).toEqual([]);
+    expect(repo.pulls.get(11)!.sha).toBe("h11");
+    expect(repo.pulls.get(12)!.sha).toBe("h11");
+    expect(repo.members()).toEqual([11]);
+    expect(r.inFlight).toBe(repo.batch()!.number);
+    expect(r.log.join("\n")).toMatch(/ALONE #11: its branch `fix-11` is also the head of #12 into `epic\/x`, so the train does not push to it; it goes the batch way/);
+    repo.settle();
+    const done = await repo.run();
+    expect(done.merged).toEqual([11]);
+    expect(repo.landed).toEqual(["#11"]);
+    expect(repo.pushes).toEqual([]);
+    expect(repo.pulls.get(12)).toMatchObject({ open: true, sha: "h11" });
+    expect(repo.pulls.get(12)!.merged).toBeFalsy();
+  });
+
+  it("still goes alone when the only other pull request from its branch is closed", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    twin(repo, { open: false, closedAt: "2026-10-02T00:00:00Z" });
+    const r = await repo.run();
+    expect(r.inFlight).toBe(11);
+    expect(r.opened).toEqual([]);
+    const head = repo.pulls.get(11)!.sha;
+    expect(repo.pushes).toEqual([`fix-11=${head}`]);
+    expect(repo.pulls.get(12)!.sha).toBe("h11");
+  });
+
+  it.each(["cut", "unread"])("goes the batch way when the list of its branch's pull requests is %s", async (how) => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.gh.headPulls = how === "cut" ? async () => Object.assign([], { truncated: true }) : async () => Promise.reject(new Error("HTTP 502 Bad Gateway"));
+    const r = await repo.run();
+    expect(repo.pushes).toEqual([]);
+    expect(repo.members()).toEqual([11]);
+    expect(r.log.join("\n")).toMatch(how === "cut" ? /ALONE #11: its branch `fix-11` heads more pull requests than the train reads/ : /ALONE #11: the train could not read which pull requests its branch `fix-11` heads \(HTTP 502 Bad Gateway\)/);
+  });
+
+  it("goes the batch way instead of rebasing a lone pull request again once another open pull request heads its branch", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    expect((await repo.run()).inFlight).toBe(11);
+    const head = repo.pulls.get(11)!.sha;
+    repo.runs.set(head, running);
+    twin(repo);
+    repo.tips.dev = "dev1"; // dev moved under the flight: alone, it would be rebased and pushed again
+    const r = await repo.run();
+    expect(repo.pushes).toEqual([`fix-11=${head}`]);
+    expect(repo.pulls.get(12)!.sha).toBe(head);
+    expect(repo.members()).toEqual([11]);
+    expect(r.log.join("\n")).toMatch(/ALONE #11: its branch `fix-11` is also the head of #12 into `epic\/x`/);
   });
 
   it("takes a pull request that conflicts with the tip out of the line with queue:conflict", async () => {
@@ -4153,12 +4332,18 @@ describe("a green pull request run that is not the pull request's own", () => {
     expect(repo.comments.get(21)![0].body).toMatch(/Waiting: another pull request from its branch \(#22 into `epic\/x`\) ran CI on the same commit/);
   });
 
-  it("pushes no fresh commit for one alone at the tip on its fast tier whose runs are not its own: its sibling runs that one too", async () => {
+  it("pushes no fresh commit for one alone at the tip on its fast tier whose runs are not its own: its sibling runs that one too, so it goes the batch way", async () => {
     const repo = sharedHead();
     repo.earlier.delete("h21");
     repo.drafts.set("h21", fastGreen);
-    expect((await repo.run()).inFlight).toBe(21);
+    const r = await repo.run();
     expect(repo.pushes).toEqual([]);
+    expect(r.inFlight).toBe(repo.batch()!.number);
+    expect(repo.members()).toEqual([21]);
+    // A batch's CI is its own: it lands there, and #22's head stays where it was.
+    repo.settle();
+    expect((await repo.run()).merged).toEqual([21]);
+    expect(repo.pulls.get(22)).toMatchObject({ open: true, sha: "h21" });
   });
 
   it("does not count a green pull request run from another branch on the same commit", async () => {

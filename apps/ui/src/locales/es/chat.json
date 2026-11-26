@@ -29,6 +29,12 @@
     "save": "Guardar audio",
     "tooLarge": "Demasiado grande para reproducirlo aquí. Descárgalo para escucharlo."
   },
+  "block": {
+    "blocked": "Bloqueaste a este contacto",
+    "body": "Ya no podrá llamarte ni enviarte nada, y nada se lo avisa. El chat se queda. Desbloquéalo desde este menú o en Ajustes → Privacidad y seguridad.",
+    "confirm": "Bloquear",
+    "title": "¿Bloquear a {{name}}?"
+  },
   "compat": {
     "burned": "El chat se ha destruido",
     "continued": "Invitaste a tu contacto a un chat nuevo.",
@@ -45,6 +51,8 @@
   "deleteForEveryone": "Eliminar para todos",
   "deleteForEveryoneGroupHint": "Se elimina también en los dispositivos de los miembros. Las apps antiguas muestran \"Mensaje eliminado\"; las copias guardadas se quedan.",
   "deleteForEveryoneHint": "Se elimina también en los dispositivos de tu contacto. Las apps antiguas muestran \"Mensaje eliminado\"; las copias guardadas se quedan.",
+  "deleteForEveryoneHintDhtContact": "Se elimina aquí ahora. Los dispositivos de tu contacto lo eliminan solo si el chat vuelve a tener conexión directa en una semana: el chat de tu contacto está en Solo DHT, hasta que la permita de nuevo. Las apps antiguas muestran \"Mensaje eliminado\"; las copias guardadas se quedan.",
+  "deleteForEveryoneHintDhtYou": "Se elimina aquí ahora. Los dispositivos de tu contacto lo eliminan solo si el chat vuelve a tener conexión directa en una semana: este chat está en Solo DHT, cámbialo desde el icono de conexión. Las apps antiguas muestran \"Mensaje eliminado\"; las copias guardadas se quedan.",
   "deleteMessage": "Eliminar mensaje",
   "deleteMessageHint": "Se elimina solo aquí. Tu contacto conserva su copia.",
   "deleteSendingFileHint": "Se elimina solo aquí. El envío se detiene; tu contacto no recibirá el archivo.",
@@ -275,6 +283,7 @@
     "wantsToSend": "{{name}} quiere enviarlo · quedan {{size}}"
   },
   "menu": {
+    "block": "Bloquear contacto",
     "continueNew": "Continuar en un chat nuevo",
     "hold": "Retener mensajes…",
     "more": "Más…",
@@ -284,6 +293,7 @@
     "pin": "Fijar chat",
     "refresh": "Actualizar",
     "techInfo": "Información técnica",
+    "unblock": "Desbloquear contacto",
     "unpin": "Dejar de fijar"
   },
   "message": {

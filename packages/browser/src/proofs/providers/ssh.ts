@@ -35,8 +35,13 @@ function normalizeKeySubject(input: string): string {
   }
 }
 
+/** Where an account's profile page is: its `publicUri`, which the username field takes back. */
+const PROFILE_HOST: Record<SshForge, string> = { github: "github.com", gitlab: "gitlab.com" };
+
 function normalizeLogin(forge: SshForge, input: string): string {
-  const login = input.trim().replace(/^@/, "").toLowerCase();
+  const value = input.trim();
+  const profile = new RegExp(`^https://${PROFILE_HOST[forge].replace(".", "\\.")}/([^/]*)/?$`, "i").exec(value);
+  const login = (profile ? profile[1]! : value.replace(/^@/, "")).toLowerCase();
   if (!validForgeLogin(forge, login)) throw new Error(`Enter a ${SSH_FORGE_LABEL[forge]} username`);
   return login;
 }
@@ -150,7 +155,7 @@ function forgeProvider(forge: SshForge): IdentityProofProvider<SshEvidence> {
     limits: `Does not prove a ${label} login: only that a key the account lists is yours, for as long as it stays listed.`,
     platforms: ["web", "extension", "desktop"],
     subject: { label: `${label} username`, placeholder: forge === "github" ? "octocat" : "username", normalize: input => normalizeLogin(forge, input) },
-    publicUri: login => `https://${forge === "github" ? "github.com" : "gitlab.com"}/${login}`,
+    publicUri: login => `https://${PROFILE_HOST[forge]}/${login}`,
     validity: { defaultDays: 90, maxDays: 365 },
     // Keys get removed from accounts; the contact's app offers "Check again" after this. GitHub answers 60 lookups an
     // hour per IP without a login: the automatic re-check spends at most half of them.

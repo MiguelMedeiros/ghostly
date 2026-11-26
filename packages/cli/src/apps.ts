@@ -1,6 +1,7 @@
 import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { closeSync, existsSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { wordlist as englishWords } from "@scure/bip39/wordlists/english.js";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, APP_STORE_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppHash, isAppLine, isAppUrl, readAppBundle,
@@ -11,7 +12,7 @@ import { APP_FETCH_HOSTS, APP_FETCH_LIMITS, isAppFetchUrl } from "@ghostly/brows
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError, shownValue } from "./errors";
 import { jsonOut } from "./jsonOut";
-import { guardText } from "./secretGuard";
+import { findSecret, guardText } from "./secretGuard";
 import { nativeEd25519 } from "./nativeEd25519";
 import { userPath } from "./profiles";
 
@@ -481,11 +482,192 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
 /**
  * A private key in a file: a PEM private key block with its body (PKCS #8, OpenSSH, RSA, EC, encrypted, the traditional
  * encrypted one's "Proc-Type: 4,ENCRYPTED" headers included), an OpenPGP "PRIVATE KEY BLOCK" (its "Version: GnuPG
- * v2.4.5" headers included), or a Ghostly key file's first line. A library that only names the block's header in its
- * code does not match. The body stops at the next "-----": a file of headers with no end is read once, not once per
- * header to the end of the file.
+ * v2.4.5" headers included), or a Ghostly key file's first line. The block may sit in a JSON or JS string, its line
+ * breaks written `\n`, or `\\n` in a string inside a string (a service account's `"private_key"`, a key pasted into
+ * code, kept in an env var), its lines indented with tabs. A library that only names the block's header in its code
+ * does not match. The body stops at the next "-----": a file of headers with no end is read once, not once per header
+ * to the end of the file. The body is cut there with `indexOf` and read by one character class: a regex alternation
+ * repeated over a body of millions of characters ran out of stack.
  */
-const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----\r?\n(?:[A-Za-z0-9+/=\r\n :,.]|-(?!----)){40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
+function holdsKeyBlock(text: string): boolean {
+  if (GHOSTLY_KEY.test(text)) return true;
+  for (const header of text.matchAll(KEY_BEGIN)) {
+    const start = header.index + header[0].length;
+    const end = text.indexOf("-----", start);
+    if (end < 0) return false;
+    if (end - start < 40 || !KEY_BODY.test(text.slice(start, end))) continue;
+    KEY_END.lastIndex = end;
+    if (KEY_END.test(text)) return true;
+  }
+  return false;
+}
+/** A key file's first line, after a UTF-8 byte order mark (read a byte a character) or blank lines an editor left. */
+const GHOSTLY_KEY = /^(?:\xef\xbb\xbf)?\s*Ghostly (publisher|store) key \(WISP 1200\)/;
+const KEY_BEGIN = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----(?:\r?\n|\\+(?:r\\+)?n)/g;
+const KEY_BODY = /^[A-Za-z0-9+/=\r\n\t :,.\\-]*$/;
+const KEY_END = /-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----/y;
+/** One string's end and the next one's start (`"...\n" +\n "..."`, a JSON array's `",\n "`): a key's lines kept apart. */
+const STRING_JOIN = /["'`]\s*(?:[+,]\s*)?\\*["'`]/g;
+/**
+ * A run of base64, wrapped or not. A fixed part and an open tail: `{40,}` kept a backtrack frame a character and ran
+ * out of stack on a run of about 5 MiB (an inlined wasm or picture).
+ */
+const BASE64_RUN = /[A-Za-z0-9+/\r\n]{40}[A-Za-z0-9+/\r\n]*/g;
+/** `text` in base64 at each of the 3 places of a group it may start: the characters that depend on it alone. */
+const inBase64 = (text: string) => [0, 1, 2].map((at) => Buffer.from(`${"\0".repeat(at)}${text}`, "latin1").toString("base64").slice(at ? 4 : 0, 4 * Math.floor((at + text.length) / 3)));
+/** "-----BEGIN" in base64, and in base64 again (a base64 secret's value encoded once more). */
+const BASE64_BEGIN = inBase64("-----BEGIN").flatMap((once) => [once, ...inBase64(once)]);
+
+/** A file's text: UTF-16 by its byte order mark (PowerShell's `>`, Notepad's "Unicode"), else a byte a character. */
+function fileText(bytes: Uint8Array): string {
+  const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (b[0] === 0xff && b[1] === 0xfe) return b.subarray(2).toString("utf16le");
+  if (b[0] === 0xfe && b[1] === 0xff) return Buffer.from(b.subarray(2, b.length - (b.length % 2))).swap16().toString("utf16le");
+  return b.toString("latin1");
+}
+
+/**
+ * Whether a text holds a private key ({@link holdsKeyBlock}): as written, its strings joined (a key built from one
+ * string a line, a JSON array of its lines), or base64-encoded (a CI or Kubernetes secret, a key file in one), read at
+ * each of the 4 places a group of base64 may start, and the decoded text read again for a key encoded twice.
+ */
+function holdsPrivateKey(text: string, depth = 0): boolean {
+  if (holdsKeyBlock(text.replace(STRING_JOIN, "\n"))) return true;
+  if (depth > 1) return false;
+  for (const [run] of text.matchAll(BASE64_RUN)) {
+    const base64 = run.replace(/[\r\n]/g, "");
+    if (!BASE64_BEGIN.some((begin) => base64.includes(begin))) continue;
+    for (let at = 0; at < 4; at++) if (holdsPrivateKey(Buffer.from(base64.slice(at), "base64").toString("latin1"), depth + 1)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether a text holds a secret that `send` asks about in a message (findSecret, ./secretGuard.ts): a BIP39 seed in
+ * English, an `nsec1…`, an xprv or a WIF, a Cashu token that decodes, or 64 or 128 hex digits written as the value of a
+ * key's name (`"privkey": "…"`, `SEED=…`); a hash under any other name (a lockfile's, an integrity field) is not one.
+ * findSecret reads a message, at about 0.1 µs a character (2 s for a 16 MiB bundle), and takes any run of seed words
+ * whose checksum holds, which one run in 16 does: a linear pass here finds each candidate, and findSecret reads that
+ * alone, {@link CANDIDATES_READ} of each kind at most. More than {@link SEED_RUN_MOST} seed words in a row are a word
+ * list (a wallet's copy of BIP39's), not a seed.
+ * Not looked for: a seed in another list or language, a secret only base64 holds (the PEM checks above decode it).
+ */
+function holdsWalletSecret(text: string): boolean {
+  // `\n` written in a JSON or JS string ends a word as the line break it stands for: \nabandon, \nnsec1…. One backslash
+  // is read (`\\+` read a long run of them again from each of its backslashes).
+  const written = text.replace(ESCAPED_BREAK, " ");
+  return [NSEC_CANDIDATE, XPRV_CANDIDATE, WIF_CANDIDATE, HEX_UNDER_KEY_NAME].some((pattern) => anySecret(matches(written, pattern)))
+    || anySecret(cashuTokens(written)) || anySecret(seedRuns(written));
+}
+const ESCAPED_BREAK = /\\[nrt]/g;
+/** findSecret's own shapes, without its open tails (a long run of base58 kept a backtrack frame a character). */
+const NSEC_CANDIDATE = /\bnsec1[02-9ac-hj-np-z]{58}(?![02-9ac-hj-np-z])/gi;
+const XPRV_CANDIDATE = /\b[xtyzuvYZUV]prv[1-9A-HJ-NP-Za-km-z]{100}/g;
+const WIF_CANDIDATE = /\b[59KLc][1-9A-HJ-NP-Za-km-z]{50,51}\b/g;
+const HEX_UNDER_KEY_NAME = /(?:priv(?:ate)?[_-]?key|secret(?:[_-]?key)?|nsec|seed|mnemonic)["'`]?[ \t]{0,16}[:=][ \t]{0,16}["'`]?(?:0x)?[0-9a-fA-F]{64}(?:[0-9a-fA-F]{64})?(?![\w-])/gi;
+/**
+ * Candidates of one kind handed to findSecret, at most: a few µs each, up to 0.4 ms for 40 seed words (Electrum's
+ * HMAC on each 12), and a file of 16 MiB of WIF-shaped words that are none took 3 s. A file with more (a list of
+ * addresses, of test vectors, of words) is data, not a key pasted by mistake. Nor more than {@link CANDIDATE_TEXT_READ}
+ * characters of them, findSecret's 0.1 µs each.
+ */
+const CANDIDATES_READ = 256;
+const CANDIDATE_TEXT_READ = 1024 * 1024;
+
+function anySecret(candidates: Iterable<string>): boolean {
+  let read = 0, characters = 0;
+  for (const candidate of candidates) {
+    if (++read > CANDIDATES_READ || (characters += candidate.length) > CANDIDATE_TEXT_READ) return false;
+    const found = findSecret(candidate);
+    if (found && (found.kind !== "cashu" || found.amount !== null)) return true;
+  }
+  return false;
+}
+
+function* matches(text: string, pattern: RegExp): Generator<string> {
+  for (const [match] of text.matchAll(pattern)) yield match;
+}
+
+const CASHU_START = /\bcashu[AB][A-Za-z0-9_+/-]{20}/g;
+/** A Cashu token's characters (base64 and base64url), by character code. */
+const CASHU_CHAR = Uint8Array.from({ length: 128 }, (_, c) => Number(/[A-Za-z0-9_+/-]/.test(String.fromCharCode(c))));
+/** The longest Cashu token read, about 60 proofs as a cashuA: a longer run is a blob that starts with the word. */
+const CASHU_MOST = 16 * 1024;
+
+/** Each `cashuA…`/`cashuB…` run, whole, read once: the next one is looked for where it ends. */
+function* cashuTokens(text: string): Generator<string> {
+  CASHU_START.lastIndex = 0;
+  for (let start: RegExpExecArray | null; (start = CASHU_START.exec(text));) {
+    let end = CASHU_START.lastIndex;
+    while (end < text.length && CASHU_CHAR[text.charCodeAt(end)] === 1) end++;
+    if (text[end] === "=") end += text[end + 1] === "=" ? 2 : 1;
+    CASHU_START.lastIndex = end;
+    if (end - start.index <= CASHU_MOST) yield text.slice(start.index, end);
+  }
+}
+
+/**
+ * What goes between the words of a seed written down: spaces and line breaks, a JSON array's `", "`, strings joined
+ * with `+`, a numbered list's `\n2. `. Code's marks (`.`, `(`, `=`, `{`, `-`, `:` but after a number) end a run:
+ * code is full of the list's words (`box.type`, `return { top, bottom }`), any 12 of which pass the checksum one time in
+ * 16. A seed in a markdown list or table is not looked for.
+ */
+const SEED_GAP = String.raw`[\s"'\`,+]{1,16}(?:\d{1,2}[.):]?[\s"'\`,+]{1,16})?`;
+/** 12 words of BIP39's English lengths (3 to 8 letters) in a row: where a seed may start, read 12 words ahead. */
+const SHORT_WORDS = new RegExp(String.raw`(?<![A-Za-z])(?:[A-Za-z]{3,8}${SEED_GAP}){11}[A-Za-z]{3,8}(?![A-Za-z])`, "g");
+/** The next word after a gap: its letters, and whether more letters go on than a seed word has. */
+const NEXT_WORD = new RegExp(String.raw`(?:${SEED_GAP})?([A-Za-z]{1,8})([A-Za-z]?)`, "y");
+const SEED_RUN_MOST = 48;
+let seedWords: Set<string> | undefined;
+
+/**
+ * The runs of 12 to {@link SEED_RUN_MOST} words of BIP39's English list, as written, each read once. A run in the
+ * list's own order is a piece of a word list (a wallet's copy of BIP39's, SLIP39's or Monero's, which share many of its
+ * words), not a seed: a seed's 12 words fall in that order one time in 479 million.
+ */
+function* seedRuns(text: string): Generator<string> {
+  seedWords ??= new Set(englishWords);
+  SHORT_WORDS.lastIndex = 0;
+  for (let found: RegExpExecArray | null; (found = SHORT_WORDS.exec(text));) {
+    const runs: string[] = [];
+    let from = -1, to = 0, count = 0, at = found.index, last = "", sorted = true;
+    const close = () => {
+      // With a word on no list after it ("a", as findSecret's own notes say): the run is not the whole text, which
+      // findSecret takes as a seed checksum or not (a message of nothing but 12 list words); here its checksum decides.
+      if (count >= 12 && count <= SEED_RUN_MOST && !sorted) runs.push(`${text.slice(from, to)} a`);
+      from = -1;
+      count = 0;
+      last = "";
+      sorted = true;
+    };
+    // The stretch of words from here, to a longer word, more marks or the end: walked once, then looked past.
+    for (;;) {
+      NEXT_WORD.lastIndex = at;
+      const word = NEXT_WORD.exec(text);
+      if (!word) break;
+      at = NEXT_WORD.lastIndex;
+      if (word[2]) {
+        while (isLetter(text.charCodeAt(at))) at++;
+        break;
+      }
+      const spelled = word[1].toLowerCase();
+      if (seedWords.has(spelled)) {
+        if (from < 0) from = at - word[1].length;
+        to = at;
+        count++;
+        if (spelled < last) sorted = false;
+        last = spelled;
+      } else close();
+    }
+    close();
+    SHORT_WORDS.lastIndex = Math.max(at, found.index + 1);
+    yield* runs;
+  }
+}
+const isLetter = (code: number) => (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+
+/** {@link holdsPrivateKey} or {@link holdsWalletSecret}: a secret a public bundle must not carry. */
+const holdsSecret = (text: string) => holdsPrivateKey(text) || holdsWalletSecret(text);
 
 /** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
 const isUnder = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
@@ -502,9 +684,11 @@ const isInside = (dir: string, path: string) => isUnder(dir, path) || isUnder(re
 /** Fields of `ghostly-app.json` the command writes itself. */
 const WRITTEN = ["publisher", "files"] as const;
 
-function readSource(path: string): Record<string, unknown> {
+/** The source's fields, and its bytes, which are scanned with the folder's files: its text is published too. */
+function readSource(path: string): { draft: Record<string, unknown>; bytes: Uint8Array } {
   if (!existsSync(path)) throw new CliError("not_found", `No ${APP_SOURCE} in ${dirname(path)}: it holds the manifest's fields (name, version, title, tagline, entry, permissions, runtime, license, ...) but publisher, sequence and files, which publish writes`);
-  const text = Buffer.from(readFolderFile(path)).toString("utf8");
+  const bytes = readFolderFile(path);
+  const text = Buffer.from(bytes).toString("utf8");
   let value: unknown;
   try { value = JSON.parse(text); } catch (error) { throw new CliError("bad_request", `${path} is not JSON: ${error instanceof Error ? error.message : String(error)}`); }
   refuseRepeatedKey(path, text);
@@ -516,7 +700,7 @@ function readSource(path: string): Record<string, unknown> {
   if (draft.sequence !== undefined && !(Number.isSafeInteger(draft.sequence) && (draft.sequence as number) >= 1)) {
     throw new CliError("bad_request", `${path}: sequence is a whole number from 1 (or leave it out: publish raises it by itself)`);
   }
-  return draft;
+  return { draft, bytes };
 }
 
 /**
@@ -548,7 +732,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   }
   const out = userPath(outArg ?? join(dir, APP_BUNDLE_FILE));
   const sourcePath = join(dir, APP_SOURCE);
-  const draft = readSource(sourcePath);
+  const { draft, bytes: sourceBytes } = readSource(sourcePath);
 
   // The version this one follows: the bundle already at the output, which only its own key may follow.
   let previous: AppManifest | null = null;
@@ -581,9 +765,13 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   const lists = [...new Set([join(dir, APP_REVOKE_FILE), join(dirname(out), APP_REVOKE_FILE)])];
   const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_BUNDLE_FILE), ...lists]));
   const contents = files.map((f) => ({ path: f.path, bytes: readFolderFile(f.full) }));
-  // A bundle is public: a private key found in the folder (an old key, a store key, any PEM) stops the publish.
-  const keyFile = contents.find((f) => PRIVATE_KEY.test(Buffer.from(f.bytes).toString("latin1")));
-  if (keyFile) throw refused(`${keyFile.path} in ${dir} holds a private key, and a bundle is public: move it out of the app's folder`, { reason: "private-key", detail: keyFile.path });
+  // A bundle is public: a private key found in the folder (an old key, a store key, any PEM), or a wallet's secret, stops
+  // the publish; in ghostly-app.json too, whose description and release notes stores and the website show.
+  const keyFile = [...contents, { path: APP_SOURCE, bytes: sourceBytes }].find((f) => holdsSecret(fileText(f.bytes)));
+  if (keyFile) {
+    const fix = keyFile.path === APP_SOURCE ? "take it out of the manifest's fields" : "move it out of the app's folder";
+    throw refused(`${keyFile.path} in ${dir} holds a private key, and a bundle is public: ${fix}`, { reason: "private-key", detail: keyFile.path });
+  }
   const manifest = {
     ...draft,
     ghostlyApp: 1,

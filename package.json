@@ -1,7 +1,7 @@
 {
   "name": "ghostly",
   "private": true,
-  "version": "1.13.7",
+  "version": "1.13.9",
   "type": "module",
   "scripts": {
     "predev": "npm run sync:apps",
@@ -13,7 +13,7 @@
     "tauri": "tauri",
     "lint": "eslint apps/ui/src packages apps/extension/src apps/extension/test/*.ts apps/web/src apps/mini e2e",
     "lint:fix": "eslint apps/ui/src packages apps/extension/src apps/extension/test/*.ts apps/web/src apps/mini e2e --fix",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p e2e && npm run typecheck -w @ghostly/core -w @ghostly/browser -w @ghostlytools/sdk -w @ghostly/extension -w @ghostly/web -w @ghostlytools/cli -w @ghostly/mini-chess",
+    "typecheck": "node tools/scripts/typecheck.mjs",
     "test": "npm run test:packages && npm run test:app",
     "test:packages": "npm run test -w @ghostly/core -w @ghostly/browser -w @ghostlytools/sdk -w @ghostly/extension -w @ghostlytools/cli -w @ghostly/mini-chess",
     "test:app": "npm run test:ui && npm run test:matrix && npm run test:scripts",

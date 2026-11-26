@@ -2051,7 +2051,7 @@ dependencies = [
 
 [[package]]
 name = "ghostly"
-version = "1.13.7"
+version = "1.13.9"
 dependencies = [
  "arboard",
  "async-trait",

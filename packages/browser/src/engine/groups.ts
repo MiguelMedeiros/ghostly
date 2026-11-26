@@ -369,10 +369,13 @@ export function dropMarks(marks: GroupMarks, groupId: string): void {
   marks.lastMessageAt.delete(groupId); marks.lastPeerMessageAt.delete(groupId); marks.lastMentionAt.delete(groupId); marks.by.delete(groupId);
 }
 
+/** A row that moves the group's "@": it named me as it came, not only since an edit (`mentionedByEdit`). */
+const marksMention = (m: StoredMessage): boolean => !!m.mentioned && !m.mentionedByEdit;
+
 /** The newest rows `load` reads the marks from: a group's last message, last of a member's, last mentioning me. */
 export function newestMarked(history: StoredMessage[]): { last?: StoredMessage; peer?: StoredMessage; mention?: StoredMessage } {
   const said = history.filter(m => !m.event && !m.groupPay);
-  return { last: said[said.length - 1], peer: [...said].reverse().find(m => m.sender !== "me"), mention: [...history].reverse().find(m => m.mentioned) };
+  return { last: said[said.length - 1], peer: [...said].reverse().find(m => m.sender !== "me"), mention: [...history].reverse().find(marksMention) };
 }
 
 /** Rows `unmark` reads at a time from the newest back: the marks it moves back are almost always among the last few. */
@@ -399,7 +402,7 @@ export async function newestMarkedOf(store: Pick<GroupStore, "getMessages" | "ge
     for (const m of [...page.messages].reverse()) {
       if (m.id === skip) continue;
       if (!m.event && !m.groupPay) { found.last ??= m; if (m.sender !== "me") found.peer ??= m; }
-      if (m.mentioned) found.mention ??= m;
+      if (marksMention(m)) found.mention ??= m;
     }
     const oldest = page.messages[0];
     if (!page.more || !oldest || ((!want.last || found.last) && (!want.peer || found.peer) && (!want.mention || found.mention))) return found;
@@ -945,6 +948,21 @@ export class Groups {
   /** A group's pin now (WISP 400 § Pinned message), the latest one taken, unpinned or not. */
   pinOf(groupId: string): StoredPin | undefined { return this.record(groupId)?.pin; }
 
+  /**
+   * The pin said over an edge as it opens: none while it names a message deleted for everyone. A member let in after
+   * the deletion (or back after a removal) never got it, and would show a pin its members do not.
+   */
+  pinToSay(groupId: string): StoredPin | undefined { return this.pinGone(groupId) ? undefined : this.pinOf(groupId); }
+
+  /**
+   * The group's pin as it is shown: one naming a message deleted for everyone is unpinned (no `id`), its number kept.
+   * What an unpin goes by, so a pin shown gone is not removed again.
+   */
+  pinShown(groupId: string): StoredPin | undefined {
+    const kept = this.pinOf(groupId);
+    return kept && this.pinGone(groupId) ? { ...kept, id: "", messageId: undefined } : kept;
+  }
+
   /** Keeps a pin when it is newer than the group's (the last pin wins): true when it was. */
   async setPin(groupId: string, pin: StoredPin): Promise<boolean> {
     const group = this.record(groupId);
@@ -981,12 +999,16 @@ export class Groups {
   }
 
   private pinned(view: GroupView): GroupView {
-    const record = this.record(view.id), kept = record?.pin;
     // The pinned message was deleted for everyone: nothing of it stays, its pin neither (agents#1646). The pin is kept
     // as it came, so the same pin said again (a catch-up) is no newer, and shown as unpinned.
-    const gone = !!kept?.id && !!record?.removedIds?.some(id => id === kept.id || id === kept.messageId);
-    const pin = pinView(gone ? { ...kept!, id: "", messageId: undefined } : kept);
+    const pin = pinView(this.pinShown(view.id));
     return pin ? { ...view, pin } : view;
+  }
+
+  /** Whether the group's pin names a message its author deleted for everyone (shown as unpinned: `pinned`). */
+  private pinGone(groupId: string): boolean {
+    const record = this.record(groupId), kept = record?.pin;
+    return !!kept?.id && !!record?.removedIds?.some(id => id === kept.id || id === kept.messageId);
   }
 
   private meshViews(): GroupView[] {

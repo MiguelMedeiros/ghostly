@@ -224,6 +224,19 @@ describe("GroupChat: what the header says", () => {
     expect(screen.queryByText("Chat list")).not.toBeInTheDocument();
   });
 
+  // The band goes with the button: Accept there hands the focus to the ⋮, a Decline left it on the page's body.
+  it.each([["Decline", "group-decline", false], ["Delete of a taken-back invitation", "group-taken-back-delete", true]] as const)(
+    "%s by keyboard on the band over a member's kept history gives the focus to the group's ⋮", async (_, button, takenBack) => {
+      const { user, engine } = openGroup(groupView({ status: "removed", canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false, takenBack } }),
+        [stored({ id: "old", text: "from before", member: ALICE })]);
+      engine.on("declineGroupInvitation", () => { fakeEngine.update({ groups: [groupView({ status: "removed", canSend: false })] }); });
+      await screen.findByText("from before");
+      act(() => within(screen.getByTestId("group-invitation")).getByTestId(button).focus());
+      await user.keyboard("{Enter}");
+      await vi.waitFor(() => expect(screen.queryByTestId("group-invitation")).not.toBeInTheDocument());
+      expect(screen.getByTestId("group-options")).toHaveFocus();
+    });
+
   it("says the group is gone when this device does not have it, with a way back to the chat list", async () => {
     // Deleted on another device, say: the group page has no tabs, and an installed iPhone web app no system back.
     const { user } = openGroup(null);
@@ -688,6 +701,21 @@ describe("GroupChat: out of the group", () => {
     expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
     expect(screen.queryByTestId("group-link-retry")).not.toBeInTheDocument();
     expect(screen.getByTestId("group-rejoin-cancel")).toHaveFocus();
+  });
+
+  // On a phone, beside both buttons, the line was squeezed to what they left: 78 px in Spanish on a 375 px screen, 23 px
+  // on a 320 px one (Chromium, the app's CSS). The row wraps, the line keeps a 12rem basis, and the buttons go under it together.
+  it("removed from a community and knocking again: on a phone the line nobody answered keeps its width, Try again and Cancel joining go under it together", () => {
+    openGroup({ ...knockingAgain(), invitation: { ...knockingAgain().invitation!, unanswered: true } });
+    const notice = screen.getByTestId("group-notice"), line = within(notice).getByTestId("group-rejoin-line");
+    expect(line).toHaveTextContent("This link did not answer");
+    const row = line.parentElement!;
+    expect(row).toHaveClass("flex", "flex-wrap");
+    expect(line).toHaveClass("flex-[1_1_12rem]");
+    const buttons = within(notice).getByTestId("group-link-retry").parentElement!;
+    expect(buttons.parentElement).toBe(row);
+    expect(buttons).toHaveClass("flex", "flex-wrap");
+    expect(within(buttons).getByTestId("group-rejoin-cancel")).toBeInTheDocument();
   });
 
   it("removed from a community and knocking again: a cancel the engine refuses is said, and the knock goes on", async () => {

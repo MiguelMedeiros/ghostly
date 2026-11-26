@@ -19,5 +19,3 @@ const notInPages = (): never => {
 };
 export const publishMessages: typeof Desktop.publishMessages = notInPages;
 export const resolveMessages: typeof Desktop.resolveMessages = notInPages;
-
-export { fromBase64Url, toBase64Url } from "./crypto";

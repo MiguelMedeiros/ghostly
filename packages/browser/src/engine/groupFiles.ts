@@ -430,7 +430,11 @@ export class GroupFileDesk {
           kept.stored = await this.keptBytes(kept.id);
           this.show(kept, { state: "transferring", stage: "paused", pausedBy: "me", transferred: kept.stored, size, direction: "in" });
         }
-        else if (kept.asked || (kept.auto && this.deps.settings().autoDownloads)) this.wants.set(kept.id, this.newWant());
+        else if (kept.asked || (kept.auto && this.deps.settings().autoDownloads)) {
+          // Still coming: with the bytes that came (what the next holder goes on from), not 0 until a holder serves it.
+          kept.stored = await this.keptBytes(kept.id);
+          this.wants.set(kept.id, this.newWant());
+        }
         else if (kept.auto) await this.stop(kept, false);
         // Waiting for a Download: no transfer either. Its record says it is not here (`waitingGroupFile`).
       }

@@ -1237,7 +1237,8 @@ export class ChatFiles {
       }
       if (record.state === "paused" && record.pausedBy === "me") { this.send({ t: "pf-wait", id, why: "paused" }); return; }
       if (paused) {
-        if (record.state !== "paused") { record.state = "paused"; record.pausedBy = "peer"; this.changed(existing); void this.checkpoint(existing); }
+        // Paused there while it arrived, it gives its turn here to the next one waiting, as a pause here does (`pause`).
+        if (record.state !== "paused") { record.state = "paused"; record.pausedBy = "peer"; this.changed(existing); void this.checkpoint(existing); this.startNext(); }
         return;
       }
       if (record.state === "paused") { record.state = "queued"; record.pausedBy = undefined; this.changed(existing); }
@@ -1322,6 +1323,9 @@ export class ChatFiles {
     }
     const bytes = binary ? data : fromBase64Url(data);
     if (!bytes.length || bytes.length > FILE_LIMITS.chunkBytes || offset + bytes.length > record.file.size) return;
+    // A sender never has more than its window unconfirmed, so no more waits to be written: past it, the bytes are not
+    // held but asked for again (the gap above) once the storage caught up.
+    if (incoming.written - incoming.stored >= FILE_LIMITS.chatWindowBytes) return;
     incoming.written += bytes.length;
     const target = incoming.target;
     incoming.writing = incoming.writing.then(async () => {

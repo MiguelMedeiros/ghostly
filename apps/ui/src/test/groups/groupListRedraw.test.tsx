@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { GroupMemberView } from "@ghostly/browser/shared/types";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
+import { isolate } from "../../lib/ownStatus";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
@@ -71,9 +72,9 @@ describe("the chat list on a group change it does not show", () => {
   it("but shows what does change: the member count, a member's name in the reaction line", () => {
     renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
     const row = () => screen.getAllByTestId("group-row")[2];
-    expect(row()).toHaveTextContent("Member 1 reacted");
+    expect(row()).toHaveTextContent(`${isolate("Member 1")} reacted`);
     act(() => fakeEngine.update({ groups: groups({ nick: "Ana", typing: true }) }));
-    expect(row()).toHaveTextContent("Ana reacted");
+    expect(row()).toHaveTextContent(`${isolate("Ana")} reacted`);
     // Something said after the reaction: the line is the member count again.
     act(() => fakeEngine.update({ groups: groups({ said: true }) }));
     expect(row()).toHaveTextContent("12 members");
@@ -84,11 +85,11 @@ describe("the chat list on a group change it does not show", () => {
   it("tells the reaction's author apart by their key's end once another member takes their name", () => {
     renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
     const row = () => screen.getAllByTestId("group-row")[2];
-    expect(row()).toHaveTextContent("Member 1 reacted");
+    expect(row()).toHaveTextContent(`${isolate("Member 1")} reacted`);
     act(() => fakeEngine.update({ groups: groups({ otherNick: "member 1" }) }));
-    expect(row()).not.toHaveTextContent("Member 1 reacted");
+    expect(row()).not.toHaveTextContent(`${isolate("Member 1")} reacted`);
     expect(row()).toHaveTextContent(`(…${key(101).slice(-6)})`);
     act(() => fakeEngine.update({ groups: groups() }));
-    expect(row()).toHaveTextContent("Member 1 reacted");
+    expect(row()).toHaveTextContent(`${isolate("Member 1")} reacted`);
   });
 });

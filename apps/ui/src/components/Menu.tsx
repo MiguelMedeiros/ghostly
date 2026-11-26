@@ -146,20 +146,28 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
     };
     // A scroll of the page under it moves its opener; one of its own rows (the wheel, its scrollbar, End) moves nothing.
     const pageScrolled = (e: Event) => { if (!(e.target instanceof Node && ref.current?.contains(e.target))) fit(); };
+    // The keyboard coming up or going down moves the opener (the message field's row rides it) while the window hears
+    // no resize on iOS: fitted again once the page has its new height.
+    let frame = 0;
+    const keyboardMoved = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(fit); };
     fit();
     window.addEventListener("resize", fit);
+    window.visualViewport?.addEventListener("resize", keyboardMoved);
     if (portal) window.addEventListener("scroll", pageScrolled, true);
     return () => {
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", fit);
+      window.visualViewport?.removeEventListener("resize", keyboardMoved);
       window.removeEventListener("scroll", pageScrolled, true);
     };
   }, [open, phone, anchorRef, prefer, portal, align, within, at]);
 
   // A sheet opened while typing (a long press on a message, the composer's +): the keyboard goes down, as in a native
   // app. iOS keeps it up otherwise, over the sheet's bottom rows, and the keys went on into the field behind the sheet:
-  // it moves no focus to a button from a timer (the long press) nor from a tap.
+  // it moves no focus to a button from a timer (the long press) nor from a tap. A popover too while a keyboard is up
+  // (a phone on its side is two panes wide): the composer's + menu opened under the keyboard, every row of it.
   useEffect(() => {
-    if (!open || !phone) return;
+    if (!open || !(phone || keyboardUp())) return;
     const at = document.activeElement;
     if (at instanceof HTMLElement && !ref.current?.contains(at) && at.matches(TYPED)) at.blur();
   }, [open, phone]);
@@ -233,13 +241,17 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
 
 type Rect = { left: number; right: number; top: number; bottom: number };
 
+/** Whether an on-screen keyboard is up (hooks/useViewportHeight.ts). */
+const keyboardUp = () => document.documentElement.dataset.keyboard === "true";
+
 /**
  * The window's safe area, or the part of it the opener's `within` ancestor covers. On a phone on its side the notch's
  * side, the rounded corners and the home indicator are off limits: with larger text a menu kept to the window's edges
  * reached into them.
  */
 function bounds(anchor: HTMLElement, within?: string): Rect {
-  const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
+  // With a keyboard up iOS keeps the window's height: the room ends where the keyboard starts.
+  const width = document.documentElement.clientWidth || window.innerWidth, height = keyboardUp() ? Math.min(window.innerHeight, window.visualViewport?.height ?? window.innerHeight) : window.innerHeight;
   const safe = safeAreaInsets();
   const box = { left: safe.left, top: safe.top, right: width - safe.right, bottom: height - safe.bottom };
   const area = within ? anchor.closest(within)?.getBoundingClientRect() : undefined;

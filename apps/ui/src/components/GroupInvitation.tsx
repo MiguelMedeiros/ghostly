@@ -62,17 +62,25 @@ export function rowAfter(groupId: string): HTMLElement | null {
   return at < 0 ? null : rows[at + 1]?.querySelector<HTMLElement>('[data-testid$="-row-open"]') ?? null;
 }
 
+/** A `focusPastRow` waiting for the list to show: the phone's page change (App.tsx) leaves the focus to it. */
+let passing = false;
+export const focusPassing = () => passing;
+
 /**
  * Once a declined invitation is gone from the list: the focus on the next row, or on New after the last, as the
  * delete dialog's. It was left on the page's body. While the list is still hidden behind the page (a phone, before
  * home shows), the focus does not take: tried again on the next frames, as long as nothing else took it.
  */
 export function focusPastRow(next: HTMLElement | null, pressed: Element | null, frames = 60) {
+  passing = false;
   const lost = document.activeElement === null || document.activeElement === document.body || document.activeElement === pressed;
   if (!lost) return;
   const target = next?.isConnected ? next : document.querySelector<HTMLElement>('[data-testid="sidebar-new-chat"]');
   target?.focus();
-  if (document.activeElement !== target && frames > 0) requestAnimationFrame(() => focusPastRow(next, pressed, frames - 1));
+  if (document.activeElement !== target && frames > 0) {
+    passing = true;
+    requestAnimationFrame(() => focusPastRow(next, pressed, frames - 1));
+  }
 }
 
 /**
@@ -102,12 +110,11 @@ export function useInvitationAnswer(group: Pick<GroupView, "id" | "invitation">,
     const next = method === "declineGroupInvitation" && (onDeclined || !returnFocus) ? rowAfter(group.id) : undefined;
     try {
       await engine.call(method, { groupId: group.id });
-      if (method === "declineGroupInvitation") {
-        onDeclined?.();
-        if (next !== undefined) focusPastRow(next, pressed);
-      }
+      if (method === "declineGroupInvitation") onDeclined?.();
+      if (next !== undefined) focusPastRow(next, pressed);
       // Only if the focus is still on the button (or already dropped with it): the user may have gone on elsewhere.
-      // From the chat list (no returnFocus), the row's own open button: the row stays, its buttons go.
+      // From the chat list (no returnFocus), the row's own open button: the row stays, its buttons go. A Decline on the
+      // band over a kept history goes there too, as Accept's: the page stays, and the focus fell to its body.
       else if (document.activeElement === pressed || document.activeElement === document.body) {
         (returnFocus ? returnFocus.current : rowOpen(group.id))?.focus();
       }

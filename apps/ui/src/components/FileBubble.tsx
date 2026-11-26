@@ -282,7 +282,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
               {transfer.room < file.size ? t("chat.file.noRoomDevice", { size: formatFileSize(transfer.room, t) }) : t("chat.file.roomDevice", { size: formatFileSize(transfer.room, t) })}
             </p>
           )}
-          <div className="flex gap-2">
+          {/* Wraps: at a larger text size on a phone Decline ran out of the bubble beside Accept. */}
+          <div className="flex flex-wrap gap-2">
             {/* Not turned off when the room shown is less than its size: that room may be old, and Accept reads it again
                 (the engine refuses one that does not fit, and says so under the bubble). */}
             <button ref={acceptRef} type="button" className={`${answerButton} bg-accent text-on-accent disabled:opacity-50`}
@@ -293,7 +294,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
         </div>
       )}
       {(controls && !offered && !group && (canPause || pausedHere || canCancel)) && (
-        <div className="flex gap-1.5 px-2 pb-1">
+        <div className="flex flex-wrap gap-1.5 px-2 pb-1">
           {canPause && <button type="button" className={linkButton} data-testid="file-pause" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={linkButton} data-testid="file-resume" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
           {canCancel && <button type="button" className={linkButton} data-testid="file-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}

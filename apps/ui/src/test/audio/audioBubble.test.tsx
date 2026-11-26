@@ -389,6 +389,22 @@ describe("an audio file not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
   });
 
+  // They took taps on 20-24 px of height on a phone, under a file's and a voice message's 44 px.
+  it("Download, Decline, Pause, Resume and Cancel are a thumb's height on a phone, as a file's are", () => {
+    const offered = song({ size: 40 * MB }), moving = song({ size: 10 * MB }), paused = song({ size: 10 * MB });
+    fakeEngine.update({
+      links: [linkView({ id: "chat1" })],
+      transfers: {
+        [offered.id]: { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: offered.size },
+        [moving.id]: { state: "transferring", direction: "in", transferred: 4 * MB, size: moving.size },
+        [paused.id]: { state: "transferring", stage: "paused", pausedBy: "me", direction: "in", transferred: 4 * MB, size: paused.size },
+      },
+    });
+    renderApp(<>{[offered, moving, paused].map((file) => <AudioBubble key={file.id} file={file} sender="peer" peerName="Ana" />)}</>);
+    for (const id of ["audio-accept", "audio-decline", "audio-pause-transfer", "audio-resume-transfer"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:min-h-11", "max-md:px-4");
+    for (const cancel of screen.getAllByTestId("audio-cancel")) expect(cancel).toHaveClass("max-md:min-h-11", "max-md:px-4");
+  });
+
   it("one sent from here that arrived whole, the contact checking it, has no Cancel: too late", () => {
     const file = song({ id: "chat1-out-song-late", size: 10 * MB });
     show(file, { state: "transferring", stage: "verifying", direction: "out", transferred: file.size, size: file.size });

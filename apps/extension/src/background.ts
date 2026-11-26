@@ -30,7 +30,10 @@ function ensureEngine(): Promise<void> {
 }
 
 async function startEngine(): Promise<void> {
-  if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
+  if (!(await chrome.offscreen.hasDocument())) {
+    await clearRings();
+    await createEngineDocument();
+  }
   const status = await waitForEngine();
   if (status.profile === status.active && !status.stopped) return await sweepAfterPeer(status);
   // A page made another profile the one in use. The running peer stops and its document closes before
@@ -273,6 +276,21 @@ async function clearNoticesNow(next?: string): Promise<void> {
 }
 
 /**
+ * The document went away (its renderer crashed, it was ended from Chrome's task manager): a call's notification it showed
+ * is taken back by that document alone (`unnotify`, at hang-up or after its ring), and the next one never knew of it, so
+ * it goes before that one opens. Taken before, so none the next one shows is among them.
+ */
+function clearRings(): Promise<void> {
+  return inNoticeOrder(async () => {
+    const kept = await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>);
+    const ids = Object.keys(kept).filter((key) => key.startsWith("ring:")).map((key) => key.slice("ring:".length));
+    if (!ids.length) return;
+    await chrome.storage.session.remove(ids.flatMap((id) => [`notice:${id}`, `ring:${id}`])).catch(() => {});
+    await Promise.all(ids.map((id) => chrome.notifications?.clear(id).catch(() => false)));
+  });
+}
+
+/**
  * The worker's reads and writes of the `notice:<id>` keys, one after another: each reads the keys, then writes, and two
  * running at once would both read before either wrote (a burst's messages, asked for in the same moment, each made a
  * notification of its own). Session storage stays what says which notification is a chat's: this order lives only as long
@@ -494,13 +512,14 @@ async function viewerAnswer(headers: [string, string][], bodyB64: string, resour
   const own = viewerResponseHeaders(headers);
   const body = (async function* () { yield fromBase64(bodyB64); })();
   const answer = await guardViewerAnswer(own, body, destinationOf(resourceType, own), PAGE_GUARDS);
+  // Ghostly's policy is the header's last one, after the contact's.
+  const policed = withViewerPolicy(answer.headers).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value }));
+  // What passes as it was (no page, or one that runs no script) goes on as it came: a video of up to 32 MiB is not
+  // decoded, copied and encoded again here.
+  if (answer.body === body) return { headers: policed, body: bodyB64 };
   const parts: Uint8Array[] = [];
   for await (const part of answer.body) parts.push(part);
-  return {
-    // Ghostly's policy is the header's last one, after the contact's.
-    headers: withViewerPolicy(answer.headers).map(([name, value]) => ({ name, value: name === "content-security-policy" ? sandboxed(value) : value })),
-    body: toBase64(concatBytes(...parts)),
-  };
+  return { headers: policed, body: toBase64(concatBytes(...parts)) };
 }
 
 /**

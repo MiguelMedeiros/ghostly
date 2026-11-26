@@ -31,6 +31,8 @@ export interface ProfileDidHost {
   emit(): void;
   /** The profile's identities a DID document can list now (verified, unexpired, with a URI): id → URI. */
   listable(): Map<string, string>;
+  /** When a listable identity stops being listable (ms), so its expiry republishes the document. */
+  expiresAt?(id: string): number | undefined;
   /** Every identity proof id of the profile, listable or not. */
   proofIds(): string[];
   /** Puts a signed packet on Pkarr as is (the relays and, on Desktop, the DHT). */
@@ -47,6 +49,13 @@ const FIRST_PUBLISH_MS = 15_000;
 const CHANGE_DELAY_MS = 2_000;
 /** A failed publish is tried again this much later (not before the hourly one otherwise). */
 const RETRY_MS = 5 * 60_000;
+/** setTimeout's longest wait. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+/**
+ * `close` waits this long at most for the listing it publishes: what one publish took at most before it also waited for
+ * the one in flight (the CLI's DHT put times out at 20 s, its relays at 10 s). A network gone dead never holds a stop.
+ */
+export const DID_CLOSE_WAIT_MS = 20_000;
 /** Relay payload header: signature and sequence number, before the DNS packet. */
 const HEADER = 72;
 
@@ -55,8 +64,11 @@ export class ProfileDid {
   private seed: Uint8Array | null = null;
   private error: string | undefined;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** When `timer` fires. */
+  private timerAt = 0;
   private running = false;
-  private inFlight: Promise<void> | null = null;
+  /** The publishes on their way: the one in flight and those asked for meanwhile (`again`). */
+  private publishing: Promise<void> | null = null;
   private again = false;
   private unlisten: (() => void) | undefined;
   /** The last `samePacket` answer. */
@@ -65,6 +77,15 @@ export class ProfileDid {
   private ended = false;
   /** The newest sequence number signed here, so the `deactivated` packet goes past one still on its way. */
   private signedSeq = 0;
+  /** This run changed the listed identities and their document is not out yet: `close` publishes it. */
+  private due = false;
+  /**
+   * Saves run one at a time, each on the record the one before saved: two built from the same record (two switches,
+   * a switch and a publish landing, a switch and a removed proof dropped) lost the first one's change.
+   */
+  private saving: Promise<void> = Promise.resolve();
+  /** At the first listed identity's expiry, `changed`: nothing else says it expired. */
+  private expiry: { at: number; timer: ReturnType<typeof setTimeout> } | null = null;
 
   constructor(private host: ProfileDidHost) {}
 
@@ -79,7 +100,7 @@ export class ProfileDid {
       createdAt: Date.now(),
       listed: [],
     };
-    await this.save(made);
+    await this.save(() => made);
     this.seed = identity.seed;
   }
 
@@ -87,12 +108,40 @@ export class ProfileDid {
     this.running = true;
     this.unlisten ??= whenDataKeyDropped(() => this.forgetSeed());
     this.schedule(FIRST_PUBLISH_MS);
+    this.watchExpiry();
+  }
+
+  /**
+   * `stop`, once a listing this run changed is published: a CLI one-shot (`engine setDidListed`, an `identity remove` of
+   * a listed proof) ended within the change's 2 s, so the DID kept the old document until a daemon ran 15 s.
+   */
+  async close(): Promise<void> {
+    this.running = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    if (this.due) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([this.publishDue(), new Promise<void>(resolve => { timer = setTimeout(resolve, DID_CLOSE_WAIT_MS); })]);
+      clearTimeout(timer);
+    }
+    this.stop();
+  }
+
+  /** Until the listing this run changed is out, or its publish failed. */
+  private async publishDue(): Promise<void> {
+    // Listing changes being saved (a removed proof dropped, a switch flipped) land before the publish reads them.
+    await this.saving;
+    // A publish on its way signed the document as it was then: the newer listing goes after it, in the same chain.
+    await this.publishing?.catch(() => {});
+    if (this.due) await this.publishNow().catch(() => {});
   }
 
   stop(): void {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.expiry) clearTimeout(this.expiry.timer);
+    this.expiry = null;
     this.unlisten?.();
     this.unlisten = undefined;
     this.forgetSeed();
@@ -133,19 +182,23 @@ export class ProfileDid {
    * a document can list; refused when the packet would not fit 1000 bytes.
    */
   async setListed({ id, listed }: { id: string; listed: boolean }): Promise<void> {
-    const current = this.listed();
     if (listed && !this.host.listable().has(id)) throw new Error("This identity cannot be listed in your DID");
-    const next = listed ? [...current.filter(x => x !== id), id] : current.filter(x => x !== id);
-    try {
-      encodeDidDhtPacket(didDhtDocument(this.publicKey(), { alsoKnownAs: this.alsoKnownAs(next) }));
-    } catch (error) {
-      // eslint-disable-next-line preserve-caught-error -- a message for the person; ES2020 has no Error.cause.
-      if (error instanceof PacketTooLargeError) throw new Error("Your DID has no room for another identity (1000 bytes). Take one out first.");
-      throw error;
-    }
-    await this.save({ ...this.stored!, listed: next });
+    await this.save(stored => {
+      const current = stored!.listed;
+      const next = listed ? [...current.filter(x => x !== id), id] : current.filter(x => x !== id);
+      try {
+        encodeDidDhtPacket(didDhtDocument(this.publicKey(), { alsoKnownAs: this.alsoKnownAs(next) }));
+      } catch (error) {
+        // eslint-disable-next-line preserve-caught-error -- a message for the person; ES2020 has no Error.cause.
+        if (error instanceof PacketTooLargeError) throw new Error("Your DID has no room for another identity (1000 bytes). Take one out first.");
+        throw error;
+      }
+      return { ...stored!, listed: next };
+    });
+    this.due = true;
     this.host.emit();
     this.schedule(CHANGE_DELAY_MS);
+    this.watchExpiry();
   }
 
   /** The profile's identities changed (added, removed, expired): publish if the document did. */
@@ -153,24 +206,63 @@ export class ProfileDid {
     if (!this.stored) return;
     const ids = new Set(this.host.proofIds());
     const kept = this.stored.listed.filter(id => ids.has(id));
-    if (kept.length !== this.stored.listed.length) void this.save({ ...this.stored, listed: kept }).catch(() => {});
+    if (kept.length !== this.stored.listed.length) {
+      this.due = true;
+      void this.save(stored => ({ ...stored!, listed: stored!.listed.filter(id => ids.has(id)) })).catch(() => {});
+    }
     if (this.stored.published && !this.samePacket(this.stored.published.payload)) this.schedule(CHANGE_DELAY_MS);
+    this.watchExpiry();
   }
 
-  /** Publishes now (or right after the publish in flight): the hourly timer starts over. */
-  async publishNow(): Promise<void> {
-    if (this.inFlight) { this.again = true; return this.inFlight; }
-    this.inFlight = this.publish().finally(() => { this.inFlight = null; });
-    await this.inFlight;
-    if (this.again) { this.again = false; await this.publishNow(); }
+  /** A listed proof that expires leaves the document then, not at the next hourly put of the old one. */
+  private watchExpiry(): void {
+    const listable = this.host.listable();
+    const ends = this.listed().filter(id => listable.has(id)).map(id => this.host.expiresAt?.(id)).filter((at): at is number => at !== undefined);
+    const at = this.running && ends.length ? Math.min(...ends) : undefined;
+    if (at === this.expiry?.at) return;
+    if (this.expiry) clearTimeout(this.expiry.timer);
+    this.expiry = null;
+    if (at === undefined) return;
+    // A timer holds about 24 days at most: a later expiry is looked at again then. One past it is no longer listable.
+    const ms = Math.min(Math.max(0, at - Date.now()) + 1, MAX_TIMEOUT_MS);
+    this.expiry = { at, timer: setTimeout(() => { this.expiry = null; this.changed(); }, ms) };
+  }
+
+  /**
+   * Publishes now (or right after the publish in flight): the hourly timer starts over, or a failed one is tried again in
+   * `RETRY_MS`. Settles once what was asked is out: a call while one is on its way waits for the one after it too. It
+   * waited for the one on its way alone, and a one-shot's `close` ended with the document as it was before its listing
+   * changed (the newer one went after the stop).
+   */
+  publishNow(): Promise<void> {
+    if (this.publishing) { this.again = true; return this.publishing; }
+    this.publishing = (async () => {
+      try {
+        do { this.again = false; await this.publish(); } while (this.again);
+      } finally { this.publishing = null; }
+      this.scheduleNext();
+    })();
+    return this.publishing;
+  }
+
+  /**
+   * After a publish (the timer's or the engine's at network-back): a failed one is tried again in `RETRY_MS`; else the hour
+   * starts over. A sooner timer stays: a change made while this publish was on its way is still due in its 2 s.
+   */
+  private scheduleNext(): void {
+    if (!this.running) return;
+    const published = this.stored?.published;
+    if (this.error) { if (!this.timer || this.timerAt > Date.now() + RETRY_MS) this.schedule(RETRY_MS); }
+    else if (!this.timer || (published && this.samePacket(published.payload))) this.schedule(DID_REPUBLISH_MS);
   }
 
   private schedule(ms: number): void {
     if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
+    this.timerAt = Date.now() + ms;
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.publishNow().finally(() => { if (this.running && !this.timer) this.schedule(this.error ? RETRY_MS : DID_REPUBLISH_MS); });
+      void this.publishNow().catch(() => {});
     }, ms);
   }
 
@@ -192,8 +284,10 @@ export class ProfileDid {
       this.signedSeq = Math.max(this.signedSeq, seq);
       await this.host.publish(toZ32(this.publicKey()), payload);
       if (this.ended) return;
+      // A listing changed while this one was on its way is still due.
+      this.due &&= !this.samePacket(toBase64Url(payload));
       this.error = undefined;
-      await this.save({ ...this.stored, published: { payload: toBase64Url(payload), seq, at: Date.now() } });
+      await this.save(stored => ({ ...stored!, published: { payload: toBase64Url(payload), seq, at: Date.now() } }));
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
     }
@@ -259,10 +353,15 @@ export class ProfileDid {
     return this.seed;
   }
 
-  private async save(next: StoredProfileDid): Promise<void> {
-    // Ended by "Clear all data": nothing writes the cleared record back (a late publish, `changed()`, `setListed`).
-    if (this.ended) return;
-    await committed((await store(STORES.settings, "readwrite")).put(next, KEY));
-    this.stored = next;
+  private save(change: (stored: StoredProfileDid | null) => StoredProfileDid): Promise<void> {
+    const run = this.saving.then(async () => {
+      // Ended by "Clear all data": nothing writes the cleared record back (a late publish, `changed()`, `setListed`).
+      if (this.ended) return;
+      const next = change(this.stored);
+      await committed((await store(STORES.settings, "readwrite")).put(next, KEY));
+      this.stored = next;
+    });
+    this.saving = run.catch(() => {});
+    return run;
   }
 }

@@ -9,7 +9,7 @@ import { contactName } from "../../lib/identities";
 import { servicesPlatform } from "../../lib/platform";
 import { problemLine } from "../../lib/problemText";
 import { contactTag } from "../../lib/publicKeyLabel";
-import { loadSession } from "../../lib/storage";
+import { loadSession, sessionIdsByPeer } from "../../lib/storage";
 import { FORCED_EDGE } from "./RoundRetry";
 
 const linkButton = `text-xs px-2.5 py-0.5 max-md:min-h-11 max-md:px-4 rounded-full bg-black/20 hover:bg-black/30 border-none ${FORCED_EDGE} text-inherit cursor-pointer transition-colors`;
@@ -35,16 +35,21 @@ export function FilesStillComing({ except, open: opened = false, accept }: { exc
   const held = useEngineValue((state) => filesStillComing(state?.transfers, state?.links, except).map(({ fileId, linkId }) => ({ fileId, linkId })).sort((a, b) => a.fileId.localeCompare(b.fileId)));
   const links = useEngineValue((state) => state?.links?.map(({ id, label, peerNick, peerPubKeyZ32 }) => ({ id, label, peerNick, peerPubKeyZ32 })));
   // Each chat's stored copy read once per set of files listed, not per tick: the chat's name as the list shows it, and
-  // the file's from its message.
+  // the file's from its message. Found by its contact's key: a chat is stored under its own id, not its link's, and read
+  // by the link's id every row said "A file" from the contact's fallback name.
   const names = useMemo(() => {
     const sessions = new Map<string, ReturnType<typeof loadSession>>();
-    const session = (linkId: string) => {
-      if (!sessions.has(linkId)) sessions.set(linkId, loadSession(linkId));
+    const sessionOf = sessionIdsByPeer();
+    const session = (linkId: string, peer: string | undefined) => {
+      if (!sessions.has(linkId)) {
+        const id = peer ? sessionOf(peer) : undefined;
+        sessions.set(linkId, id ? loadSession(id) : null);
+      }
       return sessions.get(linkId);
     };
     return new Map(held.map((file) => {
-      const stored = session(file.linkId);
       const link = links?.find((l) => l.id === file.linkId);
+      const stored = session(file.linkId, link?.peerPubKeyZ32);
       const chat = contactName(stored ?? undefined) || link?.label || link?.peerNick || t("common.unnamedContact", { key: contactTag(link?.peerPubKeyZ32 ?? file.linkId) });
       const name = stored?.messages.find((m) => m.file?.id === file.fileId)?.file?.name || t("chat.file.comingUnnamed");
       return [file.fileId, { chat, name }];

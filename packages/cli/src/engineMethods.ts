@@ -1,3 +1,5 @@
+import { isZ32Key } from "@ghostly/core";
+
 /**
  * What each call of the app's `EngineApi` (packages/browser/src/shared/rpc.ts) takes, as `engine --list --verbose`
  * shows it: `{ linkId, label }` an object with these keys (`?` an optional one), a type's name for an object of that
@@ -101,6 +103,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   deleteMessage: "{ linkId, messageId }",
   removeMessage: "{ linkId, messageId }",
   exportLinks: "",
+  noteChats: "{ linkIds }",
   sendFile: "{ linkId, file, timestamp, replyTo?, forwarded? }",
   sendGroupFile: "{ groupId, file, caption?, replyTo?, forwarded? }",
   groupFileCheck: "{ groupId }",
@@ -170,6 +173,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   setWakeSubscription: "{ subscription }",
   wakeConfirm: "{ endpoint }",
   setWakeMuted: "{ linkId, muted }",
+  setContactBlocked: "{ peerPubKeyZ32, blocked }",
   setWakeOnline: "{ on }",
   wakeForCall: "{ linkId }",
   setCallOn: "{ on }",
@@ -276,9 +280,17 @@ export const ENGINE_READS: readonly string[] = ["getState", "getMessages"];
 export const READ_PARAMS: Readonly<Record<string, string>> = { getState: "", getMessages: "{ linkId }" };
 
 /**
+ * Keys whose kind is checked here too, for calls whose engine refuses any other: the CLI answers `bad_request` naming
+ * the key, as for one missing, not `engine`. `key`: a contact's key in its one spelling (`isZ32Key`).
+ */
+const PARAM_KINDS: Readonly<Record<string, Readonly<Record<string, "boolean" | "key">>>> = {
+  setContactBlocked: { peerPubKeyZ32: "key", blocked: "boolean" },
+};
+
+/**
  * Why `params` is not what `method` takes: missing when it takes some, or a key it needs not there (a key holding
- * null is there: `setActiveLink { linkId: null }`). Undefined when it is, or when the shape names a type, which is not
- * looked into here.
+ * null is there: `setActiveLink { linkId: null }`), or one of `PARAM_KINDS` of another kind. Undefined when it is, or
+ * when the shape names a type, which is not looked into here.
  */
 export function engineParamsProblem(method: string, params: Record<string, unknown> | undefined): string | undefined {
   const takes = ENGINE_PARAMS[method] ?? READ_PARAMS[method];
@@ -286,7 +298,12 @@ export function engineParamsProblem(method: string, params: Record<string, unkno
   if (params === undefined) return takes.endsWith("?") ? undefined : "no parameters given";
   const keys = /^\{ ([\w?, ]*) \}\??$/.exec(takes)?.[1].split(", ") ?? [];
   const missing = keys.filter((key) => !key.endsWith("?") && params[key] === undefined);
-  return missing.length ? `${missing.join(", ")} missing` : undefined;
+  if (missing.length) return `${missing.join(", ")} missing`;
+  for (const [key, kind] of Object.entries(PARAM_KINDS[method] ?? {})) {
+    if (kind === "boolean" && typeof params[key] !== "boolean") return `${key} must be true or false`;
+    if (kind === "key" && !isZ32Key(params[key])) return `${key} must be a contact's key`;
+  }
+  return undefined;
 }
 
 /**

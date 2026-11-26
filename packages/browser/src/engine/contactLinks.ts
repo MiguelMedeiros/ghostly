@@ -74,6 +74,11 @@ export class ContactLinks {
   private stored: StoredContactLinks = { retired: [] };
   private error: string | undefined;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** When `timer` fires. */
+  private timerAt = 0;
+  /** The last pass that ran online: whether it went out, and whether a put failed (the link's, in `error`, or an `off`). */
+  private ran = false;
+  private failed = false;
   private running = false;
   private inFlight: Promise<void> | null = null;
   private again = false;
@@ -219,12 +224,24 @@ export class ContactLinks {
     await Promise.allSettled(links.map(async link => this.host.publish(await this.identity(link), linkRecords(inboxRecord(turnOff(newInbox(Date.now())), Date.now())))));
   }
 
-  /** Publishes what is due now: the current link's record, and `off` for each retired link not said today. */
+  /**
+   * Publishes what is due now: the current link's record, and `off` for each retired link not said today. After it the
+   * hour starts over, or a failed put is tried again in `RETRY_MS`: a change's publish (a new link, Turn off, a request
+   * taken, a busy link open again) that failed does not wait for the hourly one.
+   */
   async publishNow(): Promise<void> {
     if (this.inFlight) { this.again = true; return this.inFlight; }
     this.inFlight = this.publish().finally(() => { this.inFlight = null; });
-    await this.inFlight;
-    if (this.again) { this.again = false; await this.publishNow(); }
+    try { await this.inFlight; } catch (error) { this.again = false; this.scheduleNext(); throw error; }
+    if (this.again) { this.again = false; await this.publishNow(); return; }
+    this.scheduleNext();
+  }
+
+  /** A failed put again in `RETRY_MS` unless a timer is due sooner; else, once something went out, the hour starts over. */
+  private scheduleNext(): void {
+    if (!this.running) return;
+    if (this.failed) { if (!this.timer || this.timerAt > Date.now() + RETRY_MS) this.schedule(RETRY_MS); }
+    else if (this.ran || !this.timer) this.schedule(LINK_REPUBLISH_MS);
   }
 
   private serial<T>(work: () => Promise<T>): Promise<T> {
@@ -297,14 +314,18 @@ export class ContactLinks {
   private schedule(ms: number): void {
     if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
+    this.timerAt = Date.now() + ms;
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.publishNow().finally(() => { if (this.running && !this.timer) this.schedule(this.error ? RETRY_MS : LINK_REPUBLISH_MS); });
+      void this.publishNow().catch(() => {});
     }, ms);
   }
 
   private async publish(): Promise<void> {
+    this.ran = false;
     if (!this.host.online()) return;
+    this.ran = true;
+    this.failed = false;
     const now = Date.now();
     const { current, retired } = this.stored;
     let published = false;
@@ -316,6 +337,7 @@ export class ContactLinks {
         published = true;
       } catch (error) {
         this.error = error instanceof Error ? error.message : String(error);
+        this.failed = true;
       }
     }
     for (const link of retired) {
@@ -323,7 +345,7 @@ export class ContactLinks {
       try {
         await this.host.publish(await this.identity(link), linkRecords(inboxRecord(turnOff(newInbox(now)), now)));
         said.add(link.linkKeyZ32);
-      } catch { /* said again at the next pass */ }
+      } catch { this.failed = true; }
     }
     // A link made or turned off while this pass was out keeps what it is: only the marks of what went out are added.
     const latest = this.stored;

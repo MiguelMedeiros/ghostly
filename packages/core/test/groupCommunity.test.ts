@@ -207,6 +207,31 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(alice.session.state.nicks[carol.session.myKey]).toBe("carol");
   });
 
+  it("a member's older message that comes after a newer one keeps the member's newer name, after a restart too", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    const carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    bob.online = false;
+    for (const [text, nick, at] of [["hi", "Carol Old", 1000], ["hi again", "Carol New", 2000]] as const) {
+      const sent = await carol.session.sendText(text, nick, at);
+      if ("error" in sent) throw new Error(sent.error);
+    }
+    await net.settle();
+    const [older, newer] = carol.session.state.store.filter(f => f.s === carol.session.myKey).slice(-2);
+    bob.online = true;
+    await bob.session.handle(carol.session.myKey, clone(newer));
+    await bob.session.handle(carol.session.myKey, clone(older));
+    expect(net.texts(bob)).toEqual(expect.arrayContaining(["hi", "hi again"]));
+    expect(bob.session.state.nicks[carol.session.myKey]).toBe("Carol New");
+    // The time the name came from is saved with it: the older one, handed again after a restart, still names nobody.
+    await net.restart(bob);
+    delete bob.session.state.seen[carol.session.myKey];
+    await bob.session.handle(carol.session.myKey, clone(older));
+    expect(bob.session.state.nicks[carol.session.myKey]).toBe("Carol New");
+  });
+
   it("adding derives the next secret: members compute it, the newcomer cannot go back", async () => {
     const net = new Net();
     const alice = net.create("alice");

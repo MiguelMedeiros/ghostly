@@ -11,9 +11,9 @@ import { OPENPGP_KEYSERVER_SOURCE as KEYSERVER_SOURCE, OPENPGP_USER_ID_SOURCE as
  * since gpg drives it. The subject is the primary key's fingerprint. See docs/wisps/305-openpgp.md.
  */
 
-/** A v4 (40 hex) or v6 (64 hex) fingerprint, as gpg prints it or not: spaces and 0x are dropped. */
+/** A v4 (40 hex) or v6 (64 hex) fingerprint, as gpg prints it or not: spaces, 0x and an `openpgp4fpr:` link's scheme are dropped. */
 export function normalizeFingerprint(input: string): string {
-  const value = input.trim().replace(/^0x/i, "").replace(/\s+/g, "").toUpperCase();
+  const value = input.trim().replace(/^openpgp4fpr:/i, "").replace(/^0x/i, "").replace(/\s+/g, "").toUpperCase();
   if (/^[A-F0-9]{40}$/.test(value) || /^[A-F0-9]{64}$/.test(value)) return value;
   if (/^[A-F0-9]{8}$|^[A-F0-9]{16}$/.test(value)) throw new PgpProofError("Use the full fingerprint, not a key ID: gpg --fingerprint shows it.");
   throw new PgpProofError("Enter your key's fingerprint: 40 hex characters (gpg --fingerprint).");

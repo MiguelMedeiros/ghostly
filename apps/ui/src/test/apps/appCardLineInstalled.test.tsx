@@ -7,6 +7,7 @@ import { Sidebar } from "../../components/Sidebar";
 import { ANNOUNCE_WINDOW_MS, MessageAnnouncer, type Announceable } from "../../components/chat/MessageAnnouncer";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { forgetInstalledApps, refreshInstalledApps } from "../../lib/apps/installed";
+import { isolate } from "../../lib/ownStatus";
 import { messageSnippet } from "../../lib/replies";
 import { saveSession } from "../../lib/storage";
 import type { ChatMessage, ChatSession } from "../../lib/types";
@@ -38,6 +39,8 @@ const CARD: AppCard = { kind: "app", id: appCardId(REF), ref: REF, digest: DIGES
 const NOW = Date.now();
 const MESSAGE = { id: "m1", text: statusCardText(CARD), card: CARD, sender: "peer", timestamp: NOW } as ChatMessage;
 const OTHER: AppCard = { ...CARD, id: appCardId(`${KEY}/chess`), ref: `${KEY}/chess` };
+/** The installed app's line, its title and version isolated (appCardLineDirection.test.ts). */
+const NOTES_LINE = `🧩 App: ${isolate("Private Notes")} ${isolate("3.1.0")}`;
 
 describe("an app card for an app installed here", () => {
   beforeEach(() => {
@@ -54,7 +57,7 @@ describe("an app card for an app installed here", () => {
     saveSession({ id: "a", profile: "paired-chat/1", mySeedB64: "seed-a", peerPubKeyB64: "a".repeat(52), encKeyB64: "enc", nick: "Ana", createdAt: NOW, messages: [MESSAGE] } as unknown as ChatSession);
     renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
     const row = screen.getAllByTestId("chat-row").find((r) => within(r).getByTestId("chat-row-name").textContent === "Ana")!;
-    await waitFor(() => expect(within(row).getByTestId("chat-row-preview")).toHaveTextContent(/^🧩 App: Private Notes 3\.1\.0$/));
+    await waitFor(() => expect(within(row).getByTestId("chat-row-preview").textContent).toBe(NOTES_LINE));
   });
 
   it("a quote and the pinned bar name the installed app; one not installed here keeps the card's title", async () => {
@@ -69,7 +72,7 @@ describe("an app card for an app installed here", () => {
     const rendered = renderApp(<Saved />, { route: "/saved" });
     rendered.engine.on("savedMessages", () => [{ savedAt: NOW, message }])
       .setState({ links: [linkView({ id: "link-1", peerPubKeyZ32: "peerkeyalice", peerNick: "Alice" })] });
-    await waitFor(() => expect(screen.getByTestId("saved-text")).toHaveTextContent(/^🧩 App: Private Notes 3\.1\.0$/));
+    await waitFor(() => expect(screen.getByTestId("saved-text").textContent).toBe(NOTES_LINE));
   });
 
   it("the screen reader's line names the installed app", async () => {
@@ -81,7 +84,7 @@ describe("an app card for an app installed here", () => {
       const view = renderApp(<MessageAnnouncer chat="c" linkId="link-1" messages={history} nameOf={nameOf} />);
       view.rerender(<MessageAnnouncer chat="c" linkId="link-1" messages={[...history, { id: "m1", sender: "peer", text: MESSAGE.text, card: CARD }]} nameOf={nameOf} />);
       act(() => { vi.advanceTimersByTime(ANNOUNCE_WINDOW_MS); });
-      expect(screen.getByTestId("chat-announcement")).toHaveTextContent(/^Ana: 🧩 App: Private Notes 3\.1\.0$/);
+      expect(screen.getByTestId("chat-announcement").textContent).toBe(`Ana: ${NOTES_LINE}`);
     } finally { vi.useRealTimers(); }
   });
 });

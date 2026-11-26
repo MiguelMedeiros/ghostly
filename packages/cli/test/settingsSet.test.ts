@@ -61,7 +61,10 @@ describe("settings set", () => {
   it("refuses a HyperDHT relay with a login or a token, which every contact would be told, and keeps none", { timeout: 60_000 }, async () => {
     const dir = home("settings-hyperdht-relay");
     for (const bad of ["wss://alice:hunter2@relay.example", "wss://relay.example/?token=s3cr3t", "wss://relay.example/#s3cr3t"]) {
-      expect(error(await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", bad]), "bad_request", 1).message).toBe(`hyperdhtRelay: not a relay address: ${bad}`);
+      // The refusal names the relay without its login, password, query or fragment.
+      const { message } = error(await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", bad]), "bad_request", 1);
+      expect(message).toMatch(/^hyperdhtRelay: not a relay address: wss:\/\/relay\.example\/?$/);
+      expect(message).not.toMatch(/alice|hunter2|s3cr3t/);
     }
     // None kept: the default (none) is what `settings get` shows.
     expect(ok(await ghostly(["--home", dir, "settings", "get"])).hyperdhtRelay).toBe("");
@@ -78,5 +81,21 @@ describe("settings set", () => {
     expect(result.stderr).toContain("ghostly: This CLI runs HyperDHT itself and does not dial through hyperdhtRelay");
     // Clearing it says nothing.
     expect((await ghostly(["--home", dir, "settings", "set", "hyperdhtRelay", '""'])).stderr).not.toContain("hyperdhtRelay");
+  });
+
+  it("says on stderr that GHOSTLY_PKARR_RELAYS or GHOSTLY_IROH_RELAYS pins the relays, and keeps the setting", { timeout: 60_000 }, async () => {
+    // Taken with exit 0 and nothing said, while `status` went on naming the variable's relays (every test runs pinned).
+    const dir = home("settings-relays-pinned");
+    const relays = await ghostly(["--home", dir, "settings", "set", "relays", '["https://relay.example"]']);
+    expect(ok(relays).relays).toEqual(["https://relay.example"]);
+    expect(Object.hasOwn(relays.json, "warning")).toBe(false);
+    expect(relays.stderr).toContain("ghostly: GHOSTLY_PKARR_RELAYS is set where this profile runs, and only its relays are used: relays is kept for when the profile runs without it");
+    const iroh = await ghostly(["--home", dir, "settings", "set", "irohRelays", '["https://iroh.example/"]']);
+    expect(ok(iroh).irohRelays).toEqual(["https://iroh.example/"]);
+    expect(iroh.stderr).toContain("ghostly: GHOSTLY_IROH_RELAYS is set where this profile runs, and only its relays are used: irohRelays is kept for when the profile runs without it");
+    // Another key says nothing of them.
+    const other = await ghostly(["--home", dir, "settings", "set", "sendTyping", "false"]);
+    expect(ok(other).sendTyping).toBe(false);
+    expect(other.stderr).not.toContain("GHOSTLY_");
   });
 });

@@ -4,7 +4,7 @@ import {CardDeck} from './WalletCardDeck';
 import {useI18n} from '../contexts/I18nContext';
 import {deckArrows} from './deck/arrows';
 import {NeedsYouDot} from './NeedsYou';
-export {CardDeck,WalletCardFace,type CardDeckProps} from './WalletCardDeck';
+export {CardDeck,WalletCardFace} from './WalletCardDeck';
 
 /** A wallet card's test id: its kind and its network (`wallet-card-cashu-testnet`), and one Lightning card of several's id. */
 export const walletCardTestId=(id:string)=>`wallet-card-${id.replace(/:/g,'-')}`;

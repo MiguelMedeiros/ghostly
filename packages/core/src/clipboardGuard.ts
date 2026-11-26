@@ -21,14 +21,16 @@
  *   form, a checkbox, a double click or the app's own context menu copies on the person's tap, and nothing else does
  *   (not on load, not from a timer or a promise after a tap). `execCommand("paste")` is refused. Every other command
  *   passes as it is. The wrapped `execCommand` is left fixed in place (not writable, not configurable), once per
- *   window;
+ *   window. A page that rewrites itself (`document.open()`, which takes every listener of the document and of its
+ *   window away) has those inputs listened for again as the call returns, before its new page adds any of its own;
  * - runs in a frame's window before the page holds it, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`): what a frame
  *   element hands out is guarded first, the frames of the document and of its shadow trees are gone over as one loads
- *   (an empty frame's first load fires as it is put in the page) and as the page changes, the document's frames as
- *   each call that puts nodes in a page returns (`appendChild`, `append`, `innerHTML`, `insertNode`, `document.write`
- *   and the like, an `execCommand`), so the window of a frame read by its index in the task that put it in is guarded
- *   before the page holds it, whatever its answer, each `srcdoc` frame gets
- *   this script first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
+ *   (an empty frame's first load fires as it is put in the page) and as the page changes (the whole page once, then
+ *   only what each change put in it and the frames whose `srcdoc` it set: no change costs more as the page grows), the
+ *   document's frames as each call that puts nodes in a page returns (`appendChild`, `append`, `innerHTML`,
+ *   `insertNode`, `document.write` and the like, an `execCommand`), so the window of a frame read by its index in the
+ *   task that put it in is guarded before the page holds it, whatever its answer, each `srcdoc` frame gets this script
+ *   first, a declarative shadow root the page's script would make is refused, and with `VIEWER_GUARD_CSP`
  *   a `javascript:` URL is refused (its own Trusted Types default policy; one passes every other string on as it is,
  *   or, once the page made its own `default` policy, to that one's rules: the page's `createPolicy("default")` gets the
  *   guard's policy back with them, a kind of string they have no rule for passes on as it is, and the copy of itself it
@@ -41,7 +43,9 @@
  *   members read once). The apps' origins under a services host share its site: one an app set for the whole host
  *   would be read by every other contact's app open at once. The bridge drops those left from before as it starts
  *   (apps/web/src/svc/clearSite.ts, with the setter it kept before this ran). Both fixed in place, once per window.
- * A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
+ * A look over the frames passes by a frame of another origin without touching it (its prototype reads as null; this
+ * script cannot run there) and by one whose document it already found guarded for good, so an insertion costs little
+ * in an app with embeds. A frame's window keeps what was run in it on its first, empty page when the page it loads is of the same origin (the
  * bridge's guard reaches the app's frame then): there this script only watches the new document. Each document it
  * watches is marked (`ghostlyClipboardGuard`, fixed in place): the bridge reads that to know the guard ran in the page
  * it shows. It uses nothing the page can change after it ran (the page's own code runs later, in the same realm).
@@ -60,8 +64,9 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
     const home = w.document;
     const exec = describe(proto, "execCommand");
     const fresh = !!exec && exec.configurable === true && typeof exec.value === "function";
-    const watched = !!describe(home, "ghostlyClipboardGuard");
-    if (!fresh && watched) return;
+    const mark = describe(home, "ghostlyClipboardGuard");
+    const watched = !!mark;
+    if (!fresh && watched) return !!exec && exec.configurable === false && mark.configurable === false;
     if (!watched) define(home, "ghostlyClipboardGuard", { value: true });
     const own = "<script>(" + noClipboardWrites + ")(window)<" + "/script>";
     const close = "<" + "/script>";
@@ -71,8 +76,18 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
     const slice = text.prototype.slice;
     const index = text.prototype.indexOf;
     const listen = w.EventTarget.prototype.addEventListener;
+    const above = w.Object.getPrototypeOf;
+    const Known = w.WeakSet;
+    const known = typeof Known === "function" ? new Known() : null;
+    const has = known && Known.prototype.has;
+    const add = known && Known.prototype.add;
     const shut = (inner) => {
-      try { if (inner && inner !== w) noClipboardWrites(inner); } catch (e) {}
+      try {
+        if (!inner || inner === w || apply(above, null, [inner]) === null) return;
+        const doc = inner.document;
+        if (known !== null && apply(has, known, [doc])) return;
+        if (noClipboardWrites(inner) === true && known !== null) apply(add, known, [doc]);
+      } catch (e) {}
     };
     const count = describe(w, "length").get;
     const view = describe(proto, "defaultView").get;
@@ -101,17 +116,54 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
     };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
+    const getter = (kind, name) => {
+      try {
+        const found = describe(kind.prototype, name);
+        return found && typeof found.get === "function" ? found.get : null;
+      } catch (e) { return null; }
+    };
+    const kindOf = getter(w.MutationRecord, "type");
+    const targetOf = getter(w.MutationRecord, "target");
+    const addedOf = getter(w.MutationRecord, "addedNodes");
+    const nodeType = getter(w.Node, "nodeType");
+    const matches = elements.matches;
+    const within = elements.querySelectorAll;
+    const piecemeal = kindOf !== null && targetOf !== null && addedOf !== null && nodeType !== null && typeof matches === "function" && typeof within === "function";
+    const framed = "iframe[srcdoc]";
+    const each = (node) => {
+      if (apply(nodeType, node, []) !== 1) return;
+      if (apply(matches, node, [framed])) first(node);
+      const frames = apply(within, node, [framed]);
+      for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+    };
     const watch = (root, all) => {
-      const scan = () => {
+      const look = () => {
         try {
-          const frames = apply(all, root, ["iframe[srcdoc]"]);
+          const frames = apply(all, root, [framed]);
           for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
         } catch (e) {}
+      };
+      const changed = (records) => {
+        let whole = !piecemeal;
+        try {
+          for (let r = 0; !whole && r < records.length; r++) {
+            const record = records[r];
+            const target = apply(targetOf, record, []);
+            if (apply(kindOf, record, []) !== "childList") {
+              if (apply(nodeType, target, []) === 1 && apply(matches, target, [framed])) first(target);
+              continue;
+            }
+            const added = apply(addedOf, record, []);
+            for (let i = apply(size, added, []); i-- > 0;) each(added[i]);
+          }
+        } catch (e) { whole = true; }
+        if (whole) look();
         sweep();
       };
-      apply(observe, new Observer(scan), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
+      apply(observe, new Observer(changed), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
       apply(listen, root, ["load", sweep, true]);
-      scan();
+      look();
+      sweep();
       return root;
     };
     if (fresh) {
@@ -172,14 +224,17 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         for (let i = 0; i < shutters.length; i++) { try { shutters[i](); } catch (e) {} }
       };
       const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
-      for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
       const followed = (event) => {
         if (open === 0) return;
         const found = trust(event);
         if (found !== null) follows = { event: event, trusted: found, at: tapped, next: follows };
       };
-      apply(listen, w, ["submit", followed, true]);
-      apply(listen, w, ["change", followed, true]);
+      const hear = () => {
+        for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
+        apply(listen, w, ["submit", followed, true]);
+        apply(listen, w, ["change", followed, true]);
+      };
+      hear();
       const tapping = () => {
         if (tap !== null && dispatching(tap, trusted) && recent(tapped)) return true;
         for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted) && recent(f.at)) return true;
@@ -324,7 +379,12 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
       const reopen = proto.open;
       proto.open = function () {
         const got = apply(reopen, this, arguments);
-        try { if (apply(view, this, []) === w) apply(listen, this, ["load", sweep, true]); } catch (e) {}
+        try {
+          if (apply(view, this, []) === w) {
+            apply(listen, this, ["load", sweep, true]);
+            hear();
+          }
+        } catch (e) {}
         return got;
       };
       const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
@@ -412,4 +472,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-fUB6roSomw2nFm3l8BJTg9A9LswF+7PzLHyU0ot0T48='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-mGfLfp1PFOMe5YyTINPv0CrWYQz0/TJSSX9CzjDlCeE='";

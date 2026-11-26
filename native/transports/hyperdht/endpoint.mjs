@@ -141,7 +141,8 @@ export async function createHyperEndpoint(seed, options = {}) {
     let closed = false
     let ending = null
     let pending = []
-    let buffer = Buffer.alloc(0)
+    /** The partial frame's parts as they came (copies), their bytes, and how many it needs before it is read on. */
+    let parts = [], partBytes = 0, need = 4
     let preface = false
     let resolveOpen, rejectOpen
     const ready = new Promise((resolve, reject) => { resolveOpen = resolve; rejectOpen = reject })
@@ -210,13 +211,22 @@ export async function createHyperEndpoint(seed, options = {}) {
     socket.on('data', chunk => {
       // Secretstream chunks are bounded by its record layer. Process all frames
       // before retaining a partial one; never allocate based on an unchecked size.
-      buffer = Buffer.concat([buffer, chunk])
+      // A frame can come in many small records: its parts are kept as they come and joined once there are as many
+      // bytes as it needs (4 for its header, then all of it), not copied again at each one.
+      let buffer = chunk
+      if (parts.length || chunk.length < need) {
+        parts.push(Buffer.from(chunk)); partBytes += chunk.length
+        if (partBytes < need) return
+        buffer = Buffer.concat(parts, partBytes)
+        parts = []; partBytes = 0
+      }
+      need = 4
       while (buffer.length >= 4) {
         const word = buffer.readUInt32BE(0)
         const binary = word >= BINARY, length = word % BINARY
         // A binary frame before the preface is another protocol.
         if (length === 0 || length > MAX_FRAME || (binary && !preface)) { socket.destroy(new Error('Invalid frame length')); return }
-        if (buffer.length < 4 + length) break
+        if (buffer.length < 4 + length) { need = 4 + length; break }
         let text
         if (binary) text = new Uint8Array(buffer.subarray(4, 4 + length))
         else {
@@ -239,6 +249,7 @@ export async function createHyperEndpoint(seed, options = {}) {
         else if (pending.length < 64) pending.push(text)
         else { socket.destroy(new Error('Receive queue exceeded')); return }
       }
+      if (buffer.length) { parts = [Buffer.from(buffer)]; partBytes = buffer.length }
     })
     void socket.opened.then(ok => { if (ok) opened(); else rejectOpen(new Error('Noise handshake failed')) })
     return ready

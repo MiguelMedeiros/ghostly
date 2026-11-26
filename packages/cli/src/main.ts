@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { connect } from "node:net";
-import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { dirname, sep } from "node:path";
 import packageJson from "../package.json" with { type: "json" };
 import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, shownWord, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
@@ -9,7 +9,7 @@ import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaem
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { callRef } from "./commands/calls";
-import { here, inRange, INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
+import { fileHere, here, inRange,INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError, SINGLE_DEVICE } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -175,7 +175,16 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
   // A usage report to every 1:1 chat (`--all`) needs no group.
   if (method === "usage.send") return params.all === true;
   if (chatOrGroup(method, params)) return false;
-  return method.startsWith("chat.") || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+  return method.startsWith("chat.") || chatFileOnly(method, params) || (params.chat !== undefined && params.group === undefined && !method.startsWith("group."));
+}
+
+/**
+ * A 1:1 chat's file named by its id alone (`file save <file>`, `file wait`, `file accept`…): the id starts with its chat's
+ * (`<chat>-in-`, `<chat>-out-`), so the call is about that chat, as with `<chat>` given, and `startNamedChats` starts it.
+ * Read as about none, a one-shot started every saved chat and group: with 20 chats, 20 relay requests and 0.6-2 s more.
+ */
+function chatFileOnly(method: string, params: Record<string, unknown>): boolean {
+  return method.startsWith("file.") && params.chat === undefined && typeof params.file === "string" && !params.file.startsWith("group-");
 }
 
 /** A command whose `chat` may name a group as well: a one-shot for it starts the groups' sessions. */
@@ -211,7 +220,7 @@ export function newChatOnly(method: string): boolean {
  * whose chat may name a group (`chatOrGroup`: a bot's `task send`): the groups start for it, the other 1:1 chats do not.
  */
 export function oneChatOnly(method: string, params: Record<string, unknown>): boolean {
-  return newChatOnly(method) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
+  return newChatOnly(method) || chatFileOnly(method, params) || ((chatOnly(method, params) || chatOrGroup(method, params)) && typeof params.chat === "string");
 }
 
 /**
@@ -263,6 +272,14 @@ const NO_HISTORY_WRITES: ReadonlySet<string> = new Set([
   "status.set", "status.clear", "x401.key.new", "x401.credential.add", "x401.credential.remove", "service.add", "identity.cancel",
   "app.serve", "app.unserve", "call.answer", "call.flush", "wallet.address", "lightning.rename", "lightning.default", "wallet.remove",
 ]);
+
+/**
+ * Calls that name their thing by an id of no chat (a proof, a service, a payment, a call) and need the chats once it is
+ * found (a proof is withdrawn from each; a call may ring in any): a one-shot for one leaves every saved chat and group
+ * unstarted, looks the id up, and starts them only when it names something (api.ts `startOnceFound`). Each started every
+ * saved chat first, then said not_found for a typo: with 20 chats, 20 relay requests and 0.4-0.7 s more.
+ */
+const LOOKED_UP_FIRST: ReadonlySet<string> = new Set(["identity.remove", "service.enable", "service.remove", "payment.reclaim", "call.hangup"]);
 
 /** Whether a one-shot for this call leaves every saved chat unstarted, its history unread (`NO_HISTORY_READS`, `NO_HISTORY_WRITES`). */
 export function readsNoHistory(method: string, params: Record<string, unknown> = {}): boolean {
@@ -341,16 +358,30 @@ export function offlineCall(method: string, params: Record<string, unknown>): bo
 }
 
 /** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the
- *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin; anything else may take as long
- *  as it takes, once the daemon has answered the version check sent ahead of it (session()). */
+ *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin (a file send, plus the time to
+ *  copy the file in); anything else may take as long as it takes, once the daemon has answered the version check sent
+ *  ahead of it (session()). */
 const ANSWER_MS = 15_000;
 export function answerWithin(method: string, params: Record<string, unknown>): number | undefined {
   // A `--timeout` outside the daemon's range (1 to 3600 s, 86 400 for `chat wait` and `file wait`) is refused by the
   // daemon at once (bad_request); the deadline only has to be a timer Node takes (-10 s fired at once, 1e12 after 1 ms).
   const waits = typeof params.timeout === "number" ? Math.min(Math.max(params.timeout, 1), 86_400) : waitsFor(method, params);
-  if (waits !== undefined) return (waits + 10) * 1000;
+  if (waits !== undefined) return (waits + 10 + stagingSeconds(method, params)) * 1000;
   if (readOnly(method, params)) return ANSWER_MS;
   return undefined;
+}
+
+/**
+ * A `file send` copies the file into the profile before its wait starts (files.ts `stageWhileAsked`), 6-30 s for 1 GiB:
+ * its deadline adds a second per `STAGED_BYTES_PER_SECOND` of the file, well past that. Counted against the wait's
+ * own, a large file with a short `--timeout` failed as "The daemon did not answer" (exit 4) while it was still copied
+ * in, and the copy then stopped with the command gone: nothing was sent. A file it cannot read adds nothing (the
+ * daemon refuses it at once).
+ */
+const STAGED_BYTES_PER_SECOND = 8 * 1024 * 1024;
+function stagingSeconds(method: string, params: Record<string, unknown>): number {
+  if (method !== "file.send" || typeof params.path !== "string") return 0;
+  try { return Math.ceil(statSync(params.path).size / STAGED_BYTES_PER_SECOND); } catch { return 0; }
 }
 
 /**
@@ -363,12 +394,15 @@ async function session(g: Globals, options: RuntimeOptions, again = true, first?
   const anew = again ? () => session(g, options, false) : undefined;
   const client = await connectDaemon(g.paths);
   if (client) return throughDaemon(client, anew);
-  const [, { callApi, refuseBeforeStart, startNamedChats }] = await Promise.all([engineHost(), engineApi()]);
+  const [, { callApi, refuseBeforeStart, startNamedChats, startOnceFound }] = await Promise.all([engineHost(), engineApi()]);
   if (first) await refuseBeforeStart(first.method, first.params);
-  const host = await openOneShot(g, options);
+  const lookup = first && LOOKED_UP_FIRST.has(first.method) ? first.method : undefined;
+  const host = await openOneShot(g, lookup ? { ...options, deferChats: true } : options);
   if (host instanceof DaemonClient) return throughDaemon(host, anew);
+  let looked = false;
   const call = async (m: string, p?: unknown) => {
-    if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, m, p as Record<string, unknown>, READS.has(m));
+    if (m === lookup && !looked && p && typeof p === "object") { await startOnceFound(host.ctx, m, p as Record<string, unknown>); looked = true; }
+    else if (options.deferChats && p && typeof p === "object") await startNamedChats(host.ctx, m, p as Record<string, unknown>, READS.has(m));
     return callApi(host.ctx, m, p ?? {});
   };
   return { mode: "one-shot", call, close: () => host.close(), abort: () => host.close() };
@@ -440,8 +474,11 @@ function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Se
   };
 }
 
-/** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
-const HOLDER_WAIT_MS = 5_000;
+/**
+ * How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second.
+ * GHOSTLY_TEST_HOLDER_WAIT_MS: a test of one-shots at once, whose holders on a loaded CI runner kept it past 5 s.
+ */
+const HOLDER_WAIT_MS = Number(process.env.GHOSTLY_TEST_HOLDER_WAIT_MS) || 5_000;
 /** How long it waits for the profile's daemon that is starting (`startingDaemon`): its engine takes seconds on a large profile. */
 const STARTING_WAIT_MS = 30_000;
 /**
@@ -1219,11 +1256,16 @@ async function startedDaemon(g: Globals, seconds: number): Promise<DaemonClient 
   }
 }
 
-/** `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all). */
+/**
+ * `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all), at most a day, as the
+ * socket calls' waits (`answerWithin`): past about 24.8 days a Node timer fires after 1 ms, and `daemon stop` sent a
+ * healthy daemon SIGTERM at once.
+ */
 function seconds(parsed: Parsed, fallback: number): number {
   const value = parsed.options.timeout;
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !(value > 0)) throw new CliError("usage", "--timeout takes a number of seconds above 0");
+  if (value > 86_400) throw new CliError("usage", `--timeout takes at most 86400 seconds (a day), not ${value}`);
   return value;
 }
 
@@ -1436,7 +1478,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
   checkTypes(types, (line) => process.stderr.write(line + "\n"));
   const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
-  const cursor = here(parsed.options.cursor);
+  const cursor = fileHere(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
   const starting = startAt(sinceOf(parsed.options), cursor, (line) => process.stderr.write(line + "\n")), since = starting.from;
@@ -1797,7 +1839,13 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   }
   const audio = call.audio;
   const socket = connect(audio.socket);
-  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  // The call ended between `call.get` and here: its socket is gone, or a file stays where nothing listens. It said
+  // "No such file or folder: the path", or Node's raw "connect ECONNREFUSED …".
+  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); }).catch((error: unknown) => {
+    client.close();
+    const code = (error as { code?: unknown }).code;
+    throw code === "ENOENT" || code === "ECONNREFUSED" ? new CliError("not_found", `No call ${call.call}: it ended (ghostly call list)`) : error;
+  });
   // The call's token first: until it comes, the socket is nobody's (WISP 1100 § Calls).
   socket.write(`${audio.token}\n`);
   process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
@@ -1812,8 +1860,21 @@ async function callPipeCommand(argv: string[]): Promise<void> {
     process.stderr.write(`ghostly: call ${call.call}: nothing reads its audio any more; the call goes on\n`);
     socket.destroy();
   });
+  // Ctrl-C stops the pipe, not the call: it says so, with how to end the call, and leaves with 130 as a command stopped
+  // with Ctrl-C does. It died by the signal with no word, and the contact went on hearing silence.
+  let stopped = false;
+  process.once("SIGINT", () => {
+    stopped = true;
+    const words = `stopped (Ctrl-C); the call goes on (ghostly call hangup ${call.call} ends it)`;
+    process.stderr.write(`ghostly: call ${call.call}: ${words}\n`);
+    failures.write(jsonOut({ error: new CliError("interrupted", words[0].toUpperCase() + words.slice(1)).toJSON() }, pretty ? 2 : undefined) + "\n");
+    socket.destroy();
+    client.close();
+    exit(EXIT.interrupted);
+  });
   socket.pipe(process.stdout);
   socket.on("close", () => void (async () => {
+    if (stopped) return;
     if (!readerGone) process.stderr.write(`ghostly: call ${call.call}: ${await whyClosed()}\n`);
     client.close();
     exit(0);

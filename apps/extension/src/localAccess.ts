@@ -3,7 +3,7 @@ import { localAccessPattern } from "@ghostly/browser/host";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { listProfiles, namespaceOf } from "../../ui/src/lib/profiles";
 import { databaseFor, pageNamespace } from "./profile";
-import { ALLOWED_PREFIX, allowedKey, allowedOrigins, disallowLocalOrigin } from "./localAllowList";
+import { ALLOWED_PREFIX, allowedKey, allowedOrigins, allowLocalOrigin, disallowLocalOrigin } from "./localAllowList";
 
 /**
  * Chrome's optional host permissions for this machine's apps (`http://127.0.0.1/*`). One is granted per host, for
@@ -68,13 +68,21 @@ function release(patterns: string[]): Promise<void> {
   });
 }
 
+/** Puts `origin` on profile `ns`'s list (localAllowList.ts) while no prune of the lists runs in the middle. */
+export function allowLocalAccess(ns: string, origin: string): Promise<void> {
+  return locked(() => allowLocalOrigin(ns, origin));
+}
+
 /**
  * A share's `addService`, once Chrome said yes to `pattern`: run while no page can give the pattern back, and only if
- * Chrome still holds it (another tab may have given it back after the yes). False: it was not run, ask again.
+ * Chrome still holds it (another tab may have given it back after the yes). False: it was not run, ask again. The
+ * address goes on this page's profile's list next to its app, so a prune in another tab sees both or neither: one
+ * that read the apps before the app and the list after the Allow would take it off again.
  */
-export function withLocalAccess(pattern: string, task: () => Promise<void>): Promise<boolean> {
+export function withLocalAccess(pattern: string, origin: string, task: () => Promise<void>): Promise<boolean> {
   return locked(async () => {
     if (!(await chrome.permissions.contains({ origins: [pattern] }))) return false;
+    await allowLocalOrigin(pageNamespace(), origin);
     await task();
     return true;
   });
@@ -86,20 +94,31 @@ export async function forgetLocalAccess(origin: string): Promise<void> {
   await release([localAccessPattern(origin)]);
 }
 
-/** Each listed profile keeps only the addresses it still shares an app at; a profile gone keeps none. */
-async function pruneAllowed(): Promise<void> {
-  const kept: Record<string, string[]> = {};
-  for (const profile of listProfiles()) {
-    const ns = namespaceOf(profile.id);
-    const shared = new Set<string>();
-    for (const target of await sharedTargets(databaseFor(ns))) {
-      try { shared.add(parseLocalTarget(target).origin); } catch { /* a target that no longer parses is reached nowhere */ }
+/**
+ * Each listed profile keeps only the addresses it still shares an app at; a profile gone keeps none. Under the lock a
+ * share allows and adds its app in, and each list is read again right before it is written, losing only what was pruned.
+ */
+function pruneAllowed(): Promise<void> {
+  return locked(async () => {
+    const pruned = new Map<string, Set<string>>();
+    for (const profile of listProfiles()) {
+      const ns = namespaceOf(profile.id);
+      const shared = new Set<string>();
+      for (const target of await sharedTargets(databaseFor(ns))) {
+        try { shared.add(parseLocalTarget(target).origin); } catch { /* a target that no longer parses is reached nowhere */ }
+      }
+      pruned.set(ns, new Set((await allowedOrigins(ns)).filter((origin) => !shared.has(origin))));
     }
-    kept[allowedKey(ns)] = (await allowedOrigins(ns)).filter((origin) => shared.has(origin));
-  }
-  const gone = Object.keys(await chrome.storage.local.get(null)).filter((key) => key.startsWith(ALLOWED_PREFIX) && !(key in kept));
-  await chrome.storage.local.set(kept);
-  if (gone.length) await chrome.storage.local.remove(gone);
+    const kept: Record<string, string[]> = {};
+    for (const [ns, drop] of pruned) {
+      const list = await allowedOrigins(ns);
+      if (list.some((origin) => drop.has(origin))) kept[allowedKey(ns)] = list.filter((origin) => !drop.has(origin));
+    }
+    const listed = new Set([...pruned.keys()].map(allowedKey));
+    const gone = Object.keys(await chrome.storage.local.get(null)).filter((key) => key.startsWith(ALLOWED_PREFIX) && !listed.has(key));
+    if (Object.keys(kept).length) await chrome.storage.local.set(kept);
+    if (gone.length) await chrome.storage.local.remove(gone);
+  });
 }
 
 /** A profile's apps all went (Clear all data, a profile deleted): every local pattern Chrome granted and nobody needs. */

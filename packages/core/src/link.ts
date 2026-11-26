@@ -71,6 +71,36 @@ export const OFFER_STEP_MAX = 4;
 /** An offer to a saved contact is looked at for an answer as long as its attempt lasts (`CONNECT_TIMEOUT_MS`), not 45 s. */
 export const OFFER_LOOK_MS = 90_000;
 /**
+ * The reads a minute that the looks for answers to offers whose contact still holds a dead session (`setFastPoll`'s
+ * `shared`: a resume after a run that ended with no goodbye) take between them, over one transport (an app's relays):
+ * each such offer waits between looks at least their count's share of a minute (`offerLookWait`), so one alone looks
+ * at the relays' fast pace, and ten at once every 20 s each. Such a contact answers only once it finds the session
+ * gone. A daemon killed with 14 chats live and started again at once resumed 10 of them, each looking every 2 s while
+ * its contact had not yet (5 to 18 s with node-datachannel): the relays' minute was spent in 10 to 14 s, the answers
+ * out from 7 s on were read only a minute later, and most chats were live again at 61 to 74 s (bug hunt, 2026-11-25).
+ * Not after a goodbye: the contact watches for this app then, and answers in a second or two, which the looks at the
+ * fast pace find (14 of 14 chats live in 9 s, against 11 of 14 in a minute shared). The chat on screen looks at its own pace.
+ */
+export const OFFER_LOOKS_PER_MINUTE = 30;
+/** The longest an offer's share makes it wait between looks: ten offers' share (`RESUMES_AT_ONCE` chats resume at once). */
+export const OFFER_LOOK_WAIT_MAX_MS = 20_000;
+/** The links looking for an answer to an offer of theirs that shares its looks (`OFFER_LOOKS_PER_MINUTE`), over each transport. */
+const offerLookers = new WeakMap<PkarrTransport, Set<object>>();
+/** Counts `looker` among the links looking for an answer to such an offer over `transport` while `looking`, or no longer: how many there are. */
+export function countOfferLooker(transport: PkarrTransport, looker: object, looking: boolean): number {
+  let lookers = offerLookers.get(transport);
+  if (!lookers) offerLookers.set(transport, lookers = new Set());
+  if (looking) lookers.add(looker); else lookers.delete(looker);
+  return lookers.size;
+}
+/**
+ * The shortest wait between looks for an answer to an offer, one of `lookers` over the same relays
+ * (`OFFER_LOOKS_PER_MINUTE`), up to `OFFER_LOOK_WAIT_MAX_MS`.
+ */
+export function offerLookWait(lookers: number): number {
+  return Math.min(OFFER_LOOK_WAIT_MAX_MS, Math.round(lookers * 60_000 / OFFER_LOOKS_PER_MINUTE));
+}
+/**
  * The first fast reads after a new offer or answer of this side's went out are signaling (`PkarrRequestOptions.signal`),
  * as the reads for the answer to an offer to a saved contact are all along. An answer's: the offer it answered may be
  * given up by then (its attempt ended before it read the answer, or the answer was refused), and the offerer's next one,
@@ -355,6 +385,8 @@ export class LinkSession {
   private fastPollUntil = 0;
   /** An offer to a saved contact is out: from then on its fast window looks less often (`OFFER_FAST_MS`); 0 for none. */
   private fastStepsAfter = 0;
+  /** That offer's looks share the relays' minute with the other such offers' (`OFFER_LOOKS_PER_MINUTE`). */
+  private offerShared = false;
   /** Fast reads still signaling since this side's last new offer or answer went out (`SIGNAL_OUT_READS`). */
   private signalReadsLeft = 0;
   /** Fast reads still signaling while the contact's offer is due (`SIGNAL_DUE_READS`). */
@@ -499,6 +531,7 @@ export class LinkSession {
     if (this.firstPublishTimer) clearTimeout(this.firstPublishTimer);
     this.pollTimer = this.heartbeatTimer = this.publishRetryTimer = this.firstPublishTimer = null;
     countUnusedInvite(this.transport, this, false);
+    countOfferLooker(this.transport, this, false);
     this.rtcSignal = null;
     this.callSignal = null;
     this.presenceDueOut = false;
@@ -524,11 +557,13 @@ export class LinkSession {
 
   /**
    * Signaling in progress: look fast. `offer`: this side's offer to a saved contact, whose answer may be a while
-   * (`OFFER_FAST_MS`): fast at first, then less often.
+   * (`OFFER_FAST_MS`): fast at first, then less often. `shared`: such an offer whose contact still holds a dead session,
+   * whose looks share the relays' minute with the others' (`OFFER_LOOKS_PER_MINUTE`).
    */
-  setFastPoll(fast: boolean, offer = false): void {
+  setFastPoll(fast: boolean, offer = false, shared = false): void {
     this.fastPollUntil = fast ? Date.now() + (offer ? OFFER_LOOK_MS : FAST_POLL_MAX_MS) : 0;
     this.fastStepsAfter = fast && offer ? Date.now() + OFFER_FAST_MS : 0;
+    this.offerShared = fast && offer && shared;
     // The signal this window is for goes out next (`SIGNAL_OUT_READS`): the reads left for the last one end, and so do
     // those for the contact's (`SIGNAL_DUE_READS`).
     this.signalReadsLeft = this.dueSignalReadsLeft = 0;
@@ -722,7 +757,12 @@ export class LinkSession {
     const stepping = this.fastStepsAfter ? Date.now() - this.fastStepsAfter : -1;
     // Counted among the app's unused invites while read as one (below).
     const unused = countUnusedInvite(this.transport, this, pace === "background" && since >= 0 && !this.presence.online && this.invite());
-    if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
+    // Looking for the answer to an offer of mine that shares its looks, not on screen (`OFFER_LOOKS_PER_MINUTE`).
+    const looking = pace === "fast" && this.offerShared && this.fastStepsAfter > 0 && this.rtcSignalOut !== null && !this.active;
+    const lookers = countOfferLooker(this.transport, this, looking);
+    const shared = looking ? offerLookWait(lookers) : 0;
+    if (pace === "fast" && stepping >= 0) return Math.max(shared, Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping)));
+    if (shared) return Math.max(shared, interval);
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
     // An invite nobody used, or a joined one whose inviter never came, no longer awaited: the older it is, the less often
     // it is read, as far as their count needs. Nobody there: an inviter gone may have left a packet, its goodbye, before the join.

@@ -874,7 +874,8 @@ export class Communities {
     else fresh = await s.handle(from, raw) && f.t === "group-commit";
     // While I am still in, what moves the chain or says a leave goes on, once, to my other edges: a member whose only
     // edge is to me (I was its hub) reaches the group through me, its hand-on of the role and its leave too.
-    if (fresh && rosterHas(s.roster, s.myKey)) for (const [key, linkId] of this.host.edges(groupId)) if (key !== from) this.sendTo(linkId, f);
+    // Its own fields alone, as a hub hands on (`passOn`).
+    if (fresh && rosterHas(s.roster, s.myKey)) { const out = s.passOn(f); for (const [key, linkId] of this.host.edges(groupId)) if (key !== from) this.sendTo(linkId, out); }
     await this.leftMoved(groupId, this.now());
   }
 
@@ -2563,6 +2564,8 @@ export class Communities {
       // The admin's pin is the group's state, said once: kept past the store and handed to whoever was away however
       // much was said since, an unpin too (WISP 903, agents#1095). Only the admin's: no one else's pin is taken.
       lasting: m => m.frame.t === COMMUNITY_PIN_FRAME && m.sender === session.admin ? COMMUNITY_PIN_FRAME : undefined,
+      // In the order members show it live: by its number, which a new pin keeps past the one shown, whatever the clock.
+      lastingRank: m => m.frame.t === COMMUNITY_PIN_FRAME && typeof m.frame.n === "number" ? m.frame.n : undefined,
       // Who holds a file is a hint (WISP 503: no file is given up for lack of one): kept, every holder of every photo
       // would push the oldest texts out of what a member back from away gets.
       fleeting: frame => frame.t === GROUP_HAVE_FRAME,

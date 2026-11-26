@@ -255,6 +255,59 @@ describe("a move hands over the installed apps' bundles", () => {
     expect(files).toContainEqual({ id: `app-${whole.digest}`, size: 7, sha256: digestText(sha256(cut)) });
   });
 
+  it("a bundle hashed while cut short is offered with its whole hash at the next move, once its files came back", async () => {
+    // The source lives as long as the engine: the short file's hash, kept under its id, was offered with the whole file's
+    // size at every later Move of the session, and the taker found it damaged and cancelled the move each time.
+    const whole = bundle(22), cut = whole.bytes.subarray(0, 7);
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    await space.remove(`app-${whole.digest}`);
+    await space.append(`app-${whole.digest}`, 0, cut);
+    await profileDatabase(giver, [], [{ ...app("todo", whole.digest, "opfs"), sha256: whole.sha256, manifest: whole.manifest }]);
+    const source = handoffProfileHost("1.10.2", "web").source(giver);
+    expect(await source.files()).toContainEqual({ id: `app-${whole.digest}`, size: 7, sha256: digestText(sha256(cut)) });
+
+    // Open fetched its files back: written whole again, its record keeps the whole file's hash.
+    await space.remove(`app-${whole.digest}`);
+    await space.append(`app-${whole.digest}`, 0, whole.bytes);
+
+    expect(await source.files()).toContainEqual({ id: `app-${whole.digest}`, size: whole.bytes.length, sha256: whole.sha256 });
+  });
+
+  it("a bundle hashed at its whole length is offered with the hash its record got when it was written again", async () => {
+    // Damaged in place (same length), hashed by a move; then written again whole by the engine, which put the file's
+    // hash on the record: that one is the file's now, not the one read before.
+    const whole = bundle(23), damaged = whole.bytes.map((b) => b ^ 1);
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    await space.remove(`app-${whole.digest}`);
+    await space.append(`app-${whole.digest}`, 0, damaged);
+    await profileDatabase(giver, [], [{ ...app("todo", whole.digest, "opfs"), manifest: whole.manifest }]);
+    const source = handoffProfileHost("1.10.2", "web").source(giver);
+    expect(await source.files()).toContainEqual({ id: `app-${whole.digest}`, size: whole.bytes.length, sha256: digestText(sha256(damaged)) });
+
+    await space.remove(`app-${whole.digest}`);
+    await space.append(`app-${whole.digest}`, 0, whole.bytes);
+    await profileDatabase(giver, [], [{ ...app("todo", whole.digest, "opfs"), sha256: whole.sha256, manifest: whole.manifest }]);
+
+    expect(await source.files()).toContainEqual({ id: `app-${whole.digest}`, size: whole.bytes.length, sha256: whole.sha256 });
+  });
+
+  it("a chat file hashed at one size is hashed again once it holds other bytes", async () => {
+    const first = Uint8Array.from({ length: 500 }, (_, i) => i % 13), then = Uint8Array.from({ length: 900 }, (_, i) => i % 17);
+    const giver = GIVER, space = opfs.store.forSpace!(giver);
+    await space.remove("link2-in-f2");
+    await space.append("link2-in-f2", 0, first);
+    const row = (bytes: Uint8Array) => ({ id: "link2-in-f2", linkId: "link2", direction: "in", bytes: "opfs", createdAt: 1, metadata: { name: "b.jpg", size: bytes.length, mime: "image/jpeg", timestamp: 1 } });
+    await profileDatabase(giver, [row(first)], []);
+    const source = handoffProfileHost("1.10.2", "web").source(giver);
+    expect(await source.files()).toContainEqual({ id: "link2-in-f2", size: first.length, sha256: digestText(sha256(first)) });
+
+    await space.remove("link2-in-f2");
+    await space.append("link2-in-f2", 0, then);
+    await profileDatabase(giver, [row(then)], []);
+
+    expect(await source.files()).toContainEqual({ id: "link2-in-f2", size: then.length, sha256: digestText(sha256(then)) });
+  });
+
   it("a taker whose frozen copy holds a bundle copies it from its file storage", async () => {
     const held = bundle(4);
     await opfs.store.append(`app-${held.digest}`, 0, held.bytes);

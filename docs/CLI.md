@@ -310,12 +310,13 @@ Safety rules the CLI enforces:
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
   `chat request`, the comment of `pay` to a Lightning address, the name of `group create` and `group rename`, the
   name contacts see in `profile set`, `profile create --name` and `settings set nick`, a file's name and type in `file send`,
-  the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
+  the name of `service add`, the `--reason` of `app revoke`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`,
   `forwardMessages`, `sendGroupFile` caption and file name, `sendFile`'s file name, payment memos of `sendPayment`,
   `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo,
-  `lnurlInvoice`'s comment, the name of `createGroup` and `renameGroup`, `updateSettings`' nick, `setOwnStatus`'
+  `lnurlInvoice`'s comment, the name of `createGroup`, `renameGroup` and `addService`, `updateSettings`' nick, `setOwnStatus`'
   text and the note or profile fields of `nostrDraft` through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5) unless
-  `--force`, before anything is sent or asked of a server.
+  `--force`, before anything is sent or asked of a server. A text it would read past 16 KiB of UTF-8 (the most any
+  text Ghostly sends carries; a memo goes as its first 140 characters) is refused with its size instead (`bad_request`).
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group create` and `group link`, for a group's link, and `invite create`, for the invite it makes).
 
 Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out),
@@ -445,7 +446,8 @@ The audio contract, one Unix socket per call:
   `rejected`, `unanswered`, `crossed`, `failed`, `stopped`).
 - **Silence.** `call.stalled` says the contact's packets stopped for 5 s (its side may have died), `call.resumed` that
   they came back; after 15 s with none the call ends as `failed`.
-- **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg.
+- **Shell pipelines.** `ghostly call pipe` puts a call's audio on stdin and stdout, for sox or ffmpeg. Ctrl-C stops
+  the pipe, not the call (exit 130, and stderr says how to end it: `ghostly call hangup <call>`).
 
 **When a call does not connect** (it stays `connecting`, then ends `failed`): the daemon's log lists the candidates
 each side offered and every ICE state, and `call list` shows `stats.ice` (the state and the pair). A VPN that is the

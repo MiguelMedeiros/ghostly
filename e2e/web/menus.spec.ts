@@ -92,7 +92,7 @@ test("every row of the chat, group and New menus is one line and whole, in every
       await expect(chatMenu.getByTestId("chat-services-open")).toHaveCount(0);
       for (const id of ["call-video", "chat-identity-badges"]) await expect(chatMenu.getByTestId(id), `${id}, ${at}`).toHaveCount(viewport === PHONE ? 1 : 0);
       await expect(chatMenu.getByTestId("connection-options")).toHaveCount(0);
-      await oneLineEach(chatMenu, viewport === PHONE ? 7 : 8, `chat menu, ${at}`);
+      await oneLineEach(chatMenu, viewport === PHONE ? 8 : 9, `chat menu, ${at}`);
       if (language !== "ar") await page.screenshot({ path: testInfo.outputPath(`chat-menu-${language}-${viewport.width}.png`) });
       if (viewport === PHONE) {
         await chatMenu.getByTestId("chat-more-open").click();

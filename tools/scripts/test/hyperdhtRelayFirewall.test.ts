@@ -148,3 +148,33 @@ it("connects a custodial client that answers its firewall in time", async () => 
     await relay.close();
   }
 }, 60_000);
+
+// A quarter of one handshake is none, and keeping it for dials left no incoming one: nobody reached a client at all.
+it.each([["a custodial client", true], ["a client running its own handshakes", false]])("connects %s on a relay set to one handshake at a time", async (_, custodial) => {
+  const lines: string[] = [];
+  const relay = await startRelay({ testnet: 3, limits: { handshakes: 1, handshakeMs: 2000 }, log: (...words: string[]) => { lines.push(words.join(" ")); } });
+  const socket = new WebSocket(relay.url);
+  const node = new DHT({ bootstrap: relay.bootstrap, host: "127.0.0.1", firewalled: false });
+  try {
+    await new Promise(resolve => socket.addEventListener("open", resolve, { once: true }));
+    const keyPair = DHT.keyPair();
+    const server = (new RelayedDHT(new WebSocketStream(true, socket), { custodial }) as { createServer(options: unknown): Server }).createServer({});
+    const reached = new Promise(resolve => server.on("connection", stream => { stream.on("error", () => {}); resolve("connection"); }));
+    await server.listen(keyPair);
+    await node.ready();
+    const dial = node.connect(keyPair.publicKey).on("error", () => {});
+    const result = await Promise.race([
+      new Promise(resolve => dial.once("open", () => resolve("open"))),
+      new Promise(resolve => dial.once("error", (error: Error) => resolve(`error: ${error.message}`))),
+      new Promise(resolve => setTimeout(() => resolve("timeout"), 20_000)),
+    ]);
+    expect(result).toBe("open");
+    await expect(reached).resolves.toBe("connection");
+    expect(lines.filter(line => line.startsWith("refused handshake"))).toEqual([]);
+    dial.destroy();
+  } finally {
+    await node.destroy();
+    socket.close();
+    await relay.close();
+  }
+}, 60_000);

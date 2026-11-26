@@ -16,6 +16,7 @@ import { bootDetails, browserTraits, lockdownLikely, missingEssentials, type Ess
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
 import { OtherTab, type OtherTabState } from "../../ui/src/components/OtherTab";
 import { dropLinks, forwardLink, linkInAddress, openInTurn, takeLinks } from "../../ui/src/lib/otherTabLink";
+import { followSettingsWhileWaiting } from "../../ui/src/lib/otherTabSettings";
 import { loadLocale, translatorFor } from "../../ui/src/locales";
 import { countInstallVisit, watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
@@ -89,7 +90,13 @@ const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
 /** What stops handing links on, once this tab holds the lock; it returns the links no tab answered yet, oldest first. */
 let stopLink = (): string[] => [];
 await becomeThePeer(peerLock, () => {
-  const draw = (state: OtherTabState) => root.render(<OtherTab state={state} t={profileTranslator()} />);
+  let shown: OtherTabState = "plain";
+  const draw = (state: OtherTabState) => {
+    shown = state;
+    root.render(<OtherTab state={state} t={profileTranslator()} />);
+  };
+  // The open tab's change of language or theme: this screen takes it while it waits.
+  const stopFollowing = followSettingsWhileWaiting(() => draw(shown));
   // Opened for a share while the app runs in another tab: that tab gets it (after a wait, or as this tab goes), and
   // this one says it went only once the worker handed it over. Once the lock is this tab's, it asks for it itself.
   if (sharing) handShareOver(() => isPeer, draw, sharing);
@@ -118,6 +125,7 @@ await becomeThePeer(peerLock, () => {
   addEventListener("hashchange", arrived);
   stopLink = () => {
     removeEventListener("hashchange", arrived);
+    stopFollowing();
     for (const stop of pending.keys()) stop();
     return [...pending.values()];
   };

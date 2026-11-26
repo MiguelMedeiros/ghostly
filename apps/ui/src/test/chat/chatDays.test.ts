@@ -23,6 +23,20 @@ describe("the day each row goes under", () => {
     expect(days).toEqual([dayOf(at(2026, 10, 28)), dayOf(at(2026, 10, 29)), dayOf(at(2026, 10, 29)), dayOf(at(2026, 10, 29))]);
   });
 
+  it("starts the day after one whose midnight the clocks skipped at its midnight, not an hour into it", () => {
+    // Cairo's clocks go from 00:00 to 01:00 on 2026-04-24: that day starts at 01:00, the next one at 00:00 again.
+    const zone = process.env.TZ;
+    process.env.TZ = "Africa/Cairo";
+    try {
+      const days = rowDays([at(2026, 4, 24, 20), at(2026, 4, 25, 0, 30)]);
+      expect(days).toEqual([dayOf(at(2026, 4, 24)), dayOf(at(2026, 4, 25))]);
+      expect(new Date(days[1]).getHours()).toBe(0);
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+  });
+
   it("is the day above for a row with no time, and none before any dated row", () => {
     const days = rowDays([0, NaN, at(2026, 10, 29), NaN]);
     expect(days.slice(0, 2)).toEqual([NaN, NaN]);
@@ -90,6 +104,26 @@ describe("a day's name", () => {
     // Over a month's end and a year's.
     expect(dayLabel(dayOf(at(2026, 10, 31)), dayOf(at(2026, 11, 1)), "en", t)).toBe("Yesterday");
     expect(dayLabel(dayOf(at(2026, 12, 31)), dayOf(at(2027, 1, 1)), "en", t)).toBe("Yesterday");
+  });
+
+  it("is Yesterday on a day whose midnight the clocks skipped, and the day after it", async () => {
+    // Cairo's clocks go from 00:00 to 01:00 on 2026-04-24: that day starts at 01:00, the one before at 00:00.
+    const zone = process.env.TZ;
+    // Its own copy of the module: the weekday formatter made here writes Cairo's dates, and one made once is kept for
+    // the language, so the next tests would name the run zone's days by Cairo's (east of it, the day before).
+    vi.resetModules();
+    const { dayLabel, dayOf } = await import("../../lib/chatDays");
+    process.env.TZ = "Africa/Cairo";
+    try {
+      const skipped = dayOf(at(2026, 4, 24));
+      expect(new Date(skipped).getHours()).toBe(1);
+      expect(dayLabel(dayOf(at(2026, 4, 23)), skipped, "en", t)).toBe("Yesterday");
+      expect(dayLabel(skipped, dayOf(at(2026, 4, 25)), "en", t)).toBe("Yesterday");
+      expect(dayLabel(dayOf(at(2026, 4, 22)), skipped, "en", t)).toBe("Wednesday, April 22");
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
   });
 
   it("is the weekday and date before that, with the year when it is not this year's", () => {

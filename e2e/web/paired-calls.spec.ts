@@ -69,6 +69,46 @@ test("an audio call from the other side, declined, leaves neither on a call", { 
   for (const p of [alice, bob]) await expect(chat(p).getByText("Audio call declined")).toBeVisible();
 });
 
+test("a call that rings over an open dialog can be answered: the dialog makes way and the card takes the keys", { tag: ["@feature:calls.paired", "@feature:calls.audio"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("over-dialog-alice"), peer("over-dialog-bob")]);
+  await pair(alice, bob);
+  // A modal <dialog> makes everything outside it inert: the ringing card under it took no click and no focus.
+  await alice.page.getByTestId("chat-options").click();
+  await alice.page.getByTestId("chat-options-menu").getByRole("button", { name: "Delete chat" }).click();
+  const asking = alice.page.getByRole("dialog", { name: "Delete chat?" });
+  await expect(asking).toBeVisible();
+  await expect(bob.page.getByTestId("call-audio")).toBeEnabled();
+  await bob.page.getByTestId("call-audio").click();
+  const card = alice.page.getByTestId("incoming-call");
+  await expect(card).toBeFocused();
+  await expect(asking).toHaveCount(0);
+  await card.getByTitle("Accept audio call").click({ timeout: 5_000 });
+  for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
+  await bob.page.getByTitle("End call").click();
+  for (const p of [alice, bob]) await expect(p.page.getByTitle("End call")).toHaveCount(0);
+});
+
+test("Delete chat on the ringing card asks first, then declines the call and deletes the chat", { tag: ["@feature:calls.paired", "@feature:calls.decline", "@feature:chats.list.delete"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("card-delete-alice"), peer("card-delete-bob")]);
+  await pair(alice, bob);
+  await expect(bob.page.getByTestId("call-audio")).toBeEnabled();
+  await bob.page.getByTestId("call-audio").click();
+  const card = alice.page.getByTestId("incoming-call");
+  await expect(card).toBeVisible();
+  // Cancel keeps the chat, and the call still rings.
+  await card.getByRole("button", { name: "Delete chat" }).click();
+  const asking = alice.page.getByRole("dialog", { name: "Delete chat?" });
+  await asking.getByRole("button", { name: "Cancel" }).click();
+  await expect(asking).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Delete chat" })).toBeFocused();
+
+  await card.getByRole("button", { name: "Delete chat" }).click();
+  await asking.getByRole("button", { name: "Delete chat" }).click();
+  await expect(card).toHaveCount(0);
+  await expect(alice.page.getByTestId("chat-row")).toHaveCount(0);
+  await expect(bob.page.getByTitle("End call")).toHaveCount(0, { timeout: 30_000 });
+});
+
 test("both call at once: one side rings, and answering connects the call", { tag: ["@feature:calls.paired", "@feature:calls.audio"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("paired-glare-alice"), peer("paired-glare-bob")]);
   await pair(alice, bob);
@@ -321,14 +361,17 @@ test("a second call while on one: End and answer ends the first on both sides an
   for (const p of [alice, bob]) await expect(p.page.getByText(clock).first()).toBeVisible();
   expect(await microphones()).toBe(1);
 
-  // Carol calls: it rings over the call with two choices only, and says what answering does.
+  // Carol calls: it rings over the call with two choices only (and Block contact and Delete chat), and says what
+  // answering does.
   await expect(carol.page.getByTestId("call-audio")).toBeEnabled();
   await carol.page.getByTestId("call-audio").click();
   const ring = alice.page.getByRole("alertdialog");
   await expect(ring).toBeVisible({ timeout: 30_000 });
   await expect(ring).toHaveAccessibleDescription("Incoming audio call... Answering ends your current call");
-  await expect(ring.getByRole("button")).toHaveCount(2);
+  await expect(ring.getByRole("button")).toHaveCount(4);
   await expect(ring.getByRole("button", { name: "Decline" })).toBeVisible();
+  await expect(ring.getByRole("button", { name: "Block contact" })).toBeVisible();
+  await expect(ring.getByRole("button", { name: "Delete chat" })).toBeVisible();
   await expect(ring.getByRole("button", { name: /^Accept/ })).toHaveCount(0);
 
   await ring.getByRole("button", { name: "End and answer" }).click();

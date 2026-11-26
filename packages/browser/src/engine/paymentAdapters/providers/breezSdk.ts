@@ -8,8 +8,6 @@ import { breezDatabase, dropBreezDatabase } from "./breezDatabases";
  * in the web app, the extension's offscreen document and Desktop's WebView.
  */
 export type BreezNetwork = "mainnet" | "regtest";
-/** Ghostly's own name for the two networks: `bitcoin` (Mainnet, real sats) or `regtest` (Breez's test network). */
-export type BreezChain = "bitcoin" | "regtest";
 export type BreezWallet = Pick<BreezSdk, "getInfo" | "receivePayment" | "prepareSendPayment" | "sendPayment" | "getPayment" | "listPayments" | "syncWallet" | "disconnect">;
 
 export interface BreezConnect {
@@ -51,7 +49,7 @@ export const breezNetwork = (network: string): BreezNetwork => (network === "bit
  * about either. The Spark rail and the Breez Lightning source name it the same way, so in one profile one seed is one
  * wallet whichever opens it. `breezDatabase` is the one helper that gives the name a profile actually uses.
  */
-export { breezDatabase, breezDatabaseName, dropBreezDatabase } from "./breezDatabases";
+export { breezDatabase, breezDatabaseName } from "./breezDatabases";
 /** Names the storage of a seed on a network in this profile. */
 export type BreezStorageName = (network: string, mnemonic: string) => string | Promise<string>;
 

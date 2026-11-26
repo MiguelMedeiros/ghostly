@@ -33,6 +33,25 @@ async function viaDesktop(url: string, kind: Kind): Promise<Answer> {
   return { url: answer.url, contentType: answer.contentType, body: fromBase64(answer.bodyB64) };
 }
 
+function joined(chunks: Uint8Array[]): Uint8Array {
+  const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+  let at = 0;
+  for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.length; }
+  return bytes;
+}
+
+/**
+ * Whether a picture's first bytes already refuse it, as `readPicture` and `makeLinkPreview` would: not a PNG, JPEG, GIF
+ * or WebP, or a size `previewable` does not take (none said within `IMAGE_LIMITS.headBytes` is one). False once they
+ * say a size it takes; undefined while they do not say yet.
+ */
+function refused(head: Uint8Array): boolean | undefined {
+  if (head.length >= 12 && !pictureType(head)) return true;
+  const size = imageSize(head.subarray(0, IMAGE_LIMITS.headBytes));
+  if (size) return !previewable(size);
+  return head.length >= IMAGE_LIMITS.headBytes ? true : undefined;
+}
+
 /** A browser can read another site only if that site allows it; no cookies, no referrer, and never too much. */
 async function viaBrowser(url: string, kind: Kind, signal: AbortSignal): Promise<Answer> {
   const response = await fetch(url, { mode: "cors", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store", redirect: "follow", signal });
@@ -41,6 +60,8 @@ async function viaBrowser(url: string, kind: Kind, signal: AbortSignal): Promise
   if (!reader) throw new Error("No body");
   const chunks: Uint8Array[] = [];
   let size = 0;
+  // A picture's first bytes settle whether it is one a preview takes: the rest is not read when they refuse it.
+  let judged = kind !== "image";
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -52,11 +73,13 @@ async function viaBrowser(url: string, kind: Kind, signal: AbortSignal): Promise
     }
     chunks.push(value);
     size += value.length;
+    if (!judged) {
+      const verdict = refused(joined(chunks));
+      if (verdict) { void reader.cancel(); throw new Error("Not previewable"); }
+      judged = verdict === false;
+    }
   }
-  const body = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
-  let at = 0;
-  for (const chunk of chunks) { body.set(chunk, at); at += chunk.length; }
-  return { url: response.url || url, contentType: response.headers.get("content-type") ?? "", body };
+  return { url: response.url || url, contentType: response.headers.get("content-type") ?? "", body: joined(chunks) };
 }
 
 async function get(url: string, kind: Kind, signal: AbortSignal): Promise<Answer> {
@@ -160,6 +183,8 @@ export async function makeLinkPreview(link: string, signal: AbortSignal): Promis
     if (meta.image && !isLocalHost(new URL(meta.image).hostname)) {
       try {
         const picture = await get(meta.image, "image", both);
+        // Decoded only at a size its own bytes say a preview takes, as `readPicture` does: a few kilobytes can declare gigabytes.
+        if (!previewable(imageSize(picture.body.subarray(0, IMAGE_LIMITS.headBytes)))) throw new Error("Not previewable");
         if (/^image\/(jpeg|png|webp|gif)/i.test(picture.contentType) || !picture.contentType)
           i = await thumbnailFrom(new Blob([picture.body as BlobPart], { type: picture.contentType || "image/jpeg" }));
       } catch { /* a preview without a picture */ }

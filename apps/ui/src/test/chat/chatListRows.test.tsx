@@ -6,6 +6,7 @@ import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { formatListTime, previewText } from "../../lib/chatList";
 import { languageTag } from "../../lib/documentLanguage";
+import { isolate } from "../../lib/ownStatus";
 import { LOCALES as translations } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
@@ -165,7 +166,7 @@ describe("the chat list's rows (compact, the default)", () => {
     fakeEngine.on("appList", () => []);
     try {
       renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "zh" });
-      expect(within(rowOf("Ana")).getByTestId("chat-row-preview")).toHaveTextContent(/^🧩 应用：Chess 1\.2\.0$/);
+      expect(within(rowOf("Ana")).getByTestId("chat-row-preview").textContent).toBe(`🧩 应用：${isolate("Chess")} ${isolate("1.2.0")}`);
     } finally { hideApps(); }
   });
 
@@ -363,9 +364,18 @@ describe("the list's words", () => {
     expect(formatListTime(NOW - 30 * 86_400_000, NOW)).not.toMatch(/^\d+[mhd]$/);
   });
 
+  it("give a date from another year its year, and one from this year none", () => {
+    const now = new Date(2026, 11, 20, 12).getTime();
+    expect(formatListTime(new Date(2025, 11, 3, 12).getTime(), now, "en")).toBe("Dec 3, 2025");
+    expect(formatListTime(new Date(2026, 11, 3, 12).getTime(), now, "en")).toBe("Dec 3");
+    // Within the week across New Year it still says how long ago.
+    expect(formatListTime(new Date(2025, 11, 30, 12).getTime(), new Date(2026, 0, 2, 12).getTime(), "en")).toBe("3d");
+  });
+
   it("write a row's date as toLocaleDateString did, with one formatter per language for every row and render", () => {
     const older = [30, 45, 400].map((d) => NOW - d * 86_400_000);
-    const expected = older.map((ts) => [new Date(ts).toLocaleDateString(languageTag("fr"), { month: "short", day: "numeric" }), new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" })]);
+    const options = (ts: number): Intl.DateTimeFormatOptions => ({ month: "short", day: "numeric", ...(new Date(ts).getFullYear() !== new Date(NOW).getFullYear() && { year: "numeric" }) });
+    const expected = older.map((ts) => [new Date(ts).toLocaleDateString(languageTag("fr"), options(ts)), new Date(ts).toLocaleDateString([], options(ts))]);
     const perRow = vi.spyOn(Date.prototype, "toLocaleDateString");
     const made = vi.spyOn(Intl, "DateTimeFormat");
     try {
@@ -373,7 +383,8 @@ describe("the list's words", () => {
       for (let render = 0; render < 70; render++) for (const ts of older) { formatListTime(ts, NOW, "fr"); formatListTime(ts, NOW); }
       expect(older.map((ts) => [formatListTime(ts, NOW, "fr"), formatListTime(ts, NOW)])).toEqual(expected);
       expect(perRow).not.toHaveBeenCalled();
-      expect(made.mock.calls.length).toBeLessThanOrEqual(2);
+      // One per language with the year, one without.
+      expect(made.mock.calls.length).toBeLessThanOrEqual(4);
     } finally { perRow.mockRestore(); made.mockRestore(); }
   });
 

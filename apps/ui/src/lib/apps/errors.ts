@@ -27,6 +27,8 @@ const KEYS: Record<string, TranslationKey> = {
   "not-listed": "apps.errors.notListed",
   unlisted: "apps.errors.unlistedVersion",
   "permissions-changed": "apps.errors.permissionsChanged",
+  // Install would end a store's hold on the app's updates its screen did not name (the app pinned since, another tab).
+  "store-changed": "apps.errors.storeChanged",
   "store-key": "apps.errors.storeKey",
   "bad-signature": "apps.errors.notSigned",
   "signature-key": "apps.errors.notSigned",

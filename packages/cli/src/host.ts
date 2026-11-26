@@ -14,7 +14,7 @@ import { MAX_LINE } from "./client";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
 import { DaemonPresence } from "./daemonPresence";
 import { asCliError, CliError } from "./errors";
-import { EventHub, type GhostlyEvent } from "./events";
+import { EventHub, JOURNAL_MAX_BYTES, type GhostlyEvent } from "./events";
 import { GroupAutoJoin } from "./groupAuto";
 import { resumeHolds } from "./holds";
 import { dropRuntimeFolder, ownFolder, ownProfile, privateFolder } from "./privateFolder";
@@ -29,6 +29,14 @@ import { flushCardUpdates } from "./statusCards";
  * took, and the journal still has the rest. A replay is the journal's size at most and does not count against it.
  */
 export const MAX_UNREAD = 8 * 1024 * 1024;
+
+/**
+ * The most every connection together may leave unread of the replays they asked for: past it, a new replay cuts the
+ * oldest connection still holding one. Each subscriber that asked `since: 0` and did not read held a whole journal (30
+ * clients: 1.3 GB, and 1.9 s without an answer). Cut, not ended: an ended connection keeps what it has not read until
+ * it reads, and `listen` reconnects after the last whole event it took. Two whole journals, so a replay never cuts itself.
+ */
+export const MAX_REPLAYS_UNREAD = 2 * JOURNAL_MAX_BYTES;
 
 /**
  * How many of a chat's newest messages the start reads to see whether the events are in step with its history: the
@@ -196,12 +204,13 @@ export async function serve(host: Host): Promise<Served> {
   const secret = newDaemonSecret(ctx.runtime.paths.dir);
   const sockets = new Set<Socket>();
   const answering = new Set<Promise<void>>();
+  const replays = new Set<Socket>();
   const stopping = new AbortController();
   ctx.stopping = stopping.signal;
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
-    connection(ctx, socket, secret, answering);
+    connection(ctx, socket, secret, answering, replays);
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -292,8 +301,11 @@ function ownerOnlyUmask(): (() => void) | null {
 /** A client's nonce: 16 to 64 bytes as lowercase hex, so the proof is over nothing but a nonce. */
 const NONCE = /^(?:[0-9a-f]{2}){16,64}$/;
 
-/** `answering`: the calls of every connection still open, which a stopping daemon answers before it ends them. */
-function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: Set<Promise<void>>): void {
+/**
+ * `answering`: the calls of every connection still open, which a stopping daemon answers before it ends them.
+ * `replays`: the connections whose replay is not read yet, oldest first (`MAX_REPLAYS_UNREAD`).
+ */
+function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: Set<Promise<void>>, replays: Set<Socket>): void {
   const unsubscribes: (() => void)[] = [];
   // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
   let limit = MAX_UNREAD;
@@ -307,8 +319,8 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
     if (!replayed && socket.writableLength > limit) { unsubscribe(); socket.end(); return; }
     socket.write(JSON.stringify(value) + "\n");
   };
-  socket.on("drain", () => { limit = MAX_UNREAD; });
-  socket.on("close", unsubscribe);
+  socket.on("drain", () => { limit = MAX_UNREAD; replays.delete(socket); });
+  socket.on("close", () => { replays.delete(socket); unsubscribe(); });
   socket.on("error", () => {});
   // Before anything is read: a client writes nothing until this proves the daemon (`provesGreeting`).
   write(greeting(secret));
@@ -351,6 +363,20 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer, answering: 
       let last = since;
       for (const event of replay) { write({ event }, true); last = event.seq; }
       limit = Math.max(limit, socket.writableLength + MAX_UNREAD);
+      // Unread until it drains (a replay that fit in the socket's own buffer never waited); past the bound, the oldest
+      // others are cut, this one never.
+      if (socket.writableNeedDrain) {
+        replays.add(socket);
+        let held = 0;
+        for (const other of replays) held += other.writableLength;
+        for (const other of replays) {
+          if (held <= MAX_REPLAYS_UNREAD) break;
+          if (other === socket) continue;
+          held -= other.writableLength;
+          replays.delete(other);
+          other.destroy();
+        }
+      }
       replaying = false;
       for (const event of queued) if (event.seq > last) write({ event });
       return;

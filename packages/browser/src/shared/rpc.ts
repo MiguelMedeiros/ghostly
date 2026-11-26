@@ -223,8 +223,13 @@ export interface EngineApi {
    * In a group, `e` is the removal's edit number, for `groupTaken`.
    */
   removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean; e?: number };
-  /** Link secrets, for a UI that keeps its own session list in the same profile. */
-  exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
+  /**
+   * Link secrets, for a UI that keeps its own session list in the same profile. `hasChat`: the UI said it keeps a chat
+   * for the link (`noteChats`).
+   */
+  exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string; hasChat?: true }[];
+  /** The UI keeps a chat for each of these links (`StoredLink.hasChat`): kept on each link's record. Unknown ids are skipped. */
+  noteChats(params: { linkIds: string[] }): void;
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
   sendFile(params: { linkId: string; file: MessageFile; timestamp: number; replyTo?: string; forwarded?: number }): Promise<void>;
   /**
@@ -393,6 +398,12 @@ export interface EngineApi {
    * A private group's `group:<id>` does the same for every member of it (WISP 902 · Group Mesh § Wake-up push).
    */
   setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
+  /**
+   * Blocks or unblocks a contact, by its key: a blocked contact's 1:1 chats keep what they have, take nothing new
+   * from it (messages, files, reactions, pins, edits, call offers: dropped, nothing shown or rung) and it is told not to
+   * wake this app. Its chats in groups are not touched.
+   */
+  setContactBlocked(params: { peerPubKeyZ32: string; blocked: boolean }): Promise<void>;
   /** Whether paired contacts are asked to say when they come online while this app is closed (on by default): each live one is told again. */
   setWakeOnline(params: { on: boolean }): Promise<void>;
   /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */

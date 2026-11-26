@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { codeFiles as repoCode, knownFiles, workspacePackages } from "../affected/files.mjs";
-import { bundleReaches, checkPaths, featureGrep, globToRegExp, integrationReached, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, UNIT_ALONE, UNIT_HALVED, UNIT_PROJECTS, unitGroupOf, unitPartsOf, workspaceExports } from "../affected/select.mjs";
+import { bundleReaches, checkPaths, featureGrep, globToRegExp, integrationReached, namedPaths, packageImports, parseUnitGroup, plan, specsImporting, testsReaching, throughCoreBarrel, TYPECHECK_WHOLE, TYPECHECKS, UNIT_ALONE, UNIT_HALVED, UNIT_PROJECTS, unitGroupOf, unitPartsOf, workspaceExports } from "../affected/select.mjs";
 import { shardByTime, TimedShards } from "../../vitest.shards.ts";
 
 // A small repository: a few features, a paths map, specs tagged with them, and core modules behind a barrel.
@@ -459,6 +459,32 @@ describe("the real repository's import graph", () => {
     expect(realPlan("apps/ui/src/locales/en/chat.json").ui.files).toEqual(expect.arrayContaining(["apps/ui/src/lib/fileAnnounce.ts", "apps/ui/src/test/i18n/keys.test.ts"]));
     expect(realPlan("apps/ui/src/locales/ja/home.json").ui.files).not.toContain("apps/ui/src/lib/fileAnnounce.ts");
   });
+
+  // A tsc program runs only when a changed file matches its `sources`, so they have to name every file it reaches from
+  // its tsconfig's `include`: the browser one compiles 71 apps/ui/src files and was skipped when one of them changed.
+  it("each type check's sources hold every file its tsc program reaches", { timeout: 60_000 }, () => {
+    const { codeFiles, packages } = load();
+    const known = new Set(knownFiles(root));
+    const whole = TYPECHECK_WHOLE.map(globToRegExp);
+    const byModule = new Map(Object.keys(codeFiles).map((p) => [p.replace(/\.(?:d\.ts|[cm]?[jt]sx?)$/, ""), p]));
+    const outside: Record<string, string[]> = {};
+    for (const t of TYPECHECKS as { name: string; cmd: string[]; sources: string[] }[]) {
+      const p = t.cmd.indexOf("-p");
+      const target = p < 0 ? "tsconfig.json" : t.cmd[p + 1];
+      const config = target.endsWith(".json") ? target : `${target}/tsconfig.json`;
+      const dir = config.slice(0, config.lastIndexOf("/") + 1);
+      const include: string[] = JSON.parse(readFileSync(join(root, config), "utf8")).include;
+      const roots = include.map((i) => globToRegExp(`${dir}${/[*.]/.test(i.split("/").pop() ?? "") ? i : `${i}/**`}`));
+      const entries = Object.keys(codeFiles).filter((f) => /\.tsx?$/.test(f) && roots.some((re) => re.test(f)));
+      expect(entries.length, t.name).toBeGreaterThan(0);
+      const sources = [...t.sources.map(globToRegExp), ...whole];
+      outside[t.name] = [...bundleReaches(entries, codeFiles, packages)]
+        .map((m) => byModule.get(m) ?? byModule.get(`${m}/index`) ?? m)
+        .filter((f) => known.has(f) && !sources.some((re) => re.test(f)))
+        .sort();
+    }
+    expect(Object.fromEntries(Object.entries(outside).filter(([, files]) => files.length))).toEqual({});
+  });
 });
 
 describe("fallbacks", () => {
@@ -599,6 +625,8 @@ describe("the rest", () => {
       ["apps/desktop/src/translate.rs", "translationRuntimes.test.ts"],
       ["e2e/playwright.config.ts", "e2eWorkflow.test.ts"],
       ["rust-toolchain.toml", "rustToolchain.test.ts"],
+      // Read through a constant (`read(ACTION)`), so the by-name guard below can't see it.
+      [".github/actions/node-npm/action.yml", "npmCacheWorkflow.test.ts"],
       ["native/transports/iroh-web/src/lib.rs", "irohWebBuild.test.ts"],
       ["packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm", "irohWebBuild.test.ts"],
       // It lists the files with git, so no path of them is in its text: an import added or a dependency dropped.
@@ -758,14 +786,21 @@ for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "ut
   });
 
   it("a file whose named paths CI's gates must cover runs the check of them, which reads it from disk", () => {
-    // ci-changes.test.ts reads the website's scripts, the packages' code and the crates' Rust for the paths they name:
+    // ci-changes.test.ts reads the website's scripts, the packages' code, the crates' Rust and the published documents
+    // (with their WISPs' change files) for the paths they name or link to:
     // no import graph shows it. A draft's tier is all the train waits for, so a website script naming an uncovered
-    // file went red only in the train's batches (2026-11-03, three in a row).
+    // file went red only in the train's batches (2026-11-03, three in a row). It reads the rest of the site's code too
+    // (browser checks, lib, app, components) for the paths they open from a folder.
     const mode = (...files: string[]) => byName(plan({ changed: changed(...files), inventory, e2eFiles }).unit)["ci gates"]?.mode;
-    for (const file of ["apps/website/scripts/privacy-hosts.test.mjs", "packages/browser/src/proofs/domain.ts", "packages/cli/test/x.test.ts", "apps/extension/src/background.ts", "apps/desktop/src/lib.rs", "native/transports/src/lib.rs"]) {
+    for (const file of ["apps/website/scripts/privacy-hosts.test.mjs", "apps/website/e2e/agents-page.spec.ts", "apps/website/lib/release.ts", "apps/website/app/privacy/page.tsx", "packages/browser/src/proofs/domain.ts", "packages/cli/test/x.test.ts", "apps/extension/src/background.ts", "apps/desktop/src/lib.rs", "native/transports/src/lib.rs", "docs/PROTOCOL.md", "docs/DHT-DELIVERY.md", "docs/wisps/1200-marketplace.md", "docs/wisps/numbering.json", "docs/wisps/changes/1200-marketplace/2026-11-20-files-grant-starts-empty.md"]) {
       expect(mode(file), file).toBe("whole");
     }
-    for (const file of ["apps/website/app/privacy/page.tsx", "apps/ui/src/App.tsx", "docs/TESTING.md", "apps/desktop/gen/android/build.gradle.kts"]) expect(mode(file), file).toBe("skip");
+    // It also follows every local action the CI workflow and the workflows it calls use: a change to one ran it only
+    // in batches. Those workflows themselves run it through the scripts project, which holds it and runs whole.
+    expect(mode(".github/actions/node-npm/action.yml")).toBe("whole");
+    const scripts = (file: string) => byName(plan({ changed: changed(file), inventory, e2eFiles }).unit).scripts.mode;
+    for (const file of [".github/workflows/ci.yml", ".github/workflows/desktop-macos.yml"]) expect(scripts(file), file).toBe("whole");
+    for (const file of ["apps/website/app/globals.css", "apps/ui/src/App.tsx", "docs/TESTING.md", "apps/desktop/gen/android/build.gradle.kts"]) expect(mode(file), file).toBe("skip");
   });
 
   it("Rust runs for the Desktop crates, and Cargo.lock runs it", () => {

@@ -46,7 +46,8 @@ beforeEach(() => {
   installedHere = false;
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36");
   fakeEngine.on("appList", () => (installedHere ? [installed()] : [])).on("appStoreList", () => [store()]).on("appBuiltIns", () => [])
-    .on("appCheckUpdates", () => new Promise((done) => { checked = () => done([]); }));
+    // A check that checked another installed app, so read every store again (with none installed it reads no store).
+    .on("appCheckUpdates", () => new Promise((done) => { checked = () => done([{ ref: `${KEY}/other`, outcome: "none", run: { status: "ok" } }]); }));
 });
 afterEach(() => {
   vi.unstubAllEnvs();

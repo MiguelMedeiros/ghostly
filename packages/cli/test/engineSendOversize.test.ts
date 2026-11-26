@@ -121,21 +121,66 @@ describe("engine.call, a text past what the engine takes", { timeout: 120_000 },
     for (const sent of [node.sendMessage, node.editMessage, node.sendGroupMessage, node.sendGroupFile]) expect(sent).not.toHaveBeenCalled();
   });
 
-  it("a field the engine may take at another size is read whatever its length", async () => {
+  it("any other field past that bound (a memo, a name, a status) is refused with its size, not read: nothing the engine sends is longer", async () => {
     const { ctx, node } = fake();
-    const long = `${SEED} ${"x".repeat(ENGINE_TEXT_BYTES * 2)}`;
+    // The guard's slowest shapes: a 5 MB memo of them held the daemon 2.9 s.
+    for (const long of [`${SEED} ${"x".repeat(ENGINE_TEXT_BYTES * 2)}`, "abc (1)".repeat(750_000), "a​".repeat(2_500_000)]) {
+      for (const [method, params] of [
+        ["sendPayment", { linkId: "c", amount: 1, memo: long, timestamp: 1 }],
+        // A `text` the call does not take is not skipped either.
+        ["sendPayment", { linkId: "c", amount: 1, timestamp: 1, text: long }],
+        ["lnurlInvoice", { id: "x", amount: 1, comment: long }],
+        ["createGroup", { name: long }],
+        ["setOwnStatus", { status: { text: long } }],
+        ["sendGroupFile", { groupId: "g", file: { ...file, name: long }, caption: "x" }],
+        ["nostrDraft", { kind: "profile", fields: { about: long } }],
+        // A message's other fields beside a text past the bound.
+        ["sendMessage", { linkId: "c", text: "x".repeat(ENGINE_TEXT_BYTES + 1), memo: long }],
+      ] as const) {
+        read.mockClear();
+        const at = performance.now();
+        expect(await call(ctx, method, params), method).toMatchObject({ error: { code: "bad_request", message: expect.stringContaining(`more than any text Ghostly sends (${ENGINE_TEXT_BYTES})`), details: { bytes: bytes(long), max: ENGINE_TEXT_BYTES } } });
+        expect(longestRead(), method).toBeLessThanOrEqual(ENGINE_TEXT_BYTES * 2);
+        expect(performance.now() - at, method).toBeLessThan(500);
+      }
+    }
+    for (const sent of [node.sendMessage, node.sendPayment, node.createGroup, node.setOwnStatus, node.sendGroupFile]) expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("a secret in such a field within the bound is still refused, and a card beside a text past the bound is still read", async () => {
+    const { ctx, node } = fake();
+    const within = `${" ".repeat(ENGINE_TEXT_BYTES)}${SEED} ${"x".repeat(ENGINE_TEXT_BYTES - utf8(SEED) - 1)}`;
+    expect(bytes(within)).toBe(ENGINE_TEXT_BYTES);
     for (const [method, params] of [
-      ["sendPayment", { linkId: "c", amount: 1, memo: long, timestamp: 1 }],
-      // A `text` the call does not take is not skipped either.
-      ["sendPayment", { linkId: "c", amount: 1, timestamp: 1, text: long }],
-      ["createGroup", { name: long }],
-      ["setOwnStatus", { status: { text: long } }],
-      // A message's other fields stay read beside a text past the bound.
-      ["sendMessage", { linkId: "c", text: "x".repeat(ENGINE_TEXT_BYTES + 1), memo: long }],
+      ["sendPayment", { linkId: "c", amount: 1, memo: within, timestamp: 1 }],
+      ["createGroup", { name: within }],
+      ["setOwnStatus", { status: { text: within } }],
       ["sendMessage", { linkId: "c", text: "x".repeat(ENGINE_TEXT_BYTES + 1), card: card({ step: SEED }) }],
     ] as const) {
       expect(await call(ctx, method, params), method).toMatchObject({ error: { code: "confirm" } });
     }
     for (const sent of [node.sendMessage, node.sendPayment, node.createGroup, node.setOwnStatus]) expect(sent).not.toHaveBeenCalled();
+  });
+});
+
+describe("chat pay, chat request and pay: a memo or a comment past that bound", { timeout: 120_000 }, () => {
+  it("is refused with its size before the guard reads it; with --force it goes as before (the engine keeps 140 characters)", async () => {
+    const { ctx } = fake();
+    const long = "abc (1)".repeat(750_000);
+    for (const [method, params] of [
+      ["chat.pay", { chat: "c", amount: 1, memo: long }],
+      ["chat.request", { chat: "c", amount: 1, memo: long }],
+      ["pay", { target: "lnbc1x", comment: long }],
+    ] as const) {
+      read.mockClear();
+      const at = performance.now();
+      const answer = await callApi(ctx, method, params).then(() => null, (error) => asCliError(error).toJSON());
+      expect(answer, method).toMatchObject({ code: "bad_request", message: expect.stringMatching(/^The (memo|comment) is 5250000 UTF-8 bytes, more than any text Ghostly sends \(16384\)/) });
+      expect(longestRead(), method).toBeLessThanOrEqual(ENGINE_TEXT_BYTES * 2);
+      expect(performance.now() - at, method).toBeLessThan(500);
+      // With --force the guard is not run: past it, what refuses is the chat this fake has not.
+      const forced = await callApi(ctx, method, { ...params, force: true }).then(() => null, (error) => asCliError(error).toJSON());
+      expect(forced?.code, method).not.toBe("bad_request");
+    }
   });
 });

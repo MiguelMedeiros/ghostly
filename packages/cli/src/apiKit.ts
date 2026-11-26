@@ -46,6 +46,8 @@ export interface CallScope {
 }
 
 export type Method = (ctx: ApiContext, params: Params, call?: CallScope) => Promise<unknown>;
+/** A method's own lookup of the thing its params name, as its handler makes it first: throws what the handler would. */
+export type Lookup = (ctx: ApiContext, params: Params) => unknown;
 
 /**
  * The scope of the call running now (`callApi`), however deep: a wait still open when its client's connection closes
@@ -452,6 +454,10 @@ export async function startNamedChats(ctx: ApiContext, method: string, params: P
     if (read || (message !== undefined && !await mayHaveMessage(ctx, found.link.id, message))) await node(ctx).readDeferredChat(found.link.id);
     else await node(ctx).startDeferredChat(found.link.id);
   }
+  // A 1:1 chat's file named by its id alone (main.ts `chatFileOnly`): the chat whose id it starts with.
+  const file = params.chat === undefined && typeof params.file === "string" ? params.file : undefined;
+  const ofFile = file === undefined ? undefined : links.find((l) => file.startsWith(`${l.id}-in-`) || file.startsWith(`${l.id}-out-`));
+  if (ofFile) await (read ? node(ctx).readDeferredChat(ofFile.id) : node(ctx).startDeferredChat(ofFile.id));
   if (read) return;
   if (typeof params.group === "string") {
     try { node(ctx).startDeferredGroup(findGroup(groups, params.group).id); } catch { /* the call says so itself */ }

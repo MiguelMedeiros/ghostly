@@ -335,11 +335,13 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
  * with their keys and revocations and when the contacts' were last looked up for one (and which, of a lookup under way), its own Nostr data, the public profiles it read, the built-in mini-apps it removed
  * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`), the digests of the mini-app bundles it may hold (`APP_BUNDLES_KEY`) and the mini-app revocations it verified (`APP_REVOCATIONS_KEY`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
  * (`engine/contactLinks.ts`), the requests it sent through others' (`engine/contactAsks.ts`) and its saved messages
- * (`engine/saved.ts`). A list of what goes
+ * (`engine/saved.ts`), and the mark its goodbye left for the next start (`DEPARTED_KEY`). A list of what goes
  * rather than of what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending
  * operations), and a wallet record a newer version adds must never be deleted by mistake.
  */
-export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages", "departedAtStop"] as const;
+/** The mark this app's goodbye leaves in the settings store for its next start (`GhostlyNode.lastRunDeparted`). */
+export const DEPARTED_KEY = "departedAtStop";
 
 /** A private group's small row in the settings store (`GroupLive`, `engine/groupRows.ts`): the profile's too. */
 export const groupLiveKey = (groupId: string): string => `groupLive:${groupId}`;
@@ -534,14 +536,21 @@ export const fileStore = {
    * greatest. A link's file ids share its prefix (`<link>-in-`, `group-<id>-out-`…), so the range holds little else, and
    * whatever else it holds is not theirs. A read per file was 16,000 requests at every start with 200 files per chat
    * and 300 per group (50 chats, 20 groups).
+   *
+   * Only the ids come off the `byLink` index; the records are read from the store itself, over the same range. WebKit
+   * (the macOS app) hands back a record read through an index with its Blob missing its stored bytes, and for a File
+   * dropped or pasted in it then reaches for the path the File came from: the network process refuses that and ends
+   * the page, at every start.
    */
   async listForLink(linkId: string): Promise<StoredFile[]> {
     const tx = (await openDb()).transaction([STORES.files, STORES.fileState], "readonly");
-    const files = await wrap<StoredFile[]>(tx.objectStore(STORES.files).index("byLink").getAll(linkId));
-    if (!files.length) return files;
+    const store = tx.objectStore(STORES.files);
     // Strings sort by UTF-16 code unit, as IndexedDB orders its keys.
-    const ids = files.map(file => file.id).sort();
-    const states = new Map((await wrap<FileState[]>(tx.objectStore(STORES.fileState).getAll(IDBKeyRange.bound(ids[0], ids[ids.length - 1])))).map(state => [state.id, state]));
+    const ids = (await wrap(store.index("byLink").getAllKeys(linkId)) as string[]).sort();
+    if (!ids.length) return [];
+    const range = IDBKeyRange.bound(ids[0], ids[ids.length - 1]);
+    const files = (await wrap<StoredFile[]>(store.getAll(range))).filter(file => file.linkId === linkId);
+    const states = new Map((await wrap<FileState[]>(tx.objectStore(STORES.fileState).getAll(range))).map(state => [state.id, state]));
     return files.map(file => withState(file, states.get(file.id)));
   },
   /** The id of every group a stored file is of (`linkId` `group:<id>`), read off the index: no record is loaded. */

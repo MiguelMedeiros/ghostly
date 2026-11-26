@@ -86,8 +86,12 @@ describe("file save of a sent file", () => {
     await expect(callApi(ctx, "file.wait", { file: "chat-one-in-big", timeout: 1 })).rejects.toMatchObject(confirm);
     // A group's file this device did not fetch: no transfer in the engine's state, its record says it waits.
     await fileStore.put({ id: "group-team-in-m", linkId: "group:team", group: "team", createdAt: 1, direction: "in", metadata: { name: "minutes.bin", size: 50_000, mime: "application/octet-stream", timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 50_000 } } as never);
-    await expect(callApi(ctx, "file.save", { file: "group-team-in-m", path: join(dir, "minutes.bin") })).rejects.toMatchObject({
+    const groupConfirm = {
       code: "confirm", message: expect.stringContaining("waits for you to take it: ghostly file accept group-team-in-m"), details: { file: "group-team-in-m", group: "team", stage: "asking" },
-    });
+    };
+    await expect(callApi(ctx, "file.save", { file: "group-team-in-m", path: join(dir, "minutes.bin") })).rejects.toMatchObject(groupConfirm);
+    // file wait and file save --wait say it at once too: before, they sat out the whole timeout (300 s) and exited 4.
+    await expect(callApi(ctx, "file.wait", { file: "group-team-in-m", timeout: 2 })).rejects.toMatchObject(groupConfirm);
+    await expect(callApi(ctx, "file.save", { file: "group-team-in-m", path: join(dir, "minutes.bin"), wait: true, timeout: 2 })).rejects.toMatchObject(groupConfirm);
   });
 });

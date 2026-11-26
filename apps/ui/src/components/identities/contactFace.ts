@@ -4,6 +4,8 @@ import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/typ
 import { engine, linkOfPeer } from "@ghostly/browser/platform/engine";
 import { hasPublicProfile } from "@ghostly/browser/profiles/readers";
 import { badgeState, isGood } from "./contactBadges";
+import { receivedByKey } from "./contactLinks";
+import { useProofClock } from "./proofClock";
 import { useEngineValue } from "../../lib/identities";
 import { keyedStorage } from "../../lib/keyedStorage";
 import { getPrefix } from "../../lib/storage";
@@ -142,10 +144,11 @@ export function shownContactName({ nickname, face, nick, fallback }: { nickname?
 const receivedOf = (links: LinkView[] | undefined, peerKey: string | undefined) => linkOfPeer(links, peerKey)?.identities?.received;
 
 /**
- * The contact's face as chosen, redrawn when their identities or the choice change: not on every engine state, which
- * drew the chat it shows in each time.
+ * The contact's face as chosen, redrawn when their identities or the choice change, or when a proof expires
+ * (proofClock.ts): not on every engine state, which drew the chat it shows in each time.
  */
 export function useContactFace(peerKey: string | undefined): ContactFace | undefined {
+  useProofClock();
   const received = useEngineValue((state) => receivedOf(state?.links, peerKey));
   return contactFace(received, useFaceChoice(peerKey));
 }
@@ -156,21 +159,19 @@ const subscribeVersion = (listener: () => void) => subscribeChoices(() => { vers
 /** For a list of contacts that reads `faceChoice` itself: a number that changes when any contact's choice does. */
 export const useFaceChoices = (): number => useSyncExternalStore(subscribeVersion, () => version.n);
 
-/** Each contact's received identities, by key, for `useEngineValue`: all a list of contacts reads to show their faces. */
-const receivedByKey = (state: typeof engine.state): [peerKey: string, received: ReceivedIdentityView[]][] =>
-  (state?.links ?? []).flatMap((l) => (l.identities?.received ? [[l.peerPubKeyZ32, l.identities.received] as [string, ReceivedIdentityView[]]] : []));
-
 /**
  * For a list of contacts: a function from a contact key to its face, redrawn when a contact's identities or any choice
- * change: not on every engine state, which drew the whole chat list each time.
+ * change, or when a proof expires (proofClock.ts): not on every engine state, which drew the whole chat list each time.
  */
 export function useContactFaces(): (peerKey: string | undefined) => ContactFace | undefined {
-  const received = useEngineValue(receivedByKey);
+  // Each contact's received identities, by key: the same list while no chat's changed (contactLinks.ts).
+  const received = useEngineValue((state) => receivedByKey(state?.links));
   const v = useFaceChoices();
+  const tick = useProofClock();
   // The first chat with a key, as `receivedOf` finds it.
   const byKey = useMemo(() => new Map([...received].reverse()), [received]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useCallback((peerKey: string | undefined) => contactFace(peerKey ? byKey.get(peerKey) : undefined, faceChoice(peerKey)), [byKey, v]);
+  return useCallback((peerKey: string | undefined) => contactFace(peerKey ? byKey.get(peerKey) : undefined, faceChoice(peerKey)), [byKey, v, tick]);
 }
 
 /**

@@ -539,6 +539,29 @@ describe("the boot guard's theme", () => {
     expect(html).toHaveAttribute("data-color-theme", "classic");
   });
 
+  it("reads the settings of the profile this tab ran before it reloaded, not the one another tab chose since", () => {
+    const registry = JSON.stringify({ version: 2, active: "abcdefghij", profiles: [{ id: "", name: "Personal" }, { id: "abcdefghij", name: "Work" }] });
+    const saved = {
+      ghostly_profiles: registry,
+      ghostly_app_settings: JSON.stringify({ colorScheme: "light", colorTheme: "purple" }),
+      ghostly_abcdefghij_app_settings: JSON.stringify({ colorScheme: "dark", colorTheme: "classic" }),
+    };
+    try {
+      // The default profile's tab, reloaded after another tab switched to Work (profiles.ts `tabProfileId`).
+      sessionStorage.setItem("ghostly_profiles_tab", "");
+      open({ saved });
+      expect(html).toHaveAttribute("data-theme", "light");
+      expect(html).toHaveAttribute("data-color-theme", "purple");
+      expect(themeColor()).toBe("#faf5ff");
+      // One the registry no longer lists starts as the registry's choice, as the app does.
+      sessionStorage.setItem("ghostly_profiles_tab", "zzzzzzzzzz");
+      open({ saved });
+      expect(html).toHaveAttribute("data-color-theme", "classic");
+    } finally {
+      sessionStorage.clear();
+    }
+  });
+
   it("names each theme's header colour as index.css does", () => {
     const css = readFileSync(join(REPO, "apps/ui/src/index.css"), "utf8");
     for (const scheme of ["dark", "light"]) {
@@ -607,6 +630,18 @@ describe("the boot guard's language file", () => {
     localStorage.setItem("ghostly_moved-1_app_settings", JSON.stringify({ language: "ar" }));
     open(["en-US"]);
     expect(preloads()).toEqual(["/assets/ar-abc.js"]);
+  });
+
+  it("follows the profile this tab ran before it reloaded, over the one another tab chose since", () => {
+    localStorage.setItem("ghostly_profiles", JSON.stringify({ version: 2, active: "", profiles: [{ id: "", name: "Personal" }, { id: "abcdefghij", name: "Work" }] }));
+    localStorage.setItem("ghostly_abcdefghij_app_settings", JSON.stringify({ language: "ar" }));
+    sessionStorage.setItem("ghostly_profiles_tab", "abcdefghij");
+    try {
+      open(["en-US"], { saved: JSON.stringify({ language: "pt" }) });
+      expect(preloads()).toEqual(["/assets/ar-abc.js"]);
+    } finally {
+      sessionStorage.clear();
+    }
   });
 
   it("asks for nothing where the page names no files (the dev server), or names them badly, and still guards", () => {

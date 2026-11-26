@@ -79,6 +79,12 @@ export interface StoredLink {
   createdAt: number;
   label?: string;
   /**
+   * The page told the engine it keeps a chat (a session) for this link (`noteChats`). The page's first-run import of
+   * links (`exportLinks`) never makes another chat for it: its chat exists, even when the page's storage read without it.
+   * Local only, never on the wire.
+   */
+  hasChat?: true;
+  /**
    * The name the contact asked to be shown by, as they last said it. `""` means a paired contact said they
    * have none (removed, or not shared); absent means nothing was heard yet.
    */
@@ -1068,6 +1074,11 @@ export interface StoredMessage {
   /** A group message someone else sent that names me (or everyone). */
   mentioned?: true;
   /**
+   * `mentioned` by an edit, not as it came: never a new mention (WISP 902), so it moves no "@" in the list, live or as
+   * a restart reads the history (`newestMarked`).
+   */
+  mentionedByEdit?: true;
+  /**
    * A private group's message from another member, or a community's from anyone: the frame it came in (sealed, signed
    * by its author), kept on the group's newest rows to hand on to members who were away (`GROUP_LIMITS.relay`,
    * `COMMUNITY_LIMITS.store`). The engine's own: a row goes to a page without it (`withoutFrame`).
@@ -1560,6 +1571,13 @@ export interface Settings {
    */
   wakeMutedGroups?: string[];
   /**
+   * Contacts blocked here, by their key (`StoredLink.peerPubKeyZ32`): what their 1:1 chats bring (messages, files,
+   * reactions, pins, edits, call offers) is dropped with nothing shown, and they are told not to wake this app, as for a
+   * muted chat. Their chats are kept. In the profile's settings, so it moves with the profile to the person's other
+   * devices (WISP 06). Only through `setContactBlocked`.
+   */
+  blockedContacts?: string[];
+  /**
    * Groups whose links this device put on one transport (WISP 902 § Transports), by group id; a group not here is on
    * Automatic. This device's own: nothing of it goes to the members but each edge's `_tr`. Only through `setGroupTransport`.
    */
@@ -1880,6 +1898,8 @@ export interface LinkView {
   wakeToken?: string;
   /** Paired 1:1 chats: the contact was told not to wake this side while the chat is muted (`setWakeMuted`). */
   wakeMuted?: boolean;
+  /** 1:1 chats: its contact is blocked here (`setContactBlocked`); nothing it sends is kept or rings. */
+  blocked?: true;
   /** Paired 1:1 chats: the contact shared how to wake its closed app, so a message sent while it is away wakes it. */
   peerWakes?: boolean;
   /** While `peerTyping`: what the contact is doing when it is not plain typing (recording a voice note, thinking). */

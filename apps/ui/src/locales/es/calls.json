@@ -6,6 +6,8 @@
   "cameraUnavailable": "No hay cámara, así que el vídeo está apagado",
   "connected": "Conectado",
   "connecting": "Conectando...",
+  "contactBlocked": "Bloqueaste a este contacto",
+  "contactBlockedNext": "Desbloquéalo para llamar",
   "contactCannot": "La app de tu contacto no puede recibir llamadas",
   "contactOutdated": "Tu contacto necesita actualizar Ghostly para las llamadas",
   "decline": "Rechazar",

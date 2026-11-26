@@ -29,6 +29,12 @@
     "save": "保存音频",
     "tooLarge": "文件太大，无法在此播放。请下载后收听。"
   },
+  "block": {
+    "blocked": "你已屏蔽此联系人",
+    "body": "对方将无法再给你打电话或发送任何内容，也不会收到任何提示。聊天会保留。可在此菜单或“设置 → 隐私与安全”中取消屏蔽。",
+    "confirm": "屏蔽",
+    "title": "屏蔽 {{name}}？"
+  },
   "compat": {
     "burned": "聊天已销毁",
     "continued": "你已邀请联系人加入新聊天。",
@@ -45,6 +51,8 @@
   "deleteForEveryone": "为所有人删除",
   "deleteForEveryoneGroupHint": "也会从成员的设备上删除。旧版应用会显示“消息已删除”；已保存的副本会保留。",
   "deleteForEveryoneHint": "也会从对方的设备上删除。旧版应用会显示“消息已删除”；已保存的副本会保留。",
+  "deleteForEveryoneHintDhtContact": "现在已从此处删除。只有聊天在一周内重新直连，才会从对方的设备上删除：联系人的聊天为仅 DHT，直到对方重新允许直连。旧版应用会显示“消息已删除”；已保存的副本会保留。",
+  "deleteForEveryoneHintDhtYou": "现在已从此处删除。只有聊天在一周内重新直连，才会从对方的设备上删除：此聊天为仅 DHT，可通过连接图标更改。旧版应用会显示“消息已删除”；已保存的副本会保留。",
   "deleteMessage": "删除消息",
   "deleteMessageHint": "仅在此设备上删除，对方仍保留副本。",
   "deleteSendingFileHint": "仅在此设备上删除。发送将停止，对方不会收到该文件。",
@@ -275,6 +283,7 @@
     "wantsToSend": "{{name}} 想发送 · 剩余 {{size}}"
   },
   "menu": {
+    "block": "屏蔽联系人",
     "continueNew": "在新聊天中继续",
     "hold": "暂存消息…",
     "more": "更多…",
@@ -284,6 +293,7 @@
     "pin": "置顶聊天",
     "refresh": "刷新",
     "techInfo": "技术信息",
+    "unblock": "取消屏蔽联系人",
     "unpin": "取消置顶"
   },
   "message": {
