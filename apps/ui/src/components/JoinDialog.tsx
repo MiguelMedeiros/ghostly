@@ -135,7 +135,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     const outcome = classifyInvite(reading.keys);
     if (outcome.kind === "own") { setError(null); setManual(false); setOwn(outcome.sessionId); return; }
     joined.current = true; stop();
-    if (outcome.kind === "joined") { showJoinNotice("join.alreadyIn"); (onOpenChat ?? (() => onJoin?.(reading.keys)))(outcome.sessionId); return; }
+    if (outcome.kind === "joined") { showJoinNotice("join.alreadyIn", outcome.sessionId); (onOpenChat ?? (() => onJoin?.(reading.keys)))(outcome.sessionId); return; }
     // A chat that could not be stored (no room left) is said here, the dialog still open: the invite was good.
     try { onJoin?.(reading.keys); } catch (cause) { joined.current = false; setError(problemText(cause, t)); setManual(true); }
   };
