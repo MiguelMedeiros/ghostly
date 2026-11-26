@@ -78,8 +78,11 @@ const INVOICE_WATCH_AGAIN_MS = 60_000;
  */
 const MOVED_AT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
 
-/** `input_fee_ppk` in a few words, test sats on Testnet: a payment usually spends two to five proofs. */
-const shortFee = (t: Translate, ppk: number, testnet: boolean) => (ppk === 0 ? t("wallet.cashu.fee.none") : t(testnet ? "wallet.cashu.fee.perProofTest" : "wallet.cashu.fee.perProof", { fee: ppk / 1000 }));
+/**
+ * `input_fee_ppk` in a few words, test sats on Testnet: a payment usually spends two to five proofs. The fee per proof
+ * is a fraction ("0.1"), written with the language's decimal mark ("0,1 sat por prova") like every other amount.
+ */
+const shortFee = (t: Translate, ppk: number, testnet: boolean) => (ppk === 0 ? t("wallet.cashu.fee.none") : t(testnet ? "wallet.cashu.fee.perProofTest" : "wallet.cashu.fee.perProof", { fee: formatAmount(ppk / 1000, t.language) }));
 
 /** A number counting up to `value`: each frame draws only what shows it, not the whole card (its History's 100 rows). */
 function CountUp({ value, children }: { value: number; children: (shown: number) => ReactNode }) {
