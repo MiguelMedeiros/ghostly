@@ -2402,6 +2402,55 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
   });
 
+  describe("a lone pull request whose second rebase was never pushed, held or a draft since", () => {
+    // Its head is still the first rebase, so the mark's sha is not its head. That pushed the second rebase again before
+    // looking at a hold: a held branch was force-pushed, and a review's hold, which ends on a new head, ended on the
+    // train's own push, so a pull request with changes needed landed.
+    const unpushed = async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run();
+      const first = repo.pulls.get(11)!.sha;
+      repo.settle([11]);
+      const push = repo.git.pushHead;
+      repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access 'https://github.com/…': Could not resolve host: github.com" });
+      await repo.run();
+      repo.git.pushHead = push;
+      expect(repo.alone(11)).toMatchObject({ retried: true, from: first });
+      return { repo, first, pushes: repo.pushes.length };
+    };
+
+    it("leaves a branch put on hold alone", async () => {
+      const { repo, first, pushes } = await unpushed();
+      repo.pulls.get(11)!.labels.push(HOLD);
+      expect((await repo.run()).inFlight).toBeNull();
+      expect(repo.pulls.get(11)!.sha).toBe(first);
+      expect(repo.pushes).toHaveLength(pushes);
+    });
+
+    it("leaves a draft alone", async () => {
+      const { repo, first, pushes } = await unpushed();
+      repo.pulls.get(11)!.draft = true;
+      await repo.run();
+      expect(repo.pulls.get(11)!.sha).toBe(first);
+      expect(repo.pushes).toHaveLength(pushes);
+    });
+
+    it("does not land one a reviewer asked changes of on its head", async () => {
+      const { repo, first, pushes } = await unpushed();
+      const now = Date.now();
+      repo.comments.set(11, [
+        ...(repo.comments.get(11) ?? []),
+        { id: 777, body: `Review: changes needed (head ${first.slice(0, 7)})`, user: { login: "MiguelMedeiros" }, created_at: new Date(now - 60_000).toISOString(), author_association: "OWNER" },
+      ]);
+      await repo.run({ now });
+      expect(repo.pushes).toHaveLength(pushes);
+      repo.settle();
+      await repo.run({ now: now + 60_000 });
+      expect(repo.landed).not.toContain("#11");
+    });
+  });
+
   it("sends a lone pull request that changes a workflow and is behind dev to a coordinator, with no rebase push", async () => {
     // Before, it was rebased and pushed, GitHub refused the push, and it left the line with `queue:failed`.
     const repo = fakeRepo();

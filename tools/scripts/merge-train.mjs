@@ -1521,13 +1521,14 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const flyAlone = async (p, past = null) => {
     const mark = p.alone;
     const stay = { number: p.number, members: [p], alone: true };
+    // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place. Put
+    // on hold since: the same, until the label comes off. Before the push below too: a review's hold ends on a new
+    // head, so the train's own push would end it.
+    if (p.draft || isHeld(p)) return null;
     // The push failed: the rebase it promised is pushed again, a second run too (its head's red is the first run's).
     if (p.sha !== mark.sha) return goAlone(p, { retried: mark.retried, rerun: mark.retried, past });
     const tip = await gh.branchSha(base);
     say(`ALONE #${p.number} at ${p.sha.slice(0, 12)} CI ${p.ci}`);
-    // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place. Put
-    // on hold since: the same, until the label comes off.
-    if (p.draft || isHeld(p)) return null;
     // Red on an old tip says nothing about the new one, and green on an old tip must not land.
     if (tip !== mark.baseSha) return goAlone(p, { retried: mark.retried, past });
     if (p.ci === "failure") {
