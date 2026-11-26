@@ -1278,6 +1278,38 @@ describe("an app installed from a store updates only to the version that store l
     expect(await store.preview({ url: HEAD }), "an app pinned to no store leaves none").not.toHaveProperty("leavesStore");
   });
 
+  it("a screen drawn before the app was pinned to a store, which named no store, does not end that pin", async () => {
+    const v1 = await bundle({ sources: [HEAD] });
+    net.put(HEAD, v1.bytes);
+    net.put(PINNED_URL, v1.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v1, [PINNED_URL])] }));
+    const store = apps(net);
+    await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
+    await store.preview({ url: HEAD });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    // A newer version by link, its screen drawn while the app is pinned to no store: it names none.
+    const v2 = await bundle({ sequence: 2, sources: [HEAD] });
+    net.put(HEAD, v2.bytes);
+    const screen = await store.preview({ url: HEAD });
+    expect(screen).toMatchObject({ install: "update" });
+    expect(screen).not.toHaveProperty("leavesStore");
+    // Meanwhile (another tab) the version installed is taken again from the store's listing: pinned to it.
+    const listed = await store.preview({ store: keyOf(STORE_KEY), ref: v1.ref });
+    await store.install({ stage: listed.stage, digest: v1.digest, grant: ["chat"] });
+    expect(await pinnedTo()).toBe(keyOf(STORE_KEY));
+    // Install on the first screen would end that pin, which it never said: it is shown again first.
+    await expect(store.install({ stage: screen.stage, digest: v2.digest, grant: ["chat"] })).rejects.toThrow(/^store-changed: /);
+    expect(await pinnedTo()).toBe(keyOf(STORE_KEY));
+    expect((await store.list())[0]).toMatchObject({ sequence: 1, digest: v1.digest });
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    // Read again, the screen says so, and its Install ends the pin as said.
+    const again = await store.preview({ url: HEAD });
+    expect(again.leavesStore).toEqual({ key: keyOf(STORE_KEY), name: "Test store" });
+    await store.install({ stage: again.stage, digest: v2.digest, grant: ["chat"] });
+    expect(await pinnedTo()).toBeUndefined();
+    expect((await store.list())[0]).toMatchObject({ sequence: 2, digest: v2.digest });
+  });
+
   it("the version installed, taken again from a store's listing, pins it to that store", async () => {
     const u1 = await bundle({ sources: [HEAD] });
     net.put(HEAD, u1.bytes);

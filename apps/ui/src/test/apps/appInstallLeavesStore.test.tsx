@@ -1,5 +1,5 @@
-import { screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { appFingerprint } from "@ghostly/core";
 import type { AppPreview } from "@ghostly/browser/engine/apps";
 import { DEFAULT_STORE_KEY } from "@ghostly/browser/engine/appDefaults";
@@ -58,5 +58,28 @@ describe("an install screen whose Install ends the app's store pin", () => {
   it("says nothing when the pin stays", async () => {
     await open({});
     expect(screen.queryByTestId("app-install-leaves-store")).toBeNull();
+  });
+
+  // The app pinned to a store after the screen was read (the same version taken from a store's listing in another tab):
+  // the engine refuses Install (`store-changed`), and the screen read again says the hold ends before Install takes it.
+  it("an Install refused as ending a hold it did not name shows the screen again, saying so, and installs on the next press", async () => {
+    let shown = preview();
+    let refuse = true;
+    fakeEngine.on("appPreview", () => shown).on("appInstall", () => {
+      if (refuse) { refuse = false; throw new Error("store-changed: This install now ends a store's hold on the app's updates; look at it again"); }
+      return { ref: REF } as never;
+    });
+    const onInstalled = vi.fn();
+    const { user } = renderApp(<AppInstallDialog source={{ card: { ref: REF, url: URL_, sequence: 8 } }} onClose={() => {}} onInstalled={onInstalled} />);
+    const confirm = await screen.findByTestId("app-install-confirm");
+    expect(screen.queryByTestId("app-install-leaves-store")).toBeNull();
+    shown = preview({ leavesStore: { key: DEFAULT_STORE_KEY, name: "Ghostly Store" } });
+    await user.click(confirm);
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("Where this app gets its updates from changed. Look at it again before you install it.");
+    expect(screen.getByTestId("app-install-leaves-store")).toHaveTextContent("Installing this version ends that");
+    expect(onInstalled).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("app-install-confirm"));
+    await waitFor(() => expect(onInstalled).toHaveBeenCalled());
+    expect(fakeEngine.callsTo("appInstall")).toHaveLength(2);
   });
 });

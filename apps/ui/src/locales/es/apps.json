@@ -91,6 +91,7 @@
     "status": "No hay nada en ese enlace.",
     "storage": "Este navegador no puede guardar apps aquí (¿navegación privada?). Prueba una ventana normal.",
     "storageInfo": "Ghostly guarda los archivos de cada app en este dispositivo. Las ventanas privadas, como la Navegación privada de Safari, no lo permiten, y un disco lleno también lo impide.",
+    "storeChanged": "Cambió de dónde recibe esta app sus actualizaciones. Revísala de nuevo antes de instalarla.",
     "storeKey": "Esa tienda está firmada con otra clave.",
     "tooLarge": "Demasiado grande.",
     "unlistedVersion": "El enlace tiene una versión que esta tienda aún no lista.",

@@ -93,6 +93,16 @@ describe("app errors", () => {
       .toBe("This is not an app Ghostly can install (name is not valid)");
   });
 
+  it("an Install that would end a store's hold its screen did not name says to look at it again, in every language, never that Ghostly won't install it", () => {
+    const changed = new Error("store-changed: This install now ends a store's hold on the app's updates; look at it again");
+    expect(appErrorView(changed, translateWith(locales.en))).toEqual({ text: "Where this app gets its updates from changed. Look at it again before you install it." });
+    for (const [name, locale] of Object.entries(locales)) {
+      const t = translateWith(locale);
+      expect(appErrorView(changed, t).text, name).not.toBe(t("apps.errors.refused"));
+      expect(appErrorView(changed, t).text, name).not.toMatch(/apps\.errors|store's hold/);
+    }
+  });
+
   it("a refusal's own words behind the ⓘ are one line and bounded", () => {
     const view = appErrorView(new Error(`bad-field: This is not an app Ghostly can install (${"x\n".repeat(30_000)})`), translateWith(locales.en));
     expect(view.info?.length).toBe(200);
