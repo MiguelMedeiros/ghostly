@@ -64,6 +64,18 @@ describe("a new message, read out to a screen reader", () => {
     expect(said.length).toBeLessThan(100);
   });
 
+  it("a long message is cut before an emoji it would cut in half, or a family emoji it would cut into its parts", () => {
+    const { update } = setup(HISTORY);
+    for (const [text, kept] of [[`${"a".repeat(78)}😀 and more`, "a".repeat(78)], [`${"a".repeat(75)}👨‍👩‍👧 and more`, "a".repeat(75)]]) {
+      update([...HISTORY, peer(text)]);
+      wait(ANNOUNCE_WINDOW_MS);
+      const said = region().textContent!;
+      expect(said).toBe(`Alice: ${kept}…`);
+      expect(said).not.toMatch(/\p{Cs}/u);
+      wait(ANNOUNCE_CLEAR_MS);
+    }
+  });
+
   it("my own messages, and the chat's notes, are not read out", () => {
     const { update } = setup(HISTORY);
     update([...HISTORY, mine("hi"), peer("Alice joined", { systemEvent: { type: "join" } }), peer("Missed call", { callEvent: { type: "missed" } }), peer("joined", { event: { type: "joined" } })]);
