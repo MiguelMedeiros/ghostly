@@ -107,9 +107,12 @@ export function useMentionPicker({ mentions, text, setText, textareaRef, caretRe
           onMouseDown={e => e.preventDefault()} onClick={() => choose(c)} onMouseMove={() => setActive(i)}
           className={`flex cursor-pointer items-baseline gap-2 px-3 py-2 text-sm max-md:min-h-11 max-md:py-3 ${i === current ? "bg-surface-hover forced-colors:outline-2 forced-colors:-outline-offset-2 forced-colors:outline-[color:Highlight]" : ""}`}>
           {/* Each in its own direction: a Latin name cut keeps its start in Arabic, and the key's end reads "…jzg98o"
-              there too, not with the "…" after it. */}
+              there too, not with the "…" after it. Only a key's end is in the code font: @everyone's tag is words,
+              which the code font's fallback on Linux sets letter by letter in Arabic. */}
           <span dir="auto" className="truncate font-medium text-text-primary">{c.key === MENTION_EVERYONE ? "@everyone" : c.name}</span>
-          <span dir="ltr" className="ms-auto shrink-0 font-mono text-[11px] text-text-muted">{c.tag}</span>
+          {c.key === MENTION_EVERYONE
+            ? <span dir="auto" className="ms-auto shrink-0 text-[11px] text-text-muted">{c.tag}</span>
+            : <span dir="ltr" className="ms-auto shrink-0 font-mono text-[11px] text-text-muted">{c.tag}</span>}
         </div>
       ))}
     </div>

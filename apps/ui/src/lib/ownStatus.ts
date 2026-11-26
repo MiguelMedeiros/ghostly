@@ -1,5 +1,7 @@
 import { STATUS_TEXT_MAX, type StatusAvailability } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
+import type { Language } from "./settings";
+import { formatAt } from "./time";
 
 /*
  * This profile's own status and presence (WISP 401 § Presence and status): what the account menu's picker offers and
@@ -43,19 +45,22 @@ export function statusEnd(choice: Exclude<StatusEnd, "custom" | "keep">, languag
   return midnight.getTime();
 }
 
-/** A status text as long as it may be: 60 characters as a person counts them (an emoji is one, not two). */
-export const capStatusText = (text: string) => [...text].slice(0, STATUS_TEXT_MAX).join("");
+/**
+ * A status text's length as core counts it, in code points (an emoji like 😀 is one, a flag two). The field keeps whole
+ * characters only (`useFittedNameField`): with one left, a flag does not go in at all rather than as half of itself.
+ */
 export const statusTextLength = (text: string) => [...text].length;
+export const fitsStatusText = (text: string) => statusTextLength(text) <= STATUS_TEXT_MAX;
 
 /**
  * "11:00", "Fri 18:00", or "Dec 3, 18:00" further on: when a status ends, in the app's language. An end at midnight
  * (Today's, This week's) is the last minute of the day before, "23:59": the next day's "00:00" reads as tomorrow.
  */
-export function statusEndText(until: number, language: string, now = Date.now()): string {
+export function statusEndText(until: number, language: Language, now = Date.now()): string {
   const midnight = new Date(until).setHours(0, 0, 0, 0) === until;
   const end = new Date(midnight ? until - 60_000 : until), days = (end.getTime() - now) / 86_400_000;
-  if (end.toDateString() === new Date(now).toDateString()) return end.toLocaleTimeString(language, { hour: "numeric", minute: "2-digit" });
-  return end.toLocaleString(language, { ...(days < 6 ? { weekday: "short" } : { month: "short", day: "numeric" }), hour: "numeric", minute: "2-digit" });
+  if (end.toDateString() === new Date(now).toDateString()) return formatAt(end.getTime(), { hour: "numeric", minute: "2-digit" }, language);
+  return formatAt(end.getTime(), { ...(days < 6 ? { weekday: "short" } : { month: "short", day: "numeric" }), hour: "numeric", minute: "2-digit" }, language);
 }
 
 /** A time as a datetime-local field writes it (local, to the minute). */

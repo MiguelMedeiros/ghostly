@@ -1140,6 +1140,12 @@ html[data-standalone="true"] {
     padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
     overflow-y: auto;
   }
+
+  /* Delete chat goes beside the answers, not under them: under End and answer's words it was 48 px below a 320 px screen. */
+  .incoming-call-answers {
+    flex-direction: row;
+    justify-content: center;
+  }
 }
 
 /* A connected call on a phone on its side (320-480 px high, 320-350 in a browser): the avatars and names are centred in
@@ -1304,6 +1310,26 @@ html[data-standalone="true"] {
     padding-top: max(0.5rem, env(safe-area-inset-top));
     padding-bottom: 0.5rem;
   }
+}
+
+/* A menu's sheet with a field in it (the reaction picker's search, components/chat/Reactions.tsx): a tap in the field
+   brings the keyboard up over the sheet, the field and every emoji found under it. While the field has the focus the
+   sheet stands on the keyboard, as `.sheet` does, and the picker is no taller than what is left below the notch. Only
+   a sheet that holds a field: one of rows alone takes the keyboard down as it opens (components/Menu.tsx), and would
+   jump up and back where its first row gets the focus before the keyboard has gone.
+   `--keyboard-room` passes the visible height down to the picker: `--app-height` itself is not inherited. */
+.menu-sheet {
+  --keyboard-room: var(--app-height, 100dvh);
+}
+
+html[data-keyboard="true"] .menu-sheet:has(input):focus-within {
+  bottom: calc(100% - var(--app-height, 100%));
+  max-height: calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 0.5rem);
+  padding-bottom: 0.25rem;
+}
+
+html[data-keyboard="true"] .menu-sheet:has(input):focus-within .reaction-picker {
+  max-height: calc(var(--keyboard-room, 100dvh) - env(safe-area-inset-top) - 2.5rem);
 }
 
 /* In a chat's header (`toast-place-header`, the call buttons' why): just under the header, over the top of the chat's

@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { didDhtDocument, didDhtKey, encodeDidDhtPacket, openDidDhtPayload, toBase64Url } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
-import { DID_REPUBLISH_MS, ProfileDid, type ProfileDidHost } from "../src/engine/did";
+import { DID_CLOSE_WAIT_MS, DID_REPUBLISH_MS, ProfileDid, type ProfileDidHost } from "../src/engine/did";
 // covers: did.dht.profile, did.dht.public-links
 
 // Counted, not replaced: the real encoder still runs.
@@ -28,13 +28,16 @@ function world() {
     online: true,
     fail: null as Error | null,
     identities: new Map<string, string | null>([["nostr-1", "nostr:npub1abc"], ["domain-1", "https://example.com"], ["ssh-1", null]]),
+    /** id → when it expires (ms); none: never. */
+    expires: new Map<string, number>(),
     puts: [] as { key: string; payload: Uint8Array }[],
     emits: 0,
   };
   const host: ProfileDidHost = {
     online: () => state.online,
     emit: () => { state.emits++; },
-    listable: () => new Map([...state.identities].filter((e): e is [string, string] => !!e[1])),
+    listable: () => new Map([...state.identities].filter((e): e is [string, string] => !!e[1] && (state.expires.get(e[0]) ?? Infinity) > Date.now())),
+    expiresAt: id => state.expires.get(id),
     proofIds: () => [...state.identities.keys()],
     publish: async (key, payload) => {
       if (state.fail) throw state.fail;
@@ -228,6 +231,177 @@ describe("the profile's did:dht", () => {
     expect(state.puts).toHaveLength(3);
   });
 
+  it("takes a listed identity out of the published document when it expires, not at the next hourly put", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { make, state } = world();
+    state.expires.set("nostr-1", Date.now() + 60_000);
+    const did = make();
+    await did.load();
+    did.start();
+    await did.setListed({ id: "nostr-1", listed: true });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(state.puts).toHaveLength(1);
+    expect(opened(did, state.puts[0].payload).document.alsoKnownAs).toEqual(["nostr:npub1abc"]);
+    await vi.waitFor(() => expect(did.view()?.upToDate).toBe(true));
+
+    // Nothing emits as it expires: the DID itself notices.
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(state.puts).toHaveLength(2);
+    expect(opened(did, state.puts[1].payload).document.alsoKnownAs).toBeUndefined();
+    await vi.waitFor(() => expect(did.view()).toMatchObject({ listed: ["nostr-1"], alsoKnownAs: [], upToDate: true }));
+    did.stop();
+  });
+
+  it("publishes a listing changed within its last 2 s when it closes, as a CLI one-shot ends; nothing when none changed", async () => {
+    const { make, state } = world();
+    const did = make();
+    await did.load();
+    did.start();
+    await did.publishNow();
+    await did.setListed({ id: "domain-1", listed: true });
+    await did.close();
+    expect(state.puts).toHaveLength(2);
+    expect(opened(did, state.puts[1].payload).document.alsoKnownAs).toEqual(["https://example.com"]);
+
+    // The next run (a one-shot `identity remove` of the listed proof): the proof leaves the document before it ends.
+    const removing = make();
+    await removing.load();
+    removing.start();
+    state.identities.delete("domain-1");
+    removing.changed();
+    await removing.close();
+    expect(state.puts).toHaveLength(3);
+    expect(opened(removing, state.puts[2].payload).document.alsoKnownAs).toBeUndefined();
+    await vi.waitFor(async () => expect((await stored())?.listed).toEqual([]));
+
+    // A run that changed nothing puts nothing on the relays as it ends, even with an expired proof's document not out.
+    const idle = make();
+    await idle.load();
+    idle.start();
+    state.identities.set("nostr-1", null);
+    idle.changed();
+    await idle.close();
+    expect(state.puts).toHaveLength(3);
+  });
+
+  it("keeps every switch flipped while another change is being saved: a second switch, a publish landing, a removed proof dropped", async () => {
+    const { make, state } = world();
+    const did = make();
+    await did.load();
+    await Promise.all([did.setListed({ id: "nostr-1", listed: true }), did.setListed({ id: "domain-1", listed: true })]);
+    expect(did.view()?.listed).toEqual(["nostr-1", "domain-1"]);
+    await did.setListed({ id: "nostr-1", listed: false });
+
+    // The relay answers while the switch's save is on its way: the publish's save keeps the switch.
+    const host = (did as unknown as { host: ProfileDidHost }).host;
+    const put = host.publish;
+    let land!: () => void;
+    host.publish = (key, payload) => new Promise<void>(resolve => { land = () => { state.puts.push({ key, payload }); resolve(); }; });
+    const publishing = did.publishNow();
+    await vi.waitFor(() => expect(land).toBeDefined());
+    host.publish = put;
+    const flipped = did.setListed({ id: "nostr-1", listed: true });
+    land();
+    await Promise.all([publishing, flipped]);
+    expect(did.view()?.listed).toEqual(["domain-1", "nostr-1"]);
+    await did.publishNow();
+    expect(opened(did, state.puts.at(-1)!.payload).document.alsoKnownAs).toEqual(["https://example.com", "nostr:npub1abc"]);
+
+    // A proof removed while a switch is being saved: the removed one leaves, the switch stays.
+    state.identities.set("ssh-2", "https://github.com/octocat");
+    const removed = did.setListed({ id: "ssh-2", listed: true });
+    state.identities.delete("domain-1");
+    did.changed();
+    await removed;
+    await did.close();
+    expect(did.view()?.listed).toEqual(["nostr-1", "ssh-2"]);
+    expect((await stored())?.listed).toEqual(["nostr-1", "ssh-2"]);
+  });
+
+  it("closes once a listing changed during a publish on its way is out too, not with the older document last", async () => {
+    const { make, state } = world();
+    const did = make();
+    await did.load();
+    did.start();
+    const host = (did as unknown as { host: ProfileDidHost }).host;
+    // A slow background publish (the network back, the 2 s timer) of the document before the change.
+    let land!: () => void;
+    host.publish = (key, payload) => new Promise<void>(resolve => { land = () => { state.puts.push({ key, payload }); resolve(); }; });
+    void did.publishNow();
+    await new Promise(r => setTimeout(r, 20));
+    host.publish = async (key, payload) => { await new Promise(r => setTimeout(r, 50)); state.puts.push({ key, payload }); };
+    await did.setListed({ id: "nostr-1", listed: true });
+    const closed = did.close();
+    await new Promise(r => setTimeout(r, 20));
+    land();
+    await closed;
+    expect(state.puts).toHaveLength(2);
+    expect(opened(did, state.puts[0].payload).document.alsoKnownAs).toBeUndefined();
+    expect(opened(did, state.puts[1].payload).document.alsoKnownAs).toEqual(["nostr:npub1abc"]);
+    // Nothing goes after the close.
+    await new Promise(r => setTimeout(r, 100));
+    expect(state.puts).toHaveLength(2);
+  });
+
+  it("closes at once with nothing due, even with a publish on its way that never lands; a due one at its own pace", async () => {
+    const { make, state } = world();
+    const did = make();
+    await did.load();
+    did.start();
+    const host = (did as unknown as { host: ProfileDidHost }).host;
+    const publish = host.publish;
+    host.publish = () => new Promise<void>(() => {});
+    void did.publishNow();
+    await new Promise(r => setTimeout(r, 20));
+    let started = performance.now();
+    await did.close();
+    expect(performance.now() - started).toBeLessThan(1_000);
+
+    host.publish = publish;
+    const next = make();
+    await next.load();
+    next.start();
+    await next.setListed({ id: "domain-1", listed: true });
+    started = performance.now();
+    await next.close();
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(state.puts).toHaveLength(1);
+    expect(opened(next, state.puts[0].payload).document.alsoKnownAs).toEqual(["https://example.com"]);
+  });
+
+  it("closes within its bound when the publishes never land, and does not throw when one fails", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { make, state } = world();
+    const did = make();
+    await did.load();
+    did.start();
+    const host = (did as unknown as { host: ProfileDidHost }).host;
+    const publish = host.publish;
+    host.publish = () => new Promise<void>(() => {});
+    void did.publishNow();
+    await vi.advanceTimersByTimeAsync(10);
+    await did.setListed({ id: "nostr-1", listed: true });
+    let ended = false;
+    const closed = did.close().then(() => { ended = true; });
+    await vi.advanceTimersByTimeAsync(DID_CLOSE_WAIT_MS - 1);
+    expect(ended).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await closed;
+    expect(ended).toBe(true);
+    vi.useRealTimers();
+    host.publish = publish;
+
+    // The listing is still due in the next run, whose publish fails: the close ends all the same, the error said.
+    const next = make();
+    await next.load();
+    next.start();
+    await next.setListed({ id: "domain-1", listed: true });
+    state.fail = new Error("relays down");
+    await expect(next.close()).resolves.toBeUndefined();
+    expect(next.view()?.error).toBe("relays down");
+    expect(state.puts).toHaveLength(0);
+  });
+
   it("tries a failed publish again after a few minutes, not an hour", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { make, state } = world();
@@ -240,6 +414,56 @@ describe("the profile's did:dht", () => {
     state.fail = null;
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(state.puts).toHaveLength(1);
+    did.stop();
+  });
+
+  it("tries a publish that failed as the network came back again after a few minutes, not at the next hourly one", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { make, state } = world();
+    state.online = false;
+    const did = make();
+    await did.load();
+    did.start();
+    await did.setListed({ id: "nostr-1", listed: true });
+    // The timer's run offline publishes nothing and waits an hour.
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(state.puts).toHaveLength(0);
+
+    // The network comes back (the engine publishes at once) and the relays refuse that one.
+    state.online = true;
+    state.fail = new Error("relay down");
+    await did.publishNow().catch(() => {});
+    expect(did.view()?.error).toBe("relay down");
+    state.fail = null;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(state.puts).toHaveLength(1);
+    expect(opened(did, state.puts[0].payload).document.alsoKnownAs).toEqual(["nostr:npub1abc"]);
+    await vi.waitFor(() => expect(did.view()).toMatchObject({ upToDate: true }));
+    expect(did.view()?.error).toBeUndefined();
+    did.stop();
+  });
+
+  it("keeps a change made while a publish was on its way due in 2 s, not an hour", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { state } = world();
+    let release = () => {};
+    const puts: Uint8Array[] = [];
+    const did = new ProfileDid({
+      online: () => true, emit: () => {}, proofIds: () => [...state.identities.keys()],
+      listable: () => new Map([...state.identities].filter((e): e is [string, string] => !!e[1])),
+      publish: async (_key, payload) => { puts.push(payload); if (puts.length === 1) await new Promise<void>(resolve => { release = resolve; }); },
+    });
+    await did.load();
+    did.start();
+    const first = did.publishNow();
+    await vi.waitFor(() => expect(puts).toHaveLength(1));
+    await did.setListed({ id: "domain-1", listed: true });
+    release();
+    await first;
+    await vi.waitFor(() => expect(did.view()?.published).toBeDefined());
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(puts).toHaveLength(2);
+    expect(opened(did, puts[1]).document.alsoKnownAs).toEqual(["https://example.com"]);
     did.stop();
   });
 });

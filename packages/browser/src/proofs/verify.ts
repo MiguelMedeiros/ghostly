@@ -54,6 +54,9 @@ export function availableSigners<E>(p: IdentityProofProvider<E>, platform: Ident
   return p.signers.filter(s => (s.platforms ?? p.platforms).includes(platform) && (s.available?.() ?? true));
 }
 
+/** What `boundedIdentityFetch` asks its fetcher: a `fetch` request, with the most it takes and for how long. */
+type IdentityRequestInit = RequestInit & { maxBytes: number; timeoutMs: number };
+
 /**
  * The engine's `ctx.fetch`: HTTPS GET only, no credentials or referrer, a time-out, a size cap,
  * redirects refused unless asked for.
@@ -67,12 +70,15 @@ export function boundedIdentityFetch(options: { online: () => boolean; timeoutMs
     const target = new URL(url);
     const ownRelay = ownPkarrRelay === true && isOwnPkarrRelayUrl(target);
     if (!ownRelay && (target.protocol !== "https:" || target.username || target.password)) throw new Error("Identity checks use HTTPS only");
-    const timeout = AbortSignal.timeout(options.timeoutMs ?? 10_000);
+    const timeoutMs = options.timeoutMs ?? 10_000;
+    const timeout = AbortSignal.timeout(timeoutMs);
     const fetcher = (ownRelay ? options.relayFetcher : undefined) ?? options.fetcher ?? fetch;
-    const response = await fetcher(target.href, {
+    // The size and time ride along for a fetcher that cannot be stopped from here (Ghostly Desktop's, from Rust).
+    const request: IdentityRequestInit = {
       headers, signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store", redirect,
-    });
+      credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store", redirect, maxBytes, timeoutMs,
+    };
+    const response = await fetcher(target.href, request);
     if (Number(response.headers.get("content-length")) > maxBytes) throw new Error("Identity check response too large");
     const reader = response.body?.getReader();
     const parts: Uint8Array[] = [];

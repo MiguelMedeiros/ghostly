@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { afterAll, describe, expect, it } from "vitest";
 import { callApi } from "../src/api";
 import type { GhostlyEvent } from "../src/events";
-import { MAX_UNREAD, serve, type Host } from "../src/host";
+import { MAX_REPLAYS_UNREAD, MAX_UNREAD, serve, type Host } from "../src/host";
 // covers: headless.daemon
 
 const root = mkdtempSync(join(tmpdir(), "gh-slow-"));
@@ -95,6 +95,51 @@ describe.skipIf(process.platform === "win32")("a subscriber that stops reading",
       expect(seqs).toEqual(Array.from({ length: 300 }, (_, i) => i + 1));
       expect(listeners.size).toBe(1);
       client.destroy();
+    } finally { await s.close(); }
+  });
+
+  it("replays nobody reads cost the daemon MAX_REPLAYS_UNREAD at most: a new one cuts the oldest, which still has whole events in order, and the newest gets everything", async () => {
+    // ~20 MB as events: 5 subscribers from 0 that never read held ~100 MB.
+    const journal = Array.from({ length: 300 }, (_, i) => ({ seq: i + 1, id: `e${i + 1}`, type: "message.received", at: 0, text: LONG }) as GhostlyEvent);
+    const { hub, listeners, emit } = fakeHub(journal);
+    const s = await served("replays", hub);
+    try {
+      const clients: Socket[] = [];
+      let most = 0;
+      for (let i = 0; i < 5; i++) {
+        const client = connect(s.path);
+        client.pause();
+        clients.push(client);
+        client.write(JSON.stringify({ id: 1, method: "events.subscribe", params: { since: 0 } }) + "\n");
+        while (!(s.sockets[i]?.writableLength > 1024 * 1024)) await turn();
+        most = Math.max(most, s.sockets.reduce((sum, socket) => sum + (socket.destroyed ? 0 : socket.writableLength), 0));
+      }
+      expect(most).toBeLessThanOrEqual(MAX_REPLAYS_UNREAD);
+      // The first was cut: what it reads is the journal's first events, whole and in order, and then the end.
+      const seqs: number[] = [];
+      createInterface({ input: clients[0] }).on("line", (line) => {
+        try { const message = JSON.parse(line) as { event?: GhostlyEvent }; if (message.event) seqs.push(message.event.seq); } catch { /* the line it was cut in */ }
+      });
+      const closed = new Promise((resolve) => clients[0].on("close", resolve));
+      clients[0].resume();
+      await closed;
+      expect(seqs.length).toBeLessThan(300);
+      expect(seqs).toEqual(seqs.map((_, i) => i + 1));
+      // The newest reads its whole replay and the live events after it.
+      const newest: number[] = [];
+      let got!: () => void;
+      const all = new Promise<void>((resolve) => { got = resolve; });
+      createInterface({ input: clients[4] }).on("line", (line) => {
+        const message = JSON.parse(line) as { event?: GhostlyEvent };
+        if (message.event) newest.push(message.event.seq);
+        if (newest.length === 301) got();
+      });
+      clients[4].resume();
+      emit("live");
+      await all;
+      expect(newest).toEqual(Array.from({ length: 301 }, (_, i) => i + 1));
+      expect(listeners.size).toBeGreaterThan(0);
+      for (const client of clients) client.destroy();
     } finally { await s.close(); }
   });
 

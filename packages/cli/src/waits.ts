@@ -48,11 +48,14 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
   }
 }
 
-/** Waits until the contact confirmed my removal of a message, which is already gone here. */
-export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<void> {
+/**
+ * Waits until the contact confirmed my removal of a message, which is already gone here. `waitsLive`, read at the
+ * timeout: why it does not go by itself (a chat on the DHT only), said in place of "it still goes".
+ */
+export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: string, ms: number, waitsLive?: () => string | undefined): Promise<void> {
   const until = performance.now() + ms;
   while (node(ctx).removalPending({ linkId: chat, messageId })) {
-    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the message is gone here and the contact has not confirmed yet. Its removal ${goesOn(ctx, chat)}`, known(ctx, { messageId }));
+    if (performance.now() >= until || stopped(ctx)) throw new CliError("timeout", `${ended(ctx, ms)}: the message is gone here and the contact has not confirmed yet. ${waitsLive?.() ?? `Its removal ${goesOn(ctx, chat)}`}`, known(ctx, { messageId }));
     await new Promise((resolve) => setTimeout(resolve, 250));
     if (callGone()?.aborted) throw connectionClosed();
   }

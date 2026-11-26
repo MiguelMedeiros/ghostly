@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AWAITING_PEER_MS, OwnInviteError, type PairingProgress } from "@ghostly/core";
+import { AWAITING_PEER_MS, createIdentity, OwnInviteError, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import { chatOrGroup, findChatOrGroup, findOwnNamedChat } from "../src/apiKit";
@@ -1389,6 +1389,25 @@ describe("the engine passthrough", () => {
     expect(await call("lnurlResolve", { text: "a@b.c" })).toMatchObject({ code: "engine", message: "fetch failed" });
   });
 
+  it("refuses setContactBlocked given a word for blocked or what is not a contact's key, before the engine", async () => {
+    const { ctx, node } = fake();
+    const setContactBlocked = vi.fn(async () => {});
+    Object.assign(node, { setContactBlocked });
+    const call = (params: unknown) => callApi(ctx, "engine.call", { method: "setContactBlocked", params }).then(() => null, asCliError);
+    const takes = (why: string) => ({ code: "bad_request", message: `setContactBlocked takes ${ENGINE_PARAMS.setContactBlocked}: ${why} (ghostly engine --list --verbose)` });
+    const key = createIdentity().pubKeyZ32;
+    for (const blocked of ["false", "yes", 1, null]) expect(await call({ peerPubKeyZ32: key, blocked }), String(blocked)).toMatchObject(takes("blocked must be true or false"));
+    for (const peerPubKeyZ32 of ["__proto__", "z".repeat(2_000_000), key.slice(0, 51), `${key.slice(0, 51)}b`, 5]) {
+      const refused = await call({ peerPubKeyZ32, blocked: true });
+      expect(refused, String(peerPubKeyZ32).slice(0, 60)).toMatchObject(takes("peerPubKeyZ32 must be a contact's key"));
+      // A long word is not said back.
+      expect(refused!.message.length).toBeLessThan(200);
+    }
+    expect(setContactBlocked).not.toHaveBeenCalled();
+    expect(await call({ peerPubKeyZ32: key, blocked: false })).toBeNull();
+    expect(setContactBlocked).toHaveBeenCalledWith({ peerPubKeyZ32: key, blocked: false });
+  });
+
   it("runs send's secret guard on the calls that send a text: a seed, a key or ecash goes only with force", async () => {
     const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
     const { ctx, node } = fake([msg("m_seed", 5, { text: seed }), msg("m_hi", 6, { text: "hi" })]);
@@ -1625,6 +1644,9 @@ describe("settings", () => {
       [{ hyperdhtRelay: "ftp://x" }, "Use a wss:// relay address", "hyperdhtRelay: use a wss:// relay address"],
       // One past what a contact reads (pairedTransports.ts relayUrlTooLong).
       [{ irohRelays: ["https://x.example/long"] }, "Use a shorter relay address: https://x.example/long", "irohRelays: use a shorter relay address: https://x.example/long"],
+      // A relay's user:password@ and ?query are not said back.
+      [{ irohRelays: ["https://alice:s3cret@iroh.lan/?token=t0k"] }, "Not a relay address: https://alice:s3cret@iroh.lan/?token=t0k", "irohRelays: not a relay address: https://iroh.lan/"],
+      [{ hyperdhtRelay: "wss://alice:s3cret@relay.lan/#t0k" }, "Not a relay address: wss://alice:s3cret@relay.lan/#t0k", "hyperdhtRelay: not a relay address: wss://relay.lan/"],
     ];
     for (const [patch, engine, said] of refusals) {
       node.updateSettings.mockRejectedValueOnce(new Error(engine));
@@ -1639,14 +1661,26 @@ describe("settings", () => {
       [["ftp://x"], "relays: not a relay address: ftp://x"],
       [["ftp://relay.example.org"], "relays: use an https:// relay address: ftp://relay.example.org"],
       [["wss://relay.example.org", "notaurl"], "relays: use an https:// relay address: wss://relay.example.org"],
+      [["wss://alice:s3cret@relay.example.org/?token=t0k"], "relays: not a relay address: wss://relay.example.org/"],
     ];
     for (const [relays, said] of refusals) {
       await expect(callApi(ctx, "settings.set", { relays })).rejects.toMatchObject({ code: "bad_request", message: said });
     }
+    // A usable one next to a bad one: the engine kept the usable one and dropped the rest unsaid (exit 0), while
+    // irohRelays and the app's Settings refuse the list. A blank entry is no relay, as a blank line in the app.
+    await expect(callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "garbage"] })).rejects.toMatchObject({ code: "bad_request", message: "relays: not a relay address: garbage" });
     expect(node.updateSettings).not.toHaveBeenCalled();
-    // A usable one next to them is the engine's to keep (it drops the rest), as before.
-    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "ftp://x"] });
-    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", "ftp://x"] } });
+    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", " "] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", " "] } });
+  });
+
+  it("count an Iroh relay given twice once, and say more than the engine keeps as a wrong value", async () => {
+    // Six were `engine` (exit 1), and a relay given twice counted twice toward the five.
+    const { ctx, node } = fake();
+    await callApi(ctx, "settings.set", { irohRelays: ["https://a.example", "https://b.example", "https://a.example"] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { irohRelays: ["https://a.example", "https://b.example"] } });
+    node.updateSettings.mockRejectedValueOnce(new Error("Use at most five Iroh relays"));
+    await expect(callApi(ctx, "settings.set", { irohRelays: ["1", "2", "3", "4", "5", "6"].map((n) => `https://${n}.example`) })).rejects.toMatchObject({ code: "bad_request", message: "irohRelays: use at most five Iroh relays" });
   });
 
   it("take TCP and TLS TURN servers for the apps, and say the CLI does not use them", async () => {

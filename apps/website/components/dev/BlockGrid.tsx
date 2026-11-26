@@ -18,6 +18,8 @@ export type GridLabels = {
   noSpec: string;
   docs: string;
   included: string;
+  /** Read after a lit block's name in compose mode, where only its colour says the composition uses it. */
+  lit?: string;
   close: string;
   /** "+{n} over v{v}": how many pieces a composition adds to the public release. */
   stages?: { title: string; play: string; pause: string; names: Record<Level, string> };
@@ -261,6 +263,7 @@ export function BlockGrid({
                     <span className="bgrid-level" data-level={bl.level}>
                       {levels[bl.level]}
                     </span>
+                    {mode === "compose" && t.lit && on.has(bl.id) ? <span className="sr-only">, {t.lit}</span> : null}
                   </button>
                 ))}
               </div>

@@ -23,7 +23,7 @@ import { satsIn, unitFor } from "../NetworkTag";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { lightningStateLabel, paymentStateLabel } from "../paymentWords";
 import { formatAmount } from "../../lib/amount";
-import { formatAt } from "../../lib/time";
+import { formatAtWithYear } from "../../lib/time";
 import { problemLine, problemText } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
 import { copySecret } from "../../lib/shareLink";
@@ -72,11 +72,19 @@ const noteText = (t: Translate, { kind, note = "" }: { kind: keyof typeof TX_LAB
 /** How often the Receive screen says again that it shows its invoice (the engine's watch lasts 90 s). */
 const INVOICE_WATCH_AGAIN_MS = 60_000;
 
-/** When a movement happened, as the history writes it ("Sep 30, 03:15 PM"; "30 de set., 15:15" in Portuguese). */
+/**
+ * When a movement happened, as the history writes it ("Sep 30, 03:15 PM"; "30 de set., 15:15" in Portuguese), with
+ * the year when it is not this one's ("Dec 31, 2026, 11:30 PM"): "Dec 31" alone reads as this December.
+ */
 const MOVED_AT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
 
 /** `input_fee_ppk` in a few words, test sats on Testnet: a payment usually spends two to five proofs. */
 const shortFee = (t: Translate, ppk: number, testnet: boolean) => (ppk === 0 ? t("wallet.cashu.fee.none") : t(testnet ? "wallet.cashu.fee.perProofTest" : "wallet.cashu.fee.perProof", { fee: ppk / 1000 }));
+
+/** A number counting up to `value`: each frame draws only what shows it, not the whole card (its History's 100 rows). */
+function CountUp({ value, children }: { value: number; children: (shown: number) => ReactNode }) {
+  return <>{children(useCountUp(value))}</>;
+}
 
 /**
  * Cashu and Lightning share one balance while Lightning goes through the mints (the default source):
@@ -145,8 +153,6 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
   const testMints = testnet ? state.mints : state.mints.filter((m) => wallet.testMintUrls.includes(m.url));
   const testMint = testMints.length > 0;
   const testBalance = testMints.reduce((sum, m) => sum + m.balance, 0);
-  const realShown = useCountUp(state.balance - testBalance);
-  const testShown = useCountUp(testBalance);
   // The Cashu card always uses the mints; the Lightning card uses its network's source (the mints by default).
   const ln = state.lightning;
   const viaMint = rail === "cashu" || !ln?.providerId || ln.providerId === CASHU_MINT_SOURCE;
@@ -293,11 +299,13 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
           <p className="text-text-primary" data-testid="wallet-balance">
             {/* Only the number isolated, as an invoice's card does: in a right-to-left page the unit's Latin "sats" was one
                 run with it, glued to it ("100,000sats"). The unit stays in the line's direction. */}
-            <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(testnet ? testShown : realShown, t.language)}</bdi>
-            <span className="text-text-muted text-sm ms-2">{unitFor(t, unit, testnet ? testShown : realShown)}</span>
+            <CountUp value={testnet ? testBalance : state.balance - testBalance}>{(shown) => <>
+              <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(shown, t.language)}</bdi>
+              <span className="text-text-muted text-sm ms-2">{unitFor(t, unit, shown)}</span>
+            </>}</CountUp>
             {sharedLine}
             {/* A Testnet wallet's whole balance is test sats; a test mint's sats never count in a Mainnet one. */}
-            {testMint && !testnet && <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(testShown, t.language) })}</span>}
+            {testMint && !testnet && <CountUp value={testBalance}>{(shown) => <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(shown, t.language) })}</span>}</CountUp>}
             {!!state.setAside && (
               <span className="mt-1 flex items-center gap-1.5 text-xs text-text-muted max-md:min-h-[44px]" data-testid="wallet-set-aside">
                 {t("wallet.cashu.setAside", { amount: formatAmount(state.setAside, t.language), unit })}
@@ -441,7 +449,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
                       {/* A mint's name and a contact's memo are someone else's text, in any script: each in its own
                           direction, so the two never swap around the " · " between them. */}
-                      <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · <bdi>{mint?.name ?? new URL(tx.mint).hostname}</bdi>{tx.note && <> · <bdi>{noteText(t, tx)}</bdi></>}</span>
+                      <span className="truncate">{formatAtWithYear(tx.timestamp, MOVED_AT, t.language)} · <bdi>{mint?.name ?? new URL(tx.mint).hostname}</bdi>{tx.note && <> · <bdi>{noteText(t, tx)}</bdi></>}</span>
                       {!feeOnly && <span className={`shrink-0 ${tx.fee > 0 ? "text-warn-ink" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language), unit }) : t("wallet.cashu.history.noFee")}</span>}
                     </div>
                   </div>
@@ -466,7 +474,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
             <Section title={t("wallet.lightning.recent")} testId="lightning-recent">
               {ln.recent.map((op) => (
                 <Row key={`${op.direction}-${op.paymentHash}`} testId="lightning-op" label={t(op.direction === "in" ? "wallet.lightning.recentIn" : "wallet.lightning.recentOut", { amount: formatAmount(op.amount, t.language), unit })}
-                  hint={`${formatAt(op.createdAt, MOVED_AT, t.language)} · ${lightningStateLabel(t, op.state)}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language), unit })}` : ""}${op.error ? ` · ${problemLine(op.error, t)}` : ""}`} />
+                  hint={`${formatAtWithYear(op.createdAt, MOVED_AT, t.language)} · ${lightningStateLabel(t, op.state)}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language), unit })}` : ""}${op.error ? ` · ${problemLine(op.error, t)}` : ""}`} />
               ))}
             </Section>
           )}

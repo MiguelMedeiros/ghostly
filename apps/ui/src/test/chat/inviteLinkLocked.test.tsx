@@ -1,9 +1,9 @@
 import { render, waitFor, act, screen } from "@testing-library/react";
-import { createChatInvite, createDeviceInvite } from "@ghostly/core";
+import { createChatInvite, createDeviceInvite, createIdentity, createLink, encodeInviteCode } from "@ghostly/core";
 import { afterEach, expect, it, vi, describe } from "vitest";
 import { Root } from "../../Root";
 import { takeDeviceLink } from "../../lib/devices";
-import { listSessions } from "../../lib/storage";
+import { ensureSession, LINK_CHATS_WAITING, listSessions } from "../../lib/storage";
 import { readInvite } from "../../lib/url";
 import { axeViolations } from "../axe";
 import { fakeEngine } from "../fakeEngine";
@@ -68,6 +68,34 @@ it("invite links opened while locked each make their chat after the unlock, up t
   expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(listSessions()).toHaveLength(3);
+}, 60_000);
+
+// covers: invite.link, profiles.lock
+/*
+ * Links with a joined chat's seed but another contact's keys, opened while locked: each would make a chat of its own,
+ * so each takes a place, and those past the limit are refused. The joined chat's own link takes none.
+ */
+it("links with a joined chat's seed but other keys, opened while locked, take places like new ones", async () => {
+  const { invite, inviteCode } = createChatInvite();
+  const reading = readInvite(inviteCode);
+  if (!reading.ok) throw new Error("a fresh invite reads");
+  const joined = ensureSession(reading.keys);
+  const others = Array.from({ length: LINK_CHATS_WAITING + 3 }, () =>
+    encodeInviteCode({ ...invite, peerPubKeyZ32: createIdentity().pubKeyZ32, encKeyB64: createLink().mine.encKeyB64 }));
+  window.location.hash = "#/";
+  const { rerender } = render(<Root />);
+  for (const code of [...others, inviteCode]) {
+    window.location.hash = `#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+  expect(listSessions()).toHaveLength(1);
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe(`#/chat/${joined}`));
+  expect(listSessions()).toHaveLength(1 + LINK_CHATS_WAITING);
+  expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
 }, 60_000);
 
 // covers: invite.link, profiles.lock
@@ -248,3 +276,53 @@ describe("a refused invite link and the lock screen", () => {
     expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
   }, 60_000);
 });
+
+// covers: invite.link, profiles.lock
+/*
+ * Invite links to chats already here, opened under the lock, take no place among the links that may make chats: unlocked,
+ * they open their chats, and the new chat's link after them is made. Counted, it was refused as one too many, "delete a
+ * chat that got no answer" with none waiting.
+ */
+it("invite links to chats already here, opened while locked, leave room for a new chat's link", async () => {
+  const codes = [createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode];
+  for (const code of codes.slice(0, 3)) { const reading = readInvite(code); if (reading.ok) ensureSession(reading.keys); }
+  window.location.hash = `#${codes[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const code of codes.slice(1)) {
+    window.location.hash = `#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+  expect(listSessions()).toHaveLength(3);
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(4));
+  expect(screen.queryByTestId("invite-link-invalid")).toBeNull();
+}, 60_000);
+
+// covers: invite.link, profiles.lock
+/*
+ * An invite link to a chat already here that comes after a new chat's link refused past the limit, still under the lock:
+ * it opens its chat after the unlock, and the refusal stays to be said. Cleared by it, the refused link was lost with no word.
+ */
+it("an invite link to a chat already here, opened after a refused one while locked, leaves the refusal said", async () => {
+  const known = createChatInvite().inviteCode;
+  const reading = readInvite(known);
+  if (reading.ok) ensureSession(reading.keys);
+  const codes = [createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode, createChatInvite().inviteCode];
+  window.location.hash = `#${codes[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  for (const code of [...codes.slice(1), known]) {
+    window.location.hash = `#${code}`;
+    act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+    await waitFor(() => expect(window.location.hash).toBe("#/"));
+  }
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(4));
+  expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
+}, 60_000);

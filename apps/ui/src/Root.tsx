@@ -35,6 +35,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { trimEndOf } from "@ghostly/core";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import { modalOpen } from "./hooks/useAppCommands";
+import { composingKey } from "./hooks/useComposition";
 import { problemText, type Problem } from "./lib/problemText";
 import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
@@ -101,8 +102,9 @@ function ChatLinkIntake() {
   const locked = useRef(waits);
   locked.current = waits;
   /**
-   * The invites links brought while locked or asking, oldest first, each once, kept in memory only: as many as links may
-   * make chats (`LINK_CHATS_WAITING`), each made in turn after. One past them is refused, said after the unlock.
+   * The invites links brought while locked or asking, oldest first, each once, kept in memory only: as many new chats'
+   * as links may make (`LINK_CHATS_WAITING`), each made in turn after, and any to chats already here. One past them is
+   * refused, said after the unlock.
    */
   const held = useRef<SessionKeys[]>([]);
   const [heldCount, setHeldCount] = useState(0);
@@ -151,10 +153,14 @@ function ChatLinkIntake() {
       // lock only a link it holds does: one held already, or refused past the limit, leaves a refusal not yet said.
       linkTaken("invite");
       if (!locked.current) { setInvalid(null); open(reading.keys); return; }
+      // A link to a chat already here (joined, or this profile's own invite) takes no place among them, as after the
+      // unlock: it makes no chat. Only a link that takes a place clears a refusal: one to a chat here, past a refused
+      // one, leaves it said.
       const list = held.current;
       const keys = reading.keys;
       if (!list.some((k) => k.seedB64 === keys.seedB64 && k.peerPubKeyB64 === keys.peerPubKeyB64)) {
-        if (list.length < LINK_CHATS_WAITING) { setInvalid(null); list.push(keys); }
+        const room = list.filter((k) => classifyInvite(k).kind === "new").length < LINK_CHATS_WAITING;
+        if (room || classifyInvite(keys).kind !== "new") { if (room) setInvalid(null); list.push(keys); }
         else setInvalid("join.tooManyLinks");
       }
       setHeldCount(list.length);
@@ -227,9 +233,10 @@ function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; tes
     // Decided once the Escape has gone everywhere: one a menu, a field or a choice of messages spent is not its own,
     // though their listeners came after this one (the window's run in the order they were added). Nor is one pressed in
     // a modal dialog: a <dialog> closes on the key's default action without cancelling it, and is gone by the timeout.
+    // Nor one that only dropped an input method's candidate in a field: the field leaves that key alone, uncancelled.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const key = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || modalOpen()) return;
+      if (e.key !== "Escape" || composingKey(e, null) || modalOpen()) return;
       clearTimeout(timer);
       timer = setTimeout(() => { if (!e.defaultPrevented) close.current(); });
     };
@@ -298,10 +305,10 @@ function GroupLinkIntake() {
   const groupsLoaded = useEngineValue((state) => !!state?.groupsLoaded);
   /**
    * The links waiting for the unlock (and the engine's groups), oldest first, each once: as many as links may join
-   * (`LINK_GROUPS_WAITING`), each joined in turn after. One past them is refused. With each, what `otherLinks` was when
-   * it came.
+   * (`LINK_GROUPS_WAITING`), each joined in turn after. One past them is refused. With each, the group it names and what
+   * `otherLinks` was when it came.
    */
-  const held = useRef<{ link: string; after: number }[]>([]);
+  const held = useRef<{ link: string; id: string | null; after: number }[]>([]);
   const [heldCount, setHeldCount] = useState(0);
   const [problem, setProblem] = useState<Problem | null>(null);
   /** The groups this intake is joining, until the engine answers: links that come together count each other. */
@@ -322,10 +329,19 @@ function GroupLinkIntake() {
     if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
     // A new link answers for itself: an earlier link's refusal, kept until closed, would read as this one's. Only a link
     // it holds does: one waiting already, or refused past the limit, leaves the refusal of the one before it.
+    // A link to a group already here takes no place among them, as after the unlock, nor does a newer link to a group
+    // held already: it takes that one's (its link reset, the newest is the one joined).
     else {
       const list = held.current;
+      const id = linkGroupId(link);
+      const here = (group: string | null) => group !== null && (engine.state?.groups ?? []).some((known) => known.id === group);
+      const before = id === null ? -1 : list.findIndex((entry) => entry.id === id);
+      if (before >= 0 && list[before].link !== link) list.splice(before, 1);
       if (!list.some((entry) => entry.link === link)) {
-        if (list.length < LINK_GROUPS_WAITING) { setProblem(null); list.push({ link, after: otherLinks.current }); }
+        // Only a link that takes a place clears a refusal: one to a group here, or one that took a held link's place,
+        // past a refused one, leaves it said.
+        const room = list.filter((entry) => !here(entry.id)).length < LINK_GROUPS_WAITING;
+        if (room || here(id)) { if (room && before < 0) setProblem(null); list.push({ link, id, after: otherLinks.current }); }
         else setProblem({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
       }
       setHeldCount(list.length);
@@ -340,19 +356,20 @@ function GroupLinkIntake() {
     const list = held.current.splice(0);
     setHeldCount(0);
     const groups = engine.state?.groups ?? [];
-    for (const { link: code, after } of list) {
+    for (const { link: code, id, after } of list) {
       const refuse = (refusal: Problem) => { if (otherLinks.current === after) setProblem(refusal); };
-      const id = linkGroupId(code);
       if (id && !groups.some((group) => group.id === id) && !joining.current.has(id)
         && new Set([...linkGroupsWaiting(groups), ...joining.current]).size >= LINK_GROUPS_WAITING) {
         refuse({ tone: "error", title: t("group.link.tooMany"), next: t("group.link.tooManyNext") });
         continue;
       }
-      if (id) joining.current.add(id);
+      // One here already makes no group wait to be let in: counted, a new group's link after it was refused.
+      const joins = !!id && !groups.some((group) => group.id === id);
+      if (joins) joining.current.add(id);
       engine.call("joinGroupByLink", { link: code })
         .then(({ groupId }) => nav.conversation(groupPath(groupId)))
         .catch((cause: unknown) => refuse(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }))
-        .finally(() => { if (id) joining.current.delete(id); });
+        .finally(() => { if (joins) joining.current.delete(id); });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [heldCount, isLocked, hasUnlocked, groupsLoaded]);

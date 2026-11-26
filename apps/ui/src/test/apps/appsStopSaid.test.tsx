@@ -134,7 +134,7 @@ describe("the Apps page, when a check stops an installed app", () => {
 
   it("leaves it to the app's own screen when that screen is open", async () => {
     const { said, user } = await page();
-    await user.click(screen.getByRole("button", { name: /^Chess .*: details$/ }));
+    await user.click(screen.getByRole("button", { name: /^\u2068Chess\u2069 .*: details$/ }));
     const dialog = await screen.findByTestId("app-details");
     fakeEngine.on("appList", () => [app("chess", "Chess", REVOKED), app("go", "Go", REVOKED)]);
     await act(async () => { fakeEngine.emit({ kind: "apps-checked" }); });

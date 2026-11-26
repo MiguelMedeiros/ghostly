@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
+import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, BURST_RING_MS, CALL_SIGNAL_FUTURE_MS, CALL_SIGNAL_MAX_AGE_MS, QUICK_REDIAL_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView, Settings } from "@ghostly/browser/shared/types";
 import { dhtOnly, findChat, findOwnNamedChats } from "../apiKit";
 import { CliError } from "../errors";
@@ -205,9 +205,12 @@ export class CallManager {
   /**
    * A new signal's timestamp in a chat: now, or 1 ms after the last one sent there. The contact drops a signal no
    * newer than the last it heard, so a redial or a hang-up in the same millisecond as the signal before it would be lost.
+   * A clock set back by more than a contact takes ahead of its own (CALL_SIGNAL_FUTURE_MS) was the wrong one: dated
+   * after it, every signal in that chat was refused there until the daemon restarted.
    */
   private stamp(chat: string): number {
-    const ts = Math.max(this.now, (this.lastSent.get(chat) ?? 0) + 1);
+    const now = this.now, last = this.lastSent.get(chat) ?? 0;
+    const ts = last >= now && last - now < CALL_SIGNAL_FUTURE_MS ? last + 1 : now;
     this.lastSent.set(chat, ts);
     return ts;
   }
@@ -489,12 +492,13 @@ export class CallManager {
 
   async start(chat: string, options: { rate?: unknown }): Promise<Record<string, unknown>> {
     const link = this.callable(chat);
-    if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
+    this.refuseBusy(link.id);
     // The contact's call held back here (QUICK_REDIAL_MS) may still ring there: ours would cross it, and theirs, the
     // earlier offer, would win on their side while this side has already spent it. It rings here instead, as the apps do.
     const held = this.held.get(link.id);
     if (held && this.within(held.at, RING_MS)) {
       this.incoming(link.id, held.offer);
+      this.refuseBusy(link.id);
       throw new CliError("busy", "The contact is calling: their call rings here");
     }
     this.paced(link.id);
@@ -502,7 +506,7 @@ export class CallManager {
     const rate = rateOf(options.rate, DEFAULT_RATE);
     const stack = await this.stack();
     // The contact's call may have come in while the stack loaded.
-    if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
+    this.refuseBusy(link.id);
     const call = this.add(link.id, "out", rate);
     try {
       await this.attach(call, (media) => CallMedia.offer(stack, media));
@@ -524,6 +528,8 @@ export class CallManager {
     // A one-shot answers no call: it said "No call is on" instead when none rang.
     if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     const call = this.find(ref, (c) => c.direction === "in" && c.state === "ringing");
+    // One placed here reads `ringing` too: it rings at the contact's, for them to answer.
+    if (call.direction === "out" && call.state === "ringing") throw new CliError("refused", "That call is yours: it rings at the contact's");
     if (call.direction !== "in" || call.state !== "ringing") throw new CliError("refused", "That call is not ringing here");
     this.callable(call.chat);
     call.rate = rateOf(options.rate, call.rate);
@@ -557,9 +563,10 @@ export class CallManager {
 
   async hangup(ref: string | undefined): Promise<Record<string, unknown>> {
     const call = this.find(ref);
-    const view = this.view(call);
+    // As it was, but ended: its socket is gone and its connection closed, so no audio or stats are left to read.
+    const { stats: _, ...view } = this.view(call);
     await this.end(call, "hangup", true);
-    return { ...view, state: "ended", reason: "hangup" };
+    return { ...view, state: "ended", reason: "hangup", audio: null };
   }
 
   /** One call, by its id or its chat (or the only one). */
@@ -860,6 +867,16 @@ export class CallManager {
       audio: this.audioInfo(call),
       ...(call.socket ? { stats: { framesIn: audio?.received ?? 0, framesOut: audio?.sent ?? 0, queuedMs: call.queue?.queuedMs ?? 0, programConnected: call.socket.connected, ice: call.media?.ice ?? null } } : {}),
     };
+  }
+
+  /** Refuses a call placed in a chat where one is on; the contact's that rings here says how to answer it. */
+  private refuseBusy(chat: string): void {
+    const on = this.byChat(chat);
+    if (!on) return;
+    if (on.direction === "in" && on.state === "ringing") {
+      throw new CliError("busy", `The contact is calling: their call rings here (ghostly call answer ${chat})`, { call: on.id });
+    }
+    throw new CliError("busy", "A call is already on in this chat");
   }
 
   private byChat(chat: string): Call | undefined {

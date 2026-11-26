@@ -696,6 +696,26 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  // Found in a bug hunt: `call start` over the contact's call ringing here said only that a call was on, `call answer`
+  // on a call placed here that it was not ringing (while it read `ringing`), and `call hangup` answered with the audio
+  // socket it had just removed and the stats of a connection it had closed.
+  it("says how to answer the contact's call that rings here, whose a ringing call is, and leaves a hung-up call no audio", async () => {
+    const { a, b } = pairOfManagers();
+    const placed = await a.calls.start("chat-ab", {}) as { call: string; audio: { socket: string } };
+    const rang = await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await expect(b.calls.start("chat-ba", {})).rejects.toMatchObject({
+      code: "busy", message: "The contact is calling: their call rings here (ghostly call answer chat-ba)", details: { call: rang.call },
+    });
+    await expect(a.calls.answer(undefined, {})).rejects.toMatchObject({ code: "refused", message: "That call is yours: it rings at the contact's" });
+    const ended = await a.calls.hangup(undefined);
+    expect(ended).toMatchObject({ call: placed.call, direction: "out", state: "ended", reason: "hangup", audio: null });
+    expect(ended).not.toHaveProperty("stats");
+    expect(existsSync(placed.audio.socket)).toBe(false);
+    await until(() => b.events.find((e) => e.type === "call.ended"));
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("a call placed, rung and answered by its chat's id builds no engine state; a call placed by a name builds it once", async () => {
     const { a, b } = pairOfManagers();
     b.calls.setAuto({ on: true, from: ["chat-ba"], rate: 16000 });
@@ -1112,6 +1132,23 @@ describe("two call managers", { timeout: 60_000 }, () => {
       await until(() => b.events.find((e) => e.type === "call.ended"));
       await a.calls.start("chat-ab", {});
       await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2, 2000);
+      await a.calls.stopAll();
+      await b.calls.stopAll();
+    });
+
+    it("a call placed after this side's clock, a day ahead, was fixed rings: its signals are not dated after the ones the wrong clock dated", async () => {
+      const real = Date.now();
+      let at = real + 24 * 60 * 60_000;
+      const { a, b } = pairOfManagers({ now: () => at, nowB: () => real, callPaceMs: 0, quickRedialMs: 0 });
+      // Dated a day ahead of the contact's clock: dropped there (CALL_SIGNAL_FUTURE_MS), it never rang.
+      await a.calls.start("chat-ab", {});
+      await a.calls.hangup(undefined);
+      expect(b.events.filter((e) => e.type === "call.incoming")).toEqual([]);
+      at = real;
+      await a.calls.start("chat-ab", {});
+      await until(() => b.events.find((e) => e.type === "call.incoming"), 2000);
+      const offers = signalsOf(a, "o").map((s) => (JSON.parse(s!) as { ts: number }).ts);
+      expect(offers.at(-1)).toBe(real);
       await a.calls.stopAll();
       await b.calls.stopAll();
     });
@@ -1628,7 +1665,7 @@ describe("two call managers", { timeout: 60_000 }, () => {
         callee.side.calls.onSignal("chat-ba", offer());
         await new Promise((r) => setTimeout(r, 50));
         expect(rang()).toBe(3);
-        await expect(callee.side.calls.start("chat-ba", {})).rejects.toMatchObject({ code: "busy" });
+        await expect(callee.side.calls.start("chat-ba", {})).rejects.toMatchObject({ code: "busy", message: "The contact is calling: their call rings here (ghostly call answer chat-ba)" });
         expect(rang()).toBe(4);
         expect(signalsOf(callee.side, "o")).toEqual([]);
         await caller.side.calls.stopAll();

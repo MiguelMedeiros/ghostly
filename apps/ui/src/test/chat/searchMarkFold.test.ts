@@ -42,8 +42,8 @@ describe("a search's marks in a long message", () => {
   });
 
   it("find the same places as folding a character at a time: accents, case, combining accents, emoji", () => {
-    const texts = ["Café CAFE cafe\u0301! Ação na İstanbul. 😀 café", long("Ein Straße, ÅNGSTRÖM, naïve 😀 x\u0301y. "), "한국어 텍스트 ﬁle ǅemal Ωmega"];
-    for (const text of texts) for (const term of ["cafe", "acao", "istanbul", "angstrom", "naive", "x", "y", "😀", "한국", "ﬁle", "ǆe", "ω"]) {
+    const texts = ["Café CAFE cafe\u0301! Ação na İstanbul. 😀 café", long("Ein Straße, ÅNGSTRÖM, naïve 😀 x\u0301y. "), "한국어 텍스트 ﬁle ǅemal Ωmega ＰＤＦ ｶﾞｲﾄﾞ"];
+    for (const text of texts) for (const term of ["cafe", "acao", "istanbul", "angstrom", "naive", "x", "y", "😀", "한국", "ﬁle", "ǆe", "ω", "pdf", "ガイド"]) {
       expect(matchRanges(text, term), `${term} in ${text.slice(0, 20)}`).toEqual(oneAtATime(text, term));
     }
   });
@@ -51,7 +51,7 @@ describe("a search's marks in a long message", () => {
 
 /** `matchRanges` as it was: every character folded on its own. */
 function oneAtATime(text: string, query: string): [number, number][] {
-  const fold = (s: string) => s.normalize("NFD").toLowerCase().replace(/\p{M}/gu, "");
+  const fold = (s: string) => s.normalize("NFKD").toLowerCase().replace(/\p{M}/gu, "");
   const needle = fold(query.trim());
   let folded = "";
   const from: number[] = [];

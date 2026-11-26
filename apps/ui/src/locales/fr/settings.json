@@ -1,6 +1,13 @@
 {
   "about": "À propos",
   "appearance": "Apparence",
+  "blocked": {
+    "hint": "Bloquez un contact depuis le menu de sa conversation : rien de ce qu’il envoie ne vous parvient, sur aucun de vos appareils.",
+    "none": "Aucun contact bloqué",
+    "title": "Contacts bloqués",
+    "unblock": "Débloquer",
+    "unblockLabel": "Débloquer {{name}}"
+  },
   "changePassword": "Changer le mot de passe",
   "chatListDensities": {
     "comfortable": "Confortable",
@@ -156,6 +163,7 @@
   "searchEmpty": "Aucun paramètre ne correspond",
   "searchWords": {
     "account": "compte",
+    "blocked": "bloquer, bloqué, débloquer, contact, ignorer",
     "camera": "vidéo, webcam",
     "chatList": "compact, confortable, lignes",
     "clearData": "réinitialiser, effacer, vider",

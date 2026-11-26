@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createIdentity, type GhostLinkOptions } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
+import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
 // covers: chat.paired.send
 
@@ -84,6 +85,25 @@ it("a start with 40 saved chats lets the page run between slices of links, most 
   await vi.waitFor(() => expect(page.turns[page.turns.length - 1]).toBe(40));
   const stretches = page.turns.map((n, i) => n - (page.turns[i - 1] ?? 0)).filter((n) => n > 0);
   expect(Math.max(...stretches) * LINK_MS).toBeLessThanOrEqual(30);
+}, 30000);
+
+/**
+ * Chats last live in the same millisecond (a restart brings many back on one round of relay answers) take their place
+ * in the order of their ids, whatever order they come in. The line followed the caller's list before, so which of them
+ * took the first turns hung on who asked, and a test that worked the line out from its own rows saw another order.
+ */
+it("chats last live in the same millisecond start in the order of their ids, whatever order they come in", async () => {
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  await transact([STORES.links], (s) => { s[STORES.links].clear(); });
+  for (const [i, at] of [[2, 1000], [0, 1000], [3, 2000], [1, 1000]]) await db.putLink(chat(i, at));
+  node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: fixture as never, automaticWallets: false, nativeTransports: {} });
+  await node.start();
+  const line = ["chat-03", "chat-00", "chat-01", "chat-02"];
+  expect(built).toEqual(line);
+  const order = (ids: string[]) => (node as unknown as { nativeStartOrder(ids: string[]): string[] }).nativeStartOrder(ids);
+  expect(order(["chat-02", "chat-01", "chat-00", "chat-03"])).toEqual(line);
+  expect(order(["chat-01", "chat-03", "chat-02", "chat-00"])).toEqual(line);
 }, 30000);
 
 /** 40 saved chats, each with a message its contact sent over the DHT (`lastSeenTimestamp` 400 + i). */

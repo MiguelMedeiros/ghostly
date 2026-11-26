@@ -1,5 +1,6 @@
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { connect, expect, link, test, type Peer } from "../support/fixtures";
+import { watchCalls } from "../support/callTrace";
 import { iosKeyboard, keyboard } from "../support/keyboard";
 import { smallTargets } from "../support/touchTargets";
 
@@ -274,6 +275,54 @@ for (const width of [320, 414]) {
     await expect(bob.page.getByTestId("call-self-view")).toBeVisible();
     // The clock was centred between the corner button and the right edge, and its last 11 px ran under the preview.
     await expect.poll(async () => (await stateLine(bob.page)).wrong).toEqual([]);
+    await bob.page.getByTestId("call-hang-up").click();
+    await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+  });
+}
+
+/**
+ * Makes the call's connection in this page say its ICE went `disconnected` (paired-calls.spec.ts): the call shows
+ * Reconnecting... and restarts ICE. The page must be watched with `watchCalls` from before the call.
+ */
+const loseIce = (peer: Peer) => peer.page.evaluate(() => {
+  const recorded = (globalThis as unknown as { __callPcs?: { pc: RTCPeerConnection }[] }).__callPcs ?? [];
+  const pc = recorded.map((r) => r.pc).filter((pc) => pc.getTransceivers().length > 0).pop();
+  if (!pc) throw new Error("no call connection");
+  Object.defineProperty(pc, "iceConnectionState", { configurable: true, get: () => "disconnected" });
+  pc.oniceconnectionstatechange?.(new Event("iceconnectionstatechange"));
+});
+
+/** The whole window's state line: its parts that lie under the corner button. */
+const underCorner = (page: Page) => page.getByTestId("call-window").evaluate((win) => {
+  const button = win.querySelector("[data-testid=call-minimize]")!.getBoundingClientRect();
+  return [...win.querySelectorAll("[data-testid=call-status] > span")].flatMap((part) => [...part.getClientRects()]
+    .filter((r) => r.left < button.right && r.right > button.left && r.top < button.bottom && r.bottom > button.top)
+    .map((r) => `${part.textContent} at ${Math.round(r.left)}..${Math.round(r.right)}, ${Math.round(r.top)}..${Math.round(r.bottom)}`));
+});
+
+for (const language of ["es", "pt", "it"]) {
+  test(`a 320 px phone's call says Reconnecting clear of the corner button: ${language}`, { tag: ["@feature:calls.reconnect", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+    const alice = await peer("alice");
+    const bob: Peer = await peer("bob", { mobile: true, viewport: { width: 320, height: 640 } });
+    await link(alice, bob);
+    await connect(alice, bob);
+    await bob.page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await bob.page.reload();
+    await expect(bob.page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+    await watchCalls(bob.page);
+    await expect(bob.page.getByTestId("call-audio")).toBeEnabled({ timeout: 30_000 });
+    await bob.page.getByTestId("call-audio").click();
+    await alice.page.getByTitle("Accept audio call").click();
+    const status = bob.page.getByTestId("call-status");
+    await expect(status).toHaveAttribute("data-state", "connected");
+    await loseIce(bob);
+    await expect(status).toHaveAttribute("data-reconnecting", "true");
+    await bob.page.screenshot({ path: testInfo.outputPath(`reconnecting-320-${language}.png`) });
+    // "Llamada de audio  Reconectando..." was centred over the whole 320 px and started at 49: under the button (16..60).
+    await expect.poll(() => underCorner(bob.page)).toEqual([]);
     await bob.page.getByTestId("call-hang-up").click();
     await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
   });

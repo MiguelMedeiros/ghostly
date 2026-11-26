@@ -3,9 +3,10 @@ import { STATUS_TEXT_MAX, sanitizeDisplayText, sanitizeStatusText, type PersonSt
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
+import { useFittedNameField } from "../hooks/useGroupNameField";
 import { useOwnStatus } from "../hooks/useOwnStatus";
 import {
-  AVAILABILITIES, AVAILABILITY_DOT, STATUS_EMOJI, STATUS_ENDS, STATUS_PICKER_EVENT, capStatusText, isolate, localDateTime,
+  AVAILABILITIES, AVAILABILITY_DOT, STATUS_EMOJI, STATUS_ENDS, STATUS_PICKER_EVENT, fitsStatusText, isolate, localDateTime,
   openStatusPicker, statusEnd, statusEndText, statusTextLength, type StatusEnd,
 } from "../lib/ownStatus";
 import { listText } from "../lib/listText";
@@ -95,6 +96,9 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
   const [past, setPast] = useState(false);
   const [linkLike, setLinkLike] = useState(false);
   const [moreEmoji, setMoreEmoji] = useState(false);
+  // Each change kept to the 60 at the caret, in whole characters: never half a flag, never the end of the text cut.
+  const { ref: textRef, onChange: onTextChange, onCompositionStart, onCompositionEnd } =
+    useFittedNameField(text, (value) => { setText(value); setLinkLike(false); }, fitsStatusText);
   // An emoji picked from More emoji closes that panel, the focus in it: the chosen chip takes it, not the page.
   const chips = useRef<HTMLDivElement>(null);
   const picked = useRef(false);
@@ -176,7 +180,7 @@ function StatusPickerDialog({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-1">
           <input dir="auto" aria-label={t("status.text")} aria-describedby={linkLike ? `${id}-link ${id}-count` : `${id}-count`} placeholder={t("status.placeholder")} className={input}
-            aria-invalid={linkLike || undefined} value={text} onChange={(e) => { setText(capStatusText(e.target.value)); setLinkLike(false); }} />
+            aria-invalid={linkLike || undefined} ref={textRef} value={text} onChange={onTextChange} onCompositionStart={onCompositionStart} onCompositionEnd={onCompositionEnd} />
           {linkLike && <p id={`${id}-link`} role="alert" className="text-xs text-danger">{t("status.linkLike")}</p>}
           <p id={`${id}-count`} data-testid="status-count" className="text-end text-[11px] text-text-muted tabular-nums">{statusTextLength(text)}/{STATUS_TEXT_MAX}</p>
         </div>

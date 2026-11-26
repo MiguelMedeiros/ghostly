@@ -734,8 +734,9 @@ HandshakeProxy.prototype.recv = function (payload) {
  */
 const { FirewallProxy } = require(join(dirname(require.resolve('@hyperswarm/dht-relay')), 'lib', 'firewall-proxy.js'))
 function firewallCrowded(firewall, limits) {
-  const quarter = Math.max(1, Math.floor(limits.handshakes / 4))
-  if (firewall._requests.size >= quarter) return 'listen share'
+  // As crowded: a server gets at least one, and the dials keep a whole quarter only (none of 1 to 3, so one comes in).
+  const quarter = Math.floor(limits.handshakes / 4)
+  if (firewall._requests.size >= Math.max(1, quarter)) return 'listen share'
   let waiting = 0
   for (const server of firewall._node._servers.values()) waiting += server._firewall?._requests.size ?? 0
   return waiting >= limits.handshakes - quarter ? 'incoming' : null
@@ -871,7 +872,8 @@ const mebibytes = bytes => bytes % (1024 * 1024) ? `${bytes} bytes` : `${bytes /
  * whose users cannot connect reads the setting to change there, not in this file.
  */
 export function limitReasons (limits) {
-  const quarter = Math.max(1, Math.floor(limits.handshakes / 4))
+  // As crowded counts them: a key's share at least one, the dials' a whole quarter only.
+  const quarter = Math.floor(limits.handshakes / 4)
   return new Map([
     ['refused full', `${counted(limits.clients, 'client')} (${limitVariable('clients')})`],
     ['refused address', `${counted(limits.clientsPerAddress, 'client')} from one address (${limitVariable('clientsPerAddress')})`],
@@ -888,7 +890,7 @@ export function limitReasons (limits) {
     ['closed far queue', `a far peer leaving half of ${mebibytes(limits.queuedBytes)} untaken on one stream (${limitVariable('queuedBytes')})`],
     ['dropped queue total', `${mebibytes(limits.queuedTotalBytes)} waiting over all clients, the one holding the most dropped (${limitVariable('queuedTotalBytes')})`],
     ['refused handshake limit', `${counted(limits.handshakes, 'handshake')} waiting on one client (${limitVariable('handshakes')})`],
-    ['refused handshake listen share', `${counted(quarter, 'incoming handshake')} waiting on one key, a quarter of ${limitVariable('handshakes')}`],
+    ['refused handshake listen share', `${counted(Math.max(1, quarter), 'incoming handshake')} waiting on one key, a quarter of ${limitVariable('handshakes')}`],
     ['refused handshake incoming', `${counted(limits.handshakes - quarter, 'incoming handshake')} waiting on one client, the rest of ${limitVariable('handshakes')} kept for its dials`],
   ])
 }
@@ -1152,6 +1154,8 @@ export async function startRelay(options = {}) {
     let tokens = limits.burstBytes
     let last = monotonicNow()
     let paused = false
+    // Paused since the relay last pinged the client (see ping below).
+    let throttled = false
     const spend = bytes => {
       const now = monotonicNow()
       tokens = Math.min(limits.burstBytes, tokens + (now - last) * limits.bytesPerSecond / 1000)
@@ -1159,6 +1163,7 @@ export async function startRelay(options = {}) {
       tokens -= bytes
       if (tokens < 0 && !paused && ws._socket) {
         paused = true
+        throttled = true
         ws._socket.pause()
         setTimeout(() => { paused = false; ws._socket?.resume() }, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
       }
@@ -1189,12 +1194,14 @@ export async function startRelay(options = {}) {
       else pong(Buffer.from(data))
     })
     // A peer that has gone without closing (a sleeping laptop, a dead route) still holds its slot: one that has not
-    // answered the last ping by the next is dropped.
+    // answered the last ping by the next is dropped. One the relay has stopped reading since (its byte budget) is not:
+    // its pong waits unread behind what it sent before, seconds late at a low `bytesPerSecond` behind a proxy.
     let answered = true
     ws.on('pong', data => { spend(data.length + FRAME_BYTES); answered = true })
     const ping = setInterval(() => {
-      if (!answered) return drop('no pong')
+      if (!answered && !throttled) return drop('no pong')
       answered = false
+      throttled = paused
       ws.ping()
     }, limits.pingMs)
     let leave

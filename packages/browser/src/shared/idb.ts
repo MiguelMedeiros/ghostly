@@ -335,11 +335,13 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
  * with their keys and revocations and when the contacts' were last looked up for one (and which, of a lookup under way), its own Nostr data, the public profiles it read, the built-in mini-apps it removed
  * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`), the digests of the mini-app bundles it may hold (`APP_BUNDLES_KEY`) and the mini-app revocations it verified (`APP_REVOCATIONS_KEY`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
  * (`engine/contactLinks.ts`), the requests it sent through others' (`engine/contactAsks.ts`) and its saved messages
- * (`engine/saved.ts`). A list of what goes
+ * (`engine/saved.ts`), and the mark its goodbye left for the next start (`DEPARTED_KEY`). A list of what goes
  * rather than of what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending
  * operations), and a wallet record a newer version adds must never be deleted by mistake.
  */
-export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "identityRevocationsCheckedAt", "identityRevocationsRound", "identityWithdrawnLookups", "nostrSocial", "publicProfiles", "appBuiltIns", "appBundles", "appRevocations", "x401Credentials", "contactLinks", "contactAsks", "savedMessages", "departedAtStop"] as const;
+/** The mark this app's goodbye leaves in the settings store for its next start (`GhostlyNode.lastRunDeparted`). */
+export const DEPARTED_KEY = "departedAtStop";
 
 /** A private group's small row in the settings store (`GroupLive`, `engine/groupRows.ts`): the profile's too. */
 export const groupLiveKey = (groupId: string): string => `groupLive:${groupId}`;

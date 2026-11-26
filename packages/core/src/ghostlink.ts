@@ -855,6 +855,12 @@ export interface GhostLinkOptions {
    */
   resume?: PairedTransport;
   /**
+   * This app's last run ended with no goodbye (it crashed, or was killed): the contact still holds the session `resume`
+   * names, and answers the resume over WebRTC only once it finds that gone, seconds on. The looks for that answer share
+   * the relays' minute with the other such offers' (`OFFER_LOOKS_PER_MINUTE`), rather than spend it before it comes.
+   */
+  resumeUnannounced?: boolean;
+  /**
    * When the session that was live when this app last ran began (ms). A contact's offer made before it is the one that
    * set that session up, or an older one, read from a relay that never got the packet clearing it: it is not answered,
    * and a resumed link dials instead. An offer made after it (the contact noticed the session go, during a long
@@ -1233,6 +1239,8 @@ export class GhostLink {
   private lastLiveOn: PairedTransport | undefined;
   /** `resuming` is a wake's, not a restart's. */
   private resumingWoke = false;
+  /** The offer this dial makes is a resume whose looks share the relays' minute (`resumeUnannounced`). */
+  private offerShares = false;
   /** Until then, a session that ends was lost while the app was away (`WAKE_LOST_MS`). */
   private wokeUntil = 0;
   /** Back after a restart, the first automatic dial is still to go (`INSTANT_FAIL_MS`). */
@@ -1461,7 +1469,8 @@ export class GhostLink {
       },
       // An offer to a saved contact: its answer may be a while (the contact may still hold this app's old session),
       // so the look for it slows after its first seconds (`OFFER_FAST_MS`). A first pairing looks fast throughout.
-      setFastPoll: (fast, offer) => this.session.setFastPoll(fast, !!offer && !!options.pairing?.credentials.peerKey),
+      // A resume after a run that ended with no goodbye shares its looks (`resumeUnannounced`).
+      setFastPoll: (fast, offer) => this.session.setFastPoll(fast, !!offer && !!options.pairing?.credentials.peerKey, !!offer && this.offerShares),
       // An answer that did not connect is made again only while the contact's packet still carries that offer.
       offerStanding: ts => !this.leaving && !this.stopped && !this.streamBlocked && this.peerOfferTs() === ts,
       onAnswerReplaced: () => this.redial(),
@@ -2677,8 +2686,12 @@ export class GhostLink {
     // is currently offline.
     if (!this.isDataLinkOpen) {
       // Invalidate an older, incomplete attempt. A late native dial must not
-      // install a session using preferences that have since been changed.
-      if (this.channel || this.dialing || this.dataLink.state !== "idle") this.disconnect();
+      // install a session using preferences that have since been changed. Not this side's answer to the contact's
+      // offer while WebRTC may carry the chat: leaving DHT only answers it (`streamBlockChanged`) just before the menu
+      // applies the transport picked, and cancelled, the contact's offer waited out its 90 s before it offered again.
+      // A session it opens elsewhere than chosen moves there (the switch intent).
+      const answering = this.attempt?.side === "answered" && (fallback || preferred === "webrtc/1");
+      if (!answering && (this.channel || this.dialing || this.dataLink.state !== "idle")) this.disconnect();
       // Someone chose: the dialling side tries at once, the choice first.
       if (automatic || choice) this.dialNow();
       return;
@@ -2743,6 +2756,8 @@ export class GhostLink {
           const offeredAt = standing?.at ?? Date.now();
           this.offered = fallback ? standing ?? { epoch, at: offeredAt, ...(resume && { resume }), ...(woke && { woke }), ...(knockMissed && { knockMissed }) } : undefined;
           this.offerMade = { epoch, at: offeredAt };
+          // The restart's own resume only: one a wake starts later in the run (`resumeAfterAbsence`) looks at its own pace.
+          this.offerShares = resume && !woke && !!this.options.resumeUnannounced;
           const gate = this.dialGate;
           this.dialGate = undefined;
           // The contact's offer, read while this one still gathers, is answered in its place: the dial is over then, not

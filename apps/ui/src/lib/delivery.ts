@@ -45,6 +45,19 @@ export function useDhtOnly(peerPubKey?: string): DhtOnlyBy | undefined {
 }
 
 /**
+ * Whether this chat opens no live session because one side chose DHT only, and whose choice, by the engine's rule
+ * (`GhostLink.streamBlocked`): mine first, else the contact's, whatever way the chat's texts go meanwhile (held ones
+ * too, which the header names instead). What goes on the live session only waits for that side: my removal of a
+ * message (Delete for everyone) is neither held nor said on the DHT.
+ */
+export function useLiveBlocked(peerPubKey?: string): DhtOnlyBy | undefined {
+  return useSyncExternalStore(subscribe, () => {
+    const link = peerPubKey ? engine.linkByPeer(peerPubKey) : undefined;
+    return link?.deliveryMode === "dht" ? "you" : link?.dhtDelivery?.peerMode === "dht" ? "contact" : undefined;
+  });
+}
+
+/**
  * What a waiting message of mine waits for when it is not the contact: a file in a DHT-only chat needs a live
  * connection, which the chat does not make until the side that chose DHT only leaves it. Online or not changes nothing.
  */

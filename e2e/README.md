@@ -332,7 +332,9 @@ npm run test:e2e:desktop-macos     # about 15 s once built
   e2e-driver --config apps/desktop/tauri.e2e.conf.json`. The feature compiles in `apps/desktop/src/e2e_driver.rs`: an HTTP
   server on 127.0.0.1 (only when the app starts with `GHOSTLY_E2E_DRIVER=<port>`, and only for requests carrying
   `GHOSTLY_E2E_DRIVER_TOKEN`) that runs a script in a window (`eval_with_callback`) and answers with its value. A
-  release build with the feature does not compile. The same build reads an empty clipboard, never the Mac's.
+  release build with the feature does not compile. The same build reads an empty clipboard, never the Mac's. It
+  bundles the UI without `npm run build`'s `tsc -b`, a minute of CI's Mac job that `npm run typecheck` already does in
+  Frontend lint and types.
   `support/desktopMac.ts` (`openMacDesktop`, `MacDriver`) speaks to it and implements `DesktopApp`, so
   `matrix/people.ts`'s `desktopPerson(name, { open })` drives it like the Linux one; `MacDriver.in(label)` reaches
   another window, such as the one a shared app opens in.

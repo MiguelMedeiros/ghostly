@@ -17,8 +17,13 @@ describe("how Ghostly Desktop asks a Lightning address service", () => {
     const invoke = rust({ status: 200, contentType: "application/json", bodyB64: b64('{"ok":1}') });
     const fetch = page(() => new Response('{"never":1}'));
     await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(invoke as never, fetch) })).resolves.toEqual({ ok: 1 });
-    expect(invoke).toHaveBeenCalledExactlyOnceWith("hold_fetch", { url: "https://ln.example.com/x", headers: [["accept", "application/json"]] });
+    expect(invoke).toHaveBeenCalledExactlyOnceWith("hold_fetch", { url: "https://ln.example.com/x", headers: [["accept", "application/json"]], maxBytes: 64 * 1024, timeoutMs: 15_000 });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses an answer Rust found past a lookup's size as too large", async () => {
+    const invoke = rust("The held item is too large");
+    await expect(fetchLnurlJson("https://ln.example.com/x", { fetch: desktopLnurlFetch(invoke as never, page(opaque)) })).rejects.toThrow("The server's answer is too large");
   });
 
   it("says a service whose name leads to this machine or its network could not be reached, as Rust refuses it", async () => {
