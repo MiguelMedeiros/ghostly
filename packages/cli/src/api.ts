@@ -32,7 +32,7 @@ import { APP_CHAT_METHODS } from "./appChat";
 import { mintUrlShape, PAYMENT_LOOKUPS, payShape, tokenShape, WALLET_METHODS } from "./wallets";
 import { checkOwnStatus, statusJson } from "./ownStatus";
 import { TRANSPORT_NAMES } from "./words";
-import { chatState, dhtOnlyNote, heldWords, pinWaitsNote, type DhtOnly } from "./waitNotice";
+import { chatState, dhtOnlyNote, heldWords, pinWaitsNote, removalWaitsNote, type DhtOnly } from "./waitNotice";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -403,6 +403,12 @@ export function dhtOnlyOf(link: LinkView, ctx?: ApiContext): DhtOnly {
 function pinWaitsLive(ctx: ApiContext, linkId: string, ref: string, remove: boolean): string | undefined {
   const link = state(ctx).links.find((l) => l.id === linkId);
   return link && !nobodyJoined(link) ? pinWaitsNote(dhtOnlyOf(link, ctx), ref, remove) : undefined;
+}
+
+/** Why my removal of a message in a 1:1 chat does not go by itself, or undefined (waitNotice.ts `removalWaitsNote`), as `pinWaitsLive`. */
+function removalWaitsLive(ctx: ApiContext, linkId: string, ref: string): string | undefined {
+  const link = state(ctx).links.find((l) => l.id === linkId);
+  return link && !nobodyJoined(link) ? removalWaitsNote(dhtOnlyOf(link, ctx), ref) : undefined;
 }
 
 /**
@@ -969,7 +975,7 @@ const METHODS: Record<string, Method> = {
           : node(ctx).groupTaken({ groupId: target.id, messageId: message.id, edit: e });
         return { group: target.id, messageId: message.id, deleted: message.id, everyone: true, sent: edges > 0, edges, ...purged };
       }
-      if (wait === "confirmed") await goneHere(() => waitForRemoval(ctx, target.linkId, message.id, ms));
+      if (wait === "confirmed") await goneHere(() => waitForRemoval(ctx, target.linkId, message.id, ms, () => removalWaitsLive(ctx, target.linkId, str(params, "chat", true))));
       return { chat: target.id, messageId: message.id, deleted: message.id, everyone: true, confirmed: !node(ctx).removalPending({ linkId: target.linkId, messageId: message.id }), ...purged };
     }
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
