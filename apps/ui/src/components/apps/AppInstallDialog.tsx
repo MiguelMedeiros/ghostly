@@ -266,10 +266,14 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
 
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x) => b.includes(x));
 
-/** An app read again is what the screen showed: the same version, from a publisher shown the same, asking the same. */
+/**
+ * An app read again is what the screen showed: the same version, from a publisher shown the same, asking the same, and
+ * ending the same store's hold (or none): a hold that ends only on the read again was never said before Install.
+ */
 function sameScreen(a: AppPreview, b: AppPreview): boolean {
   return a.digest === b.digest && a.install === b.install && a.run.status === b.run.status && a.unknownPublisher === b.unknownPublisher
-    && sameSet(a.asks, b.asks) && sameSet(a.manifest.permissions, b.manifest.permissions);
+    && sameSet(a.asks, b.asks) && sameSet(a.manifest.permissions, b.manifest.permissions)
+    && a.leavesStore?.key === b.leavesStore?.key && a.leavesStore?.to === b.leavesStore?.to;
 }
 
 /**
