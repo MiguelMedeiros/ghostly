@@ -448,7 +448,7 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
   const walk = (folder: string) => {
     if (isGhostlyData(folder)) {
       const path = relative(dir, folder).split(sep).join("/") || ".";
-      throw refused(`${path} in ${dir} is a Ghostly home or profile, whose store holds the profile's seed, and a bundle is public: move it out of the app's folder, or publish a folder without it`, { reason: "private-key", detail: path });
+      throw refused(`${path} in ${dir} is a Ghostly home, profile or store, which holds the profile's seed, and a bundle is public: move it out of the app's folder, or publish a folder without it`, { reason: "private-key", detail: path });
     }
     // Read as bytes: a name that is not UTF-8 comes back from a string read with U+FFFD in it, a path no file has.
     const names = readdirSync(folder, { encoding: "buffer" }).map((raw) => ({ raw, name: raw.toString("utf8") }));
@@ -498,12 +498,16 @@ function realPath(path: string): string {
 const isInside = (dir: string, path: string) => isUnder(dir, path) || isUnder(realPath(dir), realPath(path));
 
 const isFolder = (path: string) => { try { return lstatSync(path).isDirectory(); } catch { return false; } };
+/** The files of a profile's store (./runtime/storage.ts): two of them in one folder are a store, whatever it is called. */
+const STORE_FILES = ["snapshot.bin", "journal.bin", "rows.db"];
 /**
- * A Ghostly home (its `current` file beside `profiles/`) or a profile's folder (`profiles/<name>/` with its store in
- * `db/`), of any home: the store is not encrypted at rest, and its snapshot holds the profile's seed.
+ * A Ghostly home (its `current` file beside `profiles/`), a profile's folder (`profiles/<name>/` with its store in
+ * `db/`), of any home, or a store's own folder under any name: the store is not encrypted at rest, and its snapshot
+ * and journal hold the profile's seed.
  */
 const isGhostlyData = (folder: string) =>
-  (isFolder(join(folder, "profiles")) && existsSync(join(folder, "current"))) || (basename(dirname(folder)) === "profiles" && isFolder(join(folder, "db")));
+  (isFolder(join(folder, "profiles")) && existsSync(join(folder, "current"))) || (basename(dirname(folder)) === "profiles" && isFolder(join(folder, "db")))
+  || STORE_FILES.filter((name) => existsSync(join(folder, name))).length >= 2;
 
 /** Fields of `ghostly-app.json` the command writes itself. */
 const WRITTEN = ["publisher", "files"] as const;
