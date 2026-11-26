@@ -6,7 +6,7 @@ import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, 
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
-import { CliError, type ErrorCode } from "./errors";
+import { CliError, shownValue, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
 import { checkGuardedSize, findSecret, secretWords } from "./secretGuard";
 import { shellWord } from "./shellWord";
@@ -52,7 +52,8 @@ function createChecked(type: WalletType, n: WalletNetwork, offer: WalletOffer | 
   if (!sources?.length) return;
   if (!provider) throw new CliError("bad_request", `${type} needs --provider: one of ${sources.map((p) => p.id).join(", ")} (ghostly wallet list)`);
   const source = sources.find((p) => p.id === provider);
-  if (!source) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
+  // A value that names no source is said as `shownValue` says it: a connection link typed here carries its secret.
+  if (!source) throw new CliError("bad_request", `No ${type} source ${shownValue(provider)} on ${n} (ghostly wallet list)`);
   const unknown = Object.keys(values).find((name) => !source.fields.some((f) => f.name === name));
   // Never the name itself: a secret given with no name= but with a base64 `=` (a macaroon, a rune) reads as one (`pairs`).
   if (unknown) throw new CliError("bad_request", `one --value names no field of ${provider}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
