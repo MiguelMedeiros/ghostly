@@ -1769,7 +1769,7 @@ async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
   // (the engine's line says "chat"); an unsave's with where the saved ids are.
   const where = target.group ? "group" : "chat";
   if (result.error && /not in this chat/.test(result.error)) {
-    throw remove ? new CliError("not_found", `No saved message ${JSON.stringify(messageId)} in this ${where} (ghostly saved list shows the saved ones)`)
+    throw remove ? new CliError("not_found", `No saved message ${shownValue(messageId)} in this ${where} (ghostly saved list shows the saved ones)`)
       : noMessage(messageId, { group: target.group, ref: str(params, "chat", true) });
   }
   if (result.error) throw new CliError("bad_request", result.error);

@@ -116,7 +116,7 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
   const before = message.card;
   // Said here, with the buttons it has, as a press says it (not_found, exit 3): the card's own check names only the field.
   if (chosen !== undefined && !before.buttons.some((b) => b.id === chosen))
-    throw new CliError("not_found", `That message has no button ${JSON.stringify(chosen)}; its buttons: ${before.buttons.map((b) => b.id).join(", ")}`, { card: before });
+    throw new CliError("not_found", `That message has no button ${shownValue(chosen)}; its buttons: ${before.buttons.map((b) => b.id).join(", ")}`, { card: before });
   const card = checked({ ...before, ...(chosen !== undefined && { chosen }), ...((close || before.closed) && { closed: true }) });
   const text = newText ?? message.text;
   const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "confirmed"] as const, "none");
@@ -147,7 +147,7 @@ async function pressButton(ctx: Parameters<Method>[0], params: Params): Promise<
   if (!message) throw noMessage(ref, { group: target.group, ref: str(params, "chat", true) }, { whose: "from someone else" });
   if (message.card?.kind !== "buttons") throw new CliError("bad_request", "That message has no buttons");
   const button = message.card.buttons.find((b) => b.id === buttonId);
-  if (!button) throw new CliError("not_found", `That message has no button ${JSON.stringify(buttonId)}; its buttons: ${message.card.buttons.map((b) => b.id).join(", ")}`);
+  if (!button) throw new CliError("not_found", `That message has no button ${shownValue(buttonId)}; its buttons: ${message.card.buttons.map((b) => b.id).join(", ")}`);
   const wait = target.group
     ? oneOf(params, "wait", ["none", "sent"] as const, "none")
     : oneOf(params, "wait", ["none", "sent", "delivered"] as const, oneShotWaits(ctx, target.linkId) ? "sent" : "none");

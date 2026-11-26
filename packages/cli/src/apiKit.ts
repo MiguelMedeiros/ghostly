@@ -263,13 +263,13 @@ export type RefPlace = { group: boolean; ref: string };
  */
 export function noMessage(id: string, place: RefPlace, { whose, tail }: { whose?: string; tail?: string } = {}): CliError {
   const history = `ghostly ${place.group ? "group" : "chat"} history ${shownRef(place)}`;
-  return new CliError("not_found", `No message ${JSON.stringify(id)}${whose ? ` ${whose}` : ""} in this ${place.group ? "group" : "chat"}${tail ?? ""} (${history})`);
+  return new CliError("not_found", `No message ${shownValue(id)}${whose ? ` ${whose}` : ""} in this ${place.group ? "group" : "chat"}${tail ?? ""} (${history})`);
 }
 
 /** No file by `id`, as `noMessage` says a message: in the chat or group named (`place`), or in none when none was. */
 export function noFile(id: string, place?: RefPlace): CliError {
   const where = place ? ` in this ${place.group ? "group" : "chat"}` : "";
-  return new CliError("not_found", `No file ${JSON.stringify(id)}${where} (ghostly file list ${place ? shownRef(place) : "<chat|group>"})`);
+  return new CliError("not_found", `No file ${shownValue(id)}${where} (ghostly file list ${place ? shownRef(place) : "<chat|group>"})`);
 }
 
 /** The one group `ref` names, if any (none, or more than one: undefined). */

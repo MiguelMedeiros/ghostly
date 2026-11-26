@@ -18,6 +18,19 @@ it("takes TURN and STUN addresses a browser can use, and says what is wrong with
   expect(iceServerProblem({ urls: "  " })).toContain("Enter the TURN server address");
 });
 
+it("quotes a refused address without its user, password, query or fragment", () => {
+  for (const [urls, shown] of [
+    ["turn:host?token=s3cr3t", "turn:host"],
+    ["turns://user:s3cr3t@host:5349", "turns://host:5349"],
+    ["https://user:s3cr3t@turn.example.org/#s3cr3t", "https://turn.example.org/"],
+    ["https://turn.example.org", "https://turn.example.org"],
+  ]) {
+    const problem = iceServerProblem({ urls, username: "u", credential: "c" });
+    expect(problem, urls).toBe(`“${shown}” is not a TURN or STUN address (turn:host:port)`);
+    expect(problem, urls).not.toContain("s3cr3t");
+  }
+});
+
 it("takes a server in WebRTC's form (urls a list) as the addresses comma-separated, and says a server without urls needs them", () => {
   const listed = iceServerSetting({ urls: ["stun:a.example.org", "turn:b.example.org:3478"], username: "u", credential: "c" } as unknown as IceServerSetting);
   expect(listed).toEqual({ urls: "stun:a.example.org, turn:b.example.org:3478", username: "u", credential: "c" });

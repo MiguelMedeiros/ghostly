@@ -235,6 +235,8 @@ describe("button update", () => {
     await callApi(ctx, "chat.send", { chat: "Alice", text: "Deploy?", buttons: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }] });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_3", chosen: "maybe" })).rejects.toMatchObject({ code: "not_found", message: 'That message has no button "maybe"; its buttons: yes, no' });
     await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_2" })).rejects.toMatchObject({ code: "bad_request", message: /Nothing to update/ });
+    // A secret given as the button is described, not said back.
+    await expect(callApi(ctx, "button.update", { chat: "Alice", message: "me_3", chosen: `nsec1${"q".repeat(58)}` })).rejects.toMatchObject({ code: "not_found", message: "That message has no button (a private key); its buttons: yes, no" });
     expect(node.editMessage).not.toHaveBeenCalled();
   });
 });
@@ -298,6 +300,7 @@ describe("button press", () => {
     await expect(callApi(ctx, "button.press", { chat: "Alice", message: "me_1", button: "yes" })).rejects.toMatchObject({ code: "not_found", message: /from someone else/ });
     await expect(callApi(ctx, "button.press", { chat: "Alice", message: "peer_plain", button: "yes" })).rejects.toMatchObject({ code: "bad_request", message: /no buttons/ });
     await expect(callApi(ctx, "button.press", { chat: "Alice", message: "peer_closed", button: "maybe" })).rejects.toMatchObject({ code: "not_found", message: /its buttons: yes, no/ });
+    await expect(callApi(ctx, "button.press", { chat: "Alice", message: "peer_closed", button: `nsec1${"q".repeat(58)}` })).rejects.toMatchObject({ code: "not_found", message: "That message has no button (a private key); its buttons: yes, no" });
     expect(node.pressButton).not.toHaveBeenCalled();
     const refused = await callApi(ctx, "button.press", { chat: "Alice", message: "peer_closed", button: "yes" }).catch((error: CliError) => error);
     expect(refused).toMatchObject({ code: "refused", message: "These buttons are closed" });
