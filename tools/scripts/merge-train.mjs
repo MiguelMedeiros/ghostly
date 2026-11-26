@@ -1901,7 +1901,9 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      * (given the jobs of a run, and the run: its event and branch) may pass over a run: then the one before it is read,
      * up to CI_RUNS_READ runs. A run that ended saying nothing about the commit (`saysNothing`: cancelled, skipped or
      * never started) is passed over too, so a newer run on the same head counts only once it ran: a cancelled one never
-     * hides the green (or red) run before it, and one still going is pending. Check
+     * hides the green (or red) run before it, and one still going is pending. A fast-tier run that ended (its draft
+     * gate green or red: a draft's, or a ready one's queued behind its base) speaks: CI Success did not run on it, so an
+     * older full run's red on the same head no longer decides (`draftJobs` reads its gate). Check
      * runs are not asked: they mix every run on the commit.
      */
     ciJobs: async (sha, counts = () => true) => {
@@ -1914,7 +1916,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       const runs = ciRuns(r.data.workflow_runs, repo, sha).slice(0, CI_RUNS_READ);
       for (const run of runs) {
         const jobs = await runJobs(run.id);
-        if (saysNothing(jobs, run)) continue;
+        if (saysNothing(jobs, run) && saysNothing(jobs, run, draftState)) continue;
         if (await counts(jobs, run)) return jobs;
       }
       // None counts, and the newest ended cancelled: nothing starts another run there by itself (`waiting` says so).
