@@ -105,7 +105,8 @@
     "both": "你和 {{name}} 正在共享屏幕",
     "noSound": "共享中，没有声音",
     "peer": "{{name}} 正在共享屏幕",
-    "you": "你正在共享屏幕"
+    "you": "你正在共享屏幕",
+    "withSound": "正在共享声音"
   },
   "stopSharing": "停止共享",
   "timeline": {

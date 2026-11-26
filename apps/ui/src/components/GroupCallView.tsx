@@ -207,9 +207,12 @@ function Tile({ person, you, kind, speaking, name, face, menu }: { person: Group
       <div className="absolute bottom-1.5 inset-x-1.5 flex items-center gap-1.5">
         {kind === "face" && (person.byAdmin?.mic ? <MutedMark label={t("calls.group.mutedByAdmin")} byAdmin /> : !person.mic && <MutedMark label={t("calls.group.muted")} />)}
         <span dir="auto" className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">{name}</span>
-        {/* The browser gave the picture alone (or the sound was left unticked): the others see it but hear nothing of it. */}
-        {kind === "screen" && you && person.screenSound === false && (
-          <span data-testid="group-call-screen-no-sound" className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">{t("calls.sharing.noSound")}</span>
+        {/* What the others get of your screen's sound: all the system plays (but this page), or nothing when the
+            browser gave the picture alone (or the sound was left unticked). */}
+        {kind === "screen" && you && person.screenSound !== undefined && (
+          <span data-testid="group-call-screen-sound" data-sound={person.screenSound} className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">
+            {t(person.screenSound ? "calls.sharing.withSound" : "calls.sharing.noSound")}
+          </span>
         )}
       </div>
       {menu}

@@ -6,10 +6,14 @@ import type { CallAudioMix } from "@ghostly/core";
  * this app's own playback, the call's voices, out of a system capture, so nobody hears themselves back. A browser
  * that captures no sound (Firefox, Safari, the Linux and macOS Desktop's webviews) gives the picture alone.
  */
-export const SCREEN_WITH_SOUND = { video: true, audio: { restrictOwnAudio: true }, systemAudio: "include" } as DisplayMediaStreamOptions;
+export const SCREEN_WITH_SOUND: Readonly<DisplayMediaStreamOptions> = Object.freeze({
+  video: true,
+  audio: Object.freeze({ restrictOwnAudio: true } as MediaTrackConstraints),
+  systemAudio: "include",
+} as DisplayMediaStreamOptions);
 
 /** The picture alone, for a browser that refuses to be asked for the sound at all. */
-const SCREEN_ONLY: DisplayMediaStreamOptions = { video: true, audio: false };
+const SCREEN_ONLY: Readonly<DisplayMediaStreamOptions> = Object.freeze({ video: true, audio: false });
 
 /**
  * Opens the browser's screen picker for a share with its sound (`SCREEN_WITH_SOUND`). A browser that will not take

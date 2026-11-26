@@ -619,13 +619,17 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     track.addEventListener("ended", s.screenEnded);
     try {
       await s.room.localParticipant.publishTrack(track, { source: s.lk.Track.Source.ScreenShare });
-      // Its sound goes as the screen's own (LiveKit's ScreenShareAudio), unless the share ended meanwhile. A sound
-      // the room will not take leaves the picture shared, without its sound.
+      // Stopped while it went out: LiveKit had nothing to take down then (it waits only for a LocalTrack's publish).
+      if (s.screen !== track) await s.room.localParticipant.unpublishTrack(track, true).catch(() => {});
+      // Its sound goes as the screen's own (LiveKit's ScreenShareAudio), unless the share ended meanwhile; as a
+      // sound, not a voice (no DTX cutting its quiet passages, no RED). A sound the room will not take leaves the
+      // picture shared, without its sound.
       if (sound && s.screenAudio === sound) {
-        await s.room.localParticipant.publishTrack(sound, { source: s.lk.Track.Source.ScreenShareAudio }).catch(() => {
+        await s.room.localParticipant.publishTrack(sound, { source: s.lk.Track.Source.ScreenShareAudio, dtx: false, red: false }).catch(() => {
           if (s.screenAudio === sound) s.screenAudio = null;
           sound.stop();
         });
+        if (s.screenAudio !== sound) await s.room.localParticipant.unpublishTrack(sound, true).catch(() => {});
       }
       // Not over a seal check's reason: a screen that went out unsealed left the call (`sealedStill`).
       if (!s.ended) setError(null);

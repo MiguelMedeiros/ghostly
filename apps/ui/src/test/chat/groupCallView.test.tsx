@@ -113,11 +113,18 @@ describe("a shared screen", () => {
     expect(screen.getAllByTestId("group-call-audio")).toHaveLength(1);
     expect(screen.getAllByTestId("group-call-screen-audio")).toHaveLength(1);
     const mine = within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0];
-    expect(within(mine).getByTestId("group-call-screen-no-sound")).toHaveTextContent("Shared without sound");
+    expect(within(mine).getByTestId("group-call-screen-sound")).toHaveTextContent("Shared without sound");
 
+    // with its sound, your tile says it goes out too
     rerenderWith(state(0, { local: person("me", { screen: true, screenSound: true, tracks: { screen: video() } }), participants: [person("ana")] }));
-    expect(screen.queryByTestId("group-call-screen-no-sound")).toBeNull();
+    expect(screen.getByTestId("group-call-screen-sound")).toHaveTextContent("Sharing its sound");
     expect(screen.queryByTestId("group-call-screen-audio")).toBeNull();
+  });
+
+  it("says nothing of the sound on someone else's screen: only you are told what you send", () => {
+    view(state(0, { participants: [person("ana", { screen: true, screenSound: false, tracks: { screen: video() } })] }));
+    expect(screen.getByTestId("group-call-stage")).toHaveTextContent("Ana's screen");
+    expect(screen.queryByTestId("group-call-screen-sound")).toBeNull();
   });
 
   it("two at once: the latest wins and the other is a tile; when it stops, the other is back", () => {
