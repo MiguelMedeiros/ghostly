@@ -6,6 +6,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { ChatOnScreen } from "../lib/chatOnScreen";
+import { fitText } from "../lib/fitText";
 import { buildDetails, type DetailRow } from "../lib/messageDetails";
 import { copyMessageText } from "../lib/shareLink";
 import type { ChatMessage } from "../lib/types";
@@ -61,7 +62,7 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
 
   const model = useMemo(() => buildDetails(message, view, { picture, t }), [message, view, picture, t]);
   const mine = message.sender === "me";
-  const excerpt = message.file ? message.file.name : message.text.length > 90 ? `${message.text.slice(0, 90)}…` : message.text;
+  const excerpt = message.file ? message.file.name : message.text.length > 90 ? `${fitText(message.text, s => s.length <= 90)}…` : message.text;
 
   const copyAll = () => {
     void copyMessageText(JSON.stringify(model.json, null, 2)).then(() => { setCopiedAll(true); setTimeout(() => setCopiedAll(false), 1500); }).catch(() => {});
