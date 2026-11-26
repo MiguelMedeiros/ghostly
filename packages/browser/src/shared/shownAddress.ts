@@ -6,11 +6,12 @@
  *
  * A `?` or `#` before the last `@` leaves no safe cut: that `@` may end a password holding a raw `?` or `#`
  * (`turn:user:pa?ss@host`) or sit in the query (`turn:host?user=me@example.org&credential=…`). Then only the scheme is
- * said, and `…` for the rest.
+ * said, and `…` for the rest. Two plain scans, so a long address costs no more than reading it once.
  */
 export function shownAddress(url: string): string {
   const scheme = /^(?:(?:stuns?|turns?):(?:\/\/)?|[a-z][a-z0-9+.-]*:\/\/)/i.exec(url)?.[0] ?? "";
   const rest = url.slice(scheme.length);
-  if (/[?#][\s\S]*@/.test(rest)) return `${scheme}…`;
+  const cut = rest.search(/[?#]/);
+  if (cut !== -1 && cut < rest.lastIndexOf("@")) return `${scheme}…`;
   return scheme + rest.replace(/^[\s\S]*@/, "").replace(/[?#][\s\S]*$/, "");
 }

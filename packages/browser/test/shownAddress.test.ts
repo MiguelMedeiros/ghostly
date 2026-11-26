@@ -68,3 +68,12 @@ it("says neither the user nor the query when a ? or # comes before the last @, s
     ["relay.example.org/?user=me@example.org&token=s3cr3t", "…"],
   ]);
 });
+
+it("reads a long address at once, a run of ? or # with no @ included", () => {
+  for (const mark of ["?", "#"]) {
+    const url = `turn:host${mark.repeat(1024 * 1024)}`;
+    const start = performance.now();
+    expect(shownAddress(url)).toBe("turn:host");
+    expect(performance.now() - start, mark).toBeLessThan(100);
+  }
+});
