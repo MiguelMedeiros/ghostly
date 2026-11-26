@@ -27,7 +27,8 @@ const KEY = "a".repeat(52);
 describe("Block contact during a call", () => {
   beforeEach(() => { localStorage.clear(); hook.hangUp = vi.fn(); });
 
-  it.each(["connected", "offering"])("a call %s ends as a hang-up when the contact is blocked", async (state) => {
+  // One ringing in stops with nothing sent: the caller's ring runs out, as it does when the app is closed.
+  it.each([["connected", true], ["offering", true], ["incoming", false]] as const)("a call %s ends when the contact is blocked (signal sent: %s)", async (state, send) => {
     hook.callState = state;
     saveSession({ id: "a", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: KEY, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
     const { user, engine } = renderApp(<UpdateProvider><Chat sessionId="a" visible onCallChange={() => {}} callLayer={null} /></UpdateProvider>);
@@ -36,7 +37,8 @@ describe("Block contact during a call", () => {
     await user.click(screen.getByTestId("chat-options"));
     await user.click(within(await screen.findByTestId("chat-options-menu")).getByTestId("chat-block"));
     await user.click(within(screen.getByRole("dialog", { name: /^Block .*Ana.*\?$/ })).getByRole("button", { name: "Block" }));
-    expect(hook.hangUp).toHaveBeenCalledWith(true, true);
+    expect(hook.hangUp).toHaveBeenCalledTimes(1);
+    expect(hook.hangUp).toHaveBeenCalledWith(send, send);
     expect(engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: KEY, blocked: true }]);
   });
 });
