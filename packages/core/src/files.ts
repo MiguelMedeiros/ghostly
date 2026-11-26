@@ -132,7 +132,8 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let value = bytes / 1024, unit = 0;
-  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  // The unit is picked on the shown (rounded) value: 1023.97 KB is "1.0 MB", never "1024.0 KB".
+  while (Math.round(value * 10) / 10 >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
   return `${value.toFixed(1)} ${units[unit]}`;
 }
 
