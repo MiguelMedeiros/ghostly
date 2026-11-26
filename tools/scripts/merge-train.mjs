@@ -589,8 +589,10 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * refuses its branch) says why, and its help leaves that advice out. One with `pr.behind` ({ batch,
  * with }) merges cleanly onto the base but conflicts with `with`, aboard the batch in flight: it waits for the next.
  */
-export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null, stuck = null, cannot = false) {
+export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null, stuck = null, cannot = false, parked = null) {
   const mark = `<!-- merge-train:head ${head} -->`;
+  // GitHub's message may hold any text: escaped (JSON.parse reads it back) so none ends the mark.
+  const aloneOf = (m) => `<!-- merge-train:alone ${JSON.stringify(m).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")} -->`;
   const flake = `if that red is a flake, re-run the failed jobs of CI on \`${base}\` (${stuck?.slice(0, 12)})`;
   const help = stuck
     ? ` It has been on hold for ${Math.round(HOLD_HELP / 60_000)} minutes or more: ${cannot ? `${flake}.` : `${flake}; if \`${base}\` needs a fix, give the pull request that fixes it \`queue:priority\`, and the train lands it alone ahead of the held one.`}`
@@ -611,8 +613,7 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
       ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}, but GitHub refused the push of that rebase to its branch: ${escapeMark(alone.refused)}. The train tries once more at its next run; refused again, it leaves the line.`
       : held && !alone.past ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
     const past = alone.past ? ` It goes ahead of #${alone.past}, which the train holds while CI Success on \`${base}\` itself is ${held ?? "red"} (\`${LABEL.priority}\`).` : "";
-    // GitHub's message may hold any text: escaped (JSON.parse reads it back) so none ends the mark.
-    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")} -->\nMerge train: next into \`${base}\`, alone. ${where}${past}${alone.past ? "" : hold}`;
+    return `${POSITION}${mark}${aloneOf(alone)}\nMerge train: next into \`${base}\`, alone. ${where}${past}${alone.past ? "" : hold}`;
   }
   if (batch) {
     const note = own ? ` Its own full CI is not needed: the batch's CI is its gate, so the train cancels that run if it is still going.${cancelled}` : "";
@@ -632,7 +633,8 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
   const wait = !why && company
     ? ` Waiting for company: a batch leaves once ${company.minBatch} can board (${company.count} now), or at the train's first run after ${new Date(company.leavesAt).toISOString().slice(11, 16)} UTC. It keeps its place.`
     : "";
-  return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}.${why.includes(AT_BACK) ? "" : " It keeps its place."}` : `${after}${wait}${note}`}${hold}`;
+  // A lone one parked in line (`parked`, its mark) keeps the mark, so the run after its hold or draft picks it up again.
+  return `${POSITION}${mark}${parked ? aloneOf(parked) : ""}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}.${why.includes(AT_BACK) ? "" : " It keeps its place."}` : `${after}${wait}${note}`}${hold}`;
 }
 
 /** The head a pull request had when the train first saw it queued (the reviewed one), from its position comment. */
@@ -1548,13 +1550,14 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const flyAlone = async (p, past = null) => {
     const mark = p.alone;
     const stay = { number: p.number, members: [p], alone: true };
+    // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place. Put
+    // on hold since: the same, until the label comes off. Before the push below too: a review's hold ends on a new
+    // head, so the train's own push would end it.
+    if (p.draft || isHeld(p)) return null;
     // The push failed: the rebase it promised is pushed again, a second run too (its head's red is the first run's).
     if (p.sha !== mark.sha) return goAlone(p, { retried: mark.retried, rerun: mark.retried, past });
     const tip = await gh.branchSha(base);
     say(`ALONE #${p.number} at ${p.sha.slice(0, 12)} CI ${p.ci}`);
-    // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place. Put
-    // on hold since: the same, until the label comes off.
-    if (p.draft || isHeld(p)) return null;
     // Red on an old tip says nothing about the new one, and green on an old tip must not land.
     if (tip !== mark.baseSha) return goAlone(p, { retried: mark.retried, past });
     if (p.ci === "failure") {
@@ -1606,7 +1609,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const refused = (p) => p.unread || (p.ci !== "success" && p.ci !== "failure" && (p.shared?.length || p.crowded));
   if (!inFlight) {
     // One that flew past a hold (`past` below) is not this: with no hold it is back in line like the rest.
-    const lone = line().find((p) => (p.alone?.sha === p.sha || p.alone?.from === p.sha) && !p.alone.past && canGoAlone(p) && !refused(p));
+    // Not one parked for a hold or a draft (`flyAlone` would leave it be, and nothing else would fly). One parked before
+    // (its mark says `parked`) flies only once no other lone one does: another may have gone alone while it waited.
+    const lones = line().filter((p) => (p.alone?.sha === p.sha || p.alone?.from === p.sha) && !p.alone.past && !p.draft && !isHeld(p) && canGoAlone(p) && !refused(p));
+    const lone = lones.find((p) => !p.alone.parked) ?? lones[0];
     if (lone) inFlight = await flyAlone(lone);
   }
   // Held for CI Success red on the base itself, a batch or lone pull request stays in flight until the base moves, and
@@ -1683,6 +1689,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // The oldest waited `waited` by now: it leaves MAX_WAIT after that one could board, whatever the run.
   const company = holding && !inFlight ? { count: holding.count, minBatch, leavesAt: now - holding.waited + maxWait } : null;
   let place = 0;
+  /**
+   * A lone one on hold or a draft (`flyAlone` leaves it be), or parked so before and not flown since, whose head is still
+   * its rebase, pushed or not: its mark is kept, marked `parked`, until its own flight writes a new one.
+   */
+  const parks = (p) => (p.alone?.sha === p.sha || p.alone?.from === p.sha) && !p.alone.past && (p.draft || isHeld(p) || !!p.alone.parked);
   for (const p of line()) {
     const after = behind.get(p.number);
     p.behind = after && inFlight && !inFlight.alone && after.batch === inFlight.number && !aboard.has(p.number) ? after : null;
@@ -1694,7 +1705,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
           ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held, null, stuck)
           : aboard.has(p.number)
             ? positionText(base, p, 0, inFlight.number, p.sha, null, held, null, stuck)
-            : positionText(base, p, ++place, 0, p.sha, null, held, heldBack.has(p.number) ? company : null, stuck, cannot.has(p.number));
+            : parks(p)
+              ? positionText(base, p, ++place, 0, queuedHead(p.sticky) ?? p.sha, null, held, null, stuck, false, { ...p.alone, parked: true })
+              : positionText(base, p, ++place, 0, p.sha, null, held, heldBack.has(p.number) ? company : null, stuck, cannot.has(p.number));
     if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
     if (p.unread) {
       // A comment posted now would be past what the next run reads too: one more every run.

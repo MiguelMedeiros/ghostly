@@ -2402,6 +2402,122 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
   });
 
+  describe("a lone pull request whose second rebase was never pushed, held or a draft since", () => {
+    // Its head is still the first rebase, so the mark's sha is not its head. That pushed the second rebase again before
+    // looking at a hold: a held branch was force-pushed, and a review's hold, which ends on a new head, ended on the
+    // train's own push, so a pull request with changes needed landed. Parked, its position comment lost the mark, so after
+    // the hold nothing pushed that rebase and a red first one waited for good.
+    const unpushed = async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run();
+      const first = repo.pulls.get(11)!.sha;
+      repo.settle([11]);
+      const push = repo.git.pushHead;
+      repo.git.pushHead = async () => ({ ok: false, message: "fatal: unable to access 'https://github.com/…': Could not resolve host: github.com" });
+      await repo.run();
+      repo.git.pushHead = push;
+      expect(repo.alone(11)).toMatchObject({ retried: true, from: first });
+      return { repo, first, pushes: repo.pushes.length };
+    };
+
+    /** The hold is over: the next run pushes the promised second rebase, with `retried` kept. */
+    const pushedAfter = async (repo: ReturnType<typeof fakeRepo>, first: string, pushes: number, now?: number) => {
+      expect((await repo.run(now === undefined ? undefined : { now })).inFlight).toBe(11);
+      expect(repo.pushes).toHaveLength(pushes + 1);
+      const second = repo.pulls.get(11)!.sha;
+      expect(second).not.toBe(first);
+      expect(repo.alone(11)).toMatchObject({ sha: second, retried: true });
+    };
+
+    it("leaves a branch put on hold alone, and pushes the second rebase once the hold comes off", async () => {
+      const { repo, first, pushes } = await unpushed();
+      repo.pulls.get(11)!.labels.push(HOLD);
+      for (let i = 0; i < 2; i++) expect((await repo.run()).inFlight).toBeNull();
+      expect(repo.pulls.get(11)!.sha).toBe(first);
+      expect(repo.pushes).toHaveLength(pushes);
+      expect(repo.alone(11)).toMatchObject({ retried: true, from: first });
+      repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
+      await pushedAfter(repo, first, pushes);
+      repo.settle([11]);
+      expect((await repo.run()).failed).toEqual([11]);
+      expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
+    });
+
+    it("leaves a draft alone, and pushes the second rebase once it is ready again", async () => {
+      const { repo, first, pushes } = await unpushed();
+      repo.pulls.get(11)!.draft = true;
+      await repo.run();
+      expect(repo.pulls.get(11)!.sha).toBe(first);
+      expect(repo.pushes).toHaveLength(pushes);
+      repo.pulls.get(11)!.draft = false;
+      await pushedAfter(repo, first, pushes);
+      repo.settle();
+      await repo.run();
+      expect(repo.landed).toContain("#11");
+    });
+
+    it("does not land one a reviewer asked changes of on its head, and pushes the second rebase once approved", async () => {
+      const { repo, first, pushes } = await unpushed();
+      const now = Date.now();
+      const review = (id: number, verdict: string, at: number) => ({ id, body: `Review: ${verdict} (head ${first.slice(0, 7)})`, user: { login: "MiguelMedeiros" }, created_at: new Date(at).toISOString(), author_association: "OWNER" });
+      repo.comments.set(11, [...(repo.comments.get(11) ?? []), review(777, "changes needed", now - 60_000)]);
+      await repo.run({ now });
+      expect(repo.pushes).toHaveLength(pushes);
+      repo.settle();
+      await repo.run({ now: now + 60_000 });
+      expect(repo.landed).not.toContain("#11");
+      expect(repo.pushes).toHaveLength(pushes);
+      repo.comments.set(11, [...(repo.comments.get(11) ?? []), review(778, "approved", now + 90_000)]);
+      await pushedAfter(repo, first, pushes, now + 120_000);
+      repo.settle();
+      await repo.run({ now: now + 180_000 });
+      expect(repo.landed).toContain("#11");
+    });
+
+    it("keeps the mark of one whose rebase was pushed, held while its CI ran: red after the hold, it gets its second run", async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run();
+      const first = repo.pulls.get(11)!.sha;
+      const pushes = repo.pushes.length;
+      repo.pulls.get(11)!.labels.push(HOLD);
+      expect((await repo.run()).inFlight).toBeNull();
+      expect(repo.alone(11)).toMatchObject({ sha: first, retried: false });
+      repo.settle([11]);
+      repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
+      await pushedAfter(repo, first, pushes);
+    });
+
+    it("lets another one go alone while it is parked, and that one keeps its mark: red, it gets its second run, then the parked one flies", async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run();
+      repo.pulls.get(11)!.labels.push(HOLD);
+      repo.add(12, { behind: true });
+      expect((await repo.run()).inFlight).toBe(12);
+      const first = repo.pulls.get(12)!.sha;
+      repo.settle([12]);
+      for (let i = 0; i < 2; i++) await repo.run();
+      repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
+      expect(repo.alone(11)).not.toBeNull();
+      const r = await repo.run();
+      expect(r.inFlight).toBe(12);
+      expect(repo.pulls.get(12)!.sha).not.toBe(first);
+      expect(repo.alone(12)).toMatchObject({ sha: repo.pulls.get(12)!.sha, retried: true });
+      expect(repo.alone(11)).not.toBeNull();
+      repo.settle([12]);
+      expect((await repo.run()).failed).toEqual([12]);
+      expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+      repo.settle();
+      for (let i = 0; i < 3 && !repo.landed.includes("#11"); i++) {
+        await repo.run();
+        repo.settle();
+      }
+      expect(repo.landed).toContain("#11");
+    });
+  });
+
   it("sends a lone pull request that changes a workflow and is behind dev to a coordinator, with no rebase push", async () => {
     // Before, it was rebased and pushed, GitHub refused the push, and it left the line with `queue:failed`.
     const repo = fakeRepo();
