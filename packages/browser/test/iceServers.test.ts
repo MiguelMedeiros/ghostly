@@ -24,6 +24,9 @@ it("quotes a refused address without its user, password, query or fragment", () 
     ["turns://user:s3cr3t@host:5349", "turns://host:5349"],
     ["https://user:s3cr3t@turn.example.org/#s3cr3t", "https://turn.example.org/"],
     ["https://turn.example.org", "https://turn.example.org"],
+    ["turn:user:pa#s3cr3t@host", "turn:host"],
+    ["turn:user:pa?s3cr3t@host", "turn:host"],
+    ["s3cr3t:s3cr3t@host", "host"],
   ]) {
     const problem = iceServerProblem({ urls, username: "u", credential: "c" });
     expect(problem, urls).toBe(`“${shown}” is not a TURN or STUN address (turn:host:port)`);
