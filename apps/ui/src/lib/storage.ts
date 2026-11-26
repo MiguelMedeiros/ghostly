@@ -280,6 +280,16 @@ export function sessionWrites(): number {
   return chatWrites;
 }
 
+/**
+ * Chats this page stored under a key no chat had (as `chatKeys` last read them) or removed, counted: what the chats'
+ * keys read once (`sessionIdsByPeer`) can be kept for while it stays the same, a message stored in a chat that has its
+ * key changing nothing of them. Another page's are not counted: its `storage` event says so.
+ */
+let chatKeyWrites = 0;
+export function chatKeyChanges(): number {
+  return chatKeyWrites;
+}
+
 /** A key as this page last wrote it: what localStorage refused to take, or what it holds. */
 function readKey(key: string): string | null {
   return unsaved.get(key) ?? localStorage.getItem(key);
@@ -288,7 +298,10 @@ function readKey(key: string): string | null {
 /** Writes a key, or keeps it in this page when localStorage refuses it (`unsaved`). Whether localStorage took it. */
 function writeKey(key: string, value: string): boolean {
   const held = unsaved.size > 0;
-  if (isSessionKey(key)) chatWrites++;
+  if (isSessionKey(key)) {
+    chatWrites++;
+    if (!contacts.has(key)) chatKeyWrites++;
+  }
   try {
     localStorage.setItem(key, value);
     unsaved.delete(key);
@@ -302,7 +315,10 @@ function writeKey(key: string, value: string): boolean {
 }
 
 function forgetKey(key: string): void {
-  if (isSessionKey(key)) chatWrites++;
+  if (isSessionKey(key)) {
+    chatWrites++;
+    chatKeyWrites++;
+  }
   if (unsaved.delete(key) && !unsaved.size) tellUnsaved();
   localStorage.removeItem(key);
 }

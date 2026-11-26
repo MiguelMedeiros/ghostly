@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import { sessionIdForPeer } from "../lib/storage";
+import { sessionIdsByPeer } from "../lib/storage";
 
 const NONE: ReadonlySet<string> = new Set();
 
@@ -37,7 +37,10 @@ export function useChatsFound(query: string): ReadonlySet<string> {
       if (!links.length) return;
       const peers = new Map(links.map((link) => [link.id, link.peerPubKeyZ32]));
       engine.call("chatsFound", { query, linkIds: links.map((link) => link.id) }).then((ids) => {
-        if (run === latest) setFound({ query, chats: new Set(ids.flatMap((id) => sessionIdForPeer(peers.get(id) ?? "") ?? [])) });
+        if (run !== latest) return;
+        // The chats' keys read once for the answer, not once per chat found (each read walks every stored key).
+        const sessionOf = ids.length ? sessionIdsByPeer() : () => undefined;
+        setFound({ query, chats: new Set(ids.flatMap((id) => sessionOf(peers.get(id) ?? "") ?? [])) });
       }, () => {});
     };
     const askSoon = () => { timer ??= setTimeout(ask, ASK_AGAIN_MS); };
