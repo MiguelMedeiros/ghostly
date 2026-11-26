@@ -1669,6 +1669,16 @@ export class GroupSession {
   }
 
   /**
+   * Whether an edit of my message `messageId` may mention everyone (WISP 902 § Mentions): I am the group's admin, and
+   * was the admin of the message's epoch, which its members check the edit against. An admin who got the role after
+   * sending it may not: `sendEdit` seals no `*` for it, and the app refuses such an edit before it keeps or says it.
+   */
+  editMentionsEveryone(messageId: string): boolean {
+    const ref = meshMessageRef(messageId), commit = ref && this.state.chain[ref.e];
+    return !!commit && rosterAdmin(commit.m) === this.myKey && this.isAdmin;
+  }
+
+  /**
    * Says an edit of one of my messages (WISP 902 § Edits): edit `v`, the whole new text and its mentions, sealed under
    * the key of the message's epoch and signed, to every member of that epoch still in the group, or to `to` alone (an
    * edge that just opened). Someone admitted after the message cannot open it and is not sent it, but a hub I count on
@@ -1686,7 +1696,7 @@ export class GroupSession {
       if (!validEditText(text)) return { error: text ? "Message exceeds 16 KiB" : "An edit cannot be empty" };
       const secret = this.secret(ref.e);
       if (!secret) return { error: "This message is too old to edit: its epoch's key is gone" };
-      const named = validMentions(wireMentions(edit.mentions ?? []), text, rosterAdmin(commit.m) === this.myKey && this.isAdmin);
+      const named = validMentions(wireMentions(edit.mentions ?? []), text, this.editMentionsEveryone(messageId));
       // A removal (WISP 400 § Delete for everyone) carries its fallback text alone.
       const plain = JSON.stringify(edit.remove ? { text, rm: true } : { text, ...(named.length ? { m: named } : {}), ...(edit.card ? { sc: edit.card } : {}) });
       if (utf8Encode(plain).length > MAX_EDIT_PLAIN) return { error: "Message exceeds 16 KiB" };

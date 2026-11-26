@@ -1115,6 +1115,13 @@ export class Groups {
     const result = await session.sendEdit(edit.id, { v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }), ...(edit.rm && { remove: true }) }, to);
     return "error" in result ? result.error : null;
   }
+  /**
+   * Whether my edit of `messageId` may mention everyone: a private group's admin who was its admin when the message
+   * was sent too (`GroupSession.editMentionsEveryone`); never in a community, which has no everyone.
+   */
+  editMentionsEveryone(groupId: string, messageId: string): boolean {
+    return !this.isCommunity(groupId) && !!this.sessions.get(groupId)?.editMentionsEveryone(messageId);
+  }
   /** Resolves once the community frames received so far were handed to the engine (tests). */
   communityIdle(): Promise<void> { return this.communities.idle(); }
 

@@ -127,6 +127,30 @@ describe("GroupEdits on its own", () => {
     expect(await edits.edit("g1", "nobody:9:9", "x")).toEqual({ error: "Only your own text messages can be edited", refused: true, missing: true });
   });
 
+  it("refuses an edit adding @everyone to a message sent before I was the admin, keeping and saying nothing; one sent as the admin keeps it", async () => {
+    const messages = [mine(0, "lunch"), mine(1, "dinner"), { ...mine(2, "@everyone go"), mentions: [{ k: "*", o: 0, l: 9 }] }];
+    const sent: GroupEdit[] = [];
+    // As the group answers it (`GroupSession.editMentionsEveryone`): message 1 was sent while I was the admin, 0 and 2 before.
+    const edits = new GroupEdits({ ...rows(messages), changed: () => {}, send: async (_g, edit) => { sent.push(edit); return null; }, edge: () => ({}), now: () => 1_000_000,
+      membership: () => ({ me, members: new Set([me, bob, carol]), community: false, admin: true }), mentionsEveryone: (_g, id) => id === mine(1).id });
+    expect(await edits.edit("g1", mine(0).id, "lunch @everyone", [{ k: "*", o: 6, l: 9 }])).toEqual({
+      error: "This message was sent before you were the group's admin: an edit of it cannot mention everyone. Send a new message to mention everyone.", refused: true, missing: false,
+    });
+    await edits.flush("g1");
+    expect(messages[0]).toEqual(mine(0, "lunch"));
+    expect(sent).toEqual([]);
+    // Without everyone the same message is edited as before.
+    expect(await edits.edit("g1", mine(0).id, "lunch at 1")).toEqual({ error: null, messageId: mine(0).id });
+    expect(await edits.edit("g1", mine(1).id, "dinner @everyone", [{ k: "*", o: 7, l: 9 }])).toEqual({ error: null, messageId: mine(1).id });
+    // A row that shows everyone the group would not seal again loses it here too, as the members' copy does.
+    expect(await edits.edit("g1", mine(2).id, "@everyone go now")).toEqual({ error: null, messageId: mine(2).id });
+    await edits.flush("g1");
+    expect(messages[1].mentions).toEqual([{ k: "*", o: 7, l: 9 }]);
+    expect(messages[2].mentions).toBeUndefined();
+    expect(sent.map(e => [e.id, e.k])).toEqual([[mine(0).id, undefined], [mine(1).id, [{ k: "*", o: 7, l: 9 }]], [mine(2).id, undefined]]);
+    edits.stop();
+  });
+
   it("refuses to edit or delete for everyone a text of mine written under the member key I had before I was removed and invited back", async () => {
     vi.useFakeTimers();
     // Invited back, I hold a new member key: the group knows my lines from before by the old one, and its session

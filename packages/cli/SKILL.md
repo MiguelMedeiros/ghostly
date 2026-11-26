@@ -232,6 +232,8 @@ ghostly group show Support                           # members; the entry link s
   `@<name>` for it (or `@<key prefix>`, `@everyone`). Without it, the command fails with
   "Write @Ana in the text to mention Ana". A turn's `member` is the author's key; `untrusted.name` is their name.
 - A group has no delivery receipts: `group send --wait sent` returns once a member's edge took it.
+- `group edit --mention everyone` on a message sent before you became the group's admin is `refused` (exit 1) and
+  nothing changes: an edit mentions everyone only in a message sent as the admin. Send a new message instead.
 
 ### 10. Show your work: task and routine cards
 

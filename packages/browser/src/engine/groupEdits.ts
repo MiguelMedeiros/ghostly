@@ -1,5 +1,5 @@
 import {
-  EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, GROUP_EDIT_TEXT_BYTES, MAX_EDITS_PER_MESSAGE, RateWindow, STATUS_CARD_LIMITS, carryMentions, mentionsMember, heardTime, utf8Encode,
+  EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, GROUP_EDIT_TEXT_BYTES, MAX_EDITS_PER_MESSAGE, MENTION_EVERYONE, RateWindow, STATUS_CARD_LIMITS, carryMentions, mentionsMember, heardTime, utf8Encode, validMentions,
   type GroupEdit, type GroupMention, type StatusCard,
 } from "@ghostly/core";
 import { GROUP_MESSAGE_ID, canEditInGroup, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
@@ -32,6 +32,11 @@ export interface GroupEditsHost {
   membership(groupId: string): { me: string; members: ReadonlySet<string>; community: boolean; admin?: boolean } | undefined;
   /** Why I am not in the group any more, as it shows it ("You were removed from this group"); undefined when it says none. */
   notMember?(groupId: string): string | undefined;
+  /**
+   * Whether my edit of message `messageId` may mention everyone: the group seals it only from its admin who was the
+   * admin when the message was sent too (`Groups.editMentionsEveryone`). Not given: whenever I am a private group's admin.
+   */
+  mentionsEveryone?(groupId: string, messageId: string): boolean;
   /**
    * A member deleted its message for everyone (WISP 400 § Delete for everyone): it goes from this device with its file,
    * and its id is kept so a copy that comes again stays gone. Also for a message not here yet.
@@ -145,8 +150,13 @@ export class GroupEdits {
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
     if (isJoinNotice(text)) return refuse("An edit cannot read as a join notice.");
     if (utf8Encode(text).length > GROUP_EDIT_TEXT_BYTES) return refuse(`Message exceeds ${GROUP_EDIT_TEXT_BYTES} UTF-8 bytes.`);
-    // Everyone: a private group's admin only (the group checks it against the admin of the message's epoch again).
-    const mentions = carryMentions(message, text, Array.isArray(added) ? added : [], !membership.community && !!membership.admin);
+    // Everyone: a private group's admin only, in a message sent while it was the admin too, as the group seals it
+    // (`GroupSession.sendEdit`): one asked for otherwise is refused, never kept here while the members get none.
+    const picked = Array.isArray(added) ? added : [], admin = !membership.community && !!membership.admin;
+    const everyone = admin && this.host.mentionsEveryone?.(groupId, messageId) !== false;
+    if (admin && !everyone && validMentions(picked, text, true).some(m => m.k === MENTION_EVERYONE))
+      return refuse("This message was sent before you were the group's admin: an edit of it cannot mention everyone. Send a new message to mention everyone.");
+    const mentions = carryMentions(message, text, picked, everyone);
     if (text === message.text && JSON.stringify(mentions) === JSON.stringify(message.mentions ?? []) && JSON.stringify(card ?? null) === JSON.stringify(message.card ?? null)) return { error: null, messageId };
     const seq = (message.edit?.seq ?? 0) + 1, most = card ? STATUS_CARD_LIMITS.edits : MAX_EDITS_PER_MESSAGE;
     if (seq > most) return refuse(`This message was edited ${most} times, the most one takes.`);

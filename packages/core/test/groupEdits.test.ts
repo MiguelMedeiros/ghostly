@@ -369,6 +369,35 @@ describe("group-edit frames (a private group)", () => {
     expect(mesh.of(carol).find(e => e.id === bobsId)).not.toHaveProperty("k");
   });
 
+  it("everyone in an edit after a handover: only in a message sent as the admin; one from before the role is never sealed, and a forged one is dropped", async () => {
+    const { mesh, alice, bob, carol } = await trio();
+    const before = ((await bob.sendText("lunch")) as { id: string }).id;
+    await alice.transferAdmin(bob.myKey);
+    await mesh.settle();
+    expect(bob.isAdmin).toBe(true);
+    const after = ((await bob.sendText("dinner")) as { id: string }).id;
+    // What the app asks before it keeps or says an edit: the message from before the role may not mention everyone.
+    expect(bob.editMentionsEveryone(before)).toBe(false);
+    expect(bob.editMentionsEveryone(after)).toBe(true);
+    // Alice, the admin of the first message's epoch, is not the admin any more.
+    expect(alice.editMentionsEveryone(((await alice.sendText("hi")) as { id: string }).id)).toBe(false);
+    await bob.sendEdit(after, { v: 1, ts: 1, text: "dinner @all", mentions: [{ k: "*", o: 7, l: 4 }] });
+    await bob.sendEdit(before, { v: 1, ts: 1, text: "lunch @all", mentions: [{ k: "*", o: 6, l: 4 }] });
+    await mesh.settle();
+    expect(mesh.of(carol).find(e => e.id === after)!.k).toEqual([{ k: "*", o: 7, l: 4 }]);
+    expect(mesh.of(carol).find(e => e.id === before)).not.toHaveProperty("k");
+    // Sealed anyway (an app that skipped the check): the members still drop it, as the admin of the message's epoch did not send it.
+    bob.editMentionsEveryone = () => true;
+    await bob.sendEdit(before, { v: 2, ts: 2, text: "lunch @all now", mentions: [{ k: "*", o: 6, l: 4 }] });
+    await mesh.settle();
+    const forged = mesh.sent.filter(f => f.frame.t === GROUP_EDIT_FRAME && f.to === carol.myKey).map(f => f.frame as GroupEditFrame).find(f => f.v === 2)!;
+    const secret = fromBase64Url(mesh.saves.get(bob.myKey)!.at(-1)!.secrets[forged.e]);
+    const plain = decryptText(epochKeys(secret, forged.g, forged.e).message, JSON.stringify(["ghostly-group/1 edit", forged.g, forged.e, forged.s, forged.n, forged.v, forged.ts]), forged.nn, forged.c);
+    expect(JSON.parse(plain!)).toMatchObject({ m: [{ k: "*", o: 6, l: 4 }] });
+    for (const s of [alice, carol]) expect(mesh.of(s).find(e => e.id === before && e.e === 2)).toMatchObject({ m: "lunch @all now" });
+    for (const s of [alice, carol]) expect(mesh.of(s).find(e => e.id === before && e.e === 2)).not.toHaveProperty("k");
+  });
+
   it("an app from before edits ignores the frame and keeps working", async () => {
     const mesh = new Mesh();
     const alice = mesh.add(GroupSession.create("Crew"));
