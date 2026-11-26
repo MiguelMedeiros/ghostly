@@ -56,7 +56,8 @@
     "removedInfo": "The group's node won't let you back into this call unless the admin allows it. You stay in the group.",
     "retry": "Try again",
     "screenOf": "{{name}}'s screen",
-    "unreachable": "Couldn't reach the group's call"
+    "unreachable": "Couldn't reach the group's call",
+    "yourScreen": "Your screen"
   },
   "incomingAudio": "Incoming audio call...",
   "incomingVideo": "Incoming video call...",

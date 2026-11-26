@@ -56,7 +56,8 @@
     "removedInfo": "管理者が許可するまで、グループのノードはこの通話に戻ることを許しません。グループには残っています。",
     "retry": "再試行",
     "screenOf": "{{name}}の画面",
-    "unreachable": "グループの通話につながりませんでした"
+    "unreachable": "グループの通話につながりませんでした",
+    "yourScreen": "あなたの画面"
   },
   "incomingAudio": "音声通話の着信...",
   "incomingVideo": "ビデオ通話の着信...",

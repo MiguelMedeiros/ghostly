@@ -104,6 +104,21 @@ describe("a shared screen", () => {
     expect(within(screen.getByTestId("group-call-side")).getAllByTestId("group-call-tile").map((t) => t.dataset.identity)).toEqual(["me", "ana", "bo"]);
   });
 
+  it("names your own screen \"Your screen\", on the stage, beside it and in the small window, not \"You's screen\"", async () => {
+    const mine = { screen: true, tracks: { screen: video() } };
+    const { user, rerenderWith } = view(state(0, { local: person("me", mine), participants: [person("ana")] }));
+    const screens = () => screen.getAllByTestId("group-call-tile").filter((t) => t.dataset.kind === "screen");
+    expect(screens().map((t) => t.textContent)).toEqual(["Your screen"]);
+
+    // Ana shares after you: yours moves beside hers.
+    rerenderWith(state(0, { local: person("me", mine), participants: [person("ana", mine)] }));
+    expect(screens().find((t) => t.dataset.identity === "me")).toHaveTextContent(/^Your screen$/);
+
+    rerenderWith(state(0, { local: person("me", mine), participants: [person("ana")] }));
+    await user.click(screen.getByTestId("group-call-minimize"));
+    expect(screens().map((t) => t.textContent)).toEqual(["Your screen"]);
+  });
+
   it("two at once: the latest wins and the other is a tile; when it stops, the other is back", () => {
     const sharing = (who: string[]) => state(0, { participants: ["ana", "bo"].map((id) => person(id, who.includes(id) ? { screen: true, tracks: { screen: video() } } : {})) });
     const main = () => within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0];

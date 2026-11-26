@@ -286,6 +286,8 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   // Everyone else by the group's own name for their key (WISP 602 § The reply): the node's name is not theirs to vouch for.
   const shown = (p: GroupCallParticipant) => (p === local || !groupNameOf ? p.name : groupNameOf(p.identity));
   const nameOf = (p: GroupCallParticipant) => (p === local ? t("calls.you") : shown(p));
+  // Your own screen has a name of its own: "You" in the others' template reads "You's screen".
+  const screenName = (p: GroupCallParticipant) => (p === local ? t("calls.group.yourScreen") : fillNames(t("calls.group.screenOf"), { name: shown(p) }));
   const order = useShareOrder(everyone.filter((p) => p.screen && p.tracks.screen).map((p) => p.identity));
   const presenter = everyone.find((p) => p.identity === order[order.length - 1]) ?? null;
   // The other screens are tiles beside the faces.
@@ -297,7 +299,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
     <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} menu={menuOf(p)} />
   ));
   const screenTiles = otherScreens.map((p) => (
-    <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} face={shown(p)} />
+    <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={screenName(p)} face={shown(p)} />
   ));
   // The small window shows one tile: the screen being shared, or else whoever speaks.
   const focus = presenter ?? everyone.find((p) => p.identity === activeSpeaker) ?? participants[0] ?? local;
@@ -343,7 +345,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       {mini ? (
         <div className="call-mini-tile absolute inset-0 grid">
           {focus === presenter ? (
-            <Tile person={focus} you={focus === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(focus) })} face={shown(focus)} />
+            <Tile person={focus} you={focus === local} kind="screen" speaking={false} name={screenName(focus)} face={shown(focus)} />
           ) : (
             <Tile person={focus} you={focus === local} kind="face" speaking={focus.identity === activeSpeaker} name={nameOf(focus)} face={shown(focus)} />
           )}
@@ -361,7 +363,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           {presenter ? (
             <div data-testid="group-call-stage" className="call-tiles flex-1 min-h-0 flex max-md:flex-col gap-2">
               <div className="flex-1 min-w-0 min-h-0 grid">
-                <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} face={shown(presenter)} />
+                <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={screenName(presenter)} face={shown(presenter)} />
               </div>
               <div data-testid="group-call-side" className="md:w-48 max-md:h-28 shrink-0 flex md:flex-col gap-2 overflow-auto">
                 {[...screenTiles, ...faces].map((tile) => <div key={tile.key} className="shrink-0 grid md:h-28 max-md:w-36">{tile}</div>)}

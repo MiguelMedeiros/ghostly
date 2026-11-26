@@ -56,7 +56,8 @@
     "removedInfo": "O nó do grupo não deixa você voltar a esta chamada sem a permissão do admin. Você continua no grupo.",
     "retry": "Tentar de novo",
     "screenOf": "Tela de {{name}}",
-    "unreachable": "Não foi possível alcançar a chamada do grupo"
+    "unreachable": "Não foi possível alcançar a chamada do grupo",
+    "yourScreen": "Sua tela"
   },
   "incomingAudio": "Chamada de áudio recebida...",
   "incomingVideo": "Chamada de vídeo recebida...",
