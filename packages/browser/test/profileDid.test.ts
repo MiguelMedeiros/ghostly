@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { didDhtDocument, didDhtKey, encodeDidDhtPacket, openDidDhtPayload, toBase64Url } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
-import { DID_REPUBLISH_MS, ProfileDid, type ProfileDidHost } from "../src/engine/did";
+import { DID_CLOSE_WAIT_MS, DID_REPUBLISH_MS, ProfileDid, type ProfileDidHost } from "../src/engine/did";
 // covers: did.dht.profile, did.dht.public-links
 
 // Counted, not replaced: the real encoder still runs.
@@ -316,6 +316,90 @@ describe("the profile's did:dht", () => {
     await did.close();
     expect(did.view()?.listed).toEqual(["nostr-1", "ssh-2"]);
     expect((await stored())?.listed).toEqual(["nostr-1", "ssh-2"]);
+  });
+
+  it("closes once a listing changed during a publish on its way is out too, not with the older document last", async () => {
+    const { make, state } = world();
+    const did = make();
+    await did.load();
+    did.start();
+    const host = (did as unknown as { host: ProfileDidHost }).host;
+    // A slow background publish (the network back, the 2 s timer) of the document before the change.
+    let land!: () => void;
+    host.publish = (key, payload) => new Promise<void>(resolve => { land = () => { state.puts.push({ key, payload }); resolve(); }; });
+    void did.publishNow();
+    await new Promise(r => setTimeout(r, 20));
+    host.publish = async (key, payload) => { await new Promise(r => setTimeout(r, 50)); state.puts.push({ key, payload }); };
+    await did.setListed({ id: "nostr-1", listed: true });
+    const closed = did.close();
+    await new Promise(r => setTimeout(r, 20));
+    land();
+    await closed;
+    expect(state.puts).toHaveLength(2);
+    expect(opened(did, state.puts[0].payload).document.alsoKnownAs).toBeUndefined();
+    expect(opened(did, state.puts[1].payload).document.alsoKnownAs).toEqual(["nostr:npub1abc"]);
+    // Nothing goes after the close.
+    await new Promise(r => setTimeout(r, 100));
+    expect(state.puts).toHaveLength(2);
+  });
+
+  it("closes at once with nothing due, even with a publish on its way that never lands; a due one at its own pace", async () => {
+    const { make, state } = world();
+    const did = make();
+    await did.load();
+    did.start();
+    const host = (did as unknown as { host: ProfileDidHost }).host;
+    const publish = host.publish;
+    host.publish = () => new Promise<void>(() => {});
+    void did.publishNow();
+    await new Promise(r => setTimeout(r, 20));
+    let started = performance.now();
+    await did.close();
+    expect(performance.now() - started).toBeLessThan(1_000);
+
+    host.publish = publish;
+    const next = make();
+    await next.load();
+    next.start();
+    await next.setListed({ id: "domain-1", listed: true });
+    started = performance.now();
+    await next.close();
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(state.puts).toHaveLength(1);
+    expect(opened(next, state.puts[0].payload).document.alsoKnownAs).toEqual(["https://example.com"]);
+  });
+
+  it("closes within its bound when the publishes never land, and does not throw when one fails", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { make, state } = world();
+    const did = make();
+    await did.load();
+    did.start();
+    const host = (did as unknown as { host: ProfileDidHost }).host;
+    const publish = host.publish;
+    host.publish = () => new Promise<void>(() => {});
+    void did.publishNow();
+    await vi.advanceTimersByTimeAsync(10);
+    await did.setListed({ id: "nostr-1", listed: true });
+    let ended = false;
+    const closed = did.close().then(() => { ended = true; });
+    await vi.advanceTimersByTimeAsync(DID_CLOSE_WAIT_MS - 1);
+    expect(ended).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await closed;
+    expect(ended).toBe(true);
+    vi.useRealTimers();
+    host.publish = publish;
+
+    // The listing is still due in the next run, whose publish fails: the close ends all the same, the error said.
+    const next = make();
+    await next.load();
+    next.start();
+    await next.setListed({ id: "domain-1", listed: true });
+    state.fail = new Error("relays down");
+    await expect(next.close()).resolves.toBeUndefined();
+    expect(next.view()?.error).toBe("relays down");
+    expect(state.puts).toHaveLength(0);
   });
 
   it("tries a failed publish again after a few minutes, not an hour", async () => {
