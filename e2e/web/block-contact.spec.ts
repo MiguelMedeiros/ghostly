@@ -17,6 +17,9 @@ test("a blocked contact's messages never show; unblocked in Settings, they come 
   await bob.page.screenshot({ path: test.info().outputPath("1-block-asks.png") });
   await asked.getByRole("button", { name: "Block", exact: true }).click();
   await expect(asked).toBeHidden();
+  // The chat says so, and its call buttons are off.
+  await expect(bob.page.getByTestId("chat-blocked")).toContainText("You blocked this contact");
+  await expect(bob.page.getByTestId("call-audio").filter({ visible: true })).toHaveAttribute("aria-disabled", "true");
   // The menu says it is blocked now: Unblock contact takes Block's place.
   await bob.page.getByTestId("chat-options").click();
   await expect(bob.page.getByTestId("chat-unblock")).toBeVisible();
