@@ -625,6 +625,8 @@ describe("the rest", () => {
       ["apps/desktop/src/translate.rs", "translationRuntimes.test.ts"],
       ["e2e/playwright.config.ts", "e2eWorkflow.test.ts"],
       ["rust-toolchain.toml", "rustToolchain.test.ts"],
+      // Read through a constant (`read(ACTION)`), so the by-name guard below can't see it.
+      [".github/actions/node-npm/action.yml", "npmCacheWorkflow.test.ts"],
       ["native/transports/iroh-web/src/lib.rs", "irohWebBuild.test.ts"],
       ["packages/iroh-web/pkg/ghostly_iroh_web_bg.wasm", "irohWebBuild.test.ts"],
       // It lists the files with git, so no path of them is in its text: an import added or a dependency dropped.
@@ -792,6 +794,11 @@ for (const doc of [...DOCS, "docs/CLI.md"]) readFileSync(resolve(ROOT, doc), "ut
     for (const file of ["apps/website/scripts/privacy-hosts.test.mjs", "apps/website/e2e/agents-page.spec.ts", "apps/website/lib/release.ts", "apps/website/app/privacy/page.tsx", "packages/browser/src/proofs/domain.ts", "packages/cli/test/x.test.ts", "apps/extension/src/background.ts", "apps/desktop/src/lib.rs", "native/transports/src/lib.rs"]) {
       expect(mode(file), file).toBe("whole");
     }
+    // It also follows every local action the CI workflow and the workflows it calls use: a change to one ran it only
+    // in batches. Those workflows themselves run it through the scripts project, which holds it and runs whole.
+    expect(mode(".github/actions/node-npm/action.yml")).toBe("whole");
+    const scripts = (file: string) => byName(plan({ changed: changed(file), inventory, e2eFiles }).unit).scripts.mode;
+    for (const file of [".github/workflows/ci.yml", ".github/workflows/desktop-macos.yml"]) expect(scripts(file), file).toBe("whole");
     for (const file of ["apps/website/app/globals.css", "apps/ui/src/App.tsx", "docs/TESTING.md", "apps/desktop/gen/android/build.gradle.kts"]) expect(mode(file), file).toBe("skip");
   });
 

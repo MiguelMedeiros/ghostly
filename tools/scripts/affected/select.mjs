@@ -115,6 +115,7 @@ export const UNIT_PROJECTS = [
       "e2e/playwright.config.ts": ["e2eWorkflow"],
       ".github/security-allowlist.json": ["securityScanAllowlist"],
       "rust-toolchain.toml": ["rustToolchain"],
+      ".github/actions/node-npm/action.yml": ["npmCacheWorkflow"],
       "Cargo.toml": ["androidNativeWorkflow"],
       "{apps/desktop/tauri.e2e.conf.json,tsconfig.json}": ["desktopMacBuild"],
       // Its postinstall: matched even when its "scripts" alone changed (a change elsewhere in it runs everything).
@@ -154,13 +155,14 @@ export const UNIT_PROJECTS = [
   },
   {
     // CI's path gates (tools/scripts/ci-changes.mjs) must cover every file the website's scripts and code (browser
-    // checks, lib, app, components), the packages' and the extension's code and the crates' Rust name. Its test reads
-    // those from disk for the paths they name, which no import graph shows, so a change to one runs it (whole: that one
-    // file, about 150 ms). A draft's tier is all the merge train waits for: without this, a website script naming an
-    // uncovered file went red only in batches (2026-11-03).
+    // checks, lib, app, components), the packages' and the extension's code and the crates' Rust name, and every local
+    // action CI's workflows use. Its test reads those from disk for the paths they name, which no import graph shows,
+    // so a change to one runs it (whole: that one file, about 150 ms). A draft's tier is all the merge train waits for:
+    // without this, a website script naming an uncovered file went red only in batches (2026-11-03). A workflow change
+    // runs it through the scripts project, which holds it and runs whole.
     name: "ci gates", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/ci-changes.test.ts"],
     sources: [],
-    whole: ["apps/website/scripts/**", "apps/website/**/*.{ts,tsx,mts,js,mjs}", "packages/**/*.{ts,tsx,mts,js,mjs}", "apps/extension/**/*.{ts,tsx,mts,js,mjs}", "apps/desktop/**/*.rs", "native/transports/**/*.rs"],
+    whole: ["apps/website/scripts/**", "apps/website/**/*.{ts,tsx,mts,js,mjs}", "packages/**/*.{ts,tsx,mts,js,mjs}", "apps/extension/**/*.{ts,tsx,mts,js,mjs}", "apps/desktop/**/*.rs", "native/transports/**/*.rs", ".github/actions/**"],
     tests: [],
   },
   {
