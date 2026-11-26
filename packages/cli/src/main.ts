@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { connect } from "node:net";
-import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { dirname, sep } from "node:path";
 import packageJson from "../package.json" with { type: "json" };
 import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, shownWord, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
@@ -349,16 +349,30 @@ export function offlineCall(method: string, params: Record<string, unknown>): bo
 }
 
 /** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the
- *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin; anything else may take as long
- *  as it takes, once the daemon has answered the version check sent ahead of it (session()). */
+ *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin (a file send, plus the time to
+ *  copy the file in); anything else may take as long as it takes, once the daemon has answered the version check sent
+ *  ahead of it (session()). */
 const ANSWER_MS = 15_000;
 export function answerWithin(method: string, params: Record<string, unknown>): number | undefined {
   // A `--timeout` outside the daemon's range (1 to 3600 s, 86 400 for `chat wait` and `file wait`) is refused by the
   // daemon at once (bad_request); the deadline only has to be a timer Node takes (-10 s fired at once, 1e12 after 1 ms).
   const waits = typeof params.timeout === "number" ? Math.min(Math.max(params.timeout, 1), 86_400) : waitsFor(method, params);
-  if (waits !== undefined) return (waits + 10) * 1000;
+  if (waits !== undefined) return (waits + 10 + stagingSeconds(method, params)) * 1000;
   if (readOnly(method, params)) return ANSWER_MS;
   return undefined;
+}
+
+/**
+ * A `file send` copies the file into the profile before its wait starts (files.ts `stageWhileAsked`), 6-30 s for 1 GiB:
+ * its deadline adds a second per `STAGED_BYTES_PER_SECOND` of the file, well past that. Counted against the wait's
+ * own, a large file with a short `--timeout` failed as "The daemon did not answer" (exit 4) while it was still copied
+ * in, and the copy then stopped with the command gone: nothing was sent. A file it cannot read adds nothing (the
+ * daemon refuses it at once).
+ */
+const STAGED_BYTES_PER_SECOND = 8 * 1024 * 1024;
+function stagingSeconds(method: string, params: Record<string, unknown>): number {
+  if (method !== "file.send" || typeof params.path !== "string") return 0;
+  try { return Math.ceil(statSync(params.path).size / STAGED_BYTES_PER_SECOND); } catch { return 0; }
 }
 
 /**

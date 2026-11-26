@@ -809,29 +809,36 @@ const METHODS: Record<string, Method> = {
     }
     // A copy's wait that ends short (its time ran out, its delivery failed) ends the waits, not the answer: it threw
     // alone with that copy's id, every target's result and another's refusal lost, and a bot that sent again sent twice.
+    // Every copy's wait runs at once, each up to the timeout: one after another, they took a timeout per copy, past the
+    // client's deadline for one wait, and through a daemon the command failed as "The daemon did not answer" (exit 4),
+    // its results lost. They are read in the order they went, so the copy that ends the waits is the first in that
+    // order to end short, as before, and a copy after it says what it has now.
     let short: CliError | undefined;
-    const waited = async <T>(wait: () => Promise<T>, now: () => T): Promise<T> => {
-      if (short) return now();
-      try { return await wait(); } catch (error) { short = asCliError(error); return now(); }
+    const waits: { ended: Promise<{ took: unknown } | { error: unknown }>; now: () => unknown; done: (took: unknown) => void }[] = [];
+    const watch = <T>(wait: () => Promise<T>, now: () => T, done: (took: T) => void) => {
+      waits.push({ ended: wait().then((took) => ({ took }), (error: unknown) => ({ error })), now, done: done as (took: unknown) => void });
     };
     // A group's `edges`: how many took each of its copies so far (the fewest), as `group send` says it.
-    for (const [i, result] of out.entries()) if (to[i]!.group) {
-      let edges: number | undefined;
-      for (const messageId of result.messageIds) {
-        const taken = () => node(ctx).groupTaken({ groupId: to[i]!.id, messageId });
-        const took = groupWait === "sent" ? await waited(() => waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms), taken) : taken();
-        edges = Math.min(edges ?? took, took);
-      }
-      result.edges = edges ?? 0;
+    const took = out.map(() => [] as number[]);
+    for (const [i, result] of out.entries()) if (to[i]!.group) for (const messageId of result.messageIds) {
+      const taken = () => node(ctx).groupTaken({ groupId: to[i]!.id, messageId });
+      if (groupWait === "sent") watch(() => waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms), taken, (n) => took[i]!.push(n));
+      else took[i]!.push(taken());
     }
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
       if (to[i]!.group) continue;
-      await waited(async () => {
+      watch(async () => {
         const sent = await node(ctx).getMessage(to[i]!.id, messageId);
         if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
         else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, to[i]!.id, sent?.text ?? "", to[i]!.ref, ms, error); });
-      }, () => undefined);
+      }, () => undefined, () => {});
     }
+    for (const { ended, now, done } of waits) {
+      if (short) { done(now()); continue; }
+      const end = await ended;
+      if ("error" in end) { short = asCliError(end.error); done(now()); } else done(end.took);
+    }
+    for (const [i, result] of out.entries()) if (to[i]!.group) result.edges = took[i]!.length ? Math.min(...took[i]!) : 0;
     // A refusal first, then what ended a wait: each with every target's result.
     const failed = out.filter((r) => r.error);
     if (failed.length) throw new CliError(failed.length === out.length ? "refused" : "engine", failed.map((r) => `${r.to}: ${r.error}`).join("; "), { from: from.id, results: out });
