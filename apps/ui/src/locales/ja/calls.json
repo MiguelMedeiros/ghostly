@@ -56,6 +56,8 @@
     "removedInfo": "管理者が許可するまで、グループのノードはこの通話に戻ることを許しません。グループには残っています。",
     "retry": "再試行",
     "screenOf": "{{name}}の画面",
+    "showScreen": "{{name}}の画面を大きく表示",
+    "showYourScreen": "自分の画面を大きく表示",
     "unreachable": "グループの通話につながりませんでした",
     "yourScreen": "あなたの画面"
   },
@@ -104,7 +106,9 @@
   "shareScreen": "画面を共有",
   "sharing": {
     "both": "あなたと{{name}}さんが画面を共有しています",
+    "noSound": "音声なしで共有中",
     "peer": "{{name}}さんが画面を共有しています",
+    "withSound": "音声も共有中",
     "you": "画面を共有しています"
   },
   "stopSharing": "共有を停止",

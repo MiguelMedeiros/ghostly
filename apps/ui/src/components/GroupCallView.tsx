@@ -15,6 +15,7 @@ import { errorText } from "../lib/errorText";
 import { callWindowShown } from "../lib/serviceWindows";
 import { mediaProblemKeys } from "../lib/mediaProblemText";
 import { ownDirection } from "../lib/ownDirection";
+import { isolate } from "../lib/ownStatus";
 import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
 import { InfoButton } from "./layout/Section";
@@ -28,11 +29,13 @@ export interface GroupCallParticipant {
   mic: boolean;
   camera: boolean;
   screen: boolean;
+  /** Their shared screen carries its sound (a tab's or the system's); false while sharing a screen without it. */
+  screenSound?: boolean;
   speaking: boolean;
   /** What the group's admin took away from them in this call (WISP 602 § Moderation): off until the admin allows it. */
   byAdmin?: { mic: boolean; camera: boolean; screen: boolean };
   /** Played and shown here: the hook attaches none of them to the page itself. */
-  tracks: { audio?: MediaStreamTrack | null; camera?: MediaStreamTrack | null; screen?: MediaStreamTrack | null };
+  tracks: { audio?: MediaStreamTrack | null; camera?: MediaStreamTrack | null; screen?: MediaStreamTrack | null; screenAudio?: MediaStreamTrack | null };
 }
 
 /** The `useGroupCall` state the view draws. `local` is you; `participants` are everyone else. */
@@ -151,8 +154,8 @@ function TrackVideo({ track, fit, mirror }: { track: MediaStreamTrack; fit: "cov
   return <video ref={ref} autoPlay playsInline muted className={`absolute inset-0 w-full h-full bg-black ${fit === "contain" ? "object-contain" : "object-cover"}`} style={mirror ? { transform: "scaleX(-1)" } : undefined} />;
 }
 
-/** Someone's sound, on the chosen speaker. */
-function TrackAudio({ track, speaker }: { track: MediaStreamTrack; speaker?: string }) {
+/** Someone's sound (their voice, or their shared screen's), on the chosen speaker. */
+function TrackAudio({ track, speaker, testId = "group-call-audio" }: { track: MediaStreamTrack; speaker?: string; testId?: string }) {
   const ref = useRef<HTMLAudioElement>(null);
   useEffect(() => {
     if (!ref.current || typeof MediaStream !== "function") return;
@@ -165,7 +168,7 @@ function TrackAudio({ track, speaker }: { track: MediaStreamTrack; speaker?: str
   useEffect(() => {
     void applySpeaker(ref.current, speaker).catch(() => {});
   }, [speaker, track]);
-  return <audio ref={ref} autoPlay className="hidden" data-testid="group-call-audio" />;
+  return <audio ref={ref} autoPlay className="hidden" data-testid={testId} />;
 }
 
 /** Muted, or muted by the admin (`byAdmin`): ringed, and named so, on the tile and to a screen reader. */
@@ -205,6 +208,13 @@ function Tile({ person, you, kind, speaking, name, face, menu }: { person: Group
       <div className="absolute bottom-1.5 inset-x-1.5 flex items-center gap-1.5">
         {kind === "face" && (person.byAdmin?.mic ? <MutedMark label={t("calls.group.mutedByAdmin")} byAdmin /> : !person.mic && <MutedMark label={t("calls.group.muted")} />)}
         <span dir="auto" className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">{name}</span>
+        {/* What the others get of your screen's sound: all the system plays (but this page), or nothing when the
+            browser gave the picture alone (or the sound was left unticked). */}
+        {kind === "screen" && you && person.screenSound !== undefined && (
+          <span data-testid="group-call-screen-sound" data-sound={person.screenSound} className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">
+            {t(person.screenSound ? "calls.sharing.withSound" : "calls.sharing.noSound")}
+          </span>
+        )}
       </div>
       {menu}
     </div>
@@ -289,18 +299,39 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   // Your own screen has a name of its own: "You" in the others' template reads "You's screen".
   const screenName = (p: GroupCallParticipant) => (p === local ? t("calls.group.yourScreen") : fillNames(t("calls.group.screenOf"), { name: shown(p) }));
   const order = useShareOrder(everyone.filter((p) => p.screen && p.tracks.screen).map((p) => p.identity));
-  const presenter = everyone.find((p) => p.identity === order[order.length - 1]) ?? null;
-  // The other screens are tiles beside the faces.
-  const otherScreens = order.slice(0, -1).map((id) => everyone.find((p) => p.identity === id)!);
+  // The screen picked from the side stays large while others start and stop; once it stops, the latest is again.
+  const [picked, setPicked] = useState<string | null>(null);
+  if (picked && !order.includes(picked)) setPicked(null);
+  const large = picked && order.includes(picked) ? picked : order[order.length - 1];
+  const presenter = everyone.find((p) => p.identity === large) ?? null;
+  // The other screens are tiles beside the faces, each a button that shows it large.
+  const otherScreens = order.filter((id) => id !== large).map((id) => everyone.find((p) => p.identity === id)!);
+  // The picked tile goes from the side: the focus goes to the one that took its place there, to switch back.
+  const swapped = useRef<string | null>(null);
+  useEffect(() => {
+    const id = swapped.current;
+    swapped.current = null;
+    if (!id) return;
+    [...(box.current?.querySelectorAll<HTMLElement>("[data-testid=group-call-show-screen]") ?? [])].find((b) => b.dataset.identity === id)?.focus({ preventScroll: true });
+  }, [large, box]);
+  const show = (id: string) => {
+    swapped.current = large ?? null;
+    setPicked(id);
+  };
   // The admin's menu, on the others' faces in the whole window: the small one has no room for it.
   const menuOf = (p: GroupCallParticipant) => moderation && !mini && p !== local
     ? <TileModerationMenu identity={p.identity} name={shown(p)} moderation={moderation} host={box} /> : undefined;
   const faces = everyone.map((p) => (
     <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} menu={menuOf(p)} />
   ));
-  const screenTiles = otherScreens.map((p) => (
-    <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={screenName(p)} face={shown(p)} />
-  ));
+  const screenTiles = otherScreens.map((p) => {
+    const label = p === local ? t("calls.group.showYourScreen") : t("calls.group.showScreen", { name: isolate(nameOf(p)) });
+    const button = (
+      <button type="button" onClick={() => show(p.identity)} data-testid="group-call-show-screen" data-identity={p.identity} aria-label={label} title={label}
+        className="absolute inset-0 z-10 cursor-pointer rounded-xl hover:bg-white/10 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-accent" />
+    );
+    return <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={screenName(p)} face={shown(p)} menu={button} />;
+  });
   // The small window shows one tile: the screen being shared, or else whoever speaks.
   const focus = presenter ?? everyone.find((p) => p.identity === activeSpeaker) ?? participants[0] ?? local;
   const columns = gridColumns(faces.length + screenTiles.length);
@@ -341,6 +372,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       <div role="status" className="sr-only" data-testid="group-call-news">{news.map((line) => <p key={line}>{line}</p>)}</div>
 
       {participants.map((p) => p.tracks.audio && <TrackAudio key={p.identity} track={p.tracks.audio} speaker={devices?.speaker} />)}
+      {participants.map((p) => p.tracks.screenAudio && <TrackAudio key={`${p.identity}-screen`} track={p.tracks.screenAudio} speaker={devices?.speaker} testId="group-call-screen-audio" />)}
 
       {mini ? (
         <div className="call-mini-tile absolute inset-0 grid">
