@@ -1587,6 +1587,10 @@ export class GhostlyNode implements EngineImplementation {
       const now = Date.now() / 1000;
       return new Map(this.identities.views().filter(v => v.publicUri && v.expiresAt > now).map(v => [v.id, v.publicUri!]));
     },
+    expiresAt: id => {
+      const view = this.identities.views().find(v => v.id === id);
+      return view && view.expiresAt * 1000;
+    },
     proofIds: () => this.identities.views().map(v => v.id),
     publish: (pubKeyZ32, payload) => {
       if (!this.transport.publishPayload) throw new Error("This app cannot publish a DID");
