@@ -109,6 +109,20 @@ describe("Join call in a group's header", () => {
     expect(screen.getByTestId("group-call-join")).toHaveAccessibleName("Join call");
   });
 
+  it("reads as Join call, not as a video call: its label on it, a phone, in the call's colour", () => {
+    joinButton();
+    const join = screen.getByTestId("group-call-join");
+    expect(join).toHaveTextContent("Join call");
+    expect(join.querySelector("path")?.getAttribute("d")).toMatch(/^M22 16\.92/);
+    expect(join.querySelector("rect")).toBeNull();
+    expect(join).toHaveClass("text-accent", "bg-accent/15");
+    expect(join.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    // Folded under 640 px of header: beside Share link's label it left a long name 35 px wide (pt at 540).
+    expect(screen.getByText("Join call", { selector: "span" })).toHaveClass("@max-[640px]/group-head:hidden");
+    // Off (Hide my IP with no relay, the Linux Desktop…), its edge in forced colors greys as the rest of it does.
+    expect(join).toHaveClass("forced-colors:aria-disabled:border-[color:GrayText]");
+  });
+
   it("asks the node for a pass, joins its room with it and opens the call; Leave call closes it", async () => {
     answerPass(() => pass());
     const { user } = joinButton();
