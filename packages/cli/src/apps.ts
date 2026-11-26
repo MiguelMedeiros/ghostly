@@ -484,9 +484,25 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
  * v2.4.5" headers included), or a Ghostly key file's first line. The block may sit in a JSON or JS string, its line
  * breaks written `\n` (a service account's `"private_key"`, a key pasted into code). A library that only names the
  * block's header in its code does not match. The body stops at the next "-----": a file of headers with no end is read
- * once, not once per header to the end of the file.
+ * once, not once per header to the end of the file. The body is cut there with `indexOf` and read by one character class:
+ * a regex alternation repeated over a body of millions of characters ran out of stack.
  */
-const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----(?:\r?\n|(?:\\r)?\\n)(?:[A-Za-z0-9+/=\r\n :,.\\]|-(?!----)){40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
+function holdsPrivateKey(text: string): boolean {
+  if (GHOSTLY_KEY.test(text)) return true;
+  for (const header of text.matchAll(KEY_BEGIN)) {
+    const start = header.index + header[0].length;
+    const end = text.indexOf("-----", start);
+    if (end < 0) return false;
+    if (end - start < 40 || !KEY_BODY.test(text.slice(start, end))) continue;
+    KEY_END.lastIndex = end;
+    if (KEY_END.test(text)) return true;
+  }
+  return false;
+}
+const GHOSTLY_KEY = /^Ghostly (publisher|store) key \(WISP 1200\)/;
+const KEY_BEGIN = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----(?:\r?\n|(?:\\r)?\\n)/g;
+const KEY_BODY = /^[A-Za-z0-9+/=\r\n :,.\\-]*$/;
+const KEY_END = /-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----/y;
 
 /** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
 const isUnder = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
@@ -583,7 +599,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_BUNDLE_FILE), ...lists]));
   const contents = files.map((f) => ({ path: f.path, bytes: readFolderFile(f.full) }));
   // A bundle is public: a private key found in the folder (an old key, a store key, any PEM) stops the publish.
-  const keyFile = contents.find((f) => PRIVATE_KEY.test(Buffer.from(f.bytes).toString("latin1")));
+  const keyFile = contents.find((f) => holdsPrivateKey(Buffer.from(f.bytes).toString("latin1")));
   if (keyFile) throw refused(`${keyFile.path} in ${dir} holds a private key, and a bundle is public: move it out of the app's folder`, { reason: "private-key", detail: keyFile.path });
   const manifest = {
     ...draft,
