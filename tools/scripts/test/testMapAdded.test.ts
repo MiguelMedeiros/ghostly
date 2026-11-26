@@ -76,6 +76,14 @@ describe("test-map --base: a new test file declares what it covers", () => {
     expect(result.stderr).toContain("e2e/web/new.spec.ts: a new test file declares nothing (no @feature tag)");
   });
 
+  // e2e/matrix's scenario tests are a Vitest project (select.mjs "matrix"), not Playwright specs.
+  it("reads a unit test under e2e/ as a unit test", () => {
+    const result = map(branch({ "e2e/matrix/new.test.ts": "it('declares nothing');\n", "e2e/matrix/a.test.ts": "// covers: a.nope\n" }), "--base=base");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("e2e/matrix/new.test.ts: a new test file declares nothing (no // covers: comment)");
+    expect(result.stderr).toContain('e2e/matrix/a.test.ts:1: unknown feature "a.nope"');
+  });
+
   it("takes covers:, covers-gated:, a @feature tag or guards: #<issue> as a declaration", () => {
     const dir = branch({
       "packages/x/test/a.test.ts": "// covers: a.old\n",
