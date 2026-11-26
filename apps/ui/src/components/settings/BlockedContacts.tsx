@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
 import { useEngineValue } from "../../lib/engineState";
@@ -22,16 +22,24 @@ export function BlockedContacts() {
   // Unnamed, as the chat list says it: "Contact · <tag>".
   const lines = blocked.map((line) => ({ ...line, name: line.name || t("common.unnamedContact", { key: contactTag(line.key) }) }));
   const [unblocking, setUnblocking] = useState<string | null>(null);
-  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+  const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const handOff = useRef<{ gone: string; next?: string } | null>(null);
+  // The row goes: the focus moves to the next one (or the one before), not to the page, once that row's button is drawn
+  // enabled again and the unblocked row is gone (whichever comes last: the engine's state or its answer).
+  useEffect(() => {
+    const hand = handOff.current;
+    if (!hand || unblocking !== null || lines.some((line) => line.key === hand.gone)) return;
+    handOff.current = null;
+    if (focusLost() && hand.next) buttons.current.get(hand.next)?.focus();
+  });
 
   const unblock = async (key: string, i: number) => {
     setUnblocking(key);
+    handOff.current = { gone: key, next: lines[i + 1]?.key ?? lines[i - 1]?.key };
     try {
       await engine.call("setContactBlocked", { peerPubKeyZ32: key, blocked: false });
-    } catch { /* still listed: the button stays for another try */ }
+    } catch { handOff.current = null; /* still listed: the button stays for another try */ }
     setUnblocking(null);
-    // The row goes: the focus moves to the next one (or the one before), not to the page.
-    if (focusLost()) (buttons.current[i + 1] ?? buttons.current[i - 1])?.focus();
   };
 
   return (
@@ -40,7 +48,7 @@ export function BlockedContacts() {
         ? <Row label={t("settings.blocked.none")} hint={t("settings.blocked.hint")} testId="settings-blocked-none" />
         : lines.map((line, i) => (
           <Row key={line.key} label={line.name} testId="settings-blocked-contact">
-            <Button ref={(button) => { buttons.current[i] = button; }} loading={unblocking === line.key} disabled={unblocking !== null}
+            <Button ref={(button) => { if (button) buttons.current.set(line.key, button); else buttons.current.delete(line.key); }} loading={unblocking === line.key} disabled={unblocking !== null}
               aria-label={t("settings.blocked.unblockLabel", { name: isolate(line.name) })} onClick={() => void unblock(line.key, i)}>
               {t("settings.blocked.unblock")}
             </Button>

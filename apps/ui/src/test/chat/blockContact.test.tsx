@@ -67,4 +67,19 @@ describe("Settings → Blocked contacts", () => {
     await utils.user.click(screen.getByRole("button", { name: /^Unblock .*Bob/ }));
     expect(utils.engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }]);
   });
+
+  it("Unblock hands the focus to the next row's Unblock once its own row is gone, not to the page", async () => {
+    const utils = renderApp(<BlockedContacts />);
+    const keys = ["a", "c", "d"].map((k) => k.repeat(52));
+    const names = ["Ana", "Carl", "Dina"];
+    utils.engine.update({ links: keys.map((key, i) => linkView({ id: `link-${i}`, peerPubKeyZ32: key, label: names[i] })), settings: { blockedContacts: keys } as never });
+    // The engine's state drops the key before its answer comes, as the real one does.
+    utils.engine.on("setContactBlocked", ({ peerPubKeyZ32 }) => {
+      utils.engine.update({ settings: { blockedContacts: (utils.engine.state.settings.blockedContacts ?? []).filter((k) => k !== peerPubKeyZ32) } as never });
+      return undefined;
+    });
+    await utils.user.click(await screen.findByRole("button", { name: /^Unblock .*Ana/ }));
+    await vi.waitFor(() => expect(screen.getAllByTestId("settings-blocked-contact")).toHaveLength(2));
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: /^Unblock .*Carl/ })).toHaveFocus());
+  });
 });
