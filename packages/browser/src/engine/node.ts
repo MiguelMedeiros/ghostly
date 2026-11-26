@@ -1215,9 +1215,10 @@ export class GhostlyNode implements EngineImplementation {
     },
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
-    // A file's progress, 4 states a second: its chat's view built again (what room its contact said it has), not every chat's.
-    progressed: (linkId) => { if (this.links.has(linkId)) this.chatChanged(linkId, 250); else this.emitState(250); },
-    flush: () => this.flushState(),
+    // A file's progress, 4 states a second, or a contact's new file: its chat's view built again (what room its contact
+    // said it has), not every chat's.
+    changedIn: (linkId, delayMs) => { if (this.links.has(linkId)) this.chatChanged(linkId, delayMs); else this.emitState(delayMs); },
+    flush: (linkId) => this.flushState(linkId),
     settled: (linkId, fileId, record, seen) => {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
       void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state, !seen);
@@ -5821,7 +5822,7 @@ export class GhostlyNode implements EngineImplementation {
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     // The app has its transfer before its message: a file shown with no transfer and no bytes reads as gone, and one
     // that arrived within the state's usual wait said "No longer available" until it was all here.
-    this.flushState();
+    this.flushState(linkId);
     // files/2 names a file's message by the sender's time, as the sender's reactions, edits and deletes do. Another
     // file (or a message) already at that time keeps its place, and this one gets an id of its own: its bytes never
     // land without a message. The same file sent again after its transfer failed lands in the message it had.
@@ -11348,11 +11349,16 @@ export class GhostlyNode implements EngineImplementation {
     }, delayMs);
   }
 
-  /** The state now, not after `emitState`'s wait: for what the app must have before what follows it. */
-  private flushState(): void {
+  /**
+   * The state now, not after `emitState`'s wait: for what the app must have before what follows it. It builds the views
+   * the state waiting would have, and `linkId`'s: each file a contact offers sends one, and building every chat's and
+   * group's view for it (`getState`) cost 45 ms at 2,000 chats, and each extension tab a whole copy of every view.
+   */
+  private flushState(linkId: string): void {
     if (this.stateTimer) { clearTimeout(this.stateTimer); this.stateTimer = null; }
     if (this.gatedOut) return;
-    this.events.onState(this.getState());
+    this.changedChats?.add(linkId);
+    this.events.onState(this.pushedState());
     this.dropBriefViews();
   }
 
