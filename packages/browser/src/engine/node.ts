@@ -1536,7 +1536,8 @@ export class GhostlyNode implements EngineImplementation {
         details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: wire.size, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }), completedAt: Date.now() } });
       return null;
     },
-    receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
+    // A blocked contact's: no record either, as live (`onPaymentRequest`).
+    receivePaymentRequest: async (linkId, request) => { if (!this.blockedChat(this.links.get(linkId)?.stored)) await this.desk.onPaymentRequest(linkId, request, true); },
     taken: (linkId, id) => db.hasMessage(linkId, `peer_${id}`),
     changed: () => this.emitState(),
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
@@ -11120,9 +11121,11 @@ export class GhostlyNode implements EngineImplementation {
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted. So does one deleted
     // while it is being stored: a removal that came meanwhile (live, while this came from the hold or the DHT) found
     // no row to take and was confirmed, so it never comes again. A member's message its author deleted for everyone,
-    // coming again with a catch-up or handed on, or deleted while it is being stored: it stays gone.
-    const group = chat.startsWith("group:") ? chat.slice("group:".length) : undefined;
-    const kept = () => this.removedChats.get(chat) === deletes && !live?.stored.deletedIds?.includes(id) && !(group && this.groups.isRemoved(group, id));
+    // coming again with a catch-up or handed on, or deleted while it is being stored: it stays gone. So is a contact's
+    // that is blocked while it is being stored.
+    const group = chat.startsWith("group:") ? chat.slice("group:".length) : undefined, theirs = message.sender === "peer";
+    const kept = () => this.removedChats.get(chat) === deletes && !live?.stored.deletedIds?.includes(id) && !(group && this.groups.isRemoved(group, id))
+      && !(theirs && this.blockedChat(live?.stored));
     if (!kept()) return false;
     // Whether it may be the chat's joined line, decided before anything is awaited: rows are taken in the order they come.
     const first = live ? this.firstContactRow(live, message) : false;
@@ -11273,7 +11276,8 @@ export class GhostlyNode implements EngineImplementation {
       dataLink: live.dataLink,
       peerOnline: presence.online,
       peerLastSeenAt: presenceSeenAt(presence),
-      peerServices: presence.services,
+      // A blocked contact's services are not offered (nor what its presence says of them later).
+      peerServices: this.blockedChat(stored) ? null : presence.services,
       lastMessageAt: live.lastMessageAt,
       peerAck: live.peerAck,
       lastSyncAt: live.lastSyncAt,
