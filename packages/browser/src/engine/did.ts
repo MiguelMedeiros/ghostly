@@ -55,6 +55,8 @@ export class ProfileDid {
   private seed: Uint8Array | null = null;
   private error: string | undefined;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** When `timer` fires. */
+  private timerAt = 0;
   private running = false;
   private inFlight: Promise<void> | null = null;
   private again = false;
@@ -180,20 +182,33 @@ export class ProfileDid {
     if (this.stored.published && !this.samePacket(this.stored.published.payload)) this.schedule(CHANGE_DELAY_MS);
   }
 
-  /** Publishes now (or right after the publish in flight): the hourly timer starts over. */
+  /** Publishes now (or right after the publish in flight): the hourly timer starts over, or a failed one is tried again in `RETRY_MS`. */
   async publishNow(): Promise<void> {
     if (this.inFlight) { this.again = true; return this.inFlight; }
     this.inFlight = this.publish().finally(() => { this.inFlight = null; });
     await this.inFlight;
-    if (this.again) { this.again = false; await this.publishNow(); }
+    if (this.again) { this.again = false; await this.publishNow(); return; }
+    this.scheduleNext();
+  }
+
+  /**
+   * After a publish (the timer's or the engine's at network-back): a failed one is tried again in `RETRY_MS`; else the hour
+   * starts over. A sooner timer stays: a change made while this publish was on its way is still due in its 2 s.
+   */
+  private scheduleNext(): void {
+    if (!this.running) return;
+    const published = this.stored?.published;
+    if (this.error) { if (!this.timer || this.timerAt > Date.now() + RETRY_MS) this.schedule(RETRY_MS); }
+    else if (!this.timer || (published && this.samePacket(published.payload))) this.schedule(DID_REPUBLISH_MS);
   }
 
   private schedule(ms: number): void {
     if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
+    this.timerAt = Date.now() + ms;
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.publishNow().finally(() => { if (this.running && !this.timer) this.schedule(this.error ? RETRY_MS : DID_REPUBLISH_MS); });
+      void this.publishNow().catch(() => {});
     }, ms);
   }
 

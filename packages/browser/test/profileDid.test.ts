@@ -274,4 +274,54 @@ describe("the profile's did:dht", () => {
     expect(state.puts).toHaveLength(1);
     did.stop();
   });
+
+  it("tries a publish that failed as the network came back again after a few minutes, not at the next hourly one", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { make, state } = world();
+    state.online = false;
+    const did = make();
+    await did.load();
+    did.start();
+    await did.setListed({ id: "nostr-1", listed: true });
+    // The timer's run offline publishes nothing and waits an hour.
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(state.puts).toHaveLength(0);
+
+    // The network comes back (the engine publishes at once) and the relays refuse that one.
+    state.online = true;
+    state.fail = new Error("relay down");
+    await did.publishNow().catch(() => {});
+    expect(did.view()?.error).toBe("relay down");
+    state.fail = null;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(state.puts).toHaveLength(1);
+    expect(opened(did, state.puts[0].payload).document.alsoKnownAs).toEqual(["nostr:npub1abc"]);
+    await vi.waitFor(() => expect(did.view()).toMatchObject({ upToDate: true }));
+    expect(did.view()?.error).toBeUndefined();
+    did.stop();
+  });
+
+  it("keeps a change made while a publish was on its way due in 2 s, not an hour", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { state } = world();
+    let release = () => {};
+    const puts: Uint8Array[] = [];
+    const did = new ProfileDid({
+      online: () => true, emit: () => {}, proofIds: () => [...state.identities.keys()],
+      listable: () => new Map([...state.identities].filter((e): e is [string, string] => !!e[1])),
+      publish: async (_key, payload) => { puts.push(payload); if (puts.length === 1) await new Promise<void>(resolve => { release = resolve; }); },
+    });
+    await did.load();
+    did.start();
+    const first = did.publishNow();
+    await vi.waitFor(() => expect(puts).toHaveLength(1));
+    await did.setListed({ id: "domain-1", listed: true });
+    release();
+    await first;
+    await vi.waitFor(() => expect(did.view()?.published).toBeDefined());
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(puts).toHaveLength(2);
+    expect(opened(did, puts[1]).document.alsoKnownAs).toEqual(["https://example.com"]);
+    did.stop();
+  });
 });
