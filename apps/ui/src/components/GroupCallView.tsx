@@ -181,8 +181,11 @@ function MutedMark({ label, byAdmin = false }: { label: string; byAdmin?: boolea
   );
 }
 
-/** A face (camera or avatar) or a shared screen, with the name and a muted mark; the active speaker wears a ring. */
-function Tile({ person, you, kind, speaking, name, face, menu }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode; face: string; menu?: ReactNode }) {
+/**
+ * A face (camera or avatar) or a shared screen, with the name and a muted mark; the active speaker wears a ring. `whole`:
+ * the screen the whole window shows, edge to edge on black, without a tile's rounded corners.
+ */
+function Tile({ person, you, kind, speaking, name, face, menu, whole = false }: { person: GroupCallParticipant; you: boolean; kind: "face" | "screen"; speaking: boolean; name: ReactNode; face: string; menu?: ReactNode; whole?: boolean }) {
   const { t } = useI18n();
   const track = kind === "screen" ? person.tracks.screen : person.camera ? person.tracks.camera : null;
   return (
@@ -192,7 +195,7 @@ function Tile({ person, you, kind, speaking, name, face, menu }: { person: Group
       data-kind={kind}
       data-speaking={speaking}
       data-video={!!track}
-      className={`group-call-tile relative min-w-0 min-h-0 overflow-hidden rounded-xl bg-surface-hover flex items-center justify-center ${speaking ? "ring-[3px] ring-accent" : ""}`}
+      className={`group-call-tile relative min-w-0 min-h-0 overflow-hidden ${whole ? "bg-black" : "rounded-xl bg-surface-hover"} flex items-center justify-center ${speaking ? "ring-[3px] ring-accent" : ""}`}
     >
       {track ? (
         <TrackVideo track={track} fit={kind === "screen" ? "contain" : "cover"} mirror={you && kind === "face"} />
@@ -202,7 +205,7 @@ function Tile({ person, you, kind, speaking, name, face, menu }: { person: Group
           <span aria-hidden="true" className="text-text-muted text-2xl">{initial(face)}</span>
         </div>
       )}
-      <div className="absolute bottom-1.5 inset-x-1.5 flex items-center gap-1.5">
+      <div className={`absolute flex items-center gap-1.5 ${whole ? "bottom-[calc(0.375rem+env(safe-area-inset-bottom))] left-[calc(0.375rem+env(safe-area-inset-left))] right-[calc(0.375rem+env(safe-area-inset-right))]" : "bottom-1.5 inset-x-1.5"}`}>
         {kind === "face" && (person.byAdmin?.mic ? <MutedMark label={t("calls.group.mutedByAdmin")} byAdmin /> : !person.mic && <MutedMark label={t("calls.group.muted")} />)}
         <span dir="auto" className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">{name}</span>
       </div>
@@ -320,7 +323,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       className={
         mini
           ? "call-mini floating fixed z-50 bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl overflow-hidden"
-          : "fixed inset-0 max-md:top-6 max-md:rounded-t-2xl max-md:border-t max-md:border-border z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col focus:outline-none"
+          : `fixed inset-0 ${presenter ? "" : "max-md:top-6 max-md:rounded-t-2xl max-md:border-t max-md:border-border"} z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col focus:outline-none`
       }
     >
       {mini && !compact && CORNERS.map((corner) => <div key={corner} className={`float-grip float-grip-${corner}`} {...miniWindow.handleProps(corner)} />)}
@@ -352,21 +355,26 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         <>
           {/* On a phone the row keeps 12 px (the ⓘ's grown side) from the Small window button and from the "N removed" chip. */}
           <div className="call-top flex items-center justify-center gap-1.5 max-md:gap-3 px-16 max-md:px-[72px] pt-6 pb-2">
-            <p dir="auto" className="min-w-0 truncate text-text-primary font-medium">{groupName}</p>
+            <p dir="auto" data-over-picture={presenter ? true : undefined} className="min-w-0 truncate text-text-primary font-medium">{groupName}</p>
             {/* Its phone hit area reaches up into the window's top, not down onto the tiles drawn over it 8 px below. */}
             <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className="max-md:before:-top-4 max-md:before:-bottom-2" />
             {moderation && <RemovedFromCall moderation={moderation} nameOf={(identity) => (groupNameOf ? groupNameOf(identity) : identity)} host={box} />}
           </div>
           {info && <p id={infoId} data-testid="group-call-info-text" className="mx-auto max-w-md px-4 pb-2 text-center text-xs text-text-secondary break-words">{t("calls.group.info")}</p>}
+          {/* A shared screen fills the whole window, fitted whole, and the rest is drawn over it as in the 1:1 call: the
+              name above, the faces at the side (along the bottom on a phone), the controls below. Laid out between them
+              it had 60% of a 1280 × 800 window, and 22% of a phone's. Under the name row, which stays in the flow. */}
           {presenter ? (
-            <div data-testid="group-call-stage" className="call-tiles flex-1 min-h-0 flex max-md:flex-col gap-2">
-              <div className="flex-1 min-w-0 min-h-0 grid">
-                <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} face={shown(presenter)} />
+            <>
+              <div data-testid="group-call-stage" className="absolute inset-0 -z-10 grid">
+                <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} face={shown(presenter)} whole />
               </div>
-              <div data-testid="group-call-side" className="md:w-48 max-md:h-28 shrink-0 flex md:flex-col gap-2 overflow-auto">
-                {[...screenTiles, ...faces].map((tile) => <div key={tile.key} className="shrink-0 grid md:h-28 max-md:w-36">{tile}</div>)}
+              <div className="call-tiles absolute inset-0 pt-14 z-10 pointer-events-none flex md:justify-end max-md:items-end">
+                <div data-testid="group-call-side" className="pointer-events-auto md:w-48 max-md:h-28 max-md:w-full shrink-0 flex md:flex-col gap-2 overflow-auto">
+                  {[...screenTiles, ...faces].map((tile) => <div key={tile.key} className="shrink-0 grid md:h-28 max-md:w-36">{tile}</div>)}
+                </div>
               </div>
-            </div>
+            </>
           ) : (
             <div data-testid="group-call-grid" className="call-tiles flex-1 min-h-0 grid gap-2 auto-rows-fr" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
               {faces}

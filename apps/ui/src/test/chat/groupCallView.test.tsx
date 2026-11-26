@@ -104,6 +104,26 @@ describe("a shared screen", () => {
     expect(within(screen.getByTestId("group-call-side")).getAllByTestId("group-call-tile").map((t) => t.dataset.identity)).toEqual(["me", "ana", "bo"]);
   });
 
+  // Laid out between the name row, the faces and the controls, a 1920 × 1080 screen had 60% of a 1280 × 800 window and
+  // 22% of a phone's (measured in Chromium against the viewport): fitted to the window, 90% and 26%.
+  it("fills the whole window edge to edge, fitted whole, with the faces drawn over it, on a phone too", () => {
+    const { rerenderWith } = view(state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } }), person("bo")] }));
+    const stage = screen.getByTestId("group-call-stage");
+    expect(stage).toHaveClass("absolute", "inset-0");
+    expect(within(stage).getAllByTestId("group-call-tile")).toHaveLength(1);
+    const main = within(stage).getByTestId("group-call-tile");
+    expect(main).not.toHaveClass("rounded-xl");
+    expect(main.querySelector("video")).toHaveClass("absolute", "inset-0", "w-full", "h-full", "object-contain");
+    expect(stage.contains(screen.getByTestId("group-call-side"))).toBe(false);
+    // A phone's whole window is the whole screen while a screen is shown, not a sheet 24 px under its top.
+    const callWindow = screen.getByTestId("group-call");
+    expect(callWindow).toHaveClass("fixed", "inset-0");
+    expect(callWindow.className).not.toMatch(/max-md:top-/);
+    // The faces alone keep the sheet.
+    rerenderWith(state(2));
+    expect(screen.getByTestId("group-call")).toHaveClass("max-md:top-6");
+  });
+
   it("two at once: the latest wins and the other is a tile; when it stops, the other is back", () => {
     const sharing = (who: string[]) => state(0, { participants: ["ana", "bo"].map((id) => person(id, who.includes(id) ? { screen: true, tracks: { screen: video() } } : {})) });
     const main = () => within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0];
@@ -134,10 +154,10 @@ describe("the tiles on a phone's safe areas", () => {
 
   it.each([
     ["the grid", state(2)],
-    ["the stage", state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } })] })],
+    ["the faces over a shared screen", state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } })] })],
   ])("%s keeps clear of the notch on either side and of the controls over a home bar", (_, call) => {
     view(call);
-    const area = screen.getByTestId(call.participants.some((p) => p.screen) ? "group-call-stage" : "group-call-grid");
+    const area = call.participants.some((p) => p.screen) ? screen.getByTestId("group-call-side").parentElement! : screen.getByTestId("group-call-grid");
     expect(area).toHaveClass("call-tiles");
     const rules = tileRules();
     // On its side the notch is on the left or the right: the tiles start 1rem past it.

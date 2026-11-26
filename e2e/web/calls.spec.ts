@@ -20,6 +20,15 @@ const remoteShape = (peer: Peer) =>
     return video?.videoHeight ? Math.round((10 * video.videoWidth) / video.videoHeight) / 10 : 0;
   });
 
+/** How this peer's whole call window draws the picture it receives: the video's box against the viewport, and its fit. */
+const remoteBox = (peer: Peer) =>
+  peer.page.evaluate(() => {
+    const video = document.querySelector<HTMLVideoElement>("[data-testid=remote-video]");
+    if (!video) return "none";
+    const r = video.getBoundingClientRect();
+    return `${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)} of ${innerWidth}x${innerHeight} ${getComputedStyle(video).objectFit}`;
+  });
+
 /** The browser's own "Stop sharing" (a bar the page cannot reach): the shared track ends and fires `ended`, as it does there. */
 const stopFromBrowser = (peer: Peer) =>
   peer.page.evaluate(() => {
@@ -64,6 +73,9 @@ test("video call: camera, mute, screen share, hang up", { tag: ["@feature:calls.
   await expect(alice.page.getByTestId("call-sharing")).toHaveText("You're sharing your screen");
   await expect(bob.page.getByTestId("call-sharing")).toHaveText(/is sharing their screen$/);
   await expect.poll(() => remoteShape(bob)).not.toBe(camera);
+  // The whole window shows the shared screen whole, fitted to the viewport, at whatever size it comes.
+  const { width, height } = bob.page.viewportSize()!;
+  expect(await remoteBox(bob)).toBe(`0,0 ${width}x${height} of ${width}x${height} contain`);
   // Stopping goes back to the camera it replaced, and the notice goes on both sides.
   await alice.page.getByTestId("share-screen").click();
   await expect.poll(() => remoteShape(bob)).toBe(camera);
