@@ -118,6 +118,23 @@ describe("transport log: the timeline says what matters", () => {
     expect(log.entries.slice(2).map(e => [e.kind, e.from, e.transport])).toEqual([["switched", "webrtc/1", "iroh/1"], ["switched", "iroh/1", "webrtc/1"]]);
   });
 
+  it("a long outage's row, moved off Iroh's relay onto direct WebRTC, says the new path and drops Iroh's round trip", () => {
+    const log = new TransportLog();
+    log.observe(live("webrtc/1"), 0);
+    log.observe(down(), MIN);
+    log.observe(live("iroh/1", { relayed: true }), MIN + QUIET_DROP_MS + 1);
+    log.rtt(180);
+    expect(log.entries.at(-1)).toMatchObject({ kind: "back", transport: "iroh/1", relayed: true, rttMs: 180 });
+    log.observe(live("webrtc/1"), MIN + QUIET_DROP_MS + 900);
+    const row = log.entries.at(-1)!;
+    expect(row).toMatchObject({ kind: "back", transport: "webrtc/1" });
+    expect(row.relayed).toBeUndefined();
+    expect(row.rttMs).toBeUndefined();
+    // Measured again on where it went.
+    log.rtt(30);
+    expect(log.entries.at(-1)!.rttMs).toBe(30);
+  });
+
   it("says a short drop that came back on another transport, in one row", () => {
     const log = new TransportLog();
     log.observe(live("webrtc/1"), 0);
