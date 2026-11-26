@@ -53,7 +53,7 @@ export interface FileDeskDeps {
   transfers: Map<string, FileTransferView>;
   changed(delayMs?: number): void;
   /**
-   * A transfer's progress in this chat, or its new offer, and nothing else of it: the next state (after `delayMs`) builds
+   * A transfer of this chat's changed (its offer, its progress, any other step): the next state (after `delayMs`) builds
    * this chat's view again, not every chat's. Absent: `changed(delayMs)`.
    */
   changedIn?(linkId: string, delayMs: number): void;
@@ -625,8 +625,6 @@ export class FileDesk {
   private changed(linkId: string, record: FileTransferRecord, transferred: number, progress: boolean): void {
     const chat = this.chat(linkId);
     const said = record.direction === "in" ? chat.announced.get(record.id) : undefined;
-    // Bytes moving on a transfer already shown: its view (`transfers`) and its chat's are all that change.
-    const moving = progress && !said && (record.direction === "out" || chat.local.has(record.id));
     if (said) {
       // The offer of a file said on the floor: it takes over the bubble that waited for it, in its place. What the
       // offer says is what the file is.
@@ -686,7 +684,9 @@ export class FileDesk {
       }
     }
     if (record.state === "done" && record.direction === "in") this.deps.wireIds(linkId)?.add(record.id);
-    if ((moving || offered) && this.deps.changedIn) this.deps.changedIn(linkId, progress ? 250 : 50);
+    // Its view (`transfers`) and its chat's are all that change, at every step (queued, asked, taken, paused, ended), not
+    // only its progress: each step built every chat's and group's view, four times for each small file sent.
+    if (this.deps.changedIn) this.deps.changedIn(linkId, progress ? 250 : 50);
     else this.deps.changed(progress ? 250 : 50);
   }
 

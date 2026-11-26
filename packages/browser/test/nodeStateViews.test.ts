@@ -179,6 +179,31 @@ describe("the state a change of one chat pushes", () => {
     expect(built).toBe(0);
   });
 
+  it("builds only its chat, and no group, for each step of a files/3 file sent or received that is not its progress", async () => {
+    const { node, next } = engine();
+    const a = await addChat(node, "Alice"), b = await addChat(node, "Bob");
+    let built = 0;
+    node["groups"].views = () => { built++; return []; };
+    node["emitState"]();
+    const first = await next();
+    built = 0;
+    const file = { name: "y.jpg", size: 1_000, mime: "image/jpeg", timestamp: 1_000 };
+    // A file sent goes queued, asked about, under way, done; one received is offered, then done. Each step but its
+    // progress built every chat's and group's view: four states of all of them for each small file sent (~100 ms at
+    // 2,000 chats), and each extension tab a copy of every view.
+    const steps = [
+      ...(["queued", "asking", "active", "done"] as const).map(state => ({ id: "w1", direction: "out", state, confirmed: state === "done" ? 1_000 : 0, file })),
+      ...(["active", "done"] as const).map(state => ({ id: "w2", direction: "in", state, confirmed: state === "done" ? 1_000 : 0, file })),
+    ];
+    for (const record of steps) {
+      node["fileDesk"]["changed"](b.id, record as never, record.confirmed, false);
+      const state = await next();
+      expect(view(state, a.id)).toBe(view(first, a.id));
+      if (record.direction === "out") expect(state.transfers[`${b.id}-out-w1`]?.state).toBe(record.state === "done" ? "done" : "transferring");
+    }
+    expect(built).toBe(0);
+  });
+
   it("keeps every group's view for a change of a 1:1 chat's own, and builds them again for a contact's name or a group's change", async () => {
     const { node, next } = engine();
     const a = await addChat(node, "Alice");

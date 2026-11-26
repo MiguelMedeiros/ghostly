@@ -1208,8 +1208,8 @@ export class GhostlyNode implements EngineImplementation {
     },
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
-    // A file's progress, 4 states a second, or a contact's new file: its chat's view built again (what room its contact
-    // said it has), not every chat's.
+    // A file's progress, 4 states a second, a contact's new file or any other step of one: its chat's view built again
+    // (what room its contact said it has), not every chat's.
     changedIn: (linkId, delayMs) => { if (this.links.has(linkId)) this.chatChanged(linkId, delayMs); else this.emitState(delayMs); },
     flush: (linkId) => this.flushState(linkId),
     settled: (linkId, fileId, record, seen) => {
