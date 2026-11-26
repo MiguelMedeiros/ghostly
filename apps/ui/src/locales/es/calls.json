@@ -56,6 +56,7 @@
     "removedInfo": "El nodo del grupo no te deja volver a esta llamada sin el permiso del admin. Sigues en el grupo.",
     "retry": "Reintentar",
     "screenOf": "Pantalla de {{name}}",
+    "showScreen": "Ver en grande la pantalla de {{name}}",
     "unreachable": "No se pudo llegar a la llamada del grupo"
   },
   "incomingAudio": "Llamada de voz entrante...",

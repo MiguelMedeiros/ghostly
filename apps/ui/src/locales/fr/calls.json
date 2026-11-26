@@ -56,6 +56,7 @@
     "removedInfo": "Le nœud du groupe ne vous laisse pas revenir dans cet appel sans l'accord de l'admin. Vous restez dans le groupe.",
     "retry": "Réessayer",
     "screenOf": "Écran de {{name}}",
+    "showScreen": "Afficher en grand l'écran de {{name}}",
     "unreachable": "Impossible de joindre l'appel du groupe"
   },
   "incomingAudio": "Appel audio entrant...",

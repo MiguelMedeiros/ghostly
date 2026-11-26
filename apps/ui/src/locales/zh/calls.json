@@ -56,6 +56,7 @@
     "removedInfo": "除非管理员允许，群组的节点不会让你重新加入本次通话。你仍在群组中。",
     "retry": "重试",
     "screenOf": "{{name}} 的屏幕",
+    "showScreen": "放大显示 {{name}} 的屏幕",
     "unreachable": "无法连接到群组通话"
   },
   "incomingAudio": "语音来电...",

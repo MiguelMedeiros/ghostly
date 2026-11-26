@@ -56,6 +56,7 @@
     "removedInfo": "Il nodo del gruppo non ti fa rientrare in questa chiamata senza il permesso dell'admin. Resti nel gruppo.",
     "retry": "Riprova",
     "screenOf": "Schermo di {{name}}",
+    "showScreen": "Mostra in grande lo schermo di {{name}}",
     "unreachable": "Impossibile raggiungere la chiamata del gruppo"
   },
   "incomingAudio": "Chiamata vocale in arrivo...",
