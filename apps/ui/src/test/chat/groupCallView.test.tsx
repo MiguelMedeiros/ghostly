@@ -119,6 +119,15 @@ describe("a shared screen", () => {
     expect(screens().map((t) => t.textContent)).toEqual(["Your screen"]);
   });
 
+  it("names a member called \"You\" by their name: only your own screen is \"Your screen\"", () => {
+    const sharing = { screen: true, tracks: { screen: video() } };
+    const { rerenderWith } = view(state(0, { local: person("me", sharing), participants: [person("x", { name: "You" })] }));
+    rerenderWith(state(0, { local: person("me", sharing), participants: [person("x", { name: "You", ...sharing })] }));
+    const nameOn = (id: string) => screen.getAllByTestId("group-call-tile").find((t) => t.dataset.kind === "screen" && t.dataset.identity === id);
+    expect(nameOn("x")).toHaveTextContent(/^You's screen$/);
+    expect(nameOn("me")).toHaveTextContent(/^Your screen$/);
+  });
+
   it("two at once: the latest wins and the other is a tile; when it stops, the other is back", () => {
     const sharing = (who: string[]) => state(0, { participants: ["ana", "bo"].map((id) => person(id, who.includes(id) ? { screen: true, tracks: { screen: video() } } : {})) });
     const main = () => within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0];
