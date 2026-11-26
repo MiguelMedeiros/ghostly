@@ -980,6 +980,14 @@ function membershipOf(group: GroupView | undefined): { me: string; members: Read
 /** The wire part of the ids the payment desk gives a contact's payment, request or refusal line (`peer_<this>`). */
 const PAYMENT_LINE_ID = /^(?:\d+(?:_refused)?|spent_[0-9a-f]{32})$/;
 
+/**
+ * `Settings.blockedContacts` as the engine keeps it: keys in their one spelling, each once. A list stored before
+ * `setContactBlocked` checked its input may hold a key twice or words that are no key, which no Unblock could remove.
+ */
+function blockedKeys(stored: unknown): string[] {
+  return [...new Set((Array.isArray(stored) ? stored : []).filter(isZ32Key))];
+}
+
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
   /** Limited mode (`NodeOptions.limited`): on from the start until `leaveLimited()`. */
@@ -2459,6 +2467,9 @@ export class GhostlyNode implements EngineImplementation {
     const stored = await db.getSettings();
     const fresh = Object.keys(stored).length === 0;
     this.settings = { ...DEFAULT_SETTINGS, ...stored };
+    const blocked = blockedKeys(this.settings.blockedContacts);
+    if (blocked.length) this.settings.blockedContacts = blocked;
+    else delete this.settings.blockedContacts;
     this.armOwnStatusEnd();
     // A profile still on an old default list gets today's defaults: a relay added to them reaches everyone.
     this.settings.relays = currentRelays(this.settings.relays);
@@ -3767,9 +3778,7 @@ export class GhostlyNode implements EngineImplementation {
     // again went in the list once more each time (which moves to the person's other devices), telling the contact again.
     if (!isZ32Key(peerPubKeyZ32)) throw new Error("Name the contact's key");
     if (typeof blocked !== "boolean") throw new Error("Blocked is true or false");
-    // A list stored before holds each key once from the next change on.
-    const kept = this.settings.blockedContacts;
-    const list = [...new Set((Array.isArray(kept) ? kept : []).filter(isZ32Key))];
+    const list = blockedKeys(this.settings.blockedContacts);
     if (list.includes(peerPubKeyZ32) === blocked) return;
     const chats = [...this.links.values()].filter(({ stored }) => stored.profile && !stored.group && stored.peerPubKeyZ32 === peerPubKeyZ32);
     // A contact told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
