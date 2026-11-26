@@ -125,14 +125,16 @@ test("play all goes through the steps and stops at the end", async ({
   await root.locator(".psx-dot").nth(5).click();
   const all = root.locator('[data-action="all"]');
   await all.click();
-  await expect(all).toHaveAttribute("aria-pressed", "true");
+  // The button names what a press does next, so it is no toggle with a pressed state too: "Pause, pressed" read as paused.
+  await expect(all).toHaveAccessibleName("Pause");
+  await expect(all).not.toHaveAttribute("aria-pressed");
   await expect(current(page)).toHaveAttribute("data-step-id", "frames", {
     timeout: 15_000,
   });
   await expect(current(page)).toHaveAttribute("data-step-id", "floor", {
     timeout: 15_000,
   });
-  await expect(all).toHaveAttribute("aria-pressed", "false", {
+  await expect(all).toHaveAccessibleName("From the start", {
     timeout: 15_000,
   });
   await expect.poll(() => tValue(page)).toBe(END[7]);

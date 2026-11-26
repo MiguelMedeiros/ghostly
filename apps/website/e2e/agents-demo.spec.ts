@@ -33,7 +33,9 @@ test("Pause holds the chat on its frame; Play goes on", async ({ page }) => {
   const toggle = page.getByTestId("agent-demo-toggle");
   await toggle.click();
   await page.mouse.move(2, 2); // off the chat: a hover pauses it too
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  // The button names what a press does next, so it is no toggle with a pressed state too: "Play, pressed" read as playing.
+  await expect(toggle).toHaveAccessibleName("Play");
+  await expect(toggle).not.toHaveAttribute("aria-pressed");
   const held = await frame(page);
   await page.waitForTimeout(3500);
   expect(await frame(page)).toBe(held);
