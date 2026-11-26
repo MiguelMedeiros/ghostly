@@ -391,9 +391,10 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
   const ms = num(params, "timeout", 300, { min: 1, max: 86_400 }) * 1000;
   // A received file that waits for this person's `file accept` (over 25 MiB, or a group's file that did not come by
   // itself) does not move however long this waits: said at once, naming the command. Before, it waited out its
-  // timeout and answered "0 of 40000000 bytes, asking", as if the contact were slow.
+  // timeout and answered "0 of 40000000 bytes, asking", as if the contact were slow. A group's file has no transfer in
+  // the engine's state until its Download: its record says it waits (`waitingGroupFile`), as `file save` reads it.
   const transfer = await waitForState(ctx, (s) => {
-    const now = s.transfers[fileId] ?? stored?.transfer;
+    const now = s.transfers[fileId] ?? waitingGroupFile(stored) ?? stored?.transfer;
     return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
   }, ms, `file ${fileId} to arrive`, stopping).catch((error: unknown) => {
     const now = state(ctx).transfers[fileId];
