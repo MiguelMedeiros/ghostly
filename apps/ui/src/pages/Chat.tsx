@@ -764,17 +764,19 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
-  // Cancel takes the whole notice away, and the focus it had fell to the page: it goes back to the call button that
-  // started the wait, or to ⋮ when that was a row of its menu, unless it went elsewhere meanwhile.
+  // Cancel goes with the wait, pressed or given up, and the focus it had fell to the page: it goes back to the call
+  // button that started the wait, or to ⋮ when that was a row of its menu, unless it went elsewhere meanwhile. Once:
+  // coming back to the chat while it still says it gave up does not move it again.
   const wokeFrom = useRef<Element | null>(null), wakeCancelled = useRef(false);
   const cancelWake = () => { wakeCancelled.current = true; wakeCall.cancel(); };
   useEffect(() => {
-    if (wakeCall.waking || !wakeCancelled.current) return;
+    if (wakeCall.waking || !wokeFrom.current || !(wakeCancelled.current || wakeCall.gaveUp)) return;
+    const from = wokeFrom.current;
+    wokeFrom.current = null;
     wakeCancelled.current = false;
     if (!visible || !focusLost()) return;
-    const from = wokeFrom.current;
     (from instanceof HTMLElement && from.isConnected ? from : optionsRef.current)?.focus({ preventScroll: true });
-  }, [wakeCall.waking, visible]);
+  }, [wakeCall.waking, wakeCall.gaveUp, visible]);
 
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
