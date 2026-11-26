@@ -78,6 +78,11 @@ const bounded = (at: number, now: number, ms = 0): number => Math.min(at, now + 
 const DHT_POLL_MS = 4_000;
 const STREAM_POLL_MS = 30_000;
 /**
+ * A live session the contact closed gives one more read of its mailbox (`contactClosed`), at most this often: a
+ * contact that opens and closes sessions at will gets no more than one extra read a minute out of this side.
+ */
+const CLOSED_LOOK_GAP_MS = 60_000;
+/**
  * …except for this long after this side leaves DHT-only while the contact is still there: its own
  * switch then shows in seconds, not at the next 30 s read (both sides are blocked from a live link until
  * each has seen the other leave).
@@ -257,6 +262,9 @@ export class DhtDelivery {
   private leavingUntil = 0;
   /** Until when the mailbox is read at the fast pace for any other reason (a drop, a first contact). */
   private fastUntil = 0;
+  /** When the one read after a session the contact closed goes (`contactClosed`), and when the last was given. */
+  private closedLookAt = 0;
+  private closedLookGiven = -Infinity;
   private live = false;
   private active = false;
   private readonly startedAt = Date.now();
@@ -629,6 +637,19 @@ export class DhtDelivery {
     this.probeAt = now + this.probeGap;
     this.expect(ms, true);
     return true;
+  }
+  /**
+   * The contact closed the live session (not a liveness loss): it may have chosen DHT only, and its envelope saying so
+   * goes out just after it closes the session, after the read at once that the lost session gave (`setLive`). One more
+   * read, `DHT_POLL_MS` later, a plain one, finds it: the next was the background read, 30 s on, and the chooser's
+   * first text waited for it (bug hunt 2026-11-26). At most one a `CLOSED_LOOK_GAP_MS`.
+   */
+  contactClosed(): void {
+    const now = Date.now();
+    if (now - this.closedLookGiven < CLOSED_LOOK_GAP_MS) return;
+    this.closedLookGiven = now;
+    this.closedLookAt = now + DHT_POLL_MS;
+    this.schedule();
   }
   /**
    * Layer 1 carries the chat, or no longer does. While it does, the mailbox is read every 5 minutes, after one
@@ -1252,6 +1273,7 @@ export class DhtDelivery {
     if (this.ticking) { this.tickAgain = true; return; }
     this.ticking = true; this.tickAgain = false;
     if (this.timer) clearTimeout(this.timer); this.timer = null;
+    if (this.closedLookAt && Date.now() >= this.closedLookAt) this.closedLookAt = 0;
     try { await this.serialize(async () => {
       if (!this.running) return;
       // Only the slow, periodic looks (every 5 minutes while live, every 30 s for a chat in the background) are
@@ -1385,7 +1407,9 @@ export class DhtDelivery {
     const waiting = pending && pending.attempts === 0 && pending.expires > now ? Math.max(0, this.lastPublish + 4_000 - now, held) : Infinity;
     // So does a read it held back, never sooner than a second after.
     const readHeld = this.readHeldUntil > 0 ? Math.max(1_000, this.readHeldUntil - Date.now()) : Infinity;
-    this.timer = setTimeout(() => void this.tick(), Math.min(held > 0 ? Math.min(this.pollMs, held) : this.pollMs, due, retry, waiting, readHeld));
+    // So does the one read after a session the contact closed (`contactClosed`).
+    const closedLook = this.closedLookAt > now ? this.closedLookAt - now : Infinity;
+    this.timer = setTimeout(() => void this.tick(), Math.min(held > 0 ? Math.min(this.pollMs, held) : this.pollMs, due, retry, waiting, readHeld, closedLook));
   }
 }
 export const DHT_TEXT_REFUSED = "Your contact's app does not accept text over the DHT. It is sent when you are live.";

@@ -146,7 +146,7 @@ What changes is where the choice is made: not in the invite, but in the chat's C
 | `on-dht`, chat open and app in front | 10 s |
 | The contact chose DHT only, on a headless daemon (every chat counts as open), while it is there (a new envelope of its own read in the last 10 minutes) | 10 s |
 | `on-dht`, in the background | 30 s |
-| `live` | Once as layer 1 comes up, then 5 min, and at once when layer 1 is lost |
+| `live` | Once as layer 1 comes up, then 5 min, and at once when layer 1 is lost; when the contact closed it, once more 4 s later (at most once a minute) |
 
 `on-dht` with the chat open was 4 s in the proposal; 10 s leaves room in the relays' budget for presence reads and hold pointers while layer 1 is redialled.
 

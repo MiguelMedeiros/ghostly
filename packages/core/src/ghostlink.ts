@@ -5178,6 +5178,8 @@ export class GhostLink {
   private peerLost(why: string): void {
     if (this.stopped || this.leaving || this.yielding) return;
     traceLink(this.myPubKeyZ32, "peer-lost", { why });
+    // The contact may have closed it to go DHT only: its envelope saying so follows the close (WISP 403, poll pace).
+    if (why === "closed") this.dht?.contactClosed();
     if (Date.now() < this.wokeUntil) { this.wokeUntil = 0; this.resumeAfterAbsence(); }
     const idleMs = this.options.watchPeerIdleMs ?? 0;
     this.lostUntil = Date.now() + Math.max(WATCH_PEER_MS, idleMs);
