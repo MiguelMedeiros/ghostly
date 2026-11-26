@@ -20,13 +20,19 @@ const crew = {
   ],
 } as unknown as GroupView;
 
+/** A private group of the same members: its admin me, or Al. */
+const mesh = (isAdmin: boolean) => ({ ...crew, id: "g2", name: "Mesh", profile: "mesh", isAdmin,
+  members: crew.members.map((m) => ({ ...m, role: (isAdmin ? m.me : m.key === AL) ? "admin" : "member" })) }) as unknown as GroupView;
+
 /** `group send` over a fake engine that keeps what it was asked to send. */
-function fake() {
+function fake(groups: GroupView[] = [crew]) {
   const node = {
     chatView: chatViewOf, groupView: groupViewOf,
-    getState: () => ({ links: [], groups: [crew], settings: { online: true, nick: "Bot" } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState,
+    getState: () => ({ links: [], groups, settings: { online: true, nick: "Bot" } as unknown as Settings, transport: { protocol: "p", relays: [] } }) as unknown as EngineState,
     getSettings: (): Settings => node.getState().settings,
     sendGroupMessage: vi.fn(async (_params: unknown) => ({ error: null })),
+    editMessage: vi.fn(async (_params: unknown) => ({ error: null })),
+    getMessage: vi.fn(async () => undefined),
     setTyping: vi.fn(),
     setGroupTyping: vi.fn(),
   };
@@ -103,5 +109,28 @@ describe("group mentions", () => {
     const { ctx, node } = fake();
     await callApi(ctx, "group.send", { group: "Crew", text: "@Alice @Al ping", mentions: ["Al"] });
     expect(node.sendGroupMessage).toHaveBeenCalledWith({ groupId: "g1", text: "@Alice @Al ping", mentions: [{ k: AL, o: 7, l: 3 }] });
+  });
+
+  // WISP 902 § Mentions, "Everyone": a member's `*` is dropped by its own app and by every receiver, and a community has
+  // none (WISP 903 § No everyone). It went out with exit 0, `sent: true` and no word: a bot paging the group believed it did.
+  it("everyone is the private group's admin's only: a member's and a community's are refused before anything goes", async () => {
+    for (const [group, ref, message] of [
+      [mesh(false), "Mesh", "Only the group's admin mentions everyone: mention members by name (--mention <member>)"],
+      [crew, "Crew", "A community has no @everyone: mention members one at a time (--mention <member>)"],
+    ] as const) {
+      const { ctx, node } = fake([group]);
+      for (const mentions of [["everyone"], ["Al", "*"]]) {
+        await expect(callApi(ctx, "group.send", { group: ref, text: "@everyone @Al look", mentions })).rejects.toMatchObject({ code: "refused", message });
+        await expect(callApi(ctx, "group.edit", { group: ref, message: "m1", text: "@everyone @Al look", mentions })).rejects.toMatchObject({ code: "refused", message });
+      }
+      expect(node.sendGroupMessage).not.toHaveBeenCalled();
+      expect(node.editMessage).not.toHaveBeenCalled();
+      // Members by name still go.
+      await callApi(ctx, "group.send", { group: ref, text: "@Al look", mentions: ["Al"] });
+      expect(node.sendGroupMessage).toHaveBeenCalledWith({ groupId: group.id, text: "@Al look", mentions: [{ k: AL, o: 0, l: 3 }] });
+    }
+    const { ctx, node } = fake([mesh(true)]);
+    await callApi(ctx, "group.send", { group: "Mesh", text: "@everyone look", mentions: ["everyone"] });
+    expect(node.sendGroupMessage).toHaveBeenCalledWith({ groupId: "g2", text: "@everyone look", mentions: [{ k: "*", o: 0, l: 9 }] });
   });
 });

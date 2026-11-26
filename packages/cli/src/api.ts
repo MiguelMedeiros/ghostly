@@ -207,6 +207,17 @@ export function mentionsFor(text: string, given: readonly string[], group: Group
   return out;
 }
 
+/**
+ * `--mention everyone` is the private group's admin's only, and a community has none (WISP 902 § Mentions, "Everyone";
+ * 903 § No everyone): the engine drops anyone else's `*`, so the message went out mentioning nobody while the answer
+ * said `sent: true`, and a bot paging the group believed it had.
+ */
+function everyoneRefused(group: GroupView, refs: readonly string[]): void {
+  if (!refs.some((ref) => ref === "everyone" || ref === MENTION_EVERYONE)) return;
+  if (group.profile === "community") throw new CliError("refused", "A community has no @everyone: mention members one at a time (--mention <member>)");
+  if (!group.isAdmin) throw new CliError("refused", "Only the group's admin mentions everyone: mention members by name (--mention <member>)");
+}
+
 /** Per host: stops watching the invite it marked as the chat on screen. */
 const inviteShown = new WeakMap<ApiContext, () => void>();
 
@@ -1164,6 +1175,7 @@ const METHODS: Record<string, Method> = {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; send it with --force if you mean to`, { kind: secret.kind });
     }
+    everyoneRefused(group, list(params, "mentions"));
     const mentions = mentionsFor(text, list(params, "mentions"), group, () => settingsOf(ctx).nick, str(params, "group", true));
     const replyTo = str(params, "reply");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
@@ -1199,6 +1211,7 @@ const METHODS: Record<string, Method> = {
       const secret = findSecret(text);
       if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; edit with --force if you mean to`, { kind: secret.kind });
     }
+    everyoneRefused(group, list(params, "mentions"));
     const mentions = mentionsFor(text, list(params, "mentions"), group, () => settingsOf(ctx).nick, str(params, "group", true));
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
     const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
