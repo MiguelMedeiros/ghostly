@@ -894,9 +894,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const setBlocked = (blocked: boolean) => {
     setConfirmBlock(false);
     if (!blockKey) return;
-    // Blocked while it rings (the ringing card's Block contact): the ring stops here and nothing goes to the caller,
-    // no decline and no line in the chat, as if this app were closed.
-    if (blocked && ringsIn) webrtc.hangUp(false, false);
+    // Blocked during a call (⋮, or the ringing card's Block contact): nothing of the contact is heard any more (its
+    // hang-up included), so the call ends here. One that rings in stops with nothing sent, no decline and no line in the
+    // chat, as if this app were closed; one that is on, or rings on their side, ends as a hang-up does.
+    if (blocked && webrtc.callState !== "idle") webrtc.hangUp(!ringsIn, !ringsIn);
     void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked }).catch(() => {});
   };
 
@@ -911,9 +912,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
 
   // The call buttons, in the header and (the video call on a phone) in the ⋮ menu: why they are off, and what they start.
-  const callBlocked = webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
+  // A blocked contact's answer is never heard: calling it would only ring it.
+  const callBlocked = chatLink?.blocked ? t("chat.block.blocked")
+    : webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
   const callBusy = webrtc.callState !== "idle" || wakeCall.waking;
   const startCall = (withVideo: boolean) => {
+    if (chatLink?.blocked) return;
     if (!(callsBlocked && canWakeForCall)) return webrtc.startCall(withVideo);
     wokeFrom.current = document.activeElement;
     void wakeCall.ring(withVideo);
@@ -1246,6 +1250,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} appCards={appCards} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
+
+      {chatLink?.blocked && blockKey && (
+        <div data-testid="chat-blocked" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">
+          <span>{t("chat.block.blocked")}</span>
+          <button type="button" className="underline text-accent cursor-pointer" onClick={() => setBlocked(false)}>{t("chat.menu.unblock")}</button>
+        </div>
+      )}
 
       {compat && session?.continuedIn && (
         <div data-testid="compat-continued" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">

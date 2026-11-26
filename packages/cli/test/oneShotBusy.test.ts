@@ -23,10 +23,13 @@ describe("one-shot commands at once on one profile", { timeout: 120_000 }, () =>
   afterAll(() => relay?.server.close());
 
   it("each waits for the one that holds the profile: two sends and the reads beside them all answer, and both texts are kept", async () => {
+    // What is waited for, not how long (the next test's): five at once on a loaded CI runner held the profile past 5 s
+    // each, and the one behind failed busy.
+    const waits = { ...env, GHOSTLY_TEST_HOLDER_WAIT_MS: "30000" };
     const runs = await Promise.all([
       ["send", "bob", "one", "--wait", "none"], ["send", "bob", "two", "--wait", "none"],
       ["chat", "list"], ["chat", "history", "bob"], ["settings", "get"],
-    ].map((args) => ghostly(["--home", dir, ...args], { env })));
+    ].map((args) => ghostly(["--home", dir, ...args], { env: waits })));
     for (const run of runs) ok(run);
     const texts = (ok(await ghostly(["--home", dir, "chat", "history", "bob"], { env })).messages as { text: string }[]).map((m) => m.text);
     expect(texts.sort()).toEqual(["one", "two"]);

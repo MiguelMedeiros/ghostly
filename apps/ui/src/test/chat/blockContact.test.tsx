@@ -52,6 +52,25 @@ describe("⋮ → Block contact", () => {
     expect(asked()).toBeNull();
     expect(engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }]);
   });
+
+  it("a blocked contact's chat says so, with Unblock, and its call buttons are off with that reason", async () => {
+    const { user, engine } = await openMenu(true);
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("chat-blocked")).toHaveTextContent("You blocked this contact");
+    const audio = screen.getByTestId("call-audio");
+    expect(audio).toHaveAttribute("aria-disabled", "true");
+    expect(audio).toHaveAttribute("title", "You blocked this contact");
+    await user.click(audio);
+    expect(await screen.findByTestId("call-blocked")).toHaveTextContent("You blocked this contact");
+    await user.click(within(screen.getByTestId("chat-blocked")).getByRole("button", { name: "Unblock contact" }));
+    expect(engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }]);
+  });
+
+  it("a contact not blocked shows no such line, and its call buttons are on", async () => {
+    await openMenu();
+    expect(screen.queryByTestId("chat-blocked")).toBeNull();
+    expect(screen.getByTestId("call-audio")).not.toHaveAttribute("title", "You blocked this contact");
+  });
 });
 
 describe("Settings → Blocked contacts", () => {
@@ -63,8 +82,38 @@ describe("Settings → Blocked contacts", () => {
     utils.engine.update({ links: [linkView({ id: "link-1", peerPubKeyZ32: BOB, label: "Bob" })], settings: { blockedContacts: [BOB, gone] } as never });
     const rows = await screen.findAllByTestId("settings-blocked-contact");
     expect(rows[0]).toHaveTextContent("Bob");
-    expect(rows[1]).not.toHaveTextContent("Bob");
+    expect(rows[1]).toHaveTextContent(/^Contact · /);
     await utils.user.click(screen.getByRole("button", { name: /^Unblock .*Bob/ }));
     expect(utils.engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }]);
+    // Each row unblocks its own key.
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: /^Unblock .*Contact · / })).toBeEnabled());
+    await utils.user.click(screen.getByRole("button", { name: /^Unblock .*Contact · / }));
+    expect(utils.engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }, { peerPubKeyZ32: gone, blocked: false }]);
+  });
+
+  it("Unblock hands the focus to the next row's Unblock once its own row is gone, not to the page", async () => {
+    const utils = renderApp(<BlockedContacts />);
+    const keys = ["a", "c", "d"].map((k) => k.repeat(52));
+    const names = ["Ana", "Carl", "Dina"];
+    utils.engine.update({ links: keys.map((key, i) => linkView({ id: `link-${i}`, peerPubKeyZ32: key, label: names[i] })), settings: { blockedContacts: keys } as never });
+    // The engine's state drops the key before its answer comes, as the real one does.
+    utils.engine.on("setContactBlocked", ({ peerPubKeyZ32 }) => {
+      utils.engine.update({ settings: { blockedContacts: (utils.engine.state.settings.blockedContacts ?? []).filter((k) => k !== peerPubKeyZ32) } as never });
+      return undefined;
+    });
+    await utils.user.click(await screen.findByRole("button", { name: /^Unblock .*Ana/ }));
+    await vi.waitFor(() => expect(screen.getAllByTestId("settings-blocked-contact")).toHaveLength(2));
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: /^Unblock .*Carl/ })).toHaveFocus());
+  });
+
+  it("the last row's Unblock hands the focus to the line that says none is left", async () => {
+    const utils = renderApp(<BlockedContacts />);
+    utils.engine.update({ links: [linkView({ id: "link-1", peerPubKeyZ32: BOB, label: "Bob" })], settings: { blockedContacts: [BOB] } as never });
+    utils.engine.on("setContactBlocked", () => {
+      utils.engine.update({ settings: { blockedContacts: [] } as never });
+      return undefined;
+    });
+    await utils.user.click(await screen.findByRole("button", { name: /^Unblock .*Bob/ }));
+    await vi.waitFor(() => expect(screen.getByTestId("settings-blocked-none").parentElement).toHaveFocus());
   });
 });

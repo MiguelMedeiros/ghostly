@@ -30,6 +30,7 @@
     "tooLarge": "Too large to play here. Download it to listen."
   },
   "block": {
+    "blocked": "You blocked this contact",
     "body": "They can no longer call you or send you anything, and nothing tells them. The chat stays. Unblock them from this menu or in Settings → Privacy & security.",
     "confirm": "Block",
     "title": "Block {{name}}?"

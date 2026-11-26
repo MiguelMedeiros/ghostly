@@ -30,6 +30,7 @@
     "tooLarge": "Demasiado grande para reproducirlo aquí. Descárgalo para escucharlo."
   },
   "block": {
+    "blocked": "Bloqueaste a este contacto",
     "body": "Ya no podrá llamarte ni enviarte nada, y nada se lo avisa. El chat se queda. Desbloquéalo desde este menú o en Ajustes → Privacidad y seguridad.",
     "confirm": "Bloquear",
     "title": "¿Bloquear a {{name}}?"
