@@ -1,6 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppPreview, InstalledAppView } from "@ghostly/browser/engine/apps";
+import { DEFAULT_STORE_KEY } from "@ghostly/browser/engine/appDefaults";
 import { AppInstallDialog } from "../../components/apps/AppInstallDialog";
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import { fakeEngine } from "../fakeEngine";
@@ -84,6 +85,25 @@ describe("Install on a screen whose fetched app the engine no longer holds", () 
     await user.click(screen.getByTestId("app-install-confirm"));
     await waitFor(() => expect(onInstalled).toHaveBeenCalledTimes(1));
     expect(fakeEngine.callsTo("appInstall")[1]).toEqual({ stage: `${NEXT}\nscreen-2`, digest: NEXT, grant: ["chat"], asks: ["chat"] });
+  });
+
+  // The app installed again from a store meanwhile (another tab): this version now ends that store's hold on its
+  // updates, a line the screen never showed. It installed at once, the hold gone without a word.
+  it("shows a store's hold this Install now ends, and installs only on the next press", async () => {
+    read = () => preview(`${DIGEST}\nscreen-${reads}`, { install: "update" });
+    const onInstalled = vi.fn();
+    const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} onInstalled={onInstalled} />);
+    const confirm = await screen.findByTestId("app-install-confirm");
+    expect(screen.queryByTestId("app-install-leaves-store")).toBeNull();
+    held.clear();
+    read = () => preview(`${DIGEST}\nscreen-${reads}`, { install: "update", leavesStore: { key: DEFAULT_STORE_KEY, name: "Ghostly Store" } });
+    await user.click(confirm);
+    expect(await screen.findByTestId("app-install-error")).toHaveTextContent("That took too long. Check the app again.");
+    expect(screen.getByTestId("app-install-leaves-store")).toHaveTextContent("Chess now takes updates only once Ghostly Store lists them.");
+    expect(onInstalled).not.toHaveBeenCalled();
+    expect(fakeEngine.callsTo("appInstall")).toHaveLength(1);
+    await user.click(screen.getByTestId("app-install-confirm"));
+    await waitFor(() => expect(onInstalled).toHaveBeenCalledTimes(1));
   });
 
   it("whose read again fails says why, and Install waits for Try again", async () => {
