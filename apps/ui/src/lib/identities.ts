@@ -148,6 +148,9 @@ export const currentStatus = (r: ReceivedIdentityView, now = Date.now() / 1000):
 export const expiringSoon = (p: { issuedAt: number; expiresAt: number }, now = Date.now() / 1000) =>
   p.expiresAt > now && p.expiresAt - now < Math.min(7 * 86400, (p.expiresAt - p.issuedAt) / 4);
 
+/** When `expiringSoon` starts to hold (just after this time, in seconds). */
+export const expiringFrom = (p: { issuedAt: number; expiresAt: number }) => p.expiresAt - Math.min(7 * 86400, (p.expiresAt - p.issuedAt) / 4);
+
 /** Whole days left, at least 1 while it is still valid. */
 export const daysLeft = (expiresAt: number, now = Date.now() / 1000) => Math.max(1, Math.ceil((expiresAt - now) / 86400));
 
