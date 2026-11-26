@@ -2361,7 +2361,7 @@ export class Apps {
     // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
     const revokeRead = new Set<string>();
     const reach: RevocationsReach = { answered: false, failed: false };
-    const before = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach, new Set(formerOf(app)));
+    let before = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach, new Set(formerOf(app)));
     app = withRevocations(app, before ?? []);
     // The ones this profile kept (`APP_REVOCATIONS_KEY`) judge too: one that dropped a waiting update stops it from
     // being taken again, once the record keeps it no more and its store's next index does not carry it.
@@ -2438,6 +2438,10 @@ export class Apps {
         } else skip();
         continue;
       }
+      // Its publisher's revocations beside where it was found and the sources it names too, before it is taken: one revoked
+      // there is not installed over the version that runs now.
+      const beside = await this.readRevocations(app.ref, [url, ...(bundle.manifest.sources ?? []).slice(0, APP_BUNDLE_LIMITS.sources)], revokeRead, reach);
+      if (beside) { before = [...(before ?? []), ...beside]; app = withRevocations(app, beside); }
       if (judge(version).status !== "ok") { skip(); continue; }
       // Judged again with the stores as held now: a store's index read while the bundle downloaded may revoke it.
       if (this.runStatus(version, await this.heldViews(), app.revocations).status !== "ok") { skip(); continue; }
