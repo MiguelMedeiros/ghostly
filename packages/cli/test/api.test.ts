@@ -1666,10 +1666,21 @@ describe("settings", () => {
     for (const [relays, said] of refusals) {
       await expect(callApi(ctx, "settings.set", { relays })).rejects.toMatchObject({ code: "bad_request", message: said });
     }
+    // A usable one next to a bad one: the engine kept the usable one and dropped the rest unsaid (exit 0), while
+    // irohRelays and the app's Settings refuse the list. A blank entry is no relay, as a blank line in the app.
+    await expect(callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "garbage"] })).rejects.toMatchObject({ code: "bad_request", message: "relays: not a relay address: garbage" });
     expect(node.updateSettings).not.toHaveBeenCalled();
-    // A usable one next to them is the engine's to keep (it drops the rest), as before.
-    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", "ftp://x"] });
-    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", "ftp://x"] } });
+    await callApi(ctx, "settings.set", { relays: ["https://relay.example.org", " "] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { relays: ["https://relay.example.org", " "] } });
+  });
+
+  it("count an Iroh relay given twice once, and say more than the engine keeps as a wrong value", async () => {
+    // Six were `engine` (exit 1), and a relay given twice counted twice toward the five.
+    const { ctx, node } = fake();
+    await callApi(ctx, "settings.set", { irohRelays: ["https://a.example", "https://b.example", "https://a.example"] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { irohRelays: ["https://a.example", "https://b.example"] } });
+    node.updateSettings.mockRejectedValueOnce(new Error("Use at most five Iroh relays"));
+    await expect(callApi(ctx, "settings.set", { irohRelays: ["1", "2", "3", "4", "5", "6"].map((n) => `https://${n}.example`) })).rejects.toMatchObject({ code: "bad_request", message: "irohRelays: use at most five Iroh relays" });
   });
 
   it("take TCP and TLS TURN servers for the apps, and say the CLI does not use them", async () => {
