@@ -79,6 +79,15 @@ export type CallEventType =
   /** The call ended without ever connecting: no way to reach the contact was found, or none worked in time. */
   | "call_failed";
 
+/** The voice and a shared screen's sound as one track (`CallMedia.mixAudio`). */
+export interface CallAudioMix {
+  readonly track: MediaStreamTrack;
+  /** Another microphone in place of the one mixed (the call's device menu). */
+  setVoice(voice: MediaStreamTrack): void;
+  /** Stops the mix's track and lets its sources go; the voice and the sound themselves are not stopped. */
+  close(): void;
+}
+
 /**
  * Where a call's media comes from: the browser's own WebRTC and capture, or a stand-in with the same shape.
  * Ghostly Desktop on Linux brings one: WebKitGTK has no WebRTC there, so GStreamer runs the call (WISP 601).
@@ -88,6 +97,12 @@ export interface CallMedia {
   getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;
   /** Left out where the screen cannot be shared. */
   getDisplayMedia?(options: DisplayMediaStreamOptions): Promise<MediaStream>;
+  /**
+   * Mixes a shared screen's sound into the voice: while the screen is shared, the mix's track goes on the call's one
+   * audio section in place of the microphone (`replaceTrack`, no new offer). Left out where it cannot (a stand-in's
+   * tracks): the screen is shared without its sound.
+   */
+  mixAudio?(voice: MediaStreamTrack, sound: MediaStreamTrack): CallAudioMix;
   /**
    * Its connections restart ICE as a browser's do: `createOffer({ iceRestart: true })` on a connected one gives an
    * offer with new ICE credentials and candidates, and a remote offer with new credentials is answered on the same

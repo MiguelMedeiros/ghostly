@@ -1461,6 +1461,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           isMuted={webrtc.isMuted}
           isVideoOff={webrtc.isVideoOff}
           isScreenSharing={webrtc.isScreenSharing}
+          screenSound={webrtc.screenSound}
           canSendVideo={webrtc.canSendVideo}
           canShareScreen={webrtc.canShareScreen}
           screenShareUnavailable={webrtc.screenShareUnavailable}
