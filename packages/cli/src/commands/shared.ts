@@ -1,4 +1,5 @@
 import { closeSync, openSync, readSync, type Stats, statSync } from "node:fs";
+import { sep } from "node:path";
 import { reactionEmoji } from "@ghostly/core";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
@@ -52,6 +53,22 @@ export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm 
 export function here(path: unknown): string | undefined {
   if (path === "") throw new CliError("usage", "A path given as \"\" names no file");
   return typeof path === "string" ? userPath(path) : undefined;
+}
+
+/**
+ * `here` for a file a command writes (`app publish --out` and `--key`, `listen --cursor`): a separator at its end names
+ * a folder, which resolving the path drops. Before, "--out sub/" with no sub folder wrote the bundle as a file named sub
+ * (and the next publish packed it). One not there is refused as `file save --path` refuses it; a folder that is there
+ * is the command's to answer, as without the slash.
+ */
+export function fileHere(path: unknown): string | undefined {
+  const resolved = here(path);
+  if (resolved === undefined || !((path as string).endsWith("/") || (path as string).endsWith(sep))) return resolved;
+  let there: Stats | undefined;
+  try { there = statSync(resolved); } catch { /* said below */ }
+  if (!there) throw new CliError("not_found", `No such folder: ${resolved} (make it first, or name a file in a folder that is there)`);
+  if (!there.isDirectory()) throw new CliError("not_found", `${resolved} is a file, not a folder: name a file in a folder that is there`);
+  return resolved;
 }
 
 /**
