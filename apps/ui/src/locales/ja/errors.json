@@ -515,6 +515,8 @@
   },
   "profile": {
     "arkBackup": "バックアップ用に Ark ウォレットを読み込めませんでした",
+    "backupRecordTooLarge": "このプロフィールのレコードが大きすぎて、バックアップできません",
+    "backupTooDense": "このプロフィールのデータは密度が高すぎて、バックアップできません",
     "backupTooLarge": "このバックアップは大きすぎて、ここでは復元できません。",
     "damagedBackup": "このバックアップは破損しています",
     "damagedBackupNext": "別のコピーを試してください。",

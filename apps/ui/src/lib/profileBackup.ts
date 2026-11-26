@@ -97,19 +97,24 @@ const MAX_RECORD_BYTES = 64 * 1024 * 1024;
 const MAX_RECORD_VALUES = 1_000_000;
 /** The values of all of a bundle's records (or of a version 1 document): this many per byte of the bundle, beyond one record's worth. */
 const MAX_VALUES_PER_BUNDLE_BYTE = 4;
+/** How deep a record's arrays and objects may nest: `decode`'s reviver recurses once per level, and a real record nests under 20. */
+const MAX_RECORD_DEPTH = 1000;
 const RECORD_LIMITS = { recordBytes: MAX_RECORD_BYTES };
 const TOO_LARGE = "This backup is too large to restore";
 
 /**
  * The values of `json`, as the parse meets them: the `[`, `{`, `,` and `:` outside its strings, counted up to `limit`
- * and no further. What a string holds is not counted: a string costs the parse its length, which is bounded.
+ * and no further. What a string holds is not counted: a string costs the parse its length, which is bounded. Arrays
+ * and objects nested past `MAX_RECORD_DEPTH` count as over `limit`.
  */
 function valueCount(json: string, limit: number): number {
-  let count = 0, inString = false;
+  let count = 0, depth = 0, inString = false;
   for (let i = 0; i < json.length && count <= limit; i++) {
     const c = json.charCodeAt(i);
     if (inString) { if (c === 92) i += 1; else if (c === 34) inString = false; } else if (c === 34) inString = true;
-    else if (c === 91 || c === 123 || c === 44 || c === 58) count += 1;
+    else if (c === 91 || c === 123) { count += 1; if (++depth > MAX_RECORD_DEPTH) return limit + 1; }
+    else if (c === 93 || c === 125) depth -= 1;
+    else if (c === 44 || c === 58) count += 1;
   }
   return count;
 }

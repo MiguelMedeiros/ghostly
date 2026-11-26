@@ -52,7 +52,9 @@ export function decode(text: string): unknown {
     }
     const tag = v as Partial<Tagged> | null;
     if (!tag || typeof tag !== "object" || typeof tag.$ghostly !== "string" || typeof tag.value !== "string") return v;
-    if (tag.$ghostly === "bigint") return /^-?\d+$/.test(tag.value) ? BigInt(tag.value) : v;
+    // `BigInt()` pays more than its length for a long string (millions of digits, a few KB gzipped, take seconds). What
+    // IndexedDB holds as bigints are amounts and counters, under 40 digits: one longer is left as it is.
+    if (tag.$ghostly === "bigint") return tag.value.length <= 101 && /^-?\d{1,100}$/.test(tag.value) ? BigInt(tag.value) : v;
     if (!/^[A-Za-z0-9_-]*$/.test(tag.value)) return v;
     if (tag.$ghostly === "bytes") return fromBase64Url(tag.value);
     if (tag.$ghostly === "blob") return new Blob([fromBase64Url(tag.value) as BlobPart], { type: typeof tag.type === "string" ? tag.type : "" });
