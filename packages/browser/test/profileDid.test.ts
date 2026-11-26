@@ -260,6 +260,40 @@ describe("the profile's did:dht", () => {
     expect(state.puts).toHaveLength(3);
   });
 
+  it("keeps every switch flipped while another change is being saved: a second switch, a publish landing, a removed proof dropped", async () => {
+    const { make, state } = world();
+    const did = make();
+    await did.load();
+    await Promise.all([did.setListed({ id: "nostr-1", listed: true }), did.setListed({ id: "domain-1", listed: true })]);
+    expect(did.view()?.listed).toEqual(["nostr-1", "domain-1"]);
+    await did.setListed({ id: "nostr-1", listed: false });
+
+    // The relay answers while the switch's save is on its way: the publish's save keeps the switch.
+    const host = (did as unknown as { host: ProfileDidHost }).host;
+    const put = host.publish;
+    let land!: () => void;
+    host.publish = (key, payload) => new Promise<void>(resolve => { land = () => { state.puts.push({ key, payload }); resolve(); }; });
+    const publishing = did.publishNow();
+    await vi.waitFor(() => expect(land).toBeDefined());
+    host.publish = put;
+    const flipped = did.setListed({ id: "nostr-1", listed: true });
+    land();
+    await Promise.all([publishing, flipped]);
+    expect(did.view()?.listed).toEqual(["domain-1", "nostr-1"]);
+    await did.publishNow();
+    expect(opened(did, state.puts.at(-1)!.payload).document.alsoKnownAs).toEqual(["https://example.com", "nostr:npub1abc"]);
+
+    // A proof removed while a switch is being saved: the removed one leaves, the switch stays.
+    state.identities.set("ssh-2", "https://github.com/octocat");
+    const removed = did.setListed({ id: "ssh-2", listed: true });
+    state.identities.delete("domain-1");
+    did.changed();
+    await removed;
+    await did.close();
+    expect(did.view()?.listed).toEqual(["nostr-1", "ssh-2"]);
+    expect((await stored())?.listed).toEqual(["nostr-1", "ssh-2"]);
+  });
+
   it("tries a failed publish again after a few minutes, not an hour", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { make, state } = world();
