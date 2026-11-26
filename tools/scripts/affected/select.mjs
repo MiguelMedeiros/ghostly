@@ -155,14 +155,15 @@ export const UNIT_PROJECTS = [
   },
   {
     // CI's path gates (tools/scripts/ci-changes.mjs) must cover every file the website's scripts and code (browser
-    // checks, lib, app, components), the packages' and the extension's code and the crates' Rust name, and every local
-    // action CI's workflows use. Its test reads those from disk for the paths they name, which no import graph shows,
-    // so a change to one runs it (whole: that one file, about 150 ms). A draft's tier is all the merge train waits for:
-    // without this, a website script naming an uncovered file went red only in batches (2026-11-03). A workflow change
-    // runs it through the scripts project, which holds it and runs whole.
+    // checks, lib, app, components), the packages' and the extension's code and the crates' Rust name, every local
+    // action CI's workflows use, and every file a document the site publishes links to. Its test reads those from disk
+    // for the paths they name, which no import graph shows, so a change to one runs it (whole: that one file, about
+    // 150 ms). A draft's tier is all the merge train waits for: without this, a website script naming an uncovered file
+    // went red only in batches (2026-11-03). A workflow change runs it through the scripts project, which holds it and
+    // runs whole.
     name: "ci gates", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/ci-changes.test.ts"],
     sources: [],
-    whole: ["apps/website/scripts/**", "apps/website/**/*.{ts,tsx,mts,js,mjs}", "packages/**/*.{ts,tsx,mts,js,mjs}", "apps/extension/**/*.{ts,tsx,mts,js,mjs}", "apps/desktop/**/*.rs", "native/transports/**/*.rs", ".github/actions/**"],
+    whole: ["apps/website/scripts/**", "apps/website/**/*.{ts,tsx,mts,js,mjs}", "docs/wisps/**", "docs/{PROTOCOL,SDK,USDT-INTEGRATION,DHT-DELIVERY}.md", "packages/**/*.{ts,tsx,mts,js,mjs}", "apps/extension/**/*.{ts,tsx,mts,js,mjs}", "apps/desktop/**/*.rs", "native/transports/**/*.rs", ".github/actions/**"],
     tests: [],
   },
   {
