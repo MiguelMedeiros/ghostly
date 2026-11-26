@@ -7,6 +7,7 @@ import { Apps } from "../../pages/Apps";
 import { setAppOpener, type AppOpener } from "../../lib/apps/open";
 import { forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetInstalledApps, refreshInstalledApps } from "../../lib/apps/installed";
+import { isolate } from "../../lib/ownStatus";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -149,7 +150,7 @@ describe("an Apps page row whose app stops while Open has the focus", () => {
 
   it.each([["revoked", { status: "revoked" } as const], ["removed by a store", REMOVED]])("%s: the focus goes to the row's name, Stopped", async (_name, next) => {
     const row = await stopWith(next, "open");
-    expect(document.activeElement).toBe(within(row).getByRole("button", { name: "Chess 1.2.0 Stopped: details" }));
+    expect(document.activeElement).toBe(within(row).getByRole("button", { name: `${isolate("Chess")} ${isolate("1.2.0")} ${isolate("Stopped")}: details` }));
   });
 
   it("the focus elsewhere is left where it is", async () => {

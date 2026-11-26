@@ -5,6 +5,7 @@ import type { AppPreview, BuiltInAppOffer, InstalledAppView } from "@ghostly/bro
 import { ChatAppsDialog } from "../../components/apps/ChatAppsDialog";
 import { setAppOpener } from "../../lib/apps/open";
 import { forgetInstalledApps, openAppInChat } from "../../lib/apps/installed";
+import { isolate } from "../../lib/ownStatus";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -176,9 +177,22 @@ describe("the chat's Apps with an app whose files are not on this device", () =>
       url: "https://raw.githubusercontent.com/a/snake/HEAD/app.ghostlyapp", title: "Snake", tagline: "Eat, grow." };
     fakeEngine.on("appBuiltIns", () => [offer]);
     await dialog();
-    expect(screen.getByTestId("chat-app-open")).toHaveAccessibleName("Open Chess");
-    expect(await screen.findByTestId("chat-built-in-app-open")).toHaveAccessibleName("Open Snake");
+    expect(screen.getByTestId("chat-app-open")).toHaveAccessibleName(`Open ${isolate("Chess")}`);
+    expect(await screen.findByTestId("chat-built-in-app-open")).toHaveAccessibleName(`Open ${isolate("Snake")}`);
     fakeEngine.on("appBuiltIns", () => []);
+  });
+
+  it("isolates the app's name in its Open, so in Arabic a title's end stays its own (Hunt!)", async () => {
+    run = { status: "ok" };
+    lists.mockImplementation(() => [{ ...installed(), title: "Hunt!" }]);
+    const offer: BuiltInAppOffer = { ref: `${REF.split("/")[0]}/notes`, publisher: REF.split("/")[0]!, name: "notes", fingerprint: "yz7m oxuc bd4u 8aqt", digest: "e",
+      url: "https://raw.githubusercontent.com/a/notes/HEAD/app.ghostlyapp", title: "Notes!", tagline: "Write it down." };
+    fakeEngine.on("appBuiltIns", () => [offer]);
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={() => {}} />, { language: "ar" });
+    expect(await screen.findByTestId("chat-app-open")).toHaveAccessibleName(`فتح ${isolate("Hunt!")}`);
+    expect(await screen.findByTestId("chat-built-in-app-open")).toHaveAccessibleName(`فتح ${isolate("Notes!")}`);
+    fakeEngine.on("appBuiltIns", () => []);
+    lists.mockImplementation(() => [installed()]);
   });
 });
 
