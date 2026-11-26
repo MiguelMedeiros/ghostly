@@ -1,3 +1,4 @@
+import { shownAddress } from "./shownAddress";
 import type { IceServerSetting } from "./types";
 
 /**
@@ -15,15 +16,6 @@ export function iceServerProblem(server: IceServerSetting): string | null {
     if (/^turns?:/i.test(url) && (!server.username?.trim() || !server.credential?.trim())) return "A TURN server needs its username and credential";
   }
   return null;
-}
-
-/**
- * A refused address as the refusal quotes it: without its `user:password@`, `?query` or `#fragment` (a TURN token or
- * credential put in the address), so the CLI and a log keep none of it. The rest is said as given. It cuts at the last
- * `@` first, since a password may hold a raw `?` or `#`, and keeps `turn:`/`turns:`/`stun:` even without `//`.
- */
-function shownAddress(url: string): string {
-  return url.replace(/^((?:stuns?|turns?):(?:\/\/)?|[a-z][a-z0-9+.-]*:\/\/)?[\s\S]*@/i, "$1").replace(/[?#][\s\S]*$/, "");
 }
 
 /**

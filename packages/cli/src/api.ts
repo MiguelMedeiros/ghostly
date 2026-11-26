@@ -1,6 +1,7 @@
 import { AWAITING_PEER_MS, DHT_PACKET_BUDGET, decodeCommunityLink, decodeGroupEntryLink, inviteLink, LIMITS, MENTION_EVERYONE, normalizeRelayUrl, ownInviteRefusal, parseLinkPreview, relayUrlProblem, replySnippet, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type LinkPreview, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
+import { shownAddress } from "@ghostly/browser/shared/shownAddress";
 import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
 import { groupPayLineId, groupPayNoteId } from "@ghostly/browser/shared/groupPayNotes";
 import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
@@ -489,8 +490,11 @@ const METHODS: Record<string, Method> = {
         for (const server of servers) { const problem = iceServerProblem(server); if (problem) throw new CliError("bad_request", `${key}: ${problem}`); }
         patch[key] = servers;
         // libdatachannel (libjuice) skips TURN over TCP and TLS without a word; the apps' browsers use them, so they stay.
+        // Each is named without a `user:password@` the address check lets through (`shownAddress`), since bots log stderr,
+        // and with its `?transport=tcp`, the reason it is not used: the check takes no other query.
         const unused = servers.flatMap((server) => server.urls.split(/[\s,]+/)).filter((url) => /^turns:|\?transport=tcp$/i.test(url));
-        if (unused.length) warning = (warning ? `${warning}. ` : "") + `The CLI reaches TURN over UDP only: it does not use ${unused.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
+        const named = unused.map((url) => shownAddress(url) + (/\?transport=tcp$/i.exec(url)?.[0] ?? ""));
+        if (unused.length) warning = (warning ? `${warning}. ` : "") + `The CLI reaches TURN over UDP only: it does not use ${named.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
         continue;
       }
       // The CLI hands the engine a HyperDHT of its own (runtime/engine.ts), which dials from this machine: the engine takes
