@@ -1647,6 +1647,9 @@ describe("settings", () => {
       // A relay's user:password@ and ?query are not said back.
       [{ irohRelays: ["https://alice:s3cret@iroh.lan/?token=t0k"] }, "Not a relay address: https://alice:s3cret@iroh.lan/?token=t0k", "irohRelays: not a relay address: https://iroh.lan/"],
       [{ hyperdhtRelay: "wss://alice:s3cret@relay.lan/#t0k" }, "Not a relay address: wss://alice:s3cret@relay.lan/#t0k", "hyperdhtRelay: not a relay address: wss://relay.lan/"],
+      // A raw # or ? in the password, and no scheme at all: the user and password still go unsaid.
+      [{ irohRelays: ["https://alice:s3cr#et@relay.example"] }, "Not a relay address: https://alice:s3cr#et@relay.example", "irohRelays: not a relay address: https://relay.example"],
+      [{ irohRelays: ["user:pw@relay.example"] }, "Not a relay address: user:pw@relay.example", "irohRelays: not a relay address: relay.example"],
     ];
     for (const [patch, engine, said] of refusals) {
       node.updateSettings.mockRejectedValueOnce(new Error(engine));
@@ -1662,6 +1665,7 @@ describe("settings", () => {
       [["ftp://relay.example.org"], "relays: use an https:// relay address: ftp://relay.example.org"],
       [["wss://relay.example.org", "notaurl"], "relays: use an https:// relay address: wss://relay.example.org"],
       [["wss://alice:s3cret@relay.example.org/?token=t0k"], "relays: not a relay address: wss://relay.example.org/"],
+      [["https://alice:s3cr?et@relay.example"], "relays: not a relay address: https://relay.example"],
     ];
     for (const [relays, said] of refusals) {
       await expect(callApi(ctx, "settings.set", { relays })).rejects.toMatchObject({ code: "bad_request", message: said });

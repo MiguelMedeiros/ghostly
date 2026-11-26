@@ -114,11 +114,14 @@ describe("the CLI's knobs for a private network", () => {
       ["http://alice:s3cret@iroh.lan/#t0k", "GHOSTLY_IROH_RELAYS: Use an https:// relay address: http://iroh.lan/"],
       ["https://alice:s3cret@iroh lan?token=t0k", "GHOSTLY_IROH_RELAYS: Not a relay address: https://iroh lan"],
       ["http://iroh.lan", "GHOSTLY_IROH_RELAYS: Use an https:// relay address: http://iroh.lan"],
+      // A raw # or ? in the password: what follows it is not a query, the user and password stay out.
+      ["https://alice:s3cr#et@relay.example", "GHOSTLY_IROH_RELAYS: Not a relay address: https://relay.example"],
     ];
     for (const [value, message] of iroh) expect(() => irohRelays({ GHOSTLY_IROH_RELAYS: value }), value).toThrow(expect.objectContaining({ code: "usage", message }));
     const pkarr: [string, string][] = [
       ["http://alice:s3cret@relay lan?token=t0k", 'GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not "http://relay lan"'],
       ["relay.lan", 'GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not "relay.lan"'],
+      ["http://alice:s3cr?et@relay.example", 'GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not "http://relay.example"'],
     ];
     for (const [value, message] of pkarr) expect(() => pkarrRelays({ GHOSTLY_PKARR_RELAYS: value }), value).toThrow(expect.objectContaining({ code: "usage", message }));
   });
