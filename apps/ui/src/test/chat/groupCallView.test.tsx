@@ -1,3 +1,4 @@
+// covers: calls.group.room, calls.group.screen
 import { act, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -122,6 +123,38 @@ describe("a shared screen", () => {
 
     rerenderWith(sharing([]));
     expect(screen.getByTestId("group-call-grid")).toBeInTheDocument();
+  });
+
+  it("two at once: the one picked on the side is shown large, and stays so while others start and stop", async () => {
+    const sharing = (who: string[]) => state(0, { participants: ["ana", "bo", "cy"].map((id) => person(id, who.includes(id) ? { screen: true, tracks: { screen: video() } } : {})) });
+    const main = () => within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0];
+    const show = (id: string) => within(screen.getByTestId("group-call-side")).getAllByTestId("group-call-show-screen").find((b) => b.dataset.identity === id)!;
+    const { user, rerenderWith } = view(sharing(["ana"]));
+    rerenderWith(sharing(["ana", "bo"]));
+    expect(main()).toHaveAttribute("data-identity", "bo");
+
+    // Ana's screen, picked by keyboard: it is large, Bo's is the side's, and the focus is on Bo's to switch back.
+    show("ana").focus();
+    expect(show("ana")).toHaveAccessibleName(expect.stringMatching(/^Show \W?Ana\W?'s screen large$/));
+    await user.keyboard("{Enter}");
+    expect(main()).toHaveAttribute("data-identity", "ana");
+    expect(show("bo")).toHaveFocus();
+
+    // Cy starts sharing: Ana's stays large. Bo stops: still Ana's.
+    rerenderWith(sharing(["ana", "bo", "cy"]));
+    expect(main()).toHaveAttribute("data-identity", "ana");
+    rerenderWith(sharing(["ana", "cy"]));
+    expect(main()).toHaveAttribute("data-identity", "ana");
+
+    // Ana stops: the latest left (Cy) is large, and a new share after that takes over as before.
+    rerenderWith(sharing(["cy"]));
+    expect(main()).toHaveAttribute("data-identity", "cy");
+    rerenderWith(sharing(["cy", "ana"]));
+    expect(main()).toHaveAttribute("data-identity", "ana");
+
+    await user.click(show("cy"));
+    expect(main()).toHaveAttribute("data-identity", "cy");
+    expect(await axeViolations(screen.getByTestId("group-call"))).toEqual([]);
   });
 });
 
