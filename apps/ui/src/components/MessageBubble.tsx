@@ -1190,7 +1190,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             <line x1="15" y1="12" x2="3" y2="12" />
           </svg>
           {mine ? <span>{t("chat.youJoined")}</span> : (
-            <span>
+            // A name of one long word breaks inside the line: unbroken, the centred line ran off both sides of a phone.
+            <span className="min-w-0 [overflow-wrap:anywhere]">
               {name ? <span className="font-semibold" dir="auto">{name}</span> : <span className="font-mono font-semibold">{pubKeyShort}</span>}
               {" "}{t("chat.joined")}
             </span>
