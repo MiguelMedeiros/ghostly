@@ -55,7 +55,7 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
     const now = classifyInvite(reading.keys);
     setOutcome(now);
     if (now.kind === "own") return;
-    if (now.kind === "joined") { showJoinNotice("join.alreadyIn"); nav.conversation(chatPath(now.sessionId)); return; }
+    if (now.kind === "joined") { showJoinNotice("join.alreadyIn", now.sessionId); nav.conversation(chatPath(now.sessionId)); return; }
     let sessionId: string;
     try { sessionId = ensureSession(reading.keys); } catch (cause) {
       // No room left to store the chat is said as that: the invite is good.

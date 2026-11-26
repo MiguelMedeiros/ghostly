@@ -27,7 +27,7 @@ import { useViewportHeight } from "./hooks/useViewportHeight";
 import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
 import { INVITE_REFUSAL_MESSAGE, chatPath, chatRouteSession, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite, undoubledRoute } from "./lib/url";
-import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
+import { onJoinNotice, showJoinNotice, type JoinNoticeDetail } from "./lib/joinNotice";
 import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
 import { LINK_GROUPS_WAITING, groupPath, linkGroupId, linkGroupsWaiting } from "./lib/groups";
 import { useEngineValue } from "./lib/engineState";
@@ -114,7 +114,7 @@ function ChatLinkIntake() {
     // This profile's own invite opens the chat that owns it, never a second one; one already joined by opens its chat.
     const outcome = classifyInvite(keys);
     let sessionId: string | null;
-    if (outcome.kind === "own") { sessionId = outcome.sessionId; showJoinNotice("join.own"); }
+    if (outcome.kind === "own") { sessionId = outcome.sessionId; showJoinNotice("join.own", sessionId); }
     else if (outcome.kind === "new" && linkChatsWaiting() >= LINK_CHATS_WAITING) {
       setInvalid("join.tooManyLinks");
       navigate("/", { replace: true });
@@ -125,7 +125,7 @@ function ChatLinkIntake() {
         if (cause instanceof Error && cause.message === NO_ROOM_FOR_CHAT) { reportChatNotStored(cause); navigate("/", { replace: true }); return; }
         sessionId = null;
       }
-      if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
+      if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn", sessionId);
     }
     if (!sessionId) {
       setInvalid("join.invalid");
@@ -194,20 +194,25 @@ function ChatLinkIntake() {
     : null;
 }
 
-/** "You're already in this chat", or "This is your own invite" from a link: said over the chat it opened, for a moment. */
+/**
+ * "You're already in this chat", or "This is your own invite" from a link: said over the chat it opened, for a moment,
+ * and only while that chat is shown. Links held under the lock open one after the other, and a group's link answers
+ * later: an earlier one's notice would sit over the chat or group the app lands on.
+ */
 function JoinNotice() {
   const { t } = useI18n();
-  const [notice, setNotice] = useState<JoinNoticeKey | null>(null);
+  const [notice, setNotice] = useState<JoinNoticeDetail | null>(null);
+  const shown = chatRouteSession(useLocation().pathname);
   useEffect(() => onJoinNotice(setNotice), []);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(null), 6000);
     return () => clearTimeout(timer);
   }, [notice]);
-  return notice ? (
+  return notice && notice.sessionId === shown ? (
     <div role="status" data-testid="join-notice" onClick={() => setNotice(null)}
       className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl cursor-pointer">
-      {t(notice)}
+      {t(notice.key)}
     </div>
   ) : null;
 }

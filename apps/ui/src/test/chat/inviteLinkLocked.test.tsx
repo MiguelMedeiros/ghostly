@@ -70,6 +70,85 @@ it("invite links opened while locked each make their chat after the unlock, up t
   expect(listSessions()).toHaveLength(3);
 }, 60_000);
 
+// covers: invite.link, profiles.lock, chat.paired.join-notice
+/*
+ * Invite links held under the lock open one after the other after the unlock: only the chat the app lands on (the
+ * last link's) says its join notice. An earlier link's "You're already in this chat" sat over the next chat opened.
+ */
+it.each([
+  ["a chat already here, then a new one: no notice over the new chat", ["joined", "new"], null],
+  ["this profile's own invite, then a new chat: no notice over the new chat", ["own", "new"], null],
+  ["a new chat, then one already here: that one still says so", ["new", "joined"], "You're already in this chat."],
+] as const)("invite links held under the lock, %s", async (_, kinds, notice) => {
+  const codes = kinds.map((kind) => {
+    const { mine, inviteCode } = createChatInvite();
+    const reading = readInvite(inviteCode);
+    if (kind === "joined" && reading.ok) ensureSession(reading.keys);
+    if (kind === "own") ensureSession({ seedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, profile: "paired-chat/1" });
+    return inviteCode;
+  });
+  window.location.hash = `#${codes[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  window.location.hash = `#${codes[1]}`;
+  act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(2));
+  const last = readInvite(codes[1]);
+  const landed = listSessions().find((s) => last.ok && s.peerPubKeyB64 === last.keys.peerPubKeyB64)!;
+  await waitFor(() => expect(window.location.hash).toBe(`#/chat/${landed.id}`));
+  if (notice) expect(screen.getByTestId("join-notice")).toHaveTextContent(notice);
+  else expect(screen.queryByTestId("join-notice")).toBeNull();
+}, 60_000);
+
+// covers: invite.link, groups.link.join, profiles.lock, chat.paired.join-notice
+/*
+ * A group's link held under the same lock as one to a chat already here, in either order: the group's join answers
+ * after the chat opened, and the app lands on the group. The chat's "You're already in this chat" is not said over it.
+ */
+it.each([
+  ["the chat's link first", false],
+  ["the group's link first", true],
+])("a chat already here and a group's link held under the lock, %s: no notice over the group", async (_, groupFirst) => {
+  fakeEngine.on("joinGroupByLink", () => ({ groupId: "g1" }));
+  const code = createChatInvite().inviteCode;
+  const reading = readInvite(code);
+  if (!reading.ok) throw new Error("a fresh invite reads");
+  ensureSession(reading.keys);
+  const hashes = groupFirst ? ["#/join/group2/abc", `#${code}`] : [`#${code}`, "#/join/group2/abc"];
+  window.location.hash = hashes[0];
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  window.location.hash = hashes[1];
+  act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/group/g1"));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(window.location.hash).toBe("#/group/g1");
+  expect(screen.queryByTestId("join-notice")).toBeNull();
+}, 60_000);
+
+// covers: invite.link, chat.paired.join-notice
+it("an invite link to a chat already here, opened while unlocked, says so at once", async () => {
+  const code = createChatInvite().inviteCode;
+  const reading = readInvite(code);
+  if (!reading.ok) throw new Error("a fresh invite reads");
+  const id = ensureSession(reading.keys);
+  lock.isLocked = false;
+  render(<Root />);
+  await screen.findByTestId("sidebar");
+  window.location.hash = `#${code}`;
+  act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+  await waitFor(() => expect(window.location.hash).toBe(`#/chat/${id}`));
+  expect(await screen.findByTestId("join-notice")).toHaveTextContent("You're already in this chat.");
+}, 60_000);
+
 // covers: invite.link, profiles.lock
 /*
  * Links with a joined chat's seed but another contact's keys, opened while locked: each would make a chat of its own,

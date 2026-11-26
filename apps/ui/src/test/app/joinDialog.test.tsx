@@ -93,7 +93,7 @@ describe("Join and an invite this profile made or joined", () => {
   async function submit(value: string, language?: "pt") {
     const onJoin = vi.fn(), onOpenChat = vi.fn(), onClose = vi.fn();
     const notices: JoinNoticeKey[] = [];
-    onJoinNotice((key) => notices.push(key));
+    onJoinNotice(({ key }) => notices.push(key));
     const { user, engine } = renderApp(<JoinDialog onJoin={onJoin} onOpenChat={onOpenChat} onClose={onClose} />, { language });
     engine.readClipboardText = vi.fn(async () => value);
     await user.click(screen.getByRole("button", { name: language === "pt" ? "Colar da área de transferência" : "Paste from clipboard" }));
