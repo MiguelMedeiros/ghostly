@@ -127,9 +127,15 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     };
     const listen = w.EventTarget.prototype.addEventListener;
     const home = w.document;
+    const away = (doc) => {
+      const there = apply(view, doc, []);
+      return there !== null && there !== w ? there : null;
+    };
     const reopen = w.Document.prototype.open;
     w.Document.prototype.open = function () {
       if (arguments.length > 2) return apply(opener, w, [arguments[0], arguments[1]]);
+      const there = away(this);
+      if (there !== null) return apply(there.Document.prototype.open, this, arguments);
       const got = apply(reopen, this, arguments);
       if (this === home) { try { apply(listen, home, ["load", sweep, true]); } catch (e) {} }
       return got;
@@ -159,6 +165,8 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
         for (let i = 0; i < arguments.length; i++) checked += text(arguments[i]);
         if (shadowed(tail + checked)) refuse();
         tail = apply(slice, tail + checked, [-16]);
+        const there = away(this);
+        if (there !== null) return apply(there.Document.prototype[name], this, [checked]);
         if (this === home) {
           apply(blank, home, [""]);
           try { apply(listen, home, ["load", sweep, true]); } catch (e) {}
@@ -662,8 +670,14 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           }
         } catch (e) {}
       };
+      const away = (doc) => {
+        const there = apply(view, doc, []);
+        return there !== null && there !== w ? there : null;
+      };
       const reopen = proto.open;
       proto.open = function () {
+        const there = away(this);
+        if (there !== null) return apply(there.Document.prototype.open, this, arguments);
         const got = apply(reopen, this, arguments);
         reheard(this, null);
         return got;
@@ -694,6 +708,8 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           for (let j = 0; j < arguments.length; j++) checked += text(arguments[j]);
           if (shadowed(tail + checked)) refuse();
           tail = apply(slice, tail + checked, [-16]);
+          const there = away(this);
+          if (there !== null) return apply(there.Document.prototype[writes[i]], this, [checked]);
           reheard(this, blank);
           return apply(real, this, [checked]);
         };

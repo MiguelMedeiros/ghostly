@@ -226,9 +226,12 @@ describe("the WebRTC guard's look at frames as one loads, once the page rewrote 
       parsing = true;
     };
     class List { get length() { return 0; } }
+    // As `tapWindow`'s: another window's method reaches a document's own `opened`, `parsed` and `own`.
     class Doc {
       querySelectorAll() { return new List(); }
-      open() { openSteps(this); return this; }
+      open() { this.opened(); return this; }
+      opened() { openSteps(this); }
+      own() { return this === w.document ? w : null; }
       close() { parsing = false; }
       write(html: string) { this.parsed("write", html); }
       writeln(html: string) { this.parsed("writeln", html); }
@@ -252,7 +255,7 @@ describe("the WebRTC guard's look at frames as one loads, once the page rewrote 
       open() {},
       document: null,
     };
-    Object.defineProperty(Doc.prototype, "defaultView", { get(this: unknown) { return this === w.document ? w : null; } });
+    Object.defineProperty(Doc.prototype, "defaultView", { get(this: Doc) { return this.own(); } });
     w.document = new Doc();
     new Function("window", VIEWER_GUARD_SCRIPT)(w);
     /** A frame loads a page of the origin the guard is not put in (its first, empty one, or a `blob:` one). */
@@ -266,7 +269,10 @@ describe("the WebRTC guard's look at frames as one loads, once the page rewrote 
       loads,
       written,
       load,
-      rewrite: () => (Doc.prototype.open as (this: object) => unknown).call(w.document as object),
+      /** The window's document and its `Document` (what another window reads as `frame.contentWindow.Document`). */
+      document: w.document as object,
+      Document: Doc,
+      rewrite: (on: object = w.document as object) => (Doc.prototype.open as (this: object) => unknown).call(on),
       /** As `tapWindow`'s: after load, then `document.close()`; `during` runs as a script it wrote. */
       write: (name: "write" | "writeln", on: object = w.document as object, during: (() => void) | null = null, clearing = true) => {
         parse = during;
@@ -307,6 +313,29 @@ describe("the WebRTC guard's look at frames as one loads, once the page rewrote 
     page.rewrite();
     expect(page.loads).toHaveLength(1);
     expect(page.load(0)).toBe(false);
+  });
+
+  it("goes into a frame of a frame whose document the page opened or wrote with its own method", () => {
+    // `Document.prototype.write.call(frame.contentDocument, …)` in the page runs the frame's open steps: the page's guard
+    // hands the call to the frame's own method, so the frame's guard listens for its own frames' loads again.
+    for (const call of ["open", "write", "writeln"] as const) {
+      const page = rewritable();
+      const frame = rewritable();
+      const sweep = frame.loads[0];
+      if (call === "open") page.rewrite(frame.document);
+      else page.write(call, frame.document);
+      expect(frame.loads, call).toEqual([sweep]);
+      expect(frame.load(0), call).toBe(false);
+      if (call !== "open") expect(frame.written, call).toEqual([["write", ""], [call, "<iframe></iframe>"]]);
+      expect(page.written, call).toEqual([]);
+    }
+    // A frame whose own method the page made the page's: the call never reaches the browser.
+    const page = rewritable();
+    const frame = rewritable();
+    frame.Document.prototype.write = page.Document.prototype.write;
+    expect(() => page.write("write", frame.document)).toThrow(RangeError);
+    expect(frame.written).toEqual([]);
+    expect(frame.loads).toHaveLength(1);
   });
 });
 
