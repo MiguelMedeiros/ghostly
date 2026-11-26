@@ -54,7 +54,8 @@ beforeEach(() => {
   reads = 0;
   checked = () => {};
   fakeEngine.on("appList", () => []).on("appBuiltIns", () => []).on("appStoreList", () => stores())
-    .on("appCheckUpdates", () => new Promise((resolve) => { checked = () => resolve([]); }))
+    // A check that checked an app (and so read every store again), found nothing new.
+    .on("appCheckUpdates", () => new Promise((resolve) => { checked = () => resolve([{ ref: `${KEY}1/app1`, outcome: "none", run: { status: "ok" } }]); }))
     .on("appStoreRefresh", (params: { key?: string } | undefined) => stores().filter((s) => s.key === params?.key));
 });
 afterEach(() => {

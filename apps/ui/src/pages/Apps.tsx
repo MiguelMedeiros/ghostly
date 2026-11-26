@@ -529,7 +529,8 @@ export function Apps() {
     void reloadStores();
     // The update check, as the page opens (WISP 1200 § Updates): nothing goes out while no app is installed. The engine
     // tells every page that it ran (`apps-checked`), and the installed apps are read again for that, not here a second time.
-    void engine.call("appCheckUpdates").then(() => reloadStores(), () => {});
+    // The stores are read again only after a check that checked an app: with none installed it read no store.
+    void engine.call("appCheckUpdates").then((results) => { if (results.length) void reloadStores(); }, () => {});
   }, [available, reloadStores]);
 
   // The rows' callbacks stay the same across the page's draws (a toast, a screen opening), so a row is drawn again only
