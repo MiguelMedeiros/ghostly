@@ -66,6 +66,10 @@ describe("Settings → Blocked contacts", () => {
     expect(rows[1]).toHaveTextContent(/^Contact · /);
     await utils.user.click(screen.getByRole("button", { name: /^Unblock .*Bob/ }));
     expect(utils.engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }]);
+    // Each row unblocks its own key.
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: /^Unblock .*Contact · / })).toBeEnabled());
+    await utils.user.click(screen.getByRole("button", { name: /^Unblock .*Contact · / }));
+    expect(utils.engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }, { peerPubKeyZ32: gone, blocked: false }]);
   });
 
   it("Unblock hands the focus to the next row's Unblock once its own row is gone, not to the page", async () => {

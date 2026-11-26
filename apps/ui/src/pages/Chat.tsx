@@ -893,7 +893,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const blockKey = chatLink && params.peerPubKeyB64 ? params.peerPubKeyB64 : undefined;
   const setBlocked = (blocked: boolean) => {
     setConfirmBlock(false);
-    if (blockKey) void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked }).catch(() => {});
+    if (!blockKey) return;
+    // Blocked during a call: nothing of the contact is heard any more (its hang-up included), so the call ends here.
+    // One that rings in stops with nothing sent, as if this app were closed; one that is on, or rings on their side,
+    // ends as a hang-up does.
+    if (blocked && webrtc.callState !== "idle") webrtc.hangUp(!ringsIn, !ringsIn);
+    void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked }).catch(() => {});
   };
 
   const statusLabel = contactStatus(deliveryPeer, paired, status);
