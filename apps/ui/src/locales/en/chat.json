@@ -29,6 +29,12 @@
     "save": "Save audio",
     "tooLarge": "Too large to play here. Download it to listen."
   },
+  "block": {
+    "blocked": "You blocked this contact",
+    "body": "They can no longer call you or send you anything, and nothing tells them. The chat stays. Unblock them from this menu or in Settings → Privacy & security.",
+    "confirm": "Block",
+    "title": "Block {{name}}?"
+  },
   "compat": {
     "burned": "Chat has been burned",
     "continued": "You invited your contact to a new chat.",
@@ -45,6 +51,8 @@
   "deleteForEveryone": "Delete for everyone",
   "deleteForEveryoneGroupHint": "Deleted from the members' devices too. Older apps show \"Message removed\"; saved copies stay.",
   "deleteForEveryoneHint": "Deleted from your contact's devices too. Older apps show \"Message removed\"; saved copies stay.",
+  "deleteForEveryoneHintDhtContact": "Deleted here now. Your contact's devices delete it only if the chat is live again within a week: your contact's chat is on DHT only, until they allow live again. Older apps show \"Message removed\"; saved copies stay.",
+  "deleteForEveryoneHintDhtYou": "Deleted here now. Your contact's devices delete it only if the chat is live again within a week: this chat is on DHT only, change it from the connection icon. Older apps show \"Message removed\"; saved copies stay.",
   "deleteMessage": "Delete message",
   "deleteMessageHint": "Deleted only here. Your contact keeps their copy.",
   "deleteSendingFileHint": "Deleted only here. Sending stops; your contact won't get the file.",
@@ -276,6 +284,7 @@
     "wantsToSend": "{{name}} wants to send it · {{size}} left"
   },
   "menu": {
+    "block": "Block contact",
     "continueNew": "Continue in a new chat",
     "hold": "Hold messages…",
     "more": "More…",
@@ -285,6 +294,7 @@
     "pin": "Pin chat",
     "refresh": "Refresh",
     "techInfo": "Tech Info",
+    "unblock": "Unblock contact",
     "unpin": "Unpin chat"
   },
   "message": {

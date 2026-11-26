@@ -4,7 +4,7 @@ import { DAEMON_WATCH_PEER_IDLE_MS, GhostLink, RELAY_POLL_INTERVALS, REQUESTS_PE
 import { GhostlyNode, type NodeOptions } from "../src/engine/node";
 import { ResumeTurns } from "../src/engine/resumeTurns";
 import { db } from "../src/engine/db";
-import { STORES, transact } from "../src/shared/idb";
+import { STORES, fileStore, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
 import { closeWorld, fakePeerConnection, invitationWhere, run, useFakeWorld, type Side } from "../../core/test/support/pairingWorld";
 
@@ -164,16 +164,19 @@ describe("a daemon restarted while its 50 contacts are online, one relay at the 
 });
 
 /**
- * The 20 chats first in line (`nativeStartOrder`: the most recently live in the last run first) have their contact
- * away: it quit while the app was off, and said so on the relay. The engine started again on the default budget, each
- * chat's turn (`ResumeTurns`) noted as it is taken and given back.
+ * The 20 chats first in line (`nativeStartOrder`: the most recently live in the last run first, ties by id) have their
+ * contact away: it quit while the app was off, and said so on the relay. The engine started again on the default
+ * budget, each chat's turn (`ResumeTurns`) noted as it is taken and given back.
  */
 async function restartedWithAway() {
   const { contacts, rows, liveIn } = await lastRun();
   const stored = new Map((await db.getLinks()).map((link) => [link.id, link]));
   const lastLive = (i: number) => Math.max(0, ...(stored.get(rows[i].id)!.transportHistory ?? [])
     .filter((e) => e.kind === "live" || e.kind === "switched" || (e.kind === "down" && !e.restart)).map((e) => e.at));
-  const inLine = rows.map((_, i) => i).sort((a, b) => lastLive(b) - lastLive(a));
+  // Chats last live in the same millisecond (the last run brought several back on one round of relay answers) in the
+  // order of their ids, as the engine lines them up: in the rows' order, `chat-9` went before `chat-11`, the engine put
+  // it after, and when that tie fell across the tenth place one chat thought first waited its turn for the whole window.
+  const inLine = rows.map((_, i) => i).sort((a, b) => lastLive(b) - lastLive(a) || (rows[a].id < rows[b].id ? -1 : 1));
   const away = inLine.slice(0, AWAY), online = inLine.slice(AWAY);
   await settled(Promise.all(away.map((i) => contacts[i].stop(true))));
   await run(10_000);
@@ -285,24 +288,26 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
       } as unknown as StoredLink);
     }
     const node = engine(unlimited(), { resumesAtOnce: 1 });
-    await settled(node.start());
+    // Started with the clock still: fake time run during the start (`settled`), more of it the slower the machine, let
+    // chat-0's first read find its contact away and end its turn, then chat-1's and chat-2's, before the line is read.
+    await node.start();
     const turns = node["resumeTurns"] as ResumeTurns;
     expect([...turns["running"]], "resuming").toEqual(["chat-0"]);
     expect(turns["line"], "waiting").toEqual(["chat-1", "chat-2"]);
     // Held while it waits: it starts on DHT only, where no live session resumes (and no data link opens to end a turn).
     await settled(node.setChatTransport({ linkId: "chat-1", transport: "dht" }));
-    expect(node["links"].get("chat-1")?.link, "started").toBeDefined();
+    expect(node["links"].get("chat-1")?.link, "started").toBeInstanceOf(GhostLink);
     expect(turns["running"].has("chat-1"), "a turn held on DHT only").toBe(false);
     // chat-0's turn ends (its contact read away, here, or done by hand): the one left in line takes it. Before, chat-1
     // kept a turn on DHT only and chat-2 never started.
     turns.finished("chat-0");
-    expect(node["links"].get("chat-2")?.link, "the chat behind starts").toBeDefined();
+    expect(node["links"].get("chat-2")?.link, "the chat behind starts").toBeInstanceOf(GhostLink);
   }, 60_000);
 
   it("goes back to Automatic at once", async () => {
     const { node, id } = await waiting();
     await settled(node.setChatTransport({ linkId: id, transport: "auto" }));
-    expect(node["links"].get(id)?.link, "started").toBeDefined();
+    expect(node["links"].get(id)?.link, "started").toBeInstanceOf(GhostLink);
     expect((node["resumeTurns"] as ResumeTurns)["line"]).toEqual([]);
   }, 60_000);
 
@@ -391,8 +396,40 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
   it("keeps a chat on its live link at once", async () => {
     const { node, id } = await waiting();
     await settled(node.setDeliveryMode({ linkId: id, mode: "stream" }));
-    expect(node["links"].get(id)?.link, "started").toBeDefined();
+    expect(node["links"].get(id)?.link, "started").toBeInstanceOf(GhostLink);
     expect((node["resumeTurns"] as ResumeTurns)["line"]).toEqual([]);
+  }, 60_000);
+});
+
+/**
+ * A file that stopped arriving, asked for again while its chat waits its turn to resume (`ghostly file request` on a
+ * daemon just restarted): it goes when the chat is live, and the chat tries now, as for a chat whose session dropped.
+ * Before, only a chat with a link tried now: one waiting its turn had none, and the file waited for the line.
+ */
+describe("a file pushed again in a chat that waits its turn to resume", () => {
+  it("starts the chat at once", async () => {
+    const { inviter: app, joiner: contact } = invitationWhere("inviter");
+    const row = {
+      ...app.params, id: "chat-0", label: "c0", createdAt: app.createdAt, participationSeed: app.seedB64,
+      pairedPeerKey: peerKeyOf(contact), peerTrust: { version: 1, verifiedKey: peerKeyOf(contact) }, peerTransports: ["webrtc/1"],
+      transportHistory: [{ id: "h0", at: Date.now() - MIN, kind: "live", transport: "webrtc/1" }],
+    } as unknown as StoredLink;
+    await db.putLink(row);
+    const fileId = `${row.id}-in-w3`;
+    await fileStore.put({ id: fileId, linkId: row.id, blob: new Blob([new Uint8Array(4)]), createdAt: 1, direction: "in", wireId: "w3",
+      transfer: { state: "transferring", transferred: 4, size: 8 },
+      wire3: { id: "w3", direction: "in", file: { id: "w3", name: "w3.bin", size: 8, mime: "" }, state: "active", confirmed: 4, since: Date.now(), agreed: true, consented: true } });
+    try {
+      const node = engine(unlimited(), { resumesAtOnce: 0 });
+      await settled(node.start());
+      const turns = node["resumeTurns"] as ResumeTurns;
+      expect(turns["line"], "the chat waits its turn").toEqual([row.id]);
+      await settled(Promise.resolve(node.fileAction({ linkId: row.id, fileId, action: "request" })));
+      expect(turns["line"], "out of the line").toEqual([]);
+      expect(node["links"].get(row.id)?.link, "started").toBeInstanceOf(GhostLink);
+    } finally {
+      await fileStore.delete(fileId);
+    }
   }, 60_000);
 });
 

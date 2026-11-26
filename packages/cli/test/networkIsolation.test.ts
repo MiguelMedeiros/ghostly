@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { irohRelays, publicStun, withoutPublicStun } from "../src/runtime/engine";
+import { irohRelays, pkarrRelays, publicStun, withoutPublicStun } from "../src/runtime/engine";
 import { ghostly, home, ok, Running } from "./support/cli";
 import {
   desktopPublicNetworkIn, desktopTestNetworkEnv, isolatedDesktopNetworkEnv, isolatedNetworkEnv, PUBLIC_NET_OPT_IN, publicNetworkIn, testNetworkEnv,
@@ -105,6 +105,22 @@ describe("the CLI's knobs for a private network", () => {
     const relays = (n: number) => Array.from({ length: n }, (_, i) => `https://iroh${i}.lan/`).join(",");
     expect(irohRelays({ GHOSTLY_IROH_RELAYS: relays(5) })).toHaveLength(5);
     expect(() => irohRelays({ GHOSTLY_IROH_RELAYS: relays(6) })).toThrow(expect.objectContaining({ code: "usage", message: "GHOSTLY_IROH_RELAYS: use at most 5 Iroh relays, not 6" }));
+  });
+
+  it("GHOSTLY_IROH_RELAYS and GHOSTLY_PKARR_RELAYS refused: the relay named without its user:password@ or ?query", () => {
+    // The refusal lands on stderr and in daemon.log, which people paste: a relay's credentials stay out of it.
+    const iroh: [string, string][] = [
+      ["https://alice:s3cret@iroh.lan/?token=t0k", "GHOSTLY_IROH_RELAYS: Not a relay address: https://iroh.lan/"],
+      ["http://alice:s3cret@iroh.lan/#t0k", "GHOSTLY_IROH_RELAYS: Use an https:// relay address: http://iroh.lan/"],
+      ["https://alice:s3cret@iroh lan?token=t0k", "GHOSTLY_IROH_RELAYS: Not a relay address: https://iroh lan"],
+      ["http://iroh.lan", "GHOSTLY_IROH_RELAYS: Use an https:// relay address: http://iroh.lan"],
+    ];
+    for (const [value, message] of iroh) expect(() => irohRelays({ GHOSTLY_IROH_RELAYS: value }), value).toThrow(expect.objectContaining({ code: "usage", message }));
+    const pkarr: [string, string][] = [
+      ["http://alice:s3cret@relay lan?token=t0k", 'GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not "http://relay lan"'],
+      ["relay.lan", 'GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not "relay.lan"'],
+    ];
+    for (const [value, message] of pkarr) expect(() => pkarrRelays({ GHOSTLY_PKARR_RELAYS: value }), value).toThrow(expect.objectContaining({ code: "usage", message }));
   });
 
   it("GHOSTLY_STUN=0: the apps' public STUN servers out, the profile's own kept", () => {

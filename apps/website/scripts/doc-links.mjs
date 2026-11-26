@@ -3,15 +3,19 @@
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-/** The relative .md links of `body` (the document at `sourcePath`, from the repository's `root`) that name no file. */
-export function missingDocLinks(body, sourcePath, root) {
+/** The relative .md links of `body`, as written (`../PROTOCOL.md#4-records`). */
+export function docLinks(body) {
   // Code is not read as links: a fenced block or a `span` may show how one is written.
   const prose = body.replace(/^```[\s\S]*?^```/gm, "").replace(/`[^`\n]*`/g, "");
-  const from = dirname(resolve(root, sourcePath));
   return [...prose.matchAll(/\]\(([^)\s]+)/g)]
     .map((m) => m[1])
-    .filter((url) => !/^(?:[a-z][a-z\d+.-]*:|\/|#)/i.test(url))
-    .filter((url) => /\.md$/i.test(url.split("#")[0]) && !existsSync(resolve(from, url.split("#")[0])));
+    .filter((url) => !/^(?:[a-z][a-z\d+.-]*:|\/|#)/i.test(url) && /\.md$/i.test(url.split("#")[0]));
+}
+
+/** The relative .md links of `body` (the document at `sourcePath`, from the repository's `root`) that name no file. */
+export function missingDocLinks(body, sourcePath, root) {
+  const from = dirname(resolve(root, sourcePath));
+  return docLinks(body).filter((url) => !existsSync(resolve(from, url.split("#")[0])));
 }
 
 /** Names that take a `#` and a number and are no repository: standards (PKCS#8). */

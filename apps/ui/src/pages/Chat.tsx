@@ -7,6 +7,7 @@ import { useComposition } from "../hooks/useComposition";
 import { useOpenedHeading } from "../hooks/useOpenedHeading";
 import { draftDirection } from "../lib/documentLanguage";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
+import { isolate } from "../lib/ownStatus";
 import { setChatOnCall, setChatRingsIn } from "../lib/chatsOnCall";
 import { callHoldsService, useCallService } from "../lib/callService";
 import { setCallNoPath, useCallNoPath } from "../lib/callNoPath";
@@ -126,6 +127,7 @@ import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
+import { ChatBlockedLine } from "../components/chat/ChatBlockedLine";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { ReconnectingBanner } from "../components/ReconnectingBanner";
 import { TasksButton } from "../components/chat/TasksButton";
@@ -214,6 +216,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const { t, language } = useI18n();
   const { settings } = useSettings();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmBlock, setConfirmBlock] = useState(false);
 
   const session = useMemo(() => (sessionId ? loadSession(sessionId) : null), [sessionId]);
   const sharedNick = useShareProfile() ? settings.defaultNickname : "";
@@ -638,7 +641,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // On a touch screen the focus goes to the chat's name as it opens, not to the page (hooks/useOpenedHeading.ts).
   const headingRef = useRef<HTMLHeadingElement>(null);
   useOpenedHeading(headingRef, visible ? sessionId : null);
-  const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), callButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (sessionId) {
@@ -761,18 +764,21 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop && !webrtc.relayOnlyCallsOff
     && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
-  const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
-  // Cancel takes the whole notice away, and the focus it had fell to the page: it goes back to the call button that
-  // started the wait, or to ⋮ when that was a row of its menu, unless it went elsewhere meanwhile.
+  // Never placed to a contact blocked meanwhile (here, in Settings or on another device): its answer is not heard.
+  const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked && !chatLink?.blocked, placeCall);
+  // Cancel goes with the wait, pressed or given up, and the focus it had fell to the page: it goes back to the call
+  // button that started the wait, or to ⋮ when that was a row of its menu, unless it went elsewhere meanwhile. Once:
+  // coming back to the chat while it still says it gave up does not move it again.
   const wokeFrom = useRef<Element | null>(null), wakeCancelled = useRef(false);
   const cancelWake = () => { wakeCancelled.current = true; wakeCall.cancel(); };
   useEffect(() => {
-    if (wakeCall.waking || !wakeCancelled.current) return;
+    if (wakeCall.waking || !wokeFrom.current || !(wakeCancelled.current || wakeCall.gaveUp)) return;
+    const from = wokeFrom.current;
+    wokeFrom.current = null;
     wakeCancelled.current = false;
     if (!visible || !focusLost()) return;
-    const from = wokeFrom.current;
     (from instanceof HTMLElement && from.isConnected ? from : optionsRef.current)?.focus({ preventScroll: true });
-  }, [wakeCall.waking, visible]);
+  }, [wakeCall.waking, wakeCall.gaveUp, visible]);
 
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
@@ -879,10 +885,26 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       stopPlayingFrom(chatPath(params.sessionId), true);
       // The chat list keeps its own copy: without this it shows the deleted chat until its next refresh.
       window.dispatchEvent(new Event("session-updated"));
-      nav.home();
+      // From a ringing card over another chat (or Settings), the person stays where they are.
+      if (visible) nav.home();
     } else {
       setConfirmDelete(true);
     }
+  };
+
+  // Block contact (the engine's `setContactBlocked`): by the contact's key, so every chat with it; the chat stays and
+  // nothing tells the contact. Unblocking asks nothing: it only lets the contact be heard again.
+  const blockKey = chatLink && params.peerPubKeyB64 ? params.peerPubKeyB64 : undefined;
+  const setBlocked = (blocked: boolean) => {
+    setConfirmBlock(false);
+    if (!blockKey) return;
+    // Blocked during a call (⋮, or the ringing card's Block contact): nothing of the contact is heard any more (its
+    // hang-up included), so the call ends here. One that rings in stops with nothing sent, no decline and no line in the
+    // chat, as if this app were closed; one that is on, or rings on their side, ends as a hang-up does.
+    if (blocked && webrtc.callState !== "idle") webrtc.hangUp(!ringsIn, !ringsIn);
+    // Nor is a call that waits for the contact's app to wake placed once it does.
+    if (blocked) wakeCall.cancel();
+    void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked }).catch(() => {});
   };
 
   const statusLabel = contactStatus(deliveryPeer, paired, status);
@@ -896,9 +918,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
 
   // The call buttons, in the header and (the video call on a phone) in the ⋮ menu: why they are off, and what they start.
-  const callBlocked = webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
+  // A blocked contact's answer is never heard: calling it would only ring it.
+  const callBlocked = chatLink?.blocked ? t("chat.block.blocked")
+    : webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
   const callBusy = webrtc.callState !== "idle" || wakeCall.waking;
   const startCall = (withVideo: boolean) => {
+    if (chatLink?.blocked) return;
     if (!(callsBlocked && canWakeForCall)) return webrtc.startCall(withVideo);
     wokeFrom.current = document.activeElement;
     void wakeCall.ring(withVideo);
@@ -1093,8 +1118,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined}
-            scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle"} />
-          <CallButtons phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
+            scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle" && !ringsIn}
+            declineRingIn={ringsIn ? rejectCall : undefined} />
+          <CallButtons audioRef={callButtonRef} phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={cardRows} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
           {/* Options dropdown */}
@@ -1191,6 +1217,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                   </MenuItem>
                 : rarerRows(closeMenu)}
               <MenuSeparator />
+              {blockKey && (chatLink?.blocked
+                ? <MenuItem testId="chat-unblock" onClick={() => { closeMenu(); setBlocked(false); }}
+                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /></svg>}>
+                    {t("chat.menu.unblock")}
+                  </MenuItem>
+                : <MenuItem testId="chat-block" danger onClick={() => { setConfirmBlock(true); closeMenu(); }}
+                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></svg>}>
+                    {t("chat.menu.block")}
+                  </MenuItem>)}
               <MenuItem danger onClick={() => { setConfirmDelete(true); closeMenu(); }}
                 icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>}>
                 {t("sidebar.deleteChat")}
@@ -1221,6 +1256,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} appCards={appCards} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
+
+      {chatLink?.blocked && blockKey && <ChatBlockedLine onUnblock={() => setBlocked(false)} returnFocus={optionsRef} />}
 
       {compat && session?.continuedIn && (
         <div data-testid="compat-continued" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">
@@ -1395,6 +1432,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           onReject={webrtc.rejectCall}
           // On a call in another chat: End and answer ends it first (useWebRTC), or Decline. Never two calls at once.
           onCall={webrtc.otherCallOn}
+          onDelete={() => setConfirmDelete(true)}
+          onBlock={blockKey && !chatLink?.blocked ? () => setConfirmBlock(true) : undefined}
         />,
         callLayer ?? document.body,
       )}
@@ -1414,6 +1453,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           layer={callLayer}
           pinned={!visible}
           onReturnToChat={() => nav.conversation(chatPath(sessionId))}
+          // Answered by End and answer, the call has no button of its own to give the focus back to: this chat's has it.
+          returnFocus={() => (visible ? callButtonRef.current : null)}
           callState={webrtc.callState}
           localStream={webrtc.localStream}
           remoteStream={webrtc.remoteStream}
@@ -1453,6 +1494,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
       {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} callOn={callHoldsChat} />}
+      {confirmBlock && blockKey && <DeleteChatDialog name={shownName} title={t("chat.block.title", { name: isolate(shownName) })} body={t("chat.block.body")}
+        confirm={t("chat.block.confirm")} onClose={() => setConfirmBlock(false)} onConfirm={() => setBlocked(true)} returnFocus={optionsRef} />}
       {showTechInfo && techInfo && (
         <TechInfoDialog onClose={() => setShowTechInfo(false)} returnFocus={optionsRef}>
         <div className="p-4 space-y-4 text-sm">
@@ -1490,7 +1533,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         never moves. */}
     {appHere && params && (
       <ChatAppPanel linkId={appHere} sessionId={sessionId} contact={{ name: shownName, named: !isAnonymous }}
-        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle"} />
+        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle" && !ringsIn}
+        declineRingIn={ringsIn ? rejectCall : undefined} />
     )}
     {/* Why an app did not open here, over the app that covers the chat: over the whole window, above its panel. */}
     <Toast toast={appWhy} onDismiss={dismissAppWhy} testId="chat-app-why" />

@@ -20,6 +20,7 @@ import { registerRunningApp, setAppOpener, setLinkedFiles } from "../../lib/apps
 import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
 import { forgetInstalledApps, useInstalledApps } from "../../lib/apps/installed";
 import { webLinkedFiles } from "../../lib/apps/webFiles";
+import { isolate } from "../../lib/ownStatus";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { shownInName } from "../labelInName";
@@ -52,8 +53,8 @@ const preview = (patch: Partial<AppPreview> = {}): AppPreview => ({
     entry: "index.html", permissions: ["chat"], runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT", files: [] },
   ...patch,
 });
-/** An installed app's row: named with its title, version and line as it shows them, then "details". */
-const detailsOf = (title: string) => new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} .*: details$`);
+/** An installed app's row: named with its title, version and line as it shows them, each isolated, then "details". */
+const detailsOf = (...words: string[]) => new RegExp(`^${words.map((w) => isolate(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(" ")} .*: details$`);
 
 const cardMessage = (patch: Partial<ChatMessage> = {}): ChatMessage =>
   ({ id: "m1", text: statusCardText(CARD), card: CARD, sender: "peer", timestamp: 1_700_000_000_000, ...patch });
@@ -1243,15 +1244,15 @@ describe("with the apps flag on", () => {
     const run = { status: "removed" as const, by: [{ store: "s", name: "Ghostly", reason: "Malware", at: 1 }] };
     fakeEngine.on("appList", () => [installed({ run })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
     renderApp(<Apps />, { route: "/apps" });
-    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess 1.2.0 Stopped: details" });
+    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: `${isolate("Chess")} ${isolate("1.2.0")} ${isolate("Stopped")}: details` });
     expect(details).toHaveAccessibleName(shownInName(details));
   });
 
   it("an installed app's row holds its title, version and line in its name, in the order it shows them (Label in Name)", async () => {
     fakeEngine.on("appList", () => [installed()]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
     renderApp(<Apps />, { route: "/apps" });
-    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: /^Chess 1\.2\.0 / });
-    expect(details).toHaveAccessibleName("Chess 1.2.0 Unknown publisher · Play chess with a contact: details");
+    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: detailsOf("Chess", "1.2.0") });
+    expect(details).toHaveAccessibleName(`${isolate("Chess")} ${isolate("1.2.0")} Unknown publisher · ${isolate("Play chess with a contact")}: details`);
     expect(details).toHaveAccessibleName(shownInName(details));
   });
 
@@ -1263,13 +1264,32 @@ describe("with the apps flag on", () => {
         expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [{ ref: `${KEY}/snake`, sequence: 1, digest: DIGEST, urls: [URL_], title: "Snake", tagline: "Eat, grow." }], removed: [] },
     ]);
     renderApp(<Apps />, { route: "/apps" });
-    expect(await screen.findByTestId("installed-app-open")).toHaveAccessibleName("Open Chess");
+    expect(await screen.findByTestId("installed-app-open")).toHaveAccessibleName(`Open ${isolate("Chess")}`);
     const [unread, hunt] = await screen.findAllByTestId("app-store");
-    expect(within(unread!).getByTestId("app-store-refresh")).toHaveAccessibleName(`Read ${UNREAD}`);
-    expect(within(unread!).getByTestId("app-store-remove")).toHaveAccessibleName(`Remove ${UNREAD}`);
-    expect(within(hunt!).getByTestId("app-store-refresh")).toHaveAccessibleName("Refresh Hunt");
-    expect(within(hunt!).getByTestId("app-store-remove")).toHaveAccessibleName("Remove Hunt");
-    expect(within(hunt!).getByTestId("app-listing-install")).toHaveAccessibleName("Install Snake");
+    expect(within(unread!).getByTestId("app-store-refresh")).toHaveAccessibleName(`Read ${isolate(UNREAD)}`);
+    expect(within(unread!).getByTestId("app-store-remove")).toHaveAccessibleName(`Remove ${isolate(UNREAD)}`);
+    expect(within(hunt!).getByTestId("app-store-refresh")).toHaveAccessibleName(`Refresh ${isolate("Hunt")}`);
+    expect(within(hunt!).getByTestId("app-store-remove")).toHaveAccessibleName(`Remove ${isolate("Hunt")}`);
+    expect(within(hunt!).getByTestId("app-listing-install")).toHaveAccessibleName(`Install ${isolate("Snake")}`);
+  });
+
+  it("isolates each app's and store's name in its buttons' names, so in Arabic a name's end stays its own (Hunt!)", async () => {
+    const offer: BuiltInAppOffer = { ref: `${KEY}/notes`, publisher: KEY, name: "notes", fingerprint: "yz7m oxuc bd4u 8aqt", digest: DIGEST, url: URL_, title: "Notes!", tagline: "Write it down." };
+    fakeEngine.on("appList", () => [installed({ title: "Hunt!", tagline: "Find it first!", unknownPublisher: false })]).on("appCheckUpdates", () => []).on("appBuiltIns", () => [offer])
+      .on("appStoreList", () => [{ key: "s", fingerprint: "qrst uvwx yz12 3456", url: "https://example.com/hunt.json", preloaded: false, name: "Hunt Store!", kind: "curated", sequence: 1,
+        expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [{ ref: `${KEY}/go`, sequence: 1, digest: DIGEST, urls: [URL_], title: "Go!", tagline: "Play go." }], removed: [] }]);
+    renderApp(<Apps />, { route: "/apps", language: "ar" });
+    const row = await screen.findByTestId("installed-app");
+    expect(within(row).getByTestId("installed-app-open")).toHaveAccessibleName(`فتح ${isolate("Hunt!")}`);
+    expect(within(row).getByRole("button", { name: /التفاصيل$/ })).toHaveAccessibleName(`${isolate("Hunt!")} ${isolate("1.2.0")} ${isolate("Find it first!")}: التفاصيل`);
+    const builtIn = await screen.findByTestId("built-in-app");
+    expect(within(builtIn).getByTestId("built-in-app-open")).toHaveAccessibleName(`فتح ${isolate("Notes!")}`);
+    expect(within(builtIn).getByTestId("built-in-app-remove")).toHaveAccessibleName(`إزالة ${isolate("Notes!")}`);
+    const store = await screen.findByTestId("app-store");
+    expect(within(store).getByTestId("app-store-refresh")).toHaveAccessibleName(`تحديث ${isolate("Hunt Store!")}`);
+    expect(within(store).getByTestId("app-store-remove")).toHaveAccessibleName(`إزالة ${isolate("Hunt Store!")}`);
+    expect(within(store).getByTestId("app-listing-install")).toHaveAccessibleName(`تثبيت ${isolate("Go!")}`);
+    fakeEngine.on("appBuiltIns", () => []);
   });
 
   it("the focus goes to Add once an uninstalled app's row or a removed store's block is gone, not lost on the page", async () => {
@@ -1753,7 +1773,7 @@ describe("with the apps flag on", () => {
     expect(within(row).getByText(BETA)).toHaveAttribute("dir", "ltr");
     expect(within(row).getByText(LONG)).not.toContainElement(within(row).getByText(BETA));
     // The version stays in the details button's name, right after the title, as the row shows it.
-    expect(within(row).getByRole("button", { name: detailsOf(`${LONG} ${BETA}`) })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: detailsOf(LONG, BETA) })).toBeInTheDocument();
   });
 });
 
@@ -1782,7 +1802,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     // Listing it read nothing of the app: no preview, no install.
     expect(appCalls()).not.toContain("appPreview");
 
-    await user.click(within(row).getByRole("button", { name: "Open Chess" }));
+    await user.click(within(row).getByRole("button", { name: `Open ${isolate("Chess")}` }));
     const screenOf = await screen.findByTestId("app-install");
     expect(fakeEngine.callsTo("appPreview")).toEqual([{ builtIn: REF }]);
     await within(screenOf).findByTestId("app-carried-line");
@@ -1886,7 +1906,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
   it("Remove asks first, as a store's Remove does: Cancel and Escape keep it and give the focus back to Remove", async () => {
     engineWith({ installed: false, removed: false });
     const { user } = renderApp(<Apps />, { route: "/apps" });
-    const remove = within(await screen.findByTestId("built-in-app")).getByRole("button", { name: "Remove Chess" });
+    const remove = within(await screen.findByTestId("built-in-app")).getByRole("button", { name: `Remove ${isolate("Chess")}` });
     remove.focus();
     await user.keyboard("{Enter}");
     // One press removes nothing: the question takes the place of the buttons, and Enter again does not remove.
@@ -1912,7 +1932,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     engineWith({ installed: false, removed: false });
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("built-in-app");
-    await user.click(within(row).getByRole("button", { name: "Remove Chess" }));
+    await user.click(within(row).getByRole("button", { name: `Remove ${isolate("Chess")}` }));
     expect(fakeEngine.callsTo("appUninstall")).toEqual([]);
     await user.click(screen.getByTestId("built-in-app-remove-confirm"));
     await waitFor(() => expect(fakeEngine.callsTo("appUninstall")).toEqual([{ ref: REF }]));

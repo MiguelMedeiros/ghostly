@@ -8,10 +8,14 @@ export function dayOf(at: number): number {
   return new Date(at).setHours(0, 0, 0, 0);
 }
 
-/** The local midnight of the day after the one starting at `day` (a day of 23 or 25 hours where the clocks change). */
+/**
+ * The local midnight of the day after the one starting at `day` (a day of 23 or 25 hours where the clocks change). Its
+ * own midnight: a day whose midnight the clocks skipped (Cairo, Santiago) starts at 01:00, and the next one at 00:00.
+ */
 export function nextDay(day: number): number {
   const date = new Date(day);
-  return date.setDate(date.getDate() + 1);
+  date.setDate(date.getDate() + 1);
+  return date.setHours(0, 0, 0, 0);
 }
 
 /**
@@ -73,12 +77,12 @@ export function byDay<R>(rows: readonly R[], days: readonly number[], from = 0):
 /**
  * How a day of a chat is named above its messages: Today, Yesterday, else its weekday and date, with the year when it is
  * not this year's, in the interface's language. One formatter per language and year or none: a chat with a message a day
- * has a hundred days in its page, named again on each render.
+ * has a hundred days in its page, named again on each render. Yesterday is the day whose next is today: a day before
+ * today's at today's hour is an hour into it where the clocks skipped today's midnight.
  */
 export function dayLabel(day: number, today: number, language: Language, t: Translate): string {
   if (day === today) return t("chat.today");
-  const yesterday = new Date(today);
-  if (day === yesterday.setDate(yesterday.getDate() - 1)) return t("chat.yesterday");
+  if (nextDay(day) === today) return t("chat.yesterday");
   const year = new Date(day).getFullYear() !== new Date(today).getFullYear();
   return formatAt(day, { weekday: "long", day: "numeric", month: "long", ...(year && { year: "numeric" }) }, language);
 }

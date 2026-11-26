@@ -192,6 +192,23 @@ describe("a member that picks its hubs keeps the edges it had until they reach t
     expect(wanted(NOW + 5_000)).toEqual([hub]);
   });
 
+  it("an edge to a member on another hub closes once my hub says it reaches that member through the hubs it hears (`v`)", async () => {
+    const { session, mesh, hub, members: [other, far], edges, wanted } = await adminOf20();
+    edges.set(far, "e-far");
+    expect(wanted()).toEqual([hub, far].sort());
+    mesh.reached(session.groupId, session, hub, { t: "group-reach", g: session.groupId, k: [session.myKey, other], v: [far] }, NOW);
+    expect(mesh.viaHub(session.groupId, session, far, NOW)).toBe(true);
+    expect(wanted()).toEqual([hub]);
+  });
+
+  it("the edges kept until a hub reaches their members count in the member's edge load", async () => {
+    const { session, mesh, hub, members: [a, b], edges, wanted } = await adminOf20();
+    edges.set(a, "e-a"); edges.set(b, "e-b");
+    expect(wanted()).toEqual([hub, a, b].sort());
+    // Me and three edges, not me and the hub alone: they are polled at the pace of four.
+    expect(mesh.edgeLoad(session.groupId, session)).toBe(4);
+  });
+
   it("a hub's word counts only while its edge to me is up", async () => {
     const { session, hub, members: [a], edges, down, wanted, reach } = await adminOf20();
     edges.set(a, "e-a");

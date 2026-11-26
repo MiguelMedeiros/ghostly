@@ -10,8 +10,8 @@ import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
 import { translatorFor } from "../../ui/src/locales";
 import { activeNamespace, markEngineRestart, pageNamespace, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
 import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
-import { forgetLocalAccess, releaseUnusedLocalAccess, withLocalAccess } from "./localAccess";
-import { allowLocalOrigin, localOriginAllowed } from "./localAllowList";
+import { allowLocalAccess, forgetLocalAccess, releaseUnusedLocalAccess, withLocalAccess } from "./localAccess";
+import { localOriginAllowed } from "./localAllowList";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { openedServices, type Opened } from "../../ui/src/lib/openedServices";
 import { parseViewerUrl, viewerUrl } from "./shared/viewer";
@@ -116,11 +116,11 @@ export const extensionHost: BrowserHost = {
   // list, the only addresses its peer reaches (localAllowList.ts): never on the one another tab switched to meanwhile.
   async requestLocalAccess(originPattern, origin) {
     const granted = await chrome.permissions.request({ origins: [originPattern] });
-    if (granted) await allowLocalOrigin(pageNamespace(), origin);
+    if (granted) await allowLocalAccess(pageNamespace(), origin);
     return granted;
   },
   localAccessAllowed: (origin) => localOriginAllowed(pageNamespace(), origin),
-  // The share's app is added under the lock the give-back holds, so neither runs in the middle of the other.
+  // The share's address and app are added under the lock the give-back and the prune hold, so none runs in the middle of another.
   withLocalAccess,
   // Given back once no app of any profile is at that host, on any port (localAccess.ts).
   forgetLocalAccess,

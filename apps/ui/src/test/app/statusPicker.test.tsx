@@ -100,6 +100,26 @@ describe("the status picker in the account menu", () => {
     expect(engine.callsTo("setOwnStatus")[0]?.status.text).toBe(`${"x".repeat(58)}😀😀`);
   });
 
+  it("never keeps half a flag, and a paste past the limit keeps the text after the caret", async () => {
+    answerStatus();
+    const { user } = renderBar();
+    const dialog = await openPicker(user);
+    const field = within(dialog).getByRole<HTMLInputElement>("textbox", { name: "Status text" });
+    // One character left, a flag takes two (code points, as core counts them): none of it goes in, not 🇧 alone.
+    fireEvent.change(field, { target: { value: "x".repeat(59) } });
+    await user.click(field);
+    await user.paste("🇧🇷");
+    expect(field).toHaveValue("x".repeat(59));
+    expect(within(dialog).getByTestId("status-count")).toHaveTextContent("59/60");
+
+    // At the caret, what fits goes in and the text after it stays.
+    fireEvent.change(field, { target: { value: `${"x".repeat(55)}END` } });
+    field.setSelectionRange(55, 55);
+    await user.paste("🇧🇷🇧🇷");
+    expect(field).toHaveValue(`${"x".repeat(55)}🇧🇷END`);
+    expect(field.selectionStart).toBe(55 + "🇧🇷".length);
+  });
+
   it("refuses a text that reads as a link, which the engine would drop, and saves it once changed", async () => {
     answerStatus();
     const { user, engine } = renderBar();
@@ -202,6 +222,14 @@ describe("the status picker in the account menu", () => {
     expect(statusEndText(new Date(2026, 10, 15).getTime(), "en", NOW)).toMatch(/^Sat 11:59\sPM$/);
     expect(statusEndText(new Date(2026, 10, 10).getTime(), "ar", NOW)).not.toContain("الثلاثاء");
     expect(statusEndText(new Date(2026, 10, 9, 23, 0).getTime(), "en", NOW)).toMatch(/^11:00\sPM$/);
+  });
+
+  it("in Arabic, keeps the day period on the time's line", () => {
+    for (const until of [new Date(2026, 10, 9, 21, 5), new Date(2026, 10, 12, 21, 5), new Date(2026, 10, 30, 21, 5)]) {
+      const text = statusEndText(until.getTime(), "ar", NOW);
+      expect(text).toContain("م");
+      expect(text).not.toMatch(/ م/);
+    }
   });
 
   it("in Arabic, keeps the person's text isolated in the menu row and in its name", async () => {

@@ -1229,6 +1229,25 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.a.stateChanges).toBe(before + 1);
   });
 
+  it("a file its sender pauses while it arrives gives its turn here to the next one waiting", async () => {
+    // Paused here, it gave its turn (`pause`); paused by its sender, it kept it: the file behind it waited `queued` with a
+    // free turn until one of the files still arriving ended, an hour later for large ones.
+    const w = wire({ writeMs: 5 });
+    w.attach();
+    const ids = ["turn-pa-0", "turn-pa-1", "turn-pa-2", "turn-pa-3"];
+    for (const id of ids) send(w, file(id, 1024 ** 3));
+    await until(() => state(w.b, "in", ids[3]) === "queued" && ids.slice(0, 3).every((id) => state(w.b, "in", id) === "active"));
+    w.a.files.pause("out", ids[0]);
+    await until(() => state(w.b, "in", ids[0]) === "paused");
+    await until(() => state(w.b, "in", ids[3]) === "active", 3_000);
+    expect(ids.slice(1, 3).map((id) => state(w.b, "in", id)), "the others still arrive: the turn is the paused one's").toEqual(["active", "active"]);
+    // Resumed with three arriving, it waits its turn: never a fourth at once.
+    w.a.files.resume("out", ids[0]);
+    await until(() => state(w.b, "in", ids[0]) === "queued");
+    expect(ids.filter((id) => state(w.b, "in", id) === "active")).toHaveLength(FILE_LIMITS.maxActiveIncoming);
+    for (const id of ids) w.a.files.cancel("out", id);
+  });
+
   it("files sent all at once still arrive three at a time when opening where each is written takes a while", async () => {
     // Opening a received file reads the database first: the offers behind it, and the files queued behind one that
     // ended, came in meanwhile and each went, until ten sent 1 MiB windows at once and the session's receive queue

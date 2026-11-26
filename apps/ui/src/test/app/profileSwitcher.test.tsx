@@ -173,6 +173,16 @@ describe("the account switcher on the account bar", () => {
     expect(screen.queryByTestId("profile-switcher")).not.toBeInTheDocument();
   });
 
+  it("opens once while Alt+Shift+P is held down, as Ctrl+N does", () => {
+    createProfile("Work");
+    renderBar();
+    fireEvent.keyDown(window, { code: "KeyP", key: "P", altKey: true, shiftKey: true });
+    for (let i = 0; i < 3; i++) {
+      expect(fireEvent.keyDown(window, { code: "KeyP", key: "P", altKey: true, shiftKey: true, repeat: true })).toBe(false);
+    }
+    expect(screen.getByTestId("profile-switcher")).toBeInTheDocument();
+  });
+
   it("stays shut on Alt+Shift+P behind a modal dialog or the lock screen, and opens again once it is gone", async () => {
     createProfile("Work");
     const { user } = renderBar();

@@ -182,7 +182,7 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     await act(() => open(REF, "link-1"));
     const app = screen.getByTestId("mini-app");
     expect(app).toBeVisible();
-    expect(app).toHaveAccessibleName("Chess with Ana");
+    expect(app).toHaveAccessibleName("⁨Chess⁩ with ⁨Ana⁩");
     expect(within(app).getByTestId("mini-app-title")).toHaveTextContent("Chess");
     expect(within(app).getByTestId("mini-app-with")).toHaveTextContent("with Ana");
     expect(within(app).getByTestId("mini-app-avatar")).toBeInTheDocument();
@@ -615,6 +615,20 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
       }
     }
   });
+
+  it("in ar on a phone, the panel's dialog is named with the app's title and the contact's name each in its own direction, and says while it shares a file", async () => {
+    windowIs(true);
+    const hunt = { ...host, entry: async () => ({ ...(await host.entry({} as never)), title: "Hunt!" }) } as unknown as AppsPlatform;
+    const openHunt = webOpener({ apps: () => hunt, nameIn: nameInChat, closeLabel: () => "Close" });
+    renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "سارة", named: true }} peerKey="peer" />, { language: "ar" });
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await act(() => openHunt(REF, "link-1"));
+    const dialog = screen.getByTestId("mini-app");
+    expect(dialog).toHaveAttribute("role", "dialog");
+    expect(dialog).toHaveAttribute("aria-label", "⁨Hunt!⁩ مع ⁨سارة⁩");
+    act(() => updateChatApp("link-1", { serving: true }));
+    expect(dialog).toHaveAttribute("aria-label", "⁨Hunt!⁩ · تشارك ملفًا مع ⁨سارة⁩");
+  });
 });
 
 describe("keys and focus in a mini-app", () => {
@@ -648,7 +662,7 @@ describe("keys and focus in a mini-app", () => {
     const { user } = panel();
     screen.getByTestId("opener").focus();
     await act(() => open(REF, "link-1"));
-    const app = screen.getByRole("dialog", { name: "Chess with Ana" });
+    const app = screen.getByRole("dialog", { name: "⁨Chess⁩ with ⁨Ana⁩" });
     expect(app).toHaveAttribute("aria-modal", "true");
     expect(screen.getByTestId("mini-app-back")).toHaveFocus();
     const column = app.parentElement!.querySelector(".chat-column")!;

@@ -44,6 +44,7 @@ import { useIsLocked } from "./contexts/LockScreenContext";
 import { StatusPickerHost } from "./components/StatusPicker";
 import { ReconnectedSaid } from "./components/ReconnectedSaid";
 import { focusLost, focusOffScreen } from "./lib/focus";
+import { focusPassing } from "./components/GroupInvitation";
 
 /**
  * Which chats stay loaded: the one the address points at, and the one on a
@@ -116,16 +117,18 @@ function useOnScreenLink(): string | null {
 const PAGE_TITLE_WAIT_MS = 10_000;
 
 /**
- * A phone's page change took the focused control away (`pressed`: a chat's Back, Profile's Identities): back on the chat
- * list from a chat's or a group's Back, the row of the conversation just left takes the focus (New chat when it has
- * none), as a Settings section's Back gives it to the section's row; from another page, New chat. Any other page, its
- * title (layout/Page.tsx), as a Settings section's opening does. A conversation's other ways home (Leave, Delete, Cancel
- * joining) hand the focus on themselves, past its row that is going (GroupInvitation.tsx `focusPastRow`), and a chat or
- * a group opened puts it where it wants it (hooks/useOpenedHeading.ts). A page of the menu opened for the first time
- * draws its title once its file is there (components/MenuPage.tsx): watched for until then, unless something took the
- * focus meanwhile. Returns what stops the watch.
+ * A phone's page change took the focused control away (`pressed`: a chat's Back, Profile's Identities, with whether it
+ * was in the page left): back on the chat list from a chat's or a group's Back, the row of the conversation just left
+ * takes the focus (New chat when it has none), as a Settings section's Back gives it to the section's row; so does the
+ * browser's or the system's Back (Android's back gesture), which presses nothing: the focus was last somewhere in the
+ * conversation, gone with it. From another page, New chat. Any other page, its title (layout/Page.tsx), as a Settings
+ * section's opening does. A conversation's other ways home (Leave, Delete, Cancel joining) hand the focus on themselves,
+ * past its row that is going (GroupInvitation.tsx `focusPastRow`, waiting for the list to show), and one whose row is
+ * gone went by one of them; a chat or a group opened puts it where it wants it (hooks/useOpenedHeading.ts). A page of
+ * the menu opened for the first time draws its title once its file is there (components/MenuPage.tsx): watched for
+ * until then, unless something took the focus meanwhile. Returns what stops the watch.
  */
-function focusOnPhonePage(left: string, shown: string, pressed: Element | null): (() => void) | undefined {
+function focusOnPhonePage(left: string, shown: string, pressed: LastFocused | null): (() => void) | undefined {
   if (chatRouteSession(shown) || groupRouteId(shown)) return;
   const visible = (el: HTMLElement | null | undefined) => (el && !el.closest("[hidden], [inert]") && (el.checkVisibility?.() ?? true) ? el : null);
   if (shown !== "/") {
@@ -147,13 +150,20 @@ function focusOnPhonePage(left: string, shown: string, pressed: Element | null):
     return stop;
   }
   const chat = chatRouteSession(left), group = groupRouteId(left);
-  if ((chat || group) && !pressed?.matches("[data-testid='chat-back']")) return;
   const row = chat
     ? [...document.querySelectorAll<HTMLElement>("[data-testid='chat-row']")].find(r => r.dataset.chat === chat)?.querySelector<HTMLElement>("[data-testid='chat-row-open']")
     : group ? [...document.querySelectorAll<HTMLElement>("[data-testid='group-row']")].find(r => r.dataset.group === group)?.querySelector<HTMLElement>("[data-testid='group-row-open']") : null;
+  const back = pressed?.control.matches("[data-testid='chat-back']") || (pressed?.inPage && row && !focusPassing());
+  if ((chat || group) && !back) return;
   const next = visible(row) ?? [...document.querySelectorAll<HTMLElement>("[data-testid='sidebar-new-chat']")].find(n => visible(n));
   next?.focus({ preventScroll: true });
   next?.scrollIntoView?.({ block: "nearest" });
+}
+
+/** The control that had the focus last, and whether it was in the open page (`<main>`) then: it may be gone since. */
+interface LastFocused {
+  control: Element;
+  inPage: boolean;
 }
 
 function useLoadedChats() {
@@ -270,9 +280,9 @@ export function App() {
   // On a phone, where the chat or page left stays mounted but hidden a moment with the focus: see `focusOnPhonePage`,
   // which reads the control that had the focus last (the page gone, the focus is on the document).
   const shownPath = useRef(pathname);
-  const lastFocused = useRef<Element | null>(null);
+  const lastFocused = useRef<LastFocused | null>(null);
   useEffect(() => {
-    const focused = (e: FocusEvent) => { lastFocused.current = e.target instanceof Element ? e.target : null; };
+    const focused = (e: FocusEvent) => { lastFocused.current = e.target instanceof Element ? { control: e.target, inPage: !!e.target.closest("main") } : null; };
     document.addEventListener("focusin", focused);
     return () => document.removeEventListener("focusin", focused);
   }, []);

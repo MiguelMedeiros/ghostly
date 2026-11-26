@@ -77,6 +77,19 @@ export const WEBSITE_INPUTS = [
   "docs/DHT-DELIVERY.md",
   ".github/CONTRIBUTING.md",
   ".github/SECURITY.md",
+  // Linked from a published document: sync-references.mjs stops at a link to one that was renamed or deleted.
+  "docs/APPS.md",
+  "docs/ARCHITECTURE.md",
+  "docs/BROWSER.md",
+  "docs/OIDC-PROVIDERS.md",
+  "docs/RELAYS.md",
+  "docs/SECURITY-REVIEW.md",
+  "docs/TRANSPORTS.md",
+  "docs/WALLETS.md",
+  "docs/WEB.md",
+  "e2e/README.md",
+  "packages/browser/src/engine/paymentAdapters/PROVIDERS.md",
+  "packages/browser/src/proofs/PROOFS.md",
   // Carried in /llms-full.txt by apps/website/scripts/llms.mjs (KEY_DOCS).
   "docs/CLI.md",
   "docs/AI-AGENTS.md",
@@ -139,8 +152,9 @@ export const WEBSITE_INPUTS = [
   "apps/ui/src/desktop/groupCallSupport.ts",
   "packages/cli/src/commands/groups.ts",
   "docs/CHAT.md",
-  // The jobs themselves.
+  // The jobs themselves, and the Node setup both install with.
   ".github/workflows/ci.yml",
+  ".github/actions/node-npm/",
 ];
 
 /**

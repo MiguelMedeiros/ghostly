@@ -74,7 +74,12 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
     // By the event's path, not by what holds its target now: a click that swaps what it landed on (a card turning
     // over, a step back to the deck) leaves that target detached before this runs, and it was still inside.
     const outside = (e: PointerEvent) => { const path = e.composedPath(); return !!ref.current && !path.includes(ref.current) && !(anchorRef?.current && path.includes(anchorRef.current)); };
-    const blocked = () => !topLayer() || !!document.querySelector("dialog[open]");
+    // A modal of plain elements opened over it (a call ringing over a chat's menu) has the keys and the taps, as a
+    // <dialog> does: an Escape there closed the menu under it, and the card's focus had nowhere to go back to. Not one
+    // it is in (a call made whole-window again with its menu open), nor its own (a menu drawn as a phone's sheet).
+    const under = [...modals];
+    const modalOver = () => modals.some((m) => !under.includes(m) && !!m.current && !m.current.contains(ref.current));
+    const blocked = () => !topLayer() || !!document.querySelector("dialog[open]") || modalOver();
     const down = (e: PointerEvent) => { beganOutside = !blocked() && outside(e); };
     const up = (e: PointerEvent) => {
       if (beganOutside && !blocked() && outside(e)) {

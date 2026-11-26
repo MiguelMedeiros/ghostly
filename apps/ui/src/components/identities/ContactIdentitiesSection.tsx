@@ -1,10 +1,11 @@
 import { useI18n } from "../../contexts/I18nContext";
-import { categoryLabel, chatsByPeer, contactName, currentStatus, dateTime, providerLabel, receivedStatus, shortSubject, useEngineValue } from "../../lib/identities";
+import { categoryLabel, contactName, currentStatus, dateTime, providerLabel, receivedStatus, shortSubject, useEngineValue, usePeerChats } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import { Button, Row, Section } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
 import { sharingLinks } from "./contactLinks";
+import { useProofClock } from "./proofClock";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 
 /** What needs a look comes first: a revoked or unconfirmed proof, then the verified ones, then the rest. */
@@ -18,9 +19,12 @@ export function ContactIdentitiesSection() {
   // Only the chats a contact shared identities in, and those: the page stays open, and drew this again on every state.
   // The same list while no chat's changed (contactLinks.ts), so a state that changes none costs no walk of them all.
   const links = useEngineValue(state => sharingLinks(state?.links));
+  // A status is worked out from the clock: drawn again when a proof expires.
+  useProofClock();
   const nav = useAppNavigation();
   const { t } = useI18n();
-  const chats = links.length ? chatsByPeer() : new Map();
+  // Each contact's name as the chat list shows it, drawn again when they rename or get a nickname (`usePeerChats`).
+  const chats = usePeerChats(links.length > 0, links);
   const received = links.flatMap(link => {
     const chat = chats.get(link.peerPubKeyZ32);
     return link.identities!.received.map(r => ({ r, status: currentStatus(r), chat, name: contactName(chat) ?? t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) }) }));

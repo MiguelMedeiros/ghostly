@@ -50,6 +50,11 @@ interface CallOverlayProps {
   /** The chat is off screen. The call rides along in its small window until you go back to it. */
   pinned?: boolean;
   onReturnToChat?: () => void;
+  /**
+   * Where the focus goes when the call ends and what had it before is gone: a call answered by a ringing card's End and
+   * answer (the card and the call that was on both gone) had no button of its own to go back to. Null off screen.
+   */
+  returnFocus?: () => HTMLElement | null;
   /** Where to hang the call window, so it does not go off screen with its chat. */
   layer?: HTMLElement | null;
   /** The microphone, camera and speaker menu, where the call can switch them (`useCallDevices`). */
@@ -105,6 +110,7 @@ export function CallOverlay({
   onToggleScreenShare,
   pinned = false,
   onReturnToChat,
+  returnFocus,
   layer,
   devices = null,
   notices,
@@ -148,9 +154,12 @@ export function CallOverlay({
   // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call. Not in
   // the small window: the chat beside it is in use. Either way, what had the focus (the button that started the call)
   // has it back when the call ends with the focus gone with it: a call ended from the small window's own End call, or
-  // by the contact while the focus was on its Mute, left it on the page body.
+  // by the contact while the focus was on its Mute, left it on the page body. With no such button left (End and
+  // answer), the chat's own call button has it, as after a call started from there.
   const box = miniWindow.boxProps.ref;
   const opener = useRef<HTMLElement | null>(null);
+  const fallback = useRef(returnFocus);
+  fallback.current = returnFocus;
   // Over a contact's app too (the web draws it over everything): it closes first, so Mute and End call are in reach.
   useEffect(callWindowShown, []);
   // A video made to fill the window after it (Desktop on Linux) is drawn over everything: the small window stays over
@@ -169,7 +178,7 @@ export function CallOverlay({
       if (!mini) box.current.focus({ preventScroll: true });
     }
     return () => {
-      const before = opener.current;
+      const before = opener.current?.isConnected ? opener.current : fallback.current?.();
       if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true });
     };
   }, [mini, box]);
@@ -328,14 +337,17 @@ export function CallOverlay({
         </div>
       )}
 
-      {/* Status. Over the contact's picture (`data-over-picture`) it is white with a shadow (index.css). */}
-      <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
+      {/* Status. Over the contact's picture (`data-over-picture`) it is white with a shadow (index.css). The whole window
+          keeps it clear of the corner button (44 px at 1rem past the safe area) on both sides, so it stays centred: on
+          a 320 px phone "Llamada de audio  Reconectando..." started at 49 px, under the button, which ends at 60. */}
+      <div className={`call-top absolute top-8 left-0 right-0 text-center z-10 ${mini ? "" : "px-[calc(3.75rem+env(safe-area-inset-left))]"}`}>
         <p className="text-text-muted text-sm" data-testid="call-status" data-over-picture={showRemoteVideo ? true : undefined} data-state={callState} data-reconnecting={reconnecting || undefined} role={callState === "connected" ? undefined : "status"}>
           {!remoteHasVideo && isVideoOff && callState === "connected" && (
-            <span className="text-accent">{t("calls.audio")}</span>
+            <span className="inline-block text-accent">{t("calls.audio")}</span>
           )}
+          {/* Each part a block of its own: wrapped, the line breaks between "Llamada de audio" and "Reconectando...". */}
           {statusText && (
-            <span className={callState === "connected" ? "ms-2" : ""}>
+            <span className={`inline-block ${callState === "connected" ? "ms-2" : ""}`}>
               {statusText}
             </span>
           )}

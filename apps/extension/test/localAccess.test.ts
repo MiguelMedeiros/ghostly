@@ -358,3 +358,64 @@ describe("a share in another tab while the last app at its host goes", () => {
     expect([...world.hostAccess]).toEqual(["http://localhost/*"]);
   });
 });
+
+describe("a share in one tab while another prunes the allowed addresses (Delete profile, Clear all data)", () => {
+  /** A Services page of the running profile; its `addService` waits for `gate` once it is called. */
+  async function servicesPage(gate?: Promise<void>, reached?: () => void) {
+    const extensionHost = await host();
+    return world.load("page", async () => {
+      const { setBrowserHost } = await import("@ghostly/browser/host");
+      setBrowserHost(extensionHost);
+      const { engine } = await import("@ghostly/browser/platform/engine");
+      vi.spyOn(engine, "call").mockImplementation((async (method: string, params: { target: string }) => {
+        if (method !== "addService") return;
+        reached?.();
+        await gate;
+        await shareIn("ghostly", params.target);
+      }) as never);
+      return (await import("@ghostly/browser/platform/services")).servicesPlatform!;
+    });
+  }
+
+  const allowed = async () => (await world.chrome.storage.local.get("localAccessAllowed:"))["localAccessAllowed:"];
+
+  it("keeps the address allowed and shared while the prune was reading the profiles", async () => {
+    await shareIn("ghostly", "http://localhost:9000");
+    await (await host()).requestLocalAccess("http://localhost/*", "http://localhost:9000");
+    const services = await servicesPage();
+    // The prune read the running profile's apps and list, and is reading the next profile's.
+    const databases = indexedDB.databases.bind(indexedDB);
+    let open!: () => void;
+    let reached!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const at = new Promise<void>((resolve) => { reached = resolve; });
+    vi.spyOn(indexedDB, "databases").mockImplementationOnce(databases).mockImplementationOnce(async () => { reached(); await gate; return databases(); });
+    const releasing = (await host()).releaseUnusedLocalAccess!();
+    await at;
+    const sharing = services.shareService("notes", "http://localhost:7000");
+    await settle();
+    open();
+    await Promise.all([releasing, sharing]);
+    expect(await targetsIn("ghostly")).toEqual(["http://localhost:7000", "http://localhost:9000"]);
+    expect(await allowed()).toEqual(["http://localhost:9000", "http://localhost:7000"]);
+  });
+
+  it("keeps the address of a share whose app was not added yet when the prune read the apps", async () => {
+    await shareIn("ghostly", "http://localhost:9000");
+    await (await host()).requestLocalAccess("http://localhost/*", "http://localhost:9000");
+    let open!: () => void;
+    let reached!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const at = new Promise<void>((resolve) => { reached = resolve; });
+    const services = await servicesPage(gate, reached);
+    // The Allow landed; the app's row has not.
+    const sharing = services.shareService("notes", "http://localhost:7000");
+    await at;
+    const releasing = (await host()).releaseUnusedLocalAccess!();
+    await settle();
+    open();
+    await Promise.all([releasing, sharing]);
+    expect(await targetsIn("ghostly")).toEqual(["http://localhost:7000", "http://localhost:9000"]);
+    expect(await allowed()).toEqual(["http://localhost:9000", "http://localhost:7000"]);
+  });
+});

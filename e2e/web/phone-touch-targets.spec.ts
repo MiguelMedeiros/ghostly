@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Locator, Page } from "@playwright/test";
 import { APP_URL, STORE_URL, serveStore, testStore } from "../support/appStore";
+import { copiedBy } from "../support/clipboard";
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { smallTargets } from "../support/touchTargets";
@@ -271,6 +272,100 @@ test("on a phone a message's Delete question, reply and edit bars, pin, details,
   await measure("long key and code block", "[data-testid=rich-blob-toggle], [data-testid=rich-blob-copy], [data-testid=rich-codeblock-copy]");
 
   expect(small, "a message's controls under 44 × 44 px on a phone").toEqual([]);
+});
+
+/**
+ * A key's line right above a code block, in one message: on a phone the code block's Copy took a tap 46 px tall,
+ * centred on it, which reached 10 px above the block and over the lower part of the key's Copy and Show all (and, at
+ * Huge text, of a link at the end of the line above). A tap 4 px above the bottom of the key's Copy copied the code.
+ * The code block's hit area starts at the block's top edge and grows down. In the contact's message and in one of mine,
+ * in English, in Arabic and at Huge text: every point of the key's Copy is that Copy, none of Show all is the code
+ * block's, a tap near the bottom of the key's Copy copies the key, and the code block's Copy is a 44 px target that
+ * takes no tap above its block.
+ */
+test.describe("on a phone a code block right under a key's line", () => {
+  /** The points of `control`'s box, on a 2 px grid, where a tap lands on something else: `x,y → what` (from its corner). */
+  const taken = (control: Locator) => control.evaluate((el) => {
+    const box = el.getBoundingClientRect(), out: string[] = [];
+    for (let y = box.top + 0.5; y < box.bottom; y += 2) {
+      for (let x = box.left + 0.5; x < box.right; x += 2) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit && (hit === el || el.contains(hit))) continue;
+        const name = !hit ? "nothing" : hit instanceof HTMLElement && hit.dataset.testid ? hit.dataset.testid : hit.tagName.toLowerCase();
+        out.push(`${Math.floor(x - box.left)},${Math.floor(y - box.top)} → ${name}`);
+      }
+    }
+    return out;
+  });
+
+  /** The points over the 14 px above `block`, across its Copy and 12 px past each side, where a tap lands on that Copy. */
+  const aboveTakenByCopy = (block: Locator) => block.evaluate((el) => {
+    const copy = el.querySelector("[data-testid=rich-codeblock-copy]")!;
+    const top = el.getBoundingClientRect().top, box = copy.getBoundingClientRect(), out: string[] = [];
+    for (let y = top - 14; y < top; y += 1) {
+      for (let x = box.left - 12; x <= box.right + 12; x += 2) {
+        const hit = document.elementFromPoint(x, y);
+        if (hit && (hit === copy || copy.contains(hit))) out.push(`${Math.floor(x - box.left)},${Math.floor(y - top)}`);
+      }
+    }
+    return out;
+  });
+
+  test("leaves the key's Copy all of its box, and a tap near its bottom copies the key", { tag: ["@feature:app.mobile-layout", "@feature:chat.rich.code", "@feature:chat.rich.blob", "@feature:app.i18n", "@feature:settings.text-size"] }, async ({ peer }, testInfo) => {
+    test.setTimeout(4 * 60_000);
+    const [alice, bob] = await Promise.all([peer("code-under-key-alice", { mobile: true, viewport: { width: 375, height: 667 } }), peer("code-under-key-bob")]);
+    await pair(alice, bob);
+    const { page } = alice;
+    // 96 characters of base64: one line with its Show all and Copy, the code block on the very next line.
+    const messages = [
+      { whose: "theirs", key: "Zm9vYmFy".repeat(12), code: "const b = 2;", from: bob },
+      { whose: "mine", key: "cXV4cXV1".repeat(12), code: "const c = 3;", from: alice },
+    ] as const;
+    for (const { key, code, from } of messages) await say(from, `key ${key}\n\`\`\`js\n${code}\n\`\`\``);
+    const problems: string[] = [];
+
+    const check = async (place: string) => {
+      // The chat's rows slide in after a reload: measured where they come to rest.
+      await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== "running" || a.effect?.getComputedTiming().endTime === Infinity));
+      for (const { whose, key, code } of messages) {
+        const label = `${place}, ${whose}`;
+        const bubble = chat(alice).locator("[data-message-bubble]").filter({ hasText: code }).last();
+        const block = bubble.getByTestId("rich-codeblock"), copy = bubble.getByTestId("rich-blob-copy");
+        await expect(block).toBeVisible();
+        await expect(copy).toBeVisible();
+        await bubble.evaluate((el) => el.scrollIntoView({ block: "center" }));
+
+        for (const point of await taken(copy)) problems.push(`${label}: the key's Copy at ${point}`);
+        // Show all's own edge beside Copy is Copy's (its 46 px hit area, sideways): only the code block's points count.
+        for (const point of await taken(bubble.getByTestId("rich-blob-toggle"))) if (point.endsWith("rich-codeblock-copy")) problems.push(`${label}: the key's Show all at ${point}`);
+        for (const point of await aboveTakenByCopy(block)) problems.push(`${label}: the code block's Copy takes a tap above its block at ${point}`);
+        const codeCopy = block.getByTestId("rich-codeblock-copy");
+        await codeCopy.evaluate((el) => el.setAttribute("data-measured", ""));
+        for (const target of await smallTargets(page, 44, "[data-measured]")) problems.push(`${label}: the code block's ${target.name} ${target.width}×${target.height} (${target.stops})`);
+        await codeCopy.evaluate((el) => el.removeAttribute("data-measured"));
+        await page.screenshot({ path: testInfo.outputPath(`code-under-key-${place.replace(/\W+/g, "-")}-${whose}.png`) });
+
+        // A thumb near the bottom of the key's Copy: the key, not the code.
+        const box = (await copy.boundingBox())!;
+        const copied = await copiedBy(page, () => page.touchscreen.tap(box.x + box.width / 2, box.y + box.height - 3));
+        if (copied !== key) problems.push(`${label}: a tap 3 px above the bottom of the key's Copy copied ${JSON.stringify(copied.slice(0, 24))}`);
+      }
+    };
+
+    await check("English");
+    await speak(alice, "ar", "rtl");
+    await check("Arabic");
+    await page.evaluate(() => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "en", textSize: "huge" }));
+    });
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--chat-text-scale"))).toBe("1.5");
+    await check("English at Huge text");
+
+    expect(problems, "taps the code block's Copy takes from the key's line above it, or short of 44 px").toEqual([]);
+  });
 });
 
 test.describe("the voice recorder on a phone", () => {
