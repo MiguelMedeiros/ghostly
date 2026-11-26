@@ -53,7 +53,8 @@ export function SharePicker() {
   const search = useRef<HTMLInputElement>(null), list = useRef<HTMLUListElement>(null);
   const [query, setQuery] = useState("");
   const shown = useMemo(() => findChatTargets(targets, query), [targets, query]);
-  const preview = share ? sharePreview(share) : "";
+  // Read once per share: its text may be megabytes, and the search redraws the page on each letter.
+  const preview = useMemo(() => share ? sharePreview(share) : "", [share]);
   // File names as the language lists them ("a.jpg、b.pdf"), each isolated: an Arabic name beside a Latin one keeps its own order.
   const names = (list: readonly string[]) => listText(list.map((name) => `⁨${name}⁩`), t);
   const filesName = (shown: IncomingShare) => shown.files.length === 1 ? shown.files[0]!.name || t("pwa.shareOneFile") : t("pwa.shareFiles", { count: String(shown.files.length) });
