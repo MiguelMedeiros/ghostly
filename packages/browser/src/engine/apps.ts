@@ -375,9 +375,19 @@ export interface AppsHost {
 /**
  * `store`: fetched from that store's listing, so installing it pins its updates to that store. `revocations`: its
  * publisher's, read beside it when it was fetched (Install refuses a version they stop, and the record starts with them).
- * `asks`: what the last install screen of it listed (`AppPreview.asks`), for an Install that does not say.
+ * `asks`: what the last install screen of it listed (`AppPreview.asks`), for an Install that does not say. `leaves`: the
+ * store whose hold on the app's updates that screen said Install ends (`AppPreview.leavesStore`), if any.
  */
-interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; at: number; carried?: true }
+interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; leaves?: string; at: number; carried?: true }
+/**
+ * The store whose hold on the app's updates installing it ends (`AppPreview.leavesStore`), as `install` writes the
+ * record: an update not from the pinned store drops the pin, the same version from another store moves it there; the
+ * same version by URL or card leaves the record as it is.
+ */
+function leftStore(installed: InstalledApp | undefined, install: string, fromStore: string | undefined): string | undefined {
+  const pin = installed?.store;
+  return pin !== undefined && fromStore !== pin && (install === "update" || (install === "same" && fromStore !== undefined)) ? pin : undefined;
+}
 /** What a staged bundle is kept under (`AppPreview.stage`): one install screen's version and source, so another screen of it does not change it. */
 const stagedKey = (digest: string, from: string, store: string | undefined) => `${digest}\n${from}\n${store ?? ""}`;
 
@@ -2001,22 +2011,19 @@ export class Apps {
     const stage = stagedKey(digest, from, fromStore);
     this.staged.delete(stage);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
-    this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now(), ...(carried && { carried: true as const }) });
+    const pin = leftStore(installed, install, fromStore);
+    this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, ...(pin !== undefined && { leaves: pin }), at: this.now(), ...(carried && { carried: true as const }) });
     if (!this.sweep) this.sweepStaged();
 
     const listedBy = this.listedBy(version, stores);
-    // As `install` writes the record: an update not from the pinned store drops the pin, the same version from another
-    // store moves it there; the same version by URL or card leaves the record as it is.
-    const pin = installed?.store;
-    const leaves = pin !== undefined && fromStore !== pin && (install === "update" || (install === "same" && fromStore !== undefined));
-    const leftName = leaves ? stores.find((s) => s.key === pin)?.index?.name : undefined;
+    const leftName = pin !== undefined ? stores.find((s) => s.key === pin)?.index?.name : undefined;
     return {
       digest, ref: version.ref, publisher: manifest.publisher, fingerprint: appFingerprint(manifest.publisher), manifest, from,
       icon: bundle.files.get("icon.png")?.slice() ?? null,
       install, asks,
       run: this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
-      ...(leaves && { leavesStore: { key: pin, ...(leftName !== undefined && { name: leftName }), ...(fromStore !== undefined && { to: fromStore }) } }),
+      ...(pin !== undefined && { leavesStore: { key: pin,...(leftName !== undefined && { name: leftName }), ...(fromStore !== undefined && { to: fromStore }) } }),
       ...(carried && { carried: true as const }),
       stage,
     };
@@ -2072,6 +2079,10 @@ export class Apps {
         // uninstalled, or before the check installed a version that dropped a permission, is shown again first.
         const added = installed ? addedAppPermissions(installed.permissions, manifest.permissions) : [...manifest.permissions];
         if (added.some((p) => !shown.includes(p))) fail("permissions-changed", `This install now asks for ${added.join(", ")}; look at it again`);
+        // Nor does it end a store's hold on the app's updates the screen did not name: one pinned since (the same version
+        // taken again from a store's listing in another tab) is shown again first, now saying so.
+        const leaves = leftStore(installed, decision, fromStore);
+        if (leaves !== undefined && leaves !== staged.leaves) fail("store-changed", "This install now ends a store's hold on the app's updates; look at it again");
         if (decision === "same" && installed) {
           // A restored profile's app that needs its files gets them back. The same version from a store's listing pins its
           // updates to that store (one by URL or card leaves the record as it is).
