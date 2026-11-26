@@ -315,7 +315,9 @@
     "redeem": "Riscatta",
     "redeemed": "Riscattato ✓",
     "redeemedFee": "Riscattato ✓ (la mint ha trattenuto {{fee}} come commissione)",
-    "redeeming": "Riscatto…"
+    "redeeming": "Riscatto…",
+    "unnamedUnitRequest": "Chiede ecash in un'altra unità",
+    "unnamedUnitToken": "Un token in un'altra unità"
   },
   "mode": {
     "accept": "Accetta",

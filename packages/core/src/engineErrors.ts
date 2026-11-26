@@ -122,15 +122,21 @@ export function engineText(code: EngineErrorCode, values: EngineErrorValues = {}
 
 export const engineError = (code: EngineErrorCode, values?: EngineErrorValues): EngineError => new EngineError(code, values);
 
-/** A unit as the app names it: a unit's shape (`frames.ts` `isUnit`, in any case), never a token sender's other text. */
-const NAMED_UNIT = "[A-Za-z0-9]{1,12}";
+/**
+ * A unit as the app names it: letters only, in any case (every Cashu unit in use is), never a token sender's other text.
+ * No digit: the name is drawn where the hidden amount would be, and "50000" or "100000sat" there reads as one.
+ */
+const NAMED_UNIT = "[A-Za-z]{1,12}";
+
+/** Whether the app may name ecash's `unit` in its own words: a token's or a request's unit is whatever its sender wrote. */
+export const isNamedUnit = (unit: string): boolean => new RegExp(`^${NAMED_UNIT}$`).test(unit);
 
 /**
  * Why ecash of `unit` is not redeemed here. The unit is named only when it looks like one: a token's unit is whatever
  * its sender wrote, and the line is the app's own (a contact's payment's refusal row, the CLI's answer).
  */
 export const ecashUnitError = (unit: string): EngineError =>
-  new RegExp(`^${NAMED_UNIT}$`).test(unit) ? engineError("ecashOtherUnit", { unit }) : engineError("ecashUnnamedUnit");
+  isNamedUnit(unit) ? engineError("ecashOtherUnit", { unit }) : engineError("ecashUnnamedUnit");
 
 /** What each kind of value looks like in a text: never a space in a host, a network by its name, an amount as digits. */
 const VALUE: Record<string, string> = {

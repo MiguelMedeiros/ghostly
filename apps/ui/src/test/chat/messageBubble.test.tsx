@@ -512,6 +512,24 @@ describe("MessageBubble: money in a message", () => {
     expect(within(card).queryByTestId("token-redeem")).not.toBeInTheDocument();
   });
 
+  // A unit is whatever the sender wrote: it was the card's own big line, "A sat, redeemed: 50,000 sats ✓ token", and digits
+  // there ("A 50000 token") read as the amount the card hides.
+  it.each([
+    ["token", "sat, redeemed: 50,000 sats ✓", "en", "A token in another unit"],
+    ["request", "sat, redeemed: 50,000 sats ✓", "en", "Asks for ecash in another unit"],
+    ["token", "50000", "en", "A token in another unit"],
+    ["request", "50000", "en", "Asks for ecash in another unit"],
+    ["token", "100000sat", "en", "A token in another unit"],
+    ["request", "100000sat", "en", "Asks for ecash in another unit"],
+    ["token", "sat, redeemed: 50,000 sats ✓", "ar", "رمز بوحدة أخرى"],
+  ] as const)("names an ecash %s's unit only when it is one, never its sender's text %j (%s)", async (kind, unit, language, line) => {
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: kind === "token" ? { kind, amount: 500, unit, mint: "https://mint.example.com", accepted: false } : { kind, amount: 500, unit, mints: ["https://mint.example.com"] } }));
+    renderApp(<MessageBubble message={message({ text: kind === "token" ? TOKEN : "creqA" + "o".repeat(40) })} peerPubKey="peer" />, { language });
+    const card = await screen.findByTestId(kind === "token" ? "cashu-token-bubble" : "cashu-request-bubble");
+    expect(within(card).getByTestId("money-other-unit")).toHaveTextContent(line);
+    expect(card).not.toHaveTextContent(unit.slice(0, 9));
+  });
+
   it("leaves a payment's text to its payment bubble", () => {
     bubble({ text: INVOICE, paymentId: "pay-9" });
     expect(screen.queryByTestId("invoice-bubble")).not.toBeInTheDocument();

@@ -315,7 +315,9 @@
     "redeem": "Redeem",
     "redeemed": "Redeemed ✓",
     "redeemedFee": "Redeemed ✓ (the mint kept {{fee}} as its fee)",
-    "redeeming": "Redeeming…"
+    "redeeming": "Redeeming…",
+    "unnamedUnitRequest": "Asks for ecash in another unit",
+    "unnamedUnitToken": "A token in another unit"
   },
   "mode": {
     "accept": "Accept",

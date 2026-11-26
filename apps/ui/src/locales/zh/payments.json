@@ -315,7 +315,9 @@
     "redeem": "兑换",
     "redeemed": "已兑换 ✓",
     "redeemedFee": "已兑换 ✓（mint 扣下 {{fee}} 作为手续费）",
-    "redeeming": "兑换中…"
+    "redeeming": "兑换中…",
+    "unnamedUnitRequest": "请求其他单位的 ecash",
+    "unnamedUnitToken": "一个其他单位的代币"
   },
   "mode": {
     "accept": "接受",

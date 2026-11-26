@@ -319,7 +319,9 @@
     "redeem": "استرداد",
     "redeemed": "تم الاسترداد ✓",
     "redeemedFee": "تم الاسترداد ✓ (واحتفظت الـ mint بـ {{fee}} رسمًا لها)",
-    "redeeming": "جارٍ الاسترداد…"
+    "redeeming": "جارٍ الاسترداد…",
+    "unnamedUnitRequest": "يطلب ecash بوحدة أخرى",
+    "unnamedUnitToken": "رمز بوحدة أخرى"
   },
   "mode": {
     "accept": "القبول",
