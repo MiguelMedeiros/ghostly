@@ -138,4 +138,13 @@ describe("pay that the mint has not settled", { timeout: 60_000 }, () => {
       expect(one.note).toContain("1 test sat is set aside for it, out of the balance: it leaves with the payment, or comes back to the balance");
     } finally { mint.cfg.feeReserve = 2; }
   });
+
+  it("a refusal says one sat in the singular", async () => {
+    await expect(callApi(ctx, "pay", { target: invoice(1, 6), amount: 2 })).rejects.toThrow("The invoice asks 1 sat, not the 2 given with --amount");
+    await expect(callApi(ctx, "pay", { target: invoice(2, 6), amount: 1 })).rejects.toThrow("The invoice asks 2 sats, not the 1 given with --amount");
+    mint.cfg.feeReserve = 1;
+    try {
+      await expect(callApi(ctx, "pay", { target: invoice(5, 7), maxFee: 0 })).rejects.toThrow("The fee may reach 1 sat, more than the 0 allowed");
+    } finally { mint.cfg.feeReserve = 2; }
+  });
 });

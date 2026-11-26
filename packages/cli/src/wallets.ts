@@ -191,6 +191,8 @@ export function invoiceNetwork(invoice: string): WalletNetwork | null {
   return /^ln(tb|tbs|sb)/.test(lower) ? "testnet" : null;
 }
 
+/** An amount of sats as `pay`'s refusals say it: "1 sat", "2 sats". */
+const satsText = (n: number) => `${n} ${n === 1 ? "sat" : "sats"}`;
 const isInvoice = (text: string) => /^(lightning:)?ln(bc|tb|tbs|sb|bcrt)[0-9a-z]+$/i.test(text.trim());
 const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.trim()) || /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(text.trim());
 
