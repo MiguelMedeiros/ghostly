@@ -53,12 +53,15 @@ export interface FileDeskDeps {
   transfers: Map<string, FileTransferView>;
   changed(delayMs?: number): void;
   /**
-   * A transfer's progress in this chat, and nothing else of it: the next state (after `changed`'s 250 ms) builds this
-   * chat's view again, not every chat's. Absent: `changed(250)`.
+   * A transfer's progress in this chat, or its new offer, and nothing else of it: the next state (after `delayMs`) builds
+   * this chat's view again, not every chat's. Absent: `changed(delayMs)`.
    */
-  progressed?(linkId: string): void;
-  /** The state to the app now, not after `changed`'s wait: for a transfer the app must have before its message. */
-  flush?(): void;
+  changedIn?(linkId: string, delayMs: number): void;
+  /**
+   * The state to the app now, not after `changed`'s wait: for a transfer the app must have before its message. It builds
+   * this chat's view again, not every chat's.
+   */
+  flush?(linkId: string): void;
   /** A transfer ended, either way: its local file id and how (for the message's details). */
   /** `seen`: this desk saw the transfer under way before it ended (not a finished one shown again on a restart). */
   settled?(linkId: string, fileId: string, record: FileTransferRecord, seen: boolean): void;
@@ -666,7 +669,7 @@ export class FileDesk {
     this.show(linkId, chat, record, transferred, progress);
     // The app has a new file's transfer before its message: a file shown with neither a transfer nor its bytes reads
     // as gone, and one that arrived within `changed`'s wait (250 ms behind another's progress) said "No longer available".
-    if (offered) this.deps.flush?.();
+    if (offered) this.deps.flush?.(linkId);
     const id = record.direction === "out" ? outgoingFileId(linkId, record.id) : chat.local.get(record.id)!;
     const now = elapsed(), last = chat.lastSaved.get(id) ?? -Infinity;
     if (!progress || now - last >= SAVE_EVERY_MS) this.save(chat, id, record);
@@ -683,7 +686,7 @@ export class FileDesk {
       }
     }
     if (record.state === "done" && record.direction === "in") this.deps.wireIds(linkId)?.add(record.id);
-    if (moving && this.deps.progressed) this.deps.progressed(linkId);
+    if ((moving || offered) && this.deps.changedIn) this.deps.changedIn(linkId, progress ? 250 : 50);
     else this.deps.changed(progress ? 250 : 50);
   }
 
