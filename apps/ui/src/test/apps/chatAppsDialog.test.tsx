@@ -351,3 +351,43 @@ describe("the chat's Apps when the installed apps could not be read", () => {
     expect(lists).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("the chat's Apps with two installed apps of the same title", () => {
+  const COPY = "q3kbn9s1x7w5ehd2ufc8m4tpy6ragjz0vlo3niek5bx7d1wq9s2ch/chess";
+  const copy = (): InstalledAppView => ({
+    ...installed(), ref: COPY, publisher: COPY.split("/")[0]!, fingerprint: "q3kb n9s1 x7w5 ehd2", from: "https://example.com/chess.ghostlyapp", unknownPublisher: true,
+  });
+  beforeEach(() => {
+    run = { status: "ok" };
+    lists.mockImplementation(() => [installed(), copy()]);
+  });
+  afterEach(() => lists.mockImplementation(() => [installed()]));
+
+  it("tells them apart: each row shows its publisher's fingerprint, and the stranger's says Unknown publisher", async () => {
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={vi.fn()} />);
+    const rows = await screen.findAllByTestId("chat-app");
+    expect(rows).toHaveLength(2);
+    const [known, stranger] = rows as [HTMLElement, HTMLElement];
+    expect(known.textContent).not.toBe(stranger.textContent);
+    expect(known).toHaveTextContent("yz7m oxuc bd4u 8aqt");
+    expect(known).not.toHaveTextContent("Unknown publisher");
+    expect(stranger).toHaveTextContent("Unknown publisher");
+    expect(stranger).toHaveTextContent("q3kb n9s1 x7w5 ehd2");
+    // A screen reader's Open names differ too.
+    const opens = screen.getAllByTestId("chat-app-open").map((b) => b.getAttribute("aria-label"));
+    expect(new Set(opens).size).toBe(2);
+  });
+
+  it("an app of an unknown publisher says so even when its title is the only one", async () => {
+    lists.mockImplementation(() => [copy()]);
+    await dialog();
+    expect(screen.getByTestId("chat-app")).toHaveTextContent("Unknown publisher");
+  });
+
+  it("one app of a known publisher shows its tagline alone, as before", async () => {
+    lists.mockImplementation(() => [installed()]);
+    await dialog();
+    expect(screen.getByTestId("chat-app")).toHaveTextContent("Play chess");
+    expect(screen.getByTestId("chat-app")).not.toHaveTextContent("yz7m");
+  });
+});
