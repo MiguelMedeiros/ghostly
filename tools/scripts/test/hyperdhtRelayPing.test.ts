@@ -8,7 +8,8 @@ import { startRelay } from "../../../infra/services/hyperdht-relay/relay.mjs";
 
 /**
  * A client's ping frames are what it sends like any message: they count against its byte budget, and the relay holds at
- * most one pong for it unwritten, answering the latest ping once that one is written.
+ * most one pong for it unwritten, answering the latest ping once that one is written. A client the relay
+ * has stopped reading for that budget is not dropped for a pong it has not read yet.
  */
 
 /** A raw WebSocket on the relay that has upgraded and then stops reading. */
@@ -57,6 +58,34 @@ it("holds next to nothing for a client that sends ping frames as fast as it can 
     expect(relay.stats()).toMatchObject({ clients: 1, dropped: 0 });
   } finally {
     socket?.destroy();
+    await relay.close();
+  }
+}, 30_000);
+
+it("keeps a client it has stopped reading for its byte budget, whose pong waits behind what it sent, and drops it once it stops answering", async () => {
+  const lines: string[] = [];
+  const relay = await startRelay({ testnet: 2, limits: { bytesPerSecond: 16 * 1024, burstBytes: 16 * 1024, pingMs: 1_000 }, log: (...words: unknown[]) => { lines.push(words.join(" ")); } });
+  const ws = new WebSocket(relay.url);
+  try {
+    await new Promise((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
+    // About twice its budget for 5 s, each batch once its own socket has taken the last one: the relay reads it at its
+    // budget, and its ping's answer, written by ws after what the client sent before, reaches the relay seconds late.
+    const end = Date.now() + 5_000;
+    while (Date.now() < end && ws.readyState === ws.OPEN) {
+      if (!ws.bufferedAmount) for (let i = 0; i < 8; i++) ws.ping(Buffer.alloc(125, 0x61));
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    // Before, it was dropped within a few seconds ("no pong"), though it answered every ping.
+    expect(lines.filter(line => line.startsWith("dropped"))).toEqual([]);
+    expect(relay.stats()).toMatchObject({ clients: 1, dropped: 0 });
+    // Read up, then silent: the client reads nothing more, so it answers no ping.
+    await new Promise(resolve => setTimeout(resolve, 6_000));
+    expect(relay.stats()).toMatchObject({ clients: 1, dropped: 0 });
+    (ws as unknown as { _socket: Socket })._socket.pause();
+    await vi.waitFor(() => expect(relay.stats()).toMatchObject({ clients: 0, dropped: 1 }), { timeout: 5_000 });
+    expect(lines.filter(line => line.startsWith("dropped"))).toEqual(["dropped no pong: no answer to the last ping by the next, 1 s later (GHOSTLY_RELAY_PING_MS)"]);
+  } finally {
+    ws.terminate();
     await relay.close();
   }
 }, 30_000);

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { rowDays } from "../../lib/chatDays";
 import { MEMBER_TEXT, memberColorIndex, memberText, rosterColors } from "../../lib/memberColors";
 import * as senderRuns from "../../lib/senderRuns";
 import { RUN_GAP_MS, authorsOf } from "../../lib/senderRuns";
@@ -207,6 +208,21 @@ describe("runs of a member's messages (authorsOf)", () => {
     const late = new Date(2026, 8, 29, 23, 58).getTime();
     const authors = authorsOf([at("1", NOON), at("2", NOON + RUN_GAP_MS), at("3", NOON + 2 * RUN_GAP_MS + 1), at("4", late), at("5", late + 3 * 60_000)], group, new Set(), () => undefined);
     expect(marks(authors)).toEqual(["1:a:F-", "2:a:-L", "3:a:FL", "4:a:FL", "5:a:FL"]);
+  });
+
+  it("ends a run at the midnight after a day whose midnight the clocks skipped, where its day header is", () => {
+    // Cairo's clocks go from 00:00 to 01:00 on 2026-04-24: that day starts at 01:00, the next one at 00:00.
+    const zone = process.env.TZ;
+    process.env.TZ = "Africa/Cairo";
+    try {
+      const at = (id: string, time: number) => ({ id, sender: "peer", member: A, timestamp: time });
+      const late = new Date(2026, 3, 24, 23, 58).getTime(), early = new Date(2026, 3, 25, 0, 1).getTime();
+      expect(new Set(rowDays([late, early])).size).toBe(2);
+      expect(marks(authorsOf([at("1", late), at("2", early)], group, new Set(), () => undefined))).toEqual(["1:a:FL", "2:a:FL"]);
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
   });
 
   it("names the member as the roster or the group's memory does, with their picture", () => {

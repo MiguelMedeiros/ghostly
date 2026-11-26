@@ -4,6 +4,7 @@ import { englishT, type Translate, type TranslationKey } from "../locales/transl
 import { languageTag } from "./documentLanguage";
 import { publicKeyLabel } from "./publicKeyLabel";
 import type { Language } from "./settings";
+import { unitFor } from "./sizeText";
 import { formatAt } from "./time";
 import type { ChatMessage } from "./types";
 
@@ -72,8 +73,9 @@ function decimal(n: number, digits: number, language: Language): string {
 export function formatBytes(n: number, t: Translate = englishT): string {
   const language = languageOf(t);
   const exact = t("messageDetails.unit.bytes", { n: decimal(n, 0, language) });
-  if (n >= 1024 * 1024) return t("messageDetails.unit.megabytes", { n: decimal(n / 1024 / 1024, 1, language), exact });
-  if (n >= 1024) return t("messageDetails.unit.kilobytes", { n: decimal(n / 1024, 1, language), exact });
+  const { value, unit } = unitFor(n, [0, 1, 1]);
+  if (unit === 2) return t("messageDetails.unit.megabytes", { n: decimal(value, 1, language), exact });
+  if (unit === 1) return t("messageDetails.unit.kilobytes", { n: decimal(value, 1, language), exact });
   return exact;
 }
 

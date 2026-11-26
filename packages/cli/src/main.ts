@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { connect } from "node:net";
-import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { dirname, sep } from "node:path";
 import packageJson from "../package.json" with { type: "json" };
 import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, shownWord, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
@@ -9,7 +9,7 @@ import { connectDaemon, DaemonClient, endedUnanswered, endedUnsent, isNotTheDaem
 import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { callRef } from "./commands/calls";
-import { here, inRange, INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
+import { fileHere, here, inRange,INPUT_BYTES, listAtMost, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
 import { asCliError, CliError, type ErrorCode, EXIT, localFileError, SINGLE_DEVICE } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -358,16 +358,30 @@ export function offlineCall(method: string, params: Record<string, unknown>): bo
 }
 
 /** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the
- *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin; anything else may take as long
- *  as it takes, once the daemon has answered the version check sent ahead of it (session()). */
+ *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin (a file send, plus the time to
+ *  copy the file in); anything else may take as long as it takes, once the daemon has answered the version check sent
+ *  ahead of it (session()). */
 const ANSWER_MS = 15_000;
 export function answerWithin(method: string, params: Record<string, unknown>): number | undefined {
   // A `--timeout` outside the daemon's range (1 to 3600 s, 86 400 for `chat wait` and `file wait`) is refused by the
   // daemon at once (bad_request); the deadline only has to be a timer Node takes (-10 s fired at once, 1e12 after 1 ms).
   const waits = typeof params.timeout === "number" ? Math.min(Math.max(params.timeout, 1), 86_400) : waitsFor(method, params);
-  if (waits !== undefined) return (waits + 10) * 1000;
+  if (waits !== undefined) return (waits + 10 + stagingSeconds(method, params)) * 1000;
   if (readOnly(method, params)) return ANSWER_MS;
   return undefined;
+}
+
+/**
+ * A `file send` copies the file into the profile before its wait starts (files.ts `stageWhileAsked`), 6-30 s for 1 GiB:
+ * its deadline adds a second per `STAGED_BYTES_PER_SECOND` of the file, well past that. Counted against the wait's
+ * own, a large file with a short `--timeout` failed as "The daemon did not answer" (exit 4) while it was still copied
+ * in, and the copy then stopped with the command gone: nothing was sent. A file it cannot read adds nothing (the
+ * daemon refuses it at once).
+ */
+const STAGED_BYTES_PER_SECOND = 8 * 1024 * 1024;
+function stagingSeconds(method: string, params: Record<string, unknown>): number {
+  if (method !== "file.send" || typeof params.path !== "string") return 0;
+  try { return Math.ceil(statSync(params.path).size / STAGED_BYTES_PER_SECOND); } catch { return 0; }
 }
 
 /**
@@ -1242,11 +1256,16 @@ async function startedDaemon(g: Globals, seconds: number): Promise<DaemonClient 
   }
 }
 
-/** `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all). */
+/**
+ * `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all), at most a day, as the
+ * socket calls' waits (`answerWithin`): past about 24.8 days a Node timer fires after 1 ms, and `daemon stop` sent a
+ * healthy daemon SIGTERM at once.
+ */
 function seconds(parsed: Parsed, fallback: number): number {
   const value = parsed.options.timeout;
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !(value > 0)) throw new CliError("usage", "--timeout takes a number of seconds above 0");
+  if (value > 86_400) throw new CliError("usage", `--timeout takes at most 86400 seconds (a day), not ${value}`);
   return value;
 }
 
@@ -1459,7 +1478,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
   checkTypes(types, (line) => process.stderr.write(line + "\n"));
   const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
-  const cursor = here(parsed.options.cursor);
+  const cursor = fileHere(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
   const starting = startAt(sinceOf(parsed.options), cursor, (line) => process.stderr.write(line + "\n")), since = starting.from;
@@ -1820,7 +1839,13 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   }
   const audio = call.audio;
   const socket = connect(audio.socket);
-  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  // The call ended between `call.get` and here: its socket is gone, or a file stays where nothing listens. It said
+  // "No such file or folder: the path", or Node's raw "connect ECONNREFUSED …".
+  await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); }).catch((error: unknown) => {
+    client.close();
+    const code = (error as { code?: unknown }).code;
+    throw code === "ENOENT" || code === "ECONNREFUSED" ? new CliError("not_found", `No call ${call.call}: it ended (ghostly call list)`) : error;
+  });
   // The call's token first: until it comes, the socket is nobody's (WISP 1100 § Calls).
   socket.write(`${audio.token}\n`);
   process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);

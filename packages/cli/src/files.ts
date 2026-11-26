@@ -391,9 +391,10 @@ async function waitForFile(ctx: ApiContext, params: Params, stopping?: AbortSign
   const ms = num(params, "timeout", 300, { min: 1, max: 86_400 }) * 1000;
   // A received file that waits for this person's `file accept` (over 25 MiB, or a group's file that did not come by
   // itself) does not move however long this waits: said at once, naming the command. Before, it waited out its
-  // timeout and answered "0 of 40000000 bytes, asking", as if the contact were slow.
+  // timeout and answered "0 of 40000000 bytes, asking", as if the contact were slow. A group's file has no transfer in
+  // the engine's state until its Download: its record says it waits (`waitingGroupFile`), as `file save` reads it.
   const transfer = await waitForState(ctx, (s) => {
-    const now = s.transfers[fileId] ?? stored?.transfer;
+    const now = s.transfers[fileId] ?? waitingGroupFile(stored) ?? stored?.transfer;
     return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
   }, ms, `file ${fileId} to arrive`, stopping).catch((error: unknown) => {
     const now = state(ctx).transfers[fileId];
@@ -565,6 +566,14 @@ export const FILE_METHODS: Record<string, Method> = {
     };
     if ("group" in where) {
       if (action === "resend") throw new CliError("bad_request", "A group's file is downloaded (file accept) or asked for again (file request)");
+      // Sent from here: its record is done (staged whole at send), and the members fetch it from whoever holds it, this
+      // device among them (WISP 503). Nothing here stops that; its message deleted for everyone does (`Groups.removed`).
+      if (fileId.startsWith(`group-${where.group}-out-`) && (action === "cancel" || action === "pause" || action === "decline")) {
+        const messageId = (await node(ctx).fileMessages(linkId).catch(() => [])).find((m) => m.file?.id === fileId)?.id;
+        const ref = typeof params.chat === "string" ? params.chat : `group:${where.group}`;
+        throw new CliError("refused", `A file sent to a group is fetched by the members from whoever holds it: it is not stopped from here (ghostly message delete ${shellWord(ref, "<group>")} ${messageId ? shellWord(messageId, "<message>") : "<message>"} takes it back from everyone)`,
+          { reason: "sent_to_group", group: where.group, ...(messageId ? { messageId } : {}) });
+      }
       await refuseAllHere();
       try { await node(ctx).fileAction({ linkId, fileId, action }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
       return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };

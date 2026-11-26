@@ -7,6 +7,7 @@ import { takedownText, useAppOpener } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
 import { ownDirection } from "../../lib/ownDirection";
+import { isolate } from "../../lib/ownStatus";
 import { chatApp, noteChoice, registerAppSlot, setChatApp, setChatAppNarrow, updateChatApp, useChatApp, useChatAppNarrow, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
@@ -205,7 +206,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   return (
     <section ref={root} tabIndex={-1} onKeyDown={onKeyDown} data-testid="mini-app" data-place={phone ? "phone" : full ? "full" : wide ? "wide" : "beside"} data-view={app?.view} hidden={!shown}
       role={modal ? "dialog" : undefined} aria-modal={modal || undefined}
-      aria-label={app ? t("apps.view.with", { title, name }) : undefined} className="chat-app-panel outline-none" data-wide={wide || undefined}>
+      aria-label={app ? t(app.serving ? "apps.view.withSharing" : "apps.view.with", { title: isolate(title), name: isolate(name) }) : undefined} className="chat-app-panel outline-none" data-wide={wide || undefined}>
       {modal && <TabTrap root={root} />}
       {/* The header only while the app shows: the chat's own header is the only one otherwise. */}
       {shown && <div className="chat-app-head h-14 header-safe flex items-center gap-2 max-md:gap-1 px-3 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">

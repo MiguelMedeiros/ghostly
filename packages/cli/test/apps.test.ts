@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -254,6 +254,7 @@ describe("app publish", () => {
     }
     // A key kept elsewhere, but a key file (this one, another's, any PEM private key) left in the folder.
     const key = vectorKey(tmp(), "publisher");
+    const pem = readFileSync(key, "utf8");
     for (const [path, text] of [
       ["publisher.key", readFileSync(key, "utf8")],
       ["old/store.pem", `Ghostly store key (WISP 1200). Secret.\n${readFileSync(key, "utf8")}`],
@@ -266,6 +267,23 @@ describe("app publish", () => {
       // A key in a JSON or JS string, its line breaks written `\n`: a cloud service account's file, a key pasted into code.
       ["firebase-adminsdk.json", JSON.stringify({ type: "service_account", private_key: generateKeyPairSync("rsa", { modulusLength: 2048, publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "pkcs8", format: "pem" } }).privateKey }, null, 2)],
       ["config.js", `export const key = ${JSON.stringify(readFileSync(key, "utf8").replace(/\n/g, "\r\n"))};\n`],
+      // A service account's JSON kept in a JSON string (an env var, a config value): its line breaks written `\\n`.
+      ["env.json", JSON.stringify({ GOOGLE_CREDENTIALS: JSON.stringify({ type: "service_account", private_key: pem }) })],
+      // The key base64-encoded, as CI and Kubernetes secrets keep it: on one line, wrapped at 76 (`base64`), or after a
+      // header line (a Ghostly key file), so its "-----BEGIN" is not where a group of 3 bytes starts.
+      ["deploy.env", `APP=chess\nPRIVATE_KEY_B64=${Buffer.from(pem).toString("base64")}\n`],
+      ["secret.b64", `${Buffer.from(pem).toString("base64").replace(/.{76}/g, "$&\n")}\n`],
+      ["k8s/secret.yaml", `data:\n  publisher.key: ${Buffer.from(`Ghostly publisher key (WISP 1200). Secret.\n${pem}`).toString("base64")}\n`],
+      // Encoded twice: a base64 secret's value itself base64-encoded (a Kubernetes manifest's `data:` of an env file).
+      ["twice.env", `K=${Buffer.from(`KEY=${Buffer.from(pem).toString("base64")}\n`).toString("base64")}\n`],
+      // A key built from joined strings, one line each, or a JSON array of its lines.
+      ["key.js", `export const key =\n  ${pem.trimEnd().split("\n").map((line) => JSON.stringify(`${line}\n`)).join(" +\n  ")};\n`],
+      ["key-lines.json", JSON.stringify({ private_key: pem.trimEnd().split("\n") }, null, 2)],
+      // A template literal indented with tabs.
+      ["tabbed.js", `export function key() {\n\treturn \`\n${pem.replace(/^(?=.)/gm, "\t\t")}\t\`;\n}\n`],
+      // A file saved as UTF-16 (PowerShell's `>`, Notepad's "Unicode"), either byte order.
+      ["publisher-utf16.key", Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(pem, "utf16le")])],
+      ["publisher-utf16be.key", Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(pem, "utf16le").swap16()])],
     ] as const) {
       const leaky = appFolder(manifest, files);
       mkdirSync(dirname(join(leaky, path)), { recursive: true });
@@ -275,8 +293,10 @@ describe("app publish", () => {
       expect(existsSync(join(leaky, "app.ghostlyapp"))).toBe(false);
     }
     // Code that only names the block (a PEM parser) is not a key.
-    const parser = appFolder(manifest, new Map([...files, ["pem.js", new TextEncoder().encode('const head = "-----BEGIN PRIVATE KEY-----";\n')]]));
-    expect(ok(await ghostly(["app", "publish", parser, "--key", key]))).toMatchObject({ files: ["index.html", "pem.js"] });
+    // Nor code that wraps a body it is given in the block's lines, nor a picture's base64.
+    const lib = 'export const toPem = (base64DerOfThePrivateKeyWrappedAt64Columns) =>\n  "-----BEGIN PRIVATE KEY-----\\n" + base64DerOfThePrivateKeyWrappedAt64Columns + "\\n" +\n  "-----END PRIVATE KEY-----\\n";\n';
+    const parser = appFolder(manifest, new Map([...files, ["pem.js", new TextEncoder().encode(`const head = "-----BEGIN PRIVATE KEY-----";\n${lib}`)], ["icon.css", new TextEncoder().encode(`a{background:url(data:image/png;base64,${Buffer.alloc(3000, 7).toString("base64")})}\n`)]]));
+    expect(ok(await ghostly(["app", "publish", parser, "--key", key]))).toMatchObject({ files: ["icon.css", "index.html", "pem.js"] });
   }, 60_000);
 
   it("reads a file of key headers with no end once: 1 MiB of them publishes in moments, a key after them is still found", async () => {
@@ -291,6 +311,26 @@ describe("app publish", () => {
     expect(performance.now() - started).toBeLessThan(3_000);
     const leaky = appFolder(manifest, new Map([...files, ["fixtures/cut.pem", new TextEncoder().encode(cut + readFileSync(key, "utf8"))]]));
     await expect(publishApp(leaky, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "fixtures/cut.pem" } });
+  }, 60_000);
+
+  it("reads one long base64 run without running out of stack: a 6 MiB inlined asset publishes", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    // A wasm inlined as a data URL: one run of base64 past the 5 MiB the scan's stack held.
+    const wasm = `export const url = "data:application/wasm;base64,${randomBytes(4.5 * 1024 * 1024).toString("base64")}";\n`;
+    const dir = appFolder(manifest, new Map([...files, ["engine.js", new TextEncoder().encode(wasm)]]));
+    expect(await publishApp(dir, key)).toMatchObject({ files: ["engine.js", "index.html"] });
+  }, 60_000);
+
+  it("reads a long body after a key header without running out of stack: 8 MB of data publishes, with an end it is a key", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    // A header, then more body than the scan's stack held (about 5.6 M characters): an engine error, no file named.
+    const long = `-----BEGIN PRIVATE KEY-----\n${"MC4CAQAwBQYDK2VwBCIEI-".repeat(8 * 1024 * 1024 / 22)}`;
+    const dir = appFolder(manifest, new Map([...files, ["data.txt", new TextEncoder().encode(long)]]));
+    expect(await publishApp(dir, key)).toMatchObject({ files: ["data.txt", "index.html"] });
+    const leaky = appFolder(manifest, new Map([...files, ["data.txt", new TextEncoder().encode(`${long}\n-----END PRIVATE KEY-----\n`)]]));
+    await expect(publishApp(leaky, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "data.txt" } });
   }, 60_000);
 
   it("refuses a source with a query or fragment, where a private repository's link carries its token, and writes no bundle", async () => {

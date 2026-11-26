@@ -6,6 +6,8 @@
   "cameraUnavailable": "カメラが見つからないため、ビデオはオフです",
   "connected": "接続済み",
   "connecting": "接続中...",
+  "contactBlocked": "この連絡先はブロック中です",
+  "contactBlockedNext": "通話するにはブロックを解除してください",
   "contactCannot": "相手のアプリは通話を受けられません",
   "contactOutdated": "通話には相手が Ghostly を更新する必要があります",
   "decline": "拒否",

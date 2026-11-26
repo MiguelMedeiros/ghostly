@@ -139,8 +139,9 @@ export const WEBSITE_INPUTS = [
   "apps/ui/src/desktop/groupCallSupport.ts",
   "packages/cli/src/commands/groups.ts",
   "docs/CHAT.md",
-  // The jobs themselves.
+  // The jobs themselves, and the Node setup both install with.
   ".github/workflows/ci.yml",
+  ".github/actions/node-npm/",
 ];
 
 /**

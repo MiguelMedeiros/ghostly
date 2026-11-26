@@ -59,6 +59,17 @@ it("finds a call given less than it takes", () => {
   expect(engineParamsProblem("walletCreate", undefined)).toBe("no parameters given");
 });
 
+it("finds a word for a call's true or false, or what is not a contact's key", () => {
+  const key = "o".repeat(52);
+  expect(engineParamsProblem("setContactBlocked", { peerPubKeyZ32: key, blocked: true })).toBeUndefined();
+  expect(engineParamsProblem("setContactBlocked", { peerPubKeyZ32: key, blocked: "false" })).toBe("blocked must be true or false");
+  expect(engineParamsProblem("setContactBlocked", { peerPubKeyZ32: key, blocked: null })).toBe("blocked must be true or false");
+  expect(engineParamsProblem("setContactBlocked", { peerPubKeyZ32: key })).toBe("blocked missing");
+  for (const peerPubKeyZ32 of ["__proto__", "o".repeat(51), `${"o".repeat(51)}b`, 5]) {
+    expect(engineParamsProblem("setContactBlocked", { peerPubKeyZ32, blocked: false })).toBe("peerPubKeyZ32 must be a contact's key");
+  }
+});
+
 it("`engine --list --verbose` names what each call takes", { timeout: 60_000 }, async () => {
   const dir = home("engine-list");
   const listed = ok(await ghostly(["--home", dir, "engine", "--list", "--verbose"])) as { methods: string[]; takes: Record<string, string> };

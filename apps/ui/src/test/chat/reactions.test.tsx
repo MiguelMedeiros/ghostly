@@ -5,6 +5,7 @@ import { MessageBubble } from "../../components/MessageBubble";
 import { loadEmoji } from "../../lib/emoji";
 import { reactionChips, reactionNoteText } from "../../lib/reactions";
 import { attentionOutcome } from "../../lib/chatMute";
+import { isolate } from "../../lib/ownStatus";
 import type { ChatMessage } from "../../lib/types";
 import { renderApp } from "../render";
 
@@ -335,7 +336,7 @@ describe("chips under the bubble", () => {
 describe("the chat list and notices", () => {
   it("says who reacted to what", () => {
     const t = (key: string, vars?: Record<string, string>) => `${key}:${JSON.stringify(vars)}`;
-    expect(reactionNoteText({ at: 1, by: "peer", emoji: "❤️", snippet: "hi", mine: true }, "Ana", t as never)).toBe('chat.reactions.note:{"name":"Ana","emoji":"❤️","snippet":"hi"}');
+    expect(reactionNoteText({ at: 1, by: "peer", emoji: "❤️", snippet: "hi", mine: true }, "Ana", t as never)).toBe(`chat.reactions.note:${JSON.stringify({ name: isolate("Ana"), emoji: "❤️", snippet: isolate("hi") })}`);
     expect(reactionNoteText({ at: 1, by: "me", emoji: "👍", snippet: "hi", mine: false }, "Ana", t as never)).toContain("chat.reactions.noteMine");
   });
 

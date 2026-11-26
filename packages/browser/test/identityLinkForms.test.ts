@@ -74,6 +74,10 @@ describe("the link forms Add takes", () => {
     ["nostr", `nostr:${npub}`, nostrKey],
     ["nostr", `NOSTR:${npub}`, nostrKey],
     ["nostr", ` nostr:${npub}\n`, nostrKey],
+    // bech32 in upper case, as a QR code carries it, with or without the scheme.
+    ["nostr", npub.toUpperCase(), nostrKey],
+    ["nostr", `nostr:${npub.toUpperCase()}`, nostrKey],
+    ["nostr", `NOSTR:${npub.toUpperCase()}`, nostrKey],
     // The fingerprint URI OpenPGP apps share (0x and spaces were already dropped).
     ["openpgp", `openpgp4fpr:${fpr}`, fpr],
     ["openpgp", `OPENPGP4FPR:${fpr.toLowerCase()}`, fpr],
@@ -118,6 +122,7 @@ describe("the forms Add still refuses, with the words it had", () => {
     ["nostr", `nostr:${nostrKey}`, "Enter a Nostr public key: npub1… or 64 hex characters"],
     ["nostr", `nostr://${npub}`, "Enter a Nostr public key: npub1… or 64 hex characters"],
     ["nostr", `nostr:${npub.slice(0, 10)}${npub.slice(10).toUpperCase()}`, "Enter a Nostr public key: npub1… or 64 hex characters"],
+    ["nostr", `${npub.slice(0, 10).toUpperCase()}${npub.slice(10)}`, "Enter a Nostr public key: npub1… or 64 hex characters"],
     ["nostr", `nostr:nostr:${npub}`, "Enter a Nostr public key: npub1… or 64 hex characters"],
     ["openpgp", `openpgp4fpr:${fpr.slice(-16)}`, "Use the full fingerprint, not a key ID: gpg --fingerprint shows it."],
     ["openpgp", `openpgp4fpr://${fpr}`, "Enter your key's fingerprint: 40 hex characters (gpg --fingerprint)."],

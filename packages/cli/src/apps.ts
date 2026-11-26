@@ -482,11 +482,63 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
  * A private key in a file: a PEM private key block with its body (PKCS #8, OpenSSH, RSA, EC, encrypted, the traditional
  * encrypted one's "Proc-Type: 4,ENCRYPTED" headers included), an OpenPGP "PRIVATE KEY BLOCK" (its "Version: GnuPG
  * v2.4.5" headers included), or a Ghostly key file's first line. The block may sit in a JSON or JS string, its line
- * breaks written `\n` (a service account's `"private_key"`, a key pasted into code). A library that only names the
- * block's header in its code does not match. The body stops at the next "-----": a file of headers with no end is read
- * once, not once per header to the end of the file.
+ * breaks written `\n`, or `\\n` in a string inside a string (a service account's `"private_key"`, a key pasted into
+ * code, kept in an env var), its lines indented with tabs. A library that only names the block's header in its code
+ * does not match. The body stops at the next "-----": a file of headers with no end is read once, not once per header
+ * to the end of the file. The body is cut there with `indexOf` and read by one character class: a regex alternation
+ * repeated over a body of millions of characters ran out of stack.
  */
-const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----(?:\r?\n|(?:\\r)?\\n)(?:[A-Za-z0-9+/=\r\n :,.\\]|-(?!----)){40,}-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
+function holdsKeyBlock(text: string): boolean {
+  if (GHOSTLY_KEY.test(text)) return true;
+  for (const header of text.matchAll(KEY_BEGIN)) {
+    const start = header.index + header[0].length;
+    const end = text.indexOf("-----", start);
+    if (end < 0) return false;
+    if (end - start < 40 || !KEY_BODY.test(text.slice(start, end))) continue;
+    KEY_END.lastIndex = end;
+    if (KEY_END.test(text)) return true;
+  }
+  return false;
+}
+const GHOSTLY_KEY = /^Ghostly (publisher|store) key \(WISP 1200\)/;
+const KEY_BEGIN = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----(?:\r?\n|\\+(?:r\\+)?n)/g;
+const KEY_BODY = /^[A-Za-z0-9+/=\r\n\t :,.\\-]*$/;
+const KEY_END = /-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----/y;
+/** One string's end and the next one's start (`"...\n" +\n "..."`, a JSON array's `",\n "`): a key's lines kept apart. */
+const STRING_JOIN = /["'`]\s*(?:[+,]\s*)?\\*["'`]/g;
+/**
+ * A run of base64, wrapped or not. A fixed part and an open tail: `{40,}` kept a backtrack frame a character and ran
+ * out of stack on a run of about 5 MiB (an inlined wasm or picture).
+ */
+const BASE64_RUN = /[A-Za-z0-9+/\r\n]{40}[A-Za-z0-9+/\r\n]*/g;
+/** `text` in base64 at each of the 3 places of a group it may start: the characters that depend on it alone. */
+const inBase64 = (text: string) => [0, 1, 2].map((at) => Buffer.from(`${"\0".repeat(at)}${text}`, "latin1").toString("base64").slice(at ? 4 : 0, 4 * Math.floor((at + text.length) / 3)));
+/** "-----BEGIN" in base64, and in base64 again (a base64 secret's value encoded once more). */
+const BASE64_BEGIN = inBase64("-----BEGIN").flatMap((once) => [once, ...inBase64(once)]);
+
+/** A file's text: UTF-16 by its byte order mark (PowerShell's `>`, Notepad's "Unicode"), else a byte a character. */
+function fileText(bytes: Uint8Array): string {
+  const b = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (b[0] === 0xff && b[1] === 0xfe) return b.subarray(2).toString("utf16le");
+  if (b[0] === 0xfe && b[1] === 0xff) return Buffer.from(b.subarray(2, b.length - (b.length % 2))).swap16().toString("utf16le");
+  return b.toString("latin1");
+}
+
+/**
+ * Whether a text holds a private key ({@link holdsKeyBlock}): as written, its strings joined (a key built from one
+ * string a line, a JSON array of its lines), or base64-encoded (a CI or Kubernetes secret, a key file in one), read at
+ * each of the 4 places a group of base64 may start, and the decoded text read again for a key encoded twice.
+ */
+function holdsPrivateKey(text: string, depth = 0): boolean {
+  if (holdsKeyBlock(text.replace(STRING_JOIN, "\n"))) return true;
+  if (depth > 1) return false;
+  for (const [run] of text.matchAll(BASE64_RUN)) {
+    const base64 = run.replace(/[\r\n]/g, "");
+    if (!BASE64_BEGIN.some((begin) => base64.includes(begin))) continue;
+    for (let at = 0; at < 4; at++) if (holdsPrivateKey(Buffer.from(base64.slice(at), "base64").toString("latin1"), depth + 1)) return true;
+  }
+  return false;
+}
 
 /** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
 const isUnder = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
@@ -583,7 +635,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_BUNDLE_FILE), ...lists]));
   const contents = files.map((f) => ({ path: f.path, bytes: readFolderFile(f.full) }));
   // A bundle is public: a private key found in the folder (an old key, a store key, any PEM) stops the publish.
-  const keyFile = contents.find((f) => PRIVATE_KEY.test(Buffer.from(f.bytes).toString("latin1")));
+  const keyFile = contents.find((f) => holdsPrivateKey(fileText(f.bytes)));
   if (keyFile) throw refused(`${keyFile.path} in ${dir} holds a private key, and a bundle is public: move it out of the app's folder`, { reason: "private-key", detail: keyFile.path });
   const manifest = {
     ...draft,

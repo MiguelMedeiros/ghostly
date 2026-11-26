@@ -198,6 +198,16 @@ describe("a blocked contact", () => {
     expect(asked).not.toHaveBeenCalled();
   });
 
+  it("cannot be called: its answer would be dropped, so its chat says why and no call rings it for nothing", async () => {
+    const chat = row(), other = row();
+    const { node } = await started(chat, other);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    expect(viewOf(node, chat.id).callsUnavailable).toBe("You blocked this contact. Unblock them to call");
+    expect(viewOf(node, other.id).callsUnavailable).toBeUndefined();
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    expect(viewOf(node, chat.id).callsUnavailable).toBeUndefined();
+  });
+
   it("is told not to wake this app; unblocked, it is heard again", async () => {
     const chat = row();
     const { node, events, linkOf } = await started(chat);
@@ -212,6 +222,50 @@ describe("a blocked contact", () => {
     expect(events.onCallSignal).toHaveBeenCalledWith(chat.id, offer);
   });
 
+  it("leaves no payment request record from the hold, as none from a live one", async () => {
+    const chat = row();
+    const { node } = await started(chat);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    const request = vi.spyOn(node["desk"], "onPaymentRequest");
+    const host = node["hold"]["host"] as { receivePaymentRequest(linkId: string, request: object): Promise<void> };
+    await host.receivePaymentRequest(chat.id, { id: "held-request", timestamp: Date.now(), amount: { value: 21, asset: "sat" } });
+    expect(request).not.toHaveBeenCalled();
+    // Another contact's comes in as before.
+    const other = row();
+    await db.putLink(other);
+    await host.receivePaymentRequest(other.id, { id: "other-request", timestamp: Date.now(), amount: { value: 21, asset: "sat" } }).catch(() => {});
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("is not kept when the block lands while its text is being stored", async () => {
+    const chat = row();
+    const { node, events, linkOf } = await started(chat);
+    const resolve = node["resolveReply"].bind(node);
+    vi.spyOn(node as never, "resolveReply" as never).mockImplementation((async (message: never) => {
+      await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+      return resolve(message);
+    }) as never);
+    events.onAttention.mockClear();
+    await linkOf(chat.id).options.events.onMessage({ id: "w1", text: "racing", timestamp: Date.now(), via: "datalink" });
+    expect(await db.getMessages(chat.id)).toEqual([]);
+    expect(events.onAttention).not.toHaveBeenCalled();
+  });
+
+  it("offers none of its services, nor any its presence says later", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const peer = linkOf(chat.id).options.events;
+    const services = [{ name: "wiki", port: 8080 }] as never;
+    peer.onPresence({ online: true, lastPacketAt: 1, services });
+    expect(viewOf(node, chat.id).peerServices).toEqual(services);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    expect(viewOf(node, chat.id).peerServices).toBeNull();
+    peer.onPresence({ online: true, lastPacketAt: 2, services: [{ name: "renamed", port: 8080 }] as never });
+    expect(viewOf(node, chat.id).peerServices).toBeNull();
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    expect(viewOf(node, chat.id).peerServices).toEqual([{ name: "renamed", port: 8080 }]);
+  });
+
   it("is kept through a restart, and the settings patch cannot unblock it", async () => {
     const chat = row();
     const first = await started(chat);
@@ -224,5 +278,82 @@ describe("a blocked contact", () => {
     expect(viewOf(node, chat.id).blocked).toBe(true);
     await linkOf(chat.id).options.events.onMessage({ id: "w1", text: "after", timestamp: Date.now(), via: "datalink" });
     expect(await db.getMessages(chat.id)).toEqual([]);
+  });
+});
+
+describe("setContactBlocked's input", () => {
+  async function watched(...rows: StoredLink[]) {
+    const started_ = await started(...rows);
+    const rotated = vi.spyOn(started_.node as never as { rotateWake(): Promise<void> }, "rotateWake").mockResolvedValue(undefined);
+    const shared = vi.spyOn(started_.node as never as { shareWake(id: string): Promise<void> }, "shareWake");
+    return { ...started_, rotated, shared };
+  }
+
+  it("takes only true or false: the word \"false\" or \"yes\" is refused and blocks nothing", async () => {
+    const chat = row({ wakeToken: "t" });
+    const { node, rotated, shared } = await watched(chat);
+    await expect(node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: "false" as never })).rejects.toThrow();
+    for (let i = 0; i < 3; i++) await expect(node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: "yes" as never })).rejects.toThrow();
+    for (const blocked of [1, null, undefined, {}]) await expect(node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: blocked as never })).rejects.toThrow();
+    expect((await db.getSettings()).blockedContacts).toBeUndefined();
+    expect(viewOf(node, chat.id).blocked).toBeUndefined();
+    expect(rotated).not.toHaveBeenCalled();
+    expect(shared).not.toHaveBeenCalled();
+  });
+
+  it("keeps a key once however often it is blocked, and tells the contact once", async () => {
+    const chat = row({ wakeToken: "t" });
+    const { node, rotated, shared } = await watched(chat);
+    for (let i = 0; i < 3; i++) await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32]);
+    expect(rotated).toHaveBeenCalledTimes(1);
+    expect(shared).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses what is not a contact's key: nothing is kept", async () => {
+    const { node } = await watched(row());
+    const key = createIdentity().pubKeyZ32;
+    // The last character of a key carries padding bits: a "b" there spells no key (WISP 02).
+    const respelled = `${key.slice(0, 51)}b`;
+    for (const peerPubKeyZ32 of ["__proto__", "z".repeat(2_000_000), key.slice(0, 51), `${key}y`, key.toUpperCase(), respelled, "", 5, null]) {
+      await expect(node.setContactBlocked({ peerPubKeyZ32: peerPubKeyZ32 as never, blocked: true })).rejects.toThrow();
+    }
+    expect((await db.getSettings()).blockedContacts).toBeUndefined();
+  });
+
+  it("unblocking a key that is not blocked changes nothing and tells nobody", async () => {
+    const chat = row({ wakeToken: "t" }), other = row();
+    const { node, rotated, shared } = await watched(chat, other);
+    await node.setContactBlocked({ peerPubKeyZ32: other.peerPubKeyZ32, blocked: true });
+    rotated.mockClear(); shared.mockClear();
+    const put = vi.spyOn(db, "putSettings");
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    await node.setContactBlocked({ peerPubKeyZ32: createIdentity().pubKeyZ32, blocked: false });
+    expect(put).not.toHaveBeenCalled();
+    expect(rotated).not.toHaveBeenCalled();
+    expect(shared).not.toHaveBeenCalled();
+    expect((await db.getSettings()).blockedContacts).toEqual([other.peerPubKeyZ32]);
+  });
+
+  it("keeps a stored list that holds a key twice or what is no key as each key once, from the start", async () => {
+    const chat = row(), other = row();
+    await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true, blockedContacts: ["zzz", "zzz", chat.peerPubKeyZ32, chat.peerPubKeyZ32, "__proto__", 5 as never] });
+    const { node, shared } = await watched(chat, other);
+    expect(node.getState().settings.blockedContacts).toEqual([chat.peerPubKeyZ32]);
+    expect(node.getSettings().blockedContacts).toEqual([chat.peerPubKeyZ32]);
+    expect(viewOf(node, chat.id).blocked).toBe(true);
+    await node.setContactBlocked({ peerPubKeyZ32: other.peerPubKeyZ32, blocked: true });
+    expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32, other.peerPubKeyZ32]);
+    shared.mockClear();
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    expect(shared).toHaveBeenCalledWith(chat.id);
+    expect(viewOf(node, chat.id).blocked).toBeUndefined();
+    expect((await db.getSettings()).blockedContacts).toEqual([other.peerPubKeyZ32]);
+  });
+
+  it("a stored list with no key left in it is no list", async () => {
+    await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true, blockedContacts: ["zzz", "zzz"] });
+    const { node } = await watched(row());
+    expect(node.getState().settings.blockedContacts).toBeUndefined();
   });
 });

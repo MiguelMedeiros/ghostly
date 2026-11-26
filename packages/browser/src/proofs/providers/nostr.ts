@@ -32,8 +32,10 @@ function normalizeNostrKey(input: string): string {
   const link = /^nostr:/i.test(trimmed);
   const value = link ? trimmed.slice("nostr:".length) : trimmed;
   if (!link && HEX64.test(value.toLowerCase())) return value.toLowerCase();
-  if (value.startsWith("npub1")) {
-    try { const decoded = nip19Decode(value); if (decoded.type === "npub") return decoded.data; } catch { /* fall through */ }
+  // bech32 is one case: all upper (a QR code's) reads as lower, mixed case stays refused.
+  const bech = value === value.toUpperCase() ? value.toLowerCase() : value;
+  if (bech.startsWith("npub1")) {
+    try { const decoded = nip19Decode(bech); if (decoded.type === "npub") return decoded.data; } catch { /* fall through */ }
   }
   throw new Error("Enter a Nostr public key: npub1… or 64 hex characters");
 }

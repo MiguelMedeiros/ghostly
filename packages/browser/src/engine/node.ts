@@ -905,6 +905,16 @@ export interface NodeEvents {
  */
 /** A waiting file or request that went out: it shows like any other from now on (a file by its transfer). */
 /** The contact's typing as the chat shows it: plain typing needs only `peerTyping`. */
+/**
+ * A 1:1 chat's pin as it is shown: one naming a message deleted for everyone (`removed`, or kept before it was marked,
+ * by `removedRefs`) is unpinned (no `id`), its number kept. What an unpin goes by, so a pin shown gone is not removed
+ * again.
+ */
+function linkPinShown(stored: StoredLink): StoredPin | undefined {
+  const pin = stored.pin;
+  return pin?.id && (pin.removed || stored.removedRefs?.includes(pin.id)) ? { ...pin, id: "", messageId: undefined } : pin;
+}
+
 function typingView(activity: TypingActivity | null): Pick<LinkView, "peerTyping" | "peerTypingKind" | "peerTypingStatus"> {
   return {
     peerTyping: true,
@@ -979,6 +989,14 @@ function membershipOf(group: GroupView | undefined): { me: string; members: Read
 
 /** The wire part of the ids the payment desk gives a contact's payment, request or refusal line (`peer_<this>`). */
 const PAYMENT_LINE_ID = /^(?:\d+(?:_refused)?|spent_[0-9a-f]{32})$/;
+
+/**
+ * `Settings.blockedContacts` as the engine keeps it: keys in their one spelling, each once. A list stored before
+ * `setContactBlocked` checked its input may hold a key twice or words that are no key, which no Unblock could remove.
+ */
+function blockedKeys(stored: unknown): string[] {
+  return [...new Set((Array.isArray(stored) ? stored : []).filter(isZ32Key))];
+}
 
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
@@ -1197,9 +1215,10 @@ export class GhostlyNode implements EngineImplementation {
     },
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
-    // A file's progress, 4 states a second: its chat's view built again (what room its contact said it has), not every chat's.
-    progressed: (linkId) => { if (this.links.has(linkId)) this.chatChanged(linkId, 250); else this.emitState(250); },
-    flush: () => this.flushState(),
+    // A file's progress, 4 states a second, or a contact's new file: its chat's view built again (what room its contact
+    // said it has), not every chat's.
+    changedIn: (linkId, delayMs) => { if (this.links.has(linkId)) this.chatChanged(linkId, delayMs); else this.emitState(delayMs); },
+    flush: (linkId) => this.flushState(linkId),
     settled: (linkId, fileId, record, seen) => {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
       void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state, !seen);
@@ -1517,7 +1536,8 @@ export class GhostlyNode implements EngineImplementation {
         details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: wire.size, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }), completedAt: Date.now() } });
       return null;
     },
-    receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
+    // A blocked contact's: no record either, as live (`onPaymentRequest`).
+    receivePaymentRequest: async (linkId, request) => { if (!this.blockedChat(this.links.get(linkId)?.stored)) await this.desk.onPaymentRequest(linkId, request, true); },
     taken: (linkId, id) => db.hasMessage(linkId, `peer_${id}`),
     changed: () => this.emitState(),
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
@@ -1582,6 +1602,10 @@ export class GhostlyNode implements EngineImplementation {
     listable: () => {
       const now = Date.now() / 1000;
       return new Map(this.identities.views().filter(v => v.publicUri && v.expiresAt > now).map(v => [v.id, v.publicUri!]));
+    },
+    expiresAt: id => {
+      const view = this.identities.views().find(v => v.id === id);
+      return view && view.expiresAt * 1000;
     },
     proofIds: () => this.identities.views().map(v => v.id),
     publish: (pubKeyZ32, payload) => {
@@ -2459,6 +2483,9 @@ export class GhostlyNode implements EngineImplementation {
     const stored = await db.getSettings();
     const fresh = Object.keys(stored).length === 0;
     this.settings = { ...DEFAULT_SETTINGS, ...stored };
+    const blocked = blockedKeys(this.settings.blockedContacts);
+    if (blocked.length) this.settings.blockedContacts = blocked;
+    else delete this.settings.blockedContacts;
     this.armOwnStatusEnd();
     // A profile still on an old default list gets today's defaults: a relay added to them reaches everyone.
     this.settings.relays = currentRelays(this.settings.relays);
@@ -3069,7 +3096,7 @@ export class GhostlyNode implements EngineImplementation {
     if (this.restoreTimer) clearTimeout(this.restoreTimer);
     this.restoreTimer = null;
     this.identities.stop();
-    this.did.stop();
+    const didClosed = this.did.close();
     this.contactLinks.stop();
     this.contactAsks.stop();
     this.nostrSocial.stop();
@@ -3094,6 +3121,8 @@ export class GhostlyNode implements EngineImplementation {
       this.quoteSweeps.stop(),
       // A removed proof's revocation still on its way: a CLI one-shot that removed it would otherwise never publish it.
       this.identities.published(),
+      // The same for a listing of the public DID changed within the last 2 s (`ProfileDid.close`).
+      didClosed,
       ...WALLET_NETWORKS.flatMap((network) => [this.arkWallets, this.barkWallets, this.fedimintWallets, this.sparkWallets, this.usdtWallets, this.lightnings, this.bitcoins]
         .map((wallets) => wallets[network].stop())),
       // The Cashu wallet too: its polls would otherwise go on writing after the stop.
@@ -3761,8 +3790,11 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   async setContactBlocked({ peerPubKeyZ32, blocked }: { peerPubKeyZ32: string; blocked: boolean }): Promise<void> {
-    if (typeof peerPubKeyZ32 !== "string" || !peerPubKeyZ32) throw new Error("Name the contact's key");
-    const list = this.settings.blockedContacts ?? [];
+    // Only a key in its one spelling, and only true or false: before, the word "false" blocked, and a word or a key named
+    // again went in the list once more each time (which moves to the person's other devices), telling the contact again.
+    if (!isZ32Key(peerPubKeyZ32)) throw new Error("Name the contact's key");
+    if (typeof blocked !== "boolean") throw new Error("Blocked is true or false");
+    const list = blockedKeys(this.settings.blockedContacts);
     if (list.includes(peerPubKeyZ32) === blocked) return;
     const chats = [...this.links.values()].filter(({ stored }) => stored.profile && !stored.group && stored.peerPubKeyZ32 === peerPubKeyZ32);
     // A contact told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
@@ -5506,8 +5538,10 @@ export class GhostlyNode implements EngineImplementation {
     // Taken only when it fits in the room left now (`FileDesk.accept`): one that does not keeps waiting.
     if (action === "accept") return this.fileDesk.accept(linkId, fileId).then(() => {});
     const now = this.fileDesk.act(linkId, fileId, action);
-    // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now.
-    if (!now && (action === "resend" || action === "request") && live.link && !live.link.isDataLinkOpen) void this.connect({ linkId }).catch(() => {});
+    // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now. One waiting
+    // its turn to resume (`ResumeTurns`) has no link yet: it starts now, ahead of the line.
+    const tries = live.link ? !live.link.isDataLinkOpen : this.resumeTurns.waits(linkId);
+    if (!now && (action === "resend" || action === "request") && tries) void this.connect({ linkId }).catch(() => {});
   }
 
   /** The contact can take a file on the open session: files/2 or files/3. */
@@ -5793,7 +5827,7 @@ export class GhostlyNode implements EngineImplementation {
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     // The app has its transfer before its message: a file shown with no transfer and no bytes reads as gone, and one
     // that arrived within the state's usual wait said "No longer available" until it was all here.
-    this.flushState();
+    this.flushState(linkId);
     // files/2 names a file's message by the sender's time, as the sender's reactions, edits and deletes do. Another
     // file (or a message) already at that time keeps its place, and this one gets an id of its own: its bytes never
     // land without a message. The same file sent again after its transfer failed lands in the message it had.
@@ -6546,7 +6580,7 @@ export class GhostlyNode implements EngineImplementation {
       // Not a member (removed, say): refused with the reason the group shows, as a reaction is.
       if (!view || view.status !== "active") return { error: view?.statusReason ?? "You are not in this group", refused: true };
       if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
-      const current = this.groups.pinOf(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
+      const current = this.groups.pinShown(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
       if ("error" in pin) return pin;
       // Pinned already: nothing goes. My own pin's number is still the one its edges take (`groupTaken`).
       if ("already" in pin) return { error: null, ...(current?.by === "me" && { n: current.n }) };
@@ -6565,7 +6599,7 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live || live.stored.group) return { error: "No such chat" };
     if (!live.stored.profile) return { error: "Pins need a current chat; this compatibility chat sends text only." };
-    const pin = await myPin(host, linkId, messageId, !!remove, live.stored.pin);
+    const pin = await myPin(host, linkId, messageId, !!remove, linkPinShown(live.stored));
     if ("error" in pin) return pin;
     if ("already" in pin) return { error: null };
     await this.keepLinkPin(linkId, pin, { id: pin.id, n: pin.n });
@@ -11091,9 +11125,11 @@ export class GhostlyNode implements EngineImplementation {
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted. So does one deleted
     // while it is being stored: a removal that came meanwhile (live, while this came from the hold or the DHT) found
     // no row to take and was confirmed, so it never comes again. A member's message its author deleted for everyone,
-    // coming again with a catch-up or handed on, or deleted while it is being stored: it stays gone.
-    const group = chat.startsWith("group:") ? chat.slice("group:".length) : undefined;
-    const kept = () => this.removedChats.get(chat) === deletes && !live?.stored.deletedIds?.includes(id) && !(group && this.groups.isRemoved(group, id));
+    // coming again with a catch-up or handed on, or deleted while it is being stored: it stays gone. So is a contact's
+    // that is blocked while it is being stored.
+    const group = chat.startsWith("group:") ? chat.slice("group:".length) : undefined, theirs = message.sender === "peer";
+    const kept = () => this.removedChats.get(chat) === deletes && !live?.stored.deletedIds?.includes(id) && !(group && this.groups.isRemoved(group, id))
+      && !(theirs && this.blockedChat(live?.stored));
     if (!kept()) return false;
     // Whether it may be the chat's joined line, decided before anything is awaited: rows are taken in the order they come.
     const first = live ? this.firstContactRow(live, message) : false;
@@ -11188,7 +11224,8 @@ export class GhostlyNode implements EngineImplementation {
       paymentNetworks: Object.fromEntries(PAYMENT_METHODS.map(m => [m, WALLET_NETWORKS.filter((n) => this.acceptsNetwork(stored, m, n))])) as Record<PaymentMethodName, WalletNetwork[]>,
       groups: live.link?.groupsSupport ?? false,
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
-      callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
+      // A blocked contact's answer is dropped (`onCallSignal`): a call placed would ring its app and never connect.
+      callsUnavailable: !stored.profile ? undefined : this.blockedChat(stored) ? "You blocked this contact. Unblock them to call" : live.link ? live.link.callsUnavailable : "Calls need a live connection",
       // A blocked contact's typing, presence and status show nothing either (whether its app is reachable still does:
       // that is this side's connection).
       ...(stored.profile && !stored.group && live.link?.peerTyping && !this.blockedChat(stored) ? typingView(live.link.peerTypingActivity) : {}),
@@ -11199,7 +11236,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       // The pinned message was deleted for everyone: nothing of it stays, its pin neither, as in a group (`Groups.pinned`).
       // The pin is kept as it came, so the same pin said again is no newer; one kept before it was marked, by `removedRefs`.
-      ...(stored.pin && { pin: pinView(stored.pin.id && (stored.pin.removed || stored.removedRefs?.includes(stored.pin.id)) ? { ...stored.pin, id: "", messageId: undefined } : stored.pin) }),
+      ...(stored.pin && { pin: pinView(linkPinShown(stored)) }),
       participationKey: participationKeyOf(live),
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,
@@ -11243,7 +11280,8 @@ export class GhostlyNode implements EngineImplementation {
       dataLink: live.dataLink,
       peerOnline: presence.online,
       peerLastSeenAt: presenceSeenAt(presence),
-      peerServices: presence.services,
+      // A blocked contact's services are not offered (nor what its presence says of them later).
+      peerServices: this.blockedChat(stored) ? null : presence.services,
       lastMessageAt: live.lastMessageAt,
       peerAck: live.peerAck,
       lastSyncAt: live.lastSyncAt,
@@ -11319,11 +11357,16 @@ export class GhostlyNode implements EngineImplementation {
     }, delayMs);
   }
 
-  /** The state now, not after `emitState`'s wait: for what the app must have before what follows it. */
-  private flushState(): void {
+  /**
+   * The state now, not after `emitState`'s wait: for what the app must have before what follows it. It builds the views
+   * the state waiting would have, and `linkId`'s: each file a contact offers sends one, and building every chat's and
+   * group's view for it (`getState`) cost 45 ms at 2,000 chats, and each extension tab a whole copy of every view.
+   */
+  private flushState(linkId: string): void {
     if (this.stateTimer) { clearTimeout(this.stateTimer); this.stateTimer = null; }
     if (this.gatedOut) return;
-    this.events.onState(this.getState());
+    this.changedChats?.add(linkId);
+    this.events.onState(this.pushedState());
     this.dropBriefViews();
   }
 

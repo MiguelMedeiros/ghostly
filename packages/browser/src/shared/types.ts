@@ -1074,6 +1074,11 @@ export interface StoredMessage {
   /** A group message someone else sent that names me (or everyone). */
   mentioned?: true;
   /**
+   * `mentioned` by an edit, not as it came: never a new mention (WISP 902), so it moves no "@" in the list, live or as
+   * a restart reads the history (`newestMarked`).
+   */
+  mentionedByEdit?: true;
+  /**
    * A private group's message from another member, or a community's from anyone: the frame it came in (sealed, signed
    * by its author), kept on the group's newest rows to hand on to members who were away (`GROUP_LIMITS.relay`,
    * `COMMUNITY_LIMITS.store`). The engine's own: a row goes to a page without it (`withoutFrame`).

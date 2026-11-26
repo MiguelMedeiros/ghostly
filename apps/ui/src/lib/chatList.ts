@@ -54,7 +54,9 @@ export function formatListTime(ts: number, now = Date.now(), language?: Language
   if (minutes < 60) return t("chat.listTime.minutes", { count: minutes });
   if (hours < 24) return t("chat.listTime.hours", { count: hours });
   if (days < 7) return t("chat.listTime.days", { count: days });
-  return formatAt(ts, LIST_DATE, language);
+  // A date from another year says which, as a chat's day labels do: "Dec 3" alone reads as this December.
+  return formatAt(ts, new Date(ts).getFullYear() === new Date(now).getFullYear() ? LIST_DATE : LIST_DATE_YEAR, language);
 }
 /** A row's date, written by one formatter per language (`formatAt`): `toLocaleDateString` built one per row per render. */
 const LIST_DATE: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+const LIST_DATE_YEAR: Intl.DateTimeFormatOptions = { ...LIST_DATE, year: "numeric" };
