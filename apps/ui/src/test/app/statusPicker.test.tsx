@@ -204,6 +204,14 @@ describe("the status picker in the account menu", () => {
     expect(statusEndText(new Date(2026, 10, 9, 23, 0).getTime(), "en", NOW)).toMatch(/^11:00\sPM$/);
   });
 
+  it("in Arabic, keeps the day period on the time's line", () => {
+    for (const until of [new Date(2026, 10, 9, 21, 5), new Date(2026, 10, 12, 21, 5), new Date(2026, 10, 30, 21, 5)]) {
+      const text = statusEndText(until.getTime(), "ar", NOW);
+      expect(text).toContain("م");
+      expect(text).not.toMatch(/ م/);
+    }
+  });
+
   it("in Arabic, keeps the person's text isolated in the menu row and in its name", async () => {
     answerStatus({ availability: "busy", emoji: "🍕", text: "At lunch" });
     const { user } = renderBar("ar");
