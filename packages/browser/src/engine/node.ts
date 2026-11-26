@@ -9762,7 +9762,7 @@ export class GhostlyNode implements EngineImplementation {
         onHold: (state) => this.hold.peerSaid(linkId, state),
         // A blocked contact's proofs are not taken: nothing of the contact changes while it is blocked.
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { if (!this.blockedChat(live.stored)) await (await this.proofsFor(linkId)).receive(frame); } : undefined,
-        onIdentityProof: stored.profile ? frame => this.blockedChat(live.stored) ? undefined : this.identities.frame(linkId, frame) : undefined,
+        onIdentityProof: stored.profile ? async frame => { if (!this.blockedChat(live.stored)) await this.identities.frame(linkId, frame); } : undefined,
         onContactAsker: stored.profile ? (frame, keys) => { void this.contactAskerHeard(linkId, frame, keys).catch(() => {}); } : undefined,
         onTransportsChanged: () => {
           if (live.link && !live.link.availableTransports.includes("hyperdht/1")) this.retryRelayLater();
