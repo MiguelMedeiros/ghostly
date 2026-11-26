@@ -21,3 +21,23 @@ describe("a link's text with a letter that has a dot below", () => {
     expect(labelMisleads("Họ tên", "https://evil.example/login")).toBe(false);
   });
 });
+
+describe("a link's text with another script's dot below on a letter", () => {
+  // Thai phinthu, Hebrew hiriq and lower dot, Arabic dot below: on an "l" each draws like U+0323 ("paypaḷcom").
+  const marks = ["ฺ", "ִ", "ׅ", "ٜ"];
+
+  it("reads the mark as the dot between a host's labels", () => {
+    for (const mark of marks) {
+      const label = `paypal${mark}com`;
+      expect(labelMisleads(label, "https://evil.example/login"), label).toBe(true);
+      expect(link(`[${label}](https://evil.example/login)`), label).toMatchObject({ data: { showUrl: true } });
+    }
+  });
+
+  it("leaves the mark alone on a letter of its own script", () => {
+    expect(labelMisleads("ภิกฺขุ", "https://evil.example/login")).toBe(false);
+    expect(labelMisleads("שִׁיר חָדָשׁ", "https://evil.example/login")).toBe(false);
+    expect(labelMisleads("שׁלֹמֹהׅ ודוד", "https://evil.example/login")).toBe(false);
+    expect(labelMisleads("بٜسم الله", "https://evil.example/login")).toBe(false);
+  });
+});
