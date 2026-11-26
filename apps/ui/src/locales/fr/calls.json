@@ -105,8 +105,8 @@
     "both": "Vous et {{name}} partagez vos écrans",
     "noSound": "Partagé sans le son",
     "peer": "{{name}} partage son écran",
-    "you": "Vous partagez votre écran",
-    "withSound": "Son partagé"
+    "withSound": "Son partagé",
+    "you": "Vous partagez votre écran"
   },
   "stopSharing": "Arrêter le partage",
   "timeline": {
