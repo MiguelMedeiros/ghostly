@@ -111,17 +111,37 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   const urgent: (() => void)[] = [];
   const frames: (() => void)[] = [];
   const listeners = new Map<string, ((event: Ev) => void)[]>();
+  /** The `load` listeners of the window's document (the guard's sweep of its frames). */
+  const sweeps: unknown[] = [];
   /** Whether `document.open()` takes the listeners away (a browser ignores it in some states: then nothing goes). */
   let clears = true;
+  /** Whether the document has an insertion point (opened, not closed yet): a write then only adds to what is parsed. */
+  let parsing = false;
+  /** What a write gives, as the browser parses it: the scripts the page wrote run here. */
+  let parse: (() => void) | null = null;
+  /** Each write the browser was given, by its name. */
+  const written: [string, string][] = [];
   /** How many listeners were asked for on the window, the ones already there too. */
   let asked = 0;
+  // HTML's document open steps: every listener of the document and, for its window's own document, of the window.
+  const openSteps = (doc: unknown) => {
+    if (!clears || doc !== w.document) return;
+    listeners.clear();
+    sweeps.length = 0;
+    parsing = true;
+  };
   class Doc {
     execCommand(command: string) { return command !== ""; }
-    // HTML's document open steps: every listener of the document and, for its window's own document, of the window.
-    open() { if (clears && this === w.document) listeners.clear(); return this; }
+    open() { openSteps(this); return this; }
+    close() { parsing = false; }
     // A write with no insertion point (the page has loaded) runs those same open steps itself, not `open()`.
-    write() { if (clears && this === w.document) listeners.clear(); }
-    writeln() { if (clears && this === w.document) listeners.clear(); }
+    write(html: string) { this.parsed("write", html); }
+    writeln(html: string) { this.parsed("writeln", html); }
+    parsed(name: string, html: string) {
+      if (!parsing) openSteps(this);
+      written.push([name, html]);
+      if (html !== "") parse?.();
+    }
   }
   let now = 10_000;
   class Ev { phase = 0; stamp = now; get eventPhase() { return this.phase; } get timeStamp() { return this.stamp; } }
@@ -141,6 +161,7 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
     Event: Ev,
     // As a browser's: a listener already there for that type is not added twice (the guard's are all capturing).
     EventTarget: { prototype: { addEventListener(this: unknown, type: string, listener: (event: Ev) => void) {
+      if (this === w.document && type === "load" && !sweeps.includes(listener)) sweeps.push(listener);
       if (this !== w) return;
       asked++;
       const there = listeners.get(type) ?? [];
@@ -180,8 +201,20 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
     copy, dispatch, listeners,
     /** The page rewrites itself: `document.open()` as it calls it (the guard's, if it wrapped it), on `on`. */
     rewrite: (on: object = doc, clearing = true) => { clears = clearing; (Doc.prototype.open as (this: object) => unknown).call(on); clears = true; },
-    /** The page rewrites itself with `document.write()` or `writeln()` (the guard's, if it wrapped them) after it loaded. */
-    write: (name: "write" | "writeln" = "write", on: object = doc) => { (Doc.prototype[name] as (this: object, html: string) => unknown).call(on, "<p>new</p>"); },
+    sweeps,
+    written,
+    /**
+     * The page rewrites itself with `document.write()` or `writeln()` (the guard's, if it wrapped them) after it loaded,
+     * then `document.close()`; `during` runs as a script it wrote; `clearing` false: the browser ignores the write.
+     */
+    write: (name: "write" | "writeln" = "write", on: object = doc, during: (() => void) | null = null, clearing = true) => {
+      parse = during;
+      clears = clearing;
+      (Doc.prototype[name] as (this: object, html: string) => unknown).call(on, "<p>new</p>");
+      clears = true;
+      parse = null;
+      (on as Doc).close();
+    },
     asked: () => asked,
     newDocument: () => new Doc(),
     /** The page keeps the thread for `ms` (a busy loop): time passes, no task runs. */
@@ -355,6 +388,7 @@ describe("the clipboard guard's taps and what a tap sets off", () => {
     const inputs = [...page.listeners.keys()].sort();
     page.rewrite();
     expect([...page.listeners.keys()].sort()).toEqual(inputs);
+    expect(page.sweeps).toHaveLength(1);
     const got: Record<string, boolean> = {};
     page.dispatch("click", true, () => { got.click = page.copy(); });
     page.endTask();
@@ -391,14 +425,28 @@ describe("the clipboard guard's taps and what a tap sets off", () => {
     for (const name of ["write", "writeln"] as const) {
       const page = tapWindow();
       const inputs = [...page.listeners.keys()].sort();
-      page.write(name);
+      expect(page.sweeps, name).toHaveLength(1);
+      const sweep = page.sweeps[0];
+      // A script the page wrote runs inside the write: the inputs and the document's sweep of its frames (which reaches
+      // a frame it wrote as that frame's first load fires) are listened for already.
+      let during: unknown[] = [];
+      page.write(name, undefined, () => { during = [[...page.listeners.keys()].sort(), [...page.sweeps]]; });
+      expect(during, name).toEqual([inputs, [sweep]]);
       expect([...page.listeners.keys()].sort(), name).toEqual(inputs);
+      expect(page.sweeps, name).toEqual([sweep]);
+      // The page's own text goes to the browser once, by the page's own call (`writeln` adds its newline to it only).
+      expect(page.written, name).toEqual([["write", ""], [name, "<p>new</p>"]]);
       const got: Record<string, boolean> = {};
       page.dispatch("click", true, () => { got.click = page.copy(); });
       page.endTask();
       page.dispatch("submit", true, () => { got.load = page.copy(); });
       expect(got, name).toEqual({ click: true, load: false });
       for (const [type, kept] of page.listeners) expect(kept, type).toHaveLength(1);
+      // One the browser ignores (a deferred script's, after the page was parsed) takes nothing away and adds nothing twice.
+      page.write(name, undefined, null, false);
+      expect(page.listeners.size, name).toBe(15);
+      for (const [type, kept] of page.listeners) expect(kept, type).toHaveLength(1);
+      expect(page.sweeps, name).toEqual([sweep]);
       // A document of the window's realm that is not its page: nothing of the window's.
       const asked = page.asked();
       page.write(name, page.newDocument());

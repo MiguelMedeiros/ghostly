@@ -20,7 +20,10 @@ import type { HeaderList } from "./frames";
  *   there before it, the clipboard guard's in a web page, it leaves that one as it is);
  * - refuses a declarative shadow root the page's script would make (`setHTMLUnsafe`, `Document.parseHTMLUnsafe`,
  *   `document.write`, a write split in two too): its `srcdoc` frames would be out of the guard's sight;
- * - listens for frames' loads again after `document.open()`, which takes every listener of the document away;
+ * - listens for frames' loads again after `document.open()`, which takes every listener of the document away, and
+ *   before what a `document.write()` or `writeln()` gives is parsed: one with no insertion point (the page has loaded)
+ *   runs those same open steps without `open()`, so an empty write goes first, for the browser to run them (or not, as
+ *   it would for the page's), and the scripts the page writes run with frames' loads listened for;
  * - starts a worker made from a `blob:` URL of the page's own (`URL.createObjectURL` in that window) from a script of its
  *   own that makes a pass-through Trusted Types `default` policy there first and then runs the page's (`importScripts`;
  *   for a module worker, a static `import` of the policy's module, then of the page's): such a worker takes the page's
@@ -122,6 +125,7 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
       };
     }
     let tail = "";
+    const blank = w.Document.prototype.write;
     for (const name of ["write", "writeln"]) {
       const real = w.Document.prototype[name];
       if (typeof real !== "function") continue;
@@ -130,6 +134,10 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
         for (let i = 0; i < arguments.length; i++) checked += text(arguments[i]);
         if (shadowed(tail + checked)) refuse();
         tail = apply(slice, tail + checked, [-16]);
+        if (this === home) {
+          apply(blank, home, [""]);
+          try { apply(listen, home, ["load", sweep, true]); } catch (e) {}
+        }
         return apply(real, this, [checked]);
       };
     }
@@ -294,7 +302,7 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
 })(window)`;
 
 /** `VIEWER_GUARD_SCRIPT`'s hash, as a CSP source: a contact's own policy that would refuse it is given it (`allowingViewerGuard`). */
-export const VIEWER_GUARD_HASH = "'sha256-SwvBbiKNvOB9YLHZtzwWYt9JbDfSuTxrsNmTzlCCMgI='";
+export const VIEWER_GUARD_HASH = "'sha256-hHlTwcwych3FfSYQjVZc1NZORF9dvgMJpxDfrts2p94='";
 
 /**
  * With the guard, where it is put in the page and not run by the viewer in every frame: frames only from the app's own

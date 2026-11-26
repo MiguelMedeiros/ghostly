@@ -150,6 +150,7 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
       };
     }
     let tail = "";
+    const blank = w.Document.prototype.write;
     for (const name of ["write", "writeln"]) {
       const real = w.Document.prototype[name];
       if (typeof real !== "function") continue;
@@ -158,6 +159,10 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
         for (let i = 0; i < arguments.length; i++) checked += text(arguments[i]);
         if (shadowed(tail + checked)) refuse();
         tail = apply(slice, tail + checked, [-16]);
+        if (this === home) {
+          apply(blank, home, [""]);
+          try { apply(listen, home, ["load", sweep, true]); } catch (e) {}
+        }
         return apply(real, this, [checked]);
       };
     }
@@ -648,9 +653,10 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           }
         } catch (e) {}
       }
-      const reheard = (doc) => {
+      const reheard = (doc, opening) => {
         try {
           if (apply(view, doc, []) === w) {
+            if (opening) apply(opening, doc, [""]);
             apply(listen, doc, ["load", sweep, true]);
             hear();
           }
@@ -659,7 +665,7 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
       const reopen = proto.open;
       proto.open = function () {
         const got = apply(reopen, this, arguments);
-        reheard(this);
+        reheard(this, null);
         return got;
       };
       const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
@@ -678,6 +684,7 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
         };
       }
       let tail = "";
+      const blank = proto.write;
       const writes = ["write", "writeln"];
       for (let i = 0; i < writes.length; i++) {
         const real = proto[writes[i]];
@@ -687,9 +694,8 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           for (let j = 0; j < arguments.length; j++) checked += text(arguments[j]);
           if (shadowed(tail + checked)) refuse();
           tail = apply(slice, tail + checked, [-16]);
-          const got = apply(real, this, [checked]);
-          reheard(this);
-          return got;
+          reheard(this, blank);
+          return apply(real, this, [checked]);
         };
       }
       const kinds = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
