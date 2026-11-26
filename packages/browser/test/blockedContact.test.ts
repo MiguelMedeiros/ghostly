@@ -212,6 +212,50 @@ describe("a blocked contact", () => {
     expect(events.onCallSignal).toHaveBeenCalledWith(chat.id, offer);
   });
 
+  it("leaves no payment request record from the hold, as none from a live one", async () => {
+    const chat = row();
+    const { node } = await started(chat);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    const request = vi.spyOn(node["desk"], "onPaymentRequest");
+    const host = node["hold"]["host"] as { receivePaymentRequest(linkId: string, request: object): Promise<void> };
+    await host.receivePaymentRequest(chat.id, { id: "held-request", timestamp: Date.now(), amount: { value: 21, asset: "sat" } });
+    expect(request).not.toHaveBeenCalled();
+    // Another contact's comes in as before.
+    const other = row();
+    await db.putLink(other);
+    await host.receivePaymentRequest(other.id, { id: "other-request", timestamp: Date.now(), amount: { value: 21, asset: "sat" } }).catch(() => {});
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("is not kept when the block lands while its text is being stored", async () => {
+    const chat = row();
+    const { node, events, linkOf } = await started(chat);
+    const resolve = node["resolveReply"].bind(node);
+    vi.spyOn(node as never, "resolveReply" as never).mockImplementation((async (message: never) => {
+      await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+      return resolve(message);
+    }) as never);
+    events.onAttention.mockClear();
+    await linkOf(chat.id).options.events.onMessage({ id: "w1", text: "racing", timestamp: Date.now(), via: "datalink" });
+    expect(await db.getMessages(chat.id)).toEqual([]);
+    expect(events.onAttention).not.toHaveBeenCalled();
+  });
+
+  it("offers none of its services, nor any its presence says later", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const peer = linkOf(chat.id).options.events;
+    const services = [{ name: "wiki", port: 8080 }] as never;
+    peer.onPresence({ online: true, lastPacketAt: 1, services });
+    expect(viewOf(node, chat.id).peerServices).toEqual(services);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    expect(viewOf(node, chat.id).peerServices).toBeUndefined();
+    peer.onPresence({ online: true, lastPacketAt: 2, services: [{ name: "renamed", port: 8080 }] as never });
+    expect(viewOf(node, chat.id).peerServices).toBeUndefined();
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    expect(viewOf(node, chat.id).peerServices).toEqual([{ name: "renamed", port: 8080 }]);
+  });
+
   it("is kept through a restart, and the settings patch cannot unblock it", async () => {
     const chat = row();
     const first = await started(chat);
