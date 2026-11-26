@@ -1,5 +1,6 @@
 import { createSocket } from "node:dgram";
 import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { guardViewerAnswer, utf8Encode, viewerServicePolicy, VIEWER_GUARD_HASH, VIEWER_GUARD_SCRIPT, type HeaderList } from "@ghostly/core";
 import { CHROMIUM_SANDBOX } from "../support/chromiumSandbox";
 import { expect, test } from "../support/fixtures";
@@ -15,9 +16,9 @@ import { expect, test } from "../support/fixtures";
  *
  * Not here, as a script in the page cannot do it (`VIEWER_GUARD_SCRIPT`): a frame's window read by its index while the
  * frame's page is on its way, and a `srcdoc` frame in a shadow tree written in the HTML the page itself sends.
+ *
+ * The page server and the STUN socket take free ports: copies of this test run side by side (`--repeat-each`).
  */
-const PAGE_PORT = 6322;
-const STUN_PORT = 6323;
 
 test.use({
   launchOptions: {
@@ -32,11 +33,11 @@ test.use({
 });
 
 /** What the contact's pages use (`/try.js`): a connection with the constructor a page found, if it found one. */
-const TRY = `async function attempt(find) {
+const attempts = (stunPort: number) => `async function attempt(find) {
   let made = null;
   try { made = find(); } catch (e) {}
   if (typeof made !== "function") return;
-  const connection = new made({ iceServers: [{ urls: "stun:127.0.0.1:${STUN_PORT}" }] });
+  const connection = new made({ iceServers: [{ urls: "stun:127.0.0.1:${stunPort}" }] });
   // Kept until the tab closes: one nothing holds may be collected before its first binding request goes.
   (self.keptConnections = self.keptConnections || []).push(connection);
   connection.createDataChannel("x");
@@ -116,15 +117,16 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
     answer.writeUInt32BE((from.address.split(".").reduce((word, byte) => word * 256 + Number(byte), 0) ^ 0x2112a442) >>> 0, 28);
     stun.send(answer, from.port, from.address);
   });
-  await new Promise<void>((done) => stun.bind(STUN_PORT, "127.0.0.1", done));
+  await new Promise<void>((done) => stun.bind(0, "127.0.0.1", done));
+  const tries = attempts(stun.address().port);
   let relayOnly = false;
   // The contact's answer by path, before Ghostly touches it.
   const contact = (path: string): { headers: HeaderList; body: string | Uint8Array; wait?: number } => {
     const page: HeaderList = [["content-type", "text/html; charset=utf-8"]];
     if (path.startsWith("/case/")) return { headers: page, body: html(`<script src="/try.js"></script><script>${CASES[NAMES[Number(path.slice(6))]]}</script>`) };
     // Said UTF-8: without it, a script takes the encoding of the page that asked for it (UTF-16 for `/u16`).
-    if (path === "/try.js") return { headers: [["content-type", "text/javascript; charset=utf-8"]], body: TRY };
-    if (path === "/go.js") return { headers: [["content-type", "text/javascript; charset=utf-8"]], body: `${TRY}\nattempt(() => self.RTCPeerConnection || self.webkitRTCPeerConnection);` };
+    if (path === "/try.js") return { headers: [["content-type", "text/javascript; charset=utf-8"]], body: tries };
+    if (path === "/go.js") return { headers: [["content-type", "text/javascript; charset=utf-8"]], body: `${tries}\nattempt(() => self.RTCPeerConnection || self.webkitRTCPeerConnection);` };
     if (path === "/inner") return { headers: page, body: html(`<script src="/go.js"></script>`) };
     if (path === "/slow") return { headers: page, body: html(""), wait: 700 };
     if (path === "/first") return { headers: page, body: html("") };
@@ -182,7 +184,8 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
       response.end();
     })();
   });
-  await new Promise<void>((done, failed) => { server.once("error", failed); server.listen(PAGE_PORT, "127.0.0.1", () => done()); });
+  await new Promise<void>((done, failed) => { server.once("error", failed); server.listen(0, "127.0.0.1", () => done()); });
+  const pagePort = (server.address() as AddressInfo).port;
   const context = await browser.newContext();
   try {
     for (const [index, name] of NAMES.entries()) {
@@ -192,7 +195,7 @@ test("a contact's app makes no WebRTC connection of its own in the web app while
         const open = async () => {
           packets = 0;
           const tab = await context.newPage();
-          await tab.goto(`http://127.0.0.1:${PAGE_PORT}/bridge/${index}`, { waitUntil: "load" });
+          await tab.goto(`http://127.0.0.1:${pagePort}/bridge/${index}`, { waitUntil: "load" });
           return tab;
         };
         if (on) {
