@@ -21,6 +21,11 @@ interface IncomingCallNotificationProps {
    * again after each Decline can still be removed for good, without a dialog to reach first (agents#8557).
    */
   onDelete?: () => void;
+  /**
+   * Block contact, as in the chat's ⋮ (it asks first; blocked, the ring stops with nothing sent to the caller, and the
+   * contact never rings again). Absent for a contact blocked already, or a chat with no contact's key.
+   */
+  onBlock?: () => void;
 }
 
 const ICON = { width: 24, height: 24, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -64,6 +69,7 @@ export function IncomingCallNotification({
   onReject,
   onCall = false,
   onDelete,
+  onBlock,
 }: IncomingCallNotificationProps) {
   const { t } = useI18n();
   const box = useRef<HTMLDivElement>(null);
@@ -148,7 +154,7 @@ export function IncomingCallNotification({
           </div>
         </div>
 
-        {/* The answers, and under them Delete chat, kept together: on a phone they sit at the bottom, in thumb reach. */}
+        {/* The answers, and under them Block contact and Delete chat, kept together: on a phone they sit at the bottom, in thumb reach. */}
         <div className="incoming-call-answers flex flex-col items-center gap-4">
           {onCall ? (
             // On a call already: two choices, each named under its button, since no icon says "End and answer".
@@ -184,11 +190,22 @@ export function IncomingCallNotification({
               )}
             </div>
           )}
-          {onDelete && (
-            <button type="button" onClick={onDelete} data-testid="incoming-call-delete-chat"
-              className="min-h-11 rounded-lg px-4 text-sm text-danger-ink hover:bg-danger/15 focus-visible:ring-2 focus-visible:ring-danger">
-              {t("sidebar.deleteChat")}
-            </button>
+          {/* Block contact and Delete chat side by side, wrapping on a narrow phone or in a long language. */}
+          {(onBlock || onDelete) && (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {onBlock && (
+                <button type="button" onClick={onBlock} data-testid="incoming-call-block"
+                  className="min-h-11 rounded-lg px-4 text-sm text-danger-ink hover:bg-danger/15 focus-visible:ring-2 focus-visible:ring-danger">
+                  {t("chat.menu.block")}
+                </button>
+              )}
+              {onDelete && (
+                <button type="button" onClick={onDelete} data-testid="incoming-call-delete-chat"
+                  className="min-h-11 rounded-lg px-4 text-sm text-danger-ink hover:bg-danger/15 focus-visible:ring-2 focus-visible:ring-danger">
+                  {t("sidebar.deleteChat")}
+                </button>
+              )}
+            </div>
           )}
         </div>
         {/* In the card from the start, empty until a newer offer changes the call's kind: a region added with its text
