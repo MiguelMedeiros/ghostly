@@ -11,8 +11,13 @@ export function iceServerProblem(server: IceServerSetting): string | null {
   if ([server.username, server.credential].some((value) => value !== undefined && typeof value !== "string")) return "A TURN server's username and credential are texts";
   const urls = server.urls.split(/[\s,]+/).filter(Boolean);
   if (!urls.length) return "Enter the TURN server address";
-  for (const url of urls) {
-    if (!/^(stun|turns?):[^\s/?#]+(\?transport=(udp|tcp))?$/i.test(url)) return `“${shownAddress(url)}” is not a TURN or STUN address (turn:host:port)`;
+  for (const [i, url] of urls.entries()) {
+    if (!/^(stun|turns?):[^\s/?#]+(\?transport=(udp|tcp))?$/i.test(url)) {
+      // A space or comma in a user or password splits the address before its `@`: then this piece may hold them, so
+      // only its scheme is said (`shownAddress` says `<scheme>…` for a `?`/`#` before an `@`).
+      const split = urls.slice(i + 1).some((next) => next.includes("@"));
+      return `“${shownAddress(split ? `${url}#@` : url)}” is not a TURN or STUN address (turn:host:port)`;
+    }
     if (/^turns?:/i.test(url) && (!server.username?.trim() || !server.credential?.trim())) return "A TURN server needs its username and credential";
   }
   return null;
