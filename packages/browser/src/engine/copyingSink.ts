@@ -32,8 +32,9 @@ function withoutDetails(message: StoredMessage): StoredMessage {
  * view with its transport log. One this client was sent last as it is now (its pictures left out the same way) is left
  * out, and the state names every chat's, edge's and group's id in order (`keptViews`): the page keeps the rest, and an
  * id no longer there is a chat, edge or group gone. A view that is the engine's same object as in the last state (it
- * keeps an unchanged chat's view, `pushedState`) is not written out again to tell: a file's progress sends a state
- * every 250 ms, and writing out 2,000 chats' views cost ~8 ms per tab each time.
+ * keeps an unchanged chat's view, `pushedState`) is not written out again to tell, nor copied to leave its pictures out:
+ * a file's progress sends a state every 250 ms, and writing out 2,000 chats' views cost ~8 ms per tab each time, copying
+ * those with a picture ~2 ms more.
  *
  * A group whose view changed goes without its member list when that list is the one this client was sent last
  * (`keptViews.members`): a message in a community changes its `lastMessageAt`, and its 256 members went again with each
@@ -57,29 +58,39 @@ export function copyingSink(post: (message: PostedEvent) => void): EngineClientS
       const kept: KeptPictures = {};
       // Whether this picture is the one sent last under this name (an id is once in its list: the engine's links and
       // groups are kept by id, a community member's pay link is named by group and member).
+      const sentBefore = (name: string, picture: string | undefined): boolean => !!picture && pictures.get(name) === picture;
       const same = (name: string, picture: string | undefined): boolean => {
-        if (!picture) return false;
-        now.set(name, picture);
-        return pictures.get(name) === picture;
+        if (picture) now.set(name, picture);
+        return sentBefore(name, picture);
       };
-      const leaveOut = <T extends { id: string }>(list: T[], kind: "links" | "edges" | "groups", field: keyof T & ("peerAvatar" | "picture")): T[] =>
-        list?.map((item) => {
-          if (!same(`${kind}:${item.id}`, item[field] as string | undefined)) return item;
-          (kept[kind] ??= []).push(item.id);
-          const { [field]: _, ...without } = item;
-          return without as T;
-        });
+      // Each item's picture that is the one sent last is named in `kept`; the copy without it is made only for an item
+      // that goes (`leaveOutSame`): one left out whole is not copied.
+      const keepPictures = <T extends { id: string }>(list: T[] | undefined, kind: "links" | "edges" | "groups", field: keyof T & ("peerAvatar" | "picture")): void => {
+        for (const item of list ?? []) if (same(`${kind}:${item.id}`, item[field] as string | undefined)) (kept[kind] ??= []).push(item.id);
+      };
+      const withoutPicture = <T extends { id: string }>(item: T, kind: "links" | "edges" | "groups", field: keyof T & ("peerAvatar" | "picture")): T => {
+        if (!sentBefore(`${kind}:${item.id}`, item[field] as string | undefined)) return item;
+        const { [field]: _, ...without } = item;
+        return without as T;
+      };
       // A public profile's picture deeper in an item, named by its list (`name`) and its key there.
-      const leaveOutAt = <T extends U, U>(list: T[], name: string, at: PictureAt<U>, keys: () => string[]): T[] =>
-        list.map((item) => {
-          if (!same(`${name}\n${at.key(item)}`, at.get(item))) return item;
-          keys().push(at.key(item));
-          return at.set(item, undefined);
-        });
-      const contactProfiles = (link: LinkView): LinkView => {
-        const received = link.identities?.received && leaveOutAt(link.identities.received, `received\n${link.id}`, identityPicture, () => ((kept.received ??= {})[link.id] ??= []));
-        const nostr = link.nostr && leaveOutAt(link.nostr, `nostr\n${link.id}`, nostrPicture, () => ((kept.nostr ??= {})[link.id] ??= []));
-        if (!kept.received?.[link.id] && !kept.nostr?.[link.id]) return link;
+      const keepAt = <U>(list: U[], name: string, at: PictureAt<U>, keys: () => string[]): void => {
+        for (const item of list) if (same(`${name}\n${at.key(item)}`, at.get(item))) keys().push(at.key(item));
+      };
+      const withoutAt = <T extends U, U>(list: T[], name: string, at: PictureAt<U>): T[] =>
+        list.map((item) => (sentBefore(`${name}\n${at.key(item)}`, at.get(item)) ? at.set(item, undefined) : item));
+      const leaveOutAt = <T extends U, U>(list: T[], name: string, at: PictureAt<U>, keys: () => string[]): T[] => {
+        keepAt(list, name, at, keys);
+        return withoutAt(list, name, at);
+      };
+      const keepContactProfiles = (link: LinkView): void => {
+        if (link.identities?.received) keepAt(link.identities.received, `received\n${link.id}`, identityPicture, () => ((kept.received ??= {})[link.id] ??= []));
+        if (link.nostr) keepAt(link.nostr, `nostr\n${link.id}`, nostrPicture, () => ((kept.nostr ??= {})[link.id] ??= []));
+      };
+      const withoutContactPictures = (link: LinkView): LinkView => {
+        const received = kept.received?.[link.id] && link.identities?.received && withoutAt(link.identities.received, `received\n${link.id}`, identityPicture);
+        const nostr = kept.nostr?.[link.id] && link.nostr && withoutAt(link.nostr, `nostr\n${link.id}`, nostrPicture);
+        if (!received && !nostr) return link;
         return { ...link, ...(received && { identities: { ...link.identities!, received } }), ...(nostr && { nostr }) };
       };
       const ownKept = same("avatar", settings?.avatar);
@@ -87,25 +98,28 @@ export function copyingSink(post: (message: PostedEvent) => void): EngineClientS
       const nowViews = new Map<string, { view: object; mark: string; key: string }>();
       const keptViews: KeptViews = {};
       // The views in `list` this client was sent last as they are now, with the same pictures left out (`marks`): those
-      // stay out, and `keptViews` lists every id in order. A list with an id twice goes whole. `engine`: the views
-      // `list` was made from, in its order; one the same object as last time, with the same marks, is the same copy.
-      const leaveOutSame = <T extends { id: string }>(list: T[], engine: T[], kind: "links" | "edges" | "groups", marks: (id: string) => unknown): T[] => {
-        if (!list) return list;
+      // stay out, and `keptViews` lists every id in order. A list with an id twice goes whole. `engine`: the engine's
+      // views; one the same object as last time, with the same marks, is the same copy and is not copied (`copy`: the
+      // view as it goes, its pictures left out).
+      const leaveOutSame = <T extends { id: string }>(engine: T[], kind: "links" | "edges" | "groups", marks: (id: string) => unknown, copy: (view: T) => T): T[] => {
+        if (!engine) return engine;
+        const copies: T[] = [];
+        const copied = (i: number) => (copies[i] ??= copy(engine[i]));
         const left = new Set<string>();
-        for (const [i, view] of list.entries()) {
+        for (const [i, view] of engine.entries()) {
           const name = `${kind}:${view.id}`;
-          if (nowViews.has(name)) return list;
+          if (nowViews.has(name)) return engine.map((_, i) => copied(i));
           const mark = JSON.stringify(marks(view.id)) ?? "", had = views.get(name);
-          const key = had?.view === engine[i] && had.mark === mark ? had.key : `${mark}\n${JSON.stringify(view)}`;
-          nowViews.set(name, { view: engine[i], mark, key });
+          const key = had?.view === view && had.mark === mark ? had.key : `${mark}\n${JSON.stringify(copied(i))}`;
+          nowViews.set(name, { view, mark, key });
           if (had?.key === key) left.add(view.id);
         }
-        if (!left.size) return list;
-        keptViews[kind] = list.map((view) => view.id);
+        if (!left.size) return engine.map((_, i) => copied(i));
+        keptViews[kind] = engine.map((view) => view.id);
         // The page keeps a view left out whole, its pictures with it.
         if (kept[kind]) kept[kind] = kept[kind].filter((id) => !left.has(id));
         if (kind === "links") for (const id of left) { delete kept.received?.[id]; delete kept.nostr?.[id]; }
-        return list.filter((view) => !left.has(view.id));
+        return engine.flatMap((view, i) => (left.has(view.id) ? [] : [copied(i)]));
       };
       const nowMembers = new Map<string, string>();
       // The groups going (`list`) whose member list is the one this client was sent last: they go without it, named in
@@ -124,13 +138,14 @@ export function copyingSink(post: (message: PostedEvent) => void): EngineClientS
           return without as GroupView;
         });
       };
-      const postedLinks = leaveOut(links, "links", "peerAvatar")?.map(contactProfiles);
-      const postedEdges = edges && leaveOut(edges, "edges", "peerAvatar");
-      const postedGroups = leaveOut(groups, "groups", "picture");
+      keepPictures(links, "links", "peerAvatar");
+      links?.forEach(keepContactProfiles);
+      keepPictures(edges, "edges", "peerAvatar");
+      keepPictures(groups, "groups", "picture");
       const keptLinks = new Set(kept.links), keptEdges = new Set(kept.edges), keptGroups = new Set(kept.groups);
-      const sentLinks = leaveOutSame(postedLinks, links, "links", (id) => [keptLinks.has(id), kept.received?.[id], kept.nostr?.[id]]);
-      const sentEdges = postedEdges && leaveOutSame(postedEdges, edges, "edges", (id) => keptEdges.has(id));
-      const sentGroups = leaveOutMembers(leaveOutSame(postedGroups, groups, "groups", (id) => keptGroups.has(id)));
+      const sentLinks = leaveOutSame(links, "links", (id) => [keptLinks.has(id), kept.received?.[id], kept.nostr?.[id]], (view) => withoutContactPictures(withoutPicture(view, "links", "peerAvatar")));
+      const sentEdges = edges && leaveOutSame(edges, "edges", (id) => keptEdges.has(id), (view) => withoutPicture(view, "edges", "peerAvatar"));
+      const sentGroups = leaveOutMembers(leaveOutSame(groups, "groups", (id) => keptGroups.has(id), (view) => withoutPicture(view, "groups", "picture")));
       for (const list of ["links", "edges", "groups", "received", "nostr"] as const) {
         const value = kept[list];
         if (Array.isArray(value) ? !value.length : value && !Object.keys(value).length) delete kept[list];
