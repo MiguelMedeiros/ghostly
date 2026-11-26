@@ -31,7 +31,8 @@ export interface HoldHost {
   receivePaymentRequest(linkId: string, request: PaymentRequest): Promise<void>;
   /** Whether an item with this wire id is stored here already (a text or a file; WISP 4xx § Held items). */
   taken?(linkId: string, id: string): Promise<boolean>;
-  changed(): void;
+  /** What the chats show changed: `linkId`'s hold alone, or (none named) the storage every chat's hold reads. */
+  changed(linkId?: string): void;
   fetch?: typeof fetch;
   /** Plain HTTP to this machine is a storage address too: the e2e suite's local server. Off in every shipped app. */
   loopbackStorage?: () => boolean;
@@ -199,7 +200,7 @@ export class HoldEngine {
     await this.serialize(linkId, async () => {
       await this.save(linkId, { ...this.state(linkId), enabled });
     });
-    this.host.changed();
+    this.host.changed(linkId);
     if (enabled) this.wake(linkId);
   }
 
@@ -210,7 +211,7 @@ export class HoldEngine {
       if (hold.peerAllows !== said.peerAllows) await this.save(linkId, { ...hold, peerAllows: said.peerAllows });
       if (said.peerTop !== undefined && said.peerTop > hold.inSeq) this.expecting.set(linkId, said.peerTop);
     });
-    this.host.changed();
+    this.host.changed(linkId);
     if (this.expecting.has(linkId)) this.peerPoll(linkId);
   }
 
@@ -297,14 +298,14 @@ export class HoldEngine {
     catch (error) { return this.failEntry(linkId, entry, `Stored, but could not tell the contact where: ${error instanceof Error ? error.message : String(error)}`); }
     this.errors.delete(linkId);
     await this.host.delivery(linkId, entry.messageId, "held");
-    this.host.changed();
+    this.host.changed(linkId);
   }
 
   private async failEntry(linkId: string, entry: HeldEntry, error: string): Promise<never> {
     await this.save(linkId, { ...this.state(linkId), outbox: this.state(linkId).outbox.map((e) => (e.seq === entry.seq ? { ...e, state: "failed" as const, error } : e)) });
     this.errors.set(linkId, error);
     await this.host.delivery(linkId, entry.messageId, "failed", error);
-    this.host.changed();
+    this.host.changed(linkId);
     throw new Error(error);
   }
 
@@ -386,7 +387,7 @@ export class HoldEngine {
       await this.save(linkId, { ...hold, outbox: hold.outbox.filter((e) => e !== entry) });
       await this.host.storage()?.store.remove(entry.name).catch(() => {});
       if (entry.state === "held") await this.publishPointer(linkId, true).catch(() => {});
-      this.host.changed();
+      this.host.changed(linkId);
     });
   }
   /**
@@ -492,7 +493,7 @@ export class HoldEngine {
         await this.host.storage()?.store.remove(entry.name).catch(() => {});
         await this.host.delivery(linkId, entry.messageId, "failed", "Held for its whole lifetime without being picked up. Retry to hold it again.");
       }
-      this.host.changed();
+      this.host.changed(linkId);
     }
     for (const entry of hold.outbox.filter((e) => e.state === "queued")) await this.upload(linkId, entry).catch(() => {});
     const resealed = await this.resealStale(linkId);
@@ -517,7 +518,7 @@ export class HoldEngine {
     catch (error) {
       // Held back by the relays' request budget: read again once it frees a request, and nothing is wrong meanwhile.
       if (isDiscoveryBudgetError(error)) { this.lastPoll.delete(linkId); this.retrySoon(budgetRetryMs(error, 1_000, TICK_MS)); return; }
-      this.errors.set(linkId, `Could not read the contact's pointer: ${error instanceof Error ? error.message : String(error)}`); this.host.changed(); return;
+      this.errors.set(linkId, `Could not read the contact's pointer: ${error instanceof Error ? error.message : String(error)}`); this.host.changed(linkId); return;
     }
     const pointer = packet ? keys.readPointer(packet, this.host.loopbackStorage?.()) : null;
     if (!pointer) return;
@@ -534,13 +535,13 @@ export class HoldEngine {
         await this.host.storage()?.store.remove(entry.name).catch(() => {});
       }
       await this.publishPointer(linkId, true).catch(() => {});
-      this.host.changed();
+      this.host.changed(linkId);
     } else if (pointer.ack !== hold.peerAck) hold = await this.save(linkId, { ...hold, peerAck: pointer.ack });
     // Said again below if it still holds: a pickup that may go now, or nothing left to pick up, takes the line away.
     const wasHidden = this.errors.get(linkId) === HOLD_HIDDEN_IP;
     if (wasHidden) this.errors.delete(linkId);
-    if (pointer.top <= hold.inSeq) { this.expecting.delete(linkId); if (wasHidden) this.host.changed(); return; }
-    if (!pointer.manifestUrl || pointer.expires <= now) { this.errors.set(linkId, "The contact holds items for you, but their address expired. They are handed out again when the contact is next online."); this.host.changed(); return; }
+    if (pointer.top <= hold.inSeq) { this.expecting.delete(linkId); if (wasHidden) this.host.changed(linkId); return; }
+    if (!pointer.manifestUrl || pointer.expires <= now) { this.errors.set(linkId, "The contact holds items for you, but their address expired. They are handed out again when the contact is next online."); this.host.changed(linkId); return; }
     let entries: ReturnType<typeof readManifest>, mailbox: string, manifestRev: number;
     try {
       const manifest = keys.open(await this.fetchBytes(pointer.manifestUrl, HOLD_LIMITS.maxManifestBytes), { maxBytes: HOLD_LIMITS.maxManifestBytes, now, loopback: this.host.loopbackStorage?.() });
@@ -553,7 +554,7 @@ export class HoldEngine {
       if (error instanceof HoldRefusedError) { await this.save(linkId, { ...this.state(linkId), refused: this.state(linkId).refused + 1 }); this.errors.set(linkId, `Refused what the contact's storage offered: ${error.message}`); }
       else if (error instanceof HiddenIpError) this.errors.set(linkId, HOLD_HIDDEN_IP);
       else this.errors.set(linkId, `Could not pick up held items: ${error instanceof Error ? error.message : String(error)}`);
-      this.host.changed();
+      this.host.changed(linkId);
       return;
     }
     let changed = false, stop = false;
@@ -639,7 +640,7 @@ export class HoldEngine {
       await this.publishPointer(linkId, false).catch((error) => this.errors.set(linkId, `Picked up, but could not acknowledge: ${error instanceof Error ? error.message : String(error)}`));
       if (!stop && !this.errors.get(linkId)?.startsWith("Refused")) this.errors.delete(linkId);
     }
-    this.host.changed();
+    this.host.changed(linkId);
   }
 
   /**

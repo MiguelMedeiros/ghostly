@@ -1539,7 +1539,8 @@ export class GhostlyNode implements EngineImplementation {
     // A blocked contact's: no record either, as live (`onPaymentRequest`).
     receivePaymentRequest: async (linkId, request) => { if (!this.blockedChat(this.links.get(linkId)?.stored)) await this.desk.onPaymentRequest(linkId, request, true); },
     taken: (linkId, id) => db.hasMessage(linkId, `peer_${id}`),
-    changed: () => this.emitState(),
+    // A chat's hold (the contact's word on each session, a pickup, a read that failed): its chat's view alone is built again.
+    changed: (linkId) => { if (linkId && this.links.has(linkId)) this.chatChanged(linkId); else this.emitState(); },
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
     loopbackStorage: () => this.options.holdLoopback === true,
     // Hide my IP from contacts: a pickup reaches only this person's own bucket (no storage is the app's own), never one a
@@ -9769,7 +9770,7 @@ export class GhostlyNode implements EngineImplementation {
         },
         // A blocked contact's group invitation is dropped; the signaling of groups we are both in still goes through.
         onGroupFrame: stored.profile ? frame => frame.t === "group-invite" && this.blockedChat(live.stored) ? undefined : this.groups.handleContactFrame(linkId, frame) : undefined,
-        onGroupsSupport: () => this.emitState(),
+        onGroupsSupport: () => this.chatChanged(linkId),
         // The contact takes texts again: those paced out wait for no backoff check (minutes after the contact was away).
         onTextRoom: () => void this.outboxes.get(linkId)?.flush().catch(() => {}),
         onDhtDelivery: view => {
@@ -9852,7 +9853,7 @@ export class GhostlyNode implements EngineImplementation {
           if (EXTERNAL_IDENTITIES_ENABLED && state.status === "ready") void this.proofsFor(linkId).then(p => p.resendWithdrawals()).catch(() => {});
           else live.proofs?.stop();
           this.observeTransport(linkId);
-          this.emitState();
+          this.chatChanged(linkId);
         },
         onStatus: (status) => {
           const was = live.status, synced = live.lastSyncAt;
@@ -9935,7 +9936,9 @@ export class GhostlyNode implements EngineImplementation {
           }
           if (stored.profile && state !== "open" && live.pairing?.status !== "error") live.pairing = { status: "connecting" };
           this.observeTransport(linkId);
-          this.emitState();
+          // Its chat's view alone is built again: a daemon back, or the relays, plays this and the pairing state on every
+          // chat, and each built every chat's and group's view (119 states, 9.4 s of a core in 15 s at 2,000 chats).
+          this.chatChanged(linkId);
         },
         // A blocked contact keeps the name and picture it had here.
         onPeerAvatar: (avatar) => {
