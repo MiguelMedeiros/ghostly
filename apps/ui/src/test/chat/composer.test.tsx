@@ -1098,6 +1098,22 @@ describe("the composer in forced colors", () => {
   });
 });
 
+// covers: app.mobile-layout, settings.text-size
+describe("the composer's placeholder at a larger text size (composer.css)", () => {
+  /**
+   * The field is one line tall. On a 320px phone at 150% of the browser's text size, "Mensagem…" or "メッセージ…" wrapped
+   * and its second line was cut through. The placeholder stays on its one line, cut at the field's edge (Chromium
+   * draws no "…" for a textarea's placeholder).
+   */
+  const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/composer/composer.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+  it("the placeholder never wraps to a second line", () => {
+    const placeholder = CSS.match(/\.composer-textarea::placeholder\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(placeholder).toMatch(/white-space:\s*nowrap;/);
+    expect(placeholder).toMatch(/overflow:\s*hidden;/);
+  });
+});
+
 // covers: chat.paired.send
 describe("a refusal above the composer", () => {
   /** What a group answers a file it paces, and a text over 16 KiB, in the languages slowest to read. */
