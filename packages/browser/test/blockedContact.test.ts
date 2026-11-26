@@ -266,6 +266,22 @@ describe("a blocked contact", () => {
     expect(viewOf(node, chat.id).peerServices).toEqual([{ name: "renamed", port: 8080 }]);
   });
 
+  it("takes no native listener with a text over the DHT, which would take another chat's", async () => {
+    // HyperDHT through a relay, as a CLI daemon's or a browser's; no listener starts here.
+    await db.putSettings({ ...(await db.getSettings())!, hyperdhtRelay: "wss://relay.invalid" });
+    const listen = vi.spyOn(GhostlyNode.prototype as never as { ensureNativeEndpoints(id: string, inUse?: boolean): Promise<void> }, "ensureNativeEndpoints").mockResolvedValue();
+    const chat = row({ pairedPeerKey: createIdentity().pubKeyZ32 }), other = row({ pairedPeerKey: createIdentity().pubKeyZ32 });
+    const { node, linkOf } = await started(chat, other);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    for (const id of [chat.id, other.id]) linkOf(id).isDataLinkOpen = false;
+    listen.mockClear();
+    await linkOf(chat.id).options.events.onMessage({ id: "w1", text: "let me in", timestamp: Date.now(), via: "pkarr" });
+    expect(listen).not.toHaveBeenCalled();
+    // Another contact's text over the DHT takes one as before (`chatInUse`).
+    await linkOf(other.id).options.events.onMessage({ id: "w2", text: "hi", timestamp: Date.now(), via: "pkarr" });
+    expect(listen).toHaveBeenCalledWith(other.id, true);
+  });
+
   it("is kept through a restart, and the settings patch cannot unblock it", async () => {
     const chat = row();
     const first = await started(chat);
