@@ -912,9 +912,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
 
   // The call buttons, in the header and (the video call on a phone) in the ⋮ menu: why they are off, and what they start.
-  const callBlocked = webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
+  // A blocked contact's answer is never heard: calling it would only ring it.
+  const callBlocked = chatLink?.blocked ? t("chat.block.blocked")
+    : webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
   const callBusy = webrtc.callState !== "idle" || wakeCall.waking;
   const startCall = (withVideo: boolean) => {
+    if (chatLink?.blocked) return;
     if (!(callsBlocked && canWakeForCall)) return webrtc.startCall(withVideo);
     wokeFrom.current = document.activeElement;
     void wakeCall.ring(withVideo);
@@ -1247,6 +1250,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} appCards={appCards} />
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
+
+      {chatLink?.blocked && blockKey && (
+        <div data-testid="chat-blocked" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">
+          <span>{t("chat.block.blocked")}</span>
+          <button type="button" className="underline text-accent cursor-pointer" onClick={() => setBlocked(false)}>{t("chat.menu.unblock")}</button>
+        </div>
+      )}
 
       {compat && session?.continuedIn && (
         <div data-testid="compat-continued" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">

@@ -23,14 +23,16 @@ export function BlockedContacts() {
   const lines = blocked.map((line) => ({ ...line, name: line.name || t("common.unnamedContact", { key: contactTag(line.key) }) }));
   const [unblocking, setUnblocking] = useState<string | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
+  const none = useRef<HTMLDivElement>(null);
   const handOff = useRef<{ gone: string; next?: string } | null>(null);
   // The row goes: the focus moves to the next one (or the one before), not to the page, once that row's button is drawn
-  // enabled again and the unblocked row is gone (whichever comes last: the engine's state or its answer).
+  // enabled again and the unblocked row is gone (whichever comes last: the engine's state or its answer). The last one
+  // gone: to the line that says none is left.
   useEffect(() => {
     const hand = handOff.current;
     if (!hand || unblocking !== null || lines.some((line) => line.key === hand.gone)) return;
     handOff.current = null;
-    if (focusLost() && hand.next) buttons.current.get(hand.next)?.focus();
+    if (focusLost()) (hand.next ? buttons.current.get(hand.next) : none.current)?.focus();
   });
 
   const unblock = async (key: string, i: number) => {
@@ -45,7 +47,9 @@ export function BlockedContacts() {
   return (
     <Section title={t("settings.blocked.title")}>
       {lines.length === 0
-        ? <Row label={t("settings.blocked.none")} hint={t("settings.blocked.hint")} testId="settings-blocked-none" />
+        ? <div ref={none} tabIndex={-1} className="focus:outline-none">
+            <Row label={t("settings.blocked.none")} hint={t("settings.blocked.hint")} testId="settings-blocked-none" />
+          </div>
         : lines.map((line, i) => (
           <Row key={line.key} label={line.name} testId="settings-blocked-contact">
             <Button ref={(button) => { if (button) buttons.current.set(line.key, button); else buttons.current.delete(line.key); }} loading={unblocking === line.key} disabled={unblocking !== null}

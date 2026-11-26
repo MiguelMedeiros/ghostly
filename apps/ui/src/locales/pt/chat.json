@@ -30,6 +30,7 @@
     "tooLarge": "Grande demais para tocar aqui. Baixe para ouvir."
   },
   "block": {
+    "blocked": "Você bloqueou este contato",
     "body": "Essa pessoa não poderá mais ligar nem enviar nada para você, e nada avisa a ela. A conversa fica. Desbloqueie por este menu ou em Ajustes → Privacidade e segurança.",
     "confirm": "Bloquear",
     "title": "Bloquear {{name}}?"

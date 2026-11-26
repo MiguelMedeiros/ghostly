@@ -52,6 +52,25 @@ describe("⋮ → Block contact", () => {
     expect(asked()).toBeNull();
     expect(engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }]);
   });
+
+  it("a blocked contact's chat says so, with Unblock, and its call buttons are off with that reason", async () => {
+    const { user, engine } = await openMenu(true);
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("chat-blocked")).toHaveTextContent("You blocked this contact");
+    const audio = screen.getByTestId("call-audio");
+    expect(audio).toHaveAttribute("aria-disabled", "true");
+    expect(audio).toHaveAttribute("title", "You blocked this contact");
+    await user.click(audio);
+    expect(await screen.findByTestId("call-blocked")).toHaveTextContent("You blocked this contact");
+    await user.click(within(screen.getByTestId("chat-blocked")).getByRole("button", { name: "Unblock contact" }));
+    expect(engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }]);
+  });
+
+  it("a contact not blocked shows no such line, and its call buttons are on", async () => {
+    await openMenu();
+    expect(screen.queryByTestId("chat-blocked")).toBeNull();
+    expect(screen.getByTestId("call-audio")).not.toHaveAttribute("title", "You blocked this contact");
+  });
 });
 
 describe("Settings → Blocked contacts", () => {
@@ -85,5 +104,16 @@ describe("Settings → Blocked contacts", () => {
     await utils.user.click(await screen.findByRole("button", { name: /^Unblock .*Ana/ }));
     await vi.waitFor(() => expect(screen.getAllByTestId("settings-blocked-contact")).toHaveLength(2));
     await vi.waitFor(() => expect(screen.getByRole("button", { name: /^Unblock .*Carl/ })).toHaveFocus());
+  });
+
+  it("the last row's Unblock hands the focus to the line that says none is left", async () => {
+    const utils = renderApp(<BlockedContacts />);
+    utils.engine.update({ links: [linkView({ id: "link-1", peerPubKeyZ32: BOB, label: "Bob" })], settings: { blockedContacts: [BOB] } as never });
+    utils.engine.on("setContactBlocked", () => {
+      utils.engine.update({ settings: { blockedContacts: [] } as never });
+      return undefined;
+    });
+    await utils.user.click(await screen.findByRole("button", { name: /^Unblock .*Bob/ }));
+    await vi.waitFor(() => expect(screen.getByTestId("settings-blocked-none").parentElement).toHaveFocus());
   });
 });
