@@ -59,13 +59,15 @@ export function notifySessionsChanged(): void {
 }
 
 /**
- * Histories made whole again after a reload (the engine posts every chat's at attach) store nothing new: the chat list
- * has nothing to show, but an open chat has older messages to read. One `session-updated` for all of them, not one each.
+ * A chat's whole list mirrored (the engine posts every chat's at attach, one at a time; a history asked for): one
+ * `session-updated` for all of them, not one each. Each runs a reconcile (a walk of every stored key) and every reader:
+ * one per chat with a new row was about 17 s at 2,000 chats. Histories made whole again after a reload store nothing new:
+ * the chat list has nothing to show, but an open chat has older messages to read. What the change tick tells is told at once.
  */
-let wholeAgain: ReturnType<typeof setTimeout> | undefined;
-function notifyWholeAgain(): void {
-  wholeAgain ??= setTimeout(() => {
-    wholeAgain = undefined;
+let soon: ReturnType<typeof setTimeout> | undefined;
+function notifySoon(): void {
+  soon ??= setTimeout(() => {
+    soon = undefined;
     notifySessionsChanged();
   }, 50);
 }
@@ -231,7 +233,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
     shown = deleteMessages(shown.id, gone, shown) ?? shown;
     forget(shown.id);
     if (kept) mirrored.set(linkId, { ...mirrored.get(linkId)!, stored: storedSession(shown.id) });
-    notifySessionsChanged();
+    if (changes) notifySessionsChanged(); else notifySoon();
     // Nothing unread left: the chat's notification goes, as reading the chat takes it (the Android and Linux apps keep one).
     if (!getUnreadCount(shown)) clearChatNotification(shown.id);
   }
@@ -356,7 +358,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   if (dirty || added.length || changed) forget(session.id);
   const after = storedSession(session.id);
   mirrored.set(linkId, { messages, sessionId: session.id, stored: after });
-  if (changed && partial && whole && after === before) notifyWholeAgain();
+  if (changed && (!changes || (partial && whole && after === before))) notifySoon();
   else if (changed) notifySessionsChanged();
 }
 
