@@ -15,7 +15,7 @@ import { NAME, SECOND_NAME, withName, withNames } from "./aroundName";
 import { removedLine } from "./removedLine";
 import { stopReason, stoppedSaid } from "./stoppedSaid";
 import { appErrorCode, appErrorRetryable, appErrorText, appErrorView, appUpdateErrorView, type AppErrorView } from "../../lib/apps/errors";
-import { appStopped, refreshInstalledApps } from "../../lib/apps/installed";
+import { appStopped, refreshInstalledApps, refreshInstalledAppsAfter } from "../../lib/apps/installed";
 import { useTryAgain } from "../../lib/apps/tryAgain";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
@@ -543,7 +543,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   const act = async (work: () => Promise<unknown>, close = false, which: string | null = null, view = appErrorView) => {
     focusBack();
     setBusy(true); setPending(which); setError(null);
-    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(view(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
+    try { await refreshInstalledAppsAfter(work); if (close) onClose(); } catch (e) { setError(view(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
   };
   // No link it came from answered with its files (offline, the host down, each holding another version): the engine
   // says so only by its run status, which was still `needs-files`. Said on the screen, or it looked as before.
