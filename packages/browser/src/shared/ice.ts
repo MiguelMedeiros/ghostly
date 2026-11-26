@@ -11,10 +11,18 @@ export function iceServerProblem(server: IceServerSetting): string | null {
   const urls = server.urls.split(/[\s,]+/).filter(Boolean);
   if (!urls.length) return "Enter the TURN server address";
   for (const url of urls) {
-    if (!/^(stun|turns?):[^\s/?#]+(\?transport=(udp|tcp))?$/i.test(url)) return `“${url}” is not a TURN or STUN address (turn:host:port)`;
+    if (!/^(stun|turns?):[^\s/?#]+(\?transport=(udp|tcp))?$/i.test(url)) return `“${shownAddress(url)}” is not a TURN or STUN address (turn:host:port)`;
     if (/^turns?:/i.test(url) && (!server.username?.trim() || !server.credential?.trim())) return "A TURN server needs its username and credential";
   }
   return null;
+}
+
+/**
+ * A refused address as the refusal quotes it: without its `user:password@`, `?query` or `#fragment` (a TURN token or
+ * credential put in the address), so the CLI and a log keep none of it. The rest is said as given.
+ */
+function shownAddress(url: string): string {
+  return url.replace(/[?#][\s\S]*$/, "").replace(/^([a-z][a-z0-9+.-]*:\/*)?[\s\S]*@/i, "$1");
 }
 
 /**

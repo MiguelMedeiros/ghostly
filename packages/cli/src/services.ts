@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { GhostlyHttpError, LIMITS, parseLocalTarget, VIEWER_PERMISSIONS_POLICY, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
 import { bool, chatOf, nameKey, node, num, ownChatOf, settingsOf, shownName, state, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 import { guardText } from "./secretGuard";
 import { isLive } from "./views";
 import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, guardViewerAnswer, type PageGuard } from "@ghostly/core";
@@ -326,7 +326,7 @@ function servicesNamed(services: readonly { id: string; name: string }[], given:
  * use: before, it read "No service" of a service `service list` shows by that very name. Same code and exit either way.
  */
 function noService(given: string, named: readonly string[]): CliError {
-  const quoted = JSON.stringify(given);
+  const quoted = shownValue(given);
   if (!named.length) return new CliError("not_found", `No service ${quoted} (ghostly service list)`);
   const which = named.length === 1 ? `${named[0]}: use its id` : `${named.length} services, ${named.slice(0, -1).join(", ")} and ${named.at(-1)}: use one of their ids`;
   return new CliError("not_found", `No service with id ${quoted}. ${quoted} is the name of ${which} (ghostly service list)`);

@@ -2,7 +2,7 @@ import { MESSAGE_CLOCK_SKEW_MS, STATUS_CARD_LIMITS, cardLine, checkStatusCard, r
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret, secretWords } from "./secretGuard";
 import { bool, chatOrGroup, keptForJoin, node, num, oneOf, oneShotWaits, state, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError, asCliError } from "./errors";
+import { CliError, asCliError, shownValue } from "./errors";
 import { checkTextSize } from "./textSize";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
@@ -187,7 +187,7 @@ async function cardMessage(ctx: ApiContext, target: Target, kind: Kind, id: stri
     carried(cards, key, message.id);
     return message;
   }
-  throw new CliError("not_found", `No ${kind} ${JSON.stringify(id)} of yours in this ${target.group ? "group" : "chat"}: send it first with ghostly ${kind} send`);
+  throw new CliError("not_found", `No ${kind} ${shownValue(id)} of yours in this ${target.group ? "group" : "chat"}: send it first with ghostly ${kind} send`);
 }
 
 function answer(target: Target, kind: Kind, id: string, messageId: string, extra: Record<string, unknown>): Record<string, unknown> {
@@ -203,7 +203,7 @@ async function parentThere(ctx: ApiContext, target: Target, card: StatusCard): P
   if (card.kind !== "task" || !card.parent) return;
   const parent = card.parent;
   await cardMessage(ctx, target, "task", parent).catch(() => {
-    throw new CliError("not_found", `--parent: no task ${JSON.stringify(parent)} of yours in this ${target.group ? "group" : "chat"}: send the parent first`);
+    throw new CliError("not_found", `--parent: no task ${shownValue(parent)} of yours in this ${target.group ? "group" : "chat"}: send the parent first`);
   });
 }
 
