@@ -249,9 +249,9 @@ describe("a blocked contact", () => {
     peer.onPresence({ online: true, lastPacketAt: 1, services });
     expect(viewOf(node, chat.id).peerServices).toEqual(services);
     await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
-    expect(viewOf(node, chat.id).peerServices).toBeUndefined();
+    expect(viewOf(node, chat.id).peerServices).toBeNull();
     peer.onPresence({ online: true, lastPacketAt: 2, services: [{ name: "renamed", port: 8080 }] as never });
-    expect(viewOf(node, chat.id).peerServices).toBeUndefined();
+    expect(viewOf(node, chat.id).peerServices).toBeNull();
     await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
     expect(viewOf(node, chat.id).peerServices).toEqual([{ name: "renamed", port: 8080 }]);
   });

@@ -11249,7 +11249,7 @@ export class GhostlyNode implements EngineImplementation {
       peerOnline: presence.online,
       peerLastSeenAt: presenceSeenAt(presence),
       // A blocked contact's services are not offered (nor what its presence says of them later).
-      peerServices: this.blockedChat(stored) ? undefined : presence.services,
+      peerServices: this.blockedChat(stored) ? null : presence.services,
       lastMessageAt: live.lastMessageAt,
       peerAck: live.peerAck,
       lastSyncAt: live.lastSyncAt,
