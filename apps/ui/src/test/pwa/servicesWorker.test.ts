@@ -113,9 +113,18 @@ describe("the services worker", () => {
       expect((bridge.postMessage.mock.calls[2]![0] as { method: string; path: string }).method).toBe("GET");
     });
 
-    it("goes on from its page only while that page is the view the bridge frames: under the app itself, or anywhere else, nothing asks again", async () => {
+    it("goes on from its page only while that page is in the view the bridge frames: under the app itself, or anywhere else, nothing asks again", async () => {
       const { GO_SCRIPT } = await import("../../../../web/src/svc/worker");
-      const app = { get location(): Location { throw new DOMException("cross-origin", "SecurityError"); } };
+      /** A window of another origin, whose location throws; the top's parent is itself, as in a browser. */
+      const foreign = (parent?: unknown) => {
+        const w: { parent: unknown; readonly location: Location } = {
+          parent,
+          get location(): Location { throw new DOMException("cross-origin", "SecurityError"); },
+        };
+        w.parent ??= w;
+        return w;
+      };
+      const app = foreign();
       /** The go-on page's script run with `parent` and `top` as given: the address it asked for again, if any. */
       const run = (parent: unknown, top: unknown): string | null => {
         let asked: string | null = null;
@@ -125,15 +134,25 @@ describe("the services worker", () => {
         new Function("location", "history", "document", "parent", "top", GO_SCRIPT)(location, history, document, parent, top);
         return asked;
       };
-      const bridgePage = { location: new URL(`${ORIGIN}${BRIDGE_PAGE}`) };
+      const bridgePage = { location: new URL(`${ORIGIN}${BRIDGE_PAGE}`), parent: app };
       expect(run(bridgePage, app)).toBe(`${ORIGIN}/account?x=1`);
+      // A frame of the app's own pages inside the view, at any depth.
+      const page = { location: new URL(`${ORIGIN}/`), parent: bridgePage };
+      expect(run(page, app)).toBe(`${ORIGIN}/account?x=1`);
+      expect(run({ location: new URL(`${ORIGIN}/widget`), parent: page }, app)).toBe(`${ORIGIN}/account?x=1`);
       // Its frame left the bridge (the app frames this origin itself): the parent is the app's, unreadable.
       expect(run(app, app)).toBeNull();
-      // Another page of this origin frames it, or it is the top.
-      expect(run({ location: new URL(`${ORIGIN}/`) }, app)).toBeNull();
-      const self = {};
+      // A page of this origin framed by the app, not by a bridge; or another origin between it and the bridge.
+      expect(run({ location: new URL(`${ORIGIN}/`), parent: app }, app)).toBeNull();
+      expect(run({ location: new URL(`${ORIGIN}/`), parent: foreign(bridgePage) }, app)).toBeNull();
+      // It is the top, or the bridge is.
+      const self: { parent?: unknown } = {};
+      self.parent = self;
       expect(run(self, self)).toBeNull();
-      expect(run(bridgePage, bridgePage)).toBeNull();
+      const topBridge: { location: URL; parent?: unknown } = { location: new URL(`${ORIGIN}${BRIDGE_PAGE}`) };
+      topBridge.parent = topBridge;
+      expect(run(topBridge, topBridge)).toBeNull();
+      expect(run({ location: new URL(`${ORIGIN}/`), parent: topBridge }, topBridge)).toBeNull();
     });
 
     it("is never another site's: its form POST at the top or into a frame of its own, or a window it opens", async () => {
