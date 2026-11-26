@@ -64,7 +64,7 @@ export const commands: Record<string, Command> = {
       out: { type: "string", description: "Where the bundle goes (default <dir>/app.ghostlyapp); the bundle there is the version this one follows" },
       sequence: { type: "number", description: "This version's sequence, higher than the bundle at --out's (default: one more than it)" },
     },
-    run: async ({ options }, a) => (await import("../apps")).publishApp(a.dir!, keyFile(options.key, "app publish <dir> --key <file> [--out <file>] [--sequence n]"), here(options.out), options.sequence as number | undefined),
+    run: async ({ options }, a) => (await import("../apps")).publishApp(a.dir!, keyFile(options.key, "app publish <dir> --key <file> [--out <file>] [--sequence n]"), here(options.out), options.sequence as number | undefined, options.home as string | undefined),
   },
   "app revoke": {
     method: "app.revoke", usage: "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]",
