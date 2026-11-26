@@ -3069,7 +3069,7 @@ export class GhostlyNode implements EngineImplementation {
     if (this.restoreTimer) clearTimeout(this.restoreTimer);
     this.restoreTimer = null;
     this.identities.stop();
-    this.did.stop();
+    const didClosed = this.did.close();
     this.contactLinks.stop();
     this.contactAsks.stop();
     this.nostrSocial.stop();
@@ -3094,6 +3094,8 @@ export class GhostlyNode implements EngineImplementation {
       this.quoteSweeps.stop(),
       // A removed proof's revocation still on its way: a CLI one-shot that removed it would otherwise never publish it.
       this.identities.published(),
+      // The same for a listing of the public DID changed within the last 2 s (`ProfileDid.close`).
+      didClosed,
       ...WALLET_NETWORKS.flatMap((network) => [this.arkWallets, this.barkWallets, this.fedimintWallets, this.sparkWallets, this.usdtWallets, this.lightnings, this.bitcoins]
         .map((wallets) => wallets[network].stop())),
       // The Cashu wallet too: its polls would otherwise go on writing after the stop.

@@ -228,6 +228,38 @@ describe("the profile's did:dht", () => {
     expect(state.puts).toHaveLength(3);
   });
 
+  it("publishes a listing changed within its last 2 s when it closes, as a CLI one-shot ends; nothing when none changed", async () => {
+    const { make, state } = world();
+    const did = make();
+    await did.load();
+    did.start();
+    await did.publishNow();
+    await did.setListed({ id: "domain-1", listed: true });
+    await did.close();
+    expect(state.puts).toHaveLength(2);
+    expect(opened(did, state.puts[1].payload).document.alsoKnownAs).toEqual(["https://example.com"]);
+
+    // The next run (a one-shot `identity remove` of the listed proof): the proof leaves the document before it ends.
+    const removing = make();
+    await removing.load();
+    removing.start();
+    state.identities.delete("domain-1");
+    removing.changed();
+    await removing.close();
+    expect(state.puts).toHaveLength(3);
+    expect(opened(removing, state.puts[2].payload).document.alsoKnownAs).toBeUndefined();
+    await vi.waitFor(async () => expect((await stored())?.listed).toEqual([]));
+
+    // A run that changed nothing puts nothing on the relays as it ends, even with an expired proof's document not out.
+    const idle = make();
+    await idle.load();
+    idle.start();
+    state.identities.set("nostr-1", null);
+    idle.changed();
+    await idle.close();
+    expect(state.puts).toHaveLength(3);
+  });
+
   it("tries a failed publish again after a few minutes, not an hour", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const { make, state } = world();
