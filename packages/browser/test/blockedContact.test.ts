@@ -62,6 +62,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     peerAllowsPayment = vi.fn(() => true);
     peerChoosesPayment = vi.fn(() => true);
     allowsPayment = vi.fn(() => true);
+    paymentEnabled = vi.fn(() => true);
     dhtHolds = vi.fn(() => false);
     withdrawDht = vi.fn(async () => {});
     constructor(readonly options: GhostLinkOptions) { links.push(this as never); }
@@ -143,6 +144,9 @@ describe("a blocked contact", () => {
     await peer.onPayment({ id: "p1" } as never);
     await peer.onPaymentRequest({ id: "p2" } as never);
     await peer.onPaymentAsk({ id: "p3" } as never);
+    // A request held for this app while it was away: no pending request in the wallet with no line behind it.
+    const host = node["hold"]["host"] as { receivePaymentRequest(linkId: string, request: object): Promise<void> };
+    await host.receivePaymentRequest(chat.id, { id: "p4", timestamp: 5, amount: { value: "21", asset: "sat" }, endpoints: [] });
     expect([pay, request, ask].map((spy) => spy.mock.calls.length)).toEqual([0, 0, 0]);
     // One under way when the block came is not kept (`FileDesk`'s `deleted`).
     expect(node["fileDesk"]["deps"].deleted(chat.id, "peer_f1")).toBe(true);

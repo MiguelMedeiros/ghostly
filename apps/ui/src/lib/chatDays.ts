@@ -81,8 +81,10 @@ export function byDay<R>(rows: readonly R[], days: readonly number[], from = 0):
  */
 export function dayLabel(day: number, today: number, language: Language, t: Translate): string {
   if (day === today) return t("chat.today");
+  // Its own midnight: the day before one whose midnight the clocks skipped (which starts at 01:00) starts at 00:00.
   const yesterday = new Date(today);
-  if (day === yesterday.setDate(yesterday.getDate() - 1)) return t("chat.yesterday");
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (day === yesterday.setHours(0, 0, 0, 0)) return t("chat.yesterday");
   const year = new Date(day).getFullYear() !== new Date(today).getFullYear();
   return formatAt(day, { weekday: "long", day: "numeric", month: "long", ...(year && { year: "numeric" }) }, language);
 }

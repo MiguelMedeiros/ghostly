@@ -106,6 +106,19 @@ describe("a day's name", () => {
     expect(dayLabel(dayOf(at(2026, 12, 31)), dayOf(at(2027, 1, 1)), "en", t)).toBe("Yesterday");
   });
 
+  it("is Yesterday for the day before one whose midnight the clocks skipped", () => {
+    // Cairo's 2026-04-24 starts at 01:00, the day before it at 00:00: not an hour into it.
+    const zone = process.env.TZ;
+    process.env.TZ = "Africa/Cairo";
+    try {
+      expect(dayLabel(dayOf(at(2026, 4, 23)), dayOf(at(2026, 4, 24)), "en", t)).toBe("Yesterday");
+      expect(dayLabel(dayOf(at(2026, 4, 24)), dayOf(at(2026, 4, 25)), "en", t)).toBe("Yesterday");
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+  });
+
   it("is the weekday and date before that, with the year when it is not this year's", () => {
     expect(dayLabel(dayOf(at(2026, 10, 27)), today, "en", t)).toBe("Tuesday, October 27");
     expect(dayLabel(dayOf(at(2026, 9, 27)), today, "en", t)).toBe("Sunday, September 27");
