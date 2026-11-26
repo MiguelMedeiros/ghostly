@@ -378,7 +378,7 @@ test("+ → Apps, the which-chat picker and an app's screen keep their padding u
     await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
     expect(await under("app-chat-picker", "Cancel"), `the picker at ${viewport.width} px`).toBeGreaterThanOrEqual(20);
     await ana.page.keyboard.press("Escape");
-    await ana.page.getByTestId("installed-app").getByRole("button", { name: /^Chess .*: details$/ }).click();
+    await ana.page.getByTestId("installed-app").getByRole("button", { name: /^\u2068Chess\u2069 .*: details$/ }).click();
     expect(await under("app-details", "Open"), `the app's screen at ${viewport.width} px`).toBeGreaterThanOrEqual(20);
     await ana.page.keyboard.press("Escape");
     await ana.page.goto("/#/");
