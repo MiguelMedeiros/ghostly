@@ -248,11 +248,11 @@ function fakeRepo() {
       rebased.add(sha);
       return { baseSha: tips[base], sha };
     },
-    /** A push with a lease: refused once the branch is no longer at `expected`. */
+    /** A push with a lease: refused once the branch is no longer at `expected`. It moves every open pull request the branch heads. */
     pushHead: async (branch: string, sha: string, expected: string) => {
-      const p = [...pulls.values()].find((x) => x.open && x.branch === branch)!;
-      if (p.sha !== expected) return { ok: false, message: "! [rejected] (stale info)" };
-      p.sha = sha;
+      const heads = [...pulls.values()].filter((x) => x.open && x.branch === branch);
+      if (heads[0].sha !== expected) return { ok: false, message: "! [rejected] (stale info)" };
+      for (const p of heads) p.sha = sha;
       pushes.push(`${branch}=${sha}`);
       return { ok: true };
     },
@@ -2422,6 +2422,69 @@ describe("one pull request alone", () => {
     expect(repo.pushes.filter((p) => p.startsWith("fix-11="))).toHaveLength(1);
   });
 
+  /** #12 from #11's branch into `epic/x`, open and not queued: one head, two pull requests. */
+  const twin = (repo: ReturnType<typeof fakeRepo>, extra: Partial<Pr> = {}) => repo.pulls.set(12, { ...repo.pulls.get(11)!, number: 12, base: "epic/x", labels: [], open: true, ...extra });
+
+  it("goes the batch way, pushing nothing to its branch, when another open pull request into another base heads it, and lands there", async () => {
+    // Alone, the train rebased fix-11 onto dev and pushed it: #12's head moved too (the epic's pull request then held
+    // dev's commits), and the next run refused #11's green run as not its own (#12 ran it too), so neither moved.
+    const repo = fakeRepo();
+    repo.add(11, { ci: running, behind: true });
+    repo.drafts.set("h11", fastGreen);
+    twin(repo);
+    const r = await repo.run();
+    expect(repo.pushes).toEqual([]);
+    expect(repo.pulls.get(11)!.sha).toBe("h11");
+    expect(repo.pulls.get(12)!.sha).toBe("h11");
+    expect(repo.members()).toEqual([11]);
+    expect(r.inFlight).toBe(repo.batch()!.number);
+    expect(r.log.join("\n")).toMatch(/ALONE #11: its branch `fix-11` is also the head of #12 into `epic\/x`, so the train does not push to it; it goes the batch way/);
+    repo.settle();
+    const done = await repo.run();
+    expect(done.merged).toEqual([11]);
+    expect(repo.landed).toEqual(["#11"]);
+    expect(repo.pushes).toEqual([]);
+    expect(repo.pulls.get(12)).toMatchObject({ open: true, sha: "h11" });
+    expect(repo.pulls.get(12)!.merged).toBeFalsy();
+  });
+
+  it("still goes alone when the only other pull request from its branch is closed", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    twin(repo, { open: false, closedAt: "2026-10-02T00:00:00Z" });
+    const r = await repo.run();
+    expect(r.inFlight).toBe(11);
+    expect(r.opened).toEqual([]);
+    const head = repo.pulls.get(11)!.sha;
+    expect(repo.pushes).toEqual([`fix-11=${head}`]);
+    expect(repo.pulls.get(12)!.sha).toBe("h11");
+  });
+
+  it.each(["cut", "unread"])("goes the batch way when the list of its branch's pull requests is %s", async (how) => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.gh.headPulls = how === "cut" ? async () => Object.assign([], { truncated: true }) : async () => Promise.reject(new Error("HTTP 502 Bad Gateway"));
+    const r = await repo.run();
+    expect(repo.pushes).toEqual([]);
+    expect(repo.members()).toEqual([11]);
+    expect(r.log.join("\n")).toMatch(how === "cut" ? /ALONE #11: its branch `fix-11` heads more pull requests than the train reads/ : /ALONE #11: the train could not read which pull requests its branch `fix-11` heads \(HTTP 502 Bad Gateway\)/);
+  });
+
+  it("goes the batch way instead of rebasing a lone pull request again once another open pull request heads its branch", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    expect((await repo.run()).inFlight).toBe(11);
+    const head = repo.pulls.get(11)!.sha;
+    repo.runs.set(head, running);
+    twin(repo);
+    repo.tips.dev = "dev1"; // dev moved under the flight: alone, it would be rebased and pushed again
+    const r = await repo.run();
+    expect(repo.pushes).toEqual([`fix-11=${head}`]);
+    expect(repo.pulls.get(12)!.sha).toBe(head);
+    expect(repo.members()).toEqual([11]);
+    expect(r.log.join("\n")).toMatch(/ALONE #11: its branch `fix-11` is also the head of #12 into `epic\/x`/);
+  });
+
   it("takes a pull request that conflicts with the tip out of the line with queue:conflict", async () => {
     const repo = fakeRepo();
     repo.conflicts.add(11);
@@ -3666,12 +3729,18 @@ describe("a green pull request run that is not the pull request's own", () => {
     expect(repo.comments.get(21)![0].body).toMatch(/Waiting: another pull request from its branch \(#22 into `epic\/x`\) ran CI on the same commit/);
   });
 
-  it("pushes no fresh commit for one alone at the tip on its fast tier whose runs are not its own: its sibling runs that one too", async () => {
+  it("pushes no fresh commit for one alone at the tip on its fast tier whose runs are not its own: its sibling runs that one too, so it goes the batch way", async () => {
     const repo = sharedHead();
     repo.earlier.delete("h21");
     repo.drafts.set("h21", fastGreen);
-    expect((await repo.run()).inFlight).toBe(21);
+    const r = await repo.run();
     expect(repo.pushes).toEqual([]);
+    expect(r.inFlight).toBe(repo.batch()!.number);
+    expect(repo.members()).toEqual([21]);
+    // A batch's CI is its own: it lands there, and #22's head stays where it was.
+    repo.settle();
+    expect((await repo.run()).merged).toEqual([21]);
+    expect(repo.pulls.get(22)).toMatchObject({ open: true, sha: "h21" });
   });
 
   it("does not count a green pull request run from another branch on the same commit", async () => {
