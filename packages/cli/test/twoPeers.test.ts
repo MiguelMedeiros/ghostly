@@ -719,7 +719,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     error(await ghostly(["--home", alice, "identity", "complete", started.draft as string, "--stdin"], { env, input: "not a signature" }), "bad_request", 1);
     // Nothing given: where to give it, not the API's "evidence is required"; piped without --stdin, read as a send's text.
     expect(error(await ghostly(["--home", alice, "identity", "complete", started.draft as string], { env, input: "" }), "usage", 2).message)
-      .toBe(`Missing what ssh-keygen printed: give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${started.draft as string})`);
+      .toBe(`Missing the output of the signing step (ssh-keygen): give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${started.draft as string})`);
     const done = ok(await ghostly(["--home", alice, "identity", "complete", started.draft as string], { env, input: signature }));
     const proof = done.proof as { id: string; provider: string };
     expect(proof.provider).toBe("ssh");
