@@ -554,16 +554,19 @@ describe("group call", () => {
       ["wss://call.example.com", "\"wss://call.example.com\" is not an https origin: a call node is like https://call.example.com"],
       ["call.example.com", "\"call.example.com\" is not an https origin: a call node is like https://call.example.com"],
       // Before: told "not an https origin" (no word of the limit), and capitals or :443 of a path, query or trailing /.
-      [`https://${"a".repeat(200)}.com`, `"https://${"a".repeat(200)}.com" is too long: a call node is an https origin of at most 200 characters`],
-      [longOrigin, `"${longOrigin}" is too long: a call node is an https origin of at most 200 characters`],
+      // A word that long is described, not said back (agents#8585).
+      [`https://${"a".repeat(200)}.com`, "(a 212-character word) is too long: a call node is an https origin of at most 200 characters"],
+      [longOrigin, "(a 202-character word) is too long: a call node is an https origin of at most 200 characters"],
       ["HTTPS://Call.Example.com", "\"HTTPS://Call.Example.com\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
       ["https://call.example.com:443", "\"https://call.example.com:443\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
       // A short origin under a long path is told that origin, not the limit.
-      [`https://call.example.com/${"p".repeat(200)}`, `"https://call.example.com/${"p".repeat(200)}" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com`],
+      [`https://call.example.com/${"p".repeat(200)}`, "(a 225-character word) is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
       ["https://call.example.com/sfu", "\"https://call.example.com/sfu\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
       ["https://call.example.com/", "\"https://call.example.com/\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
       ["https://Call.Example.com:443", "\"https://Call.Example.com:443\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
-      ["https://call.example.com?x=1", "\"https://call.example.com?x=1\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      // A query or a user:password@ (a node's token or credentials) is not said back (agents#8585).
+      ["https://call.example.com?x=1", "\"https://call.example.com\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
+      ["https://alice:hunter2@call.example.com", "\"https://call.example.com\" is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call Thursday --sfu https://call.example.com"],
     ] as const) await expect(callApi(ctx, "group.call", { group: "Thursday", sfu }), sfu).rejects.toMatchObject({ code: "bad_request", message });
     expect(setGroupCall).not.toHaveBeenCalled();
     // A port that is not the default one is part of the origin.

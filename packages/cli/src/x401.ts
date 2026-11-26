@@ -1,5 +1,5 @@
 import { bool, node, str, type Method } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 
 /**
  * x401 credentials (WISP 3xx): the holder keys and issued credentials a bot keeps to show a website who stands behind
@@ -32,7 +32,7 @@ export const X401_METHODS: Record<string, Method> = {
 
   async "x401.credential.remove"(ctx, params) {
     const id = str(params, "id", true);
-    if (!(await node(ctx).removeX401Credential({ id }))) throw new CliError("not_found", `No x401 credential ${JSON.stringify(id)} (ghostly x401 credential list)`);
+    if (!(await node(ctx).removeX401Credential({ id }))) throw new CliError("not_found", `No x401 credential ${shownValue(id)} (ghostly x401 credential list)`);
     return { removed: id };
   },
 };
