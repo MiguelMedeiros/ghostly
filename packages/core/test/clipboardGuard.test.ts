@@ -106,7 +106,7 @@ describe("the clipboard guard's rule", () => {
  * back at 0), and the tasks the guard queues to close a tap's window run only when the test ends the task. Time
  * passes only when the test says so (`spin`); an event's own `timeStamp` is the time it was dispatched unless given.
  */
-function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boolean } = { channel: true }) {
+function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boolean } = { channel: true }, guarded = true) {
   const tasks: (() => void)[] = [];
   const urgent: (() => void)[] = [];
   const frames: (() => void)[] = [];
@@ -130,9 +130,13 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
     sweeps.length = 0;
     parsing = true;
   };
+  // As a browser's, a method of one window works on another window's document too, with that document's window:
+  // `opened`, `parsed` and `own` are each document's own here, so another window's method reaches them.
   class Doc {
     execCommand(command: string) { return command !== ""; }
-    open() { openSteps(this); return this; }
+    open() { this.opened(); return this; }
+    opened() { openSteps(this); }
+    own() { return this === w.document ? w : null; }
     close() { parsing = false; }
     // A write with no insertion point (the page has loaded) runs those same open steps itself, not `open()`.
     write(html: string) { this.parsed("write", html); }
@@ -179,9 +183,9 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   if (closers.postTask) w.scheduler = { postTask(task: () => void, options: { priority?: string }) { if (options.priority === "user-blocking") urgent.push(task); return Promise.resolve(); } };
   if (closers.frame) w.requestAnimationFrame = (frame: () => void) => { frames.push(frame); return frames.length; };
   // A document of the window's own realm that is not its page (`createHTMLDocument`) has no window.
-  Object.defineProperty(Doc.prototype, "defaultView", { get(this: unknown) { return this === w.document ? w : null; } });
+  Object.defineProperty(Doc.prototype, "defaultView", { get(this: Doc) { return this.own(); } });
   w.document = new Doc();
-  new Function("window", CLIPBOARD_GUARD_SCRIPT)(w);
+  if (guarded) new Function("window", CLIPBOARD_GUARD_SCRIPT)(w);
   const doc = w.document as Doc;
   const copy = () => doc.execCommand("copy");
   /** Dispatches one event; `copied` holds what a copy in the page's own listener (or in its default action) got. */
@@ -199,6 +203,9 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
   const run = (queue: (() => void)[]) => { for (const task of queue.splice(0)) task(); };
   return {
     copy, dispatch, listeners,
+    /** The window's document and its `Document` (what another window reads as `frame.contentWindow.Document`). */
+    document: doc,
+    Document: Doc,
     /** The page rewrites itself: `document.open()` as it calls it (the guard's, if it wrapped it), on `on`. */
     rewrite: (on: object = doc, clearing = true) => { clears = clearing; (Doc.prototype.open as (this: object) => unknown).call(on); clears = true; },
     sweeps,
@@ -466,6 +473,38 @@ describe("the clipboard guard's taps and what a tap sets off", () => {
     expect(got).toBe(true);
     expect(page.asked()).toBe(asked);
     expect(page.listeners.size).toBe(15);
+  });
+
+  it("listens again in a frame's own window when the page opens or writes that frame's document with its own method", () => {
+    // `Document.prototype.write.call(frame.contentDocument, …)` in the page runs the frame's open steps: the page's guard
+    // hands the call to the frame's own method, so the frame's guard listens there again; the page's window is left as is.
+    for (const call of ["open", "write", "writeln"] as const) {
+      const page = tapWindow();
+      const frame = tapWindow();
+      const asked = page.asked();
+      const sweep = frame.sweeps[0];
+      if (call === "open") page.rewrite(frame.document);
+      else page.write(call, frame.document);
+      expect(frame.listeners.size, call).toBe(15);
+      expect(frame.sweeps, call).toEqual([sweep]);
+      if (call !== "open") expect(frame.written, call).toEqual([["write", ""], [call, "<p>new</p>"]]);
+      let got: boolean | undefined;
+      frame.dispatch("click", true, () => { got = frame.copy(); });
+      expect(got, call).toBe(true);
+      expect(page.asked(), call).toBe(asked);
+      expect(page.written, call).toEqual([]);
+    }
+    // A frame whose own method the page made the page's: the call never reaches the browser.
+    const page = tapWindow();
+    const frame = tapWindow();
+    frame.Document.prototype.write = page.Document.prototype.write;
+    expect(() => page.write("write", frame.document)).toThrow(RangeError);
+    expect(frame.written).toEqual([]);
+    expect(frame.listeners.size).toBe(15);
+    // A frame with no guard in it: the browser's own method, as before.
+    const bare = tapWindow(undefined, false);
+    page.write("write", bare.document);
+    expect(bare.written).toEqual([["write", "<p>new</p>"]]);
   });
 });
 
