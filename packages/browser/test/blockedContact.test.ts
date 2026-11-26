@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, type GhostLinkOptions } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
-import { STORES, transact } from "../src/shared/idb";
+import { STORES, fileStore, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
 // covers: chat.paired.block
 
@@ -77,7 +77,7 @@ function row(stored: Partial<StoredLink> = {}): StoredLink {
 }
 async function started(...rows: StoredLink[]) {
   for (const r of rows) await db.putLink(r);
-  const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+  const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn(), onAppFrame: vi.fn() };
   const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture });
   nodes.push(node);
   await node.start();
@@ -144,12 +144,58 @@ describe("a blocked contact", () => {
     await peer.onPaymentRequest({ id: "p2" } as never);
     await peer.onPaymentAsk({ id: "p3" } as never);
     expect([pay, request, ask].map((spy) => spy.mock.calls.length)).toEqual([0, 0, 0]);
-    // A file offer is declined as a deleted one is (`FileDesk.weigh`), and one under way is not kept.
+    // One under way when the block came is not kept (`FileDesk`'s `deleted`).
     expect(node["fileDesk"]["deps"].deleted(chat.id, "peer_f1")).toBe(true);
-    Object.assign(linkOf(chat.id), { peerTyping: true, peerTypingActivity: null, peerStatus: { status: { text: "busy" } } });
+    Object.assign(linkOf(chat.id), { peerTyping: true, peerTypingActivity: null, peerStatus: { presence: "away", status: { text: "busy" } } });
     peer.onPeerTyping(true);
     expect(viewOf(node, chat.id)).not.toHaveProperty("peerTyping");
     expect(viewOf(node, chat.id)).not.toHaveProperty("peerStatus");
+    expect(viewOf(node, chat.id)).not.toHaveProperty("peerPresence");
+  });
+
+  it("writes none of its files, by any way they come, and answers none of its offers", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const peer = linkOf(chat.id).options.events;
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    // files/3: the offer reaches no file desk, so it is neither taken nor declined (a decline would tell the contact).
+    const desk = vi.spyOn(node["fileDesk"], "handle");
+    await peer.onFilesFrame({ t: "pf-offer", id: "wBlockedFile1", name: "a.pdf", mime: "application/pdf", size: 2048, ts: Date.now() });
+    expect(desk).not.toHaveBeenCalled();
+    // files/2: refused before anything is stored.
+    expect(peer.onFileIncoming({ id: "f2", name: "b.txt", size: 4, mime: "text/plain", timestamp: Date.now() })).toBe("refused");
+    // Said on the DHT floor: no bubble, no record.
+    await peer.onFileAnnounced!({ wireId: "f3", name: "c.txt", size: 4, mime: "text/plain", timestamp: Date.now() } as never, {} as never);
+    // From the hold: taken as a deleted file is, and nothing written.
+    const host = node["hold"]["host"] as { receiveFile(linkId: string, wire: object, bytes: Uint8Array, digest: string): Promise<string | null> };
+    expect(await host.receiveFile(chat.id, { wireId: "f4", name: "d.txt", size: 4, mime: "text/plain", timestamp: 5 }, new TextEncoder().encode("held"), "d")).toBeNull();
+    expect(await fileStore.listForLink(chat.id)).toEqual([]);
+    expect(await db.getMessages(chat.id)).toEqual([]);
+  });
+
+  it("keeps the name and picture it had, and takes no group invitation, proof or app frame from it", async () => {
+    const chat = row({ peerNick: "Bob" });
+    const { node, events, linkOf } = await started(chat);
+    const peer = linkOf(chat.id).options.events;
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    peer.onPeerNick("Renamed");
+    peer.onPeerAvatar("data:image/jpeg;base64,AAAA");
+    expect(viewOf(node, chat.id)).toMatchObject({ peerNick: "Bob" });
+    expect(viewOf(node, chat.id).peerAvatar).toBeUndefined();
+    const contactFrame = vi.spyOn(node["groups"], "handleContactFrame").mockResolvedValue();
+    await peer.onGroupFrame({ t: "group-invite", g: "g".repeat(22), admin: createIdentity().pubKeyZ32, name: "Trap" });
+    expect(contactFrame).not.toHaveBeenCalled();
+    // The signaling of a group both are in still goes through.
+    await peer.onGroupFrame({ t: "group-signal", g: "g".repeat(22) });
+    expect(contactFrame).toHaveBeenCalledTimes(1);
+    const proofs = vi.spyOn(node["identities"], "frame");
+    await peer.onIdentityProof({ t: "id-proof" } as never);
+    expect(proofs).not.toHaveBeenCalled();
+    const asked = vi.spyOn(node as never, "appRangeAsked" as never);
+    peer.onAppFrame?.({ t: "app" } as never);
+    await peer.onAppRangeTask?.({} as never);
+    expect(events.onAppFrame).not.toHaveBeenCalled();
+    expect(asked).not.toHaveBeenCalled();
   });
 
   it("is told not to wake this app; unblocked, it is heard again", async () => {
