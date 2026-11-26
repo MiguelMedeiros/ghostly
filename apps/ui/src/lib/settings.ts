@@ -1,7 +1,7 @@
 import { getStorageProfile } from "./storage";
 import { markFirstStart } from "./nameStep";
 import { cleanOwnName } from "./ownName";
-import { sizeIn } from "./sizeText";
+import { sizeIn, unitFor } from "./sizeText";
 import { textSizeOf, type TextSize } from "./textSize";
 import type { Translate } from "../locales/translate";
 
@@ -183,8 +183,9 @@ export function getStorageUsage(): { used: number; keys: number } {
 /** A size in the app's language, up to two decimals: "144 KB", "1.46 MB"; "1,46 Mo" in French (`t`). */
 export function formatBytes(bytes: number, t?: Translate): string {
   const units = ["b", "kb", "mb", "gb"] as const;
-  const i = bytes > 0 ? Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024))) : 0;
-  return sizeIn(bytes / Math.pow(1024, i), units[i], t, 2);
+  // Picked on the shown value (two decimals), never below bytes: 0.5 is "0.5 B".
+  const { value, unit } = unitFor(bytes, [2, 2, 2, 2]);
+  return sizeIn(value, units[unit], t, 2);
 }
 
 export { APP_WEBSITE, RELEASES_URL } from "./appWebsite";

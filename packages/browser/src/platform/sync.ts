@@ -20,6 +20,8 @@ import {
   onUnsavedChange,
   peerDisplayName,
   sessionIdForPeer,
+  sessionIdsByPeer,
+  chatKeyChanges,
   sessionLinkParams,
   setSessionPeerNick,
   storedSession,
@@ -57,13 +59,15 @@ export function notifySessionsChanged(): void {
 }
 
 /**
- * Histories made whole again after a reload (the engine posts every chat's at attach) store nothing new: the chat list
- * has nothing to show, but an open chat has older messages to read. One `session-updated` for all of them, not one each.
+ * A chat's whole list mirrored (the engine posts every chat's at attach, one at a time; a history asked for): one
+ * `session-updated` for all of them, not one each. Each runs a reconcile (a walk of every stored key) and every reader:
+ * one per chat with a new row was about 17 s at 2,000 chats. Histories made whole again after a reload store nothing new:
+ * the chat list has nothing to show, but an open chat has older messages to read. What the change tick tells is told at once.
  */
-let wholeAgain: ReturnType<typeof setTimeout> | undefined;
-function notifyWholeAgain(): void {
-  wholeAgain ??= setTimeout(() => {
-    wholeAgain = undefined;
+let soon: ReturnType<typeof setTimeout> | undefined;
+function notifySoon(): void {
+  soon ??= setTimeout(() => {
+    soon = undefined;
     notifySessionsChanged();
   }, 50);
 }
@@ -85,6 +89,32 @@ function forget(sessionId: string): void {
 export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
   const id = sessionIdForPeer(peerPubKeyZ32);
   return (id && loadShownSession(id)) || undefined;
+}
+
+/**
+ * The chats' keys by contact, read once (`sessionIdsByPeer`) and kept while no chat is stored under a new key or removed:
+ * by this page (`chatKeyChanges`), by another (its `storage` event, or a count of keys that moved), in this profile.
+ */
+let chatsByPeer: { prefix: string; changes: number; keys: number; sessionOf: (peerPubKeyZ32: string) => string | undefined } | undefined;
+
+/**
+ * `sessionForPeer`, for the mirror. An attach (the web app's start, the extension's pages once its peer started again)
+ * brings every chat's newest page one after the other, and each looked for its chat through every stored key: the
+ * chats times the keys (8M key reads at 2,000 chats). Which of a contact's chats is still chosen as the list shows them when
+ * asked; a contact whose chat is not among those read, or whose chat cannot be read, is looked for the one way, and a
+ * chat found then has them read again.
+ */
+function mirroredSession(peerPubKeyZ32: string): ChatSession | undefined {
+  const prefix = getPrefix(), changes = chatKeyChanges(), keys = localStorage.length;
+  if (chatsByPeer?.prefix !== prefix || chatsByPeer.changes !== changes || chatsByPeer.keys !== keys) {
+    chatsByPeer = { prefix, changes, keys, sessionOf: sessionIdsByPeer() };
+  }
+  const id = chatsByPeer.sessionOf(peerPubKeyZ32);
+  const shown = id && loadShownSession(id);
+  if (shown) return shown;
+  const found = sessionForPeer(peerPubKeyZ32);
+  if (found) chatsByPeer = undefined;
+  return found;
 }
 
 /** A row of the engine's as the pages hold it. The rows it draws as the app's own lines are `isSystemLine`'s (shared/systemLines.ts). */
@@ -186,7 +216,7 @@ function mirrorNew(linkId: string, messages: StoredMessage[], changes?: ListChan
 
 function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: ListChanges): void {
   const link = engine.state?.links.find((l) => l.id === linkId);
-  let shown = link && sessionForPeer(link.peerPubKeyZ32);
+  let shown = link && mirroredSession(link.peerPubKeyZ32);
   if (!link || !shown) return;
   // A row the engine says it deleted (its author deleted it for everyone, WISP 400 § Delete for everyone) goes from the
   // chat as a delete here does: the row, its id kept so it is not taken again, its place in the read count. Only what
@@ -203,7 +233,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
     shown = deleteMessages(shown.id, gone, shown) ?? shown;
     forget(shown.id);
     if (kept) mirrored.set(linkId, { ...mirrored.get(linkId)!, stored: storedSession(shown.id) });
-    notifySessionsChanged();
+    if (changes) notifySessionsChanged(); else notifySoon();
     // Nothing unread left: the chat's notification goes, as reading the chat takes it (the Android and Linux apps keep one).
     if (!getUnreadCount(shown)) clearChatNotification(shown.id);
   }
@@ -328,7 +358,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   if (dirty || added.length || changed) forget(session.id);
   const after = storedSession(session.id);
   mirrored.set(linkId, { messages, sessionId: session.id, stored: after });
-  if (changed && partial && whole && after === before) notifyWholeAgain();
+  if (changed && (!changes || (partial && whole && after === before))) notifySoon();
   else if (changed) notifySessionsChanged();
 }
 
@@ -669,7 +699,11 @@ export function startSessionSync(): void {
   // mirrored first is already stored, so this page's mirror adds nothing and would never tell its chat to read again.
   // A chat cleared (`key` null: storage cleared) counts too.
   window.addEventListener("storage", (event: StorageEvent) => {
-    if (event.key === null || isSessionKey(event.key)) notifySessionsChanged();
+    if (event.key === null || isSessionKey(event.key)) {
+      // A chat stored there under a new key, or removed: the chats' keys the mirror read are read again.
+      if (event.key === null || event.oldValue === null || event.newValue === null) chatsByPeer = undefined;
+      notifySessionsChanged();
+    }
   });
   setInterval(() => void reconcile(), 5_000);
 }

@@ -101,6 +101,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "privacy", label: "settings.publicProfiles", words: "settings.searchWords.publicProfiles" },
   { section: "privacy", label: "settings.lockScreen", words: "settings.searchWords.lock" },
   { section: "privacy", label: "settings.password", opens: "passwordForm" },
+  { section: "privacy", label: "settings.blocked.title", words: "settings.searchWords.blocked" },
   { section: "network", label: "network.relays", words: "settings.searchWords.relays" },
   { section: "network", label: "network.iroh" },
   { section: "network", label: "network.hyperdht" },

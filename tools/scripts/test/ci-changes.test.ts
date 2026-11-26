@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { type Dirent, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -198,6 +198,60 @@ describe("the Rust gate", () => {
   it("a draft runs it for what the crates read, but not for a change to the workflow alone", () => {
     expect(plan(["packages/core/src/miniApp.ts"], { draft: true }).rust).toBe(true);
     expect(plan([".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"], { draft: true }).rust).toBe(false);
+  });
+});
+
+describe("the local actions and workflows the gated jobs use", () => {
+  // A job also reads every local action and reusable workflow it names by `uses: ./…`, and the ones those name in turn:
+  // a change to one must turn on every gate the job's `if:` names, or it merges untested there (the Website jobs
+  // install with .github/actions/node-npm).
+  const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+  const localUses = (text: string) => [...text.matchAll(/^[ \t]*(?:- )?uses:[ \t]*["']?\.\/([^\s"'#]+?)\/?["']?[ \t]*(?:#.*)?$/gm)].map((m) => m[1]);
+  const filesIn = (dir: string): string[] =>
+    readdirSync(join(root, dir), { withFileTypes: true }).flatMap((e: Dirent) => (e.isDirectory() ? filesIn(`${dir}/${e.name}`) : [`${dir}/${e.name}`]));
+  /** What a `uses: ./<path>` reads: a workflow's file, or an action's whole folder, and what those use in turn. */
+  const reads = (path: string, seen = new Set<string>()): string[] => {
+    if (seen.has(path)) return [];
+    seen.add(path);
+    const own = /\.ya?ml$/.test(path) ? [path] : filesIn(path);
+    const definition = own.find((f) => f === path || /\/action\.ya?ml$/.test(f));
+    if (!definition) throw new Error(`./${path} is neither a workflow nor a folder with an action.yml`);
+    return [...own, ...localUses(readFileSync(join(root, definition), "utf8")).flatMap((p) => reads(p, seen))];
+  };
+  const jobs = [...ci.slice(ci.search(/^jobs:\n/m)).matchAll(/^ {2}([\w-]+):\n([\s\S]*?)(?=^ {2}[\w-]+:\n|^\S|(?![\s\S]))/gm)].map((m) => {
+    const condition = m[2].match(/^ {4}if:(.*)$/m)?.[1] ?? "";
+    const gates = [...condition.matchAll(/needs\.changes\.outputs\.(\w+)/g)].map((g) => g[1]);
+    return { id: m[1], gates, uses: localUses(m[2]).map((use) => ({ use, files: reads(use) })) };
+  });
+  // A job on `affected` runs only in a draft; every other gate is read as a ready pull request's.
+  const tier = (gate: string) => ({ draft: gate === "affected" });
+
+  it("reads each job's gates and the local actions and workflows it uses, in steps and as the job", () => {
+    const pairs = jobs.flatMap((j) => j.gates.flatMap((gate) => j.uses.map((u) => `${j.id} ${gate} ./${u.use}`)));
+    expect(pairs).toEqual(
+      expect.arrayContaining([
+        "website website ./.github/actions/node-npm",
+        "website-e2e website_e2e ./.github/actions/node-npm",
+        "packages-tests packages ./.github/actions/node-npm",
+        "desktop-macos app ./.github/workflows/desktop-macos.yml",
+      ]),
+    );
+    // The reusable workflow's own setup action counts too.
+    expect(jobs.find((j) => j.id === "desktop-macos")?.uses[0].files).toEqual([".github/workflows/desktop-macos.yml", ".github/actions/node-npm/action.yml"]);
+    const planned = Object.keys(plan([], { draft: false }));
+    for (const j of jobs) for (const gate of j.gates) expect(planned, `${j.id}'s gate ${gate}`).toContain(gate);
+  });
+
+  it("every gate a job runs on covers every file of the local actions and workflows it uses", () => {
+    const gaps = jobs.flatMap((j) =>
+      j.gates.flatMap((gate) => j.uses.flatMap(({ use, files }) => files.filter((file) => !(plan([file], tier(gate)) as Record<string, unknown>)[gate]).map((file) => `${j.id} (${gate}) uses ./${use}: ${file}`))),
+    );
+    expect(gaps).toEqual([]);
+  });
+
+  it("a change to the Node setup action alone runs the Website jobs", () => {
+    expect(plan([".github/actions/node-npm/action.yml"], { draft: false })).toMatchObject({ website: true, website_e2e: true, app: true, packages: true, full: true });
+    expect(plan([".github/actions/node-npm/action.yml"], { draft: true })).toMatchObject({ website: true, website_e2e: false });
   });
 });
 

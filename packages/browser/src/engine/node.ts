@@ -1215,9 +1215,10 @@ export class GhostlyNode implements EngineImplementation {
     },
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
-    // A file's progress, 4 states a second: its chat's view built again (what room its contact said it has), not every chat's.
-    progressed: (linkId) => { if (this.links.has(linkId)) this.chatChanged(linkId, 250); else this.emitState(250); },
-    flush: () => this.flushState(),
+    // A file's progress, 4 states a second, or a contact's new file: its chat's view built again (what room its contact
+    // said it has), not every chat's.
+    changedIn: (linkId, delayMs) => { if (this.links.has(linkId)) this.chatChanged(linkId, delayMs); else this.emitState(delayMs); },
+    flush: (linkId) => this.flushState(linkId),
     settled: (linkId, fileId, record, seen) => {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
       void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state, !seen);
@@ -1535,7 +1536,8 @@ export class GhostlyNode implements EngineImplementation {
         details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: wire.size, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }), completedAt: Date.now() } });
       return null;
     },
-    receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
+    // A blocked contact's: no record either, as live (`onPaymentRequest`).
+    receivePaymentRequest: async (linkId, request) => { if (!this.blockedChat(this.links.get(linkId)?.stored)) await this.desk.onPaymentRequest(linkId, request, true); },
     taken: (linkId, id) => db.hasMessage(linkId, `peer_${id}`),
     changed: () => this.emitState(),
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
@@ -1600,6 +1602,10 @@ export class GhostlyNode implements EngineImplementation {
     listable: () => {
       const now = Date.now() / 1000;
       return new Map(this.identities.views().filter(v => v.publicUri && v.expiresAt > now).map(v => [v.id, v.publicUri!]));
+    },
+    expiresAt: id => {
+      const view = this.identities.views().find(v => v.id === id);
+      return view && view.expiresAt * 1000;
     },
     proofIds: () => this.identities.views().map(v => v.id),
     publish: (pubKeyZ32, payload) => {
@@ -5821,7 +5827,7 @@ export class GhostlyNode implements EngineImplementation {
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     // The app has its transfer before its message: a file shown with no transfer and no bytes reads as gone, and one
     // that arrived within the state's usual wait said "No longer available" until it was all here.
-    this.flushState();
+    this.flushState(linkId);
     // files/2 names a file's message by the sender's time, as the sender's reactions, edits and deletes do. Another
     // file (or a message) already at that time keeps its place, and this one gets an id of its own: its bytes never
     // land without a message. The same file sent again after its transfer failed lands in the message it had.
@@ -11119,9 +11125,11 @@ export class GhostlyNode implements EngineImplementation {
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted. So does one deleted
     // while it is being stored: a removal that came meanwhile (live, while this came from the hold or the DHT) found
     // no row to take and was confirmed, so it never comes again. A member's message its author deleted for everyone,
-    // coming again with a catch-up or handed on, or deleted while it is being stored: it stays gone.
-    const group = chat.startsWith("group:") ? chat.slice("group:".length) : undefined;
-    const kept = () => this.removedChats.get(chat) === deletes && !live?.stored.deletedIds?.includes(id) && !(group && this.groups.isRemoved(group, id));
+    // coming again with a catch-up or handed on, or deleted while it is being stored: it stays gone. So is a contact's
+    // that is blocked while it is being stored.
+    const group = chat.startsWith("group:") ? chat.slice("group:".length) : undefined, theirs = message.sender === "peer";
+    const kept = () => this.removedChats.get(chat) === deletes && !live?.stored.deletedIds?.includes(id) && !(group && this.groups.isRemoved(group, id))
+      && !(theirs && this.blockedChat(live?.stored));
     if (!kept()) return false;
     // Whether it may be the chat's joined line, decided before anything is awaited: rows are taken in the order they come.
     const first = live ? this.firstContactRow(live, message) : false;
@@ -11272,7 +11280,8 @@ export class GhostlyNode implements EngineImplementation {
       dataLink: live.dataLink,
       peerOnline: presence.online,
       peerLastSeenAt: presenceSeenAt(presence),
-      peerServices: presence.services,
+      // A blocked contact's services are not offered (nor what its presence says of them later).
+      peerServices: this.blockedChat(stored) ? null : presence.services,
       lastMessageAt: live.lastMessageAt,
       peerAck: live.peerAck,
       lastSyncAt: live.lastSyncAt,
@@ -11348,11 +11357,16 @@ export class GhostlyNode implements EngineImplementation {
     }, delayMs);
   }
 
-  /** The state now, not after `emitState`'s wait: for what the app must have before what follows it. */
-  private flushState(): void {
+  /**
+   * The state now, not after `emitState`'s wait: for what the app must have before what follows it. It builds the views
+   * the state waiting would have, and `linkId`'s: each file a contact offers sends one, and building every chat's and
+   * group's view for it (`getState`) cost 45 ms at 2,000 chats, and each extension tab a whole copy of every view.
+   */
+  private flushState(linkId: string): void {
     if (this.stateTimer) { clearTimeout(this.stateTimer); this.stateTimer = null; }
     if (this.gatedOut) return;
-    this.events.onState(this.getState());
+    this.changedChats?.add(linkId);
+    this.events.onState(this.pushedState());
     this.dropBriefViews();
   }
 

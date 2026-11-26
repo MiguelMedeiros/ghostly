@@ -31,6 +31,8 @@ export interface ProfileDidHost {
   emit(): void;
   /** The profile's identities a DID document can list now (verified, unexpired, with a URI): id → URI. */
   listable(): Map<string, string>;
+  /** When a listable identity stops being listable (ms), so its expiry republishes the document. */
+  expiresAt?(id: string): number | undefined;
   /** Every identity proof id of the profile, listable or not. */
   proofIds(): string[];
   /** Puts a signed packet on Pkarr as is (the relays and, on Desktop, the DHT). */
@@ -47,6 +49,8 @@ const FIRST_PUBLISH_MS = 15_000;
 const CHANGE_DELAY_MS = 2_000;
 /** A failed publish is tried again this much later (not before the hourly one otherwise). */
 const RETRY_MS = 5 * 60_000;
+/** setTimeout's longest wait. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 /** Relay payload header: signature and sequence number, before the DNS packet. */
 const HEADER = 72;
 
@@ -55,6 +59,8 @@ export class ProfileDid {
   private seed: Uint8Array | null = null;
   private error: string | undefined;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** When `timer` fires. */
+  private timerAt = 0;
   private running = false;
   private inFlight: Promise<void> | null = null;
   private again = false;
@@ -72,6 +78,8 @@ export class ProfileDid {
    * a switch and a publish landing, a switch and a removed proof dropped) lost the first one's change.
    */
   private saving: Promise<void> = Promise.resolve();
+  /** At the first listed identity's expiry, `changed`: nothing else says it expired. */
+  private expiry: { at: number; timer: ReturnType<typeof setTimeout> } | null = null;
 
   constructor(private host: ProfileDidHost) {}
 
@@ -94,6 +102,7 @@ export class ProfileDid {
     this.running = true;
     this.unlisten ??= whenDataKeyDropped(() => this.forgetSeed());
     this.schedule(FIRST_PUBLISH_MS);
+    this.watchExpiry();
   }
 
   /**
@@ -115,6 +124,8 @@ export class ProfileDid {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    if (this.expiry) clearTimeout(this.expiry.timer);
+    this.expiry = null;
     this.unlisten?.();
     this.unlisten = undefined;
     this.forgetSeed();
@@ -171,6 +182,7 @@ export class ProfileDid {
     this.due = true;
     this.host.emit();
     this.schedule(CHANGE_DELAY_MS);
+    this.watchExpiry();
   }
 
   /** The profile's identities changed (added, removed, expired): publish if the document did. */
@@ -183,22 +195,50 @@ export class ProfileDid {
       void this.save(stored => ({ ...stored!, listed: stored!.listed.filter(id => ids.has(id)) })).catch(() => {});
     }
     if (this.stored.published && !this.samePacket(this.stored.published.payload)) this.schedule(CHANGE_DELAY_MS);
+    this.watchExpiry();
   }
 
-  /** Publishes now (or right after the publish in flight): the hourly timer starts over. */
+  /** A listed proof that expires leaves the document then, not at the next hourly put of the old one. */
+  private watchExpiry(): void {
+    const listable = this.host.listable();
+    const ends = this.listed().filter(id => listable.has(id)).map(id => this.host.expiresAt?.(id)).filter((at): at is number => at !== undefined);
+    const at = this.running && ends.length ? Math.min(...ends) : undefined;
+    if (at === this.expiry?.at) return;
+    if (this.expiry) clearTimeout(this.expiry.timer);
+    this.expiry = null;
+    if (at === undefined) return;
+    // A timer holds about 24 days at most: a later expiry is looked at again then. One past it is no longer listable.
+    const ms = Math.min(Math.max(0, at - Date.now()) + 1, MAX_TIMEOUT_MS);
+    this.expiry = { at, timer: setTimeout(() => { this.expiry = null; this.changed(); }, ms) };
+  }
+
+  /** Publishes now (or right after the publish in flight): the hourly timer starts over, or a failed one is tried again in `RETRY_MS`. */
   async publishNow(): Promise<void> {
     if (this.inFlight) { this.again = true; return this.inFlight; }
     this.inFlight = this.publish().finally(() => { this.inFlight = null; });
     await this.inFlight;
-    if (this.again) { this.again = false; await this.publishNow(); }
+    if (this.again) { this.again = false; await this.publishNow(); return; }
+    this.scheduleNext();
+  }
+
+  /**
+   * After a publish (the timer's or the engine's at network-back): a failed one is tried again in `RETRY_MS`; else the hour
+   * starts over. A sooner timer stays: a change made while this publish was on its way is still due in its 2 s.
+   */
+  private scheduleNext(): void {
+    if (!this.running) return;
+    const published = this.stored?.published;
+    if (this.error) { if (!this.timer || this.timerAt > Date.now() + RETRY_MS) this.schedule(RETRY_MS); }
+    else if (!this.timer || (published && this.samePacket(published.payload))) this.schedule(DID_REPUBLISH_MS);
   }
 
   private schedule(ms: number): void {
     if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
+    this.timerAt = Date.now() + ms;
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.publishNow().finally(() => { if (this.running && !this.timer) this.schedule(this.error ? RETRY_MS : DID_REPUBLISH_MS); });
+      void this.publishNow().catch(() => {});
     }, ms);
   }
 
