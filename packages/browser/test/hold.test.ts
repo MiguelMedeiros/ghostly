@@ -120,6 +120,28 @@ const engines: HoldEngine[] = [];
 afterEach(async () => { for (const e of engines.splice(0)) await e.stop(); vi.useRealTimers(); });
 
 describe("store-and-forward engine", () => {
+  // The engine builds again only the chat a change names: the contact's word on each session and a read of its pointer
+  // that failed (each hold chat's, every poll, while the relays are out of reach) named none and built every chat's view.
+  it("names the chat each change it tells is about, and none for a storage change every chat's hold reads", async () => {
+    const { a, b, transport } = setup();
+    engines.push(a.engine, b.engine);
+    const toldA: (string | undefined)[] = [], toldB: (string | undefined)[] = [];
+    a.host.changed = (linkId) => { toldA.push(linkId); };
+    b.host.changed = (linkId) => { toldB.push(linkId); };
+    a.messages.set("me_n1", { text: "named", timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-named-1", messageId: "me_n1", bytes: 5, timestamp: 1000 });
+    await a.engine.peerSaid("link-a", { peerAllows: true });
+    transport.resolve = async () => { throw new Error("relays out of reach"); };
+    b.engine.start();
+    await vi.waitFor(() => expect(b.engine.view("link-b")?.error).toMatch(/Could not read the contact's pointer/));
+    expect(toldA.length).toBeGreaterThan(1);
+    expect(new Set(toldA)).toEqual(new Set(["link-a"]));
+    expect(toldB.length).toBeGreaterThan(0);
+    expect(new Set(toldB)).toEqual(new Set(["link-b"]));
+    a.engine.storageChanged();
+    expect(toldA.at(-1)).toBeUndefined();
+  });
+
   it("a held text that replies carries the reply in its sealed header, and the contact gets it beside the text", async () => {
     const { a, b, buckets } = setup();
     engines.push(a.engine, b.engine);
