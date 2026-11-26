@@ -1,5 +1,5 @@
 import { useI18n } from "../../contexts/I18nContext";
-import { categoryLabel, chatsByPeer, contactName, currentStatus, dateTime, providerLabel, receivedStatus, shortSubject, useEngineValue } from "../../lib/identities";
+import { categoryLabel, contactName, currentStatus, dateTime, providerLabel, receivedStatus, shortSubject, useEngineValue, usePeerChats } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import { Button, Row, Section } from "../wallet/ui";
@@ -20,7 +20,8 @@ export function ContactIdentitiesSection() {
   const links = useEngineValue(state => sharingLinks(state?.links));
   const nav = useAppNavigation();
   const { t } = useI18n();
-  const chats = links.length ? chatsByPeer() : new Map();
+  // Each contact's name as the chat list shows it, drawn again when they rename or get a nickname (`usePeerChats`).
+  const chats = usePeerChats(links.length > 0, links);
   const received = links.flatMap(link => {
     const chat = chats.get(link.peerPubKeyZ32);
     return link.identities!.received.map(r => ({ r, status: currentStatus(r), chat, name: contactName(chat) ?? t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) }) }));
