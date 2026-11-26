@@ -254,4 +254,10 @@ jobs:
         run: |
           if [[ ! "$WAKE_IN" =~ ^[0-9]{1,4}$ ]]; then echo "::error::not a wake time: $WAKE_IN"; exit 1; fi
           sleep "$WAKE_IN"
-          gh workflow run merge-queue.yml --repo "$GITHUB_REPOSITORY"
+          # A 5xx from GitHub on the dispatch (2026-11-25) would leave the batch to the schedule: try it a few times.
+          for attempt in 1 2 3 4; do
+            gh workflow run merge-queue.yml --repo "$GITHUB_REPOSITORY" && exit 0
+            if (( attempt < 4 )); then echo "::warning::starting the train failed (try $attempt), trying again"; sleep 30; fi
+          done
+          echo "::error::starting the train failed 4 times: the schedule starts it"
+          exit 1

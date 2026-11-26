@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MAX_WAIT, missedWakes, wakeIn } from "../merge-train.mjs";
 
@@ -138,11 +140,44 @@ describe("merge-queue.yml wakes the train when a held batch leaves", () => {
     expect(wake).toMatch(/^ {4}concurrency:\n {6}group: merge-queue-wake\n {6}cancel-in-progress: true$/m);
     // The workflow's own token may start a run with workflow_dispatch, and needs nothing else.
     expect(wake).toMatch(/^ {4}permissions:\n {6}actions: write$/m);
-    expect(wake).toMatch(/sleep "\$WAKE_IN"\n {10}gh workflow run merge-queue\.yml --repo "\$GITHUB_REPOSITORY"$/m);
+    expect(wake).toMatch(/^ {10}sleep "\$WAKE_IN"$/m);
+    expect(wake).toMatch(/^ {12}gh workflow run merge-queue\.yml --repo "\$GITHUB_REPOSITORY" && exit 0$/m);
   });
 
-  it("with time to sleep through the longest hold", () => {
+  // The wake step's own script, run with a fake `gh` that fails its first `fails` calls and a `sleep` that only logs.
+  const runWake = (fails: number) => {
+    const script = job("wake").match(/^ {8}run: \|\n((?: {10}.*\n)+)/m)![1].replace(/^ {10}/gm, "");
+    const bin = mkdtempSync(join(tmpdir(), "wake-"));
+    writeFileSync(join(bin, "sleep"), `#!/bin/sh\necho "sleep $*" >> "${bin}/log"\n`, { mode: 0o755 });
+    writeFileSync(
+      join(bin, "gh"),
+      `#!/bin/sh\necho "gh $*" >> "${bin}/log"\nn=$(grep -c '^gh ' "${bin}/log")\n[ "$n" -gt ${fails} ] && exit 0\necho "HTTP 503: No server is currently available" >&2; exit 1\n`,
+      { mode: 0o755 },
+    );
+    const { status } = spawnSync("bash", ["-e", "-c", script], { env: { PATH: `${bin}:${process.env.PATH}`, WAKE_IN: "120", GITHUB_REPOSITORY: repository }, encoding: "utf8" });
+    const log = readFileSync(join(bin, "log"), "utf8").trim().split("\n");
+    rmSync(bin, { recursive: true });
+    return { status, log };
+  };
+  const start = "gh workflow run merge-queue.yml --repo MiguelMedeiros/ghostly";
+
+  // A 503 from GitHub on the one dispatch (2026-11-25, run 45647790003) left the held batch to the schedule.
+  it("and starts it again when GitHub fails the first tries", () => {
+    const { status, log } = runWake(2);
+    expect(status).toBe(0);
+    expect(log[0]).toBe("sleep 120");
+    expect(log.filter((l) => l === start)).toHaveLength(3);
+  });
+
+  it("and gives up, red, after a few tries", () => {
+    const { status, log } = runWake(Infinity);
+    expect(status).not.toBe(0);
+    expect(log.filter((l) => l === start)).toHaveLength(4);
+  });
+
+  it("with time to sleep through the longest hold and every try", () => {
     const minutes = Number(job("wake").match(/^ {4}timeout-minutes: (\d+)$/m)?.[1]);
-    expect(minutes * 60).toBeGreaterThan(wakeIn(MAX_WAIT, 0)!);
+    const pauses = runWake(Infinity).log.slice(1).filter((l) => l.startsWith("sleep ")).reduce((s, l) => s + Number(l.slice(6)), 0);
+    expect(minutes * 60).toBeGreaterThan(wakeIn(MAX_WAIT, 0)! + pauses);
   });
 });
