@@ -566,6 +566,14 @@ export const FILE_METHODS: Record<string, Method> = {
     };
     if ("group" in where) {
       if (action === "resend") throw new CliError("bad_request", "A group's file is downloaded (file accept) or asked for again (file request)");
+      // Sent from here: its record is done (staged whole at send), and the members fetch it from whoever holds it, this
+      // device among them (WISP 503). Nothing here stops that; its message deleted for everyone does (`Groups.removed`).
+      if (fileId.startsWith(`group-${where.group}-out-`) && (action === "cancel" || action === "pause" || action === "decline")) {
+        const messageId = (await node(ctx).fileMessages(linkId).catch(() => [])).find((m) => m.file?.id === fileId)?.id;
+        const ref = typeof params.chat === "string" ? params.chat : `group:${where.group}`;
+        throw new CliError("refused", `A file sent to a group is fetched by the members from whoever holds it: it is not stopped from here (ghostly message delete ${shellWord(ref, "<group>")} ${messageId ? shellWord(messageId, "<message>") : "<message>"} takes it back from everyone)`,
+          { reason: "sent_to_group", group: where.group, ...(messageId ? { messageId } : {}) });
+      }
       await refuseAllHere();
       try { await node(ctx).fileAction({ linkId, fileId, action }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
       return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
