@@ -330,7 +330,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   // shows is not what Install would be asked to grant, so Install waits until Try again reads it.
   const [stale, setStale] = useState(false);
   // Why it waits for Try again (what the read again was for): the screen says that, not that it is ready.
-  const [staleFor, setStaleFor] = useState<"asks" | "expired">("asks");
+  const [staleFor, setStaleFor] = useState<"asks" | "store" | "expired">("asks");
   const [rechecking, setRechecking] = useState(false);
   const retryButton = useRef<HTMLButtonElement>(null), confirmButton = useRef<HTMLButtonElement>(null);
   // Busy while it reads, its line read out again when it fails again (lib/apps/tryAgain.ts). Once it reads (or fails in
@@ -344,14 +344,16 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     const active = document.activeElement;
     if (!active || active === document.body) (confirmButton.current ?? screenOf.current)?.focus({ preventScroll: true });
   }, [readAgain.tries]);
-  // Why the screen is read again: what it asks changed, or the engine no longer holds what it fetched (`expired`).
-  const rereadFor = useRef<"asks" | "expired">("asks");
+  // Why the screen is read again: what it asks changed, the store's hold it ends changed (`store`), or the engine no
+  // longer holds what it fetched (`expired`).
+  const rereadFor = useRef<"asks" | "store" | "expired">("asks");
   const recheck = async (): Promise<AppPreview | null> => {
     try {
       const again = await engine.call("appPreview", source);
       const was = preview;
       setPreview(again); setStale(false);
       if (rereadFor.current === "asks") setError({ text: t(again.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged") });
+      else if (rereadFor.current === "store") setError({ text: t("apps.errors.storeChanged") });
       // Read again as it was: nothing new to look at, Install takes it. Another version, or other words: look at it first.
       else if (was && sameScreen(was, again)) { setError(null); return again; }
       else setError({ text: t("apps.errors.expired") });
@@ -388,7 +390,10 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
     } catch (e) {
       // It asks for more than this screen listed (the app uninstalled since it opened, a version that dropped a permission
       // installed by the check): the screen shows what it asks now, and Install grants only that.
-      if (appErrorCode(e) === "permissions-changed") { rereadFor.current = "asks"; await recheck(); }
+      // Or it would end a store's hold on the app's updates this screen did not name (pinned since, in another tab): the
+      // screen says it now, and the next press takes it as said.
+      const code = appErrorCode(e);
+      if (code === "permissions-changed" || code === "store-changed") { rereadFor.current = code === "store-changed" ? "store" : "asks"; await recheck(); }
       else setError(appErrorView(e, t));
     } finally { setBusy(false); }
   };
@@ -421,7 +426,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
   // while Try again reads or fails again.
   const saidId = useId();
   const said = !preview ? !error && t("apps.install.fetching") : blocked ? why
-    : stale ? t(staleFor === "expired" ? "apps.errors.expired" : preview.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged")
+    : stale ? t(staleFor === "expired" ? "apps.errors.expired" : staleFor === "store" ? "apps.errors.storeChanged" : preview.install === "update" ? "apps.errors.permissionsChanged" : "apps.install.asksChanged")
       : t(preview.install === "update" ? "apps.install.readyUpdate" : "apps.install.ready");
   return (
     <Shell titleId={titleId} describedBy={saidId} onClose={close} testId="app-install">

@@ -11,7 +11,7 @@ import { renderApp } from "../render";
 // covers: apps.page
 
 /*
- * Install refused (`permissions-changed`, or `expired`) and the read again failing (offline, the host down) turns
+ * Install refused (`permissions-changed`, `store-changed` or `expired`) and the read again failing (offline, the host down) turns
  * Install off and shows Try again, but the screen's status, which also describes the screen, still said "Ready to
  * install.": a screen reader heard the app was ready while nothing on the screen could install it. While the screen
  * waits for Try again, the status says, once, to look at the app again: the line a read that worked shows.
@@ -23,6 +23,7 @@ const DIGEST = "ExPDNDfgZ_QT1mf4KwxD-xeFAYukL50YWZ1YuFsKkp4";
 const URL_ = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp";
 const ASKS = "What this app asks for changed. Look at it again before you install it.";
 const EXPIRED = "That took too long. Check the app again.";
+const STORE = "Where this app gets its updates from changed. Look at it again before you install it.";
 
 const preview = (patch: Partial<AppPreview> = {}): AppPreview => ({
   digest: DIGEST, ref: REF, publisher: KEY, fingerprint: "yz7m oxuc bd4u 8aqt", from: URL_, icon: null, install: "new", asks: ["chat"],
@@ -112,6 +113,19 @@ describe("an install screen waiting for Try again after its read again failed", 
     await screen.findByTestId("app-install-retry");
     expect(screen.getByTestId("app-install-said")).toHaveTextContent(EXPIRED);
     expect(screen.getByTestId("app-install")).toHaveAccessibleDescription(EXPIRED);
+  });
+
+  it("after an Install refused as ending a store's hold the screen did not name", async () => {
+    refusal = "store-changed: This install now ends a store's hold on the app's updates; look at it again";
+    read = () => preview({ install: "update" });
+    const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    const confirm = await screen.findByTestId("app-install-confirm");
+    read = unreachable;
+    await user.click(confirm);
+    await screen.findByTestId("app-install-retry");
+    expect(screen.getByTestId("app-install-confirm")).toBeDisabled();
+    expect(screen.getByTestId("app-install-said")).toHaveTextContent(STORE);
+    expect(screen.getByTestId("app-install")).toHaveAccessibleDescription(STORE);
   });
 
   it("an update says it is not ready to update either", async () => {
