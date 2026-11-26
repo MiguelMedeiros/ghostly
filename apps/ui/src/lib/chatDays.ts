@@ -25,14 +25,31 @@ export function rowDays(times: readonly number[]): number[] {
 }
 
 /**
+ * The device's time zone now, as a key that changes with it: its name and its offset from UTC now. A browser follows a
+ * change of the device's zone with the page open (a trip), and the local midnights found before are then another
+ * zone's.
+ */
+export function zoneNow(): string {
+  return `${Intl.DateTimeFormat().resolvedOptions().timeZone} ${new Date().getTimezoneOffset()}`;
+}
+
+/**
  * `rowDays` for one chat's rows as its list changes, each row's time by `timeOf`: a row's day comes from the rows above
  * it, so the days of the rows a new list has the same from its start are the ones found before, and only the rest are
- * found. A new array for each new list; it is never changed once given.
+ * found. All of them again when the zone changed (`zoneNow`), even for the same list. A new array for each new list;
+ * it is never changed once given.
  */
 export function rowDaysReader<R>(timeOf: (row: R) => number): (rows: readonly R[]) => readonly number[] {
   let list: readonly R[] = [];
   let days: readonly number[] = [];
+  let zone = zoneNow();
   return rows => {
+    const now = zoneNow();
+    if (now !== zone) {
+      zone = now;
+      list = [];
+      days = [];
+    }
     if (rows === list) return days;
     const same = sharedRows(list, rows);
     days = daysOn(days.slice(0, same), rows.length, i => timeOf(rows[i]!));

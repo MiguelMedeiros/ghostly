@@ -7,6 +7,7 @@ import { MessageBubble, sameMessageRow } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { DaySections } from "../components/chat/DaySections";
+import { useZone } from "../hooks/useZone";
 import { leftOn, leftScrolledUp, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { useOpenedHeading } from "../hooks/useOpenedHeading";
@@ -614,7 +615,10 @@ export function GroupChat() {
   const rowWindow = useRowWindow(rowIds, groupId ?? "", { opensOn: leftOn(groupId ?? ""), heads: stackHeads });
   // The day each row goes under, over the whole history (see Chat.tsx).
   const [readDays] = useState(() => rowDaysReader<StoredMessage>(m => m.timestamp));
-  const days = useMemo(() => readDays(messages), [readDays, messages]);
+  // Found again when the page comes back in another time zone: the reader drops the old zone's days itself.
+  const zone = useZone();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the zone: see above
+  const days = useMemo(() => readDays(messages), [readDays, messages, zone]);
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the members'.
   // Always every message, in the page or not; a new list when the window moves (see Chat.tsx).
   const [pickScrollRow] = useState(() => rowPicker<StoredMessage, ScrollRow>(m => m.event || m.groupPay ? undefined : { id: m.id, mine: m.sender === "me" }));

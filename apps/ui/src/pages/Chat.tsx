@@ -53,6 +53,7 @@ import { leftOn, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { DaySections } from "../components/chat/DaySections";
+import { useZone } from "../hooks/useZone";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
 import { preferredDevice } from "../lib/mediaDevices";
@@ -710,7 +711,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const rowWindow = useRowWindow(rowIds, sessionId, { opensOn: leftOn(sessionId), heads: stackHeads });
   // The day each row goes under, over the whole timeline: a day keeps one date whichever of its rows are in the page.
   const [readDays] = useState(() => rowDaysReader<TimelineRow<ChatMessage>>(row => row.kind === "message" ? row.message.timestamp : row.kind === "transport" ? row.entry.since ?? row.entry.at : row.entry.at));
-  const days = useMemo(() => readDays(timeline), [readDays, timeline]);
+  // Found again when the page comes back in another time zone: the reader drops the old zone's days itself.
+  const zone = useZone();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the zone: see above
+  const days = useMemo(() => readDays(timeline), [readDays, timeline, zone]);
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
   // A notice (joined, a call) is not a message to count. Always every message, in the page or not; a new list when the
   // window moves, so the view is put back in the same commit, before a scroll can see the rows moved.
