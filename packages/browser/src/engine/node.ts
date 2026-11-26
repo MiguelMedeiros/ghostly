@@ -9974,8 +9974,9 @@ export class GhostlyNode implements EngineImplementation {
             live.stored = { ...live.stored, inviteCode: undefined };
             void db.patchLink(linkId, { inviteCode: undefined });
           }
-          // A text over the DHT: the chat is in use, and takes a listener to go live as the chat on screen would.
-          if (message.via !== "datalink") this.chatInUse(live);
+          // A text over the DHT: the chat is in use, and takes a listener to go live as the chat on screen would. Not a
+          // blocked contact's, which is dropped: it took another chat's listener each time it wrote.
+          if (message.via !== "datalink" && !this.blockedChat(live.stored)) this.chatInUse(live);
           return this.storeMessage({
             linkId,
             id: `peer_${message.id ?? message.timestamp}`,
