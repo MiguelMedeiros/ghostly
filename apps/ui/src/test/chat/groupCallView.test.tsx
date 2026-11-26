@@ -105,6 +105,30 @@ describe("a shared screen", () => {
     expect(within(screen.getByTestId("group-call-side")).getAllByTestId("group-call-tile").map((t) => t.dataset.identity)).toEqual(["me", "ana", "bo"]);
   });
 
+  it("names your own screen \"Your screen\", on the stage, beside it and in the small window, not \"You's screen\"", async () => {
+    const mine = { screen: true, tracks: { screen: video() } };
+    const { user, rerenderWith } = view(state(0, { local: person("me", mine), participants: [person("ana")] }));
+    const screens = () => screen.getAllByTestId("group-call-tile").filter((t) => t.dataset.kind === "screen");
+    expect(screens().map((t) => t.textContent)).toEqual(["Your screen"]);
+
+    // Ana shares after you: yours moves beside hers.
+    rerenderWith(state(0, { local: person("me", mine), participants: [person("ana", mine)] }));
+    expect(screens().find((t) => t.dataset.identity === "me")).toHaveTextContent(/^Your screen$/);
+
+    rerenderWith(state(0, { local: person("me", mine), participants: [person("ana")] }));
+    await user.click(screen.getByTestId("group-call-minimize"));
+    expect(screens().map((t) => t.textContent)).toEqual(["Your screen"]);
+  });
+
+  it("names a member called \"You\" by their name: only your own screen is \"Your screen\"", () => {
+    const sharing = { screen: true, tracks: { screen: video() } };
+    const { rerenderWith } = view(state(0, { local: person("me", sharing), participants: [person("x", { name: "You" })] }));
+    rerenderWith(state(0, { local: person("me", sharing), participants: [person("x", { name: "You", ...sharing })] }));
+    const nameOn = (id: string) => screen.getAllByTestId("group-call-tile").find((t) => t.dataset.kind === "screen" && t.dataset.identity === id);
+    expect(nameOn("x")).toHaveTextContent(/^You's screen$/);
+    expect(nameOn("me")).toHaveTextContent(/^Your screen$/);
+  });
+
   it("plays a screen's sound beside its sharer's voice, and says on your own screen when it went without its sound", () => {
     const sound = new FakeTrack("audio") as unknown as MediaStreamTrack;
     const { rerenderWith } = view(state(0, {

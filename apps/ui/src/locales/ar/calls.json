@@ -58,7 +58,8 @@
     "screenOf": "شاشة {{name}}",
     "showScreen": "عرض شاشة {{name}} بحجم كبير",
     "showYourScreen": "عرض شاشتك بحجم كبير",
-    "unreachable": "تعذر الوصول إلى مكالمة المجموعة"
+    "unreachable": "تعذر الوصول إلى مكالمة المجموعة",
+    "yourScreen": "شاشتك"
   },
   "incomingAudio": "مكالمة صوتية واردة...",
   "incomingVideo": "مكالمة فيديو واردة...",

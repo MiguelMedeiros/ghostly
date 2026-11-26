@@ -58,7 +58,8 @@
     "screenOf": "Écran de {{name}}",
     "showScreen": "Afficher en grand l'écran de {{name}}",
     "showYourScreen": "Afficher en grand votre écran",
-    "unreachable": "Impossible de joindre l'appel du groupe"
+    "unreachable": "Impossible de joindre l'appel du groupe",
+    "yourScreen": "Votre écran"
   },
   "incomingAudio": "Appel audio entrant...",
   "incomingVideo": "Appel vidéo entrant...",

@@ -58,7 +58,8 @@
     "screenOf": "{{name}} 的屏幕",
     "showScreen": "放大显示 {{name}} 的屏幕",
     "showYourScreen": "放大显示你的屏幕",
-    "unreachable": "无法连接到群组通话"
+    "unreachable": "无法连接到群组通话",
+    "yourScreen": "你的屏幕"
   },
   "incomingAudio": "语音来电...",
   "incomingVideo": "视频来电...",

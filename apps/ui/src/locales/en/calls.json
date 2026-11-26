@@ -58,7 +58,8 @@
     "screenOf": "{{name}}'s screen",
     "showScreen": "Show {{name}}'s screen large",
     "showYourScreen": "Show your screen large",
-    "unreachable": "Couldn't reach the group's call"
+    "unreachable": "Couldn't reach the group's call",
+    "yourScreen": "Your screen"
   },
   "incomingAudio": "Incoming audio call...",
   "incomingVideo": "Incoming video call...",
