@@ -43,8 +43,11 @@ const DOTS =
  * dot, and none beside a written one ("paypaḷ.com"). Only other marks between two of them, so the run has one reading.
  */
 const MARK_DOTS = /(\.\p{M}*)?[̣\u{1d16d}](?:[^\P{M}̣\u{1d16d}]*[̣\u{1d16d}])*(\p{M}*\.)?/gu;
-/** A word: letters with their marks, and digits. */
-const WORD = /[\p{L}\p{M}\p{N}]+/gu;
+/**
+ * A word: letters with their marks, and digits, across the narrow spaces that read as no gap (as `SPACE_BY_DOT` has
+ * them), so a space of a pixel or two cannot set a stroke letter and its mark off as a word of their own script.
+ */
+const WORD = /[\p{L}\p{M}\p{N}\u2000-\u200a\u202f\u205f]+/gu;
 /** A script's dot below marks: a dot unless the word they sit in has a letter of that script and of no other. */
 const scriptDot = (script: string, marks: string) => ({
   marks: new RegExp(`[${marks}]`, "gu"),

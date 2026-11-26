@@ -45,6 +45,19 @@ describe("a link's text with another script's dot below on a letter", () => {
     expect(labelMisleads("1ฺ2ฺ3ฺ4", "https://evil.example/login")).toBe(true);
   });
 
+  it("reads the mark as a dot on such a letter set off by a narrow space on each side, which reads as no gap", () => {
+    const labels = [
+      "paypa\u200a\u0e45\u0e3a\u200acom",
+      "paypa\u2009\u0e45\u0e3a\u2009com",
+      "paypa\u2006\u05d5\u05b4\u2006com",
+      "paypa\u202f\u0627\u065c\u202fcom",
+      "paypa\u200a\u05df\u05c5\u200acom",
+    ];
+    for (const label of labels) {
+      expect(labelMisleads(label, "https://evil.example/login"), label).toBe(true);
+    }
+  });
+
   it("leaves the mark alone in a word of its own script", () => {
     for (const label of ["ภิกฺขุ", "שִׁיר חָדָשׁ", "שׁלֹמֹהׅ ודוד", "بٜسم الله", "ธมฺม Dhamma", "שִׁיר song", "ພຸດ຺ທະ"]) {
       expect(labelMisleads(label, "https://evil.example/login"), label).toBe(false);
