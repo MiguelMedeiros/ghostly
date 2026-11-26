@@ -198,6 +198,16 @@ describe("a blocked contact", () => {
     expect(asked).not.toHaveBeenCalled();
   });
 
+  it("cannot be called: its answer would be dropped, so its chat says why and no call rings it for nothing", async () => {
+    const chat = row(), other = row();
+    const { node } = await started(chat, other);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    expect(viewOf(node, chat.id).callsUnavailable).toBe("You blocked this contact. Unblock them to call");
+    expect(viewOf(node, other.id).callsUnavailable).toBeUndefined();
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    expect(viewOf(node, chat.id).callsUnavailable).toBeUndefined();
+  });
+
   it("is told not to wake this app; unblocked, it is heard again", async () => {
     const chat = row();
     const { node, events, linkOf } = await started(chat);
