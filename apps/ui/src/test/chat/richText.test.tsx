@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
@@ -230,6 +233,19 @@ describe("long blobs", () => {
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
     await user.click(within(blob).getByTestId("rich-blob-copy"));
     expect(writeText).toHaveBeenCalledWith(KEY);
+  });
+
+  it("are inline, so the one line break typed after one starts the next line right under it", () => {
+    bubble(`key ${KEY}\nfrom the Mac`);
+    // The message's text, pre-wrap, keeps its "\n": a block blob ended a line itself, and the "\n" drew one more, empty.
+    expect(text().textContent).toMatch(/Copy\nfrom the Mac$/);
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/rich/rich-text.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = /\.rich-blob\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toMatch(/display:\s*inline-flex;/);
+    expect(rule).toMatch(/(^|[;\s])width:\s*100%;/);
+    // On a phone Copy's 46px hit area reaches 13px under the key's line: the next line's time must stay off it.
+    const phone = /@media \(width < 768px\) \{\s*\.rich-blob\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(phone).toMatch(/margin-block-end:\s*14px;/);
   });
 });
 
