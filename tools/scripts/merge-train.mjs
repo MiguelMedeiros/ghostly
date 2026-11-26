@@ -1582,7 +1582,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const refused = (p) => p.unread || (p.ci !== "success" && p.ci !== "failure" && (p.shared?.length || p.crowded));
   if (!inFlight) {
     // One that flew past a hold (`past` below) is not this: with no hold it is back in line like the rest.
-    const lone = line().find((p) => (p.alone?.sha === p.sha || p.alone?.from === p.sha) && !p.alone.past && canGoAlone(p) && !refused(p));
+    // Not one parked for a hold or a draft (`flyAlone` would leave it be, and nothing else would fly). One parked before
+    // (its mark says `parked`) flies only once no other lone one does: another may have gone alone while it waited.
+    const lones = line().filter((p) => (p.alone?.sha === p.sha || p.alone?.from === p.sha) && !p.alone.past && !p.draft && !isHeld(p) && canGoAlone(p) && !refused(p));
+    const lone = lones.find((p) => !p.alone.parked) ?? lones[0];
     if (lone) inFlight = await flyAlone(lone);
   }
   // Held for CI Success red on the base itself, a batch or lone pull request stays in flight until the base moves, and
@@ -1659,8 +1662,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // The oldest waited `waited` by now: it leaves MAX_WAIT after that one could board, whatever the run.
   const company = holding && !inFlight ? { count: holding.count, minBatch, leavesAt: now - holding.waited + maxWait } : null;
   let place = 0;
-  /** A lone one only on hold or a draft (`flyAlone` leaves it be) whose head is still its rebase, pushed or not. */
-  const parks = (p) => (p.alone?.sha === p.sha || p.alone?.from === p.sha) && !p.alone.past && (p.draft || isHeld(p));
+  /**
+   * A lone one on hold or a draft (`flyAlone` leaves it be), or parked so before and not flown since, whose head is still
+   * its rebase, pushed or not: its mark is kept, marked `parked`, until its own flight writes a new one.
+   */
+  const parks = (p) => (p.alone?.sha === p.sha || p.alone?.from === p.sha) && !p.alone.past && (p.draft || isHeld(p) || !!p.alone.parked);
   for (const p of line()) {
     const after = behind.get(p.number);
     p.behind = after && inFlight && !inFlight.alone && after.batch === inFlight.number && !aboard.has(p.number) ? after : null;
@@ -1673,7 +1679,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
           : aboard.has(p.number)
             ? positionText(base, p, 0, inFlight.number, p.sha, null, held, null, stuck)
             : parks(p)
-              ? positionText(base, p, ++place, 0, queuedHead(p.sticky) ?? p.sha, null, held, null, stuck, false, p.alone)
+              ? positionText(base, p, ++place, 0, queuedHead(p.sticky) ?? p.sha, null, held, null, stuck, false, { ...p.alone, parked: true })
               : positionText(base, p, ++place, 0, p.sha, null, held, heldBack.has(p.number) ? company : null, stuck, cannot.has(p.number));
     if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
     if (p.unread) {

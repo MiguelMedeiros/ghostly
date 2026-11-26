@@ -2488,6 +2488,34 @@ describe("one pull request alone", () => {
       repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
       await pushedAfter(repo, first, pushes);
     });
+
+    it("lets another one go alone while it is parked, and that one keeps its mark: red, it gets its second run, then the parked one flies", async () => {
+      const repo = fakeRepo();
+      repo.add(11, { behind: true });
+      await repo.run();
+      repo.pulls.get(11)!.labels.push(HOLD);
+      repo.add(12, { behind: true });
+      expect((await repo.run()).inFlight).toBe(12);
+      const first = repo.pulls.get(12)!.sha;
+      repo.settle([12]);
+      for (let i = 0; i < 2; i++) await repo.run();
+      repo.pulls.get(11)!.labels = repo.pulls.get(11)!.labels.filter((l) => l !== HOLD);
+      expect(repo.alone(11)).not.toBeNull();
+      const r = await repo.run();
+      expect(r.inFlight).toBe(12);
+      expect(repo.pulls.get(12)!.sha).not.toBe(first);
+      expect(repo.alone(12)).toMatchObject({ sha: repo.pulls.get(12)!.sha, retried: true });
+      expect(repo.alone(11)).not.toBeNull();
+      repo.settle([12]);
+      expect((await repo.run()).failed).toEqual([12]);
+      expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+      repo.settle();
+      for (let i = 0; i < 3 && !repo.landed.includes("#11"); i++) {
+        await repo.run();
+        repo.settle();
+      }
+      expect(repo.landed).toContain("#11");
+    });
   });
 
   it("sends a lone pull request that changes a workflow and is behind dev to a coordinator, with no rebase push", async () => {
