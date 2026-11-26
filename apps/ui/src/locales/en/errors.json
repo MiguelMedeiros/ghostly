@@ -517,6 +517,8 @@
   },
   "profile": {
     "arkBackup": "Couldn't read the Ark wallet for the backup",
+    "backupRecordTooLarge": "A record of this profile is too large for a backup",
+    "backupTooDense": "This profile's data is too dense for a backup",
     "backupTooLarge": "This backup is too large to restore here.",
     "damagedBackup": "This backup is damaged",
     "damagedBackupNext": "Try another copy of the file.",

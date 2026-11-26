@@ -517,6 +517,8 @@
   },
   "profile": {
     "arkBackup": "No se pudo leer la billetera Ark para la copia de seguridad",
+    "backupRecordTooLarge": "Un registro de este perfil es demasiado grande para una copia",
+    "backupTooDense": "Los datos de este perfil son demasiado densos para una copia",
     "backupTooLarge": "Esta copia es demasiado grande para restaurarla aquí.",
     "damagedBackup": "Esta copia está dañada",
     "damagedBackupNext": "Prueba otra copia del archivo.",

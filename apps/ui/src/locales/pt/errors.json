@@ -517,6 +517,8 @@
   },
   "profile": {
     "arkBackup": "Não foi possível ler a carteira Ark para o backup",
+    "backupRecordTooLarge": "Um registro deste perfil é grande demais para um backup",
+    "backupTooDense": "Os dados deste perfil são densos demais para um backup",
     "backupTooLarge": "Este backup é grande demais para restaurar aqui.",
     "damagedBackup": "Este backup está danificado",
     "damagedBackupNext": "Tente outra cópia do arquivo.",

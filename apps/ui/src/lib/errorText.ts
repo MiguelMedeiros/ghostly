@@ -646,6 +646,8 @@ const RULES: readonly Rule[] = [
   exact("This is not a Ghostly backup", "errors.profile.notGhostlyBackup"),
   { match: /^This backup(?: is damaged: it was changed or cut short|'s database is malformed)$/, key: "errors.profile.damagedBackup", next: "errors.profile.damagedBackupNext" },
   exact("This backup is too large to restore", "errors.profile.backupTooLarge"),
+  exact("A record of this profile is too large for a backup", "errors.profile.backupRecordTooLarge"),
+  exact("This profile's data is too dense for a backup", "errors.profile.backupTooDense"),
   exact("This backup comes from a newer Ghostly; update to restore it", "errors.profile.newerBackup"),
   { match: /^Unsupported backup (?:encryption|format)$/, key: "errors.profile.unsupportedBackup" },
   exact("Use at least 12 characters for the backup passphrase", "errors.profile.shortPassphrase"),

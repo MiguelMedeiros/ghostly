@@ -63,8 +63,12 @@ async function expectRefused(bundle: Uint8Array) {
 }
 
 it("a small bundle holding one record of 255 MiB is refused without that record being unpacked whole", async () => {
-  const bundle = await bundleOf(rowsOf("settings", `"${"A".repeat(255 * MIB - 100)}"`));
-  expect(bundle.length).toBeLessThan(4 * MIB);
+  // Then a few MB that gzip does not shrink: a bundle that size may unpack to over 255 MiB in all, but no record to that.
+  const random = new Uint8Array(4 * MIB);
+  for (let at = 0; at < random.length; at += 65_536) crypto.getRandomValues(random.subarray(at, at + 65_536));
+  const bundle = await bundleOf(rowsOf("settings", `"${"A".repeat(255 * MIB - 100)}"`), JSON.stringify({ t: "later", pad: Buffer.from(random).toString("base64") }));
+  expect(bundle.length).toBeGreaterThan(3.5 * MIB);
+  expect(bundle.length).toBeLessThan(8 * MIB);
   const decode = TextDecoder.prototype.decode;
   let largest = 0;
   vi.spyOn(TextDecoder.prototype, "decode").mockImplementation(function (this: TextDecoder, input?: AllowSharedBufferSource, options?: TextDecodeOptions) {
@@ -105,6 +109,35 @@ it("a version 1 backup that unpacks to tens of MB of zeros is refused before it 
   expect(await outcome(restoreProfileBackup(bundle, "a passphrase of the attacker"))).toBe("This backup is too large to restore");
   expect(await databases()).toEqual(before);
   expect(seen.largest).toBeLessThan(MIB);
+}, 120_000);
+
+it("a record nested deeper than any a profile writes is refused as too large, not with the parse's stack error", async () => {
+  // 990 000 `[`: under the values a record may hold, but `decode`'s reviver recurses once per level.
+  const deep = "[".repeat(990_000) + "]".repeat(990_000);
+  await expectRefused(await bundleOf(rowsOf("settings", deep)));
+  const v1 = `{"format":"ghostly-profile","version":1,"profile":{"name":"Made","builtIn":false},"storage":{},"databases":{"peer":null,"ark":{}},"pad":${deep}}`;
+  const sealed = await seal(v1, "a passphrase of the attacker");
+  expect(await outcome(openProfileBackup(sealed, "a passphrase of the attacker"))).toBe("This backup is too large to restore");
+  // As deep as a contact's odd data may go still restores.
+  expect(await outcome(restoreProfileBackup(await bundleOf(`{"t":"later","pad":${"[".repeat(900)}${"]".repeat(900)}}`, `{"t":"end","files":0,"bytes":0}`)))).toBe("opened");
+}, 120_000);
+
+it("a bundle of some KB whose head and records hold a bigint of tens of millions of digits opens and restores without reading it", async () => {
+  // `BigInt()` of 16 million digits holds a tab's thread for seconds each time it is read; no stored amount or counter has a hundred.
+  const digits = { $ghostly: "bigint", value: "9".repeat(16 * MIB) };
+  const head = JSON.stringify({ ...JSON.parse(HEAD), createdAt: digits });
+  const sink = memorySink();
+  const writer = await BackupWriter.start(sink, null);
+  await writer.json(head);
+  await writer.json(JSON.stringify({ t: "later", n: digits }));
+  await writer.json(JSON.stringify({ t: "end", files: 0, bytes: 0 }));
+  await writer.finish();
+  const bundle = sink.bytes();
+  expect(bundle.length).toBeLessThan(100 * 1024);
+  const big = vi.spyOn(globalThis, "BigInt");
+  expect(await outcome(openProfileBackup(bundle))).toBe("opened");
+  expect(await outcome(restoreProfileBackup(bundle))).toBe("opened");
+  expect(big.mock.calls.map(([value]) => String(value).length).filter((length) => length > 100)).toEqual([]);
 }, 120_000);
 
 it("records each small enough alone are refused once their values add up to far more than the bundle's size", async () => {
