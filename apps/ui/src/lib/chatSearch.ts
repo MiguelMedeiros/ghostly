@@ -20,7 +20,7 @@ export interface Searchable {
   folded: string;
 }
 
-/** Lower case, accents off: "Ação" reads "acao". The engine's chat search folds the same way (`chatsFound`). */
+/** Lower case, accents off, full-width and half-width forms as usual: "Ação" reads "acao", "ＰＤＦ" "pdf". The engine's chat search folds the same way (`chatsFound`). */
 export { foldText };
 
 /** A character that may start inline formatting or a `[label](link)`: a text without one reads as it is written. */
