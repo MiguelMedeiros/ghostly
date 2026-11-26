@@ -5,6 +5,7 @@ import { chatPath } from "../../lib/url";
 import { Button, Row, Section } from "../wallet/ui";
 import { ProviderMark, StatusPill } from "./ProviderMark";
 import { sharingLinks } from "./contactLinks";
+import { useProofClock } from "./proofClock";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 
 /** What needs a look comes first: a revoked or unconfirmed proof, then the verified ones, then the rest. */
@@ -18,6 +19,8 @@ export function ContactIdentitiesSection() {
   // Only the chats a contact shared identities in, and those: the page stays open, and drew this again on every state.
   // The same list while no chat's changed (contactLinks.ts), so a state that changes none costs no walk of them all.
   const links = useEngineValue(state => sharingLinks(state?.links));
+  // A status is worked out from the clock: drawn again when a proof expires.
+  useProofClock();
   const nav = useAppNavigation();
   const { t } = useI18n();
   const chats = links.length ? chatsByPeer() : new Map();
