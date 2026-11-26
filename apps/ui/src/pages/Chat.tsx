@@ -763,7 +763,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop && !webrtc.relayOnlyCallsOff
     && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
-  const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
+  // Never placed to a contact blocked meanwhile (here, in Settings or on another device): its answer is not heard.
+  const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked && !chatLink?.blocked, placeCall);
   // Cancel takes the whole notice away, and the focus it had fell to the page: it goes back to the call button that
   // started the wait, or to ⋮ when that was a row of its menu, unless it went elsewhere meanwhile.
   const wokeFrom = useRef<Element | null>(null), wakeCancelled = useRef(false);
@@ -898,6 +899,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     // One that rings in stops with nothing sent, as if this app were closed; one that is on, or rings on their side,
     // ends as a hang-up does.
     if (blocked && webrtc.callState !== "idle") webrtc.hangUp(!ringsIn, !ringsIn);
+    // Nor is a call that waits for the contact's app to wake placed once it does.
+    if (blocked) wakeCall.cancel();
     void engine.call("setContactBlocked", { peerPubKeyZ32: blockKey, blocked }).catch(() => {});
   };
 
