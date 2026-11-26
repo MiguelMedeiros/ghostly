@@ -8,6 +8,12 @@ export const PHONE_HEADER_QUERY = "(max-width: 480px)";
  * upright, a tablet on its side with a mini-app or the identities docked beside the chat.
  */
 export const PHONE_HEADER_COLUMN = 480;
+/**
+ * With a mouse, a column of 20 rem or less: a desktop's header is sized in rem (its padding, gaps, avatar and buttons)
+ * and keeps the name no room under about 16 rem. At the default 16 px font that is 320 px, never beside the chat list;
+ * at a 24 px font it is 480 px, and a 768-880 px window left the chat a 348-460 px column with the name cut to nothing.
+ */
+export const PHONE_HEADER_COLUMN_REM = 20;
 /** The narrowest phones (320px): a group's header moves its Share link into ⋮, so the name keeps room to be told apart. */
 export const NARROW_PHONE_QUERY = "(max-width: 340px)";
 
@@ -24,26 +30,47 @@ function useMedia(media: string): boolean {
   return matches;
 }
 
+/** The px of one rem: the browser's font size, 16 unless the person chose a larger one. */
+const remPx = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+
+/** A hidden box 1 rem wide: its size follows the browser's font, changed with the window (and so the column) as it was. */
+function remProbe(): HTMLElement {
+  const probe = document.createElement("div");
+  probe.setAttribute("aria-hidden", "true");
+  probe.style.cssText = "position:fixed;top:0;left:0;width:1rem;height:0;visibility:hidden;pointer-events:none";
+  document.body.append(probe);
+  return probe;
+}
+
 /**
  * The phone's header, by the window or by the header's `column`. By the window alone, a phone on its side (844x390 with
  * an iPhone's safe areas) left the chat a 330 px column beside the list with every button in its header, and the name
  * cut to "Con…"; upright at 390 px it showed whole. The column, not the chat's pane: a docked mini-app or identities
  * narrow the column inside the pane (an iPad on its side: a 604 px pane, a 244 px column). A column not laid out (0: a
- * chat kept loaded off screen, or under a full-width app) keeps its last. By the column only on a touch screen: a
- * Desktop window at its default 900x700 leaves the chat a 479 px column too, and keeps the desktop's header there, its
- * video call in the row.
+ * chat kept loaded off screen, or under a full-width app) keeps its last. In px on a touch screen; with a mouse in rem
+ * (`PHONE_HEADER_COLUMN_REM`): a Desktop window at its default 900x700 leaves the chat a 479 px column too, and keeps
+ * the desktop's header there, its video call in the row.
  */
 export function usePhoneHeader(column?: HTMLElement | null): boolean {
   const phone = useMedia(PHONE_HEADER_QUERY);
   const [narrowColumn, setNarrowColumn] = useState(false);
   useLayoutEffect(() => {
-    if (!column || !touchOnly()) return;
-    const measure = () => { if (column.clientWidth > 0) setNarrowColumn(column.clientWidth <= PHONE_HEADER_COLUMN); };
+    if (!column) return;
+    const touch = touchOnly();
+    const measure = () => {
+      if (column.clientWidth > 0) setNarrowColumn(column.clientWidth <= (touch ? PHONE_HEADER_COLUMN : PHONE_HEADER_COLUMN_REM * remPx()));
+    };
     measure();
     if (typeof ResizeObserver !== "function") return;
     const observer = new ResizeObserver(measure);
     observer.observe(column);
-    return () => observer.disconnect();
+    // With a mouse the cut is in rem, and the list beside the column in px: a larger font leaves the column as wide.
+    const rem = touch ? null : remProbe();
+    if (rem) observer.observe(rem);
+    return () => {
+      observer.disconnect();
+      rem?.remove();
+    };
   }, [column]);
   return phone || narrowColumn;
 }

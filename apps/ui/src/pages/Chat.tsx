@@ -999,9 +999,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {/* Chat Header. On a phone held upright (`phoneHeader`) it is the back button, the avatar, the name with the room
           it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
           and the contact's identities are in the ⋮ menu; so in a column as narrow on a touch screen (most phones on their
-          side, a tablet upright, a tablet on its side with a mini-app docked). Wider (a Pro Max on its side), or with a
-          mouse (a Desktop window at its default 900x700, a 479 px column), every button is
-          in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
+          side, a tablet upright, a tablet on its side with a mini-app docked), and with a mouse in a column of 20 rem or
+          less (a 768-880 px window at a 24 px browser font). Wider (a Pro Max on its side), or with a mouse in a wider
+          column (a Desktop window at its default 900x700, a 479 px column at 16 px), every button is in the row, a
+          little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
           the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons; its tap still lands on
           44 × 44 px (`.tap-target`). Its buttons and the avatar are sized in px, as the name is: in rem they grew with the
           browser's text size and left the name 33px at 150%. */}
