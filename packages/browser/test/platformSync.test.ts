@@ -251,7 +251,13 @@ describe("mirroring what the peer stores into the chat", () => {
     await start([link({ createdAt: 1, ...linkOver })]);
     changes = 0;
     engine.messageListeners[0]("link-1", messages);
+    await told();
     return storage.loadSession("s1")!;
+  }
+  /** How often the page was told: a whole list's mirror tells it once for a burst of them, 50 ms on. */
+  async function told() {
+    await vi.advanceTimersByTimeAsync(50);
+    return changes;
   }
 
   it("adds what the contact sent and the payments the peer made, not my own undelivered drafts", async () => {
@@ -287,7 +293,7 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(sent.delivery).toBeUndefined();
     expect(sent.deliveryError).toBeUndefined();
     expect(stored.messages.find((m) => m.id === "me_text")).toMatchObject({ delivery: "sent" });
-    expect(changes).toBe(1);
+    expect(await told()).toBe(1);
   });
 
   it("puts an edit's new text in place: the same message, nothing new to read, and the preview follows", async () => {
@@ -300,7 +306,7 @@ describe("mirroring what the peer stores into the chat", () => {
     // The same edit again changes nothing; my edit being confirmed does.
     changes = 0;
     engine.messageListeners[0]("link-1", [message({ id: "peer_x", text: "v2", edit: { seq: 2, at: 20, history: [] } })]);
-    expect(changes).toBe(0);
+    expect(await told()).toBe(0);
     expect(sync.toChatMessage(message({ id: "me_y", sender: "me", edit: { seq: 1, at: 5, history: [], pending: true } }), "peer-1", "me-1", true).edit).toEqual({ seq: 1, at: 5, history: [], pending: true });
   });
 
@@ -310,7 +316,7 @@ describe("mirroring what the peer stores into the chat", () => {
     changes = 0;
     engine.messageListeners[0]("link-1", [message({ id: "peer_contact_k", text: "Hi, it's me" })]);
     expect(storage.loadSession("s1")!.messages[0]!.unconfirmed).toBeUndefined();
-    expect(changes).toBe(1);
+    expect(await told()).toBe(1);
   });
 
   it("a received row the engine gave a place to takes that place here too, with the time its sender said", async () => {
@@ -325,7 +331,7 @@ describe("mirroring what the peer stores into the chat", () => {
     await mirror([message({ id: "a" })]);
     changes = 0;
     engine.messageListeners[0]("link-1", [message({ id: "a" })]);
-    expect(changes).toBe(0);
+    expect(await told()).toBe(0);
   });
 
   it("takes a long history in one write, in time order, and one changed message costs one write", async () => {
@@ -348,14 +354,14 @@ describe("mirroring what the peer stores into the chat", () => {
     let reacted = reactedTo(older, history);
     engine.messageListeners[0]("link-1", reacted);
     expect(sessionWrites()).toBe(0);
-    expect(changes).toBe(1);
+    expect(await told()).toBe(1);
     expect(storage.loadSession("s1")!.messages.find((m) => m.id === older)?.reactions).toEqual({ me: { e: "👍", n: 1, at: 5 } });
     // One of its last messages: one write.
     changes = 0;
     reacted = reactedTo(newest, reacted);
     engine.messageListeners[0]("link-1", reacted);
     expect(sessionWrites()).toBe(1);
-    expect(changes).toBe(1);
+    expect(await told()).toBe(1);
     expect(storage.loadSession("s1")!.messages.find((m) => m.id === newest)?.reactions).toEqual({ me: { e: "👍", n: 1, at: 5 } });
 
     // A message the user deleted and the peer still has: nothing to write, nothing to tell.
@@ -365,7 +371,7 @@ describe("mirroring what the peer stores into the chat", () => {
     writes.mockClear();
     engine.messageListeners[0]("link-1", reacted);
     expect(sessionWrites()).toBe(0);
-    expect(changes).toBe(0);
+    expect(await told()).toBe(0);
   });
 
   it("attributes a join announcement to whoever made it, fixing an old attribution", async () => {
@@ -453,6 +459,8 @@ describe("a long chat, on every update", () => {
     const history = Array.from({ length: 300 }, (_, i) => message({ id: `peer_${i}`, timestamp: 1_000 + i, delivery: "delivered" }));
     engine.messages.set("link-1", history);
     await start([link({ createdAt: 1, profile: "paired-chat/1", peerNick: "Ana", identitySharedAt: 5 })]);
+    // The page told of the history mirrored (once, 50 ms on) and read it all again.
+    await vi.advanceTimersByTimeAsync(50);
     expect(storage.loadSession("s1")!.messages).toHaveLength(300);
     const parse = vi.spyOn(JSON, "parse");
     const chatParses = () => parse.mock.calls.filter(([text]) => typeof text === "string" && text.startsWith('{"id":"s1"')).length;
