@@ -14,12 +14,13 @@ import { useTryAgain } from "../../lib/apps/tryAgain";
 import { appErrorText, appErrorView } from "../../lib/apps/errors";
 import { ownDirection } from "../../lib/ownDirection";
 import { isolate } from "../../lib/ownStatus";
+import { sameNameForm } from "../../lib/groups";
 
 /** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
 const opens = (app: InstalledAppView) => !appStopped(app);
 
-/** A title as two rows would read alike: "Chess" and " chess " are one to the eye. */
-const sameTitle = (title: string) => title.trim().toLocaleLowerCase();
+/** A title as two rows would read alike, compared as two names are: "Chess", " chess ", "Ｃｈｅｓｓ" and "Сhess" (a Cyrillic С) are one to the eye. */
+const sameTitle = sameNameForm;
 
 /*
  * The composer's + → Apps in a 1:1 chat (WISP 1200 § In a chat): the installed apps, one to open with this contact.

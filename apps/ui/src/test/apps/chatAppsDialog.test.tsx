@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppPreview, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -376,6 +376,41 @@ describe("the chat's Apps with two installed apps of the same title", () => {
     // A screen reader's Open names differ too.
     const opens = screen.getAllByTestId("chat-app-open").map((b) => b.getAttribute("aria-label"));
     expect(new Set(opens).size).toBe(2);
+  });
+
+  // Both listed by a curated store: only the fingerprints tell the rows apart.
+  const known = (title: string): InstalledAppView => ({ ...copy(), unknownPublisher: false, title });
+  const rowsOf = async (title: string) => {
+    lists.mockImplementation(() => [installed(), known(title)]);
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={vi.fn()} />);
+    return await screen.findAllByTestId("chat-app") as [HTMLElement, HTMLElement];
+  };
+
+  it.each([
+    ["full-width", "Ｃｈｅｓｓ"],
+    ["with another case and spacing", " chess "],
+    ["with a Cyrillic С", "\u0421hess"],
+    ["with a joiner inside", "Ch\u200Dess"],
+  ])("a title that reads the same (%s) is the same title: each row shows its fingerprint", async (_, title) => {
+    const [first, other] = await rowsOf(title);
+    expect(first).toHaveTextContent("yz7m oxuc bd4u 8aqt");
+    expect(other).toHaveTextContent("q3kb n9s1 x7w5 ehd2");
+  });
+
+  it("a title with an accent written as two code points is the one written as one", async () => {
+    lists.mockImplementation(() => [{ ...installed(), title: "Caf\u00E9" }, known("Cafe\u0301")]);
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={vi.fn()} />);
+    const [first, other] = await screen.findAllByTestId("chat-app") as [HTMLElement, HTMLElement];
+    expect(first).toHaveTextContent("yz7m oxuc bd4u 8aqt");
+    expect(other).toHaveTextContent("q3kb n9s1 x7w5 ehd2");
+  });
+
+  it("a title that only looks near (Chess 2, Chest) is another title: no fingerprint", async () => {
+    for (const title of ["Chess 2", "Chest"]) {
+      const view = await rowsOf(title);
+      for (const row of view) expect(row).not.toHaveTextContent(/yz7m|q3kb/);
+      cleanup();
+    }
   });
 
   it("an app of an unknown publisher says so even when its title is the only one", async () => {
