@@ -106,9 +106,13 @@ describe("a day's name", () => {
     expect(dayLabel(dayOf(at(2026, 12, 31)), dayOf(at(2027, 1, 1)), "en", t)).toBe("Yesterday");
   });
 
-  it("is Yesterday on a day whose midnight the clocks skipped, and the day after it", () => {
+  it("is Yesterday on a day whose midnight the clocks skipped, and the day after it", async () => {
     // Cairo's clocks go from 00:00 to 01:00 on 2026-04-24: that day starts at 01:00, the one before at 00:00.
     const zone = process.env.TZ;
+    // Its own copy of the module: the weekday formatter made here writes Cairo's dates, and one made once is kept for
+    // the language, so the next tests would name the run zone's days by Cairo's (east of it, the day before).
+    vi.resetModules();
+    const { dayLabel, dayOf } = await import("../../lib/chatDays");
     process.env.TZ = "Africa/Cairo";
     try {
       const skipped = dayOf(at(2026, 4, 24));
