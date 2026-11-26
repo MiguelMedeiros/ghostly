@@ -8,10 +8,14 @@ export function dayOf(at: number): number {
   return new Date(at).setHours(0, 0, 0, 0);
 }
 
-/** The local midnight of the day after the one starting at `day` (a day of 23 or 25 hours where the clocks change). */
+/**
+ * The local midnight of the day after the one starting at `day` (a day of 23 or 25 hours where the clocks change). Its
+ * own midnight: a day whose midnight the clocks skipped (Cairo, Santiago) starts at 01:00, and the next one at 00:00.
+ */
 export function nextDay(day: number): number {
   const date = new Date(day);
-  return date.setDate(date.getDate() + 1);
+  date.setDate(date.getDate() + 1);
+  return date.setHours(0, 0, 0, 0);
 }
 
 /**

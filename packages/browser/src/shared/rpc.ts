@@ -398,6 +398,12 @@ export interface EngineApi {
    * A private group's `group:<id>` does the same for every member of it (WISP 902 · Group Mesh § Wake-up push).
    */
   setWakeMuted(params: { linkId: string; muted: boolean }): Promise<void>;
+  /**
+   * Blocks or unblocks a contact, by its key: a blocked contact's 1:1 chats keep what they have, take nothing new
+   * from it (messages, files, reactions, pins, edits, call offers: dropped, nothing shown or rung) and it is told not to
+   * wake this app. Its chats in groups are not touched.
+   */
+  setContactBlocked(params: { peerPubKeyZ32: string; blocked: boolean }): Promise<void>;
   /** Whether paired contacts are asked to say when they come online while this app is closed (on by default): each live one is told again. */
   setWakeOnline(params: { on: boolean }): Promise<void>;
   /** A call to a contact whose app is closed: a "call" wake-up; true when it can be woken this way (the caller then waits). */
