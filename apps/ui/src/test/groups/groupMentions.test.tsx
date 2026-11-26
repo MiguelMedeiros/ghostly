@@ -127,6 +127,21 @@ describe("the composer's @", () => {
     expect(within(options()[0]).getByText("Bob")).toHaveAttribute("dir", "auto");
   });
 
+  // In Arabic on Linux the code font's fallback set "Notify everyone" letter by letter, each in a fixed cell.
+  it("sets a member's key end in the code font, and @everyone's words in the text font", async () => {
+    const { user } = openGroup(active({ isAdmin: true }));
+    await user.type(composer(), "@");
+    const [alice, , everyone] = options();
+    expect(everyone.dataset.key).toBe("*");
+    const key = within(alice).getByText("…" + ALICE.slice(-6));
+    const hint = within(everyone).getByText("Notify everyone");
+    expect(key).toHaveClass("font-mono", "text-[11px]", "text-text-muted");
+    expect(hint).not.toHaveClass("font-mono");
+    // Only the font differs: the same size and colour, and the words in their own direction.
+    expect(hint).toHaveClass("ms-auto", "shrink-0", "text-[11px]", "text-text-muted");
+    expect(hint).toHaveAttribute("dir", "auto");
+  });
+
   it("tells two members of one name apart by key", async () => {
     const { user, engine } = openGroup(active({ members: [...members, member({ key: BOB2, nick: "Bob" })] }));
     await user.type(composer(), "@bob");
