@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_CALL_SFU, NO_PICTURE_METADATA, groupCallSfu, sanitizeAvatar, stripPictureMetadata } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { bool, contactKeyOf, groupById, groupNameOf, groupOf, node, nobodyJoined, notInYet, ownChatOf, settingsOf, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError, localFileError, shownValue } from "./errors";
+import { CliError, localFileError, shownRelay, shownValue } from "./errors";
 import { shellWord } from "./shellWord";
 import { guardText } from "./secretGuard";
 import { groupJson } from "./views";
@@ -99,7 +99,8 @@ function callNode(raw: string, ref: string, groupId: string): string {
     const url = new URL(raw);
     if (url.protocol === "https:") origin = url.origin;
   } catch { /* no URL at all */ }
-  const quoted = JSON.stringify(raw);
+  // Said without its credentials (`user:password@`, `?token=`) and described when long (agents#8585).
+  const quoted = shownValue(shownRelay(raw));
   if (!origin) throw new CliError("bad_request", `${quoted} is not an https origin: a call node is like https://call.example.com`);
   if (origin.length > MAX_GROUP_CALL_SFU) throw new CliError("bad_request", `${quoted} is too long: a call node is an https origin of at most ${MAX_GROUP_CALL_SFU} characters`);
   throw new CliError("bad_request", `${quoted} is not in its one spelling (lower case, no default port, path, query or trailing /): ghostly group call ${shellWord(ref, groupId)} --sfu ${origin}`);

@@ -26,6 +26,13 @@ describe("a refusal does not say back a secret typed in the wrong place", { time
     }
   });
 
+  it("an SD-JWT VC given as the id x401 credential remove takes", async () => {
+    const credential = `eyJ${"e".repeat(120)}~eyJ${"f".repeat(40)}~`;
+    const result = await run("x401", "credential", "remove", credential);
+    expect(error(result, "not_found", 3).message).toMatch(/^No x401 credential .* \(ghostly x401 credential list\)$/);
+    expect(result.stdout + result.stderr).not.toContain(credential.slice(0, 20));
+  });
+
   it("a Cashu token, a wallet connection link or a private key given as a chat or a group", async () => {
     const token = `cashuBo2Ft${"d".repeat(150)}`;
     for (const args of [["chat", "history", token], ["send", token, "hi"], ["listen", "--group", token], ["listen", "--from", token]]) {
