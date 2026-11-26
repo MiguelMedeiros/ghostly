@@ -226,3 +226,69 @@ describe("a blocked contact", () => {
     expect(await db.getMessages(chat.id)).toEqual([]);
   });
 });
+
+describe("setContactBlocked's input", () => {
+  async function watched(...rows: StoredLink[]) {
+    const started_ = await started(...rows);
+    const rotated = vi.spyOn(started_.node as never as { rotateWake(): Promise<void> }, "rotateWake").mockResolvedValue(undefined);
+    const shared = vi.spyOn(started_.node as never as { shareWake(id: string): Promise<void> }, "shareWake");
+    return { ...started_, rotated, shared };
+  }
+
+  it("takes only true or false: the word \"false\" or \"yes\" is refused and blocks nothing", async () => {
+    const chat = row({ wakeToken: "t" });
+    const { node, rotated, shared } = await watched(chat);
+    await expect(node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: "false" as never })).rejects.toThrow();
+    for (let i = 0; i < 3; i++) await expect(node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: "yes" as never })).rejects.toThrow();
+    for (const blocked of [1, null, undefined, {}]) await expect(node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: blocked as never })).rejects.toThrow();
+    expect((await db.getSettings()).blockedContacts).toBeUndefined();
+    expect(viewOf(node, chat.id).blocked).toBeUndefined();
+    expect(rotated).not.toHaveBeenCalled();
+    expect(shared).not.toHaveBeenCalled();
+  });
+
+  it("keeps a key once however often it is blocked, and tells the contact once", async () => {
+    const chat = row({ wakeToken: "t" });
+    const { node, rotated, shared } = await watched(chat);
+    for (let i = 0; i < 3; i++) await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32]);
+    expect(rotated).toHaveBeenCalledTimes(1);
+    expect(shared).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses what is not a contact's key: nothing is kept", async () => {
+    const { node } = await watched(row());
+    const key = createIdentity().pubKeyZ32;
+    // The last character of a key carries padding bits: a "b" there spells no key (WISP 02).
+    const respelled = `${key.slice(0, 51)}b`;
+    for (const peerPubKeyZ32 of ["__proto__", "z".repeat(2_000_000), key.slice(0, 51), `${key}y`, key.toUpperCase(), respelled, "", 5, null]) {
+      await expect(node.setContactBlocked({ peerPubKeyZ32: peerPubKeyZ32 as never, blocked: true })).rejects.toThrow();
+    }
+    expect((await db.getSettings()).blockedContacts).toBeUndefined();
+  });
+
+  it("unblocking a key that is not blocked changes nothing and tells nobody", async () => {
+    const chat = row({ wakeToken: "t" }), other = row();
+    const { node, rotated, shared } = await watched(chat, other);
+    await node.setContactBlocked({ peerPubKeyZ32: other.peerPubKeyZ32, blocked: true });
+    rotated.mockClear(); shared.mockClear();
+    const put = vi.spyOn(db, "putSettings");
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    await node.setContactBlocked({ peerPubKeyZ32: createIdentity().pubKeyZ32, blocked: false });
+    expect(put).not.toHaveBeenCalled();
+    expect(rotated).not.toHaveBeenCalled();
+    expect(shared).not.toHaveBeenCalled();
+    expect((await db.getSettings()).blockedContacts).toEqual([other.peerPubKeyZ32]);
+  });
+
+  it("writes a stored list that holds a key twice or what is no key back with each key once", async () => {
+    const chat = row(), other = row();
+    await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true, blockedContacts: [chat.peerPubKeyZ32, chat.peerPubKeyZ32, "__proto__", 5 as never] });
+    const { node } = await watched(chat, other);
+    expect(viewOf(node, chat.id).blocked).toBe(true);
+    await node.setContactBlocked({ peerPubKeyZ32: other.peerPubKeyZ32, blocked: true });
+    expect((await db.getSettings()).blockedContacts).toEqual([chat.peerPubKeyZ32, other.peerPubKeyZ32]);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    expect((await db.getSettings()).blockedContacts).toEqual([other.peerPubKeyZ32]);
+  });
+});

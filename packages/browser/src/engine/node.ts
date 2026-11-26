@@ -3763,8 +3763,13 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   async setContactBlocked({ peerPubKeyZ32, blocked }: { peerPubKeyZ32: string; blocked: boolean }): Promise<void> {
-    if (typeof peerPubKeyZ32 !== "string" || !peerPubKeyZ32) throw new Error("Name the contact's key");
-    const list = this.settings.blockedContacts ?? [];
+    // Only a key in its one spelling, and only true or false: before, the word "false" blocked, and a word or a key named
+    // again went in the list once more each time (which moves to the person's other devices), telling the contact again.
+    if (!isZ32Key(peerPubKeyZ32)) throw new Error("Name the contact's key");
+    if (typeof blocked !== "boolean") throw new Error("Blocked is true or false");
+    // A list stored before holds each key once from the next change on.
+    const kept = this.settings.blockedContacts;
+    const list = [...new Set((Array.isArray(kept) ? kept : []).filter(isZ32Key))];
     if (list.includes(peerPubKeyZ32) === blocked) return;
     const chats = [...this.links.values()].filter(({ stored }) => stored.profile && !stored.group && stored.peerPubKeyZ32 === peerPubKeyZ32);
     // A contact told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
