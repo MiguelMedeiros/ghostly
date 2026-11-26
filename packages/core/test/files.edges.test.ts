@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FileTransfers, type FileInfo, type FileSink } from "../src/files";
+import { FileTransfers, formatFileSize, type FileInfo, type FileSink } from "../src/files";
 import { CHUNK_KIND, LIMITS, decodeChunk, decodeControl, type FileFrame, type FrameChannel } from "../src/frames";
 
-// covers: files.legacy.send, files.size-limit
+// covers: files.legacy.send, files.size-limit, files.size-label
 
 afterEach(() => void vi.useRealTimers());
 
@@ -35,6 +35,13 @@ const info: FileInfo = { id: "file-0001", name: "a.txt", size: 3, mime: "text/pl
 async function* parts(...list: number[][]) {
   for (const part of list) yield Uint8Array.from(part);
 }
+
+it("a size that rounds up to 1024 of a unit is said in the next one", () => {
+  expect(formatFileSize(1_048_524)).toBe("1023.9 KB");
+  expect(formatFileSize(1_048_570)).toBe("1.0 MB");
+  expect(formatFileSize(1024 ** 3 - 1)).toBe("1.0 GB");
+  expect(formatFileSize(1024 ** 4 - 1)).toBe("1.0 TB");
+});
 
 describe("files: receiving", () => {
   it("ignores a second announcement on a stream already receiving", () => {
