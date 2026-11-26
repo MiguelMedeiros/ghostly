@@ -506,9 +506,15 @@ const KEY_BODY = /^[A-Za-z0-9+/=\r\n\t :,.\\-]*$/;
 const KEY_END = /-----END [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----/y;
 /** One string's end and the next one's start (`"...\n" +\n "..."`, a JSON array's `",\n "`): a key's lines kept apart. */
 const STRING_JOIN = /["'`]\s*(?:[+,]\s*)?\\*["'`]/g;
-/** A run of base64, wrapped or not, and "-----BEGIN" in base64 at each of the 3 places of a group it may start. */
-const BASE64_RUN = /[A-Za-z0-9+/\r\n]{40,}/g;
-const BASE64_BEGIN = ["LS0tLS1CRUdJT", "0tLS0tQkVHSU4", "tLS0tLUJFR0lO"];
+/**
+ * A run of base64, wrapped or not. A fixed part and an open tail: `{40,}` kept a backtrack frame a character and ran
+ * out of stack on a run of about 5 MiB (an inlined wasm or picture).
+ */
+const BASE64_RUN = /[A-Za-z0-9+/\r\n]{40}[A-Za-z0-9+/\r\n]*/g;
+/** `text` in base64 at each of the 3 places of a group it may start: the characters that depend on it alone. */
+const inBase64 = (text: string) => [0, 1, 2].map((at) => Buffer.from(`${"\0".repeat(at)}${text}`, "latin1").toString("base64").slice(at ? 4 : 0, 4 * Math.floor((at + text.length) / 3)));
+/** "-----BEGIN" in base64, and in base64 again (a base64 secret's value encoded once more). */
+const BASE64_BEGIN = inBase64("-----BEGIN").flatMap((once) => [once, ...inBase64(once)]);
 
 /** A file's text: UTF-16 by its byte order mark (PowerShell's `>`, Notepad's "Unicode"), else a byte a character. */
 function fileText(bytes: Uint8Array): string {
@@ -521,7 +527,7 @@ function fileText(bytes: Uint8Array): string {
 /**
  * Whether a text holds a private key ({@link holdsKeyBlock}): as written, its strings joined (a key built from one
  * string a line, a JSON array of its lines), or base64-encoded (a CI or Kubernetes secret, a key file in one), read at
- * each of the 4 places a group of base64 may start, once more for a key encoded twice.
+ * each of the 4 places a group of base64 may start, and the decoded text read again for a key encoded twice.
  */
 function holdsPrivateKey(text: string, depth = 0): boolean {
   if (holdsKeyBlock(text.replace(STRING_JOIN, "\n"))) return true;

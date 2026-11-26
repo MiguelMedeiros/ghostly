@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -274,6 +274,8 @@ describe("app publish", () => {
       ["deploy.env", `APP=chess\nPRIVATE_KEY_B64=${Buffer.from(pem).toString("base64")}\n`],
       ["secret.b64", `${Buffer.from(pem).toString("base64").replace(/.{76}/g, "$&\n")}\n`],
       ["k8s/secret.yaml", `data:\n  publisher.key: ${Buffer.from(`Ghostly publisher key (WISP 1200). Secret.\n${pem}`).toString("base64")}\n`],
+      // Encoded twice: a base64 secret's value itself base64-encoded (a Kubernetes manifest's `data:` of an env file).
+      ["twice.env", `K=${Buffer.from(`KEY=${Buffer.from(pem).toString("base64")}\n`).toString("base64")}\n`],
       // A key built from joined strings, one line each, or a JSON array of its lines.
       ["key.js", `export const key =\n  ${pem.trimEnd().split("\n").map((line) => JSON.stringify(`${line}\n`)).join(" +\n  ")};\n`],
       ["key-lines.json", JSON.stringify({ private_key: pem.trimEnd().split("\n") }, null, 2)],
@@ -309,6 +311,15 @@ describe("app publish", () => {
     expect(performance.now() - started).toBeLessThan(3_000);
     const leaky = appFolder(manifest, new Map([...files, ["fixtures/cut.pem", new TextEncoder().encode(cut + readFileSync(key, "utf8"))]]));
     await expect(publishApp(leaky, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "fixtures/cut.pem" } });
+  }, 60_000);
+
+  it("reads one long base64 run without running out of stack: a 6 MiB inlined asset publishes", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    // A wasm inlined as a data URL: one run of base64 past the 5 MiB the scan's stack held.
+    const wasm = `export const url = "data:application/wasm;base64,${randomBytes(4.5 * 1024 * 1024).toString("base64")}";\n`;
+    const dir = appFolder(manifest, new Map([...files, ["engine.js", new TextEncoder().encode(wasm)]]));
+    expect(await publishApp(dir, key)).toMatchObject({ files: ["engine.js", "index.html"] });
   }, 60_000);
 
   it("reads a long body after a key header without running out of stack: 8 MB of data publishes, with an end it is a key", async () => {
