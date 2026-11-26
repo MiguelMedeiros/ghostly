@@ -145,7 +145,7 @@ describe("a shared screen's sound in a 1:1 call", () => {
 
   it("a share the browser gave no sound goes as the picture alone, the microphone untouched, and says so", async () => {
     const { call, mic, audio } = await connectedCall();
-    devices.getDisplayMedia.mockImplementationOnce(async () => new FakeMediaStream([new FakeTrack("video")]) as unknown as MediaStream);
+    devices.getDisplayMedia.mockImplementationOnce(async () => new FakeMediaStream([new FakeTrack("video")]));
     act(() => { void call.result.current.toggleScreenShare(); });
     await settle();
 
