@@ -3,6 +3,7 @@ import type { MessageReaction, ReactionNote } from "@ghostly/browser/shared/type
 import type { useI18n } from "../contexts/I18nContext";
 import { filePreview } from "./chatList";
 import { othersName } from "./groups";
+import { isolate } from "./ownStatus";
 import { messageSnippet } from "./replies";
 import { appCardLine } from "./statusCards";
 import type { ChatFile } from "./types";
@@ -40,11 +41,12 @@ export interface NoteQuote {
 
 /**
  * The chat list's line for a chat's latest reaction: "Ana reacted ❤️ to "…"", or "You reacted…" (a contact named "You":
- * "“You” reacted…"). Its message reads as in its quotes and the pinned bar (`reactionQuote`).
+ * "“You” reacted…"). Its message reads as in its quotes and the pinned bar (`reactionQuote`). The name and the message
+ * are isolated, as the group's lines set their names apart: "Bob!" in an Arabic line keeps its "!" on its own side.
  */
 export function reactionNoteText(note: ReactionNote, name: string, t: ReturnType<typeof useI18n>["t"], quote: NoteQuote = {}): string {
-  const snippet = reactionQuote(note, t, quote);
-  return note.by === "me" ? t("chat.reactions.noteMine", { emoji: note.emoji, snippet }) : t("chat.reactions.note", { name: othersName(name, t), emoji: note.emoji, snippet });
+  const snippet = isolate(reactionQuote(note, t, quote));
+  return note.by === "me" ? t("chat.reactions.noteMine", { emoji: note.emoji, snippet }) : t("chat.reactions.note", { name: isolate(othersName(name, t)), emoji: note.emoji, snippet });
 }
 
 /**
