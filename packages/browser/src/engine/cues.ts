@@ -64,11 +64,12 @@ export const transportMark = (entries: readonly TransportEntry[], history: reado
 /**
  * The transport timeline gained a row worth a sound: a live switch or someone's choice landing (never this app
  * starting, nor a reconnect that came back elsewhere after a short drop), or the chat back after an outage (the
- * #227 row that says how long it was down). A drop itself is silent.
+ * #227 row that says how long it was down). A drop itself is silent, and so is a move that only tells an earlier row
+ * where the chat went (Automatic's way back over Iroh, then to WebRTC): that row is not of this event.
  */
 export function transportCue(before: TransportMark, entries: readonly TransportEntry[], history: readonly TransportEvent[]): Cue | undefined {
   const after = transportMark(entries, history), row = entries[entries.length - 1] as TransportEntry | undefined;
-  if (!row || after.row === before.row || after.event === before.event) return undefined;
+  if (!row || after.row === before.row || after.event === before.event || row.at !== after.event?.at) return undefined;
   if (row.kind === "switched" && after.event?.kind === "switched") return { cue: "switched", key: `${row.id}:${row.transport}` };
   if (row.kind === "back" && row.downMs !== undefined) return { cue: "back", key: row.id };
   return undefined;
