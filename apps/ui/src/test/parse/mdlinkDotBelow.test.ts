@@ -23,8 +23,8 @@ describe("a link's text with a letter that has a dot below", () => {
 });
 
 describe("a link's text with another script's dot below on a letter", () => {
-  // Thai phinthu, Hebrew hiriq and lower dot, Arabic dot below: on an "l" each draws like U+0323 ("paypaḷcom").
-  const marks = ["ฺ", "ִ", "ׅ", "ٜ"];
+  // Thai and Lao phinthu, Hebrew hiriq and lower dot, Arabic dot below: on an "l" each draws like U+0323 ("paypaḷcom").
+  const marks = ["ฺ", "຺", "ִ", "ׅ", "ٜ"];
 
   it("reads the mark as the dot between a host's labels", () => {
     for (const mark of marks) {
@@ -34,10 +34,40 @@ describe("a link's text with another script's dot below on a letter", () => {
     }
   });
 
-  it("leaves the mark alone on a letter of its own script", () => {
-    expect(labelMisleads("ภิกฺขุ", "https://evil.example/login")).toBe(false);
-    expect(labelMisleads("שִׁיר חָדָשׁ", "https://evil.example/login")).toBe(false);
-    expect(labelMisleads("שׁלֹמֹהׅ ודוד", "https://evil.example/login")).toBe(false);
-    expect(labelMisleads("بٜسم الله", "https://evil.example/login")).toBe(false);
+  it('reads the mark as a dot on a letter of its own script that looks like an "l" in a Latin word', () => {
+    // Thai lakkhangyao, Hebrew vav and final nun, Arabic alef (and its isolated form) are a plain stroke.
+    const strokes = ["ๅฺ", "וִ", "וׅ", "וְִ", "ןׅ", "اٜ", "ﺍٜ"];
+    for (const stroke of strokes) {
+      const label = `paypa${stroke}com`;
+      expect(labelMisleads(label, "https://evil.example/login"), label).toBe(true);
+    }
+    // Digits are no script's letters: "1.2.3.4".
+    expect(labelMisleads("1ฺ2ฺ3ฺ4", "https://evil.example/login")).toBe(true);
+  });
+
+  it("leaves the mark alone in a word of its own script", () => {
+    for (const label of ["ภิกฺขุ", "שִׁיר חָדָשׁ", "שׁלֹמֹהׅ ודוד", "بٜسم الله", "ธมฺม Dhamma", "שִׁיר song", "ພຸດ຺ທະ"]) {
+      expect(labelMisleads(label, "https://evil.example/login"), label).toBe(false);
+    }
+  });
+});
+
+describe("a link's text with several dots below on one letter", () => {
+  it("reads them as one dot between a host's labels", () => {
+    const labels = ["paypaḷฺcom", "paypalฺฺcom", "paypaḷ̣com", "paypaḷ̣com"];
+    // Or a dot below beside a written dot: "paypaḷ.com".
+    for (const label of [...labels, "paypaḷ.com", "paypal.̣com"]) {
+      expect(labelMisleads(label, "https://evil.example/login"), label).toBe(true);
+    }
+  });
+
+  it("reads a long run of them at once", () => {
+    const run = "̣".repeat(200);
+    expect(labelMisleads(`paypal${run}com`, "https://evil.example/login")).toBe(true);
+    expect(labelMisleads(`paypal${run}`, "https://evil.example/login")).toBe(false);
+  });
+
+  it("leaves a run of written dots alone", () => {
+    expect(labelMisleads("wait...what", "https://evil.example/login")).toBe(false);
   });
 });
