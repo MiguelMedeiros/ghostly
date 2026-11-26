@@ -14,6 +14,11 @@ describe("foldText", () => {
     expect(foldText("Ação É Über Ñandú")).toBe("acao e uber nandu");
     expect(foldText("İstanbul")).toBe("istanbul");
   });
+
+  it("reads full-width Latin and half-width katakana as their usual forms", () => {
+    expect(foldText("ＰＤＦ")).toBe("pdf");
+    expect(foldText("ｶﾞｲﾄﾞ")).toBe(foldText("ガイド"));
+  });
 });
 
 describe("a received text its bubble shows translated", () => {
@@ -48,6 +53,12 @@ describe("searchMessages", () => {
     expect(searchMessages(items, "cafe")).toEqual(["m3", "m1"]);
     expect(searchMessages(items, "CAFÉ")).toEqual(["m3", "m1"]);
     expect(searchMessages(items, "AMANHA")).toEqual(["m1"]);
+  });
+
+  it("finds a text or a file's name typed in full-width or half-width forms", () => {
+    const wide = searchable([message("w1", "📎 report.pdf", { file: file("report.pdf") }), message("w2", "ｶﾞｲﾄﾞを読んで")]);
+    expect(searchMessages(wide, "ＰＤＦ")).toEqual(["w1"]);
+    expect(searchMessages(wide, "ガイド")).toEqual(["w2"]);
   });
 
   it("finds a file by its name, not by the line its message carries", () => {
@@ -148,6 +159,12 @@ describe("matchRanges", () => {
   it("keeps a combining accent with its letter", () => {
     const decomposed = "café bom";
     expect(cut(decomposed, "cafe")).toEqual(["café"]);
+  });
+
+  it("marks full-width and half-width forms in the text as written", () => {
+    expect(cut("Ｒｅｐｏｒｔ.ＰＤＦ と ｶﾞｲﾄﾞ", "report.pdf")).toEqual(["Ｒｅｐｏｒｔ.ＰＤＦ"]);
+    // The half-width voiced mark goes with the letter before it.
+    expect(cut("Ｒｅｐｏｒｔ.ＰＤＦ と ｶﾞｲﾄﾞ", "ガイド")).toEqual(["ｶﾞｲﾄﾞ"]);
   });
 
   it("finds nothing for an empty query", () => {
