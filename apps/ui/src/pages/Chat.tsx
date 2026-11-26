@@ -127,6 +127,7 @@ import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
+import { ChatBlockedLine } from "../components/chat/ChatBlockedLine";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { ReconnectingBanner } from "../components/ReconnectingBanner";
 import { TasksButton } from "../components/chat/TasksButton";
@@ -1256,12 +1257,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
       <PeerServices peerPubKey={params.peerPubKeyB64} showLink={!paired} onManage={() => setShowServices(true)} />
 
-      {chatLink?.blocked && blockKey && (
-        <div data-testid="chat-blocked" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">
-          <span>{t("chat.block.blocked")}</span>
-          <button type="button" className="underline text-accent cursor-pointer" onClick={() => setBlocked(false)}>{t("chat.menu.unblock")}</button>
-        </div>
-      )}
+      {chatLink?.blocked && blockKey && <ChatBlockedLine onUnblock={() => setBlocked(false)} returnFocus={optionsRef} />}
 
       {compat && session?.continuedIn && (
         <div data-testid="compat-continued" className="flex items-center justify-center gap-2 bg-panel-header/60 px-4 py-1.5 text-xs text-text-secondary">
