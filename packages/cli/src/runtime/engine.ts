@@ -72,6 +72,21 @@ function bootstrapNodes(name: string, env: string | undefined): string[] {
 }
 
 /**
+ * A refused relay of a comma-separated list, said without its credentials (`shownRelay`). A comma in a user or password
+ * splits the address before its `@`: when a later piece still holds an `@` (`last`, from `lastAt`, read once per
+ * list), this piece may hold them, so only its scheme is said (`shownRelay` says `<scheme>…` for a `?`/`#` before an `@`).
+ */
+function shownPiece(relays: readonly string[], i: number, last: number): string {
+  return shownRelay(i < last ? `${relays[i]}#@` : relays[i]);
+}
+
+/** The index of the list's last piece that holds an `@`, or -1. */
+function lastAt(relays: readonly string[]): number {
+  for (let i = relays.length - 1; i >= 0; i--) if (relays[i].includes("@")) return i;
+  return -1;
+}
+
+/**
  * The Pkarr relays of a private network or a test, `GHOSTLY_PKARR_RELAYS` ("http://…,…"), the Desktop's name for it:
  * the only relays this process uses, whatever the profile's `relays` setting says, from its very first publish. Null
  * when unset.
@@ -80,8 +95,8 @@ export function pkarrRelays(env = process.env): string[] | null {
   const relays = (env.GHOSTLY_PKARR_RELAYS ?? "").split(",").map((url) => url.trim()).filter(Boolean);
   if (!relays.length) return null;
   // Two relays split by ';' or a space were taken as one URL.
-  const bad = relays.find((url) => !/^https?:\/\/[^/\s]/i.test(url) || /[\s;]/.test(url) || !URL.canParse(url));
-  if (bad) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${shownValue(shownRelay(bad))}`);
+  const bad = relays.findIndex((url) => !/^https?:\/\/[^/\s]/i.test(url) || /[\s;]/.test(url) || !URL.canParse(url));
+  if (bad !== -1) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${shownValue(shownPiece(relays, bad, lastAt(relays)))}`);
   return relays;
 }
 
@@ -94,7 +109,8 @@ export function irohRelays(env = process.env): string[] | null {
   const relays = (env.GHOSTLY_IROH_RELAYS ?? "").split(",").map((url) => url.trim()).filter(Boolean);
   if (!relays.length) return null;
   // The problem ends with the URL as given: said without its credentials (`shownRelay`).
-  const bad = relays.map((url) => irohRelayProblem(url)?.replace(url, () => shownRelay(url))).find(Boolean);
+  const last = lastAt(relays);
+  const bad = relays.map((url, i) => irohRelayProblem(url)?.replace(url, () => shownPiece(relays, i, last))).find(Boolean);
   if (bad) throw new CliError("usage", `GHOSTLY_IROH_RELAYS: ${bad}`);
   // More than the endpoint takes left every chat's Iroh refused, the profile running with none.
   if (relays.length > MAX_IROH_RELAYS) throw new CliError("usage", `GHOSTLY_IROH_RELAYS: use at most ${MAX_IROH_RELAYS} Iroh relays, not ${relays.length}`);

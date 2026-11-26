@@ -1,3 +1,5 @@
+import { shownAddress } from "@ghostly/browser/shared/shownAddress";
+
 /**
  * Errors that reach a bot: a stable `code` to branch on, a message for people, and the exit status the CLI
  * leaves with (WISP 1100 § Exit codes). The daemon sends `{code, message}` over the socket; the CLI prints
@@ -35,10 +37,11 @@ export function shownValue(value: unknown): string {
 
 /**
  * A relay address as a refusal quotes it: without its `user:password@`, `?query` or `#fragment` (a relay's credentials
- * or token), parsed or not. The rest is said as given, so the person sees which one was refused.
+ * or token), parsed or not, as the browser's TURN refusal does (`shownAddress`). The rest is said as given, so the
+ * person sees which one was refused; with a `?` or `#` before the last `@`, only the scheme.
  */
 export function shownRelay(value: string): string {
-  return value.replace(/[?#][\s\S]*$/, "").replace(/^([a-z][a-z0-9+.-]*:\/*)?[\s\S]*@/i, "$1");
+  return shownAddress(value);
 }
 
 /** What `shownValue` says in place of a long or secret-looking word, else undefined (the word may be printed). */
