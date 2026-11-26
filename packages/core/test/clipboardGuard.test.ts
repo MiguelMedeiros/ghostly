@@ -119,6 +119,9 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
     execCommand(command: string) { return command !== ""; }
     // HTML's document open steps: every listener of the document and, for its window's own document, of the window.
     open() { if (clears && this === w.document) listeners.clear(); return this; }
+    // A write with no insertion point (the page has loaded) runs those same open steps itself, not `open()`.
+    write() { if (clears && this === w.document) listeners.clear(); }
+    writeln() { if (clears && this === w.document) listeners.clear(); }
   }
   let now = 10_000;
   class Ev { phase = 0; stamp = now; get eventPhase() { return this.phase; } get timeStamp() { return this.stamp; } }
@@ -177,6 +180,8 @@ function tapWindow(closers: { channel?: boolean; postTask?: boolean; frame?: boo
     copy, dispatch, listeners,
     /** The page rewrites itself: `document.open()` as it calls it (the guard's, if it wrapped it), on `on`. */
     rewrite: (on: object = doc, clearing = true) => { clears = clearing; (Doc.prototype.open as (this: object) => unknown).call(on); clears = true; },
+    /** The page rewrites itself with `document.write()` or `writeln()` (the guard's, if it wrapped them) after it loaded. */
+    write: (name: "write" | "writeln" = "write", on: object = doc) => { (Doc.prototype[name] as (this: object, html: string) => unknown).call(on, "<p>new</p>"); },
     asked: () => asked,
     newDocument: () => new Doc(),
     /** The page keeps the thread for `ms` (a busy loop): time passes, no task runs. */
@@ -378,6 +383,27 @@ describe("the clipboard guard's taps and what a tap sets off", () => {
     page.rewrite(page.newDocument());
     expect(page.asked()).toBe(asked);
     expect(page.listeners.size).toBe(15);
+  });
+
+  it("listens for the person's inputs again once the page rewrites itself with document.write() after it loaded", () => {
+    // A write with no insertion point runs the document open steps without calling `document.open()`: the rewritten
+    // page's copy button copies on a tap again, and still nothing outside one.
+    for (const name of ["write", "writeln"] as const) {
+      const page = tapWindow();
+      const inputs = [...page.listeners.keys()].sort();
+      page.write(name);
+      expect([...page.listeners.keys()].sort(), name).toEqual(inputs);
+      const got: Record<string, boolean> = {};
+      page.dispatch("click", true, () => { got.click = page.copy(); });
+      page.endTask();
+      page.dispatch("submit", true, () => { got.load = page.copy(); });
+      expect(got, name).toEqual({ click: true, load: false });
+      for (const [type, kept] of page.listeners) expect(kept, type).toHaveLength(1);
+      // A document of the window's realm that is not its page: nothing of the window's.
+      const asked = page.asked();
+      page.write(name, page.newDocument());
+      expect(page.asked(), name).toBe(asked);
+    }
   });
 
   it("listens again in a frame's own window when the page writes that frame with document.open()", () => {
