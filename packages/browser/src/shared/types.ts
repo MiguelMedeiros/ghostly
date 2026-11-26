@@ -568,6 +568,11 @@ export interface FileTransferView {
   stage?: "preparing" | "waiting" | "asking" | "queued" | "paused" | "verifying";
   /** files/3: the transfer can be paused, resumed and cancelled from here. */
   direction?: "in" | "out";
+  /**
+   * Sent, `queued`: not offered yet, it waits for room in the contact's limit, which only their answers to this side's
+   * other files, or those files' ends, make. Nothing of it moves meanwhile.
+   */
+  unoffered?: true;
   pausedBy?: "me" | "peer";
   /** Bytes per second lately, while moving. */
   rate?: number;

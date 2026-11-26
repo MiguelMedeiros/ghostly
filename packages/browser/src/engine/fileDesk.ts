@@ -905,7 +905,7 @@ export class FileDesk {
     if (record.state === "paused") return { ...base, state: "transferring", stage: "paused", pausedBy: record.pausedBy };
     if (!live) return { ...base, state: "transferring", stage: "waiting" };
     // Received: in line behind other files here. Sent: not offered yet, it waits for room in the contact's limit.
-    if (record.state === "queued") return { ...base, state: "transferring", stage: "queued" };
+    if (record.state === "queued") return { ...base, state: "transferring", stage: "queued", ...(record.direction === "out" && { unoffered: true }) };
     if (record.state === "verifying") return { ...base, state: "transferring", stage: "verifying" };
     return { ...base, state: "transferring" };
   }

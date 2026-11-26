@@ -4,6 +4,9 @@ import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import { DevicesSection } from "../../components/devices/DevicesSection";
 import type { FileTransferView } from "@ghostly/browser/shared/types";
+import { FileDesk } from "@ghostly/browser/engine/fileDesk";
+import { fileStore } from "@ghostly/browser/shared/idb";
+import type { FileTransferRecord, TransferState } from "@ghostly/core";
 import { filesMoving, handoffRunning, hasStandby, keepAwakeWanted, useComputerAwake } from "../../lib/keepAwake";
 import { useDeviceSet } from "../../lib/devices";
 import { fakeEngine } from "../fakeEngine";
@@ -64,6 +67,28 @@ describe("a file on its way", () => {
     expect(filesMoving({ a: { ...moving, state: "failed", error: "Cancelled" } })).toBe(false);
     // One moving among finished and waiting ones is enough.
     expect(filesMoving({ a: { ...moving, state: "done" }, b: { ...moving, stage: "waiting" }, c: moving })).toBe(true);
+  });
+
+  it("not for a sent file waiting for room behind the contact's files that wait for an answer", async () => {
+    vi.spyOn(fileStore, "patch").mockResolvedValue(undefined);
+    const transfers = new Map<string, FileTransferView>();
+    const desk = new FileDesk({ send: () => false, receivedBytes: () => 0, wireIds: () => new Set(), deleted: () => false, storeMessage: async () => {}, transfers, changed: () => {} });
+    desk.session("chat", true);
+    const changed = (id: string, state: TransferState, waitingFor?: "consent" | "busy", direction: "in" | "out" = "out") => (desk as unknown as { changed(l: string, r: FileTransferRecord, t: number, p: boolean): void })
+      .changed("chat", { id, direction, state, ...(waitingFor && { waitingFor }), confirmed: 0, since: 1, file: { name: `${id}.jpg`, size: 2_000_000, mime: "image/jpeg", timestamp: 1 } } as FileTransferRecord, 0, false);
+    // The contact's 256 waiting for their person to answer, and the next one sent here, not offered yet (WISP 501).
+    changed("w1", "asking", "consent");
+    changed("w2", "queued");
+    // Before, it read as moving for as long as nobody answered: the Android app's "Sending files" service, the phone's
+    // screen and the Desktop's computer kept awake with nothing moving.
+    expect(filesMoving(Object.fromEntries(transfers))).toBe(false);
+    // Accepted there, it waits its turn behind the contact's other files: that one still holds.
+    changed("w1", "asking", "busy");
+    expect(filesMoving(Object.fromEntries(transfers))).toBe(true);
+    // A received file in line behind the others here holds too: it comes as soon as they end.
+    changed("w1", "asking", "consent");
+    changed("r1", "queued", undefined, "in");
+    expect(filesMoving(Object.fromEntries(transfers))).toBe(true);
   });
 
   it("holds the Desktop's computer awake from the first file that moves until the last one ends", async () => {
