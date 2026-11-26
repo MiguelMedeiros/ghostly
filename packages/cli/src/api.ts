@@ -5,7 +5,7 @@ import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
 import { groupPayLineId, groupPayNoteId } from "@ghostly/browser/shared/groupPayNotes";
 import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
 import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwards";
-import { findSecret, guardText, secretWords } from "./secretGuard";
+import { checkGuardedSize, findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError, shownRelay } from "./errors";
 import { shellWord } from "./shellWord";
@@ -16,7 +16,7 @@ import {
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
 import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
-import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
+import { STATUS_CARD_METHODS, secretIn, textsIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdEnds, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, ONE_SHOT_LIVE_GRACE_MS, sayTyping, typingStatus } from "./typing";
@@ -1422,7 +1422,8 @@ function pastEngineBound(method: string, field: "text" | "caption" | "card", val
 /**
  * The secret guard of a raw engine send. A text the engine refuses by its size alone is not read for a secret (a
  * 15 MB one held the daemon's thread for seconds): the engine answers it with its size, as it did once the guard was
- * done, and nothing of it is kept or sent.
+ * done, and nothing of it is kept or sent. Any other text past that bound (a memo, a name, a note) is refused with its
+ * size before the guard reads it (`checkGuardedSize`): the engine sends none that long.
  */
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
@@ -1441,7 +1442,7 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
       const message = await node(ctx).getMessage(linkId, id);
       return message ? forwardedTexts(message) : null;
     })) : [];
-  }
+  } else for (const value of textsIn(texts)) checkGuardedSize(value, `A text of ${method}`);
   const secret = secretIn(texts);
   if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; call ${method} with --force if you mean to`, { kind: secret.kind });
 }
