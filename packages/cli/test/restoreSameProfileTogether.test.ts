@@ -26,7 +26,9 @@ it("two restores of one backup started together: one restores, the other is refu
   const restored = both.filter((result) => result.code === 0);
   expect(restored, "exactly one restores").toHaveLength(1);
   const winner = restored[0]!.json.restored as string;
-  const refused = both.find((result) => result.code !== 0)!.json.error as { code?: string; details?: unknown };
+  const refusedRun = both.find((result) => result.code !== 0)!;
+  expect(refusedRun.code, "exit 5: --copy lets it through").toBe(5);
+  const refused = refusedRun.json.error as { code?: string; details?: unknown };
   expect(refused.code).toBe("confirm");
   expect(refused.details).toEqual({ reason: "same-profile", profiles: [winner] });
   expect(profiles(dir), "no folder being restored, no lock").toEqual([winner]);
