@@ -15,6 +15,7 @@ import { errorText } from "../lib/errorText";
 import { callWindowShown } from "../lib/serviceWindows";
 import { mediaProblemKeys } from "../lib/mediaProblemText";
 import { ownDirection } from "../lib/ownDirection";
+import { isolate } from "../lib/ownStatus";
 import { openAppSettings } from "../desktop/androidCameraRefusal";
 import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
 import { InfoButton } from "./layout/Section";
@@ -287,18 +288,39 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
   const shown = (p: GroupCallParticipant) => (p === local || !groupNameOf ? p.name : groupNameOf(p.identity));
   const nameOf = (p: GroupCallParticipant) => (p === local ? t("calls.you") : shown(p));
   const order = useShareOrder(everyone.filter((p) => p.screen && p.tracks.screen).map((p) => p.identity));
-  const presenter = everyone.find((p) => p.identity === order[order.length - 1]) ?? null;
-  // The other screens are tiles beside the faces.
-  const otherScreens = order.slice(0, -1).map((id) => everyone.find((p) => p.identity === id)!);
+  // The screen picked from the side stays large while others start and stop; once it stops, the latest is again.
+  const [picked, setPicked] = useState<string | null>(null);
+  if (picked && !order.includes(picked)) setPicked(null);
+  const large = picked && order.includes(picked) ? picked : order[order.length - 1];
+  const presenter = everyone.find((p) => p.identity === large) ?? null;
+  // The other screens are tiles beside the faces, each a button that shows it large.
+  const otherScreens = order.filter((id) => id !== large).map((id) => everyone.find((p) => p.identity === id)!);
+  // The picked tile goes from the side: the focus goes to the one that took its place there, to switch back.
+  const swapped = useRef<string | null>(null);
+  useEffect(() => {
+    const id = swapped.current;
+    swapped.current = null;
+    if (!id) return;
+    [...(box.current?.querySelectorAll<HTMLElement>("[data-testid=group-call-show-screen]") ?? [])].find((b) => b.dataset.identity === id)?.focus({ preventScroll: true });
+  }, [large, box]);
+  const show = (id: string) => {
+    swapped.current = large ?? null;
+    setPicked(id);
+  };
   // The admin's menu, on the others' faces in the whole window: the small one has no room for it.
   const menuOf = (p: GroupCallParticipant) => moderation && !mini && p !== local
     ? <TileModerationMenu identity={p.identity} name={shown(p)} moderation={moderation} host={box} /> : undefined;
   const faces = everyone.map((p) => (
     <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} menu={menuOf(p)} />
   ));
-  const screenTiles = otherScreens.map((p) => (
-    <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} face={shown(p)} />
-  ));
+  const screenTiles = otherScreens.map((p) => {
+    const label = p === local ? t("calls.group.showYourScreen") : t("calls.group.showScreen", { name: isolate(nameOf(p)) });
+    const button = (
+      <button type="button" onClick={() => show(p.identity)} data-testid="group-call-show-screen" data-identity={p.identity} aria-label={label} title={label}
+        className="absolute inset-0 z-10 cursor-pointer rounded-xl hover:bg-white/10 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-accent" />
+    );
+    return <Tile key={`${p.identity}-screen`} person={p} you={p === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(p) })} face={shown(p)} menu={button} />;
+  });
   // The small window shows one tile: the screen being shared, or else whoever speaks.
   const focus = presenter ?? everyone.find((p) => p.identity === activeSpeaker) ?? participants[0] ?? local;
   const columns = gridColumns(faces.length + screenTiles.length);
