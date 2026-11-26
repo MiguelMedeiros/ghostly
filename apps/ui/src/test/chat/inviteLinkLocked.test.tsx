@@ -76,13 +76,16 @@ it("invite links opened while locked each make their chat after the unlock, up t
  * last link's) says its join notice. An earlier link's "You're already in this chat" sat over the next chat opened.
  */
 it.each([
-  ["a chat already here, then a new one: no notice over the new chat", [true, false], null],
-  ["a new chat, then one already here: that one still says so", [false, true], "You're already in this chat."],
-])("invite links held under the lock, %s", async (_, known, notice) => {
-  const codes = known.map(() => createChatInvite().inviteCode);
-  known.forEach((isKnown, i) => {
-    const reading = readInvite(codes[i]);
-    if (isKnown && reading.ok) ensureSession(reading.keys);
+  ["a chat already here, then a new one: no notice over the new chat", ["joined", "new"], null],
+  ["this profile's own invite, then a new chat: no notice over the new chat", ["own", "new"], null],
+  ["a new chat, then one already here: that one still says so", ["new", "joined"], "You're already in this chat."],
+] as const)("invite links held under the lock, %s", async (_, kinds, notice) => {
+  const codes = kinds.map((kind) => {
+    const { mine, inviteCode } = createChatInvite();
+    const reading = readInvite(inviteCode);
+    if (kind === "joined" && reading.ok) ensureSession(reading.keys);
+    if (kind === "own") ensureSession({ seedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, profile: "paired-chat/1" });
+    return inviteCode;
   });
   window.location.hash = `#${codes[0]}`;
   const { rerender } = render(<Root />);
