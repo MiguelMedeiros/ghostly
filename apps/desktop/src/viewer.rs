@@ -648,15 +648,18 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           }
         } catch (e) {}
       }
-      const reopen = proto.open;
-      proto.open = function () {
-        const got = apply(reopen, this, arguments);
+      const reheard = (doc) => {
         try {
-          if (apply(view, this, []) === w) {
-            apply(listen, this, ["load", sweep, true]);
+          if (apply(view, doc, []) === w) {
+            apply(listen, doc, ["load", sweep, true]);
             hear();
           }
         } catch (e) {}
+      };
+      const reopen = proto.open;
+      proto.open = function () {
+        const got = apply(reopen, this, arguments);
+        reheard(this);
         return got;
       };
       const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
@@ -684,7 +687,9 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           for (let j = 0; j < arguments.length; j++) checked += text(arguments[j]);
           if (shadowed(tail + checked)) refuse();
           tail = apply(slice, tail + checked, [-16]);
-          return apply(real, this, [checked]);
+          const got = apply(real, this, [checked]);
+          reheard(this);
+          return got;
         };
       }
       const kinds = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
