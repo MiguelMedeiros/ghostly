@@ -3,7 +3,7 @@ import { isLocalHost } from "../localHost";
 import { parseMessage } from "./blocks";
 import { findEntities } from "./entities";
 import { findLocation } from "./location";
-import { findSecret, hasSecretBeside } from "./secrets";
+import { findSecret, secretsBeside } from "./secrets";
 import type { Block, Segment } from "./types";
 
 /**
@@ -132,9 +132,13 @@ const IMAGE_LINK = /\.(gif|png|jpe?g|webp|svg|avif)(\?\S*)?$/i;
  * `findSecret` knows, alone or with the words around it ("my seed: https://…/<64 hex>"). Null when none.
  */
 export function previewableLink(text: string): string | null {
-  // Read only once a link could get a card: the composer asks on every key, of drafts that may be long.
-  let drawn: Set<string> | undefined;
+  // Read only once a link could get a card, and each link once: the composer asks on every key, of drafts that may be
+  // long, and one link said over and over reads the same each time.
+  let drawn: Set<string> | undefined, keyed: ((link: string) => boolean) | undefined;
+  const read = new Set<string>();
   for (const link of linksIn(text)) {
+    if (read.has(link)) continue;
+    read.add(link);
     const canonical = canonicalUrl(link);
     if (!canonical) continue;
     const url = new URL(canonical);
@@ -145,7 +149,7 @@ export function previewableLink(text: string): string | null {
     // Its address holds what the composer asks about before a message goes (a token, a key): reading the page would
     // hand it to the site before that question, and whatever the answer. Some keys are asked about only for the words
     // beside them, which may be outside the link.
-    if (findSecret(link) || hasSecretBeside(text, link)) continue;
+    if (findSecret(link) || (keyed ??= secretsBeside(text))(link)) continue;
     return link;
   }
   return null;

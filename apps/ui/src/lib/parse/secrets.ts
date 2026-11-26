@@ -429,24 +429,41 @@ function hexBeside(text: string, context: RegExp): boolean {
 }
 
 /**
- * Whether `part` of `text` holds a key `findSecret` asks about only for the words around it: 64 hex digits beside
+ * Whether a part of `text` holds a key `findSecret` asks about only for the words around it: 64 hex digits beside
  * "seed" or `rpcpassword`, a rune beside "rune". `findSecret(part)` alone misses those when the words are outside it.
  * A key elsewhere in the text does not count. Read as written and without the invisible characters, as `findSecret`.
+ * The text is read once, for every part asked about after: the composer asks of each link of a long draft.
  */
-export function hasSecretBeside(text: string, part: string): boolean {
+export function secretsBeside(text: string): (part: string) => boolean {
   const visible = text.replace(INVISIBLE, "");
-  const readings: [string, string][] = visible === text ? [[text, part]] : [[text, part], [visible, part.replace(INVISIBLE, "")]];
-  return readings.some(([reading, piece]) => {
-    if (!piece) return false;
-    const within = (match: RegExpExecArray) => {
-      const end = match.index + match[0].length;
-      for (let at = reading.indexOf(piece); at >= 0; at = reading.indexOf(piece, at + 1)) if (match.index < at + piece.length && end > at) return true;
-      return false;
-    };
-    for (const match of reading.matchAll(HEX_SECRET)) if (within(match) && (beside(reading, match, SECRET_CONTEXT) || beside(reading, match, NODE_CONTEXT))) return true;
-    for (const match of reading.matchAll(RUNE)) if (within(match) && isRune(reading, match)) return true;
+  const readings = (visible === text ? [text] : [text, visible]).map((reading) => ({ reading, keys: keySpans(reading) }));
+  return (part) => readings.some(({ reading, keys }, i) => {
+    const piece = i ? part.replace(INVISIBLE, "") : part;
+    if (!piece || !keys.length) return false;
+    // Both run left to right, so each key is passed over once for all the places the part is.
+    let k = 0;
+    for (let at = reading.indexOf(piece); at >= 0; at = reading.indexOf(piece, at + 1)) {
+      while (k < keys.length && keys[k][1] <= at) k++;
+      if (k === keys.length) return false;
+      if (keys[k][0] < at + piece.length) return true;
+    }
     return false;
   });
+}
+
+/** Where `text` holds such a key, as [start, end) spans in order, those that touch made one. */
+function keySpans(text: string): [number, number][] {
+  const spans: [number, number][] = [];
+  for (const match of text.matchAll(HEX_SECRET)) if (beside(text, match, SECRET_CONTEXT) || beside(text, match, NODE_CONTEXT)) spans.push([match.index, match.index + match[0].length]);
+  for (const match of text.matchAll(RUNE)) if (isRune(text, match)) spans.push([match.index, match.index + match[0].length]);
+  spans.sort((a, b) => a[0] - b[0]);
+  const merged: [number, number][] = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else merged.push(span);
+  }
+  return merged;
 }
 
 /**
