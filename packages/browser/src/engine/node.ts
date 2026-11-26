@@ -905,6 +905,16 @@ export interface NodeEvents {
  */
 /** A waiting file or request that went out: it shows like any other from now on (a file by its transfer). */
 /** The contact's typing as the chat shows it: plain typing needs only `peerTyping`. */
+/**
+ * A 1:1 chat's pin as it is shown: one naming a message deleted for everyone (`removed`, or kept before it was marked,
+ * by `removedRefs`) is unpinned (no `id`), its number kept. What an unpin goes by, so a pin shown gone is not removed
+ * again.
+ */
+function linkPinShown(stored: StoredLink): StoredPin | undefined {
+  const pin = stored.pin;
+  return pin?.id && (pin.removed || stored.removedRefs?.includes(pin.id)) ? { ...pin, id: "", messageId: undefined } : pin;
+}
+
 function typingView(activity: TypingActivity | null): Pick<LinkView, "peerTyping" | "peerTypingKind" | "peerTypingStatus"> {
   return {
     peerTyping: true,
@@ -6548,7 +6558,7 @@ export class GhostlyNode implements EngineImplementation {
       // Not a member (removed, say): refused with the reason the group shows, as a reaction is.
       if (!view || view.status !== "active") return { error: view?.statusReason ?? "You are not in this group", refused: true };
       if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
-      const current = this.groups.pinOf(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
+      const current = this.groups.pinShown(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
       if ("error" in pin) return pin;
       // Pinned already: nothing goes. My own pin's number is still the one its edges take (`groupTaken`).
       if ("already" in pin) return { error: null, ...(current?.by === "me" && { n: current.n }) };
@@ -6567,7 +6577,7 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live || live.stored.group) return { error: "No such chat" };
     if (!live.stored.profile) return { error: "Pins need a current chat; this compatibility chat sends text only." };
-    const pin = await myPin(host, linkId, messageId, !!remove, live.stored.pin);
+    const pin = await myPin(host, linkId, messageId, !!remove, linkPinShown(live.stored));
     if ("error" in pin) return pin;
     if ("already" in pin) return { error: null };
     await this.keepLinkPin(linkId, pin, { id: pin.id, n: pin.n });
@@ -11201,7 +11211,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       // The pinned message was deleted for everyone: nothing of it stays, its pin neither, as in a group (`Groups.pinned`).
       // The pin is kept as it came, so the same pin said again is no newer; one kept before it was marked, by `removedRefs`.
-      ...(stored.pin && { pin: pinView(stored.pin.id && (stored.pin.removed || stored.removedRefs?.includes(stored.pin.id)) ? { ...stored.pin, id: "", messageId: undefined } : stored.pin) }),
+      ...(stored.pin && { pin: pinView(linkPinShown(stored)) }),
       participationKey: participationKeyOf(live),
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,

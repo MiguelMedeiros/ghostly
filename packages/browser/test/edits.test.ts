@@ -676,6 +676,8 @@ describe("the contact's edits", () => {
     expect(t.view().pin?.id).toBe("");
     await t.restart();
     expect(t.view().pin).toEqual({ id: "", by: "peer", at: expect.any(Number) });
+    // Shown unpinned, so nothing to unpin: no unpin goes for it.
+    expect(await t.node.pinMessage({ linkId: t.id, remove: true })).toEqual({ error: "Nothing is pinned in this chat" });
   });
 
   // The pin was shown unpinned only while its id was among the newest 500 removed, and the id among the newest 500
@@ -723,6 +725,7 @@ describe("the contact's edits", () => {
     const kept = () => (t.node as unknown as { links: Map<string, { stored: StoredLink }> }).links.get(t.id)!.stored.pin;
     await vi.waitFor(() => expect(kept()).toMatchObject({ id: wireId, by: "peer" }));
     expect(t.view().pin).toEqual({ id: "", by: "peer", at: expect.any(Number) });
+    expect(await t.node.pinMessage({ linkId: t.id, remove: true })).toEqual({ error: "Nothing is pinned in this chat" });
   });
 
   it("the pin of a message deleted here first goes when its author deletes it for everyone; deleted here alone it stays", async () => {
