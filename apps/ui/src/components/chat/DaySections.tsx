@@ -2,12 +2,31 @@ import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { byDay, dayLabel, dayOf, nextDay } from "../../lib/chatDays";
 
-/** Today's local midnight, again at each midnight while the chat stays open: its Today becomes Yesterday then. */
+/**
+ * Today's local midnight, again at each midnight while the chat stays open: its Today becomes Yesterday then. Timers
+ * stand still while the device sleeps or the page is frozen in the background, so the midnight one can come hours
+ * late: the day is also checked when the page comes back (shown or focused) and on each draw, and set only when it
+ * moved on.
+ */
 function useToday(): number {
   const [today, setToday] = useState(() => dayOf(Date.now()));
+  // A draw (a message coming in) can come before the page says it is back: it reads the day too.
+  const now = dayOf(Date.now());
+  if (now !== today) setToday(now);
   useEffect(() => {
-    const timer = window.setTimeout(() => setToday(dayOf(Date.now())), Math.max(1_000, nextDay(today) - Date.now()));
-    return () => window.clearTimeout(timer);
+    const check = () => {
+      const day = dayOf(Date.now());
+      if (day !== today) setToday(day);
+    };
+    const shown = () => { if (document.visibilityState !== "hidden") check(); };
+    const timer = window.setTimeout(check, Math.max(1_000, nextDay(today) - Date.now()));
+    document.addEventListener("visibilitychange", shown);
+    window.addEventListener("focus", check);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", shown);
+      window.removeEventListener("focus", check);
+    };
   }, [today]);
   return today;
 }

@@ -1,5 +1,6 @@
 import type { KeyboardEvent, RefObject } from "react";
 import { useI18n } from "../../contexts/I18nContext";
+import { useComposition } from "../../hooks/useComposition";
 import { draftDirection } from "../../lib/documentLanguage";
 import type { ChatTarget } from "../../hooks/useChatTargets";
 import { chatTargetRows } from "../../lib/chatTargets";
@@ -34,7 +35,8 @@ export function ChatTargetRow({ target, testId, onClick, checked, disabled, unav
 
 /**
  * A picker's search by name (Forward, Open an app in a chat), in Forward's words. The down arrow goes on to the first
- * chat it found; the list it filters takes `chatTargetKeys` for the rest.
+ * chat it found; the list it filters takes `chatTargetKeys` for the rest. While an input method composes, the down
+ * arrow is its own (the next candidate) and stays in the field.
  */
 export function ChatTargetSearch({ inputRef, list, value, onChange, testId }: {
   inputRef: RefObject<HTMLInputElement | null>;
@@ -45,15 +47,16 @@ export function ChatTargetSearch({ inputRef, list, value, onChange, testId }: {
   testId: string;
 }) {
   const { t } = useI18n();
+  const composition = useComposition();
   const keys = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== "ArrowDown") return;
+    if (composition.composing(e) || e.key !== "ArrowDown") return;
     const first = chatTargetRows(list.current)[0];
     if (!first) return;
     e.preventDefault();
     first.focus();
   };
   return (
-    <input ref={inputRef} type="search" data-testid={testId} value={value} dir={draftDirection(value)} onChange={e => onChange(e.target.value)} onKeyDown={keys}
+    <input ref={inputRef} type="search" data-testid={testId} value={value} dir={draftDirection(value)} onChange={e => onChange(e.target.value)} {...composition.inputProps} onKeyDown={keys}
       placeholder={t("chat.forward.search")} aria-label={t("chat.forward.search")}
       className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus-ring" />
   );
