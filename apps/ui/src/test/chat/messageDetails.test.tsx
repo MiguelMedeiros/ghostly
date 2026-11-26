@@ -270,6 +270,19 @@ describe("what it says", () => {
     expect(screen.getByTestId("message-details-keys-hint")).toHaveTextContent("Keys are never shown here.");
   });
 
+  it("a long text's excerpt ends before an emoji it would cut in half, or a family emoji it would cut into its parts", async () => {
+    fakeEngine.on("messageDetails", () => null);
+    for (const [text, kept] of [[`${"a".repeat(89)}😀 and more`, "a".repeat(89)], [`${"a".repeat(85)}👨‍👩‍👧 and more`, "a".repeat(85)]]) {
+      const { user, unmount, container } = bubble({ text });
+      await detailsClick(user, container.querySelector("[data-message-bubble]")!);
+      const excerpt = await screen.findByTestId("message-details-excerpt");
+      expect(excerpt).toHaveTextContent(`${kept}…`);
+      // No half of an emoji (a lone surrogate) in it.
+      expect(excerpt.textContent).not.toMatch(/\p{Cs}/u);
+      unmount();
+    }
+  });
+
   it("a text received through an Iroh relay names the relay", async () => {
     fakeEngine.on("messageDetails", () => textView({
       message: { id: "peer_x", wireId: "w", linkId: "link-1", sender: "peer", timestamp: 1_700_000_000_000, via: "datalink", kind: "text", textBytes: 5 },
