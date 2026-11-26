@@ -375,19 +375,23 @@ export class MeshHubs {
     }
     out.delete(me);
     for (const key of [...out]) if (!rosterHas(session.roster, key)) out.delete(key);
-    live.wantedSize = out.size;
     const edges = this.host.edges(groupId);
     for (const [key, until] of live.gone) if (until <= now) live.gone.delete(key); else if (edges.has(key)) out.add(key);
     // Make before break, as a member on my hubs: an edge that is up stays until a hub whose edge to me is up says it
-    // reaches that member itself (its `k`). Closed at once, texts sent while the hubs' edges opened came 13-35 s late.
+    // reaches that member, itself (its `k`) or through the hubs it hears (its `v`). Closed at once, texts sent while the
+    // hubs' edges opened came 13-35 s late.
     if (!live.hub && live.myHubs.length) {
       const reached = new Set<string>();
       for (const hub of this.hubs(groupId, session, now)) {
         const id = edges.get(hub), keys = live.reach.get(hub);
-        if (keys && id && this.host.linkReady(id)) for (const key of keys) reached.add(key);
+        if (!keys || !id || !this.host.linkReady(id)) continue;
+        for (const key of keys) reached.add(key);
+        for (const key of live.reachVia.get(hub) ?? []) reached.add(key);
       }
       for (const [key, id] of edges) if (!out.has(key) && !reached.has(key) && rosterHas(session.roster, key) && this.host.linkReady(id)) out.add(key);
     }
+    // Every edge kept, those lingering and those waiting for a hub too: what paces them (`edgeLoad`).
+    live.wantedSize = out.size;
     return out;
   }
 
