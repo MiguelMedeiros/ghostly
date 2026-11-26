@@ -20,6 +20,14 @@ const TYPED = "input:not([type=checkbox], [type=radio], [type=range], [type=butt
 const InSheet = createContext(false);
 
 /**
+ * The menus open now. One at a time, as a desktop's own menus: one that opens closes the others, but those it opens
+ * from (its opener is in them). Their outside press could not do it for every way a menu opens: a right-click opens its
+ * menu between the press and the release, so at the release the menu open before had a newer layer over it and stayed
+ * (three right-clicks on three messages left three menus open), and the keyboard's menu key presses nothing.
+ */
+const openMenus = new Set<{ menu: RefObject<HTMLElement | null>; close: () => void }>();
+
+/**
  * A dropdown of actions. Every row is one line in every language: the menu is as wide as its longest row
  * (between a floor and the window), and only a row wider than that is cut, with the full text on hover.
  * On a wide screen it drops from its opener and moves over, or up, to stay in the window; on a phone it is a
@@ -181,14 +189,26 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
   // alone (on a phone the keyboard would come back up). In the layout phase, as the menu leaves: a dialog a row opens
   // then finds the button focused, and gives the focus back there when it closes. Before, it all went to the page.
   const openedFrom = useRef<Element | null>(null);
+  // Closed because another menu opened: the focus is the new one's, never taken back to this one's button.
+  const replaced = useRef(false);
   useLayoutEffect(() => {
     const opener = document.activeElement, menu = ref.current;
     openedFrom.current = opener;
     return () => {
-      if (!(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected || opener.matches(TYPED)) return;
+      if (replaced.current || !(opener instanceof HTMLElement) || opener === document.body || !opener.isConnected || opener.matches(TYPED)) return;
       if (menu?.contains(document.activeElement)) opener.focus({ preventScroll: true });
     };
   }, []);
+
+  // One menu at a time (openMenus): after the line above, so this one's opener is read before another one closes.
+  const closing = useRef(onClose); closing.current = onClose;
+  useLayoutEffect(() => {
+    const self = { menu: ref, close: () => { replaced.current = true; closing.current(); } };
+    const from = anchorRef.current;
+    for (const other of [...openMenus]) if (!(from && other.menu.current?.contains(from))) other.close();
+    openMenus.add(self);
+    return () => { openMenus.delete(self); };
+  }, [anchorRef]);
 
   if (!open) return null;
 
