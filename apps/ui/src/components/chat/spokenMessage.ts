@@ -1,6 +1,7 @@
 import type { GroupPayNote } from "@ghostly/browser/shared/types";
 import type { Translate } from "../../contexts/I18nContext";
 import { filePreview, previewText } from "../../lib/chatList";
+import { fitText } from "../../lib/fitText";
 import { servicesPlatform } from "../../lib/platform";
 import { paymentLine, storedPaymentLine } from "../paymentWords";
 import { appCardLine, cardLine, showsCard } from "../../lib/statusCards";
@@ -27,10 +28,10 @@ export function spoken(message: Announceable, t: Translate, appCards: boolean, n
   return appCardLine(message.card, appCards, t) ?? filePreview(message.file, t) ?? previewText(message.text, t);
 }
 
-/** A line read out, on one line and up to `PREVIEW_CHARS`. */
+/** A line read out, on one line and up to `PREVIEW_CHARS`, cut between two characters (an emoji stays whole or goes). */
 export const short = (text: string) => {
   const line = text.replace(/\s+/g, " ").trim();
-  return line.length > PREVIEW_CHARS ? `${line.slice(0, PREVIEW_CHARS - 1).trimEnd()}…` : line;
+  return line.length > PREVIEW_CHARS ? `${fitText(line, s => s.length < PREVIEW_CHARS).trimEnd()}…` : line;
 };
 
 /** A message as the chat's announcer reads it out, the start of it (MessageAnnouncer): the chat's search says its match so too. */
