@@ -19,7 +19,7 @@ import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { NAME, withName } from "../components/apps/aroundName";
 import { useAppsState } from "../lib/apps/flag";
-import { appStopped, refreshInstalledApps, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
+import { appStopped, refreshInstalledApps, refreshInstalledAppsAfter, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../lib/apps/installed";
 import { useTryAgain } from "../lib/apps/tryAgain";
 import { kept } from "../lib/apps/kept";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
@@ -542,7 +542,7 @@ export function Apps() {
   // Removed, never opened: nothing to export, and the store still has it. It is not offered again.
   const removeBuiltIn = useCallback(async (app: BuiltInAppOffer) => {
     setRemoving(true);
-    try { await engine.call("appUninstall", { ref: app.ref }); setGone({ app: app.ref }); await refreshInstalledApps(); } catch (e) { fail(e); } finally { setRemoving(false); }
+    try { await refreshInstalledAppsAfter(async () => { await engine.call("appUninstall", { ref: app.ref }); setGone({ app: app.ref }); }); } catch (e) { fail(e); } finally { setRemoving(false); }
   }, [fail]);
 
   if (state === "checking") return null;

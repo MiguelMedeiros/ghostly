@@ -26,10 +26,12 @@ const subscribe = (listener: () => void) => { listeners.add(listener); return ()
 // version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`). The engine says
 // the same after an uninstall, to every page: the app's frames stop wherever they run. A first read still on its way
 // may have started before the check ended: it is read again too.
-engine.onAppsChecked(() => { if (apps !== null || loading || appsRunning()) void refreshInstalledApps(); });
+engine.onAppsChecked(() => { if (apps !== null || loading || appsRunning()) { told++; void refreshInstalledApps(); } });
 
 /** How many reads were asked: of two on their way at once, the one asked last is what shows. */
 let asked = 0;
+/** How many reads the engine's tell asked (`refreshInstalledAppsAfter`). */
+let told = 0;
 
 /** An app is the same app from one read to the next by its ref. */
 const byRef = (app: { ref: string }) => app.ref;
@@ -54,6 +56,19 @@ export function refreshInstalledApps(): Promise<void> {
   }, (e: unknown) => { if (mine !== asked) return loading ?? undefined; apps ??= []; failed = e; tell(); }).finally(() => { if (loading === read) loading = null; });
   loading = read;
   return read;
+}
+
+/**
+ * Runs `work` (an uninstall, an update, files fetched again) and resolves once the list is read after it, read once:
+ * the engine tells every page when it made such a change, before it answers, and the read that tell asked is the one
+ * awaited, not a second whole list (every installed app, its files looked for). Work the engine tells nothing of reads
+ * the list itself.
+ */
+export async function refreshInstalledAppsAfter(work: () => Promise<unknown>): Promise<void> {
+  const before = told;
+  await work();
+  if (told !== before) return loading ?? undefined;
+  return refreshInstalledApps();
 }
 
 /** For tests: forget what was read. */
