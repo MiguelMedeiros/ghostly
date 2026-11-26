@@ -138,6 +138,16 @@ describe("the rail", () => {
     field.remove();
   });
 
+  it("folds once while Alt+Shift+L is held down, as Ctrl+N does", () => {
+    saveSession(chat("a", { nick: "Ana" }));
+    list();
+    fireEvent.keyDown(window, { code: "KeyL", key: "L", altKey: true, shiftKey: true });
+    for (let i = 0; i < 3; i++) {
+      expect(fireEvent.keyDown(window, { code: "KeyL", key: "L", altKey: true, shiftKey: true, repeat: true })).toBe(false);
+    }
+    expect(screen.getByTestId("chat-rail")).toBeInTheDocument();
+  });
+
   it("folds with the key that types L on any keyboard, as Ctrl+N and Ctrl+F do", () => {
     saveSession(chat("a", { nick: "Ana" }));
     list();
