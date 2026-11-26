@@ -1013,7 +1013,12 @@ describe("with the apps flag on", () => {
     expect(await screen.findByTestId("app-card-error")).toHaveTextContent("A store you added removed this app.");
     expect(screen.getByTestId("app-card-check")).toHaveTextContent(/^Stopped$/);
     expect(opener).toHaveBeenLastCalledWith(REF, "link-1", { runAnyway: false });
+    // Run anyway goes through the installed app's details screen, which says the store and its reason first.
     await user.click(screen.getByTestId("app-card-run-anyway"));
+    expect(opener).toHaveBeenCalledTimes(1);
+    const details = await screen.findByTestId("app-details");
+    expect(within(details).getByTestId("app-run-line")).toHaveTextContent("Malware");
+    await user.click(within(details).getByTestId("app-run-anyway"));
     expect(opener).toHaveBeenLastCalledWith(REF, "link-1", { runAnyway: true });
     await waitFor(() => expect(screen.queryByTestId("app-card-error")).not.toBeInTheDocument());
   });

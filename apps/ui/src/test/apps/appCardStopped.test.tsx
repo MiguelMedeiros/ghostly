@@ -75,14 +75,31 @@ describe("an app card for an installed app taken down", () => {
     expect(within(row).queryByTestId("installed-app-open")).not.toBeInTheDocument();
   });
 
-  it("removed by a store: the card says Stopped as the Apps page does, and offers Run anyway, which opens it", async () => {
+  it("removed by a store: the card says Stopped as the Apps page does, and its Run anyway goes through the details screen", async () => {
     run = REMOVED;
     const { row, card, user } = await pageAndCard();
     expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent(/^Stopped$/);
     expect(within(card).getByTestId("app-card-check")).toHaveTextContent(/^Stopped$/);
     expect(within(card).queryByTestId("app-card-open")).not.toBeInTheDocument();
+    // The card is drawn from what the contact sent: its Run anyway runs nothing, it opens the installed app's details
+    // screen, which says which store removed it and why before its own Run anyway, as the Apps page's does.
     await user.click(within(card).getByTestId("app-card-run-anyway"));
+    expect(opened).not.toHaveBeenCalled();
+    const details = await screen.findByTestId("app-details");
+    expect(within(details).getByTestId("app-run-line")).toHaveTextContent("Ghostly");
+    expect(within(details).getByTestId("app-run-line")).toHaveTextContent("Sends your moves to a server");
+    await user.click(within(details).getByTestId("app-run-anyway"));
     expect(opened).toHaveBeenCalledWith(REF, "link-1", { runAnyway: true });
+    expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
+  });
+
+  it("removed by a store: Keep it stopped on the card's details screen runs nothing", async () => {
+    run = REMOVED;
+    const { card, user } = await pageAndCard();
+    await user.click(within(card).getByTestId("app-card-run-anyway"));
+    await user.click(within(await screen.findByTestId("app-details")).getByTestId("app-keep-stopped"));
+    expect(screen.queryByTestId("app-details")).not.toBeInTheDocument();
+    expect(opened).not.toHaveBeenCalled();
   });
 
   it("an app that may run still says Installed with Open", async () => {
