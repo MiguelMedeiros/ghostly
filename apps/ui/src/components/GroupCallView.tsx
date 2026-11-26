@@ -29,11 +29,13 @@ export interface GroupCallParticipant {
   mic: boolean;
   camera: boolean;
   screen: boolean;
+  /** Their shared screen carries its sound (a tab's or the system's); false while sharing a screen without it. */
+  screenSound?: boolean;
   speaking: boolean;
   /** What the group's admin took away from them in this call (WISP 602 § Moderation): off until the admin allows it. */
   byAdmin?: { mic: boolean; camera: boolean; screen: boolean };
   /** Played and shown here: the hook attaches none of them to the page itself. */
-  tracks: { audio?: MediaStreamTrack | null; camera?: MediaStreamTrack | null; screen?: MediaStreamTrack | null };
+  tracks: { audio?: MediaStreamTrack | null; camera?: MediaStreamTrack | null; screen?: MediaStreamTrack | null; screenAudio?: MediaStreamTrack | null };
 }
 
 /** The `useGroupCall` state the view draws. `local` is you; `participants` are everyone else. */
@@ -152,8 +154,8 @@ function TrackVideo({ track, fit, mirror }: { track: MediaStreamTrack; fit: "cov
   return <video ref={ref} autoPlay playsInline muted className={`absolute inset-0 w-full h-full bg-black ${fit === "contain" ? "object-contain" : "object-cover"}`} style={mirror ? { transform: "scaleX(-1)" } : undefined} />;
 }
 
-/** Someone's sound, on the chosen speaker. */
-function TrackAudio({ track, speaker }: { track: MediaStreamTrack; speaker?: string }) {
+/** Someone's sound (their voice, or their shared screen's), on the chosen speaker. */
+function TrackAudio({ track, speaker, testId = "group-call-audio" }: { track: MediaStreamTrack; speaker?: string; testId?: string }) {
   const ref = useRef<HTMLAudioElement>(null);
   useEffect(() => {
     if (!ref.current || typeof MediaStream !== "function") return;
@@ -166,7 +168,7 @@ function TrackAudio({ track, speaker }: { track: MediaStreamTrack; speaker?: str
   useEffect(() => {
     void applySpeaker(ref.current, speaker).catch(() => {});
   }, [speaker, track]);
-  return <audio ref={ref} autoPlay className="hidden" data-testid="group-call-audio" />;
+  return <audio ref={ref} autoPlay className="hidden" data-testid={testId} />;
 }
 
 /** Muted, or muted by the admin (`byAdmin`): ringed, and named so, on the tile and to a screen reader. */
@@ -206,6 +208,13 @@ function Tile({ person, you, kind, speaking, name, face, menu }: { person: Group
       <div className="absolute bottom-1.5 inset-x-1.5 flex items-center gap-1.5">
         {kind === "face" && (person.byAdmin?.mic ? <MutedMark label={t("calls.group.mutedByAdmin")} byAdmin /> : !person.mic && <MutedMark label={t("calls.group.muted")} />)}
         <span dir="auto" className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">{name}</span>
+        {/* What the others get of your screen's sound: all the system plays (but this page), or nothing when the
+            browser gave the picture alone (or the sound was left unticked). */}
+        {kind === "screen" && you && person.screenSound !== undefined && (
+          <span data-testid="group-call-screen-sound" data-sound={person.screenSound} className="min-w-0 truncate rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white">
+            {t(person.screenSound ? "calls.sharing.withSound" : "calls.sharing.noSound")}
+          </span>
+        )}
       </div>
       {menu}
     </div>
@@ -361,6 +370,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       <div role="status" className="sr-only" data-testid="group-call-news">{news.map((line) => <p key={line}>{line}</p>)}</div>
 
       {participants.map((p) => p.tracks.audio && <TrackAudio key={p.identity} track={p.tracks.audio} speaker={devices?.speaker} />)}
+      {participants.map((p) => p.tracks.screenAudio && <TrackAudio key={`${p.identity}-screen`} track={p.tracks.screenAudio} speaker={devices?.speaker} testId="group-call-screen-audio" />)}
 
       {mini ? (
         <div className="call-mini-tile absolute inset-0 grid">
