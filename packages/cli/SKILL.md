@@ -230,7 +230,8 @@ ghostly group show Support                           # members; the entry link s
 - In a group, only a message that mentions the agent is a turn: people write `@Casper` in the app.
 - `--mention <member>` takes a member's key, a key prefix, their name or `everyone`, and the text must contain
   `@<name>` for it (or `@<key prefix>`, `@everyone`). Without it, the command fails with
-  "Write @Ana in the text to mention Ana". A turn's `member` is the author's key; `untrusted.name` is their name.
+  "Write @Ana in the text to mention Ana". `everyone` is a private group's admin's only: from any other member, or
+  in a community (which has no @everyone), the command is `refused` and nothing goes. A turn's `member` is the author's key; `untrusted.name` is their name.
 - A group has no delivery receipts: `group send --wait sent` returns once a member's edge took it.
 
 ### 10. Show your work: task and routine cards

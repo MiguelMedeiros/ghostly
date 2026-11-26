@@ -42,7 +42,7 @@ export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "g
   },
   "group send": {
     method: "group.send", target: "group", args: ["group", "text...?"], usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--button id:Label]... [--style id=primary|neutral|danger]... [--once] [--id id] [--stdin] [--force] [--wait none|sent] [--timeout s]", summary: "Send to a group; mention members written as @name in the text; --button puts buttons under it",
-    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, mention: { type: "list", description: "A member (key, key prefix, name or everyone) named as @name in the text" }, ...buttonOptions, ...groupWait },
+    options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, mention: { type: "list", description: "A member (key, key prefix, name, or everyone: a private group's admin only) named as @name in the text" }, ...buttonOptions, ...groupWait },
   },
   "group edit": {
     method: "group.edit", target: "group", message: true, args: ["group", "message", "text...?"], usage: "group edit <group> <message> [text... | --text <text> | --stdin] [--mention <member>]... [--force] [--wait none|sent] [--timeout s]", summary: "Replace the text of a message you sent to a group (the id group send gave)",
