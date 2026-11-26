@@ -117,6 +117,36 @@ describe("a call that rings with no Ghostly tab open", () => {
     }
   });
 
+  /**
+   * The peer's document went away mid-ring (its renderer crashed, it was ended from Chrome's task manager) and came back
+   * as the same profile: the ring and its minute lived in that document, so nothing took its notification back.
+   */
+  it("goes when the peer's document went away during the ring, and a message's stays", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      engine().ring(LINK, offer());
+      await vi.waitFor(() => expect(created()).toHaveLength(1), { timeout: 4_000 });
+      const [call] = created()[0]!;
+      engine().attention({ id: "message:group:control:m1", type: "message", at: Date.now(), linkId: "group:control" });
+      await vi.waitFor(() => expect(created()).toHaveLength(2), { timeout: 4_000 });
+      const [message] = created()[1]!;
+
+      // Nothing of a crashed document runs: its take-back never comes.
+      const send = world.sendMessageFrom;
+      world.sendMessageFrom = (sender, sent) => ((sent as { type?: string }).type === "unnotify" ? Promise.resolve(undefined) : send(sender, sent));
+      world.endOffscreen();
+      world.fireAlarm("peer-check");
+      await vi.waitFor(() => expect(engineControl().servers).toHaveLength(2), { timeout: 4_000 });
+      await vi.advanceTimersByTimeAsync(2 * RING_MS);
+      expect(world.notices.has(call)).toBe(false);
+      expect(world.session.has(`notice:${call}`)).toBe(false);
+      expect(world.notices.has(message)).toBe(true);
+      expect(world.session.get(`notice:${message}`)).toBe("group:control");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps apart from the chat's message notification", async () => {
     await ring();
     const [call] = created()[0]!;

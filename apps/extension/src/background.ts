@@ -30,7 +30,10 @@ function ensureEngine(): Promise<void> {
 }
 
 async function startEngine(): Promise<void> {
-  if (!(await chrome.offscreen.hasDocument())) await createEngineDocument();
+  if (!(await chrome.offscreen.hasDocument())) {
+    await clearRings();
+    await createEngineDocument();
+  }
   const status = await waitForEngine();
   if (status.profile === status.active && !status.stopped) return await sweepAfterPeer(status);
   // A page made another profile the one in use. The running peer stops and its document closes before
@@ -270,6 +273,21 @@ async function clearNoticesNow(next?: string): Promise<void> {
   if (!keys.length) return;
   await chrome.storage.session.remove([...keys, ...keys.map((key) => `ring:${key.slice("notice:".length)}`)]).catch(() => {});
   await Promise.all(keys.map((key) => chrome.notifications?.clear(key.slice("notice:".length)).catch(() => false)));
+}
+
+/**
+ * The document went away (its renderer crashed, it was ended from Chrome's task manager): a call's notification it showed
+ * is taken back by that document alone (`unnotify`, at hang-up or after its ring), and the next one never knew of it, so
+ * it goes before that one opens. Taken before, so none the next one shows is among them.
+ */
+function clearRings(): Promise<void> {
+  return inNoticeOrder(async () => {
+    const kept = await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>);
+    const ids = Object.keys(kept).filter((key) => key.startsWith("ring:")).map((key) => key.slice("ring:".length));
+    if (!ids.length) return;
+    await chrome.storage.session.remove(ids.flatMap((id) => [`notice:${id}`, `ring:${id}`])).catch(() => {});
+    await Promise.all(ids.map((id) => chrome.notifications?.clear(id).catch(() => false)));
+  });
 }
 
 /**
