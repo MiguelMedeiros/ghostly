@@ -37,7 +37,10 @@ describe("what a file's status line says", () => {
     ["no connection, nothing moved", t({ stage: "waiting", transferred: 0 }), "Waiting for connection · 4.2 GB"],
     ["sent, the contact decides", t({ stage: "asking", direction: "out", transferred: 0 }), "Waiting for \u2068Ana\u2069 to accept · 4.2 GB"],
     ["received, this person decides", t({ stage: "asking", direction: "in", transferred: 0 }), "4.2 GB · waiting for your answer"],
-    ["sent, the contact's turn", t({ stage: "queued", direction: "out" }), "Queued by \u2068Ana\u2069 · 62% done"],
+    // The contact answered busy, or it is held back here behind the contact's 256 unfinished files, never offered:
+    // "Queued by Ana" named the contact for a wait that may be this side's.
+    ["sent, waiting its turn", t({ stage: "queued", direction: "out" }), "Waiting its turn · 62% done"],
+    ["sent, held back here before its offer", t({ stage: "queued", direction: "out", transferred: 0 }), "Waiting its turn · 0% done"],
     ["paused here", t({ stage: "paused", pausedBy: "me" }), "Paused · 62% of 4.2 GB"],
     ["paused by the contact", t({ stage: "paused", pausedBy: "peer" }), "Paused by \u2068Ana\u2069 · 62% of 4.2 GB"],
     ["checking", t({ stage: "verifying" }), "Checking the file… 4.2 GB"],
@@ -67,7 +70,6 @@ describe("what a file's status line says", () => {
   it("a contact with no name is \"your contact\", in lower case mid-sentence", () => {
     expect(fileStatus(f, t({ stage: "paused", pausedBy: "peer" }), undefined, false)).toBe("Paused by your contact · 62% of 4.2\u00a0GB");
     expect(fileStatus(f, t({ stage: "asking", direction: "out", transferred: 0 }), undefined, false)).toBe("Waiting for your contact to accept · 4.2\u00a0GB");
-    expect(fileStatus(f, t({ stage: "queued", direction: "out" }), undefined, false)).toBe("Queued by your contact · 62% done");
   });
   it("time left reads in minutes and hours", () => {
     expect(timeLeft(30)).toBe("less than a minute left");

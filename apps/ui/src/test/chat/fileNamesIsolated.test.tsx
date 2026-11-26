@@ -65,7 +65,7 @@ describe("names in a file's lines, each isolated", () => {
   it("the line under a file names the contact isolated", () => {
     const t = translateWith(locales.ar, "ar");
     const sent = (patch: Partial<FileTransferState>) => fileStatus(file(), { state: "transferring", direction: "out", transferred: 0, size: 40 * MB, ...patch }, "Bob!", false, t);
-    for (const stage of ["asking", "queued", "verifying"] as const) expect(sent({ stage }), stage).toContain(iso("Bob!"));
+    for (const stage of ["asking", "verifying"] as const) expect(sent({ stage }), stage).toContain(iso("Bob!"));
     expect(sent({ stage: "paused", pausedBy: "peer" })).toContain(iso("Bob!"));
     // A contact with no name: the app's own words, as they were.
     expect(fileStatus(file(), { state: "transferring", stage: "asking", direction: "out", transferred: 0, size: 40 * MB }, undefined, false, englishT)).toBe("Waiting for your contact to accept · 40.0 MB");

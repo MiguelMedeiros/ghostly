@@ -192,7 +192,6 @@
     "pausedBy": "In pausa da {{name}}",
     "preparing": "Preparazione… {{progress}}",
     "queuedHere": "In attesa del suo turno · {{done}} completato",
-    "queuedThere": "In coda da {{name}} · {{done}} completato",
     "resendHint": "Lo offre di nuovo. Riprende da ciò che il tuo contatto ha già.",
     "restoring": "Caricamento… · {{size}}",
     "resume": "Riprendi",
