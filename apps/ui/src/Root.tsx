@@ -110,11 +110,11 @@ function ChatLinkIntake() {
   const [heldCount, setHeldCount] = useState(0);
   const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | "join.tooManyLinks" | "join.chatGone" | null>(null);
 
-  const open = useCallback((keys: SessionKeys) => {
+  const open = useCallback((keys: SessionKeys, notice = true) => {
     // This profile's own invite opens the chat that owns it, never a second one; one already joined by opens its chat.
     const outcome = classifyInvite(keys);
     let sessionId: string | null;
-    if (outcome.kind === "own") { sessionId = outcome.sessionId; showJoinNotice("join.own"); }
+    if (outcome.kind === "own") { sessionId = outcome.sessionId; if (notice) showJoinNotice("join.own"); }
     else if (outcome.kind === "new" && linkChatsWaiting() >= LINK_CHATS_WAITING) {
       setInvalid("join.tooManyLinks");
       navigate("/", { replace: true });
@@ -125,7 +125,7 @@ function ChatLinkIntake() {
         if (cause instanceof Error && cause.message === NO_ROOM_FOR_CHAT) { reportChatNotStored(cause); navigate("/", { replace: true }); return; }
         sessionId = null;
       }
-      if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
+      if (notice && sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
     }
     if (!sessionId) {
       setInvalid("join.invalid");
@@ -184,7 +184,8 @@ function ChatLinkIntake() {
     if (!heldCount || waits) return;
     const list = held.current.splice(0);
     setHeldCount(0);
-    for (const keys of list) open(keys);
+    // Only the last opens the chat the app lands on: an earlier one's join notice would sit over it.
+    list.forEach((keys, i) => open(keys, i === list.length - 1));
   }, [heldCount, waits, open]);
 
   // Kept until closed, and said only once the lock is passed and the question answered: under the lock screen nobody
