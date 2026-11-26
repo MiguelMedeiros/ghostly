@@ -42,11 +42,16 @@ describe("a group's main buttons in forced colors", () => {
   });
 
   // The header's pills (Join call, Share link) are drawn by their accent tint alone: forced colors drop it, and they
-  // read as bare bold text beside bare icon buttons.
-  it.each(TINT_FILES)("%s: the accent-tinted pill has a ButtonText border in forced colors only", (file) => {
+  // read as bare bold text beside bare icon buttons. Their edge is there all along, see-through in normal colours: one
+  // added in forced colors only widened Share link by 2 px and moved the connection dot beside it.
+  it.each(TINT_FILES)("%s: the accent-tinted pill has a see-through border that is ButtonText in forced colors", (file) => {
     const buttons = tintedButtons(file);
     expect(buttons.length, file).toBeGreaterThan(0);
-    for (const classes of buttons) keepsAnEdge(file, classes);
+    for (const classes of buttons) {
+      const names = classes.split(/\s+/);
+      for (const name of ["border", "border-transparent", "forced-colors:border-[color:ButtonText]"]) expect(names, `${file}: ${classes}`).toContain(name);
+      expect(names.filter((n) => /^forced-colors:border$/.test(n)), `${file}: ${classes}`).toEqual([]);
+    }
   });
 });
 
@@ -56,7 +61,7 @@ const TINT_FILES = ["components/GroupCallButton.tsx", "pages/GroupChat.tsx"];
 function tintedButtons(file: string): string[] {
   const source = readFileSync(join(SRC, file), "utf8");
   return [...source.matchAll(/["`]([^"`]*\bbg-accent\/15\b[^"`]*)["`]/g)].map(([, classes]) => classes)
-    .filter((classes) => /\btext-accent\b/.test(classes) && /\brounded-full\b/.test(classes) && /\bpx-3\b/.test(classes));
+    .filter((classes) => /\btext-accent\b/.test(classes) && /\brounded-full\b/.test(classes) && /\bfont-semibold\b/.test(classes));
 }
 
 const DANGER_FILES = ["components/LeaveGroupDialog.tsx", "components/RemoveMemberDialog.tsx", "components/GroupLinkAskDialog.tsx"];
