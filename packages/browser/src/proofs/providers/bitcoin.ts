@@ -142,9 +142,11 @@ export const bitcoin: IdentityProofProvider<BitcoinEvidence> = {
     return { signature: e.signature };
   },
   async verify(statement, evidence) {
+    const subject = statement.binding.subject;
+    if (normalizeAddress(subject) !== subject) throw new Error("The address is not in canonical form");
     const { verdict, network } = check(statement, evidence.signature);
     const format = verdict.format === "legacy" ? "Legacy signmessage" : verdict.format === "bip322-full" ? "BIP-322 full" : "BIP-322 simple";
     const script = { p2pkh: "P2PKH", p2wpkh: "P2WPKH", "p2sh-p2wpkh": "P2SH-P2WPKH", p2tr: "P2TR" }[verdict.script];
-    return { subject: statement.binding.subject, source: `${format} signature, ${script}${network === "testnet" ? ", test network" : ""}` };
+    return { subject, source: `${format} signature, ${script}${network === "testnet" ? ", test network" : ""}` };
   },
 };
