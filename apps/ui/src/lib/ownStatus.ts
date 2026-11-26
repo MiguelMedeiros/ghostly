@@ -43,9 +43,12 @@ export function statusEnd(choice: Exclude<StatusEnd, "custom" | "keep">, languag
   return midnight.getTime();
 }
 
-/** A status text as long as it may be: 60 characters as a person counts them (an emoji is one, not two). */
-export const capStatusText = (text: string) => [...text].slice(0, STATUS_TEXT_MAX).join("");
+/**
+ * A status text's length as core counts it, in code points (an emoji like 😀 is one, a flag two). The field keeps whole
+ * characters only (`useFittedNameField`): with one left, a flag does not go in at all rather than as half of itself.
+ */
 export const statusTextLength = (text: string) => [...text].length;
+export const fitsStatusText = (text: string) => statusTextLength(text) <= STATUS_TEXT_MAX;
 
 /**
  * "11:00", "Fri 18:00", or "Dec 3, 18:00" further on: when a status ends, in the app's language. An end at midnight
