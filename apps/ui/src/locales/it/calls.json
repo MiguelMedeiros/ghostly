@@ -41,6 +41,7 @@
     "leftMany": "{{names}} hanno lasciato la chiamata",
     "muted": "Microfono disattivato",
     "mutedByAdmin": "Silenziato dall'admin",
+    "mutedForYou": "{{name}} è silenziato per te",
     "noCallKey": "Non puoi ancora entrare: la chiave della chiamata non è arrivata",
     "noCallKeyInfo": "Le chiamate di questo gruppo sono cifrate end-to-end e la loro chiave non è ancora arrivata su questo dispositivo. Riprova tra un attimo.",
     "noRelay": "Non puoi entrare con Nascondi il mio IP attivo",
@@ -58,7 +59,9 @@
     "screenOf": "Schermo di {{name}}",
     "showScreen": "Mostra in grande lo schermo di {{name}}",
     "showYourScreen": "Mostra in grande il tuo schermo",
-    "unreachable": "Impossibile raggiungere la chiamata del gruppo"
+    "unreachable": "Impossibile raggiungere la chiamata del gruppo",
+    "volumeNote": "Solo tu senti la modifica. A 0 è silenziato per te.",
+    "volumeOf": "Volume di {{name}}"
   },
   "incomingAudio": "Chiamata vocale in arrivo...",
   "incomingVideo": "Videochiamata in arrivo...",

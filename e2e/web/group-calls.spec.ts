@@ -10,7 +10,8 @@ import { installSealProbe, pictures, sealProbe, shareTestPattern, type Picture }
  * A community group's call through its node (WISP 602), end to end: a headless Ghostly is the group's admin, as the
  * node is, and names the e2e stack's token mock as the group's SFU (`ghostly group call --sfu`). Three browsers join
  * by the link and press Join call: each asks the mock for a pass with a request its member key signs, and all three
- * meet in the stack's LiveKit room. They see each other's tiles, a mute shows on the others, one shares the screen
+ * meet in the stack's LiveKit room. They see each other's tiles, one turns another down and off on their own window
+ * alone, a mute shows on the others, one shares the screen
  * (Chromium's fake one, picked by --auto-select-desktop-capture-source) and the other two get it, and a leave takes the
  * tile away. A fourth browser in the group but not in the node's roster gets no pass and sees why.
  *
@@ -51,7 +52,7 @@ async function joinGroup(peer: Peer, link: string): Promise<void> {
   await expect(peer.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 180_000 });
 }
 
-test("three members join a community group's call, see and hear each other, see a shared screen; an outsider gets no pass", { tag: ["@feature:calls.group", "@feature:calls.group.room", "@feature:calls.group.screen"] }, async ({ peer, relay }, testInfo) => {
+test("three members join a community group's call, see and hear each other, set one's volume for themselves, see a shared screen; an outsider gets no pass", { tag: ["@feature:calls.group", "@feature:calls.group.room", "@feature:calls.group.screen", "@feature:calls.group.volume"] }, async ({ peer, relay }, testInfo) => {
   const started = Date.now();
   const node = new HeadlessBot();
   try {
@@ -93,6 +94,28 @@ test("three members join a community group's call, see and hear each other, see 
       await expect.poll(() => hearing(p), { timeout: 30_000 }).toBe(2);
       await expect(p.page.getByTestId("group-call-muted")).toHaveCount(0);
     }
+
+    // Ana sets Bia's volume on Bia's tile: at 50% Bia's <audio> plays at half for Ana, at 0 it's muted for her, and
+    // her tile says so. Only on Ana's window: Cleo's two stay as sent. Back at 100%, Ana hears Bia as sent again.
+    const players = (peer: Peer) =>
+      peer.page.getByTestId("group-call-audio").evaluateAll((els) => (els as HTMLAudioElement[]).map((el) => `${el.muted ? "muted" : "on"} ${el.volume}`).sort());
+    const volumeOf = async (percent: number) => {
+      await tile(ana, b, "face").getByTestId("group-call-volume").click();
+      await ana.page.getByTestId("group-call-volume-slider").fill(String(percent));
+      await ana.page.keyboard.press("Escape");
+      await expect(ana.page.getByTestId("group-call-volume-menu")).toHaveCount(0);
+      await expect(tile(ana, b, "face").getByTestId("group-call-volume")).toHaveAttribute("data-volume", String(percent / 100));
+    };
+    await expect(tile(ana, a, "face").getByTestId("group-call-volume")).toHaveCount(0);
+    await volumeOf(50);
+    await expect.poll(() => players(ana)).toEqual(["on 0.5", "on 1"]);
+    await volumeOf(0);
+    await expect.poll(() => players(ana)).toEqual(["muted 0", "on 1"]);
+    await expect(tile(ana, b, "face").getByTestId("group-call-volume")).toHaveAttribute("aria-label", /is muted for you$/);
+    expect(await players(cleo)).toEqual(["on 1", "on 1"]);
+    await volumeOf(100);
+    await expect.poll(() => players(ana)).toEqual(["on 1", "on 1"]);
+    expect(await hearing(ana)).toBe(2);
 
     // Ana mutes: the mark shows on her tile for Bia and Cleo.
     await ana.page.getByTestId("group-call-mic").click();
