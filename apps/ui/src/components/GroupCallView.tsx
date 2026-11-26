@@ -353,14 +353,16 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         </div>
       ) : (
         <>
-          {/* On a phone the row keeps 12 px (the ⓘ's grown side) from the Small window button and from the "N removed" chip. */}
-          <div className="call-top flex items-center justify-center gap-1.5 max-md:gap-3 px-16 max-md:px-[72px] pt-6 pb-2">
+          {/* On a phone the row keeps 12 px (the ⓘ's grown side) from the Small window button and from the "N removed" chip.
+              Over a shared screen the window starts at the phone's top, so the row starts below its status bar. */}
+          <div data-testid="group-call-top" className={`call-top flex items-center justify-center gap-1.5 max-md:gap-3 px-16 max-md:px-[72px] ${presenter ? "pt-[calc(1.5rem+env(safe-area-inset-top))]" : "pt-6"} pb-2`}>
             <p dir="auto" data-over-picture={presenter ? true : undefined} className="min-w-0 truncate text-text-primary font-medium">{groupName}</p>
             {/* Its phone hit area reaches up into the window's top, not down onto the tiles drawn over it 8 px below. */}
-            <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className="max-md:before:-top-4 max-md:before:-bottom-2" />
+            <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className={`max-md:before:-top-4 max-md:before:-bottom-2 ${presenter ? "text-white/80 aria-expanded:text-white" : ""}`} />
             {moderation && <RemovedFromCall moderation={moderation} nameOf={(identity) => (groupNameOf ? groupNameOf(identity) : identity)} host={box} />}
           </div>
-          {info && <p id={infoId} data-testid="group-call-info-text" className="mx-auto max-w-md px-4 pb-2 text-center text-xs text-text-secondary break-words">{t("calls.group.info")}</p>}
+          {/* Over a shared screen in the theme's grey it was 2.3:1 on black in the light theme: there it is a dark chip, as the error notice is. */}
+          {info && <p id={infoId} data-testid="group-call-info-text" className={`mx-auto text-center text-xs break-words ${presenter ? "mb-2 w-max max-w-[min(28rem,calc(100%-2rem))] rounded-lg bg-black/70 px-3 py-2 text-white" : "max-w-md px-4 pb-2 text-text-secondary"}`}>{t("calls.group.info")}</p>}
           {/* A shared screen fills the whole window, fitted whole, and the rest is drawn over it as in the 1:1 call: the
               name above, the faces at the side (along the bottom on a phone), the controls below. Laid out between them
               it had 60% of a 1280 × 800 window, and 22% of a phone's. Under the name row, which stays in the flow. */}
@@ -369,7 +371,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
               <div data-testid="group-call-stage" className="absolute inset-0 -z-10 grid">
                 <Tile person={presenter} you={presenter === local} kind="screen" speaking={false} name={fillNames(t("calls.group.screenOf"), { name: nameOf(presenter) })} face={shown(presenter)} whole />
               </div>
-              <div className="call-tiles absolute inset-0 pt-14 z-10 pointer-events-none flex md:justify-end max-md:items-end">
+              <div data-testid="group-call-faces" className="call-tiles absolute inset-0 pt-[calc(3.5rem+env(safe-area-inset-top))] z-10 pointer-events-none flex md:justify-end max-md:items-end">
                 <div data-testid="group-call-side" className="pointer-events-auto md:w-48 max-md:h-28 max-md:w-full shrink-0 flex md:flex-col gap-2 overflow-auto">
                   {[...screenTiles, ...faces].map((tile) => <div key={tile.key} className="shrink-0 grid md:h-28 max-md:w-36">{tile}</div>)}
                 </div>

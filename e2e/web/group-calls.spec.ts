@@ -33,6 +33,15 @@ async function plays(peer: Peer, identity: string, kind: "face" | "screen"): Pro
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { timeout: 15_000 }).toBeGreaterThan(at);
 }
 
+/** How this member's whole call window draws the shared screen it shows large: its video's box against the viewport, and its fit. */
+const stageBox = (peer: Peer) =>
+  peer.page.evaluate(() => {
+    const video = document.querySelector<HTMLVideoElement>("[data-testid=group-call-stage] video");
+    if (!video) return "none";
+    const r = video.getBoundingClientRect();
+    return `${Math.round(r.left)},${Math.round(r.top)} ${Math.round(r.width)}x${Math.round(r.height)} of ${innerWidth}x${innerHeight} ${getComputedStyle(video).objectFit}`;
+  });
+
 /** The group's SFU origin, as the group names it, reaches the e2e stack's token mock from this browser. */
 async function routeSfu(peer: Peer): Promise<void> {
   await peer.context.route(`${endpoints.sfu.origin}/**`, async (route) => {
@@ -101,6 +110,11 @@ test("three members join a community group's call, see and hear each other, see 
     // Bia shares her screen: Ana and Cleo get the screen track, large.
     await bia.page.getByTestId("group-call-screen").click();
     for (const p of [ana, cleo]) await plays(p, b, "screen");
+    // It fills the whole window, fitted whole: laid out between the name row, the faces and the controls, it had part of it.
+    for (const p of [ana, cleo]) {
+      const { width, height } = p.page.viewportSize()!;
+      await expect.poll(() => stageBox(p)).toBe(`0,0 ${width}x${height} of ${width}x${height} contain`);
+    }
 
     // Cleo leaves: her tile goes from the others' windows.
     await cleo.page.getByTestId("group-call-leave").click();

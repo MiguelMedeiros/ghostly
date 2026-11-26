@@ -109,7 +109,10 @@ describe("a shared screen", () => {
   it("fills the whole window edge to edge, fitted whole, with the faces drawn over it, on a phone too", () => {
     const { rerenderWith } = view(state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } }), person("bo")] }));
     const stage = screen.getByTestId("group-call-stage");
-    expect(stage).toHaveClass("absolute", "inset-0");
+    // Behind the name row, which stays in the flow; the faces over it let a tap through to that row but take their own.
+    expect(stage).toHaveClass("absolute", "inset-0", "-z-10");
+    expect(screen.getByTestId("group-call-faces")).toHaveClass("absolute", "inset-0", "z-10", "pointer-events-none");
+    expect(screen.getByTestId("group-call-side")).toHaveClass("pointer-events-auto");
     expect(within(stage).getAllByTestId("group-call-tile")).toHaveLength(1);
     const main = within(stage).getByTestId("group-call-tile");
     expect(main).not.toHaveClass("rounded-xl");
@@ -119,9 +122,28 @@ describe("a shared screen", () => {
     const callWindow = screen.getByTestId("group-call");
     expect(callWindow).toHaveClass("fixed", "inset-0");
     expect(callWindow.className).not.toMatch(/max-md:top-/);
+    // So the name row and the faces start below an installed app's status bar.
+    expect(screen.getByTestId("group-call-top")).toHaveClass("pt-[calc(1.5rem+env(safe-area-inset-top))]");
+    expect(screen.getByTestId("group-call-top")).not.toHaveClass("pt-6");
+    expect(screen.getByTestId("group-call-faces")).toHaveClass("pt-[calc(3.5rem+env(safe-area-inset-top))]");
     // The faces alone keep the sheet.
     rerenderWith(state(2));
     expect(screen.getByTestId("group-call")).toHaveClass("max-md:top-6");
+    expect(screen.getByTestId("group-call-top")).toHaveClass("pt-6");
+  });
+
+  // Over the picture in the theme's colours the ⓘ and its words were 2.3:1 on black in the light theme.
+  it("draws the name row's ⓘ and its words over the picture in white, and in the theme's colours over the faces alone", () => {
+    const { rerenderWith } = view(state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } })] }));
+    act(() => screen.getByTestId("group-call-info").click());
+    // Open, white too: the accent it takes elsewhere was 3.2:1 on black in the light theme.
+    expect(screen.getByTestId("group-call-info")).toHaveClass("text-white/80", "aria-expanded:text-white");
+    expect(screen.getByTestId("group-call-info-text")).toHaveClass("bg-black/70", "text-white");
+    expect(screen.getByTestId("group-call-info-text")).not.toHaveClass("text-text-secondary");
+    rerenderWith(state(2));
+    expect(screen.getByTestId("group-call-info")).not.toHaveClass("text-white/80");
+    expect(screen.getByTestId("group-call-info-text")).toHaveClass("text-text-secondary");
+    expect(screen.getByTestId("group-call-info-text")).not.toHaveClass("bg-black/70");
   });
 
   it("two at once: the latest wins and the other is a tile; when it stops, the other is back", () => {
@@ -157,7 +179,7 @@ describe("the tiles on a phone's safe areas", () => {
     ["the faces over a shared screen", state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } })] })],
   ])("%s keeps clear of the notch on either side and of the controls over a home bar", (_, call) => {
     view(call);
-    const area = call.participants.some((p) => p.screen) ? screen.getByTestId("group-call-side").parentElement! : screen.getByTestId("group-call-grid");
+    const area = call.participants.some((p) => p.screen) ? screen.getByTestId("group-call-faces") : screen.getByTestId("group-call-grid");
     expect(area).toHaveClass("call-tiles");
     const rules = tileRules();
     // On its side the notch is on the left or the right: the tiles start 1rem past it.
