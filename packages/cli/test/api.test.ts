@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AWAITING_PEER_MS, OwnInviteError, type PairingProgress } from "@ghostly/core";
+import { AWAITING_PEER_MS, createIdentity, OwnInviteError, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import { chatOrGroup, findChatOrGroup, findOwnNamedChat } from "../src/apiKit";
@@ -1387,6 +1387,25 @@ describe("the engine passthrough", () => {
     expect(await call("renameLink", { linkId: "c", label: "x" })).toBeNull();
     // The network failing is not the caller's parameters.
     expect(await call("lnurlResolve", { text: "a@b.c" })).toMatchObject({ code: "engine", message: "fetch failed" });
+  });
+
+  it("refuses setContactBlocked given a word for blocked or what is not a contact's key, before the engine", async () => {
+    const { ctx, node } = fake();
+    const setContactBlocked = vi.fn(async () => {});
+    Object.assign(node, { setContactBlocked });
+    const call = (params: unknown) => callApi(ctx, "engine.call", { method: "setContactBlocked", params }).then(() => null, asCliError);
+    const takes = (why: string) => ({ code: "bad_request", message: `setContactBlocked takes ${ENGINE_PARAMS.setContactBlocked}: ${why} (ghostly engine --list --verbose)` });
+    const key = createIdentity().pubKeyZ32;
+    for (const blocked of ["false", "yes", 1, null]) expect(await call({ peerPubKeyZ32: key, blocked }), String(blocked)).toMatchObject(takes("blocked must be true or false"));
+    for (const peerPubKeyZ32 of ["__proto__", "z".repeat(2_000_000), key.slice(0, 51), `${key.slice(0, 51)}b`, 5]) {
+      const refused = await call({ peerPubKeyZ32, blocked: true });
+      expect(refused, String(peerPubKeyZ32).slice(0, 60)).toMatchObject(takes("peerPubKeyZ32 must be a contact's key"));
+      // A long word is not said back.
+      expect(refused!.message.length).toBeLessThan(200);
+    }
+    expect(setContactBlocked).not.toHaveBeenCalled();
+    expect(await call({ peerPubKeyZ32: key, blocked: false })).toBeNull();
+    expect(setContactBlocked).toHaveBeenCalledWith({ peerPubKeyZ32: key, blocked: false });
   });
 
   it("runs send's secret guard on the calls that send a text: a seed, a key or ecash goes only with force", async () => {
