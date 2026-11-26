@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { parseEngineError, paymentUri, type Bolt11Invoice, type PaymentReview as Review } from "@ghostly/core";
-import type { WalletPlatform, WalletState } from "../../lib/platform";
+import type { WalletNetwork, WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
 import { usePageShown } from "../../hooks/usePageShown";
 import { PaymentReview } from "../PaymentReview";
@@ -162,9 +162,11 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
   const sats = (amount: number) => t("wallet.cards.amount", { amount: formatAmount(amount, t.language), unit });
   // A redeemed token says what arrived and, at a mint that charges to take ecash in, what it kept: the face value
   // the person was handed is the two together (agents#2255).
-  const redeemedLine = ({ amount, fee }: { amount: number; fee: number }) => fee > 0
-    ? t(testnet ? "wallet.cashu.tokenRedeemedFeeTest" : "wallet.cashu.tokenRedeemedFee", { count: amount, amount: formatAmount(amount, t.language), fee: formatAmount(fee, t.language) })
-    : t("wallet.cashu.redeemed", { amount: formatAmount(amount, t.language), unit });
+  // In the token's own money: a test mint's token pasted on a Mainnet card is redeemed as test sats (into the Testnet
+  // wallet), and a real mint's on a Testnet card as real sats, whatever card it was pasted on.
+  const redeemedLine = ({ amount, fee }: { amount: number; fee: number }, network: WalletNetwork = testnet ? "testnet" : "mainnet") => fee > 0
+    ? t(network === "testnet" ? "wallet.cashu.tokenRedeemedFeeTest" : "wallet.cashu.tokenRedeemedFee", { count: amount, amount: formatAmount(amount, t.language), fee: formatAmount(fee, t.language) })
+    : t("wallet.cashu.redeemed", { amount: formatAmount(amount, t.language), unit: satsIn(t, network) });
   // Only this invoice's own receipt: other money of the same amount (a contact's ecash, a token taken back, a chat
   // request paid, test coins) is not a payment of it. A Lightning card's invoice is matched by its hash below.
   const mintPaid = !!invoiceQuote && state.history.some((tx) => tx.kind === "lightning-in" && tx.quote === invoiceQuote);
@@ -397,7 +399,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
               </div>
             ) : (
               <SendScan onText={given} disabled={busy} scanOnOpen={sendOpened}>
-              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (isToken) void run(async () => { const received = await wallet.receiveToken(route.text); setPayInput(""); setNotice(redeemedLine(received));
+              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (isToken) void run(async () => { const [received, inspection] = await Promise.all([wallet.receiveToken(route.text), Promise.resolve().then(() => wallet.inspectCashu(route.text)).catch(() => null)]); setPayInput(""); setNotice(redeemedLine(received, inspection?.kind === "token" ? mintNetwork(inspection.mint) : undefined));
                   if (document.activeElement === sendSubmit.current) payField.current?.focus(); }, "send"); else if (route.kind === "invoice") quoteFor(route.invoice); else if (route.kind === "no-amount" && chosen) quoteFor(route.invoice, chosen); }}>
                 <textarea ref={payField} data-testid="wallet-pay-input" className={`${input} font-mono text-xs resize-none`} rows={3} {...exactText} autoFocus={!touchOnly()}
                   placeholder={rail === "cashu" ? t("wallet.cashu.pastePlaceholder") : t("wallet.lightning.pastePlaceholder")} value={payInput} onChange={(e) => { setNotice(""); setPayInput(e.target.value); setPayAmount(""); maxed.current = false; }} />
