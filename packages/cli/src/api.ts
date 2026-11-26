@@ -119,10 +119,10 @@ export function settingsInEffect(settings: Settings): Settings {
 /**
  * A relay address the engine refuses (node.ts `updateSettings`, irohWeb.ts, hyperdhtRelay.ts): the person's value, so
  * `bad_request` named by its key, in a terminal's words ("give", not the app's "Enter"). Before, `engine` (exit 1). A
- * wrong scheme ("Use an https:// relay address") too.
+ * wrong scheme ("Use an https:// relay address") too, and more Iroh relays than it keeps ("Use at most five Iroh relays").
  */
 function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
-  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address|Use an? \S+ relay address)\b/.test(error.message)) return error;
+  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address|Use an? \S+ relay address|Use at most \S+ Iroh relays)\b/.test(error.message)) return error;
   const keys = ["relays", "irohRelays", "hyperdhtRelay"].filter((key) => Object.hasOwn(patch, key));
   // The address the engine names, as given, without its credentials (`shownRelay`).
   const said = error.message.replace(/^(.*? relay address: )([\s\S]+)$/, (_, words: string, address: string) => words + shownRelay(address));
@@ -527,11 +527,11 @@ const METHODS: Record<string, Method> = {
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
-      // The engine says "Enter at least one relay address" for any list it can't use (node.ts `updateSettings`): the
-      // address given is named here, in the app's Settings words; an empty list stays the engine's to refuse.
-      if (key === "relays" && (value as string[]).length && !(value as string[]).some(normalizeRelayUrl)) {
-        throw relayRefused(new Error(relayUrlProblem((value as string[])[0]) ?? ""), { relays: value });
-      }
+      // The engine keeps the relays it can read and drops the rest unsaid, and says "Enter at least one relay address"
+      // for a list with none (node.ts `updateSettings`): the first one it can't read is named here, as the app's
+      // Settings does (a blank entry is no relay, as a blank line there); an empty list stays the engine's to refuse.
+      const unread = key === "relays" ? (value as string[]).find((relay) => relay.trim() && !normalizeRelayUrl(relay)) : undefined;
+      if (unread !== undefined) throw relayRefused(new Error(relayUrlProblem(unread) ?? ""), { relays: value });
       // The name contacts see: `profile set --name`'s rule.
       if (key === "nick") { patch.nick = checkShownName(value, key); guardText(patch.nick, bool(params, "force"), "nick", "set it"); continue; }
       if (kind === "ice") {
@@ -558,7 +558,8 @@ const METHODS: Record<string, Method> = {
       if (variable && process.env[variable]?.split(",").some((url) => url.trim())) {
         warning = (warning ? `${warning}. ` : "") + `${variable} is set where this profile runs, and only its relays are used: ${key} is kept for when the profile runs without it`;
       }
-      patch[key] = value;
+      // An Iroh relay given twice is one relay, not two of the five the engine keeps.
+      patch[key] = key === "irohRelays" ? [...new Set(value as string[])] : value;
     }
     await node(ctx).updateSettings({ settings: patch }).catch((error: unknown) => { throw relayRefused(error, patch); });
     return { ...redactSettings(settingsInEffect(settingsOf(ctx))), ...(warning ? { warning } : {}) };
