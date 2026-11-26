@@ -38,10 +38,12 @@ const ROWS: StoredMessage[] = [
   at("me_3", "hello Alice, the soup recipe", "me"),
   { ...at("peer_9", ""), file: { id: "f", name: "joined-sats report.pdf", size: 1, mime: "application/pdf" } as never },
   { ...at("peer_10", "Payment of 21 sats"), paymentId: "p1" },
+  at("peer_11", "ｶﾞｲﾄﾞを読んで"),
 ];
 
 const QUERIES = ["joined", "👋", "alice", "bob", "mallory", "sats", "test sats", "could not receive", "127.0.0.1", reason,
-  "fedimint", "already redeemed", "unsupported amount", "send the phrase", "try again", "the club", "soup", "report.pdf", "payment of"];
+  "fedimint", "already redeemed", "unsupported amount", "send the phrase", "try again", "the club", "soup", "report.pdf", "payment of",
+  "ＰＤＦ", "ガイド"];
 
 /** The rows the pages' search finds for `query`, over the rows as they hold them. */
 function pagesFind(query: string): string[] {
@@ -60,6 +62,9 @@ describe("the chat list's search, in the engine and in the pages", () => {
     // Not empty both ways: the pages find people's words, and none of the app's lines.
     expect(pagesFind("joined")).toEqual(["peer_2", "peer_8", "peer_9"]);
     expect(pagesFind("could not receive")).toEqual(["peer_6_refused", "peer_7"]);
+    // Full-width Latin and half-width katakana read as their usual forms.
+    expect(pagesFind("ＰＤＦ")).toEqual(["peer_9"]);
+    expect(pagesFind("ガイド")).toEqual(["peer_11"]);
   });
 
   it("leaves out the rows the pages draw as the app's own lines, and only those", () => {

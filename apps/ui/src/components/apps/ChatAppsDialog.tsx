@@ -13,6 +13,7 @@ import { chatAppOver } from "../../lib/apps/running";
 import { useTryAgain } from "../../lib/apps/tryAgain";
 import { appErrorText, appErrorView } from "../../lib/apps/errors";
 import { ownDirection } from "../../lib/ownDirection";
+import { isolate } from "../../lib/ownStatus";
 
 /** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
 const opens = (app: InstalledAppView) => !appStopped(app);
@@ -116,7 +117,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
                       <p dir="auto" className="text-match-parent text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t(app.run.status === "needs-files" ? "apps.app.needsFiles" : "apps.app.stopped")}</p>
                     </div>
                   </div>
-                  <Button variant="primary" data-testid="chat-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} disabled={!opens(app) || busy !== null} loading={busy === app.ref} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
+                  <Button variant="primary" data-testid="chat-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: isolate(app.title) })} disabled={!opens(app) || busy !== null} loading={busy === app.ref} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
                 </div>
               ))}
           {installed !== null && builtIns.map((app) => (
@@ -128,7 +129,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
                   <p dir="auto" className="text-match-parent text-xs text-text-muted truncate">{app.tagline}</p>
                 </div>
               </div>
-              <Button variant="primary" data-testid="chat-built-in-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} disabled={busy !== null} loading={busy === app.ref} onClick={() => setFirst(app)}>{t("apps.page.open")}</Button>
+              <Button variant="primary" data-testid="chat-built-in-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: isolate(app.title) })} disabled={busy !== null} loading={busy === app.ref} onClick={() => setFirst(app)}>{t("apps.page.open")}</Button>
             </div>
           ))}
           <button type="button" data-testid="chat-apps-browse" onClick={() => { onClose(); nav.open("/apps"); }}

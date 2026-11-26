@@ -4,7 +4,7 @@ import { DAEMON_WATCH_PEER_IDLE_MS, GhostLink, RELAY_POLL_INTERVALS, REQUESTS_PE
 import { GhostlyNode, type NodeOptions } from "../src/engine/node";
 import { ResumeTurns } from "../src/engine/resumeTurns";
 import { db } from "../src/engine/db";
-import { STORES, transact } from "../src/shared/idb";
+import { STORES, fileStore, transact } from "../src/shared/idb";
 import type { StoredLink } from "../src/shared/types";
 import { closeWorld, fakePeerConnection, invitationWhere, run, useFakeWorld, type Side } from "../../core/test/support/pairingWorld";
 
@@ -398,6 +398,38 @@ describe("a transport chosen for a chat that waits its turn to resume", () => {
     await settled(node.setDeliveryMode({ linkId: id, mode: "stream" }));
     expect(node["links"].get(id)?.link, "started").toBeInstanceOf(GhostLink);
     expect((node["resumeTurns"] as ResumeTurns)["line"]).toEqual([]);
+  }, 60_000);
+});
+
+/**
+ * A file that stopped arriving, asked for again while its chat waits its turn to resume (`ghostly file request` on a
+ * daemon just restarted): it goes when the chat is live, and the chat tries now, as for a chat whose session dropped.
+ * Before, only a chat with a link tried now: one waiting its turn had none, and the file waited for the line.
+ */
+describe("a file pushed again in a chat that waits its turn to resume", () => {
+  it("starts the chat at once", async () => {
+    const { inviter: app, joiner: contact } = invitationWhere("inviter");
+    const row = {
+      ...app.params, id: "chat-0", label: "c0", createdAt: app.createdAt, participationSeed: app.seedB64,
+      pairedPeerKey: peerKeyOf(contact), peerTrust: { version: 1, verifiedKey: peerKeyOf(contact) }, peerTransports: ["webrtc/1"],
+      transportHistory: [{ id: "h0", at: Date.now() - MIN, kind: "live", transport: "webrtc/1" }],
+    } as unknown as StoredLink;
+    await db.putLink(row);
+    const fileId = `${row.id}-in-w3`;
+    await fileStore.put({ id: fileId, linkId: row.id, blob: new Blob([new Uint8Array(4)]), createdAt: 1, direction: "in", wireId: "w3",
+      transfer: { state: "transferring", transferred: 4, size: 8 },
+      wire3: { id: "w3", direction: "in", file: { id: "w3", name: "w3.bin", size: 8, mime: "" }, state: "active", confirmed: 4, since: Date.now(), agreed: true, consented: true } });
+    try {
+      const node = engine(unlimited(), { resumesAtOnce: 0 });
+      await settled(node.start());
+      const turns = node["resumeTurns"] as ResumeTurns;
+      expect(turns["line"], "the chat waits its turn").toEqual([row.id]);
+      await settled(Promise.resolve(node.fileAction({ linkId: row.id, fileId, action: "request" })));
+      expect(turns["line"], "out of the line").toEqual([]);
+      expect(node["links"].get(row.id)?.link, "started").toBeInstanceOf(GhostLink);
+    } finally {
+      await fileStore.delete(fileId);
+    }
   }, 60_000);
 });
 

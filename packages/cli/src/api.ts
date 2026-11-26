@@ -5,7 +5,7 @@ import { DEFAULT_HYPERDHT_RELAY } from "@ghostly/browser/shared/hyperdhtRelay";
 import { groupPayLineId, groupPayNoteId } from "@ghostly/browser/shared/groupPayNotes";
 import { DEFAULT_IROH_RELAYS } from "@ghostly/browser/platform/irohWeb";
 import { FORWARD_MESSAGES, FORWARD_TARGETS } from "@ghostly/browser/engine/forwards";
-import { findSecret, guardText, secretWords } from "./secretGuard";
+import { checkGuardedSize, findSecret, guardText, secretWords } from "./secretGuard";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError, shownRelay } from "./errors";
 import { shellWord } from "./shellWord";
@@ -16,7 +16,7 @@ import {
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
 import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
-import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
+import { STATUS_CARD_METHODS, secretIn, textsIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { forgetHold, HOLD_MAX_MINUTES, holdChat, holdEnds, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, ONE_SHOT_LIVE_GRACE_MS, sayTyping, typingStatus } from "./typing";
@@ -119,10 +119,10 @@ export function settingsInEffect(settings: Settings): Settings {
 /**
  * A relay address the engine refuses (node.ts `updateSettings`, irohWeb.ts, hyperdhtRelay.ts): the person's value, so
  * `bad_request` named by its key, in a terminal's words ("give", not the app's "Enter"). Before, `engine` (exit 1). A
- * wrong scheme ("Use an https:// relay address") too.
+ * wrong scheme ("Use an https:// relay address") too, and more Iroh relays than it keeps ("Use at most five Iroh relays").
  */
 function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
-  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address|Use an? \S+ relay address)\b/.test(error.message)) return error;
+  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address|Use an? \S+ relay address|Use at most \S+ Iroh relays)\b/.test(error.message)) return error;
   const keys = ["relays", "irohRelays", "hyperdhtRelay"].filter((key) => Object.hasOwn(patch, key));
   // The address the engine names, as given, without its credentials (`shownRelay`).
   const said = error.message.replace(/^(.*? relay address: )([\s\S]+)$/, (_, words: string, address: string) => words + shownRelay(address));
@@ -527,11 +527,11 @@ const METHODS: Record<string, Method> = {
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
-      // The engine says "Enter at least one relay address" for any list it can't use (node.ts `updateSettings`): the
-      // address given is named here, in the app's Settings words; an empty list stays the engine's to refuse.
-      if (key === "relays" && (value as string[]).length && !(value as string[]).some(normalizeRelayUrl)) {
-        throw relayRefused(new Error(relayUrlProblem((value as string[])[0]) ?? ""), { relays: value });
-      }
+      // The engine keeps the relays it can read and drops the rest unsaid, and says "Enter at least one relay address"
+      // for a list with none (node.ts `updateSettings`): the first one it can't read is named here, as the app's
+      // Settings does (a blank entry is no relay, as a blank line there); an empty list stays the engine's to refuse.
+      const unread = key === "relays" ? (value as string[]).find((relay) => relay.trim() && !normalizeRelayUrl(relay)) : undefined;
+      if (unread !== undefined) throw relayRefused(new Error(relayUrlProblem(unread) ?? ""), { relays: value });
       // The name contacts see: `profile set --name`'s rule.
       if (key === "nick") { patch.nick = checkShownName(value, key); guardText(patch.nick, bool(params, "force"), "nick", "set it"); continue; }
       if (kind === "ice") {
@@ -558,7 +558,8 @@ const METHODS: Record<string, Method> = {
       if (variable && process.env[variable]?.split(",").some((url) => url.trim())) {
         warning = (warning ? `${warning}. ` : "") + `${variable} is set where this profile runs, and only its relays are used: ${key} is kept for when the profile runs without it`;
       }
-      patch[key] = value;
+      // An Iroh relay given twice is one relay, not two of the five the engine keeps.
+      patch[key] = key === "irohRelays" ? [...new Set(value as string[])] : value;
     }
     await node(ctx).updateSettings({ settings: patch }).catch((error: unknown) => { throw relayRefused(error, patch); });
     return { ...redactSettings(settingsInEffect(settingsOf(ctx))), ...(warning ? { warning } : {}) };
@@ -869,29 +870,36 @@ const METHODS: Record<string, Method> = {
     }
     // A copy's wait that ends short (its time ran out, its delivery failed) ends the waits, not the answer: it threw
     // alone with that copy's id, every target's result and another's refusal lost, and a bot that sent again sent twice.
+    // Every copy's wait runs at once, each up to the timeout: one after another, they took a timeout per copy, past the
+    // client's deadline for one wait, and through a daemon the command failed as "The daemon did not answer" (exit 4),
+    // its results lost. They are read in the order they went, so the copy that ends the waits is the first in that
+    // order to end short, as before, and a copy after it says what it has now.
     let short: CliError | undefined;
-    const waited = async <T>(wait: () => Promise<T>, now: () => T): Promise<T> => {
-      if (short) return now();
-      try { return await wait(); } catch (error) { short = asCliError(error); return now(); }
+    const waits: { ended: Promise<{ took: unknown } | { error: unknown }>; now: () => unknown; done: (took: unknown) => void }[] = [];
+    const watch = <T>(wait: () => Promise<T>, now: () => T, done: (took: T) => void) => {
+      waits.push({ ended: wait().then((took) => ({ took }), (error: unknown) => ({ error })), now, done: done as (took: unknown) => void });
     };
     // A group's `edges`: how many took each of its copies so far (the fewest), as `group send` says it.
-    for (const [i, result] of out.entries()) if (to[i]!.group) {
-      let edges: number | undefined;
-      for (const messageId of result.messageIds) {
-        const taken = () => node(ctx).groupTaken({ groupId: to[i]!.id, messageId });
-        const took = groupWait === "sent" ? await waited(() => waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms), taken) : taken();
-        edges = Math.min(edges ?? took, took);
-      }
-      result.edges = edges ?? 0;
+    const took = out.map(() => [] as number[]);
+    for (const [i, result] of out.entries()) if (to[i]!.group) for (const messageId of result.messageIds) {
+      const taken = () => node(ctx).groupTaken({ groupId: to[i]!.id, messageId });
+      if (groupWait === "sent") watch(() => waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms), taken, (n) => took[i]!.push(n));
+      else took[i]!.push(taken());
     }
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
       if (to[i]!.group) continue;
-      await waited(async () => {
+      watch(async () => {
         const sent = await node(ctx).getMessage(to[i]!.id, messageId);
         if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
         else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, to[i]!.id, sent?.text ?? "", to[i]!.ref, ms, error); });
-      }, () => undefined);
+      }, () => undefined, () => {});
     }
+    for (const { ended, now, done } of waits) {
+      if (short) { done(now()); continue; }
+      const end = await ended;
+      if ("error" in end) { short = asCliError(end.error); done(now()); } else done(end.took);
+    }
+    for (const [i, result] of out.entries()) if (to[i]!.group) result.edges = took[i]!.length ? Math.min(...took[i]!) : 0;
     // A refusal first, then what ended a wait: each with every target's result.
     const failed = out.filter((r) => r.error);
     if (failed.length) throw new CliError(failed.length === out.length ? "refused" : "engine", failed.map((r) => `${r.to}: ${r.error}`).join("; "), { from: from.id, results: out });
@@ -1415,7 +1423,8 @@ function pastEngineBound(method: string, field: "text" | "caption" | "card", val
 /**
  * The secret guard of a raw engine send. A text the engine refuses by its size alone is not read for a secret (a
  * 15 MB one held the daemon's thread for seconds): the engine answers it with its size, as it did once the guard was
- * done, and nothing of it is kept or sent.
+ * done, and nothing of it is kept or sent. Any other text past that bound (a memo, a name, a note) is refused with its
+ * size before the guard reads it (`checkGuardedSize`): the engine sends none that long.
  */
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
   const of = (value: unknown, key: string) => (value && typeof value === "object" ? (value as Params)[key] : undefined);
@@ -1434,7 +1443,7 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
       const message = await node(ctx).getMessage(linkId, id);
       return message ? forwardedTexts(message) : null;
     })) : [];
-  }
+  } else for (const value of textsIn(texts)) checkGuardedSize(value, `A text of ${method}`);
   const secret = secretIn(texts);
   if (secret) throw new CliError("confirm", `The text looks like ${secretWords(secret)}; call ${method} with --force if you mean to`, { kind: secret.kind });
 }

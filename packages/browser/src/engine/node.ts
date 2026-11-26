@@ -905,6 +905,16 @@ export interface NodeEvents {
  */
 /** A waiting file or request that went out: it shows like any other from now on (a file by its transfer). */
 /** The contact's typing as the chat shows it: plain typing needs only `peerTyping`. */
+/**
+ * A 1:1 chat's pin as it is shown: one naming a message deleted for everyone (`removed`, or kept before it was marked,
+ * by `removedRefs`) is unpinned (no `id`), its number kept. What an unpin goes by, so a pin shown gone is not removed
+ * again.
+ */
+function linkPinShown(stored: StoredLink): StoredPin | undefined {
+  const pin = stored.pin;
+  return pin?.id && (pin.removed || stored.removedRefs?.includes(pin.id)) ? { ...pin, id: "", messageId: undefined } : pin;
+}
+
 function typingView(activity: TypingActivity | null): Pick<LinkView, "peerTyping" | "peerTypingKind" | "peerTypingStatus"> {
   return {
     peerTyping: true,
@@ -979,6 +989,14 @@ function membershipOf(group: GroupView | undefined): { me: string; members: Read
 
 /** The wire part of the ids the payment desk gives a contact's payment, request or refusal line (`peer_<this>`). */
 const PAYMENT_LINE_ID = /^(?:\d+(?:_refused)?|spent_[0-9a-f]{32})$/;
+
+/**
+ * `Settings.blockedContacts` as the engine keeps it: keys in their one spelling, each once. A list stored before
+ * `setContactBlocked` checked its input may hold a key twice or words that are no key, which no Unblock could remove.
+ */
+function blockedKeys(stored: unknown): string[] {
+  return [...new Set((Array.isArray(stored) ? stored : []).filter(isZ32Key))];
+}
 
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
@@ -2459,6 +2477,9 @@ export class GhostlyNode implements EngineImplementation {
     const stored = await db.getSettings();
     const fresh = Object.keys(stored).length === 0;
     this.settings = { ...DEFAULT_SETTINGS, ...stored };
+    const blocked = blockedKeys(this.settings.blockedContacts);
+    if (blocked.length) this.settings.blockedContacts = blocked;
+    else delete this.settings.blockedContacts;
     this.armOwnStatusEnd();
     // A profile still on an old default list gets today's defaults: a relay added to them reaches everyone.
     this.settings.relays = currentRelays(this.settings.relays);
@@ -3069,7 +3090,7 @@ export class GhostlyNode implements EngineImplementation {
     if (this.restoreTimer) clearTimeout(this.restoreTimer);
     this.restoreTimer = null;
     this.identities.stop();
-    this.did.stop();
+    const didClosed = this.did.close();
     this.contactLinks.stop();
     this.contactAsks.stop();
     this.nostrSocial.stop();
@@ -3094,6 +3115,8 @@ export class GhostlyNode implements EngineImplementation {
       this.quoteSweeps.stop(),
       // A removed proof's revocation still on its way: a CLI one-shot that removed it would otherwise never publish it.
       this.identities.published(),
+      // The same for a listing of the public DID changed within the last 2 s (`ProfileDid.close`).
+      didClosed,
       ...WALLET_NETWORKS.flatMap((network) => [this.arkWallets, this.barkWallets, this.fedimintWallets, this.sparkWallets, this.usdtWallets, this.lightnings, this.bitcoins]
         .map((wallets) => wallets[network].stop())),
       // The Cashu wallet too: its polls would otherwise go on writing after the stop.
@@ -3761,8 +3784,11 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   async setContactBlocked({ peerPubKeyZ32, blocked }: { peerPubKeyZ32: string; blocked: boolean }): Promise<void> {
-    if (typeof peerPubKeyZ32 !== "string" || !peerPubKeyZ32) throw new Error("Name the contact's key");
-    const list = this.settings.blockedContacts ?? [];
+    // Only a key in its one spelling, and only true or false: before, the word "false" blocked, and a word or a key named
+    // again went in the list once more each time (which moves to the person's other devices), telling the contact again.
+    if (!isZ32Key(peerPubKeyZ32)) throw new Error("Name the contact's key");
+    if (typeof blocked !== "boolean") throw new Error("Blocked is true or false");
+    const list = blockedKeys(this.settings.blockedContacts);
     if (list.includes(peerPubKeyZ32) === blocked) return;
     const chats = [...this.links.values()].filter(({ stored }) => stored.profile && !stored.group && stored.peerPubKeyZ32 === peerPubKeyZ32);
     // A contact told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
@@ -5506,8 +5532,10 @@ export class GhostlyNode implements EngineImplementation {
     // Taken only when it fits in the room left now (`FileDesk.accept`): one that does not keeps waiting.
     if (action === "accept") return this.fileDesk.accept(linkId, fileId).then(() => {});
     const now = this.fileDesk.act(linkId, fileId, action);
-    // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now.
-    if (!now && (action === "resend" || action === "request") && live.link && !live.link.isDataLinkOpen) void this.connect({ linkId }).catch(() => {});
+    // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now. One waiting
+    // its turn to resume (`ResumeTurns`) has no link yet: it starts now, ahead of the line.
+    const tries = live.link ? !live.link.isDataLinkOpen : this.resumeTurns.waits(linkId);
+    if (!now && (action === "resend" || action === "request") && tries) void this.connect({ linkId }).catch(() => {});
   }
 
   /** The contact can take a file on the open session: files/2 or files/3. */
@@ -6546,7 +6574,7 @@ export class GhostlyNode implements EngineImplementation {
       // Not a member (removed, say): refused with the reason the group shows, as a reaction is.
       if (!view || view.status !== "active") return { error: view?.statusReason ?? "You are not in this group", refused: true };
       if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
-      const current = this.groups.pinOf(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
+      const current = this.groups.pinShown(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
       if ("error" in pin) return pin;
       // Pinned already: nothing goes. My own pin's number is still the one its edges take (`groupTaken`).
       if ("already" in pin) return { error: null, ...(current?.by === "me" && { n: current.n }) };
@@ -6565,7 +6593,7 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live || live.stored.group) return { error: "No such chat" };
     if (!live.stored.profile) return { error: "Pins need a current chat; this compatibility chat sends text only." };
-    const pin = await myPin(host, linkId, messageId, !!remove, live.stored.pin);
+    const pin = await myPin(host, linkId, messageId, !!remove, linkPinShown(live.stored));
     if ("error" in pin) return pin;
     if ("already" in pin) return { error: null };
     await this.keepLinkPin(linkId, pin, { id: pin.id, n: pin.n });
@@ -11188,7 +11216,8 @@ export class GhostlyNode implements EngineImplementation {
       paymentNetworks: Object.fromEntries(PAYMENT_METHODS.map(m => [m, WALLET_NETWORKS.filter((n) => this.acceptsNetwork(stored, m, n))])) as Record<PaymentMethodName, WalletNetwork[]>,
       groups: live.link?.groupsSupport ?? false,
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
-      callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
+      // A blocked contact's answer is dropped (`onCallSignal`): a call placed would ring its app and never connect.
+      callsUnavailable: !stored.profile ? undefined : this.blockedChat(stored) ? "You blocked this contact. Unblock them to call" : live.link ? live.link.callsUnavailable : "Calls need a live connection",
       // A blocked contact's typing, presence and status show nothing either (whether its app is reachable still does:
       // that is this side's connection).
       ...(stored.profile && !stored.group && live.link?.peerTyping && !this.blockedChat(stored) ? typingView(live.link.peerTypingActivity) : {}),
@@ -11199,7 +11228,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       // The pinned message was deleted for everyone: nothing of it stays, its pin neither, as in a group (`Groups.pinned`).
       // The pin is kept as it came, so the same pin said again is no newer; one kept before it was marked, by `removedRefs`.
-      ...(stored.pin && { pin: pinView(stored.pin.id && (stored.pin.removed || stored.removedRefs?.includes(stored.pin.id)) ? { ...stored.pin, id: "", messageId: undefined } : stored.pin) }),
+      ...(stored.pin && { pin: pinView(linkPinShown(stored)) }),
       participationKey: participationKeyOf(live),
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,

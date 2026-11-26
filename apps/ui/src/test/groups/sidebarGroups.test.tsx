@@ -273,4 +273,30 @@ describe("Sidebar: groups in the chat list", () => {
       expect(document.activeElement).toBe(more);
     }
   });
+
+  // On a phone, and at 200 % zoom, the menu is a sheet over the page, hung at the body's end: opened from the keys, the
+  // focus stayed on New ▾ behind its backdrop, the arrow keys did nothing and Tab went on to Join behind it.
+  it("New ▾ opened from the keys puts the focus on its first row, wide and on a phone, and the arrows go down to Group", async () => {
+    const viewport = (width: number) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height: 640 });
+    try {
+      for (const width of [1024, 375]) {
+        viewport(width);
+        const { user, unmount } = sidebar([]);
+        const more = screen.getByTestId("sidebar-new-more");
+        more.focus();
+        await user.keyboard("{Enter}");
+        const menu = screen.getByTestId("sidebar-new-menu");
+        expect(menu.dataset.menu).toBe(width < 768 ? "sheet" : "popover");
+        expect(menu).toContainElement(document.activeElement as HTMLElement);
+        await user.keyboard("{ArrowDown}");
+        expect(document.activeElement).toBe(screen.getByTestId("new-group"));
+        await user.keyboard("{Escape}");
+        expect(screen.queryByTestId("sidebar-new-menu")).not.toBeInTheDocument();
+        expect(document.activeElement).toBe(more);
+        unmount();
+      }
+    } finally {
+      viewport(1024);
+    }
+  });
 });

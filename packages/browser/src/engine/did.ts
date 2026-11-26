@@ -65,6 +65,13 @@ export class ProfileDid {
   private ended = false;
   /** The newest sequence number signed here, so the `deactivated` packet goes past one still on its way. */
   private signedSeq = 0;
+  /** This run changed the listed identities and their document is not out yet: `close` publishes it. */
+  private due = false;
+  /**
+   * Saves run one at a time, each on the record the one before saved: two built from the same record (two switches,
+   * a switch and a publish landing, a switch and a removed proof dropped) lost the first one's change.
+   */
+  private saving: Promise<void> = Promise.resolve();
 
   constructor(private host: ProfileDidHost) {}
 
@@ -79,7 +86,7 @@ export class ProfileDid {
       createdAt: Date.now(),
       listed: [],
     };
-    await this.save(made);
+    await this.save(() => made);
     this.seed = identity.seed;
   }
 
@@ -87,6 +94,21 @@ export class ProfileDid {
     this.running = true;
     this.unlisten ??= whenDataKeyDropped(() => this.forgetSeed());
     this.schedule(FIRST_PUBLISH_MS);
+  }
+
+  /**
+   * `stop`, once a listing this run changed is published: a CLI one-shot (`engine setDidListed`, an `identity remove` of
+   * a listed proof) ended within the change's 2 s, so the DID kept the old document until a daemon ran 15 s.
+   */
+  async close(): Promise<void> {
+    this.running = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    if (this.due) {
+      await this.saving;
+      await this.publishNow().catch(() => {});
+    }
+    this.stop();
   }
 
   stop(): void {
@@ -133,17 +155,20 @@ export class ProfileDid {
    * a document can list; refused when the packet would not fit 1000 bytes.
    */
   async setListed({ id, listed }: { id: string; listed: boolean }): Promise<void> {
-    const current = this.listed();
     if (listed && !this.host.listable().has(id)) throw new Error("This identity cannot be listed in your DID");
-    const next = listed ? [...current.filter(x => x !== id), id] : current.filter(x => x !== id);
-    try {
-      encodeDidDhtPacket(didDhtDocument(this.publicKey(), { alsoKnownAs: this.alsoKnownAs(next) }));
-    } catch (error) {
-      // eslint-disable-next-line preserve-caught-error -- a message for the person; ES2020 has no Error.cause.
-      if (error instanceof PacketTooLargeError) throw new Error("Your DID has no room for another identity (1000 bytes). Take one out first.");
-      throw error;
-    }
-    await this.save({ ...this.stored!, listed: next });
+    await this.save(stored => {
+      const current = stored!.listed;
+      const next = listed ? [...current.filter(x => x !== id), id] : current.filter(x => x !== id);
+      try {
+        encodeDidDhtPacket(didDhtDocument(this.publicKey(), { alsoKnownAs: this.alsoKnownAs(next) }));
+      } catch (error) {
+        // eslint-disable-next-line preserve-caught-error -- a message for the person; ES2020 has no Error.cause.
+        if (error instanceof PacketTooLargeError) throw new Error("Your DID has no room for another identity (1000 bytes). Take one out first.");
+        throw error;
+      }
+      return { ...stored!, listed: next };
+    });
+    this.due = true;
     this.host.emit();
     this.schedule(CHANGE_DELAY_MS);
   }
@@ -153,7 +178,10 @@ export class ProfileDid {
     if (!this.stored) return;
     const ids = new Set(this.host.proofIds());
     const kept = this.stored.listed.filter(id => ids.has(id));
-    if (kept.length !== this.stored.listed.length) void this.save({ ...this.stored, listed: kept }).catch(() => {});
+    if (kept.length !== this.stored.listed.length) {
+      this.due = true;
+      void this.save(stored => ({ ...stored!, listed: stored!.listed.filter(id => ids.has(id)) })).catch(() => {});
+    }
     if (this.stored.published && !this.samePacket(this.stored.published.payload)) this.schedule(CHANGE_DELAY_MS);
   }
 
@@ -192,8 +220,10 @@ export class ProfileDid {
       this.signedSeq = Math.max(this.signedSeq, seq);
       await this.host.publish(toZ32(this.publicKey()), payload);
       if (this.ended) return;
+      // A listing changed while this one was on its way is still due.
+      this.due &&= !this.samePacket(toBase64Url(payload));
       this.error = undefined;
-      await this.save({ ...this.stored, published: { payload: toBase64Url(payload), seq, at: Date.now() } });
+      await this.save(stored => ({ ...stored!, published: { payload: toBase64Url(payload), seq, at: Date.now() } }));
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
     }
@@ -259,10 +289,15 @@ export class ProfileDid {
     return this.seed;
   }
 
-  private async save(next: StoredProfileDid): Promise<void> {
-    // Ended by "Clear all data": nothing writes the cleared record back (a late publish, `changed()`, `setListed`).
-    if (this.ended) return;
-    await committed((await store(STORES.settings, "readwrite")).put(next, KEY));
-    this.stored = next;
+  private save(change: (stored: StoredProfileDid | null) => StoredProfileDid): Promise<void> {
+    const run = this.saving.then(async () => {
+      // Ended by "Clear all data": nothing writes the cleared record back (a late publish, `changed()`, `setListed`).
+      if (this.ended) return;
+      const next = change(this.stored);
+      await committed((await store(STORES.settings, "readwrite")).put(next, KEY));
+      this.stored = next;
+    });
+    this.saving = run.catch(() => {});
+    return run;
   }
 }

@@ -93,8 +93,17 @@ describe("a chat's mute: until when, kept on this device", () => {
 
   it("says when it ends: the time today, the weekday and time after that", () => {
     const today = new Date(2026, 8, 25, 14, 0).getTime();
-    expect(muteEndText(today + 30 * MIN, "en", today)).toBe(new Date(today + 30 * MIN).toLocaleTimeString("en", { hour: "numeric", minute: "2-digit" }));
+    expect(muteEndText(today + 30 * MIN, "en", today)).toMatch(/^2:30\sPM$/);
     expect(muteEndText(today + 24 * 60 * MIN, "en", today)).toMatch(/^Sat/);
+  });
+
+  it("in Arabic, keeps the day period on the time's line", () => {
+    const today = new Date(2026, 8, 25, 14, 0).getTime();
+    for (const until of [today + 5 * MIN, today + 24 * 60 * MIN]) {
+      const text = muteEndText(until, "ar", today);
+      expect(text).toContain("م");
+      expect(text).not.toMatch(/ م/);
+    }
   });
 });
 
@@ -307,7 +316,8 @@ describe("muting from the chat's menu", () => {
     await user.click(screen.getByTestId("group-options"));
     const row = screen.getByTestId("chat-unmute");
     expect(row).toHaveTextContent(`Unmute notifications`);
-    expect(row).toHaveTextContent(`Muted until ${muteEndText(until, "en")}`);
+    // toHaveTextContent reads the time's no-break space as a plain one.
+    expect(row).toHaveTextContent(`Muted until ${muteEndText(until, "en").replace(/\s/g, " ")}`);
     await user.click(row);
     expect(mutedUntil(groupChat("group-1"))).toBeUndefined();
     await user.click(screen.getByTestId("group-options"));

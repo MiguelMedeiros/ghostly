@@ -78,6 +78,11 @@ const MOVED_AT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", h
 /** `input_fee_ppk` in a few words, test sats on Testnet: a payment usually spends two to five proofs. */
 const shortFee = (t: Translate, ppk: number, testnet: boolean) => (ppk === 0 ? t("wallet.cashu.fee.none") : t(testnet ? "wallet.cashu.fee.perProofTest" : "wallet.cashu.fee.perProof", { fee: ppk / 1000 }));
 
+/** A number counting up to `value`: each frame draws only what shows it, not the whole card (its History's 100 rows). */
+function CountUp({ value, children }: { value: number; children: (shown: number) => ReactNode }) {
+  return <>{children(useCountUp(value))}</>;
+}
+
 /**
  * Cashu and Lightning share one balance while Lightning goes through the mints (the default source):
  * ecash held by the mints, filled and emptied over Lightning. The Cashu card also holds the mint
@@ -145,8 +150,6 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
   const testMints = testnet ? state.mints : state.mints.filter((m) => wallet.testMintUrls.includes(m.url));
   const testMint = testMints.length > 0;
   const testBalance = testMints.reduce((sum, m) => sum + m.balance, 0);
-  const realShown = useCountUp(state.balance - testBalance);
-  const testShown = useCountUp(testBalance);
   // The Cashu card always uses the mints; the Lightning card uses its network's source (the mints by default).
   const ln = state.lightning;
   const viaMint = rail === "cashu" || !ln?.providerId || ln.providerId === CASHU_MINT_SOURCE;
@@ -293,11 +296,13 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
           <p className="text-text-primary" data-testid="wallet-balance">
             {/* Only the number isolated, as an invoice's card does: in a right-to-left page the unit's Latin "sats" was one
                 run with it, glued to it ("100,000sats"). The unit stays in the line's direction. */}
-            <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(testnet ? testShown : realShown, t.language)}</bdi>
-            <span className="text-text-muted text-sm ms-2">{unitFor(t, unit, testnet ? testShown : realShown)}</span>
+            <CountUp value={testnet ? testBalance : state.balance - testBalance}>{(shown) => <>
+              <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(shown, t.language)}</bdi>
+              <span className="text-text-muted text-sm ms-2">{unitFor(t, unit, shown)}</span>
+            </>}</CountUp>
             {sharedLine}
             {/* A Testnet wallet's whole balance is test sats; a test mint's sats never count in a Mainnet one. */}
-            {testMint && !testnet && <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(testShown, t.language) })}</span>}
+            {testMint && !testnet && <CountUp value={testBalance}>{(shown) => <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(shown, t.language) })}</span>}</CountUp>}
             {!!state.setAside && (
               <span className="mt-1 flex items-center gap-1.5 text-xs text-text-muted max-md:min-h-[44px]" data-testid="wallet-set-aside">
                 {t("wallet.cashu.setAside", { amount: formatAmount(state.setAside, t.language), unit })}

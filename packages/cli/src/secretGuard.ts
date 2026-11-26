@@ -4,9 +4,20 @@
  */
 import "../../../apps/ui/src/lib/parse/seedLists";
 import { findSecret, type SecretFinding } from "../../../apps/ui/src/lib/parse/secrets";
+import { LIMITS } from "@ghostly/core";
 import { CliError } from "./errors";
 
 export { findSecret };
+
+/**
+ * The most a text the guard reads may carry: 16 KiB of UTF-8, trimmed, a message's bound. Nothing else the engine sends
+ * is longer (a memo goes as its first 140 characters, a note at most 4,000, a name or a status far less), and the guard
+ * reads up to ~0.3 µs a character: a 5 MB memo held the daemon 2.9 s. A longer one is refused with its size, unread.
+ */
+export function checkGuardedSize(text: string, what: string): void {
+  const bytes = Buffer.byteLength(text.trim());
+  if (bytes > LIMITS.maxChatMessageBytes) throw new CliError("bad_request", `${what} is ${bytes} UTF-8 bytes, more than any text Ghostly sends (${LIMITS.maxChatMessageBytes}): shorten it`, { bytes, max: LIMITS.maxChatMessageBytes });
+}
 
 /** What a refusal says the text looks like. */
 export function secretWords(secret: SecretFinding): string {

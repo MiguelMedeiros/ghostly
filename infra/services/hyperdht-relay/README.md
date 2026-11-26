@@ -52,7 +52,7 @@ are in WISP 103, "Browser profile".
 | bytes waiting for a client that it has not read yet, with what it sent that its far peers have not taken yet (one stream past half of it is closed) | 8 MiB | `GHOSTLY_RELAY_QUEUED_BYTES` |
 | bytes waiting, both ways, over all clients (past it, the client holding the most is dropped) | 96 MiB | `GHOSTLY_RELAY_QUEUED_TOTAL_BYTES` |
 | a client with no listen open and no dial | 30 s | `GHOSTLY_RELAY_IDLE_MS` |
-| ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
+| ping, dropped when the last went unanswered (not while its socket was paused for the byte rate since: the answer waits unread behind what it sent) | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |
 | a client's part of a handshake (its answer) | 15 s | `GHOSTLY_RELAY_HANDSHAKE_MS` |
 | handshakes waiting on one client's answer at once (its dials and incoming ones; one key's incoming ones at most a quarter but at least one, and a quarter rounded down kept for its dials: none at 1 to 3) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
@@ -73,7 +73,7 @@ at most 5 a minute, then one count a minute while it goes on (`refused address (
 | `refused address` | a new client got 429: its address already holds `clientsPerAddress` | `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS`; behind a proxy, `GHOSTLY_RELAY_PROXIES` or `GHOSTLY_RELAY_CLOUDFLARE`, or every client counts as the proxy |
 | `dropped room` | on a full relay, the oldest client of the address holding the most, for a newcomer | `GHOSTLY_RELAY_CLIENTS` |
 | `dropped idle` | a client with no listen and no dial for `idleMs` | `GHOSTLY_RELAY_IDLE_MS` |
-| `dropped no pong` | a client that had not answered the last ping by the next | `GHOSTLY_RELAY_PING_MS` |
+| `dropped no pong` | a client that had not answered the last ping by the next, its socket not paused for the byte rate meanwhile | `GHOSTLY_RELAY_PING_MS` |
 | `dropped listen rate`, `dropped listen limit` | a client past `listensPerMinute`, or past `listens` at once | `GHOSTLY_RELAY_LISTENS_PER_MINUTE`, `GHOSTLY_RELAY_LISTENS` |
 | `dropped dial limit` | a client past `connectsPerMinute` | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
 | `dropped address listen rate`, `dropped address dial limit` | a client whose address has started `listensPerMinute` (or `connectsPerMinute`) × `clientsPerAddress` in the last minute, over all its clients, closed ones too | `GHOSTLY_RELAY_LISTENS_PER_MINUTE`, `GHOSTLY_RELAY_CONNECTS_PER_MINUTE`, `GHOSTLY_RELAY_CLIENTS_PER_ADDRESS` |
