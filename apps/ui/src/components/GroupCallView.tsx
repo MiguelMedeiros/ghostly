@@ -390,7 +390,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
           <div data-testid="group-call-top" className={`call-top flex items-center justify-center gap-1.5 max-md:gap-3 px-16 max-md:px-[72px] ${presenter ? "pt-[calc(1.5rem+env(safe-area-inset-top))]" : "pt-6"} pb-2`}>
             <p dir="auto" data-over-picture={presenter ? true : undefined} className="min-w-0 truncate text-text-primary font-medium">{groupName}</p>
             {/* Its phone hit area reaches up into the window's top, not down onto the tiles drawn over it 8 px below. */}
-            <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className={`max-md:before:-top-4 max-md:before:-bottom-2 ${presenter ? "text-white/80 aria-expanded:text-white" : ""}`} />
+            <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="group-call-info" className={`max-md:before:-top-4 max-md:before:-bottom-2 ${presenter ? "bg-black/70 text-white aria-expanded:text-white" : ""}`} />
             {moderation && <RemovedFromCall moderation={moderation} nameOf={(identity) => (groupNameOf ? groupNameOf(identity) : identity)} host={box} overPicture={!!presenter} />}
           </div>
           {/* Over a shared screen in the theme's grey it was 2.3:1 on black in the light theme: there it is a dark chip, as the error notice is. */}

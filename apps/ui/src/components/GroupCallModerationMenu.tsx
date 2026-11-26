@@ -100,7 +100,8 @@ function ConfirmRemove({ name, from, returnFocus, onClose, onConfirm }: { name: 
 /**
  * Who the admin removed from the call, out of it and so without a tile: each with Let back in, which lifts the ban
  * (they join again themselves). Beside the call's name, only while someone is removed. Over a shared screen
- * (`overPicture`) it is white, as the ⓘ beside it: the theme's grey was 2.3:1 on black in the light theme.
+ * (`overPicture`) it is white on its own black chip, as the ⓘ beside it: the theme's grey was 2.3:1 on black in the
+ * light theme, and white alone 1.0:1 over a white screen.
  */
 export function RemovedFromCall({ moderation, nameOf, host, overPicture = false }: { moderation: CallModeration; nameOf: (identity: string) => string; host: RefObject<HTMLElement | null>; overPicture?: boolean }) {
   const { t } = useI18n();
@@ -112,7 +113,7 @@ export function RemovedFromCall({ moderation, nameOf, host, overPicture = false 
   return (
     <div ref={anchor} className="relative shrink-0">
       <button type="button" onClick={() => setOpen(!open)} data-testid="group-call-removed" aria-expanded={open} aria-haspopup="true"
-        className={`min-h-8 max-md:min-h-11 cursor-pointer rounded-full px-2 text-xs transition-colors ${overPicture ? "text-white/80 hover:bg-white/10 hover:text-white" : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}>
+        className={`min-h-8 max-md:min-h-11 cursor-pointer rounded-full px-2 text-xs transition-colors ${overPicture ? "bg-black/70 text-white hover:bg-black/80" : "text-text-secondary hover:bg-surface-hover hover:text-text-primary"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}>
         {label}
       </button>
       <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="group-call-removed-menu" label={label} portal focusFirst align="start" host={host.current}>

@@ -152,11 +152,12 @@ describe("the admin's menu on a member's tile", () => {
     const sharing: GroupCallState = { ...call, participants: [{ ...person(ANA, "Ana"), screen: true, tracks: { screen: new FakeTrack("video") as unknown as MediaStreamTrack } }] };
     const { rerenderWith } = adminView({ shown: sharing });
     const chip = await screen.findByTestId("group-call-removed");
-    expect(chip).toHaveClass("text-white/80", "hover:bg-white/10", "hover:text-white");
+    // On its own black chip: white with no backing was 1.0:1 over a white shared screen.
+    expect(chip).toHaveClass("bg-black/70", "text-white", "hover:bg-black/80");
     expect(chip).not.toHaveClass("text-text-secondary");
     rerenderWith(call);
     expect(screen.getByTestId("group-call-removed")).toHaveClass("text-text-secondary", "hover:bg-surface-hover");
-    expect(screen.getByTestId("group-call-removed")).not.toHaveClass("text-white/80");
+    expect(screen.getByTestId("group-call-removed")).not.toHaveClass("bg-black/70");
   });
 
   it("asks before removing from the group, saying behind the ⓘ that the group gets a new key, and uses the group's remove", async () => {
