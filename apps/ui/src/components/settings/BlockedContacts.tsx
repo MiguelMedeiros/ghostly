@@ -19,8 +19,12 @@ export function BlockedContacts() {
     const chat = state?.links.find((link) => link.peerPubKeyZ32 === key);
     return { key, name: chat?.label?.trim() || chat?.peerNick?.trim() || "" };
   }));
-  // Unnamed, as the chat list says it: "Contact · <tag>".
-  const lines = blocked.map((line) => ({ ...line, name: line.name || t("common.unnamedContact", { key: contactTag(line.key) }) }));
+  // Unnamed, as the chat list says it: "Contact · <tag>". A name the chat or the contact chose is drawn in its own <bdi>,
+  // as Devices draws a device's: "Ana (2)" in an Arabic page otherwise reads ")Ana (2". The fallback is the app's words.
+  const lines = blocked.map((line) => {
+    const name = line.name || t("common.unnamedContact", { key: contactTag(line.key) });
+    return { ...line, name, shown: line.name ? <bdi>{line.name}</bdi> : name };
+  });
   const [unblocking, setUnblocking] = useState<string | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const none = useRef<HTMLDivElement>(null);
@@ -51,7 +55,7 @@ export function BlockedContacts() {
             <Row label={t("settings.blocked.none")} hint={t("settings.blocked.hint")} testId="settings-blocked-none" />
           </div>
         : lines.map((line, i) => (
-          <Row key={line.key} label={line.name} testId="settings-blocked-contact">
+          <Row key={line.key} label={line.shown} testId="settings-blocked-contact">
             <Button ref={(button) => { if (button) buttons.current.set(line.key, button); else buttons.current.delete(line.key); }} loading={unblocking === line.key} disabled={unblocking !== null}
               aria-label={t("settings.blocked.unblockLabel", { name: isolate(line.name) })} onClick={() => void unblock(line.key, i)}>
               {t("settings.blocked.unblock")}
