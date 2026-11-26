@@ -207,6 +207,109 @@ describe("the WebRTC guard of a contact's app (Hide my IP from contacts)", () =>
   });
 });
 
+describe("the WebRTC guard's look at frames as one loads, once the page rewrote itself", () => {
+  /**
+   * A window with the guard run in it, whose frames' windows have WebRTC until the guard goes into them. The document's
+   * `load` listeners are what a frame's load (its first, empty one as it is put in the page too) fires; the open steps
+   * (`document.open()`, or a write with no insertion point) take them away, unless the browser ignores the call.
+   */
+  function rewritable() {
+    const loads: (() => void)[] = [];
+    const frames: Record<string, unknown>[] = [];
+    let parsing = false;
+    let clears = true;
+    let parse: (() => void) | null = null;
+    const written: [string, string][] = [];
+    const openSteps = (doc: unknown) => {
+      if (!clears || doc !== w.document) return;
+      loads.length = 0;
+      parsing = true;
+    };
+    class List { get length() { return 0; } }
+    class Doc {
+      querySelectorAll() { return new List(); }
+      open() { openSteps(this); return this; }
+      close() { parsing = false; }
+      write(html: string) { this.parsed("write", html); }
+      writeln(html: string) { this.parsed("writeln", html); }
+      parsed(name: string, html: string) {
+        if (!parsing) openSteps(this);
+        written.push([name, html]);
+        if (html !== "") parse?.();
+      }
+    }
+    const w: Record<string, unknown> = {
+      TypeError,
+      Document: Doc,
+      EventTarget: { prototype: { addEventListener(this: unknown, type: string, listener: () => void) {
+        if (this === w.document && type === "load" && !loads.includes(listener)) loads.push(listener);
+      } } },
+      Element: { prototype: {} },
+      DocumentFragment: { prototype: { querySelectorAll() { return new List(); } } },
+      NodeList: { prototype: List.prototype },
+      MutationObserver: class { observe() {} },
+      get length() { return frames.length; },
+      open() {},
+      document: null,
+    };
+    Object.defineProperty(Doc.prototype, "defaultView", { get(this: unknown) { return this === w.document ? w : null; } });
+    w.document = new Doc();
+    new Function("window", VIEWER_GUARD_SCRIPT)(w);
+    /** A frame loads a page of the origin the guard is not put in (its first, empty one, or a `blob:` one). */
+    const load = (at: number) => {
+      frames[at] = { RTCPeerConnection: class {} };
+      w[at] = frames[at];
+      for (const listener of [...loads]) listener();
+      return "RTCPeerConnection" in frames[at];
+    };
+    return {
+      loads,
+      written,
+      load,
+      rewrite: () => (Doc.prototype.open as (this: object) => unknown).call(w.document as object),
+      /** As `tapWindow`'s: after load, then `document.close()`; `during` runs as a script it wrote. */
+      write: (name: "write" | "writeln", on: object = w.document as object, during: (() => void) | null = null, clearing = true) => {
+        parse = during;
+        clears = clearing;
+        (Doc.prototype[name] as (this: object, html: string) => unknown).call(on, "<iframe></iframe>");
+        clears = true;
+        parse = null;
+        (on as Doc).close();
+      },
+      newDocument: () => new Doc(),
+    };
+  }
+
+  it("goes into a frame that loads after a document.write() once the page loaded, and into one the write puts in", () => {
+    // covers: settings.network.relay-only
+    for (const name of ["write", "writeln"] as const) {
+      const page = rewritable();
+      expect(page.load(0), name).toBe(false);
+      const sweep = page.loads[0];
+      // The frame the written HTML puts in fires its first load inside the write, and a script written after it reads
+      // its window by its index there.
+      let during: boolean | undefined;
+      page.write(name, undefined, () => { during = page.load(0); });
+      expect(during, name).toBe(false);
+      expect(page.loads, name).toEqual([sweep]);
+      // The frame goes to a page the guard is not in, later.
+      expect(page.load(0), name).toBe(false);
+      // The page's own text goes to the browser once, by the page's own call.
+      expect(page.written, name).toEqual([["write", ""], [name, "<iframe></iframe>"]]);
+      // One the browser ignores takes nothing away and adds nothing twice; a document that is not the page's, nothing.
+      page.write(name, undefined, null, false);
+      page.write(name, page.newDocument());
+      expect(page.loads, name).toEqual([sweep]);
+      expect(page.load(1), name).toBe(false);
+    }
+    // document.open(), as before.
+    const page = rewritable();
+    page.rewrite();
+    expect(page.loads).toHaveLength(1);
+    expect(page.load(0)).toBe(false);
+  });
+});
+
 describe("the WebRTC guard's Trusted Types default policy", () => {
   type Rules = Record<string, ((input: string, type: string, sink: string) => string | null) | undefined>;
   class Policy { constructor(readonly name: string, readonly rules: Rules) {} }

@@ -24,7 +24,8 @@
  *   window. A page that rewrites itself (`document.open()`, which takes every listener of the document and of its
  *   window away) has those inputs listened for again as the call returns, before its new page adds any of its own; so
  *   does one that calls `document.write()` or `writeln()` once it has loaded (the same open steps, run without
- *   `open()`), as that call returns;
+ *   `open()`), before what it wrote is parsed: an empty write goes first, for the browser to run those steps (or not,
+ *   as it would for the page's), so a script the page writes runs with them listened for;
  * - runs in a frame's window before the page holds it, as the WebRTC guard does (`VIEWER_GUARD_SCRIPT`): what a frame
  *   element hands out is guarded first, the frames of the document and of its shadow trees are gone over as one loads
  *   (an empty frame's first load fires as it is put in the page) and as the page changes (the whole page once, then
@@ -378,9 +379,10 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
           }
         } catch (e) {}
       }
-      const reheard = (doc) => {
+      const reheard = (doc, opening) => {
         try {
           if (apply(view, doc, []) === w) {
+            if (opening) apply(opening, doc, [""]);
             apply(listen, doc, ["load", sweep, true]);
             hear();
           }
@@ -389,7 +391,7 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
       const reopen = proto.open;
       proto.open = function () {
         const got = apply(reopen, this, arguments);
-        reheard(this);
+        reheard(this, null);
         return got;
       };
       const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
@@ -408,6 +410,7 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
         };
       }
       let tail = "";
+      const blank = proto.write;
       const writes = ["write", "writeln"];
       for (let i = 0; i < writes.length; i++) {
         const real = proto[writes[i]];
@@ -417,9 +420,8 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
           for (let j = 0; j < arguments.length; j++) checked += text(arguments[j]);
           if (shadowed(tail + checked)) refuse();
           tail = apply(slice, tail + checked, [-16]);
-          const got = apply(real, this, [checked]);
-          reheard(this);
-          return got;
+          reheard(this, blank);
+          return apply(real, this, [checked]);
         };
       }
       const kinds = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
@@ -479,4 +481,4 @@ export const CLIPBOARD_GUARD_SCRIPT = `(function noClipboardWrites(w) {
 })(window)`;
 
 /** `CLIPBOARD_GUARD_SCRIPT`'s hash, as a CSP source: the bridge's policy and a contact's own are given it. */
-export const CLIPBOARD_GUARD_HASH = "'sha256-e02ru5vfXUoocznFuaOYi6mYSROzfSEW5rzBIFAYqN4='";
+export const CLIPBOARD_GUARD_HASH = "'sha256-4XD5HdORWUmOWOoJYRH1EbSPf5kui35Kspre38YIVP4='";
