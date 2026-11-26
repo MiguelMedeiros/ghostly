@@ -65,6 +65,10 @@ export class ProfileDid {
   private ended = false;
   /** The newest sequence number signed here, so the `deactivated` packet goes past one still on its way. */
   private signedSeq = 0;
+  /** This run changed the listed identities and their document is not out yet: `close` publishes it. */
+  private due = false;
+  /** `changed`'s save of the listing without a removed proof: `close` publishes after it, or the publish's save brings the proof back. */
+  private dropping: Promise<void> | undefined;
 
   constructor(private host: ProfileDidHost) {}
 
@@ -87,6 +91,21 @@ export class ProfileDid {
     this.running = true;
     this.unlisten ??= whenDataKeyDropped(() => this.forgetSeed());
     this.schedule(FIRST_PUBLISH_MS);
+  }
+
+  /**
+   * `stop`, once a listing this run changed is published: a CLI one-shot (`engine setDidListed`, an `identity remove` of
+   * a listed proof) ended within the change's 2 s, so the DID kept the old document until a daemon ran 15 s.
+   */
+  async close(): Promise<void> {
+    this.running = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    if (this.due) {
+      await this.dropping;
+      await this.publishNow().catch(() => {});
+    }
+    this.stop();
   }
 
   stop(): void {
@@ -144,6 +163,7 @@ export class ProfileDid {
       throw error;
     }
     await this.save({ ...this.stored!, listed: next });
+    this.due = true;
     this.host.emit();
     this.schedule(CHANGE_DELAY_MS);
   }
@@ -153,7 +173,10 @@ export class ProfileDid {
     if (!this.stored) return;
     const ids = new Set(this.host.proofIds());
     const kept = this.stored.listed.filter(id => ids.has(id));
-    if (kept.length !== this.stored.listed.length) void this.save({ ...this.stored, listed: kept }).catch(() => {});
+    if (kept.length !== this.stored.listed.length) {
+      this.due = true;
+      this.dropping = this.save({ ...this.stored, listed: kept }).catch(() => {});
+    }
     if (this.stored.published && !this.samePacket(this.stored.published.payload)) this.schedule(CHANGE_DELAY_MS);
   }
 
@@ -192,6 +215,8 @@ export class ProfileDid {
       this.signedSeq = Math.max(this.signedSeq, seq);
       await this.host.publish(toZ32(this.publicKey()), payload);
       if (this.ended) return;
+      // A listing changed while this one was on its way is still due.
+      this.due &&= !this.samePacket(toBase64Url(payload));
       this.error = undefined;
       await this.save({ ...this.stored, published: { payload: toBase64Url(payload), seq, at: Date.now() } });
     } catch (error) {
