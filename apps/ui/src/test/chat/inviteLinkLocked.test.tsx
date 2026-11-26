@@ -70,6 +70,37 @@ it("invite links opened while locked each make their chat after the unlock, up t
   expect(listSessions()).toHaveLength(3);
 }, 60_000);
 
+// covers: invite.link, profiles.lock, chat.paired.join-notice
+/*
+ * Invite links held under the lock open one after the other after the unlock: only the chat the app lands on (the
+ * last link's) says its join notice. An earlier link's "You're already in this chat" sat over the next chat opened.
+ */
+it.each([
+  ["a chat already here, then a new one: no notice over the new chat", [true, false], null],
+  ["a new chat, then one already here: that one still says so", [false, true], "You're already in this chat."],
+])("invite links held under the lock, %s", async (_, known, notice) => {
+  const codes = known.map(() => createChatInvite().inviteCode);
+  known.forEach((isKnown, i) => {
+    const reading = readInvite(codes[i]);
+    if (isKnown && reading.ok) ensureSession(reading.keys);
+  });
+  window.location.hash = `#${codes[0]}`;
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  window.location.hash = `#${codes[1]}`;
+  act(() => { window.dispatchEvent(new PopStateEvent("popstate")); });
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  await waitFor(() => expect(listSessions()).toHaveLength(2));
+  const last = readInvite(codes[1]);
+  const landed = listSessions().find((s) => last.ok && s.peerPubKeyB64 === last.keys.peerPubKeyB64)!;
+  await waitFor(() => expect(window.location.hash).toBe(`#/chat/${landed.id}`));
+  if (notice) expect(screen.getByTestId("join-notice")).toHaveTextContent(notice);
+  else expect(screen.queryByTestId("join-notice")).toBeNull();
+}, 60_000);
+
 // covers: invite.link, profiles.lock
 /*
  * Links with a joined chat's seed but another contact's keys, opened while locked: each would make a chat of its own,
