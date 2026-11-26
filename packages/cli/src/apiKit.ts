@@ -3,7 +3,7 @@ import { groupName, INVITE_TAKEN, isZ32Key, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
-import { CliError } from "./errors";
+import { CliError, shownValue } from "./errors";
 import { shellWord } from "./shellWord";
 import type { CallManager } from "./calls/manager";
 import type { EventHub } from "./events";
@@ -238,7 +238,9 @@ export function findChat(links: readonly LinkView[], ref: string, groups: readon
  * `chat connect`, `identity share`, `call start` and the other commands that take only a 1:1 chat read `No chat "Crew"`,
  * as if nothing had that name. `onlyChat`: why the command takes only a chat ("only a chat has a code to compare"), said
  * after a name more than one group has. No group command takes the group in their place, so none is named: "a group
- * command takes one by its id" named none, and `group auto on --from` takes chats.
+ * command takes one by its id" named none, and `group auto on --from` takes chats. A ref that names nothing is quoted as
+ * a refused value is (`shownValue`): a Cashu token or a key typed in the wrong place (`ghostly send "$TOKEN" bob`) is
+ * described, not printed.
  */
 function noChat(ref: string, groups: readonly GroupView[], onlyChat?: string): CliError {
   // A name two groups share is still a group's: it read `No chat "Crew"`, as if nothing had it.
@@ -247,7 +249,7 @@ function noChat(ref: string, groups: readonly GroupView[], onlyChat?: string): C
   if (shared) return new CliError("not_found", `${JSON.stringify(ref)} names more than one group, not a chat${onlyChat ? `: ${onlyChat}` : ""} (ghostly chat list)`, { matches: shared });
   const group = groupNamed(ref, groups);
   if (group) return new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat (ghostly chat list)`, { group: group.id });
-  return new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
+  return new CliError("not_found", `No chat ${shownValue(ref)} (ghostly chat list)`);
 }
 
 /** A chat or group ref as a next step shows it: as given, quoted only when it holds more than a word (see `shellWord`). */
@@ -263,13 +265,13 @@ export type RefPlace = { group: boolean; ref: string };
  */
 export function noMessage(id: string, place: RefPlace, { whose, tail }: { whose?: string; tail?: string } = {}): CliError {
   const history = `ghostly ${place.group ? "group" : "chat"} history ${shownRef(place)}`;
-  return new CliError("not_found", `No message ${JSON.stringify(id)}${whose ? ` ${whose}` : ""} in this ${place.group ? "group" : "chat"}${tail ?? ""} (${history})`);
+  return new CliError("not_found", `No message ${shownValue(id)}${whose ? ` ${whose}` : ""} in this ${place.group ? "group" : "chat"}${tail ?? ""} (${history})`);
 }
 
 /** No file by `id`, as `noMessage` says a message: in the chat or group named (`place`), or in none when none was. */
 export function noFile(id: string, place?: RefPlace): CliError {
   const where = place ? ` in this ${place.group ? "group" : "chat"}` : "";
-  return new CliError("not_found", `No file ${JSON.stringify(id)}${where} (ghostly file list ${place ? shownRef(place) : "<chat|group>"})`);
+  return new CliError("not_found", `No file ${shownValue(id)}${where} (ghostly file list ${place ? shownRef(place) : "<chat|group>"})`);
 }
 
 /** The one group `ref` names, if any (none, or more than one: undefined). */
@@ -383,7 +385,7 @@ export function findGroup(groups: readonly GroupView[], given: string): GroupVie
     if (found.length === 1) return found[0];
     if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(given)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
   }
-  throw new CliError("not_found", `No group ${JSON.stringify(given)} (ghostly group list)`);
+  throw new CliError("not_found", `No group ${shownValue(given)} (ghostly group list)`);
 }
 
 /**
@@ -406,7 +408,7 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
     if (CHAT_ID_SHAPED.test(nameKey(ref)) || contactKeyOf(ref) !== undefined) throw error;
     try { return { group: findGroup(groups, ref) }; } catch (inner) {
       if (!(inner instanceof CliError) || inner.code !== "not_found") throw inner;
-      throw new CliError("not_found", `No chat or group ${JSON.stringify(ref)} (ghostly chat list, ghostly group list)`);
+      throw new CliError("not_found", `No chat or group ${shownValue(ref)} (ghostly chat list, ghostly group list)`);
     }
   }
   if (!chat.theirName) return { link: chat.link };
