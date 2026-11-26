@@ -1,3 +1,4 @@
+// covers: headless.backup
 import { createCipheriv, createHash, pbkdf2Sync, randomBytes } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { open } from "node:fs/promises";
