@@ -163,6 +163,7 @@ export const developers = {
     noSpec: "No WISP yet",
     docs: "Reference",
     included: "{n} of {t} pieces",
+    lit: "in this composition",
     boardLabel: "Architecture board",
   },
   negotiate: {
