@@ -158,7 +158,8 @@ const SCREEN = "640x360";
 const picture = /^[1-9]\d*x[1-9]\d*$/;
 
 /** The call's sharing notice, if it shows one. WebKit ends a flex box's innerText with a newline: trimmed. */
-const sharingNotice = async (p: DesktopPerson) => (await p.app.text('[data-testid="call-sharing"]'))?.trim() ?? null;
+// innerText puts each of the notice's flex items on a line of its own: read as one line.
+const sharingNotice = async (p: DesktopPerson) => (await p.app.text('[data-testid="call-sharing"]'))?.replace(/\s+/g, " ").trim() ?? null;
 
 /** How many "… call ended" lines the page shows. */
 const endedLines = async (p: DesktopPerson) => (await p.snapshot()).split("call ended").length - 1;
