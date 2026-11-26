@@ -3,10 +3,13 @@ import { expect, test } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /*
- * A 1:1 chat's "<name> joined the chat" line, for a contact whose name is one long word (20 letters, as long as a
- * nickname may be): the name breaks inside the line. Unbroken, the centred line ran off both sides of a 320 px phone
- * and the chat cut it: the icon at the left edge and its ⋮ off the screen, and at the browser's larger text size
- * (24 px) "joined" read "d the chat" with the time gone.
+ * A chat's event lines with a name of one long word in them break the name inside the line. Unbroken, the centred line
+ * ran off both sides of a 320 px phone and the chat cut it:
+ * - a 1:1 chat's "<name> joined the chat", for a contact named by 20 letters (as long as a nickname may be): its icon
+ *   at the left edge and its ⋮ off the screen, and at the browser's larger text size (24 px) "joined" read
+ *   "d the chat" with the time gone;
+ * - a group's "You renamed the group to “<name>”", for a name of 64 letters (the most a group's name may have): the
+ *   name ran from x=-202 to 522.
  */
 const PHONE = { width: 320, height: 640 };
 const NAME = "W".repeat(20);
@@ -58,5 +61,35 @@ for (const language of ["en", "ar"]) {
         expect.soft(right, `${px} px: the ${part} ends at x=${right}`).toBeLessThanOrEqual(parts.width);
       }
     }
+  });
+
+  test(`${language}: a group's name of one long word stays inside its renamed line on a phone`, { tag: ["@feature:groups.rename","@feature:app.mobile-layout"] }, async ({ peer }) => {
+    const { page } = await peer("ana");
+    const group = "W".repeat(64);
+    await page.goto("/#/");
+    await page.getByTestId("sidebar-new-more").click();
+    await page.getByTestId("new-group").click();
+    await page.getByTestId("new-group-name").fill("Lunch");
+    await page.getByTestId("new-group-create").click();
+    await page.getByTestId("group-share-done").click();
+    await page.getByTestId("group-members").click();
+    await page.getByTestId("group-rename").click();
+    await page.getByTestId("group-rename-input").fill(group);
+    await page.getByTestId("group-rename-input").press("Enter");
+    await page.getByTestId("group-members-dialog").getByRole("button", { name: "Close" }).click();
+
+    await page.setViewportSize(PHONE);
+    await useLanguage(page, language);
+    const line = page.getByTestId("group-event").filter({ hasText: group }).locator("span").first();
+    await expect(line).toBeVisible();
+    await line.screenshot({ path: test.info().outputPath("renamed-line.png") });
+    const [left, right] = await line.evaluate((el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const { left, right } = range.getBoundingClientRect();
+      return [Math.round(left), Math.round(right)];
+    });
+    expect.soft(left, `the line's words start at x=${left}`).toBeGreaterThanOrEqual(0);
+    expect.soft(right, `the line's words end at x=${right}`).toBeLessThanOrEqual(PHONE.width);
   });
 }
