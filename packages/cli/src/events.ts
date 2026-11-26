@@ -2,10 +2,9 @@ import { appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, openSy
 import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
-import { parsePayLink } from "@ghostly/browser/shared/payLinks";
 import type { EngineState, FileTransferView, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import { chatJson, chatMessageJson, groupJson, groupMessageJson, groupPayTwins, type MessageJson } from "./views";
-import { paymentJson } from "./wallets";
+import { paymentGroupOf, paymentJson } from "./wallets";
 
 /**
  * The event stream (WISP 1100 § Event stream): what happened, derived from the engine's own events, one JSON object
@@ -760,9 +759,8 @@ export class EventHub {
     this.forget(removedGroups, (event) => groupsGone.has(event.group as string) && event.type !== "group.removed");
     // A group's payment that went over a member's edge, or a community member's `cpay:` link, has no `group` of its own
     // (only a request to the whole group does): its event names the group, as `listen --group` reads it.
-    let edgeGroups: Map<string, string> | undefined;
-    const groupOf = (linkId: string) => (edgeGroups ??= new Map(state.groups.flatMap((g) => g.members.flatMap((m) => m.edge ? [[m.edge.linkId, g.id] as const] : [])))).get(linkId)
-      ?? parsePayLink(linkId)?.groupId;
+    // `payment list` reads it the same way (`paymentGroupOf`).
+    const groupOf = paymentGroupOf(state.groups);
     // The engine keeps every payment for good and hands the same views object until one changes: the same object as in
     // the last state is skipped, or each state (every 50 ms under traffic) walked them all, 7 ms at 20,000.
     const payments = state.payments === this.state?.payments ? {} : state.payments ?? {};
@@ -770,8 +768,7 @@ export class EventHub {
       const shape = `${payment.state}|${payment.error ?? ""}|${payment.closed ? 1 : 0}`, before = this.payments.get(id);
       this.payments.set(id, shape);
       if (quiet || before === shape) continue;
-      const group = payment.group ?? groupOf(payment.linkId);
-      const json = { ...paymentJson(payment), ...(group && { group }) };
+      const json = paymentJson(payment, groupOf(payment));
       if (before === undefined) this.emit("payment.created", `payment.created:${id}`, { chat: payment.linkId, payment: json });
       else this.emit("payment.updated", `payment.updated:${id}:${payment.state}:${this.now()}`, { chat: payment.linkId, payment: json });
     }

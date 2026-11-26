@@ -1,7 +1,8 @@
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { parsePaymentAmount, type WalletNetwork } from "@ghostly/core";
-import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupView, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
+import { parsePayLink } from "@ghostly/browser/shared/payLinks";
 import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, str, type ApiContext, type Lookup, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
@@ -171,11 +172,26 @@ function tokenUnits(text: string, decimals: number): number {
   throw new CliError("bad_request", "amount must be above 0");
 }
 
-export function paymentJson(p: PaymentView) {
+/**
+ * The group a payment is of, whichever link it went over: only a request to the whole group names its group itself
+ * (`p.group`). A member paying it over their edge, a member's request that came to me over it, and a community member's
+ * payment on `cpay:<group>:<key>` carry the edge's or the `cpay:` link as their chat, which `chat show` does not know.
+ * `payment list` and the `payment.*` events read it alike. The edges' map is built once, on the first payment it is
+ * asked for.
+ */
+export function paymentGroupOf(groups: readonly Pick<GroupView, "id" | "members">[]): (p: Pick<PaymentView, "group" | "linkId">) => string | undefined {
+  let edges: Map<string, string> | undefined;
+  return (p) => p.group
+    ?? (edges ??= new Map(groups.flatMap((g) => g.members.flatMap((m) => (m.edge ? [[m.edge.linkId, g.id] as const] : []))))).get(p.linkId)
+    ?? parsePayLink(p.linkId)?.groupId;
+}
+
+/** A payment as the CLI gives it. `group`: the group it is of (`paymentGroupOf`), by default only the one it names. */
+export function paymentJson(p: PaymentView, group = p.group) {
   return {
     id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, ...tokenDecimals(p), memo: p.memo ?? null,
     state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: p.target?.method ?? (p.federation || p.federations ? "fedimint" : p.invoice ? "lightning" : p.mint || p.mints ? "cashu" : null),
-    createdAt: p.createdAt, ...(p.group ? { group: p.group } : {}), ...(p.closed ? { closed: true } : {}), ...(p.txid ? { txid: p.txid } : {}),
+    createdAt: p.createdAt, ...(group ? { group } : {}), ...(p.closed ? { closed: true } : {}), ...(p.txid ? { txid: p.txid } : {}),
   };
 }
 
@@ -591,7 +607,9 @@ const WALLETS: Record<string, Method> = {
   async "payment.list"(ctx, params) {
     const s = state(ctx);
     const chat = params.chat === undefined ? null : chatOf(ctx, params, s).id;
-    const payments = Object.values(s.payments).filter((p) => !chat || p.linkId === chat).sort((a, b) => b.createdAt - a.createdAt).map(paymentJson);
+    const groupOf = paymentGroupOf(s.groups ?? []);
+    const payments = Object.values(s.payments).filter((p) => !chat || p.linkId === chat).sort((a, b) => b.createdAt - a.createdAt)
+      .map((p) => paymentJson(p, groupOf(p)));
     return { payments };
   },
 
