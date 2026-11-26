@@ -460,8 +460,11 @@ function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Se
   };
 }
 
-/** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
-const HOLDER_WAIT_MS = 5_000;
+/**
+ * How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second.
+ * GHOSTLY_TEST_HOLDER_WAIT_MS: a test of one-shots at once, whose holders on a loaded CI runner kept it past 5 s.
+ */
+const HOLDER_WAIT_MS = Number(process.env.GHOSTLY_TEST_HOLDER_WAIT_MS) || 5_000;
 /** How long it waits for the profile's daemon that is starting (`startingDaemon`): its engine takes seconds on a large profile. */
 const STARTING_WAIT_MS = 30_000;
 /**
