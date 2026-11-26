@@ -5,6 +5,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { EngineState, GroupView, StoredLink } from "../src/shared/types";
+// guards: #8982
 
 /**
  * What a 1:1 chat's link says of itself as it goes live or drops (a connection attempt, its data link, the contact's
