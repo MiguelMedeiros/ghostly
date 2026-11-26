@@ -101,11 +101,11 @@ describe("message delete --everyone in a chat on the DHT only: the timeout says 
       const failure = await timedOut(callApi(fake(mode, mine).ctx, "chat.delete", { chat: "Alice", message: "me_1", everyone: true, wait: "confirmed", timeout: 2 })) as { code: string; message: string; details: object };
       expect(failure.code).toBe("timeout");
       expect(failure.message).not.toMatch(/goes by itself|next command|daemon --detach/);
-      expect(failure.message).toBe(`${gone}. Its removal goes only on a live session, and this chat is on the DHT only: it goes once you choose a live transport (ghostly chat transport Alice auto)`);
+      expect(failure.message).toBe(`${gone}. Its removal goes only on a live session and is given up a week after the delete, and this chat is on the DHT only: it goes once you choose a live transport (ghostly chat transport Alice auto)`);
       expect(failure.details).toEqual({ messageId: "me_1", deleted: "me_1" });
     }
     expect(await timedOut(callApi(fake("daemon", theirs).ctx, "chat.delete", { chat: "Alice", message: "me_1", everyone: true, wait: "confirmed", timeout: 2 }))).toMatchObject({
-      code: "timeout", message: `${gone}. Its removal goes only on a live session, and the contact keeps this chat on the DHT only: it goes once they choose a live transport`,
+      code: "timeout", message: `${gone}. Its removal goes only on a live session and is given up a week after the delete, and the contact keeps this chat on the DHT only: it goes once they choose a live transport`,
     });
   });
 });

@@ -74,11 +74,12 @@ export function pinWaitsNote(chat: DhtOnly, ref: string, remove: boolean): strin
  * Why my removal of a message (`message delete --everyone`) in a 1:1 chat waits, or undefined: it goes on the live
  * session only (WISP 400 § Delete for everyone, core `sendEdit`), never over the DHT, as a pin's. A `--wait confirmed`
  * timeout says it in its words (api.ts `removalWaitsLive`): it said the removal still goes by itself, and it never went
- * while the chat stayed on the DHT only.
+ * while the chat stayed on the DHT only. One still unconfirmed a week after the delete is given up (`RESEND_POLICY`'s
+ * window, engine `EditQueue`), so the words say that bound too, as the app's dialog does.
  */
 export function removalWaitsNote(chat: DhtOnly, ref: string): string | undefined {
   const who = dhtOnlyWho(chat, ref);
-  return who && `Its removal goes only on a live session, and ${who}`;
+  return who && `Its removal goes only on a live session and is given up a week after the delete, and ${who}`;
 }
 
 /**
