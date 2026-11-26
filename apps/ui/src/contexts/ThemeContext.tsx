@@ -45,7 +45,7 @@ export function switchTheme(scheme: "dark" | "light", colorTheme: ColorTheme, ro
  * App: the lock screen and a standby device's screen show no App, and the theme still changes under them (System follows
  * the OS), while the bar kept what the boot guard wrote at load.
  */
-function syncThemeColor(root: HTMLElement = document.documentElement): void {
+export function syncThemeColor(root: HTMLElement = document.documentElement): void {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (!meta) return;
   const color = getComputedStyle(root).getPropertyValue("--theme-panel-header").trim();
