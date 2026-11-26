@@ -314,7 +314,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
     <Tile key={p.identity} person={p} you={p === local} kind="face" speaking={p.identity === activeSpeaker} name={nameOf(p)} face={shown(p)} menu={menuOf(p)} />
   ));
   const screenTiles = otherScreens.map((p) => {
-    const label = t("calls.group.showScreen", { name: isolate(nameOf(p)) });
+    const label = p === local ? t("calls.group.showYourScreen") : t("calls.group.showScreen", { name: isolate(nameOf(p)) });
     const button = (
       <button type="button" onClick={() => show(p.identity)} data-testid="group-call-show-screen" data-identity={p.identity} aria-label={label} title={label}
         className="absolute inset-0 z-10 cursor-pointer rounded-xl hover:bg-white/10 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-accent" />

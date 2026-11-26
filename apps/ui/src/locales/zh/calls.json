@@ -57,6 +57,7 @@
     "retry": "重试",
     "screenOf": "{{name}} 的屏幕",
     "showScreen": "放大显示 {{name}} 的屏幕",
+    "showYourScreen": "放大显示你的屏幕",
     "unreachable": "无法连接到群组通话"
   },
   "incomingAudio": "语音来电...",

@@ -135,7 +135,8 @@ describe("a shared screen", () => {
 
     // Ana's screen, picked by keyboard: it is large, Bo's is the side's, and the focus is on Bo's to switch back.
     show("ana").focus();
-    expect(show("ana")).toHaveAccessibleName(expect.stringMatching(/^Show \W?Ana\W?'s screen large$/));
+    // The name sits in its own direction, between FSI and PDI.
+    expect(show("ana")).toHaveAccessibleName(`Show ${String.fromCodePoint(0x2068)}Ana${String.fromCodePoint(0x2069)}'s screen large`);
     await user.keyboard("{Enter}");
     expect(main()).toHaveAttribute("data-identity", "ana");
     expect(show("bo")).toHaveFocus();
@@ -146,15 +147,24 @@ describe("a shared screen", () => {
     rerenderWith(sharing(["ana", "cy"]));
     expect(main()).toHaveAttribute("data-identity", "ana");
 
-    // Ana stops: the latest left (Cy) is large, and a new share after that takes over as before.
+    // Ana stops: the latest left (Cy) is large, and the pick is gone: Ana sharing again, then Bo, each is large in turn.
     rerenderWith(sharing(["cy"]));
     expect(main()).toHaveAttribute("data-identity", "cy");
     rerenderWith(sharing(["cy", "ana"]));
     expect(main()).toHaveAttribute("data-identity", "ana");
+    rerenderWith(sharing(["cy", "ana", "bo"]));
+    expect(main()).toHaveAttribute("data-identity", "bo");
 
     await user.click(show("cy"));
     expect(main()).toHaveAttribute("data-identity", "cy");
     expect(await axeViolations(screen.getByTestId("group-call"))).toEqual([]);
+  });
+
+  it("names your own screen on the side as yours, not by the word You", () => {
+    const shares = { screen: true, tracks: { screen: video() } };
+    view(state(0, { local: person("me", shares), participants: [person("ana", shares)] }));
+    expect(within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0]).toHaveAttribute("data-identity", "ana");
+    expect(within(screen.getByTestId("group-call-side")).getByTestId("group-call-show-screen")).toHaveAccessibleName("Show your screen large");
   });
 });
 

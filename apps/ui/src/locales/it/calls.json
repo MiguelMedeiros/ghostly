@@ -57,6 +57,7 @@
     "retry": "Riprova",
     "screenOf": "Schermo di {{name}}",
     "showScreen": "Mostra in grande lo schermo di {{name}}",
+    "showYourScreen": "Mostra in grande il tuo schermo",
     "unreachable": "Impossibile raggiungere la chiamata del gruppo"
   },
   "incomingAudio": "Chiamata vocale in arrivo...",

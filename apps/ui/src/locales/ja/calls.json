@@ -57,6 +57,7 @@
     "retry": "再試行",
     "screenOf": "{{name}}の画面",
     "showScreen": "{{name}}の画面を大きく表示",
+    "showYourScreen": "自分の画面を大きく表示",
     "unreachable": "グループの通話につながりませんでした"
   },
   "incomingAudio": "音声通話の着信...",

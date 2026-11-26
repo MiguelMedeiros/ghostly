@@ -57,6 +57,7 @@
     "retry": "Réessayer",
     "screenOf": "Écran de {{name}}",
     "showScreen": "Afficher en grand l'écran de {{name}}",
+    "showYourScreen": "Afficher en grand votre écran",
     "unreachable": "Impossible de joindre l'appel du groupe"
   },
   "incomingAudio": "Appel audio entrant...",
