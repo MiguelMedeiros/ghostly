@@ -218,7 +218,7 @@ export function AgentDemo({ t }: { t: Copy }) {
           {caption}
         </span>
         {!calm && (
-          <button type="button" className="agd-toggle" onClick={() => setPaused(!paused)} aria-pressed={paused} data-testid="agent-demo-toggle">
+          <button type="button" className="agd-toggle" onClick={() => setPaused(!paused)} data-testid="agent-demo-toggle">
             {paused ? t.play : t.pause}
           </button>
         )}
