@@ -121,6 +121,44 @@ describe("the profile's contact link (WISP 8xx)", () => {
     expect(state.puts).toHaveLength(3);
   });
 
+  it("a new link whose publish failed goes out again after a few minutes, not at the next hourly one", async () => {
+    const { state, make } = world();
+    const links = make();
+    await links.load();
+    links.start();
+    // The first timer's run had no link and waits an hour.
+    await vi.advanceTimersByTimeAsync(15_000);
+    state.fail = new Error("relays down");
+    const { code } = await links.create();
+    expect(links.view()?.error).toBe("relays down");
+    state.fail = null;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(state.puts).toEqual([{ key: keyOf(code), state: "open" }]);
+    expect(links.view()?.error).toBeUndefined();
+    // Then the hour starts over.
+    await vi.advanceTimersByTimeAsync(LINK_REPUBLISH_MS - 1_000);
+    expect(state.puts).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(state.puts).toHaveLength(2);
+    links.stop();
+  });
+
+  it("an off whose publish failed at Turn off is said after a few minutes, not at the next hourly pass", async () => {
+    const { state, make } = world();
+    const links = make();
+    await links.load();
+    const { code } = await links.create();
+    links.start();
+    await vi.advanceTimersByTimeAsync(15_000);
+    state.puts = [];
+    state.fail = new Error("relays down");
+    await links.turnOff();
+    state.fail = null;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(state.puts).toEqual([{ key: keyOf(code), state: "off" }]);
+    links.stop();
+  });
+
   it("Clear all data: every link it still holds says off once", async () => {
     const { state, make } = world();
     const links = make();
