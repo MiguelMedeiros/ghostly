@@ -1443,6 +1443,23 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   };
 
   /**
+   * Why the train may not push to a pull request's branch for another open pull request it heads, or null: the other
+   * ones, or a list of the branch's pull requests that is cut or that GitHub did not give.
+   */
+  const sharedHead = async (p) => {
+    let others;
+    try {
+      others = await siblings(p);
+    } catch (e) {
+      if (e instanceof BudgetLow) throw e;
+      return `the train could not read which pull requests its branch \`${p.branch}\` heads (${e.message})`;
+    }
+    if (others.truncated) return `its branch \`${p.branch}\` heads more pull requests than the train reads`;
+    const open = others.filter((o) => o.open !== false);
+    return open.length ? `its branch \`${p.branch}\` is also the head of ${open.map((o) => `#${o.number} into \`${o.base}\``).join(", ")}` : null;
+  };
+
+  /**
    * The next pull request, alone: merged at once when its head holds the base's tip and is green, else rebased onto
    * the tip and pushed for CI. `rerun` rebases even when nothing moved (a fresh commit for a second CI run). So does CI
    * "none": nothing runs on a head at the tip whose own run was cancelled (a batch it boarded closed without it), and
@@ -1458,6 +1475,16 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       // lands another way, so it never blocks the line.
       say(`::warning::Could not merge #${p.number} alone: ${r.message}; it goes the batch way.`);
       return (await board([p])) ?? false;
+    }
+    // Its branch is also the head of another open pull request (into another base): the push of its rebase would move
+    // that one's head too, with the base's commits, and the run on that commit would not count for this one (`own`), so
+    // both waited for good. The batch way pushes nothing to its branch, and a batch's CI is its own. So does a list of
+    // the branch's pull requests that is cut or does not read: one past what the train reads may be open.
+    const shared = await sharedHead(p);
+    if (shared) {
+      if (past) return pastBatchWay(p, shared);
+      say(`ALONE #${p.number}: ${shared}, so the train does not push to it; it goes the batch way.`);
+      return board([p], [], retried ? { retried } : {});
     }
     const built = await git.rebase(base, p, { force: rerun || (p.ci === "none" && !refused(p)) });
     if (built.dropped === "conflict" && past) return pastConflict(p);
