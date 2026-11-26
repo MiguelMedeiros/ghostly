@@ -511,7 +511,7 @@ const isHead = (value: Partial<ProfileHead> | null | undefined) => typeof value?
 export async function openProfileBackup(input: BackupInput, passphrase?: string, { signal, onProgress }: BackupRun = {}): Promise<OpenedProfileBackup> {
   const source = sourceOf(input);
   onProgress?.({ stage: "opening", files: 0, filesTotal: 0, bytes: 0, bytesTotal: 0 });
-  const reader = await BackupReader.open(source, passphrase, signal, RECORD_LIMITS);
+  const reader = await BackupReader.open(source, passphrase, signal, { limits: RECORD_LIMITS });
   if (!reader) {
     // Version 1: one JSON document, read whole.
     if (source.size > MAX_BACKUP_BYTES * 1.4) throw new Error("This backup is too large to restore");
@@ -830,7 +830,7 @@ interface RestoreState { files: boolean; db: IDBDatabase | null; writing: LargeF
 /** A version 2 bundle: read record by record, each written as it comes. */
 async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>, ns: string, made: string[], state: RestoreState, fresh: (walletId: string) => string, walletIds: Map<string, string>, { signal, onProgress }: BackupRun, handoff = false): Promise<void> {
   const space = `ghostly_${ns}`;
-  const reader = await BackupReader.open(stream.source, stream.passphrase, signal, RECORD_LIMITS);
+  const reader = await BackupReader.open(stream.source, stream.passphrase, signal, { limits: RECORD_LIMITS });
   if (!reader) throw new Error(NOT_A_PROFILE);
   const parse = recordParser(stream.source);
   const progress: BackupProgress = { stage: "restoring", files: 0, filesTotal: 0, bytes: 0, bytesTotal: 0 };
