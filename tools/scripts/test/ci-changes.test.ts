@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DRAFT_GATE, HOLD, PACKAGES_READ_FROM_SITE, QUEUE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, queuedBehind, supersededBy, testedAs } from "../ci-changes.mjs";
+import { docLinks } from "../../../apps/website/scripts/doc-links.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
+import { readChanges, withRevisions } from "../../../apps/website/scripts/wisp-changes.mjs";
 
 const root = resolve(import.meta.dirname, "../../..");
 
@@ -96,6 +98,32 @@ describe("the website gate", () => {
       const kind = (() => { try { return statSync(join(root, path)).isDirectory() ? "folder" : "file"; } catch { return null; } })();
       return !covers(WEBSITE_INPUTS, kind === "file" ? path : `${path}/any`);
     });
+    expect(uncovered).toEqual([]);
+  });
+
+  it("covers every file a published document links to", () => {
+    // sync-references.mjs stops the Website job at a published document's relative .md link to a file that is gone,
+    // so renaming or deleting one breaks the site. Published: the WISPs but the GitHub-only and generated ones, each
+    // with its change files' revision log, as sync-references.mjs builds it (their links read from the WISP's folder),
+    // and the documents it adds by name.
+    const wisps = join(root, "docs/wisps");
+    const numbering: { oldFile: string; file: string }[] = JSON.parse(readFileSync(join(wisps, "numbering.json"), "utf8"));
+    const stems = new Set(numbering.map((e) => e.file.replace(/\.md$/, "")));
+    const moved = new Set(numbering.filter((e) => e.oldFile !== e.file).map((e) => e.oldFile));
+    const published = readdirSync(wisps)
+      .filter((name) => name.endsWith(".md") && !["README.md", "IMPLEMENTATION.md", "NUMBERING.md"].includes(name) && !moved.has(name) && !/^(HANDOFF|QA)-CLAUDE/.test(name))
+      .map((name) => `docs/wisps/${name}`);
+    published.push("docs/PROTOCOL.md", "docs/SDK.md", "docs/USDT-INTEGRATION.md", "docs/DHT-DELIVERY.md");
+    const linked = new Map<string, string>();
+    for (const path of published) {
+      const stem = posix.basename(path, ".md");
+      const text = readFileSync(join(root, path), "utf8");
+      const changes = path.startsWith("docs/wisps/") && stems.has(stem) ? readChanges(wisps, stem) : [];
+      const body = changes.length ? withRevisions(text, stem, changes) : text;
+      for (const url of docLinks(body)) linked.set(posix.join(posix.dirname(path), url.split("#")[0]), path);
+    }
+    expect([...linked.keys()]).toEqual(expect.arrayContaining(["docs/PROTOCOL.md", "docs/BROWSER.md", "packages/browser/src/proofs/PROOFS.md"]));
+    const uncovered = [...linked].filter(([path]) => !covers(WEBSITE_INPUTS, path)).map(([path, from]) => `${path} (linked from ${from})`);
     expect(uncovered).toEqual([]);
   });
 });
