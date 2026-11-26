@@ -5457,8 +5457,10 @@ export class GhostlyNode implements EngineImplementation {
     // Taken only when it fits in the room left now (`FileDesk.accept`): one that does not keeps waiting.
     if (action === "accept") return this.fileDesk.accept(linkId, fileId).then(() => {});
     const now = this.fileDesk.act(linkId, fileId, action);
-    // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now.
-    if (!now && (action === "resend" || action === "request") && live.link && !live.link.isDataLinkOpen) void this.connect({ linkId }).catch(() => {});
+    // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now. One waiting
+    // its turn to resume (`ResumeTurns`) has no link yet: it starts now, ahead of the line.
+    const tries = live.link ? !live.link.isDataLinkOpen : this.resumeTurns.waits(linkId);
+    if (!now && (action === "resend" || action === "request") && tries) void this.connect({ linkId }).catch(() => {});
   }
 
   /** The contact can take a file on the open session: files/2 or files/3. */
