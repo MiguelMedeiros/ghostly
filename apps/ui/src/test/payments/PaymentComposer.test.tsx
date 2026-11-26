@@ -1148,6 +1148,53 @@ describe("Request and Send while the chosen card turns", () => {
     await waitFor(() => expect(screen.getByTestId("payment-request")).toBeEnabled());
   });
 
+  /**
+   * The review takes the amount's place after Send and is taller. The card grew to it over half a second (flip.css's
+   * height transition), Approve sliding under the pointer as it grew: a press on Approve let go a few pixels lower is no
+   * click, and the review stayed open with nothing sent (the e2e matrix saw it). Once the card is still, its height
+   * follows its back at once; the turns themselves still grow and shrink it. Read from flip.css's own rules, which the UI
+   * tests do not load: the last one this card matches that sets a transition (reduced motion's are not matched here).
+   */
+  const FLIP_CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/deck/flip.css"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "").replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, "");
+  const heightTransition = (card: Element) => {
+    let found = "";
+    for (const [, selectors, body] of FLIP_CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const transition = /(?:^|;)\s*transition\s*:\s*([^;]+)/.exec(body)?.[1]?.trim();
+      if (transition && selectors.split(",").some((s) => card.matches(s.trim()))) found = transition;
+    }
+    return found;
+  };
+
+  it("grows the card with its turns only: once it is still, the review after Send is in its place at once", async () => {
+    fakeEngine.setState({ links: [linkView()], wallet: everyWallet({ mints: [mint(REAL_MINT, 1_000), mint(TEST_MINT, 1_000)], balance: 1_000 }) });
+    rememberRail("peer", "cashu:testnet");
+    const { user, engine } = renderApp(<PaymentComposer balance={1_000} onSend={async () => null} onRequest={async () => null} onClose={() => {}} reviewContext={reviewContext()} contact="Alice" />);
+    engine.on("preparePayment", reviewOf);
+    const card = () => screen.getByTestId("payment-back").closest(".deck-flip")!;
+    await user.click(screen.getByTestId("payment-use"));
+    await user.type(screen.getByTestId("payment-amount"), "21");
+    // Turning over: the card grows from a card's height to its back's as it turns.
+    expect(card()).toHaveAttribute("data-turning", "true");
+    expect(heightTransition(card())).toMatch(/^height /);
+    await waitFor(() => expect(screen.getByTestId("payment-send")).toBeEnabled());
+    expect(card()).toHaveAttribute("data-settled", "true");
+    expect(heightTransition(card())).toBe("none");
+    // Turning back shrinks it again, from the render that starts the turn.
+    await user.click(screen.getByTestId("payment-change-card"));
+    expect(card()).not.toHaveAttribute("data-settled");
+    expect(heightTransition(card())).toMatch(/^height /);
+    await user.click(await screen.findByTestId("payment-use"));
+    // The amount stayed while the card was away.
+    expect(screen.getByTestId("payment-amount")).toHaveValue("21");
+    await waitFor(() => expect(screen.getByTestId("payment-send")).toBeEnabled());
+    await user.click(screen.getByTestId("payment-send"));
+    expect(await screen.findByTestId("review-approve")).toBeEnabled();
+    // The review's taller back: the card takes its height at once, Approve does not move after it shows.
+    expect(card()).toHaveAttribute("data-settled", "true");
+    expect(heightTransition(card())).toBe("none");
+  });
+
   // With motion reduced there is no turn (flip.css takes the card's transition away, the faces cross-fade where they
   // are): nothing to wait for.
   it("does not wait with motion reduced", async () => {
