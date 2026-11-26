@@ -563,4 +563,16 @@ describe("my pin in a private group counts once an edge took it", () => {
     await vi.waitFor(() => expect(taken(second.n!)).toBe(1));
     expect(frames(away).filter(f => f.t === "group-pin")).toMatchObject([{ n: second.n, id: "" }]);
   }, 30_000);
+
+  it("a pin whose message was deleted for everyone shows unpinned, and there is nothing to unpin: no unpin goes", async () => {
+    const { node, groupId, members: [bob] } = await adminOf(["bob"]);
+    const chat = `group:${groupId}`;
+    const { messageId } = await node.sendGroupMessage({ groupId, text: "pin me" }) as { messageId: string };
+    expect(await node.pinMessage({ linkId: chat, messageId })).toEqual({ error: null, n: expect.any(Number) });
+    expect(await node.removeMessage({ linkId: chat, messageId })).toMatchObject({ error: null });
+    await vi.waitFor(() => expect(node.getState().groups.find(g => g.id === groupId)?.pin?.id ?? "").toBe(""));
+    const pins = frames(bob).filter(f => f.t === "group-pin").length;
+    expect(await node.pinMessage({ linkId: chat, remove: true })).toEqual({ error: "Nothing is pinned in this group" });
+    expect(frames(bob).filter(f => f.t === "group-pin")).toHaveLength(pins);
+  }, 30_000);
 });
