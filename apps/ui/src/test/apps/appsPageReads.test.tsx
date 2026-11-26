@@ -60,6 +60,25 @@ describe("the Apps page's reads of the installed apps", () => {
     expect(fakeEngine.callsTo("appBuiltIns")).toHaveLength(2);
   });
 
+  it("with no app installed, reads the stores and the installed apps once: the check read nothing", async () => {
+    // The engine's check with no app: it answers at once, reads no store and tells no page.
+    fakeEngine.on("appList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    expect(await screen.findByTestId("apps-none")).toBeInTheDocument();
+    await waitFor(() => expect(fakeEngine.callsTo("appCheckUpdates")).toHaveLength(1));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(fakeEngine.callsTo("appStoreList")).toHaveLength(1);
+    expect(fakeEngine.callsTo("appList")).toHaveLength(1);
+    expect(fakeEngine.callsTo("appBuiltIns")).toHaveLength(1);
+  });
+
+  it("reads the stores again after a check that checked an app: it read every store again", async () => {
+    fakeEngine.on("appCheckUpdates", async () => { fakeEngine.emit({ kind: "apps-checked" }); return [{ ref: installed(1).ref, outcome: "none", run: { status: "ok" } }]; });
+    renderApp(<Apps />, { route: "/apps" });
+    expect(await screen.findAllByTestId("installed-app")).toHaveLength(2);
+    await waitFor(() => expect(fakeEngine.callsTo("appStoreList")).toHaveLength(2));
+  });
+
   it("still shows what the check found when it ended before the first read answered", async () => {
     let found = false;
     let answer: () => void = () => {};
