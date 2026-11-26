@@ -104,7 +104,7 @@ test("Chess is on the Apps page of a new profile; its first open asks what it ma
 
   // Uninstalled by the person: not offered again, on this page or after the app starts again.
   await expect(ana.page.getByTestId("installed-app-hint")).not.toContainText("Unknown publisher");
-  await ana.page.getByTestId("installed-app").getByRole("button", { name: /^Chess .*: details$/ }).click();
+  await ana.page.getByTestId("installed-app").getByRole("button", { name: /^\u2068Chess\u2069 .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
   await expect(details.getByTestId("app-publisher-name")).toHaveText("Publisher");
   await expect(details.getByTestId("app-store-line")).toHaveText("Comes with Ghostly");
@@ -122,7 +122,7 @@ test("Remove on a built-in app never opened asks first, then takes it off the li
   const ana = await peer("ana");
   const asked = await withBuiltIns(ana);
   await ana.page.getByTestId("account-apps").click();
-  await ana.page.getByTestId("built-in-app").getByRole("button", { name: "Remove Chess" }).click();
+  await ana.page.getByTestId("built-in-app").getByRole("button", { name: "Remove \u2068Chess\u2069" }).click();
   // One press removes nothing: the question says it is not offered again, and Cancel keeps it.
   const question = ana.page.getByTestId("built-in-app-remove-question");
   await expect(question).toContainText("Remove Chess?");
@@ -130,7 +130,7 @@ test("Remove on a built-in app never opened asks first, then takes it off the li
   await expect(ana.page.getByTestId("built-in-app-remove")).toBeFocused();
   await ana.page.reload();
   await expect(ana.page.getByTestId("built-in-app")).toContainText("Chess");
-  await ana.page.getByTestId("built-in-app").getByRole("button", { name: "Remove Chess" }).click();
+  await ana.page.getByTestId("built-in-app").getByRole("button", { name: "Remove \u2068Chess\u2069" }).click();
   await question.getByTestId("built-in-app-remove-confirm").click();
   await expect(ana.page.getByTestId("apps-none")).toBeVisible();
   await ana.page.reload();
