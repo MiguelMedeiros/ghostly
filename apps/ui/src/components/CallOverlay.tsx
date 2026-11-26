@@ -24,6 +24,8 @@ interface CallOverlayProps {
   isVideoOff: boolean;
   /** We are sending our screen instead of the camera. */
   isScreenSharing?: boolean;
+  /** The shared screen's sound goes with it, or not (the picture alone): the sharing notice says which. */
+  screenSound?: boolean;
   /** Offer the camera button: the call has a video lane our side may send on. */
   canSendVideo?: boolean;
   /** The share button works: that lane, in a browser that can capture the screen. */
@@ -95,6 +97,7 @@ export function CallOverlay({
   isMuted,
   isVideoOff,
   isScreenSharing = false,
+  screenSound = true,
   canSendVideo = false,
   canShareScreen = false,
   screenShareUnavailable = null,
@@ -373,6 +376,13 @@ export function CallOverlay({
           </svg>
           {/* The whole sentence, on two lines if need be: cut to one, "… está compartiendo su p…" lost what is shared. */}
           <span className="call-notice-words min-w-0 break-words">{sharingNotice}</span>
+          {/* What your contact gets of your screen's sound: all the system plays (but this page), or nothing when the
+              browser gave the picture alone (or the sound was left unticked). */}
+          {isScreenSharing && (
+            <span data-testid="call-sharing-sound" data-sound={screenSound} className="call-notice-words min-w-0 break-words">
+              {` · ${t(screenSound ? "calls.sharing.withSound" : "calls.sharing.noSound")}`}
+            </span>
+          )}
         </p>
       )}
 

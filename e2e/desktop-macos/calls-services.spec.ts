@@ -158,7 +158,8 @@ const SCREEN = "640x360";
 const picture = /^[1-9]\d*x[1-9]\d*$/;
 
 /** The call's sharing notice, if it shows one. WebKit ends a flex box's innerText with a newline: trimmed. */
-const sharingNotice = async (p: DesktopPerson) => (await p.app.text('[data-testid="call-sharing"]'))?.trim() ?? null;
+// innerText puts each of the notice's flex items on a line of its own: read as one line.
+const sharingNotice = async (p: DesktopPerson) => (await p.app.text('[data-testid="call-sharing"]'))?.replace(/\s+/g, " ").trim() ?? null;
 
 /** How many "… call ended" lines the page shows. */
 const endedLines = async (p: DesktopPerson) => (await p.snapshot()).split("call ended").length - 1;
@@ -250,7 +251,8 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       expect(camera).not.toBe(SCREEN);
       await expect.poll(() => alice.app.execute(SHARE_BUTTON), { timeout: 30_000 }).toEqual({ disabled: false, title: "Share screen" });
       await alice.app.click('[data-testid="share-screen"]');
-      await expect.poll(() => sharingNotice(alice), { timeout: 30_000 }).toBe("You're sharing your screen");
+      // The double's screen has no sound (WKWebView captures none): the notice says so.
+      await expect.poll(() => sharingNotice(alice), { timeout: 30_000 }).toBe("You're sharing your screen · Shared without sound");
       await expect.poll(() => bob.app.execute<string>(REMOTE_PICTURE), { timeout: 60_000, message: "B shows A's screen" }).toBe(SCREEN);
       await expect.poll(() => sharingNotice(bob), { timeout: 30_000 }).toMatch(/is sharing their screen$/);
       await alice.app.click('[data-testid="share-screen"]');
