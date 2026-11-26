@@ -196,6 +196,8 @@ export class DataLink {
   private disconnectTimer: ReturnType<typeof setTimeout> | null = null;
   /** The offer this side answered in the current attempt, when it took it (this clock), and how many times it answered it again. */
   private answered: { offer: RtcSignal; at: number; again: number } | null = null;
+  /** The peer's offer that crossed this side's, set aside for it (the lower key keeps its offer), and when it came. */
+  private setAside: { offer: RtcSignal; at: number } | null = null;
   /** Answers refused since a connection last opened, each followed by a new offer at once (`ANSWER_REFUSED_REDIALS`). */
   private refusedAnswers = 0;
   /** The last answer dropped as not for this side's offer (`answer-dropped`): each is said once. */
@@ -262,9 +264,11 @@ export class DataLink {
 
     if (signal.t === "o") {
       if (this.state === "offering") {
-        // Both sides offered at once: the lower public key keeps its offer.
-        if (this.options.myPubKeyZ32 < this.options.peerPubKeyZ32) return;
+        // Both sides offered at once: the lower public key keeps its offer. The peer's is kept aside, should this
+        // side's never go out (`answerAgain`).
+        if (this.options.myPubKeyZ32 < this.options.peerPubKeyZ32) { this.setAside = { offer: signal, at: Date.now() }; return; }
       }
+      this.setAside = null;
       // A fresh offer while connected means the peer lost the old connection. One that comes while an earlier one is
       // still being answered takes its place too: the peer gave that one up (its answer was refused there, say, and
       // it offered again at once), and a signal is fed once, so a newer offer left aside here was never answered.
@@ -347,7 +351,7 @@ export class DataLink {
     // Or still gathering, with nothing found on every connection but the last (`gatherStalled`).
     const evidence = (stalled ? this.directEvidence() : null) ?? (this.gatherStalled ? "no-public" : null);
     this.noteNoPublic(stalled);
-    this.answered = null;
+    this.answered = this.setAside = null;
     this.reset();
     if (evidence) this.options.onDirect?.(evidence);
   }
@@ -357,7 +361,7 @@ export class DataLink {
    * as `close`, with nothing learnt about direct connections from it.
    */
   abandon(): void {
-    this.answered = null;
+    this.answered = this.setAside = null;
     this.reset();
   }
 
@@ -420,6 +424,31 @@ export class DataLink {
     }
     this.reset();
     if (evidence) this.options.onDirect?.(evidence);
+  }
+
+  /**
+   * The answer to the offer this side took could not even be made (no candidate on any connection, `gathered`, or the
+   * offer refused as it went in), and the link is idle: it is made again for that offer while the peer still offers it
+   * (`offerStanding`), up to `REANSWERS` in all, as an answer whose connection failed is. So is the peer's offer that
+   * crossed this side's (`setAside`), once this side's never went out. The peer's packet carries the same offer for its
+   * whole attempt, and a signal is fed once: an enrollment's inviter that gathered nothing under load waited for the
+   * joiner's attempt to end (90 s) with its offer in hand, and the spec's 60 s ran out (CI, 2026-11-21). False when
+   * nothing was made again.
+   */
+  answerAgain(): boolean {
+    if (this.state !== "idle") return false;
+    const aside = this.setAside;
+    this.setAside = null;
+    // Taken now, it is answered for the first time.
+    const taken = !this.answered && !!aside && aside.offer.ts > this.lastSignalTs;
+    const answered = taken ? { offer: aside!.offer, at: aside!.at, again: 0 } : this.answered;
+    if (!answered || answered.again >= REANSWERS) return false;
+    const left = CONNECT_TIMEOUT_MS - (Date.now() - answered.at);
+    if (left <= REANSWER_MARGIN_MS || !this.options.offerStanding?.(answered.offer.ts)) return false;
+    if (taken) { this.lastSignalTs = answered.offer.ts; this.answered = answered; } else answered.again++;
+    traceLink(this.options.myPubKeyZ32, "reanswer", { again: answered.again, leftMs: left, unmade: true });
+    void this.answer(answered.offer);
+    return true;
   }
 
   /** The answer to this side's offer did not go in (`ANSWER_REFUSED_REDIALS`): the attempt ends, and the caller may offer again now. */
@@ -501,7 +530,7 @@ export class DataLink {
     dc.addEventListener("open", () => {
       if (this.pc !== pc) return;
       this.clearTimers();
-      this.answered = null;
+      this.answered = this.setAside = null;
       this.refusedAnswers = 0;
       this.fullGather = false;
       this.setState("open");
