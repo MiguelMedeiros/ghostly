@@ -369,10 +369,13 @@ export function dropMarks(marks: GroupMarks, groupId: string): void {
   marks.lastMessageAt.delete(groupId); marks.lastPeerMessageAt.delete(groupId); marks.lastMentionAt.delete(groupId); marks.by.delete(groupId);
 }
 
+/** A row that moves the group's "@": it named me as it came, not only since an edit (`mentionedByEdit`). */
+const marksMention = (m: StoredMessage): boolean => !!m.mentioned && !m.mentionedByEdit;
+
 /** The newest rows `load` reads the marks from: a group's last message, last of a member's, last mentioning me. */
 export function newestMarked(history: StoredMessage[]): { last?: StoredMessage; peer?: StoredMessage; mention?: StoredMessage } {
   const said = history.filter(m => !m.event && !m.groupPay);
-  return { last: said[said.length - 1], peer: [...said].reverse().find(m => m.sender !== "me"), mention: [...history].reverse().find(m => m.mentioned) };
+  return { last: said[said.length - 1], peer: [...said].reverse().find(m => m.sender !== "me"), mention: [...history].reverse().find(marksMention) };
 }
 
 /** Rows `unmark` reads at a time from the newest back: the marks it moves back are almost always among the last few. */
@@ -399,7 +402,7 @@ export async function newestMarkedOf(store: Pick<GroupStore, "getMessages" | "ge
     for (const m of [...page.messages].reverse()) {
       if (m.id === skip) continue;
       if (!m.event && !m.groupPay) { found.last ??= m; if (m.sender !== "me") found.peer ??= m; }
-      if (m.mentioned) found.mention ??= m;
+      if (marksMention(m)) found.mention ??= m;
     }
     const oldest = page.messages[0];
     if (!page.more || !oldest || ((!want.last || found.last) && (!want.peer || found.peer) && (!want.mention || found.mention))) return found;
