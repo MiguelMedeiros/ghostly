@@ -1154,6 +1154,8 @@ export async function startRelay(options = {}) {
     let tokens = limits.burstBytes
     let last = monotonicNow()
     let paused = false
+    // Paused since the relay last pinged the client (see ping below).
+    let throttled = false
     const spend = bytes => {
       const now = monotonicNow()
       tokens = Math.min(limits.burstBytes, tokens + (now - last) * limits.bytesPerSecond / 1000)
@@ -1161,6 +1163,7 @@ export async function startRelay(options = {}) {
       tokens -= bytes
       if (tokens < 0 && !paused && ws._socket) {
         paused = true
+        throttled = true
         ws._socket.pause()
         setTimeout(() => { paused = false; ws._socket?.resume() }, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
       }
@@ -1191,12 +1194,14 @@ export async function startRelay(options = {}) {
       else pong(Buffer.from(data))
     })
     // A peer that has gone without closing (a sleeping laptop, a dead route) still holds its slot: one that has not
-    // answered the last ping by the next is dropped.
+    // answered the last ping by the next is dropped. One the relay has stopped reading since (its byte budget) is not:
+    // its pong waits unread behind what it sent before, seconds late at a low `bytesPerSecond` behind a proxy.
     let answered = true
     ws.on('pong', data => { spend(data.length + FRAME_BYTES); answered = true })
     const ping = setInterval(() => {
-      if (!answered) return drop('no pong')
+      if (!answered && !throttled) return drop('no pong')
       answered = false
+      throttled = paused
       ws.ping()
     }, limits.pingMs)
     let leave
