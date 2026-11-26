@@ -951,6 +951,15 @@ export class Groups {
    */
   pinToSay(groupId: string): StoredPin | undefined { return this.pinGone(groupId) ? undefined : this.pinOf(groupId); }
 
+  /**
+   * The group's pin as it is shown: one naming a message deleted for everyone is unpinned (no `id`), its number kept.
+   * What an unpin goes by, so a pin shown gone is not removed again.
+   */
+  pinShown(groupId: string): StoredPin | undefined {
+    const kept = this.pinOf(groupId);
+    return kept && this.pinGone(groupId) ? { ...kept, id: "", messageId: undefined } : kept;
+  }
+
   /** Keeps a pin when it is newer than the group's (the last pin wins): true when it was. */
   async setPin(groupId: string, pin: StoredPin): Promise<boolean> {
     const group = this.record(groupId);
@@ -987,10 +996,9 @@ export class Groups {
   }
 
   private pinned(view: GroupView): GroupView {
-    const kept = this.pinOf(view.id);
     // The pinned message was deleted for everyone: nothing of it stays, its pin neither (agents#1646). The pin is kept
     // as it came, so the same pin said again (a catch-up) is no newer, and shown as unpinned.
-    const pin = pinView(this.pinGone(view.id) ? { ...kept!, id: "", messageId: undefined } : kept);
+    const pin = pinView(this.pinShown(view.id));
     return pin ? { ...view, pin } : view;
   }
 
