@@ -76,6 +76,47 @@ describe("sizes in the app's language", () => {
     expect(formatFileSize(1024 ** 4 - 1)).toBe("1.0 TB");
   });
 
+  it("a backup's size that rounds up to 1024 of a unit is said in the next one", () => {
+    // Whole KB, then MB and GB with one decimal.
+    expect(byteSize(1_048_063)).toBe("1023 KB");
+    expect(byteSize(1_048_064)).toBe("1.0 MB");
+    expect(byteSize(1_048_575)).toBe("1.0 MB");
+    expect(byteSize(1_048_575, inPt)).toBe("1,0 MB");
+    expect(byteSize(1_073_689_395)).toBe("1023.9 MB");
+    expect(byteSize(1_073_689_396)).toBe("1.0 GB");
+    expect(byteSize(1024 ** 3 - 1)).toBe("1.0 GB");
+    expect(byteSize(1024 ** 3 - 1, inPt)).toBe("1,0 GB");
+    expect(byteSize(1024 ** 4 - 1)).toBe("1024.0 GB");
+  });
+
+  it("a move between devices says a size that rounds up to 1024 of a unit in the next one", () => {
+    // Whole KB and MB, then GB with one decimal.
+    expect(sizeText(1_048_063)).toBe("1023 KB");
+    expect(sizeText(1_048_064)).toBe("1 MB");
+    expect(sizeText(1_048_575, inPt)).toBe("1 MB");
+    expect(sizeText(1_073_217_535)).toBe("1023 MB");
+    expect(sizeText(1_073_217_536)).toBe("1.0 GB");
+    expect(sizeText(1024 ** 3 - 1)).toBe("1.0 GB");
+    expect(sizeText(1024 ** 3 - 1, inPt)).toBe("1,0 GB");
+  });
+
+  it("Settings says a size that rounds up to 1024 of a unit in the next one", () => {
+    // Up to two decimals.
+    expect(formatBytes(1_048_570)).toBe("1023.99 KB");
+    expect(formatBytes(1_048_570, inPt)).toBe("1023,99 KB");
+    expect(formatBytes(1_048_571)).toBe("1 MB");
+    expect(formatBytes(1_048_575, inPt)).toBe("1 MB");
+    expect(formatBytes(1_073_736_581)).toBe("1023.99 MB");
+    expect(formatBytes(1_073_736_582)).toBe("1 GB");
+    expect(formatBytes(1024 ** 3 - 1)).toBe("1 GB");
+    expect(formatBytes(1024 ** 3 - 1, inPt)).toBe("1 GB");
+  });
+
+  it("Settings says a size under one byte in bytes", () => {
+    expect(formatBytes(0.5)).toBe("0.5 B");
+    expect(formatBytes(0.5, inPt)).toBe("0,5 B");
+  });
+
   it("Settings says the storage used in the app's language", async () => {
     windowIs(false);
     renderApp(<LockScreenProvider><UpdateProvider><Routes><Route path="/settings/:section?" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>,
