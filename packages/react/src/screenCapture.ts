@@ -1,3 +1,5 @@
+import type { CallAudioMix } from "@ghostly/core";
+
 /**
  * What a screen share asks the browser for: the picture, and the sound of what is shared, a tab's, or the whole
  * system's where the browser offers it (`systemAudio`, Chromium on Windows and ChromeOS). `restrictOwnAudio` keeps
@@ -23,4 +25,36 @@ export async function captureScreen(getDisplayMedia: (options: DisplayMediaStrea
     if (name !== "TypeError" && name !== "NotSupportedError" && name !== "OverconstrainedError") throw error;
     return getDisplayMedia(SCREEN_ONLY);
   }
+}
+
+/**
+ * The voice and a shared screen's sound as one track, through Web Audio, for a call with one audio section (the 1:1
+ * call). A muted voice (`enabled` false) adds silence, so muting the microphone leaves the screen's sound going.
+ * Throws where the page has no Web Audio.
+ */
+export function mixWithWebAudio(voice: MediaStreamTrack, sound: MediaStreamTrack): CallAudioMix {
+  const context = new AudioContext();
+  // Made after the picker, not in the click: a page without that click's activation may start it suspended.
+  void context.resume().catch(() => {});
+  const out = context.createMediaStreamDestination();
+  const source = (track: MediaStreamTrack) => {
+    const node = context.createMediaStreamSource(new MediaStream([track]));
+    node.connect(out);
+    return node;
+  };
+  let voiceNode = source(voice);
+  const soundNode = source(sound);
+  return {
+    track: out.stream.getAudioTracks()[0],
+    setVoice(next) {
+      voiceNode.disconnect();
+      voiceNode = source(next);
+    },
+    close() {
+      voiceNode.disconnect();
+      soundNode.disconnect();
+      out.stream.getTracks().forEach((track) => track.stop());
+      void context.close().catch(() => {});
+    },
+  };
 }

@@ -146,6 +146,15 @@ describe("sharing the screen from inside a call", () => {
     expect(onToggleScreenShare).toHaveBeenCalledOnce();
   });
 
+  it("says, beside You're sharing your screen, when the screen went without its sound", () => {
+    const { rerender } = overlay({ isScreenSharing: true, screenSound: false });
+    expect(screen.getByTestId("call-sharing")).toHaveTextContent("You're sharing your screen· Shared without sound");
+    rerender(<CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff canSendVideo canShareScreen remoteHasVideo={false}
+      callStartedAt={Date.now()} peerName="Ana" onHangUp={vi.fn()} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} isScreenSharing screenSound />);
+    expect(screen.getByTestId("call-sharing")).toHaveTextContent("You're sharing your screen");
+    expect(screen.queryByTestId("call-sharing-no-sound")).toBeNull();
+  });
+
   it("is offered in a video call", () => {
     overlay({ isVideoOff: false });
     expect(screen.getByTestId("share-screen")).toBeEnabled();
