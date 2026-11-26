@@ -23,7 +23,7 @@ import { satsIn, unitFor } from "../NetworkTag";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { lightningStateLabel, paymentStateLabel } from "../paymentWords";
 import { formatAmount } from "../../lib/amount";
-import { formatAt } from "../../lib/time";
+import { formatAtWithYear } from "../../lib/time";
 import { problemLine, problemText } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
 import { copySecret } from "../../lib/shareLink";
@@ -72,7 +72,10 @@ const noteText = (t: Translate, { kind, note = "" }: { kind: keyof typeof TX_LAB
 /** How often the Receive screen says again that it shows its invoice (the engine's watch lasts 90 s). */
 const INVOICE_WATCH_AGAIN_MS = 60_000;
 
-/** When a movement happened, as the history writes it ("Sep 30, 03:15 PM"; "30 de set., 15:15" in Portuguese). */
+/**
+ * When a movement happened, as the history writes it ("Sep 30, 03:15 PM"; "30 de set., 15:15" in Portuguese), with
+ * the year when it is not this one's ("Dec 31, 2026, 11:30 PM"): "Dec 31" alone reads as this December.
+ */
 const MOVED_AT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
 
 /** `input_fee_ppk` in a few words, test sats on Testnet: a payment usually spends two to five proofs. */
@@ -446,7 +449,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
                       {/* A mint's name and a contact's memo are someone else's text, in any script: each in its own
                           direction, so the two never swap around the " · " between them. */}
-                      <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · <bdi>{mint?.name ?? new URL(tx.mint).hostname}</bdi>{tx.note && <> · <bdi>{noteText(t, tx)}</bdi></>}</span>
+                      <span className="truncate">{formatAtWithYear(tx.timestamp, MOVED_AT, t.language)} · <bdi>{mint?.name ?? new URL(tx.mint).hostname}</bdi>{tx.note && <> · <bdi>{noteText(t, tx)}</bdi></>}</span>
                       {!feeOnly && <span className={`shrink-0 ${tx.fee > 0 ? "text-warn-ink" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language), unit }) : t("wallet.cashu.history.noFee")}</span>}
                     </div>
                   </div>
@@ -471,7 +474,7 @@ export function CashuWallet({ wallet, state, rail, sharedWith, onOpenCashu, focu
             <Section title={t("wallet.lightning.recent")} testId="lightning-recent">
               {ln.recent.map((op) => (
                 <Row key={`${op.direction}-${op.paymentHash}`} testId="lightning-op" label={t(op.direction === "in" ? "wallet.lightning.recentIn" : "wallet.lightning.recentOut", { amount: formatAmount(op.amount, t.language), unit })}
-                  hint={`${formatAt(op.createdAt, MOVED_AT, t.language)} · ${lightningStateLabel(t, op.state)}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language), unit })}` : ""}${op.error ? ` · ${problemLine(op.error, t)}` : ""}`} />
+                  hint={`${formatAtWithYear(op.createdAt, MOVED_AT, t.language)} · ${lightningStateLabel(t, op.state)}${op.fee ? ` · ${t("wallet.cashu.history.fee", { amount: formatAmount(op.fee, t.language), unit })}` : ""}${op.error ? ` · ${problemLine(op.error, t)}` : ""}`} />
               ))}
             </Section>
           )}
