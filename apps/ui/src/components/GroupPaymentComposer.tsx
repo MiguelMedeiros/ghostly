@@ -105,7 +105,7 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
   return <>
     <div className="sheet-backdrop" />
     <div ref={ref} data-testid="group-pay-recipients"
-      className="sheet sheet-padded absolute bottom-full start-0 mb-2 z-50 animate-fade-in w-[360px] max-w-[calc(100vw-1.5rem)] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3">
+      className="sheet sheet-padded absolute bottom-full start-0 mb-2 z-50 animate-fade-in w-[360px] max-w-[min(100%,calc(100vw-1.5rem))] max-md:max-w-none bg-panel-header border border-border rounded-2xl shadow-2xl p-3">
       <p className="m-0 px-1 text-sm font-semibold text-text-primary">{t("payments.mode.pay")}</p>
       <p className="m-0 px-1 text-xs text-text-muted">{community
         ? t("payments.group.hint.community")
