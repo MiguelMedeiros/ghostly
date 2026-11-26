@@ -19,10 +19,11 @@ export function iceServerProblem(server: IceServerSetting): string | null {
 
 /**
  * A refused address as the refusal quotes it: without its `user:password@`, `?query` or `#fragment` (a TURN token or
- * credential put in the address), so the CLI and a log keep none of it. The rest is said as given.
+ * credential put in the address), so the CLI and a log keep none of it. The rest is said as given. It cuts at the last
+ * `@` first, since a password may hold a raw `?` or `#`, and keeps `turn:`/`turns:`/`stun:` even without `//`.
  */
 function shownAddress(url: string): string {
-  return url.replace(/[?#][\s\S]*$/, "").replace(/^([a-z][a-z0-9+.-]*:\/*)?[\s\S]*@/i, "$1");
+  return url.replace(/^((?:stuns?|turns?):(?:\/\/)?|[a-z][a-z0-9+.-]*:\/\/)?[\s\S]*@/i, "$1").replace(/[?#][\s\S]*$/, "");
 }
 
 /**
