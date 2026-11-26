@@ -24,8 +24,12 @@ it("quotes a refused address without its user, password, query or fragment", () 
     ["turns://user:s3cr3t@host:5349", "turns://host:5349"],
     ["https://user:s3cr3t@turn.example.org/#s3cr3t", "https://turn.example.org/"],
     ["https://turn.example.org", "https://turn.example.org"],
-    ["turn:user:pa#s3cr3t@host", "turn:host"],
-    ["turn:user:pa?s3cr3t@host", "turn:host"],
+    // A ? or # before the last @: that @ may be in the password or in the query, so neither is said.
+    ["turn:user:pa#s3cr3t@host", "turn:…"],
+    ["turn:user:pa?s3cr3t@host", "turn:…"],
+    ["turn:host?username=me@example.org&credential=s3cr3t", "turn:…"],
+    ["turn:host#frag@s3cr3t", "turn:…"],
+    ["turn:user:s3cr3t@host?x=a@b&token=s3cr3t", "turn:…"],
     ["s3cr3t:s3cr3t@host", "host"],
   ]) {
     const problem = iceServerProblem({ urls, username: "u", credential: "c" });

@@ -1691,6 +1691,9 @@ describe("settings", () => {
     const tcp = await callApi(ctx, "settings.set", { iceServers: [turn("turn:t.example.org:3478, turn:t.example.org:3478?transport=tcp"), turn("turns:t.example.org:443?transport=tcp")] }) as Record<string, unknown>;
     expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [turn("turn:t.example.org:3478, turn:t.example.org:3478?transport=tcp"), turn("turns:t.example.org:443?transport=tcp")] } });
     expect(tcp.warning).toBe("The CLI reaches TURN over UDP only: it does not use turn:t.example.org:3478?transport=tcp, turns:t.example.org:443?transport=tcp (the apps do). Add a turn: server over UDP for the CLI");
+    // A user and password in the address, which the check takes, are not said.
+    const login = await callApi(ctx, "settings.set", { iceServers: [turn("turn:u:s3cr3t@t.example.org:3478?transport=tcp, turns:u:s3cr3t@t.example.org:443")] }) as Record<string, unknown>;
+    expect(login.warning).toBe("The CLI reaches TURN over UDP only: it does not use turn:t.example.org:3478?transport=tcp, turns:t.example.org:443 (the apps do). Add a turn: server over UDP for the CLI");
   });
 });
 
