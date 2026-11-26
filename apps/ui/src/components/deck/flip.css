@@ -1,6 +1,10 @@
 /* A chosen card turned over (Flip.tsx): the chat's payment picker and its identity picker. Both faces sit in the same
    place; the card grows from a card's height to what its back holds as it turns. */
 .deck-flip{--flip-ease:cubic-bezier(.22,1,.36,1);position:relative;perspective:1200px;transition:height .52s var(--flip-ease)}
+/* Once the turn is over, the card follows its back's height at once. A payment's review, taking the amount's place
+   after Send, grew it for half a second: Approve slid under the pointer, and a press on it let go a few pixels lower
+   was no click. Turning back grows it again (Flip.tsx drops data-settled as the turn back starts). */
+.deck-flip[data-settled]{transition:none}
 .deck-flip-card{position:absolute;inset:0;transform-style:preserve-3d;transition:transform .52s var(--flip-ease)}
 .deck-flip[data-flipped=true] .deck-flip-card{transform:rotateY(180deg)}
 .deck-flip-front,.deck-flip-back{position:absolute;top:0;left:0;width:100%;-webkit-backface-visibility:hidden;backface-visibility:hidden}
