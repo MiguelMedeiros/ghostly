@@ -727,7 +727,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, peerPubKey, onDetai
   const ref = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   // A right-click on the message: this menu, at the pointer, with the focus on ⋮ as a click on it would leave it (the
-  // keys work, Escape goes back there). Each one opens it afresh: the press that asked closes a menu open before.
+  // keys work, Escape goes back there). Each one opens it afresh, and closes any other menu open (Menu.tsx's openMenus).
   const [pointed, setPointed] = useState<MenuPoint & { n: number }>();
   useContextMenu(ref, "[data-message-row]", (at) => {
     button.current?.focus({ preventScroll: true });
