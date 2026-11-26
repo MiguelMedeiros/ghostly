@@ -4,21 +4,23 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useEngineValue } from "../../lib/engineState";
 import { focusLost } from "../../lib/focus";
 import { isolate } from "../../lib/ownStatus";
-import { publicKeyLabel } from "../../lib/publicKeyLabel";
+import { contactTag } from "../../lib/publicKeyLabel";
 import { Row, Section } from "../layout";
 import { Button } from "../wallet/ui";
 
 /**
  * Settings → Privacy, **Blocked contacts**: each contact blocked here (a chat's ⋮ → Block contact), named as its chat
- * is (its key's short form once no chat with it is left), with Unblock. The list is the profile's settings, so it is
+ * is ("Contact · <tag>" when it has no name, or no chat is left), with Unblock. The list is the profile's settings, so it is
  * the same on the person's other devices.
  */
 export function BlockedContacts() {
   const { t } = useI18n();
-  const lines = useEngineValue((state) => (state?.settings.blockedContacts ?? []).map((key) => {
+  const blocked = useEngineValue((state) => (state?.settings.blockedContacts ?? []).map((key) => {
     const chat = state?.links.find((link) => link.peerPubKeyZ32 === key);
-    return { key, name: chat?.label?.trim() || chat?.peerNick?.trim() || publicKeyLabel(key) };
+    return { key, name: chat?.label?.trim() || chat?.peerNick?.trim() || "" };
   }));
+  // Unnamed, as the chat list says it: "Contact · <tag>".
+  const lines = blocked.map((line) => ({ ...line, name: line.name || t("common.unnamedContact", { key: contactTag(line.key) }) }));
   const [unblocking, setUnblocking] = useState<string | null>(null);
   const buttons = useRef<(HTMLButtonElement | null)[]>([]);
 

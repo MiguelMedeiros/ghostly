@@ -14,6 +14,7 @@ test("a blocked contact's messages never show; unblocked in Settings, they come 
   await bob.page.getByTestId("chat-block").click();
   const asked = bob.page.getByRole("dialog", { name: /^Block .*\?$/ });
   await expect(asked).toHaveAccessibleDescription(/can no longer call you or send you anything/);
+  await bob.page.screenshot({ path: test.info().outputPath("1-block-asks.png") });
   await asked.getByRole("button", { name: "Block", exact: true }).click();
   await expect(asked).toBeHidden();
   // The menu says it is blocked now: Unblock contact takes Block's place.
@@ -33,6 +34,8 @@ test("a blocked contact's messages never show; unblocked in Settings, they come 
   await bob.page.goto("/#/settings");
   const row = bob.page.getByTestId("settings-blocked-contact");
   await expect(row).toHaveCount(1);
+  await row.scrollIntoViewIfNeeded();
+  await bob.page.screenshot({ path: test.info().outputPath("2-settings-blocked.png") });
   await row.getByRole("button", { name: /^Unblock / }).click();
   await expect(bob.page.getByTestId("settings-blocked-none")).toBeVisible();
 

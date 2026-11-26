@@ -63,7 +63,7 @@ describe("Settings → Blocked contacts", () => {
     utils.engine.update({ links: [linkView({ id: "link-1", peerPubKeyZ32: BOB, label: "Bob" })], settings: { blockedContacts: [BOB, gone] } as never });
     const rows = await screen.findAllByTestId("settings-blocked-contact");
     expect(rows[0]).toHaveTextContent("Bob");
-    expect(rows[1]).not.toHaveTextContent("Bob");
+    expect(rows[1]).toHaveTextContent(/^Contact · /);
     await utils.user.click(screen.getByRole("button", { name: /^Unblock .*Bob/ }));
     expect(utils.engine.callsTo("setContactBlocked")).toEqual([{ peerPubKeyZ32: BOB, blocked: false }]);
   });
