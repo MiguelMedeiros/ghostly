@@ -6,6 +6,7 @@ import { MESSAGE_CHANGES_TICK_MS } from "@ghostly/browser/platform/engine";
 import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { authorName, othersName } from "../../lib/groups";
 import { groupPayTitle } from "../../lib/groupPayments";
+import { isolate } from "../../lib/ownStatus";
 import { reactionNoteText } from "../../lib/reactions";
 import { saveSession } from "../../lib/storage";
 import { translatorFor, loadLocale } from "../../locales";
@@ -52,8 +53,8 @@ describe("a name that is the app's word for me", () => {
   it("the chat list's reaction line of a contact named so is not mine", async () => {
     const note = (by: "me" | "peer") => ({ at: 1, by, emoji: "❤️", snippet: "hi", mine: true });
     const en = translatorFor("en");
-    expect(reactionNoteText(note("peer"), "You", en)).toBe("“You” reacted ❤️ to \"hi\"");
-    expect(reactionNoteText(note("me"), "Ana", en)).toBe("You reacted ❤️ to \"hi\"");
+    expect(reactionNoteText(note("peer"), "You", en)).toBe(`${isolate("“You”")} reacted ❤️ to "${isolate("hi")}"`);
+    expect(reactionNoteText(note("me"), "Ana", en)).toBe(`You reacted ❤️ to "${isolate("hi")}"`);
     await loadLocale("pt");
     const pt = translatorFor("pt");
     expect(reactionNoteText(note("peer"), "Você", pt)).not.toBe(reactionNoteText(note("me"), "Ana", pt));
