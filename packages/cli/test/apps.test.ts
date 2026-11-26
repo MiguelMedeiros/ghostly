@@ -4,6 +4,11 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bech32, createBase58check } from "@scure/base";
+import { HDKey } from "@scure/bip32";
+import { generateMnemonic } from "@scure/bip39";
+import { wordlist as englishWords } from "@scure/bip39/wordlists/english.js";
 import { appRevocationFor, canonicalJsonBytes, readAppBundle, readAppRevocations, seedSigner, signAppRevocation, type AppManifest } from "@ghostly/core";
 import { publishApp, verifyApp, writeWhole } from "../src/apps";
 import { CliError } from "../src/errors";
@@ -331,6 +336,77 @@ describe("app publish", () => {
     expect(await publishApp(dir, key)).toMatchObject({ files: ["data.txt", "index.html"] });
     const leaky = appFolder(manifest, new Map([...files, ["data.txt", new TextEncoder().encode(`${long}\n-----END PRIVATE KEY-----\n`)]]));
     await expect(publishApp(leaky, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "data.txt" } });
+  }, 60_000);
+
+  // Secrets the CLI's guard knows (secretGuard.ts, findSecret) in any text file, a key file's first line after a byte
+  // order mark or blank lines, and ghostly-app.json itself, whose description and release notes stores show. Every
+  // value is made here: no real key or seed sits in the repository.
+  it("never bundles a wallet's secret, a key file after a byte order mark or blank lines, nor a secret in ghostly-app.json", async () => {
+    const { manifest, files } = chess();
+    const key = vectorKey(tmp(), "publisher");
+    const pem = readFileSync(key, "utf8");
+    const hex = (bytes: number) => randomBytes(bytes).toString("hex");
+    const mnemonic = generateMnemonic(englishWords);
+    const nsec = bech32.encode("nsec", bech32.toWords(randomBytes(32)));
+    const wif = createBase58check(sha256).encode(Uint8Array.from([0x80, ...randomBytes(32), 0x01]));
+    const xprv = HDKey.fromMasterSeed(randomBytes(32)).privateExtendedKey;
+    const proof = { amount: 8, id: "00ad268c4d1f5826", secret: hex(32), C: `02${hex(32)}` };
+    const cashuA = `cashuA${Buffer.from(JSON.stringify({ token: [{ mint: "https://mint.example", proofs: [proof] }], unit: "sat" })).toString("base64url")}`;
+    // CBOR of {t: [{p: [{a: 8}]}], u: "sat"}.
+    const cashuB = `cashuB${Buffer.from("a2617481a1617081a1616108617563736174", "hex").toString("base64url")}`;
+    for (const [path, text] of [
+      ["publisher.key", `\ufeffGhostly publisher key (WISP 1200). Secret.\n`],
+      ["old/store.key", `\n\r\nGhostly store key (WISP 1200). Secret.\n`],
+      ["seed.txt", `${mnemonic}\n`],
+      ["wallet.json", JSON.stringify({ mnemonic }, null, 2)],
+      ["backup.js", `export const words = ${JSON.stringify(mnemonic.split(" "))};\n`],
+      ["nostr.js", `export const nsec = "${nsec}";\n`],
+      // After a `\n` written in a JSON string: the letter n is not part of the key.
+      ["notes.json", JSON.stringify({ text: `line one\n${nsec}` })],
+      ["keys.json", JSON.stringify({ wif })],
+      ["hd.js", `const root = '${xprv}';\n`],
+      ["tip.txt", `Thanks! ${cashuA}\n`],
+      ["tip-b.json", JSON.stringify({ token: cashuB })],
+      ["config.json", JSON.stringify({ relay: "wss://relay.example", privkey: hex(32) }, null, 2)],
+      // Base64 after a line of base64's letters: the run starts one character past a group of 4.
+      ["ci/token.b64", `token\n${Buffer.from(pem).toString("base64")}\n`],
+    ] as const) {
+      const leaky = appFolder(manifest, files);
+      mkdirSync(dirname(join(leaky, path)), { recursive: true });
+      writeFileSync(join(leaky, path), text);
+      const refusal = error(await ghostly(["app", "publish", leaky, "--key", key]), "refused", 1) as { details?: { reason?: string; detail?: string } };
+      expect(refusal.details, path).toEqual({ reason: "private-key", detail: path });
+      expect(existsSync(join(leaky, "app.ghostlyapp"))).toBe(false);
+    }
+    // In the manifest's own fields: refused as ghostly-app.json, which is said to keep it out of its fields.
+    for (const leak of [{ description: `${manifest.description}\n\n${pem}` }, { releaseNotes: `Fixed the clock. ${mnemonic}` }]) {
+      const leaky = appFolder({ ...manifest, ...leak }, files);
+      const refusal = error(await ghostly(["app", "publish", leaky, "--key", key]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+      expect(refusal.details).toEqual({ reason: "private-key", detail: "ghostly-app.json" });
+      expect(refusal.message).toContain("take it out of the manifest's fields");
+      expect(existsSync(join(leaky, "app.ghostlyapp"))).toBe(false);
+    }
+    // Not secrets: hashes under their own names, a lockfile's integrity, prose and docs that name the kinds, a key
+    // file's first line inside a page, a wallet's copy of BIP39's list, whole (a run of 2048 seed words is no seed) or a
+    // piece of it in the list's order, and a file of 12 list words whose checksum fails (a message of them alone is
+    // asked about; a file's are not a seed).
+    const clean = appFolder(manifest, new Map([...files, ...([
+      ["package-lock.json", JSON.stringify({ packages: { "node_modules/x": { version: "1.0.0", integrity: `sha512-${randomBytes(64).toString("base64")}` } } }, null, 2)],
+      ["hashes.json", JSON.stringify({ sha256: hex(32), digest: `0x${hex(32)}`, seedHash: hex(32), commit: hex(20) }, null, 2)],
+      ["about.txt", `${manifest.description}\n`],
+      ["docs.md", "# Keys\n\nBack up the 12 or 24 words of your seed; never paste an nsec1… key, an xprv or a WIF, and a Cashu token (cashuA…) is money.\nThe key file opens with Ghostly publisher key (WISP 1200), on its first line.\n"],
+      ["twelve.txt", `ability ${"abandon ".repeat(11).trim()}`],
+      // Names that start as a token does, which decode to none.
+      ["wallet.js", "export const cashuAmountFormatterHelper = (sat) => `${sat} sat`;\n"],
+      // Code is full of the list's words, these 13 between its marks pass a checksum (apps/ui's useFloatingBox).
+      ["box.js", "export function fit(field, top, bottom) {\n  if (field.height > 0 && field.top > top && field.top < bottom) bottom = field.top;\n  return { top, bottom };\n}\n"],
+      ["words.js", `export const words = ${JSON.stringify(englishWords)};\n`],
+      // 24 of the list in its order, some 12 of which pass the checksum.
+      ["words-b.txt", `${englishWords.slice(24, 48).join("\n")}\n`],
+      // A game's bank of 64 of the list's words, in no order: more in a row than a seed has.
+      ["bank.json", JSON.stringify(Array.from({ length: 64 }, (_, i) => englishWords[(i * 997) % 2048]))],
+    ] as const).map(([path, text]) => [path, new TextEncoder().encode(text)] as [string, Uint8Array])]));
+    expect(ok(await ghostly(["app", "publish", clean, "--key", key]))).toMatchObject({ files: ["about.txt", "bank.json", "box.js", "docs.md", "hashes.json", "index.html", "package-lock.json", "twelve.txt", "wallet.js", "words-b.txt", "words.js"] });
   }, 60_000);
 
   it("refuses a source with a query or fragment, where a private repository's link carries its token, and writes no bundle", async () => {
