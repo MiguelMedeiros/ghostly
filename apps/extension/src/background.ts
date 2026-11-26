@@ -1,4 +1,4 @@
-import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, concatBytes, fromBase64, guardViewerAnswer, toBase64, utf8Encode, viewerResponseHeaders, viewerServicePolicy, withViewerPolicy } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, concatBytes, fromBase64, guardViewerAnswer, toBase64, utf8Encode, viewerResponseHeaders, withViewerPolicy } from "@ghostly/core";
 import { VIEWER_PORT, type EngineStatus, type HttpRequest, type HttpRequestReply, type RuntimeMessage, type ViewerAsk, type ViewerPage, type ViewerReply, type ViewerTaken } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { isViewerOrigin, parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
@@ -469,7 +469,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 // - DevTools attaches only to the tab `openViewer` itself just created, and
 //   every command goes to a tab with a viewer binding, which only `openViewer`
 //   writes and which is forgotten once the debugger leaves the tab;
-// - only the four commands the viewer needs are ever sent.
+// - only the five commands the viewer needs are ever sent.
 
 const PROTOCOL_VERSION = "1.3";
 
@@ -477,7 +477,7 @@ const PROTOCOL_VERSION = "1.3";
 const RELAY_ONLY_REFUSED = "A contact's app does not open in the browser extension while Hide my IP from contacts is on";
 
 /** The DevTools commands a viewer tab needs. Nothing else is ever sent. */
-const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRequest", "Fetch.failRequest"]);
+const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Page.addScriptToEvaluateOnNewDocument", "Fetch.fulfillRequest", "Fetch.failRequest"]);
 
 /**
  * Added to Ghostly's policy on every page a viewer serves: the app opens no window or tab of its own, which would run
@@ -487,9 +487,19 @@ const VIEWER_COMMANDS = new Set(["Fetch.enable", "Page.enable", "Fetch.fulfillRe
 const sandboxed = (policy: string) => `${policy}; sandbox allow-scripts allow-same-origin allow-forms`;
 
 /**
+ * The policy of Ghostly's own page in the tab (`answerFailed`): nothing loads or frames, its style its own, and an
+ * origin of its own (an empty `sandbox`: no script, form or popup either; the page is static). The guards never run in
+ * it, and the app can frame it and read its window by index from the moment it commits, so on the app's origin its
+ * `execCommand` would copy on a timer, as no page of the app's may (`OWN_ORIGIN_CSP` in packages/core/src/viewerGuard.ts).
+ * Desktop's `OWN_ANSWER_CSP` and the web runner's `ownPolicy` (apps/web/src/svc/worker.ts) load nothing either.
+ */
+const OWN_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; base-uri 'none'; sandbox";
+
+/**
  * What each page of the app runs first, as on the web (apps/web/src/svc/worker.ts): the clipboard guard. No policy or
  * sandbox flag keeps a page off `execCommand("copy")`, which Chromium lets write for seconds after a tap. The WebRTC
- * guard is not needed: no tab opens while Hide my IP from contacts is on.
+ * guard is not needed: no tab opens while Hide my IP from contacts is on. DevTools also runs it in each new document of
+ * the tab as that document is made (`openViewer`); the copy in the page then finds the window guarded and does nothing.
  */
 const PAGE_GUARDS = [{ script: CLIPBOARD_GUARD_SCRIPT, hash: CLIPBOARD_GUARD_HASH }];
 
@@ -730,6 +740,7 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string,
       patterns: [{ urlPattern: VIEWER_URL_PATTERN, requestStage: "Request" }],
     });
     await devtools(tab.id, "Page.enable");
+    await devtools(tab.id, "Page.addScriptToEvaluateOnNewDocument", { source: CLIPBOARD_GUARD_SCRIPT });
   } catch (error) {
     await chrome.tabs.remove(tab.id).catch(() => {});
     // `closeViewers` took the tab while DevTools attached to it.
@@ -886,7 +897,7 @@ async function answerFailed(tabId: number, requestId: string, binding: ViewerBin
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
-      { name: "content-security-policy", value: sandboxed(viewerServicePolicy(false)) },
+      { name: "content-security-policy", value: OWN_PAGE_CSP },
     ],
     body: toBase64(utf8Encode(html)),
   }, binding);

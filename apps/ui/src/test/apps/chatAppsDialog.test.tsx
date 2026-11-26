@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppPreview, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -349,5 +349,80 @@ describe("the chat's Apps when the installed apps could not be read", () => {
     await screen.findByTestId("chat-app");
     expect(screen.queryByTestId("chat-apps-error")).toBeNull();
     expect(lists).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the chat's Apps with two installed apps of the same title", () => {
+  const COPY = "q3kbn9s1x7w5ehd2ufc8m4tpy6ragjz0vlo3niek5bx7d1wq9s2ch/chess";
+  const copy = (): InstalledAppView => ({
+    ...installed(), ref: COPY, publisher: COPY.split("/")[0]!, fingerprint: "q3kb n9s1 x7w5 ehd2", from: "https://example.com/chess.ghostlyapp", unknownPublisher: true,
+  });
+  beforeEach(() => {
+    run = { status: "ok" };
+    lists.mockImplementation(() => [installed(), copy()]);
+  });
+  afterEach(() => lists.mockImplementation(() => [installed()]));
+
+  it("tells them apart: each row shows its publisher's fingerprint, and the stranger's says Unknown publisher", async () => {
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={vi.fn()} />);
+    const rows = await screen.findAllByTestId("chat-app");
+    expect(rows).toHaveLength(2);
+    const [known, stranger] = rows as [HTMLElement, HTMLElement];
+    expect(known.textContent).not.toBe(stranger.textContent);
+    expect(known).toHaveTextContent("yz7m oxuc bd4u 8aqt");
+    expect(known).not.toHaveTextContent("Unknown publisher");
+    expect(stranger).toHaveTextContent("Unknown publisher");
+    expect(stranger).toHaveTextContent("q3kb n9s1 x7w5 ehd2");
+    // A screen reader's Open names differ too.
+    const opens = screen.getAllByTestId("chat-app-open").map((b) => b.getAttribute("aria-label"));
+    expect(new Set(opens).size).toBe(2);
+  });
+
+  // Both listed by a curated store: only the fingerprints tell the rows apart.
+  const known = (title: string): InstalledAppView => ({ ...copy(), unknownPublisher: false, title });
+  const rowsOf = async (title: string) => {
+    lists.mockImplementation(() => [installed(), known(title)]);
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={vi.fn()} />);
+    return await screen.findAllByTestId("chat-app") as [HTMLElement, HTMLElement];
+  };
+
+  it.each([
+    ["full-width", "Ｃｈｅｓｓ"],
+    ["with another case and spacing", " chess "],
+    ["with a Cyrillic С", "\u0421hess"],
+    ["with a joiner inside", "Ch\u200Dess"],
+  ])("a title that reads the same (%s) is the same title: each row shows its fingerprint", async (_, title) => {
+    const [first, other] = await rowsOf(title);
+    expect(first).toHaveTextContent("yz7m oxuc bd4u 8aqt");
+    expect(other).toHaveTextContent("q3kb n9s1 x7w5 ehd2");
+  });
+
+  it("a title with an accent written as two code points is the one written as one", async () => {
+    lists.mockImplementation(() => [{ ...installed(), title: "Caf\u00E9" }, known("Cafe\u0301")]);
+    renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={vi.fn()} />);
+    const [first, other] = await screen.findAllByTestId("chat-app") as [HTMLElement, HTMLElement];
+    expect(first).toHaveTextContent("yz7m oxuc bd4u 8aqt");
+    expect(other).toHaveTextContent("q3kb n9s1 x7w5 ehd2");
+  });
+
+  it("a title that only looks near (Chess 2, Chest) is another title: no fingerprint", async () => {
+    for (const title of ["Chess 2", "Chest"]) {
+      const view = await rowsOf(title);
+      for (const row of view) expect(row).not.toHaveTextContent(/yz7m|q3kb/);
+      cleanup();
+    }
+  });
+
+  it("an app of an unknown publisher says so even when its title is the only one", async () => {
+    lists.mockImplementation(() => [copy()]);
+    await dialog();
+    expect(screen.getByTestId("chat-app")).toHaveTextContent("Unknown publisher");
+  });
+
+  it("one app of a known publisher shows its tagline alone, as before", async () => {
+    lists.mockImplementation(() => [installed()]);
+    await dialog();
+    expect(screen.getByTestId("chat-app")).toHaveTextContent("Play chess");
+    expect(screen.getByTestId("chat-app")).not.toHaveTextContent("yz7m");
   });
 });

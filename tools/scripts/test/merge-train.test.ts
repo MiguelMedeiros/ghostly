@@ -4979,6 +4979,38 @@ describe("GitHub over REST", () => {
     expect(sent.filter((s) => s.startsWith("POST"))).toEqual([]);
   });
 
+  it("finds CI's own run behind more runs of forks' pull requests than GitHub lists, by its author or its push", async () => {
+    const sent: string[] = [];
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", head_repository: { full_name: "o/r" }, actor: { login: "train[bot]" }, status: "completed", ...extra });
+    // Newest first: 1000 runs of fork pull requests (all GitHub lists for one commit), then the batch's own green run 7
+    // and dev's push run 6 on the same commit.
+    const forks = Array.from({ length: 1000 }, (_, i) => wf(3000 - i, { head_repository: { full_name: "fork/r" }, actor: { login: "x" }, status: "in_progress" }));
+    const runs = [...forks, wf(7, { status: "in_progress" }), wf(6, { event: "push", head_branch: "dev", actor: { login: "someone" } })];
+    const fetchImpl = async (url: string, init: { method: string }) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(`${init.method} ${path}`);
+      if (init.method === "POST") return reply(202, {});
+      if (/\/actions\/runs\/[67]\/jobs/.test(path)) return reply(200, { jobs: [{ id: 7, name: "CI Success", status: "completed", conclusion: "success" }] });
+      const q = new URL(`https://x${path}`).searchParams;
+      const page = Number(q.get("page") ?? 1);
+      const listed = runs.filter((r) => (!q.get("event") || r.event === q.get("event")) && (!q.get("actor") || r.actor.login === q.get("actor"))).slice(0, 1000);
+      return reply(200, { workflow_runs: listed.slice((page - 1) * 100, page * 100) });
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(ciState(await gh.ciJobs("abc", undefined, "train[bot]"))).toBe("success");
+    expect(sent.filter((s) => /event=|actor=/.test(s))).toEqual([
+      "GET /actions/workflows/ci.yml/runs?head_sha=abc&event=push&per_page=100",
+      "GET /actions/workflows/ci.yml/runs?head_sha=abc&actor=train%5Bbot%5D&per_page=100",
+    ]);
+    // dev's own push run, for the base's commit (no pull request).
+    const base = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(ciState(await base.ciJobs("abc"))).toBe("success");
+    // The cancel reaches the batch's own run, never a fork's.
+    sent.length = 0;
+    expect(await gh.cancelCi("abc", "train[bot]")).toEqual({ cancelled: [7] });
+    expect(sent.filter((s) => s.startsWith("POST"))).toEqual(["POST /actions/runs/7/cancel"]);
+  });
+
   it("falls back to GitHub Actions' check runs, with one warning, when the token may not read Actions", async () => {
     const warnings: string[] = [];
     const checks = [

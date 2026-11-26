@@ -388,6 +388,16 @@ describe("a task's pull request state, checks, tags and parent", () => {
     await expect(callApi(ctx, "task.send", { chat: "Sala de Máquinas", card: { title: "Codec", parent: "epic-1" } })).resolves.toMatchObject({ group: "g1" });
   });
 
+  it("describe a secret given as the task or its parent, not say it back", async () => {
+    const { ctx } = fake();
+    const nsec = `nsec1${"q".repeat(58)}`;
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: nsec, card: { progress: 10 } })).rejects.toMatchObject({ code: "not_found",
+      message: "No task (a private key) of yours in this chat: send it first with ghostly task send" });
+    // Past the card's own secret check (--force): the parent's refusal still does not say it.
+    await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Codec", parent: nsec }, force: true })).rejects.toMatchObject({ code: "not_found",
+      message: "--parent: no task (a private key) of yours in this chat: send the parent first" });
+  });
+
   it("an update sets them, merges the pull request field by field, and replaces the tags", async () => {
     const { ctx, rows } = fake();
     await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "codec", title: "Codec", pr: { url: "https://github.com/o/r/pull/612", number: 612, state: "draft" }, tags: ["core"] } });

@@ -850,11 +850,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const events = (p.events = await gh.events(p.number));
     p.queuedAt = queuedAt(events, p.createdAt, p.labels);
     p.priority = p.labels.includes(LABEL.priority);
-    const jobs = await gh.ciJobs(p.sha, counts(p));
+    const jobs = await gh.ciJobs(p.sha, counts(p), p.author);
     p.ci = ciState(jobs);
     p.cancelled = !!jobs.cancelled;
     // The fast tier on the same head: read only when CI Success alone does not decide.
-    const drafts = p.ci !== "success" && p.ci !== "failure" ? await gh.draftJobs(p.sha) : null;
+    const drafts = p.ci !== "success" && p.ci !== "failure" ? await gh.draftJobs(p.sha, p.author) : null;
     if (drafts) p.fast = draftState(drafts);
     // It could board from when it was queued, or from when the gate it boards on turned green, whichever is later.
     const greenAt = p.ci === "success" ? gateDoneAt(jobs, "CI Success") : p.fast === "success" ? gateDoneAt(drafts, DRAFT_GATE) : null;
@@ -975,7 +975,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const cancelOwnCi = async (p, why = "the batch's CI is its gate") => {
     if (!mayCancel || p.ci === "success") return;
     try {
-      const r = await w.cancelCi(p.sha);
+      const r = await w.cancelCi(p.sha, p.author);
       if (r.denied) {
         mayCancel = false;
         say(`Not cancelling the boarded pull requests' own CI: this token may not cancel workflow runs (${r.denied}); it needs "Actions: write".`);
@@ -1154,7 +1154,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     for (const x of waits) behind.set(x.number, { batch: batch.number, with: x.with });
     const members = state.prs.map((s) => (gone.has(s.number) ? undefined : byNumber.get(s.number)));
     const next = state.next.map((n) => byNumber.get(n)).filter((p) => p && !gone.has(p.number) && !waiting(p));
-    const jobs = await gh.ciJobs(batch.sha, counts(batch));
+    const jobs = await gh.ciJobs(batch.sha, counts(batch), batch.author);
     const ci = ciState(jobs);
     const tip = await gh.branchSha(base);
     const baseJobs = ci === "failure" ? await gh.ciJobs(state.baseSha, planned(null)) : null;
@@ -1831,21 +1831,35 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
    * The answer to the list of CI's runs on a commit: the runs, or a 403 (a token that may not read Actions). Pages are
    * read, newest first, until `enough` of this repository's own runs are in (see `ciRuns`) or the list ends: anyone can
    * open pull requests from a fork at a public commit, and their runs would fill a first page that holds none of ours.
-   * GitHub lists at most 1000 runs for one commit, PAGES_READ pages.
+   * GitHub lists at most 1000 runs for one commit, PAGES_READ pages, so when they all fill without enough of ours, the
+   * runs no fork can make are read too, PAGES_READ pages each: a push's (a fork's push runs in the fork) and those of
+   * `author`, the pull request's author (a fork's pull request runs as whoever opened, reopened or pushed it).
    */
-  const readCiRuns = async (sha, enough) => {
+  const readCiRuns = async (sha, enough, author) => {
     const runs = [];
-    for (let page = 1; page <= PAGES_READ; page++) {
-      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100${page > 1 ? `&page=${page}` : ""}`);
-      if (!r.ok && r.status !== 403) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
-      if (!r.ok) return r;
-      const list = r.data?.workflow_runs ?? [];
-      runs.push(...list);
-      if (list.length < 100 || ciRuns(runs, repo, sha).length >= enough) break;
+    const seen = new Set();
+    // true when every page filled without enough of ours; a 403 answer as it came.
+    const pages = async (by) => {
+      for (let page = 1; page <= PAGES_READ; page++) {
+        const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}${by}&per_page=100${page > 1 ? `&page=${page}` : ""}`);
+        if (!r.ok && r.status !== 403) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
+        if (!r.ok) return r;
+        const list = r.data?.workflow_runs ?? [];
+        for (const run of list) if (!seen.has(run.id)) seen.add(run.id), runs.push(run);
+        if (list.length < 100 || ciRuns(runs, repo, sha).length >= enough) return false;
+      }
+      return true;
+    };
+    let more = await pages("");
+    for (const by of ["&event=push", ...(author ? [`&actor=${encodeURIComponent(author)}`] : [])]) {
+      if (more !== true) break;
+      more = await pages(by);
+      if (more === false) more = ciRuns(runs, repo, sha).length < enough;
     }
+    if (more?.status === 403) return more;
     return { ok: true, status: 200, data: { workflow_runs: runs } };
   };
-  const ciRunsOn = (sha) => once(runsRead, sha, () => readCiRuns(sha, CI_RUNS_READ));
+  const ciRunsOn = (sha, author) => once(runsRead, `${sha} ${author ?? ""}`, () => readCiRuns(sha, CI_RUNS_READ, author));
   const runJobs = (id) => once(jobsRead, id, () => all(`/actions/runs/${id}/jobs?filter=latest`));
   const pull = (p) => ({
     number: p.number,
@@ -1902,10 +1916,10 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      * up to CI_RUNS_READ runs. A run that ended saying nothing about the commit (`saysNothing`: cancelled, skipped or
      * never started) is passed over too, so a newer run on the same head counts only once it ran: a cancelled one never
      * hides the green (or red) run before it, and one still going is pending. Check
-     * runs are not asked: they mix every run on the commit.
+     * runs are not asked: they mix every run on the commit. `author`: the pull request's (see `readCiRuns`).
      */
-    ciJobs: async (sha, counts = () => true) => {
-      const r = await ciRunsOn(sha);
+    ciJobs: async (sha, counts = () => true, author) => {
+      const r = await ciRunsOn(sha, author);
       if (r.status === 403) {
         if (!warnedChecks) warn(`This token may not read Actions (${r.data?.message ?? "HTTP 403"}), so CI is read from check runs, which any workflow of the repository can post. Give the queue app "Actions: read".`);
         warnedChecks = true;
@@ -1939,8 +1953,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      * same commit), from its three newest runs; check runs when the token may not read Actions, as `ciJobs`. A run whose
      * draft gate ended cancelled or skipped is passed over as `ciJobs` passes one (`saysNothing`).
      */
-    draftJobs: async (sha) => {
-      const r = await ciRunsOn(sha);
+    draftJobs: async (sha, author) => {
+      const r = await ciRunsOn(sha, author);
       if (r.status === 403) return (await all(`/commits/${sha}/check-runs?filter=latest`)).filter((c) => c.app?.slug === "github-actions" && c.name === DRAFT_GATE);
       for (const run of ciRuns(r.data.workflow_runs, repo, sha).slice(0, 3)) {
         const gates = (await runJobs(run.id)).filter((j) => j.name === DRAFT_GATE);
@@ -1953,9 +1967,9 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      * not (no "Actions: write"); after a denial nothing more is asked. The runs are read afresh, not from what `ciJobs`
      * read earlier in the run: a pull request that left draft since then has a full run that list does not hold.
      */
-    cancelCi: async (sha) => {
+    cancelCi: async (sha, author) => {
       if (cancelDenied) return { cancelled: [], denied: cancelDenied };
-      const r = await readCiRuns(sha, Infinity);
+      const r = await readCiRuns(sha, Infinity, author);
       if (r.status === 403) return { cancelled: [], denied: (cancelDenied = `HTTP 403 ${r.data?.message ?? ""}`.trim()) };
       const cancelled = [];
       for (const run of ciRuns(r.data.workflow_runs, repo, sha).filter((x) => x.event === "pull_request" && x.status !== "completed")) {

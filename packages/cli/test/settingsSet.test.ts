@@ -56,6 +56,12 @@ describe("settings set", () => {
     expect(Object.hasOwn(set, "warning")).toBe(false);
     expect(result.stderr).toContain("ghostly: The CLI reaches TURN over UDP only: it does not use turns:turn.example:5349");
     expect(set).toEqual(ok(await ghostly(["--home", dir, "settings", "get"])));
+    // The address is named without its user and password, which bots would log from stderr.
+    const login = [{ urls: "turns:user:s3cr3t@turn.example:5349", username: "u", credential: "c" }];
+    const said = await ghostly(["--home", dir, "settings", "set", "iceServers", "-"], { input: JSON.stringify(login) });
+    ok(said);
+    expect(said.stderr).toContain("it does not use turns:turn.example:5349");
+    expect(said.stderr).not.toContain("s3cr3t");
   });
 
   it("refuses a HyperDHT relay with a login or a token, which every contact would be told, and keeps none", { timeout: 60_000 }, async () => {

@@ -86,6 +86,49 @@ export interface BackupResult { bytes: number; files: number; fileBytes: number;
 export { isCancelled };
 
 const ROWS_PER_RECORD = 400;
+/**
+ * What one record of a bundle may hold, as JSON: a writer writes no more, a restore takes no more, and measures it
+ * before parsing it. The largest a profile writes are a batch of rows, a wallet's database and the head, a few MB
+ * each; a batch over this goes as smaller ones. Its values are counted as well: the parse (and `decode`'s reviver)
+ * pays about a microsecond and a hundred bytes of a tab's heap for each, so `0,` or `[],` cost a thousand times more
+ * than their size says, and a tab holds one record whole while it parses it. A real record has a few hundred thousand.
+ */
+const MAX_RECORD_BYTES = 64 * 1024 * 1024;
+const MAX_RECORD_VALUES = 1_000_000;
+/** The values of all of a bundle's records (or of a version 1 document): this many per byte of the bundle, beyond one record's worth. */
+const MAX_VALUES_PER_BUNDLE_BYTE = 4;
+/** How deep a record's arrays and objects may nest: `decode`'s reviver recurses once per level, and a real record nests under 20. */
+const MAX_RECORD_DEPTH = 1000;
+const RECORD_LIMITS = { recordBytes: MAX_RECORD_BYTES };
+const TOO_LARGE = "This backup is too large to restore";
+
+/**
+ * The values of `json`, as the parse meets them: the `[`, `{`, `,` and `:` outside its strings, counted up to `limit`
+ * and no further. What a string holds is not counted: a string costs the parse its length, which is bounded. Arrays
+ * and objects nested past `MAX_RECORD_DEPTH` count as over `limit`.
+ */
+function valueCount(json: string, limit: number): number {
+  let count = 0, depth = 0, inString = false;
+  for (let i = 0; i < json.length && count <= limit; i++) {
+    const c = json.charCodeAt(i);
+    if (inString) { if (c === 92) i += 1; else if (c === 34) inString = false; } else if (c === 34) inString = true;
+    else if (c === 91 || c === 123) { count += 1; if (++depth > MAX_RECORD_DEPTH) return limit + 1; }
+    else if (c === 93 || c === 125) depth -= 1;
+    else if (c === 44 || c === 58) count += 1;
+  }
+  return count;
+}
+const recordFits = (json: string) => (json.length * 3 <= MAX_RECORD_BYTES || new TextEncoder().encode(json).length <= MAX_RECORD_BYTES) && valueCount(json, MAX_RECORD_VALUES) <= MAX_RECORD_VALUES;
+/** Parses a bundle's records one after another, each measured first: none, and not all of them, past what a profile writes. */
+function recordParser(source: BackupSource): (json: string) => BackupRecord {
+  let left = MAX_RECORD_VALUES + MAX_VALUES_PER_BUNDLE_BYTE * source.size;
+  return (json) => {
+    const count = valueCount(json, Math.min(MAX_RECORD_VALUES, left));
+    if (count > MAX_RECORD_VALUES || count > left) throw new Error(TOO_LARGE);
+    left -= count;
+    return decode(json) as BackupRecord;
+  };
+}
 const isRecordOf = (rail: "arkWallet" | "barkWallet") => (key: IDBValidKey) => key === rail || (typeof key === "string" && (key.startsWith(`${rail}-retired-`) || key.startsWith(`${rail}-mode-`)));
 const isArkRecord = isRecordOf("arkWallet");
 /** A Bark wallet keeps its coins in a database of its own, named after its id (`ghostly-bark-<id>`), which no bundle carries. */
@@ -320,7 +363,23 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
 
     const profileId = active ? currentProfile().id : id!;
     const name = storedProfileName(profileId) ?? "Profile";
-    const put = async (record: BackupRecord) => writer.json(await encode(record));
+    // Never a record a restore refuses (`recordFits`), nor records whose values add up to more than it takes
+    // (`recordParser`): the backup is refused now, not when it is restored.
+    let counted = 0;
+    const putText = async (json: string) => {
+      if (!recordFits(json)) throw new Error("A record of this profile is too large for a backup");
+      counted += valueCount(json, MAX_RECORD_VALUES);
+      await writer.json(json);
+    };
+    const put = async (record: BackupRecord) => putText(await encode(record));
+    // A batch of rows larger than a restore takes goes as two halves, down to a row alone.
+    const putRowsOf = async (store: string, keys: IDBValidKey[], values: unknown[]): Promise<void> => {
+      const json = await encode({ t: "rows", db: "peer", store, keys, values } satisfies BackupRecord);
+      if (values.length < 2 || recordFits(json)) return putText(json);
+      const half = values.length >> 1;
+      await putRowsOf(store, keys.slice(0, half), values.slice(0, half));
+      await putRowsOf(store, keys.slice(half), values.slice(half));
+    };
     const mark: LightMark | undefined = light ? { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut, bytes: leftOutBytes } : undefined;
     await put({ t: "profile", format: "ghostly-profile", version: 2, createdAt: Date.now(), profile: { name, builtIn: hasBuiltInName(profileId) }, storage, files: carried.length, bytes: progress.bytesTotal, ...(mark && { light: mark }) });
     // Right after the head: a restore reads it before it writes anything (`openProfileBackup`).
@@ -336,7 +395,7 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
         if (store.name === "fileState") { const kept = values.map((value, i) => [keys[i], value] as const).filter(([, value]) => !merged.has((value as StoredFile)?.id)); keys = kept.map(([key]) => key); values = kept.map(([, value]) => value); }
         // Where a file's bytes are is the giver's: the taker says where it put them.
         if (store.name === "fileState" && handoff) values = values.map((value) => { const { bytes: _bytes, ...rest } = (value ?? {}) as Partial<StoredFile>; return rest; });
-        for (let at = 0; at < values.length; at += ROWS_PER_RECORD) await put({ t: "rows", db: "peer", store: store.name, keys: keys.slice(at, at + ROWS_PER_RECORD), values: values.slice(at, at + ROWS_PER_RECORD) });
+        for (let at = 0; at < values.length; at += ROWS_PER_RECORD) await putRowsOf(store.name, keys.slice(at, at + ROWS_PER_RECORD), values.slice(at, at + ROWS_PER_RECORD));
       }
     }
     for (const [walletId, snapshot] of Object.entries(ark)) await put({ t: "ark", walletId, snapshot });
@@ -371,6 +430,7 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
       tell();
     }
     await put({ t: "end", files, bytes: fileBytes });
+    if (counted > MAX_RECORD_VALUES + MAX_VALUES_PER_BUNDLE_BYTE * writer.written) throw new Error("This profile's data is too dense for a backup");
     return { bytes: await writer.finish(), files, fileBytes, skipped, ...(light && { leftOut, leftOutBytes }) };
   } finally {
     (piecesDb as IDBDatabase | null)?.close();
@@ -451,17 +511,22 @@ const isHead = (value: Partial<ProfileHead> | null | undefined) => typeof value?
 export async function openProfileBackup(input: BackupInput, passphrase?: string, { signal, onProgress }: BackupRun = {}): Promise<OpenedProfileBackup> {
   const source = sourceOf(input);
   onProgress?.({ stage: "opening", files: 0, filesTotal: 0, bytes: 0, bytesTotal: 0 });
-  const reader = await BackupReader.open(source, passphrase, signal);
+  const reader = await BackupReader.open(source, passphrase, signal, { limits: RECORD_LIMITS });
   if (!reader) {
     // Version 1: one JSON document, read whole.
     if (source.size > MAX_BACKUP_BYTES * 1.4) throw new Error("This backup is too large to restore");
-    const payload = decode(await open(new TextDecoder().decode(await source.read(0, source.size)), passphrase ?? "")) as ProfilePayload;
+    const plain = await open(new TextDecoder().decode(await source.read(0, source.size)), passphrase ?? "");
+    // A whole profile in one document: its values are held to the whole bundle's budget, counted before the parse.
+    const budget = MAX_RECORD_VALUES + MAX_VALUES_PER_BUNDLE_BYTE * source.size;
+    if (valueCount(plain, budget) > budget) throw new Error(TOO_LARGE);
+    const payload = decode(plain) as ProfilePayload;
     if (payload?.format !== "ghostly-profile" || payload.version !== 1 || !isHead(payload) || !payload.databases) throw new Error(NOT_A_PROFILE);
     checkVersion(payload.databases.peer?.version);
     return { name: payload.profile.name, protection: "passphrase", payload, whole: payload };
   }
+  const parse = recordParser(source);
   const first = await reader.next();
-  const head = first?.json === undefined ? null : (decode(first.json) as BackupRecord);
+  const head = first?.json === undefined ? null : parse(first.json);
   if (head?.t !== "profile" || head.format !== "ghostly-profile" || !isHead(head)) throw new Error(NOT_A_PROFILE);
   if (head.version !== 2) throw new Error(NEWER);
   // The chats and the DID come right after: enough to tell whose profile this is before anything is written.
@@ -470,7 +535,7 @@ export async function openProfileBackup(input: BackupInput, passphrase?: string,
   let devices: BundleDevices | undefined;
   let verifier: OpenedProfileBackup["verifier"];
   for (let record = await reader.next(); record?.json !== undefined; record = await reader.next()) {
-    const value = decode(record.json) as BackupRecord;
+    const value = parse(record.json);
     if (value?.t === "db") { checkVersion(value.version); continue; }
     if (value?.t === "devices") {
       // A device set this build cannot read is refused, never restored as a profile of one device (WISP 06).
@@ -765,8 +830,9 @@ interface RestoreState { files: boolean; db: IDBDatabase | null; writing: LargeF
 /** A version 2 bundle: read record by record, each written as it comes. */
 async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>, ns: string, made: string[], state: RestoreState, fresh: (walletId: string) => string, walletIds: Map<string, string>, { signal, onProgress }: BackupRun, handoff = false): Promise<void> {
   const space = `ghostly_${ns}`;
-  const reader = await BackupReader.open(stream.source, stream.passphrase, signal);
+  const reader = await BackupReader.open(stream.source, stream.passphrase, signal, { limits: RECORD_LIMITS });
   if (!reader) throw new Error(NOT_A_PROFILE);
+  const parse = recordParser(stream.source);
   const progress: BackupProgress = { stage: "restoring", files: 0, filesTotal: 0, bytes: 0, bytesTotal: 0 };
   const tell = () => onProgress?.({ ...progress });
   let file: { row: StoredFile; size: number; type: string; got: number; parts: Uint8Array[]; large: LargeFile | null } | null = null;
@@ -783,7 +849,7 @@ async function restoreStream(stream: NonNullable<OpenedProfileBackup["stream"]>,
       tell();
       continue;
     }
-    const value = decode(record.json) as BackupRecord;
+    const value = parse(record.json);
     if (file && value?.t !== "file-end") throw new Error(DAMAGED);
     if (!started && value?.t !== "profile") throw new Error(NOT_A_PROFILE);
     switch (value?.t) {

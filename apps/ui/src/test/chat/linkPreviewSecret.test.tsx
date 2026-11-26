@@ -45,6 +45,41 @@ describe("a link preview of a link that holds a secret", () => {
     expect(previewableLink("https://news.example/story?id=9")).toBe("https://news.example/story?id=9");
   });
 
+  it("is not made when the words around the link say its key is a secret", () => {
+    const hex = "a".repeat(32) + "b".repeat(32);
+    for (const text of [
+      `password reset link: https://app.example/reset/${hex}`,
+      `my seed backup https://paste.example/${hex}`,
+      `https://paste.example/${hex} is my seed`,
+      `pass\u200bword reset link: https://app.example/reset/${hex}`,
+      `bitcoind rpcpassword https://node.example/${hex}`,
+    ]) {
+      expect(findSecret(text)).not.toBeNull();
+      expect(previewableLink(text)).toBeNull();
+    }
+    // A bare hash in a link is not asked about at Send, and keeps its card; so does a link beside someone else's key.
+    expect(previewableLink(`https://explorer.example/tx/${hex}`)).toBe(`https://explorer.example/tx/${hex}`);
+    expect(previewableLink(`my seed ${hex}\n\n${"-".repeat(48)}\nhttps://news.example/story`)).toBe("https://news.example/story");
+  });
+
+  it("reads a draft at the length cap, full of keys in links, in the time of a keystroke", () => {
+    const hex = "a".repeat(32) + "b".repeat(32);
+    const fill = (line: (i: number) => string, end = "") => {
+      let text = "";
+      for (let i = 0; text.length + end.length < 16_000; i++) text += line(i);
+      return text + end;
+    };
+    // The same link over and over with "seed" after the last one, and as many links each beside "seed".
+    for (const text of [fill(() => `https://paste.example/${hex} `, "seed"), fill((i) => `https://paste.example/${i}/${hex} seed\n`)]) {
+      expect(findSecret(text)).not.toBeNull();
+      previewableLink(text);
+      const start = performance.now();
+      for (let i = 0; i < 5; i++) expect(previewableLink(text)).toBeNull();
+      // Each read takes a few milliseconds; the ceiling is far above that, to stay steady on a busy machine.
+      expect((performance.now() - start) / 5).toBeLessThan(50);
+    }
+  });
+
   it("goes to the next link of the text when that one holds none", () => {
     expect(previewableLink(`${SECRET_LINKS[0]} and https://news.example/story`)).toBe("https://news.example/story");
   });

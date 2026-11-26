@@ -319,6 +319,8 @@ const RULES: readonly Rule[] = [
   exact("No message to forward", "errors.chat.forwardNone", "errors.chat.forwardNoneNext"),
   // A chat made or joined that the storage had no room for (lib/storage.ts ensureSession).
   exact("There is no room left on this device for a new chat", "errors.chat.noRoom", "errors.chat.noRoomNext"),
+  // An invite whose own seed is another contact's chat here (lib/storage.ts ensureSession): no real invite reuses one.
+  exact("This invite's keys belong to another chat on this device", "join.invalid"),
   exact("Someone else joined with this invite first. Ask your contact for a new one.", "pairing.reason.taken"),
   exact("Chat has been burned", "chat.compat.burned"),
 
@@ -648,6 +650,8 @@ const RULES: readonly Rule[] = [
   exact("This is not a Ghostly backup", "errors.profile.notGhostlyBackup"),
   { match: /^This backup(?: is damaged: it was changed or cut short|'s database is malformed)$/, key: "errors.profile.damagedBackup", next: "errors.profile.damagedBackupNext" },
   exact("This backup is too large to restore", "errors.profile.backupTooLarge"),
+  exact("A record of this profile is too large for a backup", "errors.profile.backupRecordTooLarge"),
+  exact("This profile's data is too dense for a backup", "errors.profile.backupTooDense"),
   exact("This backup comes from a newer Ghostly; update to restore it", "errors.profile.newerBackup"),
   { match: /^Unsupported backup (?:encryption|format)$/, key: "errors.profile.unsupportedBackup" },
   exact("Use at least 12 characters for the backup passphrase", "errors.profile.shortPassphrase"),

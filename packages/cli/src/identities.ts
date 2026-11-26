@@ -131,7 +131,7 @@ async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string,
 /** The proof `identity remove` names: the engine removes nothing for an id it does not know, and says nothing. */
 function proofToRemove(ctx: ApiContext, params: Params): string {
   const id = str(params, "id", true);
-  if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
+  if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${shownValue(id)} (ghostly identity list)`);
   return id;
 }
 
@@ -272,7 +272,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     const s = state(ctx);
     const link = ownChatOf(ctx, params, s);
     const id = str(params, "id", true);
-    if (!s.identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
+    if (!s.identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${shownValue(id)} (ghostly identity list)`);
     await node(ctx).shareIdentityProof({ linkId: link.id, id });
     return { chat: link.id, shared: id };
   },
@@ -281,7 +281,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     // As `identity.share`: a contact's own name or a prefix of its id never names the chat.
     const link = ownChatOf(ctx, params);
     const id = str(params, "id", true);
-    if (!link.identities?.shared.some((s) => s.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} shared in this chat (ghostly identity contact ${link.id})`);
+    if (!link.identities?.shared.some((s) => s.id === id)) throw new CliError("not_found", `No identity proof ${shownValue(id)} shared in this chat (ghostly identity contact ${link.id})`);
     await node(ctx).withdrawIdentityProof({ linkId: link.id, id });
     return { chat: link.id, withdrawn: id };
   },
@@ -300,7 +300,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
   async "identity.recheck"(ctx, params) {
     const link = chatOf(ctx, params);
     const id = str(params, "id", true);
-    if (!link.identities?.received.some((r) => r.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} from this contact (ghostly identity contact ${link.id})`);
+    if (!link.identities?.received.some((r) => r.id === id)) throw new CliError("not_found", `No identity proof ${shownValue(id)} from this contact (ghostly identity contact ${link.id})`);
     await node(ctx).recheckIdentityProof({ linkId: link.id, id });
     return IDENTITY_METHODS["identity.contact"](ctx, { chat: link.id });
   },

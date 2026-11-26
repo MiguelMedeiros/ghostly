@@ -515,6 +515,8 @@
   },
   "profile": {
     "arkBackup": "Impossible de lire le portefeuille Ark pour la sauvegarde",
+    "backupRecordTooLarge": "Un enregistrement de ce profil est trop volumineux pour une sauvegarde",
+    "backupTooDense": "Les données de ce profil sont trop denses pour une sauvegarde",
     "backupTooLarge": "Cette sauvegarde est trop volumineuse pour être restaurée ici.",
     "damagedBackup": "Cette sauvegarde est endommagée",
     "damagedBackupNext": "Essayez une autre copie du fichier.",

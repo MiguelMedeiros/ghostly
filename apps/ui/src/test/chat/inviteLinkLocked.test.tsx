@@ -72,10 +72,11 @@ it("invite links opened while locked each make their chat after the unlock, up t
 
 // covers: invite.link, profiles.lock
 /*
- * Links with a joined chat's seed but another contact's keys, opened while locked: each would make a chat of its own,
- * so each takes a place, and those past the limit are refused. The joined chat's own link takes none.
+ * Links with a joined chat's seed but another contact's keys, opened while locked: none makes a chat after the unlock
+ * (the engine keys a chat by its own seed, so such a chat had the joined chat's link), and the app says so. The joined
+ * chat's own link opens it.
  */
-it("links with a joined chat's seed but other keys, opened while locked, take places like new ones", async () => {
+it("links with a joined chat's seed but other keys, opened while locked, make no chat after the unlock", async () => {
   const { invite, inviteCode } = createChatInvite();
   const reading = readInvite(inviteCode);
   if (!reading.ok) throw new Error("a fresh invite reads");
@@ -94,8 +95,9 @@ it("links with a joined chat's seed but other keys, opened while locked, take pl
   lock.isLocked = false;
   rerender(<Root />);
   await waitFor(() => expect(window.location.hash).toBe(`#/chat/${joined}`));
-  expect(listSessions()).toHaveLength(1 + LINK_CHATS_WAITING);
-  expect(screen.getByTestId("invite-link-invalid")).toHaveTextContent("Too many invite links opened");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(listSessions().map((session) => session.id)).toEqual([joined]);
+  expect(screen.getByTestId("invite-link-invalid")).toBeInTheDocument();
 }, 60_000);
 
 // covers: invite.link, profiles.lock

@@ -127,9 +127,15 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     };
     const listen = w.EventTarget.prototype.addEventListener;
     const home = w.document;
+    const away = (doc) => {
+      const there = apply(view, doc, []);
+      return there !== null && there !== w ? there : null;
+    };
     const reopen = w.Document.prototype.open;
     w.Document.prototype.open = function () {
       if (arguments.length > 2) return apply(opener, w, [arguments[0], arguments[1]]);
+      const there = away(this);
+      if (there !== null) return apply(there.Document.prototype.open, this, arguments);
       const got = apply(reopen, this, arguments);
       if (this === home) { try { apply(listen, home, ["load", sweep, true]); } catch (e) {} }
       return got;
@@ -150,6 +156,7 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
       };
     }
     let tail = "";
+    const blank = w.Document.prototype.write;
     for (const name of ["write", "writeln"]) {
       const real = w.Document.prototype[name];
       if (typeof real !== "function") continue;
@@ -158,6 +165,12 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
         for (let i = 0; i < arguments.length; i++) checked += text(arguments[i]);
         if (shadowed(tail + checked)) refuse();
         tail = apply(slice, tail + checked, [-16]);
+        const there = away(this);
+        if (there !== null) return apply(there.Document.prototype[name], this, [checked]);
+        if (this === home) {
+          apply(blank, home, [""]);
+          try { apply(listen, home, ["load", sweep, true]); } catch (e) {}
+        }
         return apply(real, this, [checked]);
       };
     }
@@ -648,15 +661,25 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           }
         } catch (e) {}
       }
-      const reopen = proto.open;
-      proto.open = function () {
-        const got = apply(reopen, this, arguments);
+      const reheard = (doc, opening) => {
         try {
-          if (apply(view, this, []) === w) {
-            apply(listen, this, ["load", sweep, true]);
+          if (apply(view, doc, []) === w) {
+            if (opening) apply(opening, doc, [""]);
+            apply(listen, doc, ["load", sweep, true]);
             hear();
           }
         } catch (e) {}
+      };
+      const away = (doc) => {
+        const there = apply(view, doc, []);
+        return there !== null && there !== w ? there : null;
+      };
+      const reopen = proto.open;
+      proto.open = function () {
+        const there = away(this);
+        if (there !== null) return apply(there.Document.prototype.open, this, arguments);
+        const got = apply(reopen, this, arguments);
+        reheard(this, null);
         return got;
       };
       const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
@@ -675,6 +698,7 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
         };
       }
       let tail = "";
+      const blank = proto.write;
       const writes = ["write", "writeln"];
       for (let i = 0; i < writes.length; i++) {
         const real = proto[writes[i]];
@@ -684,6 +708,9 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           for (let j = 0; j < arguments.length; j++) checked += text(arguments[j]);
           if (shadowed(tail + checked)) refuse();
           tail = apply(slice, tail + checked, [-16]);
+          const there = away(this);
+          if (there !== null) return apply(there.Document.prototype[writes[i]], this, [checked]);
+          reheard(this, blank);
           return apply(real, this, [checked]);
         };
       }
@@ -1114,6 +1141,16 @@ fn viewer_settings(settings: &webkit2gtk::Settings) {
     settings.set_enable_fullscreen(false);
 }
 
+/// The window's web view on Linux, as it is made, before the page runs: its settings, and no print dialog.
+#[cfg(target_os = "linux")]
+fn viewer_webview(webview: &webkit2gtk::WebView) {
+    use webkit2gtk::WebViewExt;
+    if let Some(settings) = WebViewExt::settings(webview) {
+        viewer_settings(&settings);
+    }
+    crate::app_sandbox::no_print(webview);
+}
+
 pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
@@ -1222,12 +1259,7 @@ fn frame_guards(relay_only: bool) -> Vec<&'static str> {
 /// webview, so it goes off again here, as in an app window. WebView2's only fills the webview: the title stays.
 fn no_element_fullscreen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
     #[cfg(target_os = "linux")]
-    let done = window.with_webview(|platform| {
-        use webkit2gtk::WebViewExt;
-        if let Some(settings) = WebViewExt::settings(&platform.inner()) {
-            viewer_settings(&settings);
-        }
-    });
+    let done = window.with_webview(|platform| viewer_webview(&platform.inner()));
     #[cfg(target_os = "macos")]
     let done = window.with_webview(|platform| {
         crate::app_sandbox::webkit::no_element_fullscreen(platform.inner())
@@ -2966,5 +2998,15 @@ mod download_tests {
         assert!(settings.enables_fullscreen(), "WebKitGTK's default");
         viewer_settings(&settings);
         assert!(!settings.enables_fullscreen());
+    }
+
+    /// A contact's page that calls `print()` gets it back at once, and no print dialog is up: WebKitGTK's own is
+    /// modal to every window of the app.
+    #[test]
+    #[ignore = "needs a display and a process of its own (app_sandbox::print_in)"]
+    fn a_contacts_page_shows_no_print_dialog() {
+        let (returned, dialog) = crate::app_sandbox::print_in(viewer_webview);
+        assert!(!dialog, "a print dialog was up");
+        assert!(returned, "print() did not return");
     }
 }

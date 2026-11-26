@@ -5,7 +5,7 @@ import { usePlatformValue } from "../../hooks/useServicesPlatform";
 import { servicesPlatform } from "../../lib/platform";
 import { Button } from "../wallet/ui";
 import { AppIcon, Fingerprint } from "./AppIcon";
-import { AppInstallDialog } from "./AppInstallDialog";
+import { AppInstallDialog, InstalledAppDialog } from "./AppInstallDialog";
 import { NAME, aroundName, withName } from "./aroundName";
 import { appStopped, refreshInstalledApps, useInstalledApp } from "../../lib/apps/installed";
 import { appsBlock, appsUnavailable } from "../../lib/apps/availability";
@@ -23,7 +23,8 @@ import { ownDirection } from "../../lib/ownDirection";
  * and icon), whatever the card calls it. While the contact is not live it says the app needs
  * you both online, unless the app is stopped with nothing that could run it. A version found revoked or removed says "Stopped" with no Open, as the Apps page and the composer's
  * Apps do (`appStopped`); one a store of the person's removed offers "Run anyway" (WISP 1200 § Takedowns), which a
- * revoked one never gets.
+ * revoked one never gets. The card is the contact's, so its Run anyway runs nothing: it opens the installed app's
+ * details screen, the Apps page's, which says which store removed it and why before its own Run anyway.
  */
 export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks }: {
   card: AppCard;
@@ -41,6 +42,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   // second while a file moves, which the bubble's memo exists to spare a long chat.
   const block = usePlatformValue(() => appsBlock(servicesPlatform?.getPeer(peerKey)));
   const [installing, setInstalling] = useState(false);
+  const [details, setDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Open on its way: an app whose files are missing here (a restored profile) fetches them first, which a slow link
   // makes long. The pressed button turns busy so the press shows, and a second press opens nothing more.
@@ -109,13 +111,14 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
         {stopped ? null : app ? <Button ref={openRef} variant="primary" data-testid="app-card-open" loading={opening === "open"} onClick={() => open()}>{t("apps.page.open")}</Button>
           : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
             : <span className="chat-text-card-line text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : withName(t("apps.card.ask", { name: NAME }), contact)}</span>}
-        {runAnyway && <Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
+        {runAnyway && <Button ref={runAnywayRef} data-testid="app-card-run-anyway" loading={opening === "anyway"} onClick={() => setDetails(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
       </div>
       {installing && card.url && (
         <AppInstallDialog source={{ card: { ref: card.ref, url: card.url, sequence: card.sequence, digest: card.digest } }} title={card.title}
           sentBy={mine ? undefined : contact} openAfter onClose={() => setInstalling(false)} onInstalled={() => open()} />
       )}
+      {details && app && <InstalledAppDialog app={app} onClose={() => setDetails(false)} onOpen={(_app, options) => open(options?.runAnyway === true)} />}
     </div>
   );
 }

@@ -89,8 +89,9 @@ describe("ghostly x401 key and credential", { timeout: 120_000 }, () => {
     expect(requests).toEqual([]);
   });
 
-  it("says a credential file that is not there or is a folder as every other file it reads", async () => {
-    expect(error(await run("x401", "credential", "add", join(dir, "missing.txt")), "not_found", 3).message).toBe(`No such file or folder: ${join(dir, "missing.txt")}`);
+  // One not there is not named: the word given may be the credential itself (refusalHidesSecret.test.ts).
+  it("says a credential file that is not there, or names the folder given in its place", async () => {
+    expect(error(await run("x401", "credential", "add", join(dir, "missing.txt")), "not_found", 3).message).toBe("<file> names no file: give the path of the file that holds the SD-JWT VC the issuer sent, or - to read it from stdin");
     expect(error(await run("x401", "credential", "add", dir), "bad_request", 1).message).toBe(`${dir} is a folder: name a file`);
   });
 

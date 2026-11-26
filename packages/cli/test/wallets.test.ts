@@ -382,6 +382,17 @@ describe("wallets", () => {
     expect(node.walletCreate).toHaveBeenCalledOnce();
   });
 
+  it("a wallet connection link given as --provider is refused without its secret", async () => {
+    // Found in a bug hunt: the refusal quoted the value whole, so a NWC link typed in the wrong place printed its secret.
+    const { ctx, node } = fake();
+    const secret = "b".repeat(64);
+    const link = `nostr+walletconnect://${"a".repeat(64)}?relay=wss%3A%2F%2Frelay.example&secret=${secret}`;
+    const error = asCliError(await callApi(ctx, "wallet.create", { type: "lightning", provider: link }).catch((e: unknown) => e));
+    expect({ code: error.code, message: error.message }).toEqual({ code: "bad_request", message: "No lightning source (a wallet connection link) on testnet (ghostly wallet list)" });
+    expect(JSON.stringify(error)).not.toContain(secret);
+    expect(node.walletCreate).not.toHaveBeenCalled();
+  });
+
   it("a source or a field left out, or one the wallet does not take, is refused naming the flag, before the engine is asked", async () => {
     // Found in a bug hunt: each was `engine` (exit 1) in the app's words ("Enter connection uri", "try again"), naming
     // no flag, or the flag was dropped without a word.

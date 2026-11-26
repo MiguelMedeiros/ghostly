@@ -2368,7 +2368,7 @@ export class Apps {
     // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
     const revokeRead = new Set<string>();
     const reach: RevocationsReach = { answered: false, failed: false };
-    const before = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach, new Set(formerOf(app)));
+    let before = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach, new Set(formerOf(app)));
     app = withRevocations(app, before ?? []);
     // The ones this profile kept (`APP_REVOCATIONS_KEY`) judge too: one that dropped a waiting update stops it from
     // being taken again, once the record keeps it no more and its store's next index does not carry it.
@@ -2445,6 +2445,10 @@ export class Apps {
         } else skip();
         continue;
       }
+      // Its publisher's revocations beside where it was found and the sources it names too, before it is taken: one revoked
+      // there is not installed over the version that runs now.
+      const beside = await this.readRevocations(app.ref, [url, ...(bundle.manifest.sources ?? []).slice(0, APP_BUNDLE_LIMITS.sources)], revokeRead, reach);
+      if (beside) { before = [...(before ?? []), ...beside]; app = withRevocations(app, beside); }
       if (judge(version).status !== "ok") { skip(); continue; }
       // Judged again with the stores as held now: a store's index read while the bundle downloaded may revoke it.
       if (this.runStatus(version, await this.heldViews(), app.revocations).status !== "ok") { skip(); continue; }
@@ -2476,6 +2480,14 @@ export class Apps {
     // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
     // version not found yet): a file that changes does not pile up.
     const revocations = before || after ? [...(before ?? []), ...(after ?? [])] : null;
+    // Each one read is kept beside the record too (`APP_REVOCATIONS_KEY`): the record keeps only those that stop one of
+    // these versions, and a file read later without one (moved, or serving part of the list) drops it from there.
+    const keptAlready = new Set(kept.map((r) => canonicalJson(r)));
+    if (revocations?.some((r) => !keptAlready.has(canonicalJson(r)))) {
+      const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+      keepRevocations(tx.objectStore(STORES.settings), new Map([[app.ref, revocations]]));
+      await done(tx);
+    }
     // A store's index carries some too: those that stop one of these are kept, as a store may drop them or be removed.
     const versions = this.versionsOf(app);
     const stays = revocations ? stopping(versions, app.revocations ?? []) : app.revocations ?? [];
