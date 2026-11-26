@@ -28,13 +28,16 @@ function world() {
     online: true,
     fail: null as Error | null,
     identities: new Map<string, string | null>([["nostr-1", "nostr:npub1abc"], ["domain-1", "https://example.com"], ["ssh-1", null]]),
+    /** id → when it expires (ms); none: never. */
+    expires: new Map<string, number>(),
     puts: [] as { key: string; payload: Uint8Array }[],
     emits: 0,
   };
   const host: ProfileDidHost = {
     online: () => state.online,
     emit: () => { state.emits++; },
-    listable: () => new Map([...state.identities].filter((e): e is [string, string] => !!e[1])),
+    listable: () => new Map([...state.identities].filter((e): e is [string, string] => !!e[1] && (state.expires.get(e[0]) ?? Infinity) > Date.now())),
+    expiresAt: id => state.expires.get(id),
     proofIds: () => [...state.identities.keys()],
     publish: async (key, payload) => {
       if (state.fail) throw state.fail;
@@ -226,6 +229,27 @@ describe("the profile's did:dht", () => {
     did.stop();
     await vi.advanceTimersByTimeAsync(2 * DID_REPUBLISH_MS);
     expect(state.puts).toHaveLength(3);
+  });
+
+  it("takes a listed identity out of the published document when it expires, not at the next hourly put", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { make, state } = world();
+    state.expires.set("nostr-1", Date.now() + 60_000);
+    const did = make();
+    await did.load();
+    did.start();
+    await did.setListed({ id: "nostr-1", listed: true });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(state.puts).toHaveLength(1);
+    expect(opened(did, state.puts[0].payload).document.alsoKnownAs).toEqual(["nostr:npub1abc"]);
+    await vi.waitFor(() => expect(did.view()?.upToDate).toBe(true));
+
+    // Nothing emits as it expires: the DID itself notices.
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(state.puts).toHaveLength(2);
+    expect(opened(did, state.puts[1].payload).document.alsoKnownAs).toBeUndefined();
+    await vi.waitFor(() => expect(did.view()).toMatchObject({ listed: ["nostr-1"], alsoKnownAs: [], upToDate: true }));
+    did.stop();
   });
 
   it("publishes a listing changed within its last 2 s when it closes, as a CLI one-shot ends; nothing when none changed", async () => {
