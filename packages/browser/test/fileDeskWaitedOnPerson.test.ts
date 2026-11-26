@@ -48,25 +48,8 @@ for (const waited of ["asking", "paused"] as const) {
 
 /**
  * A sent file past the contact's unfinished files (WISP 501 § Consent, 256) waits its turn here, not offered, while the
- * session is open: it goes once one of those ends. Before, after a minute it read "Not moving · 0%" with a "Send again"
- * that offered nothing (its turn had not come), for as long as the files before it took.
+ * session is open (fileDeskQueuedForRoom.test.ts: it never reads as stuck). Nothing looks at it again each minute either.
  */
-it("a sent file waiting its turn here on an open session reads as queued, not as stuck", async () => {
-  vi.useFakeTimers();
-  const t = desk();
-  t.changed("queued");
-  await vi.advanceTimersByTimeAsync(10 * 60_000);
-  t.changed("queued");
-  expect(t.view()).toMatchObject({ state: "transferring", stage: "queued" });
-  expect(t.view().stalled).toBeUndefined();
-  // Its turn came: it is offered, and only from then can it be stuck.
-  t.changed("offered");
-  expect(t.view().stalled).toBeUndefined();
-  await vi.advanceTimersByTimeAsync(FILE_LIMITS.stallMs + 1_000);
-  t.changed("offered");
-  expect(t.view()).toMatchObject({ state: "transferring", stalled: true });
-});
-
 it("a sent file waiting its turn here arms no stall check: nothing looks at it again each minute", async () => {
   vi.useFakeTimers();
   const t = desk();
