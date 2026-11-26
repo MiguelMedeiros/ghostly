@@ -67,6 +67,20 @@ describe("a 1:1 chat", () => {
     expect(days().map(d => d.label)).toEqual(["Wednesday, October 28", "Yesterday"]);
   });
 
+  it("moves Today and Yesterday on when the page comes back after the device slept past midnight", async () => {
+    vi.setSystemTime(at(29, 23));
+    open([message(1, at(28, 10)), message(2, at(29, 10))]);
+    await screen.findByText("Message 2");
+    expect(days().map(d => d.label)).toEqual(["Yesterday", "Today"]);
+    // Asleep until the morning: the clock moved on, and no timer ran meanwhile.
+    vi.setSystemTime(at(30, 9));
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(days().map(d => d.label)).toEqual(["Wednesday, October 28", "Yesterday"]);
+  });
+
   it("an empty chat has no date", async () => {
     // Not paired yet: no line of its own ("You joined") either.
     open([], false);
