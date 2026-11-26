@@ -42,6 +42,22 @@ async function open(browser: Browser, relay: LocalRelay, baseURL: string | undef
 
 const tags = { tag: ["@feature:app.boot"] };
 
+/**
+ * A screen the entry draws in place of the app takes the window's whole width, its words in the middle, on a phone and
+ * at a computer's width. `#root` is a flex row: a box with no width there was as wide as its words, against the left edge.
+ */
+async function fillsTheWidth(page: Page, testId: string) {
+  for (const width of [393, 1280]) {
+    await page.setViewportSize({ width, height: 851 });
+    const { box, left, right } = await page.getByTestId(testId).evaluate((screen) => {
+      const words = screen.firstElementChild!.getBoundingClientRect();
+      return { box: screen.getBoundingClientRect().width, left: words.left, right: innerWidth - words.right };
+    });
+    expect(box).toBe(width);
+    expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
+  }
+}
+
 // ---------- optional things: the app starts and works without them ----------
 
 const OPTIONAL: [string, string][] = [
@@ -137,6 +153,7 @@ test("the cannot-run screen speaks the profile's language, and its details hold 
   expect(details).toContain("locks=no");
   expect(details).toContain("browser: ");
   expect(details).not.toContain("not-for-the-report");
+  await fillsTheWidth(page, "unsupported-browser");
   await context.close();
 });
 
@@ -156,6 +173,7 @@ test("an iPhone that looks to be in Lockdown Mode is told so, and how to exclude
 test("a lock another tab holds is still \"open in another tab\", not an error", tags, async ({ browser, relay, baseURL }) => {
   const { page, context } = await open(browser, relay, baseURL, `LockManager.prototype.request = () => ${never};`);
   await expect(page.getByText("Ghostly is already open in another tab.")).toBeVisible({ timeout: 20_000 });
+  await fillsTheWidth(page, "other-tab");
   // Past the guard's wait: that screen counts as the app having drawn.
   await page.waitForTimeout(8000);
   await expect(page.getByTestId("boot-fallback")).toHaveCount(0);
