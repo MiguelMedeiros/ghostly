@@ -1499,7 +1499,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       )}
       {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} callOn={callHoldsChat} />}
       {confirmBlock && blockKey && <DeleteChatDialog name={shownName} title={t("chat.block.title", { name: isolate(shownName) })} body={t("chat.block.body")}
-        confirm={t("chat.block.confirm")} onClose={() => setConfirmBlock(false)} onConfirm={() => setBlocked(true)} />}
+        confirm={t("chat.block.confirm")} onClose={() => setConfirmBlock(false)} onConfirm={() => setBlocked(true)} returnFocus={optionsRef} />}
       {showTechInfo && techInfo && (
         <TechInfoDialog onClose={() => setShowTechInfo(false)} returnFocus={optionsRef}>
         <div className="p-4 space-y-4 text-sm">
