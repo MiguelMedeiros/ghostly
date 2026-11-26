@@ -99,6 +99,25 @@ for (const [path, group, count] of [
   });
 }
 
+test("/developers: a screen reader hears which blocks the composition lights, not only the eye", async ({ page }) => {
+  await page.goto("/developers", { waitUntil: "networkidle" });
+  await expect(page.locator(".nav-open-more")).toBeEnabled({ timeout: 45_000 });
+  const radios = page.getByRole("radiogroup", { name: "Compositions" }).getByRole("radio");
+  const blocks = page.locator(".bgrid-block");
+  for (const i of [0, 1]) {
+    await radios.nth(i).click();
+    await expect(radios.nth(i)).toHaveAttribute("aria-checked", "true");
+    const read = await blocks.evaluateAll((all) =>
+      all.map((b) => ({ lit: b.getAttribute("data-on") === "true", said: b.querySelector(".sr-only")?.textContent ?? "" })),
+    );
+    const lit = read.filter((b) => b.lit).length;
+    expect(lit, "lit blocks").toBeGreaterThan(0);
+    expect(lit, "lit blocks").toBeLessThan(read.length);
+    for (const b of read) expect(b.said).toBe(b.lit ? ", in this composition" : "");
+  }
+  await expect(page.getByRole("button", { name: /^Ghost core Available ?, in this composition$/ })).toBeVisible();
+});
+
 test("/roadmap: axe finds nothing serious, wide or on a phone", async ({ page }) => {
   for (const width of [1280, 375]) {
     await page.setViewportSize({ width, height: 812 });
