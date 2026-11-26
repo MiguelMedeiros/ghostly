@@ -171,6 +171,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   setWakeSubscription: "{ subscription }",
   wakeConfirm: "{ endpoint }",
   setWakeMuted: "{ linkId, muted }",
+  setContactBlocked: "{ peerPubKeyZ32, blocked }",
   setWakeOnline: "{ on }",
   wakeForCall: "{ linkId }",
   setCallOn: "{ on }",
