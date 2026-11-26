@@ -4,7 +4,7 @@ import type { HandoffFailure, HandoffView } from "@ghostly/browser/devices/hando
 import type { TranslationKey } from "../contexts/I18nContext";
 import { WALLET_NAME } from "../components/wallet/names";
 import { englishT, type Translate } from "../locales/translate";
-import { sizeIn } from "./sizeText";
+import { sizeIn, unitFor } from "./sizeText";
 import { useShownPoll } from "../hooks/useShownPoll";
 import { said } from "./notices";
 import type { Problem } from "./problemText";
@@ -13,9 +13,10 @@ import type { Problem } from "./problemText";
 
 /** A size as people read it, in the app's language: "480 MB", "1.2 GB", "1,2 Go" in French. */
 export function sizeText(bytes: number, t: Translate = englishT): string {
-  if (bytes >= 1024 ** 3) return sizeIn(bytes / 1024 ** 3, "gb", t, 1, true);
-  if (bytes >= 1024 ** 2) return sizeIn(Math.max(1, Math.round(bytes / 1024 ** 2)), "mb", t);
-  return sizeIn(Math.max(1, Math.round(bytes / 1024)), "kb", t);
+  const { value, unit } = unitFor(bytes / 1024, [0, 0, 1]);
+  if (unit === 2) return sizeIn(value, "gb", t, 1, true);
+  if (unit === 1) return sizeIn(Math.max(1, Math.round(value)), "mb", t);
+  return sizeIn(Math.max(1, Math.round(value)), "kb", t);
 }
 
 export const FAILURES: Record<HandoffFailure, TranslationKey> = {
