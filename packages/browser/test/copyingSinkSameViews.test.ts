@@ -71,6 +71,37 @@ describe("a state whose views are the ones the last state had, over the extensio
     expect(posted.at(-1)!.keptPictures?.links ?? []).not.toContain("chat-3");
   });
 
+  it("does not copy a view that stays out to leave its picture out: only a view that goes is copied", () => {
+    const posted: PostedState[] = [];
+    const sink = copyingSink((message) => { if (message.kind === "state") posted.push(JSON.parse(JSON.stringify(message.state))); });
+    // A field of the view itself (`createdAt`) counts its copies: leaving the picture out copies the view's own fields.
+    const pictured = <T extends LinkView | GroupView>(view: T, field: string, seed: string): T =>
+      counted(`${view.id} copied`, Object.assign(view, { [field]: picture(seed) }), "createdAt", view.createdAt);
+    const links = Array.from({ length: 20 }, (_, i) => pictured(chat(i), "peerAvatar", `a${i}`));
+    const groups = [pictured(group(0), "picture", "g0")];
+    const edges = [pictured(chat(100, { group: "group-0", groupPeer: key("g0m1") } as Partial<LinkView>), "peerAvatar", "e0")];
+    sink.post({ kind: "state", state: stateOf(links, groups, edges) });
+    sink.post({ kind: "state", state: stateOf(links, groups, edges) });
+    expect(posted[1].keptPictures?.links).toHaveLength(20);
+
+    // A file's progress: every view the same object, each picture the one sent.
+    reads.clear();
+    for (let k = 1; k <= 5; k++) sink.post({ kind: "state", state: stateOf(links, groups, edges, k) });
+    expect([...reads.keys()].filter((id) => id.endsWith(" copied"))).toEqual([]);
+    expect(posted.at(-1)!.links).toEqual([]);
+    expect(posted.at(-1)!.groups).toEqual([]);
+    expect(posted.at(-1)!.edges).toEqual([]);
+
+    // One chat changed: only it is copied, and it goes without its picture.
+    const next = links.map((view, i) => (i === 5 ? pictured(chat(5, { peerTyping: true }), "peerAvatar", "a5") : view));
+    reads.clear();
+    sink.post({ kind: "state", state: stateOf(next, groups, edges) });
+    expect([...reads.keys()].filter((id) => id.endsWith(" copied"))).toEqual(["chat-5 copied"]);
+    expect(posted.at(-1)!.links.map((v) => v.id)).toEqual(["chat-5"]);
+    expect(posted.at(-1)!.links[0].peerAvatar).toBeUndefined();
+    expect(posted.at(-1)!.keptPictures?.links).toEqual(["chat-5"]);
+  });
+
   it("writes a view out again when it is kept by another sink: each tab's port has its own last state", () => {
     const links = [chat(0), chat(1)];
     const a: PostedState[] = [], b: PostedState[] = [];
