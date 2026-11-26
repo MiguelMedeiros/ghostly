@@ -1279,7 +1279,7 @@ html[data-standalone="true"] {
    open with a field, and centred on the whole screen their Save, Delete and Sign and publish were under the keyboard.
    A sheet (Apps → Add, Add identity, New wallet) stands on the keyboard by its own rule and is left out: it is fixed,
    so `max-height: 100%` would be the whole screen's and lift its cap. */
-@media (pointer: coarse) and (max-width: 767px) {
+@media (pointer: coarse) and (width < 768px) {
   html[data-keyboard="true"] .fixed.inset-0:has(> [aria-modal="true"]:not(.sheet)) {
     bottom: calc(100% - var(--app-height, 100%));
     padding-top: max(0.5rem, env(safe-area-inset-top));

@@ -8,7 +8,7 @@ import { focusPastRow, rowAfter } from "../../components/GroupInvitation";
 // covers: app.keyboard, app.mobile-layout
 
 let mobile = true;
-vi.mock("../../hooks/useIsMobile", () => ({ MOBILE_QUERY: "(max-width: 767px)", useIsMobile: () => mobile }));
+vi.mock("../../hooks/useIsMobile", () => ({ MOBILE_QUERY: "(width < 768px)", useIsMobile: () => mobile }));
 
 /** A page's own control that opens another page: Back, or a Profile tile. It goes with the page it was on. */
 function Leave({ to, label, testId }: { to: string; label: string; testId?: string }) {
