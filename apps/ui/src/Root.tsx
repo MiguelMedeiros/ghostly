@@ -35,6 +35,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { trimEndOf } from "@ghostly/core";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import { modalOpen } from "./hooks/useAppCommands";
+import { composingKey } from "./hooks/useComposition";
 import { problemText, type Problem } from "./lib/problemText";
 import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
@@ -232,9 +233,10 @@ function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; tes
     // Decided once the Escape has gone everywhere: one a menu, a field or a choice of messages spent is not its own,
     // though their listeners came after this one (the window's run in the order they were added). Nor is one pressed in
     // a modal dialog: a <dialog> closes on the key's default action without cancelling it, and is gone by the timeout.
+    // Nor one that only dropped an input method's candidate in a field: the field leaves that key alone, uncancelled.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const key = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || modalOpen()) return;
+      if (e.key !== "Escape" || composingKey(e, null) || modalOpen()) return;
       clearTimeout(timer);
       timer = setTimeout(() => { if (!e.defaultPrevented) close.current(); });
     };
