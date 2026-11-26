@@ -9,6 +9,7 @@ import { useI18n, type Translate, type TranslationKey } from "../contexts/I18nCo
 import { listText } from "../lib/listText";
 import { useBackCloses, useTabTrap } from "../hooks/useDismiss";
 import { useFocusKept } from "../hooks/useFocusKept";
+import { MOBILE_QUERY } from "../hooks/useIsMobile";
 import { initial } from "../lib/initial";
 import { fillNames } from "../lib/fillNodes";
 import { errorText } from "../lib/errorText";
@@ -247,7 +248,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
     if (raised) setMini(false);
   }, [raised]);
   // The sizes of the 1:1 call's small window (CallOverlay): on a touch screen its five buttons need 264 × 168.
-  const phone = window.innerWidth < 768;
+  const phone = window.matchMedia(MOBILE_QUERY).matches;
   const touch = typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
   const miniWindow = useFloatingBox(
     "ghostly_group_call_window_box",
