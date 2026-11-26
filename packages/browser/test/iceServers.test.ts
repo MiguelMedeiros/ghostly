@@ -37,6 +37,19 @@ it("quotes a refused address without its user, password, query or fragment", () 
     expect(problem, urls).not.toContain("s3cr3t");
   }
 });
+it("says only the scheme of a refused piece when a space or comma in a user or password split the address before its @", () => {
+  for (const [urls, shown] of [
+    ["turn:alice:hunter#2 s3cr3t@turn.example.org:3478", "turn:…"],
+    ["turn://alice:hunter2,s3cr3t@turn.example.org:3478", "turn://…"],
+    ["turns://alice:hunter2\ts3cr3t@turn.example.org:5349", "turns://…"],
+    ["alice:hunter#2 s3cr3t@turn.example.org", "…"],
+  ]) {
+    const problem = iceServerProblem({ urls, username: "u", credential: "c" });
+    expect(problem, urls).toBe(`“${shown}” is not a TURN or STUN address (turn:host:port)`);
+    expect(problem, urls).not.toMatch(/alice|hunter/);
+  }
+});
+
 
 it("takes a server in WebRTC's form (urls a list) as the addresses comma-separated, and says a server without urls needs them", () => {
   const listed = iceServerSetting({ urls: ["stun:a.example.org", "turn:b.example.org:3478"], username: "u", credential: "c" } as unknown as IceServerSetting);
