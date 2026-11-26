@@ -8,7 +8,7 @@ import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/provi
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
-import { findSecret, secretWords } from "./secretGuard";
+import { checkGuardedSize, findSecret, secretWords } from "./secretGuard";
 import { shellWord } from "./shellWord";
 import { isLocalHost } from "../../../apps/ui/src/lib/localHost";
 
@@ -203,6 +203,7 @@ const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.tri
 function memoOf(params: Params, verb: string, field: "memo" | "comment" = "memo"): string | undefined {
   const memo = str(params, field);
   if (memo && !bool(params, "force")) {
+    checkGuardedSize(memo, `The ${field}`);
     const secret = findSecret(memo);
     if (secret) throw new CliError("confirm", `The ${field} looks like ${secretWords(secret)}; ${verb} with --force if you mean to`, { kind: secret.kind });
   }
