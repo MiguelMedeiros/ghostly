@@ -46,7 +46,10 @@ export function checkEntries(entries, { today, issues }) {
   return errors;
 }
 
-/** A spec's quarantined tests: each "@quarantine" tag with the `// quarantine:` line at most 5 lines above it. */
+/**
+ * A spec's quarantined tests: each "@quarantine" tag with the `// quarantine:` line at most 5 lines above it and no
+ * other tag between them.
+ */
 export function specMarks(file, text) {
   const lines = text.split("\n");
   const entries = [];
@@ -55,7 +58,11 @@ export function specMarks(file, text) {
   lines.forEach((line, i) => {
     if (!TAG.test(line)) return;
     let at = -1;
-    for (let j = i; j >= Math.max(0, i - NEAR); j--) if (MARK.test(lines[j])) { at = j; break; }
+    // Up to the tag above at most: that tag's line is not this test's.
+    for (let j = i; j >= Math.max(0, i - NEAR); j--) {
+      if (MARK.test(lines[j])) { at = j; break; }
+      if (j < i && TAG.test(lines[j])) break;
+    }
     if (at < 0) return errors.push(`${file}:${i + 1}: @quarantine without a \`// quarantine: #<issue> until <YYYY-MM-DD>\` line above it`);
     used.add(at);
     const [, issue, until] = MARK.exec(lines[at]);
