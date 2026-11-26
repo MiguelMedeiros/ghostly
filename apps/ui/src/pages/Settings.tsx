@@ -16,6 +16,7 @@ import { NetworkSettings } from "../components/NetworkSettings";
 import { ForkRows } from "../components/devices/Forks";
 import { DomainProofSettings } from "../components/DomainProofSettings";
 import { MediaSettings } from "../components/MediaSettings";
+import { BlockedContacts } from "../components/settings/BlockedContacts";
 import { GroupDownloadsRow } from "../components/settings/GroupDownloads";
 import { StayConnectedRow } from "../components/settings/StayConnected";
 import { androidApp } from "../lib/touchOnly";
@@ -815,6 +816,7 @@ export function Settings() {
           </Block>
         )}
       </Section>
+      <BlockedContacts />
       </SettingsGroup>
 
       {/* How this client reaches the network, and how it checks contacts' domain proofs (once Settings → Advanced). */}

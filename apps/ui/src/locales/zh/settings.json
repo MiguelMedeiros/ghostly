@@ -1,6 +1,13 @@
 {
   "about": "关于",
   "appearance": "外观",
+  "blocked": {
+    "hint": "在联系人的聊天菜单中屏蔽对方：对方发送的任何内容都不会到达你的任何设备。",
+    "none": "没有已屏蔽的联系人",
+    "title": "已屏蔽的联系人",
+    "unblock": "取消屏蔽",
+    "unblockLabel": "取消屏蔽 {{name}}"
+  },
   "changePassword": "修改密码",
   "chatListDensities": {
     "comfortable": "宽松",
@@ -156,6 +163,7 @@
   "searchEmpty": "没有匹配的设置",
   "searchWords": {
     "account": "账户",
+    "blocked": "屏蔽、已屏蔽、取消屏蔽、联系人、忽略",
     "camera": "视频、网络摄像头",
     "chatList": "紧凑、舒适、行",
     "clearData": "重置、删除、清除",

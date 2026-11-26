@@ -29,6 +29,12 @@
     "save": "Save audio",
     "tooLarge": "Too large to play here. Download it to listen."
   },
+  "block": {
+    "blocked": "You blocked this contact",
+    "body": "They can no longer call you or send you anything, and nothing tells them. The chat stays. Unblock them from this menu or in Settings → Privacy & security.",
+    "confirm": "Block",
+    "title": "Block {{name}}?"
+  },
   "compat": {
     "burned": "Chat has been burned",
     "continued": "You invited your contact to a new chat.",
@@ -278,6 +284,7 @@
     "wantsToSend": "{{name}} wants to send it · {{size}} left"
   },
   "menu": {
+    "block": "Block contact",
     "continueNew": "Continue in a new chat",
     "hold": "Hold messages…",
     "more": "More…",
@@ -287,6 +294,7 @@
     "pin": "Pin chat",
     "refresh": "Refresh",
     "techInfo": "Tech Info",
+    "unblock": "Unblock contact",
     "unpin": "Unpin chat"
   },
   "message": {

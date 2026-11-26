@@ -1,6 +1,13 @@
 {
   "about": "アプリについて",
   "appearance": "外観",
+  "blocked": {
+    "hint": "チャットのメニューから連絡先をブロックできます。相手が送ったものは、あなたのどのデバイスにも届きません。",
+    "none": "ブロック中の連絡先はありません",
+    "title": "ブロック中の連絡先",
+    "unblock": "ブロック解除",
+    "unblockLabel": "{{name}} のブロックを解除"
+  },
   "changePassword": "パスワードを変更",
   "chatListDensities": {
     "comfortable": "ゆったり",
@@ -156,6 +163,7 @@
   "searchEmpty": "一致する設定はありません",
   "searchWords": {
     "account": "アカウント",
+    "blocked": "ブロック、ブロック中、ブロック解除、連絡先、無視",
     "camera": "ビデオ、ウェブカメラ",
     "chatList": "コンパクト、ゆったり、行",
     "clearData": "リセット、消去、初期化",
