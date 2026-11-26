@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { captureScreen, SCREEN_WITH_SOUND } from "../src/screenCapture";
 
+// covers: calls.screen-share
+
 /** `captureScreen`: a share asks for its sound, and a browser that refuses the sound's options gets the picture alone. */
 
 const stream = {} as MediaStream;
