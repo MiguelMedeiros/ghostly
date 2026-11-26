@@ -3,6 +3,7 @@ import { linkOfPeer } from "@ghostly/browser/platform/engine";
 import { providerIcon } from "./ProviderIcons";
 import { currentStatus, expiringSoon, providerLabel, shortSubject, useEngineValue } from "../../lib/identities";
 import { english } from "../../lib/english";
+import { useProofClock } from "./proofClock";
 import type { Translate } from "../../contexts/I18nContext";
 
 /**
@@ -123,7 +124,10 @@ export const BADGE_LIMITS = { row: 2, rowNarrow: 1, header: 3, headerNarrow: 2, 
 
 /**
  * A contact's received identities, from the engine's state: the chat's link with this contact key. Drawn again only
- * when they change, not on every engine state: each row of the chat list reads its own.
+ * when they change, not on every engine state: each row of the chat list reads its own. And when one of them expires
+ * or enters its last days (proofClock.ts), since their marks are worked out from the clock as they draw.
  */
-export const useReceived = (peerKey: string | undefined) =>
-  useEngineValue(state => linkOfPeer(state?.links, peerKey)?.identities?.received);
+export const useReceived = (peerKey: string | undefined) => {
+  useProofClock();
+  return useEngineValue(state => linkOfPeer(state?.links, peerKey)?.identities?.received);
+};
