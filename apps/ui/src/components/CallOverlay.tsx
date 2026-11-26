@@ -337,14 +337,17 @@ export function CallOverlay({
         </div>
       )}
 
-      {/* Status. Over the contact's picture (`data-over-picture`) it is white with a shadow (index.css). */}
-      <div className="call-top absolute top-8 left-0 right-0 text-center z-10">
+      {/* Status. Over the contact's picture (`data-over-picture`) it is white with a shadow (index.css). The whole window
+          keeps it clear of the corner button (44 px at 1rem past the safe area) on both sides, so it stays centred: on
+          a 320 px phone "Llamada de audio  Reconectando..." started at 49 px, under the button, which ends at 60. */}
+      <div className={`call-top absolute top-8 left-0 right-0 text-center z-10 ${mini ? "" : "px-[calc(3.75rem+env(safe-area-inset-left))]"}`}>
         <p className="text-text-muted text-sm" data-testid="call-status" data-over-picture={showRemoteVideo ? true : undefined} data-state={callState} data-reconnecting={reconnecting || undefined} role={callState === "connected" ? undefined : "status"}>
           {!remoteHasVideo && isVideoOff && callState === "connected" && (
-            <span className="text-accent">{t("calls.audio")}</span>
+            <span className="inline-block text-accent">{t("calls.audio")}</span>
           )}
+          {/* Each part a block of its own: wrapped, the line breaks between "Llamada de audio" and "Reconectando...". */}
           {statusText && (
-            <span className={callState === "connected" ? "ms-2" : ""}>
+            <span className={`inline-block ${callState === "connected" ? "ms-2" : ""}`}>
               {statusText}
             </span>
           )}
