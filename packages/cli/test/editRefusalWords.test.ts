@@ -170,3 +170,30 @@ describe("in a private group I was removed from and invited back to, my edit, de
     edits.stop();
   });
 });
+
+describe("group edit --mention everyone from an admin who got the role after sending the message", () => {
+  it("is refused (exit 1) and nothing changes or goes, where it answered sent while the members got no mention", async () => {
+    // The engine's own refusal (GroupEdits over the group's answer): the edit went out without the `*` it kept here.
+    const me = "m".repeat(52), mineId = `${me}:1:0`;
+    const rows: StoredMessage[] = [row({ linkId: "group:g1", id: mineId, wireId: undefined, member: me, text: "lunch at 1" })];
+    const sent: unknown[] = [];
+    const edits = new GroupEdits({ messages: async (chat) => rows.filter((m) => m.linkId === chat), patch: async (_chat, id, change) => {
+      const at = rows.findIndex((m) => m.id === id), patch = at < 0 ? null : change(rows[at]);
+      if (patch) rows[at] = { ...rows[at], ...patch };
+      return patch ? rows[at] : undefined;
+    }, remove: async () => {}, removeMine: async () => {}, changed: () => {}, send: async (_g, edit) => { sent.push(edit); return null; }, edge: () => undefined,
+      membership: () => ({ me, members: new Set([me, "bobkey"]), community: false, admin: true }), mentionsEveryone: () => false });
+    const { ctx, node } = fake();
+    node.getMessage.mockImplementation(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id));
+    node.editMessage.mockImplementation(((p: { linkId: string; messageId: string; text: string; mentions?: [] }) => edits.edit(p.linkId.slice("group:".length), p.messageId, p.text, p.mentions)) as never);
+    await expect(callApi(ctx, "group.edit", { group: "Crew", message: mineId, text: "lunch at 1 @everyone", mentions: ["everyone"] })).rejects.toMatchObject({
+      code: "refused", message: "This message was sent before you were the group's admin: an edit of it cannot mention everyone. Send a new message to mention everyone.",
+    });
+    expect(rows[0]).toMatchObject({ text: "lunch at 1" });
+    expect(rows[0].mentions).toBeUndefined();
+    expect(sent).toEqual([]);
+    // The same edit without everyone goes as before.
+    expect(await callApi(ctx, "group.edit", { group: "Crew", message: mineId, text: "lunch at 2" })).toMatchObject({ group: "g1", messageId: mineId, edits: 1 });
+    edits.stop();
+  });
+});
