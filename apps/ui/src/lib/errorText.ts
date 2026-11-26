@@ -709,6 +709,8 @@ const RULES: readonly Rule[] = [
   exact("This Pubky key has no records on the Pkarr relays", "errors.proof.pubkyNoRecords"),
   exact("The homeserver of this Pubky key has no records on the Pkarr relays", "errors.proof.pubkyHomeserverNoRecords"),
   exact("This Pubky key names no homeserver", "errors.proof.pubkyNoHomeserver"),
+  // Add's field (core pubkyProofs.ts normalizePubkyKey).
+  exact("That is not a Pubky key: 52 characters, like the one Pubky Ring shows", "errors.proof.pubkyNotKey", "errors.proof.pubkyNotKeyNext"),
   { match: /^Signed by another (?:Nostr|SSH) key$/, key: "errors.proof.otherKey" },
   exact("Invalid Nostr signature", "errors.proof.badSignature"),
   exact("The evidence is for another identity", "errors.proof.otherIdentity"),
@@ -758,6 +760,8 @@ const RULES: readonly Rule[] = [
   exact("Use a domain name, not an IP address", "errors.proof.domainNotIp"),
   exact("That name only works on private networks", "errors.proof.domainPrivate"),
   exact("Enter a Bitcoin address", "errors.proof.btcEnterAddress"),
+  // The address decoder's own refusal (core bitcoinScript.ts), which the provider passes on.
+  { match: /^Not a Bitcoin address(?: \(bad checksum\?\))?$/, key: "errors.proof.btcNotAddress", next: "errors.proof.btcNotAddressNext" },
   { match: /^Ghostly can check proofs for single-key addresses only \(.+\), not multisig or script addresses$/, key: "errors.proof.btcSingleKey" },
   exact("Paste the signature your wallet made", "errors.proof.btcPaste"),
   exact("That is not a Bitcoin message signature: paste the whole signature, as the wallet shows it", "errors.proof.btcNotSignature", "errors.proof.btcNotSignatureNext"),
