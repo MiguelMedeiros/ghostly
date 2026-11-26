@@ -103,6 +103,7 @@
   "shareScreen": "Compartir pantalla",
   "sharing": {
     "both": "Tú y {{name}} están compartiendo sus pantallas",
+    "noSound": "Compartida sin sonido",
     "peer": "{{name}} está compartiendo su pantalla",
     "you": "Estás compartiendo tu pantalla"
   },

@@ -103,6 +103,7 @@
   "shareScreen": "Share screen",
   "sharing": {
     "both": "You and {{name}} are sharing your screens",
+    "noSound": "Shared without sound",
     "peer": "{{name}} is sharing their screen",
     "you": "You're sharing your screen"
   },
