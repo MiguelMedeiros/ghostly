@@ -104,6 +104,7 @@
   "shareScreen": "共享屏幕",
   "sharing": {
     "both": "你和 {{name}} 正在共享屏幕",
+    "noSound": "共享中，没有声音",
     "peer": "{{name}} 正在共享屏幕",
     "you": "你正在共享屏幕"
   },

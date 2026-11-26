@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LocalTrackPublication, Participant, RemoteTrackPublication, Room, Track, TrackPublication } from "livekit-client";
 import { callRtcConfig } from "@ghostly/core";
-import { screenShareErrorMessage } from "@ghostly/react";
+import { captureScreen, screenShareErrorMessage } from "@ghostly/react";
 import { preferredDevice, trackDevice } from "../lib/mediaDevices";
 import type { GroupCallParticipant, GroupCallState } from "../components/GroupCallView";
 
@@ -179,6 +179,8 @@ interface Session {
   sealedStill: () => boolean;
   ended: boolean;
   screen: MediaStreamTrack | null;
+  /** The shared screen's sound (a tab's or the system's), when the browser gave one: it goes and stops with the screen. */
+  screenAudio: MediaStreamTrack | null;
   screenEnded: (() => void) | null;
   screenAsking: boolean;
   refresh: () => void;
@@ -208,12 +210,13 @@ function personOf(p: Participant, lk: LivekitModule, local: boolean, sealed: boo
     mic: p.isMicrophoneEnabled,
     camera: p.isCameraEnabled,
     screen: p.isScreenShareEnabled,
+    screenSound: p.isScreenShareEnabled && !!p.getTrackPublication(Source.ScreenShareAudio),
     speaking: p.isSpeaking,
     byAdmin: heldOf(p),
-    // Your own voice is never handed out: nothing can play it back to you.
+    // Your own voice, and your own screen's sound, are never handed out: nothing plays them back to you.
     tracks: local
       ? { camera: track(Source.Camera), screen: track(Source.ScreenShare) }
-      : { audio: track(Source.Microphone), camera: track(Source.Camera), screen: track(Source.ScreenShare) },
+      : { audio: track(Source.Microphone), camera: track(Source.Camera), screen: track(Source.ScreenShare), screenAudio: track(Source.ScreenShareAudio) },
   };
 }
 
@@ -244,19 +247,23 @@ async function switchInput(room: Room, source: Track.Source, deviceId: string | 
   }
 }
 
-/** Takes the shared screen down and stops it; safe to call twice. */
+/** Takes the shared screen and its sound down and stops them; safe to call twice. */
 async function stopScreen(session: Session): Promise<void> {
   const track = session.screen;
   if (!track) return;
+  const sound = session.screenAudio;
   session.screen = null;
+  session.screenAudio = null;
   if (session.screenEnded) track.removeEventListener("ended", session.screenEnded);
   session.screenEnded = null;
-  try {
-    await session.room?.localParticipant.unpublishTrack(track, true);
-  } catch {
-    // already gone from the room (it ended the share itself, or the room is closed)
+  for (const t of sound ? [track, sound] : [track]) {
+    try {
+      await session.room?.localParticipant.unpublishTrack(t, true);
+    } catch {
+      // already gone from the room (it ended the share itself, or the room is closed)
+    }
+    t.stop();
   }
-  track.stop();
 }
 
 /**
@@ -379,7 +386,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     carry.current = null;
     const pass = (again.current && latest.current?.()) || { url, token, iceServers: ice.current };
     again.current = false;
-    const s: Session = { relayed: relay.current, ended: false, screen: null, screenEnded: null, screenAsking: false, refresh: () => {}, sealedStill: () => true };
+    const s: Session = { relayed: relay.current, ended: false, screen: null, screenAudio: null, screenEnded: null, screenAsking: false, refresh: () => {}, sealedStill: () => true };
     session.current = s;
     setState(EMPTY);
     setStatus("connecting");
@@ -588,7 +595,7 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     const asked = Date.now();
     let stream: MediaStream;
     try {
-      stream = await media.getDisplayMedia({ video: true, audio: false });
+      stream = await captureScreen((options) => media.getDisplayMedia(options));
     } catch (cause) {
       s.screenAsking = false;
       // null: the person closed the picker, nothing to say
@@ -598,18 +605,28 @@ export function useGroupCall({ url, token, iceServers, relayOnly = false, e2ee, 
     }
     s.screenAsking = false;
     const [track, ...rest] = stream.getVideoTracks();
-    for (const other of [...rest, ...stream.getAudioTracks()]) other.stop();
-    if (!track) return;
-    if (s.ended) {
-      track.stop();
+    const [sound, ...more] = stream.getAudioTracks();
+    for (const other of [...rest, ...more]) other.stop();
+    if (!track || s.ended) {
+      track?.stop();
+      sound?.stop();
       return;
     }
     s.screen = track;
+    s.screenAudio = sound ?? null;
     // The browser's own "Stop sharing" bar ends the track: take it out of the room as the button would.
     s.screenEnded = () => void stopScreen(s).then(s.refresh);
     track.addEventListener("ended", s.screenEnded);
     try {
       await s.room.localParticipant.publishTrack(track, { source: s.lk.Track.Source.ScreenShare });
+      // Its sound goes as the screen's own (LiveKit's ScreenShareAudio), unless the share ended meanwhile. A sound
+      // the room will not take leaves the picture shared, without its sound.
+      if (sound && s.screenAudio === sound) {
+        await s.room.localParticipant.publishTrack(sound, { source: s.lk.Track.Source.ScreenShareAudio }).catch(() => {
+          if (s.screenAudio === sound) s.screenAudio = null;
+          sound.stop();
+        });
+      }
       // Not over a seal check's reason: a screen that went out unsealed left the call (`sealedStill`).
       if (!s.ended) setError(null);
     } catch (cause) {

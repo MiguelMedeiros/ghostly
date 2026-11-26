@@ -105,6 +105,22 @@ describe("a shared screen", () => {
     expect(within(screen.getByTestId("group-call-side")).getAllByTestId("group-call-tile").map((t) => t.dataset.identity)).toEqual(["me", "ana", "bo"]);
   });
 
+  it("plays a screen's sound beside its sharer's voice, and says on your own screen when it went without its sound", () => {
+    const sound = new FakeTrack("audio") as unknown as MediaStreamTrack;
+    const { rerenderWith } = view(state(0, {
+      local: person("me", { screen: true, screenSound: false, tracks: { screen: video() } }),
+      participants: [person("ana", { tracks: { audio: new FakeTrack("audio") as unknown as MediaStreamTrack, screenAudio: sound } })],
+    }));
+    expect(screen.getAllByTestId("group-call-audio")).toHaveLength(1);
+    expect(screen.getAllByTestId("group-call-screen-audio")).toHaveLength(1);
+    const mine = within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0];
+    expect(within(mine).getByTestId("group-call-screen-no-sound")).toHaveTextContent("Shared without sound");
+
+    rerenderWith(state(0, { local: person("me", { screen: true, screenSound: true, tracks: { screen: video() } }), participants: [person("ana")] }));
+    expect(screen.queryByTestId("group-call-screen-no-sound")).toBeNull();
+    expect(screen.queryByTestId("group-call-screen-audio")).toBeNull();
+  });
+
   it("two at once: the latest wins and the other is a tile; when it stops, the other is back", () => {
     const sharing = (who: string[]) => state(0, { participants: ["ana", "bo"].map((id) => person(id, who.includes(id) ? { screen: true, tracks: { screen: video() } } : {})) });
     const main = () => within(screen.getByTestId("group-call-stage")).getAllByTestId("group-call-tile")[0];
