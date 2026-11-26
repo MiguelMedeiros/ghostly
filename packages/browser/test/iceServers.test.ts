@@ -18,6 +18,39 @@ it("takes TURN and STUN addresses a browser can use, and says what is wrong with
   expect(iceServerProblem({ urls: "  " })).toContain("Enter the TURN server address");
 });
 
+it("quotes a refused address without its user, password, query or fragment", () => {
+  for (const [urls, shown] of [
+    ["turn:host?token=s3cr3t", "turn:host"],
+    ["turns://user:s3cr3t@host:5349", "turns://host:5349"],
+    ["https://user:s3cr3t@turn.example.org/#s3cr3t", "https://turn.example.org/"],
+    ["https://turn.example.org", "https://turn.example.org"],
+    // A ? or # before the last @: that @ may be in the password or in the query, so neither is said.
+    ["turn:user:pa#s3cr3t@host", "turn:…"],
+    ["turn:user:pa?s3cr3t@host", "turn:…"],
+    ["turn:host?username=me@example.org&credential=s3cr3t", "turn:…"],
+    ["turn:host#frag@s3cr3t", "turn:…"],
+    ["turn:user:s3cr3t@host?x=a@b&token=s3cr3t", "turn:…"],
+    ["s3cr3t:s3cr3t@host", "host"],
+  ]) {
+    const problem = iceServerProblem({ urls, username: "u", credential: "c" });
+    expect(problem, urls).toBe(`“${shown}” is not a TURN or STUN address (turn:host:port)`);
+    expect(problem, urls).not.toContain("s3cr3t");
+  }
+});
+it("says only the scheme of a refused piece when a space or comma in a user or password split the address before its @", () => {
+  for (const [urls, shown] of [
+    ["turn:alice:hunter#2 s3cr3t@turn.example.org:3478", "turn:…"],
+    ["turn://alice:hunter2,s3cr3t@turn.example.org:3478", "turn://…"],
+    ["turns://alice:hunter2\ts3cr3t@turn.example.org:5349", "turns://…"],
+    ["alice:hunter#2 s3cr3t@turn.example.org", "…"],
+  ]) {
+    const problem = iceServerProblem({ urls, username: "u", credential: "c" });
+    expect(problem, urls).toBe(`“${shown}” is not a TURN or STUN address (turn:host:port)`);
+    expect(problem, urls).not.toMatch(/alice|hunter/);
+  }
+});
+
+
 it("takes a server in WebRTC's form (urls a list) as the addresses comma-separated, and says a server without urls needs them", () => {
   const listed = iceServerSetting({ urls: ["stun:a.example.org", "turn:b.example.org:3478"], username: "u", credential: "c" } as unknown as IceServerSetting);
   expect(listed).toEqual({ urls: "stun:a.example.org, turn:b.example.org:3478", username: "u", credential: "c" });

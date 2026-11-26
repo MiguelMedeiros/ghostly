@@ -1599,6 +1599,12 @@ describe("settings", () => {
       // A relay's user:password@ and ?query are not said back.
       [{ irohRelays: ["https://alice:s3cret@iroh.lan/?token=t0k"] }, "Not a relay address: https://alice:s3cret@iroh.lan/?token=t0k", "irohRelays: not a relay address: https://iroh.lan/"],
       [{ hyperdhtRelay: "wss://alice:s3cret@relay.lan/#t0k" }, "Not a relay address: wss://alice:s3cret@relay.lan/#t0k", "hyperdhtRelay: not a relay address: wss://relay.lan/"],
+      // No scheme at all: the user and password still go unsaid.
+      [{ irohRelays: ["user:pw@relay.example"] }, "Not a relay address: user:pw@relay.example", "irohRelays: not a relay address: relay.example"],
+      // A ? or # before the last @: that @ may be in the password or in the query, so neither is said, only the scheme.
+      [{ irohRelays: ["https://alice:s3cr#et@relay.example"] }, "Not a relay address: https://alice:s3cr#et@relay.example", "irohRelays: not a relay address: https://…"],
+      [{ irohRelays: ["https://relay.example.org/?user=me@example.org&token=s3cr3t"] }, "Not a relay address: https://relay.example.org/?user=me@example.org&token=s3cr3t", "irohRelays: not a relay address: https://…"],
+      [{ hyperdhtRelay: "wss://relay.example.org/#a@s3cr3t" }, "Not a relay address: wss://relay.example.org/#a@s3cr3t", "hyperdhtRelay: not a relay address: wss://…"],
     ];
     for (const [patch, engine, said] of refusals) {
       node.updateSettings.mockRejectedValueOnce(new Error(engine));
@@ -1614,6 +1620,7 @@ describe("settings", () => {
       [["ftp://relay.example.org"], "relays: use an https:// relay address: ftp://relay.example.org"],
       [["wss://relay.example.org", "notaurl"], "relays: use an https:// relay address: wss://relay.example.org"],
       [["wss://alice:s3cret@relay.example.org/?token=t0k"], "relays: not a relay address: wss://relay.example.org/"],
+      [["https://alice:s3cr?et@relay.example"], "relays: not a relay address: https://…"],
     ];
     for (const [relays, said] of refusals) {
       await expect(callApi(ctx, "settings.set", { relays })).rejects.toMatchObject({ code: "bad_request", message: said });
@@ -1632,6 +1639,9 @@ describe("settings", () => {
     const tcp = await callApi(ctx, "settings.set", { iceServers: [turn("turn:t.example.org:3478, turn:t.example.org:3478?transport=tcp"), turn("turns:t.example.org:443?transport=tcp")] }) as Record<string, unknown>;
     expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [turn("turn:t.example.org:3478, turn:t.example.org:3478?transport=tcp"), turn("turns:t.example.org:443?transport=tcp")] } });
     expect(tcp.warning).toBe("The CLI reaches TURN over UDP only: it does not use turn:t.example.org:3478?transport=tcp, turns:t.example.org:443?transport=tcp (the apps do). Add a turn: server over UDP for the CLI");
+    // A user and password in the address, which the check takes, are not said.
+    const login = await callApi(ctx, "settings.set", { iceServers: [turn("turn:u:s3cr3t@t.example.org:3478?transport=tcp, turns:u:s3cr3t@t.example.org:443")] }) as Record<string, unknown>;
+    expect(login.warning).toBe("The CLI reaches TURN over UDP only: it does not use turn:t.example.org:3478?transport=tcp, turns:t.example.org:443 (the apps do). Add a turn: server over UDP for the CLI");
   });
 });
 

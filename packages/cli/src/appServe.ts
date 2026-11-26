@@ -66,7 +66,7 @@ function writeServed(dir: string, apps: ServedApp[]): void {
 /** A served app by its reference or, when only one has it, its name. */
 export function servedApp(apps: readonly ServedApp[], ref: string): ServedApp {
   const matches = apps.filter((a) => a.ref === ref || a.ref.split("/")[1] === ref);
-  if (matches.length !== 1) throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? `${JSON.stringify(ref)} names more than one served app: give its whole reference` : `No served app ${JSON.stringify(ref)}: app serve its bundle first`);
+  if (matches.length !== 1) throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? `${shownValue(ref)} names more than one served app: give its whole reference` : `No served app ${shownValue(ref)}: app serve its bundle first`);
   return matches[0];
 }
 

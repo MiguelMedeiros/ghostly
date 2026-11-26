@@ -35,8 +35,13 @@ export const SCRIPT_NAMES: Record<BitcoinScriptType, string> = {
   p2wsh: "script / multisig (P2WSH)", "witness-unknown": "future SegWit version",
 };
 
+/** A BIP-21 link (`bitcoin:<address>?amount=…`), as wallets show and QR codes write it, the scheme in any case. */
+const BIP21 = /^bitcoin:([^?]*)(?:\?[\s\S]*)?$/i;
+
 function normalizeAddress(input: string): string {
-  const value = input.trim();
+  const trimmed = input.trim();
+  // Only the address before the query counts: nothing in it (an amount, a label, another address) is read.
+  const value = BIP21.exec(trimmed)?.[1] ?? trimmed;
   let info;
   try { info = decodeAnyBitcoinAddress(value); } catch (e) {
     throw Object.assign(new Error(e instanceof BitcoinAddressError ? e.message : "Enter a Bitcoin address"), { cause: e });
@@ -137,9 +142,11 @@ export const bitcoin: IdentityProofProvider<BitcoinEvidence> = {
     return { signature: e.signature };
   },
   async verify(statement, evidence) {
+    const subject = statement.binding.subject;
+    if (normalizeAddress(subject) !== subject) throw new Error("The address is not in canonical form");
     const { verdict, network } = check(statement, evidence.signature);
     const format = verdict.format === "legacy" ? "Legacy signmessage" : verdict.format === "bip322-full" ? "BIP-322 full" : "BIP-322 simple";
     const script = { p2pkh: "P2PKH", p2wpkh: "P2WPKH", "p2sh-p2wpkh": "P2SH-P2WPKH", p2tr: "P2TR" }[verdict.script];
-    return { subject: statement.binding.subject, source: `${format} signature, ${script}${network === "testnet" ? ", test network" : ""}` };
+    return { subject, source: `${format} signature, ${script}${network === "testnet" ? ", test network" : ""}` };
   },
 };

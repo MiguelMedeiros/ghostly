@@ -1,9 +1,10 @@
-import { randomBytes } from "node:crypto";
+import { createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { open as openEnvelope } from "@ghostly/browser/backup/envelope";
-import { BackupReader, BackupWriter, FRAME_BYTES, readBackupHeader, type BackupSource } from "@ghostly/browser/backup/stream";
+import { BackupReader, BackupWriter, FRAME_BYTES, readBackupHeader, type BackupSource, type FrameCrypto } from "@ghostly/browser/backup/stream";
 import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from "@ghostly/browser/backup/light";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { bool, str, type Method } from "./apiKit";
@@ -42,6 +43,22 @@ type BackupRecord =
  */
 const HOLDS = "holds.json";
 const SETTINGS = ["groups.json", "calls.json", HOLDS, "apps.json"];
+
+/**
+ * What a backup holds of a record, as JSON: a writer writes no more, a restore takes no more, and measures it before
+ * parsing it (JSON of nested brackets costs a hundred times more to parse than its size suggests). The largest record
+ * is the head with a light backup's file ids (~50 bytes each): 16 MiB is some 300,000 files. Each setting is a short
+ * list (chats and their keys, holds, served apps): ~100 bytes an entry, so 1 MiB is thousands of them. Every other
+ * record (a file's, and one a newer CLI writes) is a few fields.
+ */
+const MAX_RECORD_BYTES = 16 * 1024 * 1024;
+const MAX_SETTING_BYTES = 1024 * 1024;
+const MAX_SMALL_RECORD_BYTES = 64 * 1024;
+/**
+ * The CLI writes every record but the head and the settings plain: all a bundle's JSON unpacks to is the bundle's
+ * own size plus these (`BackupLimits`).
+ */
+const RESTORE_LIMITS = { recordBytes: MAX_RECORD_BYTES, totalBytes: MAX_RECORD_BYTES + SETTINGS.length * MAX_SETTING_BYTES, perByte: 1 };
 
 /** A setting's text, or null for one the profile never wrote. */
 const readSetting = (dir: string, name: string) => readFile(join(dir, name), "utf8").catch(unlessGone);
@@ -113,6 +130,31 @@ async function removeDeadPartials(path: string): Promise<void> {
     let alive = true;
     try { process.kill(pid, 0); } catch (error) { alive = (error as NodeJS.ErrnoException).code === "EPERM"; }
     if (!alive) await rm(join(dirname(path), entry), { force: true });
+  }
+}
+
+/**
+ * Gives the whole backup at `partial` the name `path`, never over a file there (EEXIST). Where the file system has no
+ * hard links (FAT/exFAT, the USB stick a profile is moved on, answers EPERM; some network shares ENOTSUP), it is copied
+ * under the name, which it takes first; a copy cut short (a full stick) leaves no file. Before, "Not allowed to write
+ * or read" and no backup.
+ */
+async function place(partial: string, path: string): Promise<void> {
+  try { return await link(partial, path); } catch (error) {
+    if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+  }
+  const target = await open(path, "wx", 0o600);
+  try {
+    const source = await open(partial, "r"), buffer = new Uint8Array(FRAME_BYTES);
+    try {
+      for (let read; (read = (await source.read(buffer, 0, buffer.length)).bytesRead);) await target.write(buffer.subarray(0, read));
+    } finally { await source.close(); }
+    await target.sync();
+    await target.close();
+  } catch (error) {
+    await target.close().catch(() => {});
+    await rm(path, { force: true }).catch(() => {});
+    throw error;
   }
 }
 
@@ -223,6 +265,12 @@ export const BACKUP_METHODS: Record<string, Method> = {
       for (const file of all) (!light || (await kept(file)) ? files : leftOut).push(file);
       const storeSize = (await stat(store)).size, bytes = files.reduce((sum, file) => sum + file.size, 0);
       const leftOutBytes = leftOut.reduce((sum, file) => sum + file.size, 0);
+      // Never a record a restore refuses (`MAX_RECORD_BYTES`): the backup is refused now, not when it is restored.
+      const head = JSON.stringify({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) } satisfies BackupRecord);
+      if (head.length > MAX_RECORD_BYTES) throw new CliError("refused", `A light backup of this profile leaves out too many files to list (${leftOut.length}): make a full backup`);
+      const records = settings.map(({ name, text }) => ({ name, json: JSON.stringify({ t: "setting", name, text } satisfies BackupRecord) }));
+      const large = records.find((record) => record.json.length > MAX_SETTING_BYTES);
+      if (large) throw new CliError("refused", `${large.name} of this profile is too large for a backup (over ${MAX_SETTING_BYTES / 1024 / 1024} MiB)`);
 
       writing = true;
       out = await open(partial, "wx", 0o600);
@@ -230,7 +278,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       let writer: BackupWriter;
       try { writer = await BackupWriter.start({ write: async (chunk) => { await handle.write(chunk); } }, unsealed ? null : passphrase!); } catch (error) { throw localFileError(error, path) ?? new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
       const put = (record: BackupRecord) => writer.json(JSON.stringify(record));
-      await put({ t: "profile", format: FORMAT, createdAt: Date.now(), files: files.length, bytes, ...(light && { light: { maxFileBytes: LIGHT_FILE_BYTES, maxVoiceBytes: LIGHT_VOICE_BYTES, files: leftOut.length, bytes: leftOutBytes, ids: leftOut.map((file) => basename(file.name)) } }) });
+      await writer.json(head);
       await put({ t: "file", kind: "store", size: storeSize });
       const buffer = new Uint8Array(FRAME_BYTES);
       await copyIn(writer, buffer, store, storeSize, undefined, gone);
@@ -244,7 +292,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
         copied++;
         copiedBytes += file.size;
       }
-      for (const { name, text } of settings) await put({ t: "setting", name, text });
+      for (const { json } of records) await writer.json(json);
       await put({ t: "end", files: copied, bytes: copiedBytes });
       const written = await writer.finish();
       await handle.sync();
@@ -252,7 +300,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       out = null;
       // Its name only now, and never over a file that appeared meanwhile, nor once nobody asks for it.
       stillAsked(gone);
-      try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
+      try { await place(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
       return { path, bytes: written, files: copied, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
     } catch (error) {
       // The name it is written under is never typed and gone after: an error on it (a folder it may not write) names
@@ -295,6 +343,28 @@ async function fileSource(path: string): Promise<BackupSource & { close(): Promi
     close: () => handle.close(),
   };
 }
+
+const TAG_BYTES = 16;
+/**
+ * A restore's frames checked with node:crypto and inflated with node:zlib, at once: through WebCrypto and a
+ * DecompressionStream, async calls per frame, a backup of 200,000 tiny records took ~6 s to open (~36 s gzipped), so
+ * many small records cost far more than their bytes.
+ */
+const nodeFrames: FrameCrypto = {
+  sha256: (...parts) => { const hash = createHash("sha256"); for (const part of parts) hash.update(part); return hash.digest(); },
+  open: (key, iv, additionalData, sealed) => {
+    if (sealed.length < TAG_BYTES) throw new Error("A frame shorter than its tag");
+    const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
+    decipher.setAAD(additionalData);
+    decipher.setAuthTag(sealed.subarray(sealed.length - TAG_BYTES));
+    return Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - TAG_BYTES)), decipher.final()]);
+  },
+  gunzip: (bytes, limit) => {
+    try { return gunzipSync(bytes, { maxOutputLength: Math.max(1, limit) }); } catch (error) {
+      throw new Error((error as { code?: string }).code === "ERR_BUFFER_TOO_LARGE" || error instanceof RangeError ? "This backup is too large to restore" : "A frame that does not inflate", { cause: error });
+    }
+  },
+};
 
 /** A version 1 backup is one JSON object, and `seal` writes its format first. */
 const VERSION_1_START = /^\s*\{\s*"format"\s*:\s*"ghostly-backup"/;
@@ -392,7 +462,7 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
   let work: ProfilePaths | null = null;
   try {
     let reader: BackupReader | null;
-    try { reader = await BackupReader.open(source, passphrase); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
+    try { reader = await BackupReader.open(source, passphrase, undefined, { limits: RESTORE_LIMITS, frames: nodeFrames }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
     if (!reader) {
       const payload = await readWhole(file, passphrase ?? "");
       stop?.throwIfAborted();
@@ -411,18 +481,30 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
     work = await restoringFolder(home, name);
     const paths = work;
     await mkdir(paths.db, { recursive: true, mode: 0o700 });
-    let out: { handle: FileHandle; left: number } | null = null, files = 0, bytes = 0, ended = false, stored = false;
+    // A file's frames are held up to FRAME_BYTES and written together: one write per frame, however small, cost ~35 µs.
+    let out: { handle: FileHandle; left: number; held: Uint8Array[]; heldBytes: number } | null = null, files = 0, bytes = 0, ended = false, stored = false;
+    const flush = async (file: NonNullable<typeof out>) => {
+      if (file.held.length) await file.handle.write(file.held.length === 1 ? file.held[0] : Buffer.concat(file.held));
+      file.held = [];
+      file.heldBytes = 0;
+    };
     try {
       for (let record = await next(); record; record = await next()) {
         if (ended) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
         if (record.bytes) {
           if (!out || record.bytes.length > out.left) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
-          await out.handle.write(record.bytes);
+          if (!record.bytes.length) continue;
+          out.held.push(record.bytes);
+          out.heldBytes += record.bytes.length;
           out.left -= record.bytes.length;
+          if (out.heldBytes >= FRAME_BYTES) await flush(out);
           continue;
         }
-        if (out) { if (out.left) throw new CliError("refused", "This backup is damaged: it was changed or cut short"); await out.handle.close(); out = null; }
+        if (out) { if (out.left) throw new CliError("refused", "This backup is damaged: it was changed or cut short"); await flush(out); await out.handle.close(); out = null; }
+        // Measured before it is parsed: a setting's record no larger than any this CLI writes, every other one small.
+        if (record.json.length > MAX_SETTING_BYTES) throw new CliError("refused", "This backup is too large to restore");
         const value = parse(record.json);
+        if (value.t !== "setting" && record.json.length > MAX_SMALL_RECORD_BYTES) throw new CliError("refused", "This backup is too large to restore");
         if (value.t === "end") { ended = value.files === files && value.bytes === bytes; if (!ended) throw new CliError("refused", "This backup is damaged: it was changed or cut short"); continue; }
         if (value.t === "setting") {
           if (SETTINGS.includes(value.name) && typeof value.text === "string") {
@@ -434,7 +516,7 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
         let target: string;
         if (value.kind === "store") { target = join(paths.db, "snapshot.bin"); stored = true; }
         else { target = inside(paths.files, value.path); await mkdir(dirname(target), { recursive: true, mode: 0o700 }); files += 1; bytes += value.size; }
-        out = { handle: await open(target, "wx", 0o600), left: value.size };
+        out = { handle: await open(target, "wx", 0o600), left: value.size, held: [], heldBytes: 0 };
       }
       if (out || !ended || !stored) throw new CliError("refused", "This backup is damaged: it was changed or cut short");
     } finally { await out?.handle.close().catch(() => {}); }

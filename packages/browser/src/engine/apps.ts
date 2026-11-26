@@ -375,9 +375,19 @@ export interface AppsHost {
 /**
  * `store`: fetched from that store's listing, so installing it pins its updates to that store. `revocations`: its
  * publisher's, read beside it when it was fetched (Install refuses a version they stop, and the record starts with them).
- * `asks`: what the last install screen of it listed (`AppPreview.asks`), for an Install that does not say.
+ * `asks`: what the last install screen of it listed (`AppPreview.asks`), for an Install that does not say. `leaves`: the
+ * store whose hold on the app's updates that screen said Install ends (`AppPreview.leavesStore`), if any.
  */
-interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; at: number; carried?: true }
+interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; asks: AppPermission[]; leaves?: string; at: number; carried?: true }
+/**
+ * The store whose hold on the app's updates installing it ends (`AppPreview.leavesStore`), as `install` writes the
+ * record: an update not from the pinned store drops the pin, the same version from another store moves it there; the
+ * same version by URL or card leaves the record as it is.
+ */
+function leftStore(installed: InstalledApp | undefined, install: string, fromStore: string | undefined): string | undefined {
+  const pin = installed?.store;
+  return pin !== undefined && fromStore !== pin && (install === "update" || (install === "same" && fromStore !== undefined)) ? pin : undefined;
+}
 /** What a staged bundle is kept under (`AppPreview.stage`): one install screen's version and source, so another screen of it does not change it. */
 const stagedKey = (digest: string, from: string, store: string | undefined) => `${digest}\n${from}\n${store ?? ""}`;
 
@@ -656,6 +666,13 @@ function revocationUrlsOf(installed: InstalledApp | undefined): string[] {
   return installed ? [installed.from, ...(installed.manifest.sources ?? []), ...formerOf(installed), ...pendingUrlsOf(installed)] : [];
 }
 
+/**
+ * `pinnedRevocations` kept: at most this many (64 apps' earlier places), and of their lists at most `bytes` in all.
+ * Past them none is added (none dropped for it, which the next check would ask again first): the others are asked at
+ * every check.
+ */
+const PINNED_REVOCATIONS_KEPT = { max: 1024, bytes: 1024 * 1024 } as const;
+
 /** `InstalledApp.formerSources` once another version replaces `installed`: its own first, then where it came from and the sources it named. */
 function formerSourcesOf(installed: InstalledApp | undefined): string[] | undefined {
   const kept = new Set<string>();
@@ -878,6 +895,15 @@ export class Apps {
    * `REVOCATION_FILES_KEPT.bytes` of files, the oldest dropped first (one dropped is downloaded again); none outside a check.
    */
   private revocationReads: Map<string, { bytes: number; read: Promise<Uint8Array> }> | null = null;
+  /**
+   * What a `ghostly-revoke.json` at a commit (jsDelivr, `isPinnedAppUrl`) answered this engine for an app (`<url> <ref>`):
+   * its verified revocations of that app, or null when none is published there. Such a file never changes. An app a
+   * store updates leaves one at each version's commit among its earlier places (`formerSources`): the update check takes
+   * those from here and does not ask them again, while where it comes from now and its sources are asked at every
+   * check. Only the ones an installed app's places name stay (`checkNow`); at most `PINNED_REVOCATIONS_KEPT`.
+   */
+  private readonly pinnedRevocations = new Map<string, { revocations: SignedAppRevocation[] | null; bytes: number }>();
+  private pinnedRevocationBytes = 0;
   /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
   private readonly storeRevocations = new Set<string>();
   private readonly checkedRevocations: AppRevocationsChecked = {
@@ -1539,23 +1565,42 @@ export class Apps {
    * The revocations its publisher signed, read beside each URL (`ghostly-revoke.json`); none there is not an error.
    * `read` holds the files already read, which are skipped, and gets the ones read now. Null when no file answered now.
    * `reach`, when given, learns whether a host answered (a file, or none there) and whether a read failed for a reason
-   * that may pass (offline, the host not reached or too slow, its own trouble).
+   * that may pass (offline, the host not reached or too slow, its own trouble). `former`: the app's earlier places
+   * (`formerSources`), whose files at a commit are taken as they answered before (`pinnedRevocations`), not asked again
+   * and not counted in `reach`: they say nothing of whether its publisher's hosts answer now.
    */
-  private async readRevocations(ref: string, urls: string[], read = new Set<string>(), reach?: RevocationsReach): Promise<SignedAppRevocation[] | null> {
+  private async readRevocations(ref: string, urls: string[], read = new Set<string>(), reach?: RevocationsReach, former?: ReadonlySet<string>): Promise<SignedAppRevocation[] | null> {
     let out: SignedAppRevocation[] | null = null;
     for (const url of new Set(urls.filter(isAppFetchUrl).map((u) => besideUrl(u, "ghostly-revoke.json")))) {
       if (read.has(url)) continue;
       read.add(url);
+      const held = former?.has(url) ? this.pinnedRevocations.get(`${url} ${ref}`) : undefined;
+      if (held) {
+        if (held.revocations) (out ??= []).push(...held.revocations);
+        continue;
+      }
       try {
         const file = await this.readRevocationsFile(ref, await this.fetchRevocationsOnce(url));
         if (file) (out ??= []).push(...file);
         if (reach) reach.answered = true;
+        this.keepPinned(url, ref, file);
       } catch (error) {
         // Not published there (an answer), or not reachable now.
         if (reach) { if (passing(error)) reach.failed = true; else reach.answered = true; }
+        if (error instanceof AppFetchError && !passing(error)) this.keepPinned(url, ref, null);
       }
     }
     return out;
+  }
+
+  /** What a `ghostly-revoke.json` at a commit answered for `ref`, kept while it fits (`pinnedRevocations`). */
+  private keepPinned(url: string, ref: string, revocations: SignedAppRevocation[] | null): void {
+    const key = `${url} ${ref}`;
+    if (!isPinnedAppUrl(url) || this.pinnedRevocations.has(key) || this.pinnedRevocations.size >= PINNED_REVOCATIONS_KEPT.max) return;
+    const bytes = revocations?.length ? canonicalJsonBytes(revocations as unknown as JsonValue).length : 0;
+    if (this.pinnedRevocationBytes + bytes > PINNED_REVOCATIONS_KEPT.bytes) return;
+    this.pinnedRevocations.set(key, { revocations, bytes });
+    this.pinnedRevocationBytes += bytes;
   }
 
   /** A `ghostly-revoke.json` downloaded, once per update check for the same URL (`revocationReads`). */
@@ -1998,22 +2043,19 @@ export class Apps {
     const stage = stagedKey(digest, from, fromStore);
     this.staged.delete(stage);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
-    this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, at: this.now(), ...(carried && { carried: true as const }) });
+    const pin = leftStore(installed, install, fromStore);
+    this.staged.set(stage, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, asks, ...(pin !== undefined && { leaves: pin }), at: this.now(), ...(carried && { carried: true as const }) });
     if (!this.sweep) this.sweepStaged();
 
     const listedBy = this.listedBy(version, stores);
-    // As `install` writes the record: an update not from the pinned store drops the pin, the same version from another
-    // store moves it there; the same version by URL or card leaves the record as it is.
-    const pin = installed?.store;
-    const leaves = pin !== undefined && fromStore !== pin && (install === "update" || (install === "same" && fromStore !== undefined));
-    const leftName = leaves ? stores.find((s) => s.key === pin)?.index?.name : undefined;
+    const leftName = pin !== undefined ? stores.find((s) => s.key === pin)?.index?.name : undefined;
     return {
       digest, ref: version.ref, publisher: manifest.publisher, fingerprint: appFingerprint(manifest.publisher), manifest, from,
       icon: bundle.files.get("icon.png")?.slice() ?? null,
       install, asks,
       run: this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
-      ...(leaves && { leavesStore: { key: pin, ...(leftName !== undefined && { name: leftName }), ...(fromStore !== undefined && { to: fromStore }) } }),
+      ...(pin !== undefined && { leavesStore: { key: pin,...(leftName !== undefined && { name: leftName }), ...(fromStore !== undefined && { to: fromStore }) } }),
       ...(carried && { carried: true as const }),
       stage,
     };
@@ -2069,6 +2111,10 @@ export class Apps {
         // uninstalled, or before the check installed a version that dropped a permission, is shown again first.
         const added = installed ? addedAppPermissions(installed.permissions, manifest.permissions) : [...manifest.permissions];
         if (added.some((p) => !shown.includes(p))) fail("permissions-changed", `This install now asks for ${added.join(", ")}; look at it again`);
+        // Nor does it end a store's hold on the app's updates the screen did not name: one pinned since (the same version
+        // taken again from a store's listing in another tab) is shown again first, now saying so.
+        const leaves = leftStore(installed, decision, fromStore);
+        if (leaves !== undefined && leaves !== staged.leaves) fail("store-changed", "This install now ends a store's hold on the app's updates; look at it again");
         if (decision === "same" && installed) {
           // A restored profile's app that needs its files gets them back. The same version from a store's listing pins its
           // updates to that store (one by URL or card leaves the record as it is).
@@ -2236,6 +2282,13 @@ export class Apps {
       const out = (await Promise.all(pooled(apps, APP_CHECK_PARALLEL, (app) => this.checkApp(app, stores).catch(() => null)))).filter((r) => r !== null);
       this.unreachedChecks = out.some((r) => r.unreached) ? this.unreachedChecks + 1 : 0;
       for (const missed of this.listingMisses.keys()) if (!read.has(missed)) this.listingMisses.delete(missed);
+      // A file at a commit no installed app's places name any more (uninstalled, or past its kept earlier places) goes.
+      const named = new Set([...apps, ...out.map((r) => r.app)].flatMap((a) => revocationUrlsOf(a).filter(isAppFetchUrl).map((u) => `${besideUrl(u, "ghostly-revoke.json")} ${a.ref}`)));
+      for (const [key, held] of this.pinnedRevocations) {
+        if (named.has(key)) continue;
+        this.pinnedRevocations.delete(key);
+        this.pinnedRevocationBytes -= held.bytes;
+      }
       // Each one judged with the revocations this profile kept as they are now, read once for every app (up to 1024 of
       // every app: once per app, a check read them again for each one).
       const kept = out.length ? await this.keptValue() : null;
@@ -2308,7 +2361,7 @@ export class Apps {
     // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
     const revokeRead = new Set<string>();
     const reach: RevocationsReach = { answered: false, failed: false };
-    const before = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach);
+    let before = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach, new Set(formerOf(app)));
     app = withRevocations(app, before ?? []);
     // The ones this profile kept (`APP_REVOCATIONS_KEY`) judge too: one that dropped a waiting update stops it from
     // being taken again, once the record keeps it no more and its store's next index does not carry it.
@@ -2385,6 +2438,10 @@ export class Apps {
         } else skip();
         continue;
       }
+      // Its publisher's revocations beside where it was found and the sources it names too, before it is taken: one revoked
+      // there is not installed over the version that runs now.
+      const beside = await this.readRevocations(app.ref, [url, ...(bundle.manifest.sources ?? []).slice(0, APP_BUNDLE_LIMITS.sources)], revokeRead, reach);
+      if (beside) { before = [...(before ?? []), ...beside]; app = withRevocations(app, beside); }
       if (judge(version).status !== "ok") { skip(); continue; }
       // Judged again with the stores as held now: a store's index read while the bundle downloaded may revoke it.
       if (this.runStatus(version, await this.heldViews(), app.revocations).status !== "ok") { skip(); continue; }
@@ -2411,11 +2468,19 @@ export class Apps {
     }
     // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too (and still
     // beside where the earlier ones came from).
-    const after = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach);
+    const after = await this.readRevocations(app.ref, revocationUrlsOf(app), revokeRead, reach, new Set(formerOf(app)));
     // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version, or one
     // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
     // version not found yet): a file that changes does not pile up.
     const revocations = before || after ? [...(before ?? []), ...(after ?? [])] : null;
+    // Each one read is kept beside the record too (`APP_REVOCATIONS_KEY`): the record keeps only those that stop one of
+    // these versions, and a file read later without one (moved, or serving part of the list) drops it from there.
+    const keptAlready = new Set(kept.map((r) => canonicalJson(r)));
+    if (revocations?.some((r) => !keptAlready.has(canonicalJson(r)))) {
+      const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+      keepRevocations(tx.objectStore(STORES.settings), new Map([[app.ref, revocations]]));
+      await done(tx);
+    }
     // A store's index carries some too: those that stop one of these are kept, as a store may drop them or be removed.
     const versions = this.versionsOf(app);
     const stays = revocations ? stopping(versions, app.revocations ?? []) : app.revocations ?? [];

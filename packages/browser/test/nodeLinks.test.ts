@@ -216,6 +216,20 @@ describe("a chat as the contact drives it", () => {
     expect(node.getState().links.find((link) => link.id === b.id)!.liveAttempt).toEqual(attempt);
   });
 
+  it("a waiting invite's pairing progress and a failed read of the contact name their chat, and build no other chat's view", async () => {
+    const a = row(), b = row({ inviteCode: "invite" });
+    const { node, linkOf } = await started(a, b);
+    const unnamed = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const named = vi.spyOn(node as never as { chatChanged(linkId: string): void }, "chatChanged");
+    // The relays out of reach: an invite's publish fails again every 4 s, and each failure is its progress.
+    const progress = { role: "inviter" as const, stage: "failed" as const, since: 1, startedAt: 1, attempt: 1, reason: "publish" as const, retryable: true };
+    linkOf(b.id).options.events.onPairingProgress!(progress);
+    linkOf(b.id).options.events.onDiscoveryError!("Could not read discovery: offline");
+    expect(unnamed).not.toHaveBeenCalled();
+    expect(named.mock.calls).toEqual([[b.id], [b.id]]);
+    expect(node.getState().links.find((link) => link.id === b.id)).toMatchObject({ pairingProgress: progress, discoveryError: "Could not read discovery: offline" });
+  });
+
   it("an acknowledgement moves a legacy chat's read mark, never a paired one's", async () => {
     const legacy = row({ profile: undefined, participationSeed: undefined }), paired = row();
     const { node, linkOf } = await started(legacy, paired);

@@ -778,6 +778,26 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(fromBob.filter(offset => offset < cut).length).toBe(cut / (16 * 1024));
   });
 
+  it("a file cut mid-way by a restart shows the bytes stored here while it waits for a holder, and counts only the rest as still to come", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const size = 600_000, cut = 256 * 1024;
+    t.hold = (from, to, frame) => from === alice && to === bob && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 11));
+    await t.world.until(() => (t.got(bob, id, messageId).transfer?.transferred ?? 0) >= cut, 5 * 60_000);
+    // Alice's app closes (the transfer ends, what came is kept), then Bob's starts again: nobody holds the file in reach.
+    alice.online = false;
+    t.hold = null;
+    await t.world.run(10_000);
+    await t.restart(bob);
+    await t.world.run(10_000);
+    expect(t.got(bob, id, messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", transferred: cut, size });
+    expect(bob.groups.files!.stillComing()).toBe(size - cut);
+    t.world.reopen(alice);
+    await t.world.until(() => t.done(bob, id, messageId), 5 * 60_000);
+    expect(sha(t.got(bob, id, messageId).bytes!)).toBe(meta.d);
+  });
+
   it("a holder serving bad bytes then stalling does not get the next holder blamed", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);

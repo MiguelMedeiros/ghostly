@@ -764,17 +764,19 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     && deviceOnline && engine.state?.settings.online !== false && callsWaitForLive(deliveryPeer?.callsUnavailable);
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
-  // Cancel takes the whole notice away, and the focus it had fell to the page: it goes back to the call button that
-  // started the wait, or to ⋮ when that was a row of its menu, unless it went elsewhere meanwhile.
+  // Cancel goes with the wait, pressed or given up, and the focus it had fell to the page: it goes back to the call
+  // button that started the wait, or to ⋮ when that was a row of its menu, unless it went elsewhere meanwhile. Once:
+  // coming back to the chat while it still says it gave up does not move it again.
   const wokeFrom = useRef<Element | null>(null), wakeCancelled = useRef(false);
   const cancelWake = () => { wakeCancelled.current = true; wakeCall.cancel(); };
   useEffect(() => {
-    if (wakeCall.waking || !wakeCancelled.current) return;
+    if (wakeCall.waking || !wokeFrom.current || !(wakeCancelled.current || wakeCall.gaveUp)) return;
+    const from = wokeFrom.current;
+    wokeFrom.current = null;
     wakeCancelled.current = false;
     if (!visible || !focusLost()) return;
-    const from = wokeFrom.current;
     (from instanceof HTMLElement && from.isConnected ? from : optionsRef.current)?.focus({ preventScroll: true });
-  }, [wakeCall.waking, visible]);
+  }, [wakeCall.waking, wakeCall.gaveUp, visible]);
 
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
@@ -881,7 +883,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       stopPlayingFrom(chatPath(params.sessionId), true);
       // The chat list keeps its own copy: without this it shows the deleted chat until its next refresh.
       window.dispatchEvent(new Event("session-updated"));
-      nav.home();
+      // From a ringing card over another chat (or Settings), the person stays where they are.
+      if (visible) nav.home();
     } else {
       setConfirmDelete(true);
     }
@@ -1396,6 +1399,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           onReject={webrtc.rejectCall}
           // On a call in another chat: End and answer ends it first (useWebRTC), or Decline. Never two calls at once.
           onCall={webrtc.otherCallOn}
+          onDelete={() => setConfirmDelete(true)}
         />,
         callLayer ?? document.body,
       )}

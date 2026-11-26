@@ -626,6 +626,22 @@ describe("choosing several", () => {
     expect(screen.queryByTestId("select-bar")).toBeNull();
   });
 
+  // A field that leaves Escape alone while an input method composes in it (the chat's search): the key only dropped a
+  // candidate, and the choice ended under it.
+  it("an Escape that only drops an input method's candidate in a field leaves the choice", async () => {
+    const { user } = renderApp(<><Timeline messages={messages} /><input aria-label="Search" /></>);
+    await user.click(screen.getAllByTestId("message-options")[0]!);
+    await user.click(screen.getByTestId("message-select-start"));
+    const field = screen.getByRole("textbox", { name: "Search" });
+    act(() => field.focus());
+    const composing = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, isComposing: true, keyCode: 229 });
+    act(() => { field.dispatchEvent(composing); });
+    expect(screen.getByTestId("select-bar")).toBeInTheDocument();
+    expect(composing.defaultPrevented).toBe(false);
+    act(() => { field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+  });
+
   /** The chat's column as the pages lay it out: the list, the bar, and the composer, kept but hidden while messages are chosen. */
   function Column({ disabled = false }: { disabled?: boolean }) {
     const forwarding = useForwarding("link-bo", messages);

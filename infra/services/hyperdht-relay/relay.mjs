@@ -30,7 +30,10 @@ export const DEFAULT_LIMITS = Object.freeze({
   clientsPerAddress: 16,
   /** Largest relay protocol message a client may send. */
   payloadBytes: 256 * 1024,
-  /** Bytes a client may send per second, on average, and in one burst. The relay pauses its socket past that. */
+  /**
+   * Bytes one address may send per second, on average, and in one burst, over all its clients, the ones it has closed
+   * too (see sendable). The relay pauses the address's sockets past that.
+   */
   bytesPerSecond: 512 * 1024,
   burstBytes: 4 * 1024 * 1024,
   /** Keys one client may listen on at once. */
@@ -1025,10 +1028,25 @@ export async function startRelay(options = {}) {
     entry[kind].push(now)
     return true
   }
+  /**
+   * The byte budget each address has left (a token bucket of `bytesPerSecond` and `burstBytes`), shared by all its
+   * clients: the relay's work grows with each message it reads, so a budget per WebSocket let one address cost the relay
+   * `clientsPerAddress` times what one client may, and one that closed each WebSocket and opened another start each
+   * with a full burst. An address's next client starts from what is left; it is forgotten once full again and unused.
+   */
+  const sendable = new Map()
+  const budgetOf = (address, now) => {
+    let budget = sendable.get(address)
+    if (!budget) sendable.set(address, budget = { tokens: limits.burstBytes, last: now })
+    budget.tokens = Math.min(limits.burstBytes, budget.tokens + (now - budget.last) * limits.bytesPerSecond / 1000)
+    budget.last = now
+    return budget
+  }
   const forgetRoom = setInterval(() => {
     for (const [address, at] of madeRoom) if (monotonicNow() - at >= ROOM_MS) madeRoom.delete(address)
     const now = monotonicNow()
     for (const [address, entry] of spent) if ([...entry.listens, ...entry.dials].every(at => now - at >= 60_000)) spent.delete(address)
+    for (const address of sendable.keys()) if (!perAddress.has(address) && budgetOf(address, now).tokens >= limits.burstBytes) sendable.delete(address)
   }, 60_000)
   forgetRoom.unref?.()
 
@@ -1150,19 +1168,27 @@ export async function startRelay(options = {}) {
       if (over()) drop('queue')
       else holdQueued(ws)
     }
-    // A token bucket on what the client sends, its pings and pongs too: past it, the relay stops reading its socket for a while.
-    let tokens = limits.burstBytes
-    let last = monotonicNow()
+    // What the client sends, its pings and pongs too, spends its address's budget: past it, the relay stops reading its
+    // socket until the budget is back above zero (each of the address's sockets as it next sends). The wait is weighed
+    // again as it ends: the rest of the read that went past zero, and the address's other sockets, spend meanwhile.
     let paused = false
+    // Paused since the relay last pinged the client (see ping below).
+    let throttled = false
+    const hold = () => {
+      if (dropped) return
+      const { tokens } = budgetOf(address, monotonicNow())
+      if (tokens < 0) return setTimeout(hold, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
+      paused = false
+      ws._socket?.resume()
+    }
     const spend = bytes => {
-      const now = monotonicNow()
-      tokens = Math.min(limits.burstBytes, tokens + (now - last) * limits.bytesPerSecond / 1000)
-      last = now
-      tokens -= bytes
-      if (tokens < 0 && !paused && ws._socket) {
+      const budget = budgetOf(address, monotonicNow())
+      budget.tokens -= bytes
+      if (budget.tokens < 0 && !paused && ws._socket) {
         paused = true
+        throttled = true
         ws._socket.pause()
-        setTimeout(() => { paused = false; ws._socket?.resume() }, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
+        hold()
       }
     }
     // Each frame from a client costs its payload and 64 bytes: the relay's work on a frame (parsing it, and for a message
@@ -1191,12 +1217,14 @@ export async function startRelay(options = {}) {
       else pong(Buffer.from(data))
     })
     // A peer that has gone without closing (a sleeping laptop, a dead route) still holds its slot: one that has not
-    // answered the last ping by the next is dropped.
+    // answered the last ping by the next is dropped. One the relay has stopped reading since (its byte budget) is not:
+    // its pong waits unread behind what it sent before, seconds late at a low `bytesPerSecond` behind a proxy.
     let answered = true
     ws.on('pong', data => { spend(data.length + FRAME_BYTES); answered = true })
     const ping = setInterval(() => {
-      if (!answered) return drop('no pong')
+      if (!answered && !throttled) return drop('no pong')
       answered = false
+      throttled = paused
       ws.ping()
     }, limits.pingMs)
     let leave

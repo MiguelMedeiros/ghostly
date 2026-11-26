@@ -64,7 +64,9 @@ export function walletAwaiting({ network, mints, quotes, lightningOps, lightning
     out.push({ type: "cashu", kind: q.issuedUnclaimed ? "unclaimed" : "paid", amount: q.amount, ...withOwner(owner) });
     if (owner) claimedBy.add(owner);
   }
-  const openQuotes = cashuQuotes.filter((q) => !q.issuedUnclaimed && !q.paid && live(q.expiresAt));
+  // A quote kept with no expiry (its mint gave none) expires with its invoice, as the wallet's polling takes it.
+  const quoteExpiry = (q: StoredQuote) => q.expiresAt ?? (decodeBolt11(q.invoice)?.expiresAt ?? 0) * 1000;
+  const openQuotes = cashuQuotes.filter((q) => !q.issuedUnclaimed && !q.paid && live(quoteExpiry(q)));
   const cashuInvoices = new Set(openQuotes.map((q) => invoiceKey(q.invoice)));
   const openOps = lightningOps.filter((op) => op.direction === "in" && op.mode === network && op.state === "open" && !op.selfSettled && op.providerId !== CASHU_MINT_SOURCE && live(op.expiresAt));
   /** Each open invoice's Lightning card. */

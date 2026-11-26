@@ -1,12 +1,14 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useEffect, useRef, useState } from "react";
-import { Route, Routes, useNavigate } from "react-router-dom";
+import { Route, Routes, useNavigate, useParams, type NavigateFunction } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderApp } from "../render";
+import { focusPastRow, rowAfter } from "../../components/GroupInvitation";
 
 // covers: app.keyboard, app.mobile-layout
 
-vi.mock("../../hooks/useIsMobile", () => ({ MOBILE_QUERY: "(max-width: 767px)", useIsMobile: () => true }));
+let mobile = true;
+vi.mock("../../hooks/useIsMobile", () => ({ MOBILE_QUERY: "(max-width: 767px)", useIsMobile: () => mobile }));
 
 /** A page's own control that opens another page: Back, or a Profile tile. It goes with the page it was on. */
 function Leave({ to, label, testId }: { to: string; label: string; testId?: string }) {
@@ -14,11 +16,27 @@ function Leave({ to, label, testId }: { to: string; label: string; testId?: stri
   return <button type="button" data-testid={testId} onClick={() => navigate(to)}>{label}</button>;
 }
 
+/**
+ * A group's other ways home (Leave, Delete, Cancel joining): the group's row is going, so they hand the focus on past
+ * it themselves, once the list shows (GroupInvitation.tsx `focusPastRow`).
+ */
+function GoneHome({ groupId, label }: { groupId: string; label: string }) {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => { const next = rowAfter(groupId), pressed = document.activeElement; void navigate("/"); focusPastRow(next, pressed); }}>{label}</button>;
+}
+
 /** A chat draws its own title; "bob" is on a call, so it stays loaded, hidden, once its Their profile is pressed. */
 vi.mock("../../pages/Chat", () => ({
   Chat: ({ sessionId, onCallChange }: { sessionId: string; onCallChange: (id: string, onCall: boolean) => void }) => {
     useEffect(() => { if (sessionId === "bob") onCallChange(sessionId, true); }, [sessionId, onCallChange]);
-    return <><h1 tabIndex={-1}>Chat {sessionId}</h1><Leave to="/" label="Back from chat" testId="chat-back" /><Leave to="/profile" label="Their profile" /></>;
+    return (
+      <>
+        <h1 tabIndex={-1}>Chat {sessionId}</h1>
+        <p tabIndex={0}>A message in {sessionId}</p>
+        <textarea aria-label={`Message to ${sessionId}`} />
+        <Leave to="/" label="Back from chat" testId="chat-back" /><Leave to="/profile" label="Their profile" />
+      </>
+    );
   },
 }));
 vi.mock("../../components/Sidebar", () => ({
@@ -37,7 +55,7 @@ vi.mock("../../components/InstallApp", () => ({ InstallSteps: () => null }));
 vi.mock("../../hooks/useAppCommands", () => ({ useAppCommands: () => {} }));
 
 /** The app's own way to a page, with no control pressed. */
-let go: (to: string) => void = () => {};
+let go: NavigateFunction = () => {};
 function Go() {
   const navigate = useNavigate();
   useEffect(() => { go = navigate; }, [navigate]);
@@ -56,24 +74,42 @@ let drawLate: () => void = () => {};
 function Late() {
   const [drawn, setDrawn] = useState(false);
   useEffect(() => { drawLate = () => setDrawn(true); }, []);
-  return <><Go />{drawn && <h1 tabIndex={-1}>Wallets</h1>}</>;
+  return drawn ? <h1 tabIndex={-1}>Wallets</h1> : null;
+}
+
+/** A group's page: its title, Back, and its other ways home. */
+function Group() {
+  const groupId = useParams().groupId!;
+  return (
+    <>
+      <h1 tabIndex={-1}>Group {groupId}</h1>
+      <Leave to="/" label="Back from group" testId="chat-back" />
+      <GoneHome groupId={groupId} label="Leave group" />
+      <GoneHome groupId={groupId} label="Delete group" />
+      <GoneHome groupId={groupId} label="Cancel joining" />
+    </>
+  );
 }
 
 const { App } = await import("../../App");
 
 function renderPages(route: string) {
   return renderApp(
-    <Routes>
-      <Route path="/" element={<App />}>
-        <Route index element={null} />
-        <Route path="chat/:sessionId" element={null} />
-        <Route path="group/:groupId" element={<><Leave to="/" label="Back from group" testId="chat-back" /><Leave to="/" label="Leave group" /></>} />
-        <Route path="profile" element={<><h1 tabIndex={-1}>Profile</h1><Leave to="/identities" label="Identities" /><Leave to="/" label="Chats" /><Leave to="/name" label="Name" /><Leave to="/wallet" label="Wallets" /><Leave to="/chat/s1" label="Message" /></>} />
-        <Route path="identities" element={<h1 tabIndex={-1}>Identities</h1>} />
-        <Route path="name" element={<Named />} />
-        <Route path="wallet" element={<Late />} />
-      </Route>
-    </Routes>,
+    <>
+      {/* Out of the pages: the chat list shows none. */}
+      <Go />
+      <Routes>
+        <Route path="/" element={<App />}>
+          <Route index element={null} />
+          <Route path="chat/:sessionId" element={null} />
+          <Route path="group/:groupId" element={<Group />} />
+          <Route path="profile" element={<><h1 tabIndex={-1}>Profile</h1><Leave to="/identities" label="Identities" /><Leave to="/" label="Chats" /><Leave to="/name" label="Name" /><Leave to="/wallet" label="Wallets" /><Leave to="/chat/s1" label="Message" /></>} />
+          <Route path="identities" element={<h1 tabIndex={-1}>Identities</h1>} />
+          <Route path="name" element={<Named />} />
+          <Route path="wallet" element={<Late />} />
+        </Route>
+      </Routes>
+    </>,
     { route },
   );
 }
@@ -118,12 +154,21 @@ describe("a page change on a phone that takes the focused control away", () => {
     expect(screen.getByTestId("sidebar-new-chat")).toHaveFocus();
   });
 
-  // Leave and Delete hand the focus past the group's row, which is going (GroupInvitation.tsx `focusPastRow`).
-  it("leaves the list alone when a conversation's own control other than Back took it home", () => {
-    renderPages("/group/g1");
-    press("Leave group");
-    expect(screen.getByRole("button", { name: "Book club" })).not.toHaveFocus();
-    expect(screen.getByTestId("sidebar-new-chat")).not.toHaveFocus();
+  // Leave, Delete and Cancel joining hand the focus past the group's row, which is going (GroupInvitation.tsx
+  // `focusPastRow`): Other group's next row is Alice's.
+  it.each(["Leave group", "Delete group", "Cancel joining"])("leaves %s to hand the focus past the group's row", async (label) => {
+    // As a browser does, and happy-dom does not: no focus in the list while it is hidden behind the page.
+    const focus = HTMLElement.prototype.focus;
+    const shown = vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+      if (!this.closest(".hidden")) focus.call(this, options);
+    });
+    try {
+      renderPages("/group/g2");
+      press(label);
+      expect(screen.getByRole("button", { name: "Other group" })).not.toHaveFocus();
+      expect(screen.getByTestId("sidebar-new-chat")).not.toHaveFocus();
+      await waitFor(() => expect(screen.getByRole("button", { name: "Alice" })).toHaveFocus());
+    } finally { shown.mockRestore(); }
   });
 
   it("gives the page opened to its title", () => {
@@ -200,5 +245,63 @@ describe("a page change on a phone that takes the focused control away", () => {
     renderPages("/profile");
     press("Name");
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveFocus();
+  });
+
+  /** Opens `path` from the chat list, puts the focus on `focused` in it, then goes back as the browser or the system does. */
+  function backFrom(path: string, focused: () => HTMLElement) {
+    renderPages("/");
+    act(() => { void go(path); });
+    focused().focus();
+    act(() => { void go(-1); });
+  }
+
+  // The browser's Back, or the system's (Android's back gesture), with no control of the page pressed: the focus was
+  // last on whatever had it in the conversation, gone with it.
+  it.each([
+    ["its title", () => screen.getByRole("heading", { name: "Chat s1" })],
+    ["its message field", () => screen.getByRole("textbox", { name: "Message to s1" })],
+    ["a message", () => screen.getByText("A message in s1")],
+  ])("gives the browser's or the system's Back from a chat, with the focus on %s, to that chat's row", (_, focused) => {
+    backFrom("/chat/s1", focused);
+    expect(screen.getByRole("button", { name: "Alice" })).toHaveFocus();
+  });
+
+  it("gives the browser's or the system's Back from a group to that group's row", () => {
+    backFrom("/group/g1", () => screen.getByRole("heading", { name: "Group g1" }));
+    expect(screen.getByRole("button", { name: "Book club" })).toHaveFocus();
+  });
+
+  it("gives the browser's or the system's Back to New chat when the conversation's row is not shown", () => {
+    backFrom("/chat/s9", () => screen.getByRole("heading", { name: "Chat s9" }));
+    expect(screen.getByTestId("sidebar-new-chat")).toHaveFocus();
+  });
+
+  // Gone from the list: deleted (Chat.tsx goes home after), or left.
+  it("leaves the list alone when the conversation left has no row any more", () => {
+    backFrom("/chat/gone", () => screen.getByRole("heading", { name: "Chat gone" }));
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("leaves the focus where the person put it out of the conversation", () => {
+    const elsewhere = document.createElement("button");
+    document.body.append(elsewhere);
+    try {
+      backFrom("/chat/s1", () => elsewhere);
+      expect(elsewhere).toHaveFocus();
+      // And once that is gone too, the row is not handed a focus that was never in the conversation.
+      act(() => { void go("/chat/s1"); });
+      elsewhere.focus();
+      elsewhere.remove();
+      act(() => { void go(-1); });
+      expect(screen.getByRole("button", { name: "Alice" })).not.toHaveFocus();
+    } finally { elsewhere.remove(); }
+  });
+
+  it("leaves two panes as they were: the focus goes to the open page's column", () => {
+    mobile = false;
+    try {
+      backFrom("/chat/s1", () => screen.getByRole("heading", { name: "Chat s1" }));
+      expect(document.activeElement).toBe(document.querySelector("main"));
+    } finally { mobile = true; }
   });
 });

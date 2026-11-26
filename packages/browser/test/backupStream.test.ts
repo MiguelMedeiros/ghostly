@@ -195,6 +195,35 @@ describe("a backup written a piece at a time (envelope version 2)", () => {
     await expect(writer.json(text)).rejects.toThrow("A record of this profile is too large for a backup");
   }, 120_000);
 
+  it("refuses a bundle whose JSON unpacks to far more than any profile's: each record under its own cap", async () => {
+    // Five records of 20 MiB that compress to ~20 KB each: 100 MiB of JSON from a bundle of ~100 KB.
+    const big = JSON.stringify({ t: "later", pad: "a".repeat(20 * MIB) });
+    const bundle = await make(PASS, async (writer) => { for (let i = 0; i < 5; i++) await writer.json(big); });
+    expect(bundle.length).toBeLessThan(MIB);
+    await expect(readAll(bundle, PASS)).rejects.toThrow("This backup is too large to restore");
+    // As much JSON in a bundle of its size (bytes that do not compress) reads back.
+    const real = await make(PASS, async (writer) => { await writer.bytes(pattern(2 * MIB)); for (let i = 0; i < 5; i++) await writer.json(big); });
+    expect((await readAll(real, PASS)).filter((record) => record.json).length).toBe(5);
+  }, 60_000);
+
+  it("a reader given a smaller cap per record refuses a larger one", async () => {
+    const bundle = await make(PASS, async (writer) => { await writer.json(JSON.stringify({ pad: "a".repeat(2 * MIB) })); });
+    const reader = (await BackupReader.open(bytesSource(bundle), PASS, undefined, { limits: { recordBytes: MIB } }))!;
+    await expect(reader.next()).rejects.toThrow("This backup is too large to restore");
+  });
+
+  it("a reader given a smaller total refuses a bundle whose JSON adds up past it", async () => {
+    const record = JSON.stringify({ pad: "a".repeat(MIB) });
+    const bundle = await make(PASS, async (writer) => { for (let i = 0; i < 3; i++) await writer.json(record); });
+    const open = async () => (await BackupReader.open(bytesSource(bundle), PASS, undefined, { limits: { totalBytes: 2 * MIB + 1024, perByte: 1 } }))!;
+    const reader = await open();
+    expect((await reader.next())?.json).toBe(record);
+    expect((await reader.next())?.json).toBe(record);
+    await expect(reader.next()).rejects.toThrow("This backup is too large to restore");
+    // At the default (64 MiB plus 64 times the bundle) the same bundle reads whole.
+    expect(await readAll(bundle, PASS)).toHaveLength(3);
+  });
+
   it("a short piece of JSON is written plain, a long one compressed, and both read back", async () => {
     const short = JSON.stringify({ t: "file", id: "f-1", name: "note.txt", size: 20_480 });
     const long = JSON.stringify({ t: "head", ids: Array.from({ length: 200 }, (_, i) => `contact-${i}`) });

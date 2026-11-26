@@ -6,7 +6,7 @@ import { bool, chatOf, inviteTaken, node, num, oneOf, ownChatOf, sentAt, state, 
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CASHU_MINT_SOURCE } from "@ghostly/browser/engine/paymentAdapters/providers/cashuMint";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
-import { CliError, type ErrorCode } from "./errors";
+import { CliError, shownValue, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
 import { findSecret, secretWords } from "./secretGuard";
 import { shellWord } from "./shellWord";
@@ -52,7 +52,8 @@ function createChecked(type: WalletType, n: WalletNetwork, offer: WalletOffer | 
   if (!sources?.length) return;
   if (!provider) throw new CliError("bad_request", `${type} needs --provider: one of ${sources.map((p) => p.id).join(", ")} (ghostly wallet list)`);
   const source = sources.find((p) => p.id === provider);
-  if (!source) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
+  // A value that names no source is said as `shownValue` says it: a connection link typed here carries its secret.
+  if (!source) throw new CliError("bad_request", `No ${type} source ${shownValue(provider)} on ${n} (ghostly wallet list)`);
   const unknown = Object.keys(values).find((name) => !source.fields.some((f) => f.name === name));
   // Never the name itself: a secret given with no name= but with a base64 `=` (a macaroon, a rune) reads as one (`pairs`).
   if (unknown) throw new CliError("bad_request", `one --value names no field of ${provider}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
@@ -72,7 +73,7 @@ function netView(s: EngineState, n: WalletNetwork): NetworkWalletsView | undefin
 /** A Lightning card named by `card` on the network asked: one that is not there is not_found, before the engine is asked. */
 function lightningCard(ctx: ApiContext, params: Params): void {
   const n = network(params), card = str(params, "card", true);
-  if (!netView(state(ctx), n)?.lightnings?.some((c) => c.card === card)) throw new CliError("not_found", `No Lightning card ${JSON.stringify(card)} on ${n} (ghostly wallet list)`);
+  if (!netView(state(ctx), n)?.lightnings?.some((c) => c.card === card)) throw new CliError("not_found", `No Lightning card ${shownValue(card)} on ${n} (ghostly wallet list)`);
 }
 
 /**
@@ -544,7 +545,7 @@ const WALLETS: Record<string, Method> = {
     if (request?.linkId === link.id && request.kind !== "request") {
       throw new CliError("not_found", `${JSON.stringify(paymentId)} is ${request.direction === "out" ? "a payment you sent" : "a payment you received"}, not a request: chat pay-request pays a request the contact made of you ${listed}`);
     }
-    if (!request || request.linkId !== link.id) throw new CliError("not_found", `No request ${JSON.stringify(paymentId)} in this chat ${listed}`);
+    if (!request || request.linkId !== link.id) throw new CliError("not_found", `No request ${shownValue(paymentId)} in this chat ${listed}`);
     // One I made is the contact's to pay: the engine knew it only as "Unknown payment request" (engine, exit 1).
     if (request.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(paymentId)} is your own request: the contact pays it`);
     // The request says which network it is paid on: real money or test coins, never the choice of the payer.
@@ -590,7 +591,7 @@ const WALLETS: Record<string, Method> = {
     const s = state(ctx);
     const link = chatOf(ctx, params, s);
     const p = s.payments[str(params, "payment", true)];
-    if (p?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
+    if (p?.linkId !== link.id) throw new CliError("not_found", `No payment ${shownValue(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
     // The contact's app is asked to look for a request it made: one of mine, or a payment, has nothing to look for.
     if (p.kind !== "request" || p.direction !== "in") throw new CliError("bad_request", `${JSON.stringify(p.id)} is ${p.kind === "request" ? "your own request" : p.direction === "out" ? "a payment you sent" : "a payment you received"}: payment check is for a request the contact made of you`);
     await node(ctx).checkPayment({ linkId: link.id, paymentId: str(params, "payment", true) });
@@ -598,7 +599,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "payment.reclaim"(ctx, params) {
-    if (!state(ctx).payments[str(params, "payment", true)]) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} (ghostly payment list)`);
+    if (!state(ctx).payments[str(params, "payment", true)]) throw new CliError("not_found", `No payment ${shownValue(str(params, "payment", true))} (ghostly payment list)`);
     await node(ctx).reclaimPayment({ paymentId: str(params, "payment", true) });
     const p = state(ctx).payments[str(params, "payment", true)];
     return p ? paymentJson(p) : { paymentId: str(params, "payment", true) };

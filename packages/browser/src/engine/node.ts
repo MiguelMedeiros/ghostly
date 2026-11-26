@@ -127,7 +127,7 @@ import {
 import type { AppRangeAsk, AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { SavedMessages } from "./saved";
 import { ChatTextSearch } from "./chatSearch";
-import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, committed, type StoredFile } from "../shared/idb";
+import { DEPARTED_KEY, STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, committed, type StoredFile } from "../shared/idb";
 import { Apps, type AppDataExport, type AppDataExportText, type AppFileAt, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
 import { boundedAppFetch } from "./appFetch";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
@@ -906,6 +906,16 @@ export interface NodeEvents {
  */
 /** A waiting file or request that went out: it shows like any other from now on (a file by its transfer). */
 /** The contact's typing as the chat shows it: plain typing needs only `peerTyping`. */
+/**
+ * A 1:1 chat's pin as it is shown: one naming a message deleted for everyone (`removed`, or kept before it was marked,
+ * by `removedRefs`) is unpinned (no `id`), its number kept. What an unpin goes by, so a pin shown gone is not removed
+ * again.
+ */
+function linkPinShown(stored: StoredLink): StoredPin | undefined {
+  const pin = stored.pin;
+  return pin?.id && (pin.removed || stored.removedRefs?.includes(pin.id)) ? { ...pin, id: "", messageId: undefined } : pin;
+}
+
 function typingView(activity: TypingActivity | null): Pick<LinkView, "peerTyping" | "peerTypingKind" | "peerTypingStatus"> {
   return {
     peerTyping: true,
@@ -1198,9 +1208,10 @@ export class GhostlyNode implements EngineImplementation {
     },
     transfers: this.transfers,
     changed: (delayMs) => this.emitState(delayMs),
-    // A file's progress, 4 states a second: its chat's view built again (what room its contact said it has), not every chat's.
-    progressed: (linkId) => { if (this.links.has(linkId)) this.chatChanged(linkId, 250); else this.emitState(250); },
-    flush: () => this.flushState(),
+    // A file's progress, 4 states a second, or a contact's new file: its chat's view built again (what room its contact
+    // said it has), not every chat's.
+    changedIn: (linkId, delayMs) => { if (this.links.has(linkId)) this.chatChanged(linkId, delayMs); else this.emitState(delayMs); },
+    flush: (linkId) => this.flushState(linkId),
     settled: (linkId, fileId, record, seen) => {
       if (seen && record.direction === "in" && record.state === "done") this.cueFeedback({ cue: "downloaded", key: fileId }, this.chatOf(linkId));
       void this.noteFileEnd(linkId, fileId, record.state === "done" ? undefined : record.error ?? record.state, !seen);
@@ -1575,6 +1586,10 @@ export class GhostlyNode implements EngineImplementation {
     listable: () => {
       const now = Date.now() / 1000;
       return new Map(this.identities.views().filter(v => v.publicUri && v.expiresAt > now).map(v => [v.id, v.publicUri!]));
+    },
+    expiresAt: id => {
+      const view = this.identities.views().find(v => v.id === id);
+      return view && view.expiresAt * 1000;
     },
     proofIds: () => this.identities.views().map(v => v.id),
     publish: (pubKeyZ32, payload) => {
@@ -2478,6 +2493,7 @@ export class GhostlyNode implements EngineImplementation {
 
     const links = await db.getLinks();
     this.unshareServicesOfGone(links);
+    this.lastRunDeparted = await this.takeDepartedMark();
     if (this.options.deferChats) for (const stored of links) {
       if (!stored.group) this.deferredChats.add(stored.id);
       // A group's edges, not the entry sessions of a join that waits for its admin: those go on as they did.
@@ -2984,6 +3000,27 @@ export class GhostlyNode implements EngineImplementation {
    */
   depart(options: { quitting?: boolean } = {}): void {
     for (const live of this.links.values()) live.link?.depart(options);
+    // For the next start (`lastRunDeparted`). Not waited for: a stop takes longer than this write (its links' leave
+    // packets go out first), and a page closing may not have the time anyway; that start then takes the contacts for
+    // still holding their sessions, and only looks for their answers less often.
+    void store(STORES.settings, "readwrite").then((settings) => committed(settings.put({ at: Date.now() }, DEPARTED_KEY))).catch(() => {});
+  }
+
+  /**
+   * Whether this app's last run said goodbye (`depart`) as it ended. Not (a crash, a kill): a contact live with it then
+   * still holds that session, and answers a resume only once it finds it gone (`GhostLinkOptions.resumeUnannounced`).
+   * Read at start, and taken away, so a crash in this run is not taken for a goodbye.
+   */
+  private lastRunDeparted = true;
+  private async takeDepartedMark(): Promise<boolean> {
+    try {
+      const mark = await wrap((await store(STORES.settings, "readonly")).get(DEPARTED_KEY));
+      if (mark === undefined) return false;
+      await committed((await store(STORES.settings, "readwrite")).delete(DEPARTED_KEY));
+      return true;
+    } catch {
+      return true;
+    }
   }
 
   /**
@@ -3040,7 +3077,7 @@ export class GhostlyNode implements EngineImplementation {
     if (this.restoreTimer) clearTimeout(this.restoreTimer);
     this.restoreTimer = null;
     this.identities.stop();
-    this.did.stop();
+    const didClosed = this.did.close();
     this.contactLinks.stop();
     this.contactAsks.stop();
     this.nostrSocial.stop();
@@ -3063,6 +3100,10 @@ export class GhostlyNode implements EngineImplementation {
       this.groups.flush(),
       // The quotes of messages removed within the last seconds: swept now, or the replies keep their lines (WISP 400).
       this.quoteSweeps.stop(),
+      // A removed proof's revocation still on its way: a CLI one-shot that removed it would otherwise never publish it.
+      this.identities.published(),
+      // The same for a listing of the public DID changed within the last 2 s (`ProfileDid.close`).
+      didClosed,
       ...WALLET_NETWORKS.flatMap((network) => [this.arkWallets, this.barkWallets, this.fedimintWallets, this.sparkWallets, this.usdtWallets, this.lightnings, this.bitcoins]
         .map((wallets) => wallets[network].stop())),
       // The Cashu wallet too: its polls would otherwise go on writing after the stop.
@@ -5421,8 +5462,10 @@ export class GhostlyNode implements EngineImplementation {
     // Taken only when it fits in the room left now (`FileDesk.accept`): one that does not keeps waiting.
     if (action === "accept") return this.fileDesk.accept(linkId, fileId).then(() => {});
     const now = this.fileDesk.act(linkId, fileId, action);
-    // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now.
-    if (!now && (action === "resend" || action === "request") && live.link && !live.link.isDataLinkOpen) void this.connect({ linkId }).catch(() => {});
+    // Sent again or asked again with no live session: it goes when the chat is live, and the chat tries now. One waiting
+    // its turn to resume (`ResumeTurns`) has no link yet: it starts now, ahead of the line.
+    const tries = live.link ? !live.link.isDataLinkOpen : this.resumeTurns.waits(linkId);
+    if (!now && (action === "resend" || action === "request") && tries) void this.connect({ linkId }).catch(() => {});
   }
 
   /** The contact can take a file on the open session: files/2 or files/3. */
@@ -5707,7 +5750,7 @@ export class GhostlyNode implements EngineImplementation {
     this.transfers.set(file.id, { state: "transferring", transferred: 0, size: file.size });
     // The app has its transfer before its message: a file shown with no transfer and no bytes reads as gone, and one
     // that arrived within the state's usual wait said "No longer available" until it was all here.
-    this.flushState();
+    this.flushState(linkId);
     // files/2 names a file's message by the sender's time, as the sender's reactions, edits and deletes do. Another
     // file (or a message) already at that time keeps its place, and this one gets an id of its own: its bytes never
     // land without a message. The same file sent again after its transfer failed lands in the message it had.
@@ -6460,7 +6503,7 @@ export class GhostlyNode implements EngineImplementation {
       // Not a member (removed, say): refused with the reason the group shows, as a reaction is.
       if (!view || view.status !== "active") return { error: view?.statusReason ?? "You are not in this group", refused: true };
       if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
-      const current = this.groups.pinOf(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
+      const current = this.groups.pinShown(groupId), pin = await myPin(host, linkId, messageId, !!remove, current);
       if ("error" in pin) return pin;
       // Pinned already: nothing goes. My own pin's number is still the one its edges take (`groupTaken`).
       if ("already" in pin) return { error: null, ...(current?.by === "me" && { n: current.n }) };
@@ -6479,7 +6522,7 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live || live.stored.group) return { error: "No such chat" };
     if (!live.stored.profile) return { error: "Pins need a current chat; this compatibility chat sends text only." };
-    const pin = await myPin(host, linkId, messageId, !!remove, live.stored.pin);
+    const pin = await myPin(host, linkId, messageId, !!remove, linkPinShown(live.stored));
     if ("error" in pin) return pin;
     if ("already" in pin) return { error: null };
     await this.keepLinkPin(linkId, pin, { id: pin.id, n: pin.n });
@@ -6756,7 +6799,7 @@ export class GhostlyNode implements EngineImplementation {
    * opens). An edge that took my own pin counts for `groupTaken` (`pinKey`).
    */
   private sendGroupPinFrame(groupId: string, member: string): void {
-    const pin = this.groups.pinOf(groupId), edge = this.memberEdges(groupId).get(member);
+    const pin = this.groups.pinToSay(groupId), edge = this.memberEdges(groupId).get(member);
     // One whose number does not hold counts as none: no member takes it.
     if (!pin?.k || !pin.sig || !edge || this.groups.isCommunityGroup(groupId) || !pinNumberHolds(pin.n)) return;
     const frame: GroupPinFrame = { t: "group-pin", g: groupId, id: pin.id, n: pin.n, k: pin.k, sig: pin.sig };
@@ -9513,6 +9556,8 @@ export class GhostlyNode implements EngineImplementation {
         automatic: stored.preferredTransport === undefined },
       // Live when this app last ran: the contact may still hold that session, and is reached again at once (WISP 100).
       resume: resumed.resume,
+      // That run ended with no goodbye: the contact answers only once it finds the session gone.
+      resumeUnannounced: !!resumed.resume && !this.lastRunDeparted,
       // An offer from before that live stretch began is not answered after a restart (a relay that missed its clearing).
       resumeFloor: resumed.floor,
       pairing: credentials ? {
@@ -9563,10 +9608,12 @@ export class GhostlyNode implements EngineImplementation {
       groupsSupport: !!stored.profile,
       // Heard only while this is the chat's link: once the chat is deleted, nothing it hears is acted on.
       events: whileChat({
+        // Its chat's view alone is built again: with the relays out of reach, each waiting invite's publish fails every 4 s,
+        // and 40 of them built every chat's and group's view about 40 times a minute on an idle daemon (bug hunt, 2026-11-25).
         onPairingProgress: progress => {
           if (knockCue(live.pairingProgress, progress)) this.cueFeedback({ cue: "knock", key: `${linkId}:${progress.startedAt}` }, linkId);
           live.pairingProgress = progress;
-          this.emitState();
+          this.chatChanged(linkId);
         },
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
@@ -9635,7 +9682,7 @@ export class GhostlyNode implements EngineImplementation {
           live.discoveryError = error ?? undefined;
           // The contact's packet cannot be read: the listener let go while it was away listens again (`contactGone`).
           if (live.goneListener && this.contactUnread(live)) this.listenAgain(live);
-          this.emitState();
+          this.chatChanged(linkId);
         },
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
           const patch = { peerDescriptors, peerTransports, peerFallback };
@@ -11012,7 +11059,7 @@ export class GhostlyNode implements EngineImplementation {
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
       // The pinned message was deleted for everyone: nothing of it stays, its pin neither, as in a group (`Groups.pinned`).
       // The pin is kept as it came, so the same pin said again is no newer; one kept before it was marked, by `removedRefs`.
-      ...(stored.pin && { pin: pinView(stored.pin.id && (stored.pin.removed || stored.removedRefs?.includes(stored.pin.id)) ? { ...stored.pin, id: "", messageId: undefined } : stored.pin) }),
+      ...(stored.pin && { pin: pinView(linkPinShown(stored)) }),
       participationKey: participationKeyOf(live),
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,
@@ -11132,11 +11179,16 @@ export class GhostlyNode implements EngineImplementation {
     }, delayMs);
   }
 
-  /** The state now, not after `emitState`'s wait: for what the app must have before what follows it. */
-  private flushState(): void {
+  /**
+   * The state now, not after `emitState`'s wait: for what the app must have before what follows it. It builds the views
+   * the state waiting would have, and `linkId`'s: each file a contact offers sends one, and building every chat's and
+   * group's view for it (`getState`) cost 45 ms at 2,000 chats, and each extension tab a whole copy of every view.
+   */
+  private flushState(linkId: string): void {
     if (this.stateTimer) { clearTimeout(this.stateTimer); this.stateTimer = null; }
     if (this.gatedOut) return;
-    this.events.onState(this.getState());
+    this.changedChats?.add(linkId);
+    this.events.onState(this.pushedState());
     this.dropBriefViews();
   }
 

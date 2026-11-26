@@ -114,13 +114,30 @@ describe("the CLI's knobs for a private network", () => {
       ["http://alice:s3cret@iroh.lan/#t0k", "GHOSTLY_IROH_RELAYS: Use an https:// relay address: http://iroh.lan/"],
       ["https://alice:s3cret@iroh lan?token=t0k", "GHOSTLY_IROH_RELAYS: Not a relay address: https://iroh lan"],
       ["http://iroh.lan", "GHOSTLY_IROH_RELAYS: Use an https:// relay address: http://iroh.lan"],
+      // A ? or # before the last @: that @ may be in the password or in the query, so neither is said, only the scheme.
+      ["https://alice:s3cr#et@relay.example", "GHOSTLY_IROH_RELAYS: Not a relay address: https://…"],
+      ["https://relay.example.org/?user=me@example.org&token=s3cr3t", "GHOSTLY_IROH_RELAYS: Not a relay address: https://…"],
+      ["https://relay.example.org/#a@s3cr3t", "GHOSTLY_IROH_RELAYS: Not a relay address: https://…"],
+      // A comma in the password splits the address before its @: only the refused piece's scheme is said.
+      ["https://alice:hunter,s3cr3t@relay.example", "GHOSTLY_IROH_RELAYS: Not a relay address: https://…"],
     ];
     for (const [value, message] of iroh) expect(() => irohRelays({ GHOSTLY_IROH_RELAYS: value }), value).toThrow(expect.objectContaining({ code: "usage", message }));
     const pkarr: [string, string][] = [
       ["http://alice:s3cret@relay lan?token=t0k", 'GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not "http://relay lan"'],
       ["relay.lan", 'GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not "relay.lan"'],
+      ["http://alice:s3cr?et@relay.example", 'GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not "http://…"'],
+      ["http://alice:hunter,s3cr3t@relay.example", 'GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not "http://…"'],
     ];
     for (const [value, message] of pkarr) expect(() => pkarrRelays({ GHOSTLY_PKARR_RELAYS: value }), value).toThrow(expect.objectContaining({ code: "usage", message }));
+  });
+
+  it("GHOSTLY_IROH_RELAYS and GHOSTLY_PKARR_RELAYS: a long list of refused pieces is read at once", () => {
+    const value = "a,".repeat(65536);
+    for (const read of [() => irohRelays({ GHOSTLY_IROH_RELAYS: value }), () => pkarrRelays({ GHOSTLY_PKARR_RELAYS: value })]) {
+      const start = performance.now();
+      expect(read).toThrow(expect.objectContaining({ code: "usage" }));
+      expect(performance.now() - start).toBeLessThan(2000);
+    }
   });
 
   it("GHOSTLY_STUN=0: the apps' public STUN servers out, the profile's own kept", () => {

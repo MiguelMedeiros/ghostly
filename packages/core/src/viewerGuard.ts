@@ -11,7 +11,8 @@ import type { HeaderList } from "./frames";
  * - opens every new window with `noopener`, so the page never holds a window it did not run in;
  * - runs in a frame's window before the page holds it: what a frame element hands out (`contentWindow`,
  *   `contentDocument`, `getSVGDocument`) is guarded first, in a shadow tree too, and the frames of the document are
- *   gone over as one loads (an empty frame's first load fires as it is put in the page) and as the page changes;
+ *   gone over as one loads (an empty frame's first load fires as it is put in the page) and as the page changes,
+ *   passing by a frame of another origin without touching it (its prototype reads as null);
  * - puts itself first in each `srcdoc` frame, in the shadow trees the page makes too, and, with `VIEWER_GUARD_CSP`,
  *   refuses `javascript:` URLs (its own Trusted Types default policy: one passes every other string on as it is, or,
  *   once the page made its own `default` policy, to that one's rules: the page's `createPolicy("default")` gets the
@@ -19,7 +20,12 @@ import type { HeaderList } from "./frames";
  *   there before it, the clipboard guard's in a web page, it leaves that one as it is);
  * - refuses a declarative shadow root the page's script would make (`setHTMLUnsafe`, `Document.parseHTMLUnsafe`,
  *   `document.write`, a write split in two too): its `srcdoc` frames would be out of the guard's sight;
- * - listens for frames' loads again after `document.open()`, which takes every listener of the document away;
+ * - listens for frames' loads again after `document.open()`, which takes every listener of the document away, and
+ *   before what a `document.write()` or `writeln()` gives is parsed: one with no insertion point (the page has loaded)
+ *   runs those same open steps without `open()`, so an empty write goes first, for the browser to run them (or not, as
+ *   it would for the page's), and the scripts the page writes run with frames' loads listened for. One of those three
+ *   called on another window's document (`Document.prototype.write.call(frame.contentDocument, …)`) is handed to that
+ *   window's own method, so the guard there listens again (a window whose own is this one again throws);
  * - starts a worker made from a `blob:` URL of the page's own (`URL.createObjectURL` in that window) from a script of its
  *   own that makes a pass-through Trusted Types `default` policy there first and then runs the page's (`importScripts`;
  *   for a module worker, a static `import` of the policy's module, then of the page's): such a worker takes the page's
@@ -27,10 +33,13 @@ import type { HeaderList } from "./frames";
  *   the same script, so it is the same worker; the page's revoke of the blob's URL drops the guard's own a minute later.
  *   A `data:` worker, and a blob made in another window, in a worker or already revoked, run as they were. Once per
  *   window, whichever guard runs first (`ghostlyWorkerGuard`, `CLIPBOARD_GUARD_SCRIPT` does the same).
- * - takes out each `<script type="speculationrules">` as it is put in the page, a shadow tree the page makes included:
- *   Chromium would prefetch or prerender the pages it lists on a server the contact names, which no policy covers
- *   (`'unsafe-inline'` lets inline rules in); the `Speculation-Rules` header is not passed on (`VIEWER_DROPPED_HEADERS`).
- * It uses nothing the page can change after it ran (the page's own code runs later, in the same realm).
+ * - takes out each `<script type="speculationrules">` as it is put in the page or given that type, a shadow tree the
+ *   page makes included: Chromium would prefetch or prerender the pages it lists on a server the contact names, which
+ *   no policy covers (`'unsafe-inline'` lets inline rules in); the `Speculation-Rules` header is not passed on
+ *   (`VIEWER_DROPPED_HEADERS`).
+ * It goes over the whole page once, then only over what each change put in it and the elements whose `srcdoc` or
+ * `type` it set, so no change costs more as the page grows. It uses nothing the page can change after it ran (the
+ * page's own code runs later, in the same realm).
  *
  * What a script put in the page cannot do, so where the viewer does not run it per document this is not a guarantee:
  * a frame's window read by its index (`window[0]`, never through the frame element) while the frame's page is still
@@ -83,8 +92,9 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
     w.open = opener;
     const describe = Object.getOwnPropertyDescriptor;
     const define = Object.defineProperty;
+    const above = Object.getPrototypeOf;
     const shut = (inner) => {
-      try { if (inner && inner !== w && ("RTCPeerConnection" in inner || "webkitRTCPeerConnection" in inner)) noWebRtc(inner); } catch (e) {}
+      try { if (inner && inner !== w && apply(above, null, [inner]) !== null && ("RTCPeerConnection" in inner || "webkitRTCPeerConnection" in inner)) noWebRtc(inner); } catch (e) {}
     };
     const count = describe(w, "length").get;
     const view = describe(w.Document.prototype, "defaultView").get;
@@ -94,9 +104,15 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
     };
     const listen = w.EventTarget.prototype.addEventListener;
     const home = w.document;
+    const away = (doc) => {
+      const there = apply(view, doc, []);
+      return there !== null && there !== w ? there : null;
+    };
     const reopen = w.Document.prototype.open;
     w.Document.prototype.open = function () {
       if (arguments.length > 2) return apply(opener, w, [arguments[0], arguments[1]]);
+      const there = away(this);
+      if (there !== null) return apply(there.Document.prototype.open, this, arguments);
       const got = apply(reopen, this, arguments);
       if (this === home) { try { apply(listen, home, ["load", sweep, true]); } catch (e) {} }
       return got;
@@ -117,6 +133,7 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
       };
     }
     let tail = "";
+    const blank = w.Document.prototype.write;
     for (const name of ["write", "writeln"]) {
       const real = w.Document.prototype[name];
       if (typeof real !== "function") continue;
@@ -125,6 +142,12 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
         for (let i = 0; i < arguments.length; i++) checked += text(arguments[i]);
         if (shadowed(tail + checked)) refuse();
         tail = apply(slice, tail + checked, [-16]);
+        const there = away(this);
+        if (there !== null) return apply(there.Document.prototype[name], this, [checked]);
+        if (this === home) {
+          apply(blank, home, [""]);
+          try { apply(listen, home, ["load", sweep, true]); } catch (e) {}
+        }
         return apply(real, this, [checked]);
       };
     }
@@ -160,20 +183,60 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
     };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
+    const getter = (kind, name) => {
+      try {
+        const found = describe(kind.prototype, name);
+        return found && typeof found.get === "function" ? found.get : null;
+      } catch (e) { return null; }
+    };
+    const kindOf = getter(w.MutationRecord, "type");
+    const targetOf = getter(w.MutationRecord, "target");
+    const addedOf = getter(w.MutationRecord, "addedNodes");
+    const nodeType = getter(w.Node, "nodeType");
+    const { matches, querySelectorAll: within } = w.Element.prototype;
+    const piecemeal = kindOf !== null && targetOf !== null && addedOf !== null && nodeType !== null && typeof matches === "function" && typeof within === "function";
+    const framed = "iframe[srcdoc]";
+    const check = (node) => {
+      if (apply(nodeType, node, []) !== 1) return false;
+      if (apply(matches, node, [framed])) first(node);
+      else if (apply(matches, node, ["script"])) unruled(node);
+      return true;
+    };
+    const each = (node) => {
+      if (!check(node)) return;
+      const frames = apply(within, node, [framed]);
+      for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+      const scripts = apply(within, node, ["script"]);
+      for (let i = apply(size, scripts, []); i-- > 0;) unruled(scripts[i]);
+    };
     const watch = (root, all) => {
-      const scan = () => {
+      const look = () => {
         try {
-          const frames = apply(all, root, ["iframe[srcdoc]"]);
+          const frames = apply(all, root, [framed]);
           for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
         } catch (e) {}
         try {
           const scripts = apply(all, root, ["script"]);
           for (let i = apply(size, scripts, []); i-- > 0;) unruled(scripts[i]);
         } catch (e) {}
+      };
+      const changed = (records) => {
+        let whole = !piecemeal;
+        try {
+          for (let r = 0; !whole && r < records.length; r++) {
+            const record = records[r];
+            check(apply(targetOf, record, []));
+            if (apply(kindOf, record, []) !== "childList") continue;
+            const added = apply(addedOf, record, []);
+            for (let i = apply(size, added, []); i-- > 0;) each(added[i]);
+          }
+        } catch (e) { whole = true; }
+        if (whole) look();
         sweep();
       };
-      apply(observe, new Observer(scan), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
-      scan();
+      apply(observe, new Observer(changed), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc", "type"] }]);
+      look();
+      sweep();
       return root;
     };
     const inShadow = w.DocumentFragment.prototype.querySelectorAll;
@@ -249,7 +312,7 @@ export const VIEWER_GUARD_SCRIPT = `(function noWebRtc(w) {
 })(window)`;
 
 /** `VIEWER_GUARD_SCRIPT`'s hash, as a CSP source: a contact's own policy that would refuse it is given it (`allowingViewerGuard`). */
-export const VIEWER_GUARD_HASH = "'sha256-ie6GQZQ0wmtjA66s3QLqLGKXUfK7SjGjsdWtUKNKArc='";
+export const VIEWER_GUARD_HASH = "'sha256-MqKMlAkESW8mzMW3Iv2QI5mG7JPJskHzws+CD6yFN6g='";
 
 /**
  * With the guard, where it is put in the page and not run by the viewer in every frame: frames only from the app's own

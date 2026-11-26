@@ -1,4 +1,5 @@
 import type { GroupView } from "@ghostly/browser/shared/types";
+import { dayOf, nextDay } from "./chatDays";
 import { sharedRows } from "./chatRows";
 
 /** Who wrote a group's message, as its row shows them (chat/SenderAvatar.tsx): their key, picture and place in a run. */
@@ -30,16 +31,16 @@ export interface RunRow {
 export const RUN_GAP_MS = 5 * 60_000;
 
 /**
- * Whether two times are on one day here (a run never goes past midnight). The last day worked out is kept as its two
- * midnights: a history comes in time order, so a Date is made once a day, not twice a message (local time is slow).
+ * Whether two times are on one day here (a run never goes past midnight), the days the chat's headers go by (`rowDays`):
+ * the day after one whose midnight the clocks skipped starts at its own midnight. The last day worked out is kept as its
+ * two midnights: a history comes in time order, so a Date is made once a day, not twice a message (local time is slow).
  */
 function dayCheck(): (a: number, b: number) => boolean {
   let from = 0, to = -1;
   return (a, b) => {
     if (a < from || a >= to) {
-      const day = new Date(a);
-      from = day.setHours(0, 0, 0, 0);
-      to = day.setDate(day.getDate() + 1);
+      from = dayOf(a);
+      to = nextDay(from);
     }
     return b >= from && b < to;
   };

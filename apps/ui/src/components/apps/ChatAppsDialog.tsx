@@ -5,7 +5,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { fillNames } from "../../lib/fillNodes";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { Button, Notice } from "../wallet/ui";
-import { AppIcon } from "./AppIcon";
+import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
 import { appStopped, refreshInstalledApps, sendOpenedCard, useBuiltInApps, useInstalledApps, useInstalledAppsFailure } from "../../lib/apps/installed";
 import { openApp } from "../../lib/apps/open";
@@ -13,9 +13,14 @@ import { chatAppOver } from "../../lib/apps/running";
 import { useTryAgain } from "../../lib/apps/tryAgain";
 import { appErrorText, appErrorView } from "../../lib/apps/errors";
 import { ownDirection } from "../../lib/ownDirection";
+import { isolate } from "../../lib/ownStatus";
+import { sameNameForm } from "../../lib/groups";
 
 /** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
 const opens = (app: InstalledAppView) => !appStopped(app);
+
+/** A title as two rows would read alike, compared as two names are: "Chess", " chess ", "Ｃｈｅｓｓ" and "Сhess" (a Cyrillic С) are one to the eye. */
+const sameTitle = sameNameForm;
 
 /*
  * The composer's + → Apps in a 1:1 chat (WISP 1200 § In a chat): the installed apps, one to open with this contact.
@@ -58,6 +63,12 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
   useDialogFocus(ref, onClose, () => !opened.current);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(failed);
+  // Two apps with one title (a copy of a known app from another publisher) would draw two identical rows: each says whose it
+  // is (its publisher's fingerprint, as the install screen shows it), and a stranger's says so first, as the Apps page does.
+  const titles = new Map<string, number>();
+  for (const app of [...(installed ?? []), ...builtIns]) titles.set(sameTitle(app.title), (titles.get(sameTitle(app.title)) ?? 0) + 1);
+  const shared = (app: InstalledAppView) => (titles.get(sameTitle(app.title)) ?? 0) > 1;
+  const stranger = (app: InstalledAppView) => app.unknownPublisher && !app.builtIn;
 
   const open = async (app: InstalledAppView) => {
     setBusy(app.ref); setError(null);
@@ -113,10 +124,16 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
                     <AppIcon size={36} installed={app} />
                     <div className="min-w-0 flex-1">
                       <p dir="auto" className="text-match-parent text-sm text-text-primary truncate">{app.title}</p>
+                      {(stranger(app) || shared(app)) && (
+                        <p className="flex min-w-0 items-baseline gap-x-1.5 text-xs text-text-muted" data-testid="chat-app-publisher">
+                          {stranger(app) && <span className="shrink-0">{t("apps.install.unknownPublisher")}</span>}
+                          {shared(app) && <span className="min-w-0 truncate"><Fingerprint value={app.fingerprint} /></span>}
+                        </p>
+                      )}
                       <p dir="auto" className="text-match-parent text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t(app.run.status === "needs-files" ? "apps.app.needsFiles" : "apps.app.stopped")}</p>
                     </div>
                   </div>
-                  <Button variant="primary" data-testid="chat-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} disabled={!opens(app) || busy !== null} loading={busy === app.ref} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
+                  <Button variant="primary" data-testid="chat-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: shared(app) ? `${isolate(app.title)} ${app.fingerprint}` : isolate(app.title) })} disabled={!opens(app) || busy !== null} loading={busy === app.ref} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
                 </div>
               ))}
           {installed !== null && builtIns.map((app) => (
@@ -128,7 +145,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
                   <p dir="auto" className="text-match-parent text-xs text-text-muted truncate">{app.tagline}</p>
                 </div>
               </div>
-              <Button variant="primary" data-testid="chat-built-in-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: app.title })} disabled={busy !== null} loading={busy === app.ref} onClick={() => setFirst(app)}>{t("apps.page.open")}</Button>
+              <Button variant="primary" data-testid="chat-built-in-app-open" className="ms-auto" aria-label={t("apps.builtIn.openNamed", { title: isolate(app.title) })} disabled={busy !== null} loading={busy === app.ref} onClick={() => setFirst(app)}>{t("apps.page.open")}</Button>
             </div>
           ))}
           <button type="button" data-testid="chat-apps-browse" onClick={() => { onClose(); nav.open("/apps"); }}

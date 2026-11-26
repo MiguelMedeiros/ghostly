@@ -115,8 +115,9 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     w.open = opener;
     const describe = Object.getOwnPropertyDescriptor;
     const define = Object.defineProperty;
+    const above = Object.getPrototypeOf;
     const shut = (inner) => {
-      try { if (inner && inner !== w && ("RTCPeerConnection" in inner || "webkitRTCPeerConnection" in inner)) noWebRtc(inner); } catch (e) {}
+      try { if (inner && inner !== w && apply(above, null, [inner]) !== null && ("RTCPeerConnection" in inner || "webkitRTCPeerConnection" in inner)) noWebRtc(inner); } catch (e) {}
     };
     const count = describe(w, "length").get;
     const view = describe(w.Document.prototype, "defaultView").get;
@@ -126,9 +127,15 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     };
     const listen = w.EventTarget.prototype.addEventListener;
     const home = w.document;
+    const away = (doc) => {
+      const there = apply(view, doc, []);
+      return there !== null && there !== w ? there : null;
+    };
     const reopen = w.Document.prototype.open;
     w.Document.prototype.open = function () {
       if (arguments.length > 2) return apply(opener, w, [arguments[0], arguments[1]]);
+      const there = away(this);
+      if (there !== null) return apply(there.Document.prototype.open, this, arguments);
       const got = apply(reopen, this, arguments);
       if (this === home) { try { apply(listen, home, ["load", sweep, true]); } catch (e) {} }
       return got;
@@ -149,6 +156,7 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
       };
     }
     let tail = "";
+    const blank = w.Document.prototype.write;
     for (const name of ["write", "writeln"]) {
       const real = w.Document.prototype[name];
       if (typeof real !== "function") continue;
@@ -157,6 +165,12 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
         for (let i = 0; i < arguments.length; i++) checked += text(arguments[i]);
         if (shadowed(tail + checked)) refuse();
         tail = apply(slice, tail + checked, [-16]);
+        const there = away(this);
+        if (there !== null) return apply(there.Document.prototype[name], this, [checked]);
+        if (this === home) {
+          apply(blank, home, [""]);
+          try { apply(listen, home, ["load", sweep, true]); } catch (e) {}
+        }
         return apply(real, this, [checked]);
       };
     }
@@ -192,20 +206,60 @@ const SERVICE_GUARD: &str = r#"(function noWebRtc(w) {
     };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
+    const getter = (kind, name) => {
+      try {
+        const found = describe(kind.prototype, name);
+        return found && typeof found.get === "function" ? found.get : null;
+      } catch (e) { return null; }
+    };
+    const kindOf = getter(w.MutationRecord, "type");
+    const targetOf = getter(w.MutationRecord, "target");
+    const addedOf = getter(w.MutationRecord, "addedNodes");
+    const nodeType = getter(w.Node, "nodeType");
+    const { matches, querySelectorAll: within } = w.Element.prototype;
+    const piecemeal = kindOf !== null && targetOf !== null && addedOf !== null && nodeType !== null && typeof matches === "function" && typeof within === "function";
+    const framed = "iframe[srcdoc]";
+    const check = (node) => {
+      if (apply(nodeType, node, []) !== 1) return false;
+      if (apply(matches, node, [framed])) first(node);
+      else if (apply(matches, node, ["script"])) unruled(node);
+      return true;
+    };
+    const each = (node) => {
+      if (!check(node)) return;
+      const frames = apply(within, node, [framed]);
+      for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+      const scripts = apply(within, node, ["script"]);
+      for (let i = apply(size, scripts, []); i-- > 0;) unruled(scripts[i]);
+    };
     const watch = (root, all) => {
-      const scan = () => {
+      const look = () => {
         try {
-          const frames = apply(all, root, ["iframe[srcdoc]"]);
+          const frames = apply(all, root, [framed]);
           for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
         } catch (e) {}
         try {
           const scripts = apply(all, root, ["script"]);
           for (let i = apply(size, scripts, []); i-- > 0;) unruled(scripts[i]);
         } catch (e) {}
+      };
+      const changed = (records) => {
+        let whole = !piecemeal;
+        try {
+          for (let r = 0; !whole && r < records.length; r++) {
+            const record = records[r];
+            check(apply(targetOf, record, []));
+            if (apply(kindOf, record, []) !== "childList") continue;
+            const added = apply(addedOf, record, []);
+            for (let i = apply(size, added, []); i-- > 0;) each(added[i]);
+          }
+        } catch (e) { whole = true; }
+        if (whole) look();
         sweep();
       };
-      apply(observe, new Observer(scan), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
-      scan();
+      apply(observe, new Observer(changed), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc", "type"] }]);
+      look();
+      sweep();
       return root;
     };
     const inShadow = w.DocumentFragment.prototype.querySelectorAll;
@@ -347,17 +401,54 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
     };
     const Observer = w.MutationObserver;
     const observe = Observer.prototype.observe;
+    const getter = (kind, name) => {
+      try {
+        const found = describe(kind.prototype, name);
+        return found && typeof found.get === "function" ? found.get : null;
+      } catch (e) { return null; }
+    };
+    const kindOf = getter(w.MutationRecord, "type");
+    const targetOf = getter(w.MutationRecord, "target");
+    const addedOf = getter(w.MutationRecord, "addedNodes");
+    const nodeType = getter(w.Node, "nodeType");
+    const matches = elements.matches;
+    const within = elements.querySelectorAll;
+    const piecemeal = kindOf !== null && targetOf !== null && addedOf !== null && nodeType !== null && typeof matches === "function" && typeof within === "function";
+    const framed = "iframe[srcdoc]";
+    const each = (node) => {
+      if (apply(nodeType, node, []) !== 1) return;
+      if (apply(matches, node, [framed])) first(node);
+      const frames = apply(within, node, [framed]);
+      for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
+    };
     const watch = (root, all) => {
-      const scan = () => {
+      const look = () => {
         try {
-          const frames = apply(all, root, ["iframe[srcdoc]"]);
+          const frames = apply(all, root, [framed]);
           for (let i = apply(size, frames, []); i-- > 0;) first(frames[i]);
         } catch (e) {}
+      };
+      const changed = (records) => {
+        let whole = !piecemeal;
+        try {
+          for (let r = 0; !whole && r < records.length; r++) {
+            const record = records[r];
+            const target = apply(targetOf, record, []);
+            if (apply(kindOf, record, []) !== "childList") {
+              if (apply(nodeType, target, []) === 1 && apply(matches, target, [framed])) first(target);
+              continue;
+            }
+            const added = apply(addedOf, record, []);
+            for (let i = apply(size, added, []); i-- > 0;) each(added[i]);
+          }
+        } catch (e) { whole = true; }
+        if (whole) look();
         sweep();
       };
-      apply(observe, new Observer(scan), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
+      apply(observe, new Observer(changed), [root, { subtree: true, childList: true, attributes: true, attributeFilter: ["srcdoc"] }]);
       apply(listen, root, ["load", sweep, true]);
-      scan();
+      look();
+      sweep();
       return root;
     };
     if (fresh) {
@@ -418,14 +509,17 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
         for (let i = 0; i < shutters.length; i++) { try { shutters[i](); } catch (e) {} }
       };
       const taps = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "auxclick", "dblclick", "contextmenu", "touchstart", "touchend", "keydown", "keypress", "keyup"];
-      for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
       const followed = (event) => {
         if (open === 0) return;
         const found = trust(event);
         if (found !== null) follows = { event: event, trusted: found, at: tapped, next: follows };
       };
-      apply(listen, w, ["submit", followed, true]);
-      apply(listen, w, ["change", followed, true]);
+      const hear = () => {
+        for (let i = 0; i < taps.length; i++) apply(listen, w, [taps[i], seen, true]);
+        apply(listen, w, ["submit", followed, true]);
+        apply(listen, w, ["change", followed, true]);
+      };
+      hear();
       const tapping = () => {
         if (tap !== null && dispatching(tap, trusted) && recent(tapped)) return true;
         for (let f = follows; f !== null; f = f.next) if (dispatching(f.event, f.trusted) && recent(f.at)) return true;
@@ -567,10 +661,25 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           }
         } catch (e) {}
       }
+      const reheard = (doc, opening) => {
+        try {
+          if (apply(view, doc, []) === w) {
+            if (opening) apply(opening, doc, [""]);
+            apply(listen, doc, ["load", sweep, true]);
+            hear();
+          }
+        } catch (e) {}
+      };
+      const away = (doc) => {
+        const there = apply(view, doc, []);
+        return there !== null && there !== w ? there : null;
+      };
       const reopen = proto.open;
       proto.open = function () {
+        const there = away(this);
+        if (there !== null) return apply(there.Document.prototype.open, this, arguments);
         const got = apply(reopen, this, arguments);
-        try { if (apply(view, this, []) === w) apply(listen, this, ["load", sweep, true]); } catch (e) {}
+        reheard(this, null);
         return got;
       };
       const shadowed = (html) => apply(index, apply(lower, html, []), ["shadowrootmode"]) >= 0;
@@ -589,6 +698,7 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
         };
       }
       let tail = "";
+      const blank = proto.write;
       const writes = ["write", "writeln"];
       for (let i = 0; i < writes.length; i++) {
         const real = proto[writes[i]];
@@ -598,6 +708,9 @@ const CLIPBOARD_GUARD: &str = r#"(function noClipboardWrites(w) {
           for (let j = 0; j < arguments.length; j++) checked += text(arguments[j]);
           if (shadowed(tail + checked)) refuse();
           tail = apply(slice, tail + checked, [-16]);
+          const there = away(this);
+          if (there !== null) return apply(there.Document.prototype[writes[i]], this, [checked]);
+          reheard(this, blank);
           return apply(real, this, [checked]);
         };
       }
@@ -1028,6 +1141,16 @@ fn viewer_settings(settings: &webkit2gtk::Settings) {
     settings.set_enable_fullscreen(false);
 }
 
+/// The window's web view on Linux, as it is made, before the page runs: its settings, and no print dialog.
+#[cfg(target_os = "linux")]
+fn viewer_webview(webview: &webkit2gtk::WebView) {
+    use webkit2gtk::WebViewExt;
+    if let Some(settings) = WebViewExt::settings(webview) {
+        viewer_settings(&settings);
+    }
+    crate::app_sandbox::no_print(webview);
+}
+
 pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
@@ -1136,12 +1259,7 @@ fn frame_guards(relay_only: bool) -> Vec<&'static str> {
 /// webview, so it goes off again here, as in an app window. WebView2's only fills the webview: the title stays.
 fn no_element_fullscreen<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<()> {
     #[cfg(target_os = "linux")]
-    let done = window.with_webview(|platform| {
-        use webkit2gtk::WebViewExt;
-        if let Some(settings) = WebViewExt::settings(&platform.inner()) {
-            viewer_settings(&settings);
-        }
-    });
+    let done = window.with_webview(|platform| viewer_webview(&platform.inner()));
     #[cfg(target_os = "macos")]
     let done = window.with_webview(|platform| {
         crate::app_sandbox::webkit::no_element_fullscreen(platform.inner())
@@ -2880,5 +2998,15 @@ mod download_tests {
         assert!(settings.enables_fullscreen(), "WebKitGTK's default");
         viewer_settings(&settings);
         assert!(!settings.enables_fullscreen());
+    }
+
+    /// A contact's page that calls `print()` gets it back at once, and no print dialog is up: WebKitGTK's own is
+    /// modal to every window of the app.
+    #[test]
+    #[ignore = "needs a display and a process of its own (app_sandbox::print_in)"]
+    fn a_contacts_page_shows_no_print_dialog() {
+        let (returned, dialog) = crate::app_sandbox::print_in(viewer_webview);
+        assert!(!dialog, "a print dialog was up");
+        assert!(returned, "print() did not return");
     }
 }

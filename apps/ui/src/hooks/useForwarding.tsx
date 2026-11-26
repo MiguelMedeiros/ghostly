@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { useI18n } from "../contexts/I18nContext";
 import { ForwardDialog } from "../components/chat/ForwardDialog";
 import { modalOpen } from "./useAppCommands";
+import { composingKey } from "./useComposition";
 import { focusInPlace } from "../lib/focus";
 import { FORWARD_MAX_MESSAGES, canForward } from "../lib/forward";
 import { touchOnly } from "../lib/touchOnly";
@@ -50,8 +51,9 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
   useEffect(() => {
     if (!selected || forwarding) return;
     // An Escape a menu or a field answered is not the choice's; the one that ends it is spent. One in a modal dialog over
-    // the chat is the dialog's: a <dialog> closes on the key's default action, which cancelling it here would stop.
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented && !modalOpen()) { e.preventDefault(); setSelected(null); } };
+    // the chat is the dialog's: a <dialog> closes on the key's default action, which cancelling it here would stop. One
+    // that only dropped an input method's candidate in a field (the chat's search) is the input method's.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !composingKey(e, null) && !e.defaultPrevented && !modalOpen()) { e.preventDefault(); setSelected(null); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selected, forwarding]);

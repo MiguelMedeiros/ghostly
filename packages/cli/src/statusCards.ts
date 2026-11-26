@@ -2,7 +2,7 @@ import { MESSAGE_CLOCK_SKEW_MS, STATUS_CARD_LIMITS, cardLine, checkStatusCard, r
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret, secretWords } from "./secretGuard";
 import { bool, chatOrGroup, keptForJoin, node, num, oneOf, oneShotWaits, state, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError, asCliError } from "./errors";
+import { CliError, asCliError, shownValue } from "./errors";
 import { checkTextSize } from "./textSize";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
@@ -187,7 +187,7 @@ async function cardMessage(ctx: ApiContext, target: Target, kind: Kind, id: stri
     carried(cards, key, message.id);
     return message;
   }
-  throw new CliError("not_found", `No ${kind} ${JSON.stringify(id)} of yours in this ${target.group ? "group" : "chat"}: send it first with ghostly ${kind} send`);
+  throw new CliError("not_found", `No ${kind} ${shownValue(id)} of yours in this ${target.group ? "group" : "chat"}: send it first with ghostly ${kind} send`);
 }
 
 function answer(target: Target, kind: Kind, id: string, messageId: string, extra: Record<string, unknown>): Record<string, unknown> {
@@ -203,12 +203,18 @@ async function parentThere(ctx: ApiContext, target: Target, card: StatusCard): P
   if (card.kind !== "task" || !card.parent) return;
   const parent = card.parent;
   await cardMessage(ctx, target, "task", parent).catch(() => {
-    throw new CliError("not_found", `--parent: no task ${JSON.stringify(parent)} of yours in this ${target.group ? "group" : "chat"}: send the parent first`);
+    throw new CliError("not_found", `--parent: no task ${shownValue(parent)} of yours in this ${target.group ? "group" : "chat"}: send the parent first`);
   });
 }
 
+/**
+ * `waiting`: told once what the call asks of the engine is done and only its wait for the contact (or an edge) is left
+ * (`sendUsage`, which starts the next chat's report then).
+ */
+type Waiting = (() => void) | undefined;
+
 /** A new card: a message whose text is written from it, in a chat or a group. */
-async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Record<string, unknown>> {
+async function sendCard(ctx: ApiContext, params: Params, kind: Kind, waiting?: Waiting): Promise<Record<string, unknown>> {
   const target = chatOrGroup(ctx, str(params, "chat", true));
   const fields = fieldsOf(params);
   guardSecrets(fields, params, "send");
@@ -229,6 +235,7 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
     const result = await node(ctx).sendGroupMessage({ groupId: target.id, text, card });
     if (result.error || !result.messageId) throw new CliError(result.refused ? "refused" : "unavailable", result.error ?? "Nothing to send");
     carried(carriersOf(ctx), carrierKey(target.linkId, kind, id), result.messageId);
+    waiting?.();
     const edges = wait === "sent" ? await waitForGroupFrame(ctx, target.id, result.messageId, undefined, ms) : undefined;
     return answer(target, kind, id, result.messageId, { card, ...(edges !== undefined && { edges }) });
   }
@@ -237,6 +244,7 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
   carried(carriersOf(ctx), carrierKey(target.linkId, kind, id), result.messageId);
   let message = await node(ctx).getMessage(target.linkId, result.messageId);
+  waiting?.();
   if (wait !== "none") message = await waitForMessage(ctx, target.linkId, result.messageId, wait, ms);
   return answer(target, kind, id, result.messageId, { card, delivery: message?.delivery ?? null, ...keptForJoin(ctx, target.linkId, "the card") });
 }
@@ -268,7 +276,7 @@ async function editCard(ctx: ApiContext, target: Target, messageId: string, card
  * once when the card's last update is `CARD_UPDATE_GAP_MS` old; otherwise it waits for that, merged with any update
  * that comes meanwhile (`queued: true`). A one-shot command waits the time out itself: it has no daemon to wait in.
  */
-async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Record<string, unknown>> {
+async function updateCard(ctx: ApiContext, params: Params, kind: Kind, waiting?: Waiting): Promise<Record<string, unknown>> {
   const target = chatOrGroup(ctx, str(params, "chat", true));
   const id = str(params, kind, true);
   const patch = fieldsOf(params);
@@ -311,11 +319,14 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
       pace.flush = send;
       pace.timer = setTimeout(send, due);
     });
+    // The edit goes from the pace's timer: what is left here is waiting.
+    waiting?.();
     if (wait !== "none") await pace.flushed;
   } else {
     if (due > 0) await new Promise((resolve) => setTimeout(resolve, due));
     pace.last = Date.now();
     await editCard(ctx, target, message.id, card, text);
+    waiting?.();
   }
   let edited = await node(ctx).getMessage(target.linkId, message.id);
   if (wait === "confirmed" && edited?.edit?.pending) edited = await waitForEdit(ctx, target.linkId, message.id, ms);
@@ -349,7 +360,7 @@ export const USAGE_CARD_ID = "usage";
  * it; every later one edits it in place (quiet: no sound, no unread, no move in the list), paced as a task's updates.
  * A report is whole: what it does not say goes from the card. A card at its edits' cap gives way to a new message.
  */
-async function reportUsage(ctx: ApiContext, ref: string, fields: Record<string, unknown>, params: Params): Promise<Record<string, unknown>> {
+async function reportUsage(ctx: ApiContext, ref: string, fields: Record<string, unknown>, params: Params, waiting?: Waiting): Promise<Record<string, unknown>> {
   const target = chatOrGroup(ctx, ref);
   const id = typeof fields.id === "string" && fields.id ? fields.id : USAGE_CARD_ID;
   const report = { updatedAt: Date.now(), ...fields, kind: "usage", id };
@@ -358,12 +369,12 @@ async function reportUsage(ctx: ApiContext, ref: string, fields: Record<string, 
   // A one-shot's report in a chat stays until it went out (a new card) or the contact confirmed it (an update).
   const wait = oneOf(params, "wait", ["none", "sent"] as const, !target.group && oneShotWaits(ctx, target.linkId) ? "sent" : "none");
   if (!sent || (sent.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits) {
-    const answer = await sendCard(ctx, { ...params, chat: ref, card: report, wait }, "usage");
+    const answer = await sendCard(ctx, { ...params, chat: ref, card: report, wait }, "usage", waiting);
     return { ...answer, updated: false };
   }
   const patch: Record<string, unknown> = {};
   for (const key of USAGE_FIELDS) patch[key] = report[key as keyof typeof report] ?? null;
-  const answer = await updateCard(ctx, { ...params, chat: ref, usage: id, card: patch, wait: wait === "none" ? "none" : target.group ? "sent" : "confirmed" }, "usage");
+  const answer = await updateCard(ctx, { ...params, chat: ref, usage: id, card: patch, wait: wait === "none" ? "none" : target.group ? "sent" : "confirmed" }, "usage", waiting);
   return { ...answer, updated: true };
 }
 
@@ -381,15 +392,25 @@ async function sendUsage(ctx: ApiContext, params: Params): Promise<Record<string
   oneOf(params, "wait", ["none", "sent"] as const, "none");
   num(params, "timeout", 30, { min: 1, max: 3600 });
   const chats = state(ctx).links.filter((link) => link.profile && link.peerPubKeyZ32);
+  // What goes to the engine goes one chat at a time, in order, as before; the next chat's report starts once this one
+  // only waits for its contact (`waiting`), so the waits run side by side. One after another, a `--wait sent` took up
+  // to its timeout per contact away, past the client's deadline for one wait: through a daemon the command failed as
+  // "The daemon did not answer" (exit 4), told to restart a sound daemon, and every chat's result was lost.
+  const reports: Promise<Record<string, unknown>>[] = [];
+  for (const link of chats) {
+    let waiting!: () => void;
+    const started = new Promise<void>((resolve) => { waiting = resolve; });
+    const report = reportUsage(ctx, link.id, fields, params, waiting);
+    reports.push(report);
+    await Promise.race([started, report.then(() => {}, () => {})]);
+  }
   const results: Record<string, unknown>[] = [];
   const failed: { chat: string; error: CliError }[] = [];
-  for (const link of chats) {
-    try { results.push(await reportUsage(ctx, link.id, fields, params)); }
-    catch (error) {
-      const refusal = { chat: link.id, error: asCliError(error) };
-      failed.push(refusal);
-      results.push({ chat: link.id, error: refusal.error.toJSON() });
-    }
+  for (const [i, report] of (await Promise.allSettled(reports)).entries()) {
+    if (report.status === "fulfilled") { results.push(report.value); continue; }
+    const refusal = { chat: chats[i]!.id, error: asCliError(report.reason) };
+    failed.push(refusal);
+    results.push({ chat: refusal.chat, error: refusal.error.toJSON() });
   }
   if (failed.length && failed.length === chats.length) {
     const codes = new Set(failed.map((f) => f.error.code));

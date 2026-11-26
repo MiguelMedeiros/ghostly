@@ -1059,10 +1059,10 @@ describe("listen with an allowlist and --turns", () => {
     await handle.idle();
     await vi.waitFor(() => expect(Number(readFileSync(cursor, "utf8").trim())).toBe(frames.at(-1)!.seq));
     expect(lines.map((line) => (JSON.parse(line) as { seq: number }).seq)).toEqual([wanted.seq]);
-    // With nothing at work, a dropped event moves the cursor at once.
+    // With nothing at work, a dropped event moves the cursor too (one write per CURSOR_WRITE_MS, listenCursorWrites).
     const late = other("app.message", { chat: "c1", data: "y" });
     feed.take(late);
-    expect(Number(readFileSync(cursor, "utf8").trim())).toBe(late.seq);
+    await vi.waitFor(() => expect(Number(readFileSync(cursor, "utf8").trim())).toBe(late.seq));
   });
 
   it("--turns takes the place of --type", async () => {

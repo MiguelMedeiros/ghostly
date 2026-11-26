@@ -202,11 +202,17 @@ try {
   check("image from another app is refused", out.img === "blocked" && !reached("evil-img"));
   check("another app cannot be framed", !reached("evil-iframe"));
   check("no extension APIs in the app", out.chrome === false);
+  check("Ghostly's own page in a frame of the app's cannot be read by its index", out.ownPage === "cross-origin", out.ownPage);
   // Before the navigation below, which takes the tab off Evil's page.
   await evilTab.locator("#tap").click();
   await evilTab.locator("#copied").filter({ hasText: /./ }).waitFor({ timeout: 10_000 });
   const copied = await evilTab.locator("#copied").textContent();
   check("a copy from a timer after the person's tap is refused", copied === "false", `execCommand("copy") gave ${copied}`);
+  // Refused, the planted frame never shows its button: nothing to tap, nothing copied.
+  await evilTab.frameLocator("#saved").frameLocator("#planted").locator("#tap").click({ timeout: 5000 }).catch(() => {});
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  const plantedCopied = await evilTab.locator("#planted-copied").textContent();
+  check("a frame put in Ghostly's own page in the tab copies nothing from a timer", plantedCopied !== "true", `execCommand("copy") gave ${plantedCopied || "nothing: the frame was refused"}`);
   await evilTab.evaluate((url) => (location.href = `${url}/?from=evil-nav`), out.sibling).catch(() => {});
   await new Promise((resolve) => setTimeout(resolve, 5000));
   check("navigating the tab to another app is refused", !reached("evil-nav"));

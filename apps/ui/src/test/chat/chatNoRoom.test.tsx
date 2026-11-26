@@ -142,8 +142,15 @@ describe("on a full localStorage", () => {
 
     const field = screen.getByRole("textbox", { name: "Message" });
     act(() => field.focus());
+    // One that only drops an input method's candidate in the field is the input method's: the notice stays.
+    await act(async () => {
+      field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, isComposing: true, keyCode: 229 }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.getByTestId("chat-not-stored")).toBeInTheDocument();
     escape();
     expect(document.activeElement).toBe(field);
+    await waitFor(() => expect(screen.queryByTestId("chat-not-stored")).toBeNull());
   }, 60_000);
 
   it("an Escape that ends a choice of messages started after the notice ends only the choice", async () => {

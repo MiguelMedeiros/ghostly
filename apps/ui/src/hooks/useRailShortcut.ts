@@ -19,7 +19,8 @@ export function useRailShortcut(enabled: boolean, toggle: () => void) {
     const onKey = (e: KeyboardEvent) => {
       if (!isShortcut(e) || modalOpen()) return;
       e.preventDefault();
-      toggle();
+      // Held down, once (appCommands.ts): each repeat folded and unfolded it again.
+      if (!e.repeat) toggle();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

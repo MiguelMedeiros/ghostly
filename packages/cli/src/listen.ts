@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { contactKeyOf, groupPrefixed, nameKey, namedByThem } from "./apiKit";
 import { childEnv } from "./childEnv";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
-import { CliError, localFileError } from "./errors";
+import { CliError, localFileError, shownValue } from "./errors";
 import { shellWord } from "./shellWord";
 import type { GhostlyEvent } from "./events";
 import { jsonOut } from "./jsonOut";
@@ -152,7 +152,7 @@ async function fromChat(ref: string, call: (method: string, params: Record<strin
 
 /** `--group`'s refusal: `ref` found `group` only by its name or a prefix of its id, both chosen by others. */
 function namedByAdmin(ref: string, group: { id: string; name?: string | null }): CliError {
-  return new CliError("bad_request", `${JSON.stringify(ref)} names a group only by what others chose (its name, a prefix of its id): use its id: ghostly listen --group ${shellWord(group.id, group.id)}`, { group: group.id, name: group.name ?? null });
+  return new CliError("bad_request", `${shownValue(ref)} names a group only by what others chose (its name, a prefix of its id): use its id: ghostly listen --group ${shellWord(group.id, group.id)}`, { group: group.id, name: group.name ?? null });
 }
 
 /**
@@ -168,7 +168,7 @@ async function otherFlag(lookup: Promise<unknown>, ref: string, flag: "--from" |
     if (other === "chat" && contactKeyOf(ref) === undefined) await fromChat(ref, call);
     const named = error.details[other] as string;
     const shown = shellWord(named, error.details[other] as string);
-    throw new CliError("not_found", `${JSON.stringify(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
+    throw new CliError("not_found", `${shownValue(ref)} is a ${other}, not a ${flag === "--from" ? "chat" : "group"}: ghostly listen ${flag === "--from" ? "--group" : "--from"} ${shown}`, error.details);
   }
 }
 
@@ -514,15 +514,28 @@ export function eventHandler(options: ListenOptions): EventHandler {
   const slowMs = options.execSlowMs ?? EXEC_SLOW_MS, stopMs = options.stopMs ?? EXEC_STOP_MS;
   /** The last event the cursor says, and the last one `--type` dropped while others were still being handled. */
   let kept = -1, dropped = -1;
+  /** When the cursor was last written, and the write past dropped events that waits for `CURSOR_WRITE_MS`. */
+  let wroteAt = 0, later: ReturnType<typeof setTimeout> | undefined;
   const keep = (seq: number) => {
-    if (!options.cursor) return;
+    // Typing and app frames carry the last journaled event's number: each one wrote that same number again.
+    if (!options.cursor || seq === kept) return;
     try { writeCursor(options.cursor, seq); } catch (error) { throw new CursorError(error); }
     kept = Math.max(kept, seq);
+    wroteAt = Date.now();
   };
-  /** The cursor past events dropped meanwhile, once nothing before them is left to handle. */
-  const keepDropped = () => {
+  /**
+   * The cursor past events dropped meanwhile, once nothing before them is left to handle; at most once per
+   * `CURSOR_WRITE_MS` (`now`: at once, a stop's). Before, each dropped event wrote it: a busy group not on --group, or a
+   * contact's app frames, cost a file write and rename (0.2 ms of a blocked loop) per event. One lost to a crash in
+   * between is dropped again at the next start.
+   */
+  const keepDropped = (now = false) => {
     // Once stopped, never past an event whose hook the stop ended.
     if (stopped || behind > 0 || dropped <= kept) return;
+    const wait = wroteAt + CURSOR_WRITE_MS - Date.now();
+    if (!now && wait > 0) { later ??= setTimeout(() => { later = undefined; keepDropped(); }, wait); return; }
+    clearTimeout(later);
+    later = undefined;
     try { keep(dropped); } catch (failed) {
       if (!(failed instanceof CursorError) || !options.cursorFailed) return;
       stopped = true;
@@ -591,6 +604,7 @@ export function eventHandler(options: ListenOptions): EventHandler {
   };
   const within = (promise: Promise<unknown>, ms: number) => Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms).unref())]);
   const stop = async () => {
+    keepDropped(true);
     stopped = true;
     const hook = running;
     if (!hook) return;
@@ -611,6 +625,9 @@ export function eventHandler(options: ListenOptions): EventHandler {
   };
   return Object.assign(handle, { behind: () => behind, idle: () => chain, stop });
 }
+
+/** The least time between two cursor writes past events a listener drops (`keepDropped`). */
+export const CURSOR_WRITE_MS = 100;
 
 /** Events a listener takes ahead of its output and hooks before it stops taking more (a few MB at most). */
 export const MAX_BEHIND = 1_000;

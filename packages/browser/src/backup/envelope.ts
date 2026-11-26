@@ -19,13 +19,20 @@ async function keyFrom(passphrase: string, salt: Uint8Array, iterations: number)
 /** A profile with years of files is large, but not this large: past it, a bundle is refused, not read. */
 export const MAX_BACKUP_BYTES = 1024 * 1024 * 1024;
 
-async function through(bytes: Uint8Array, stream: CompressionStream | DecompressionStream): Promise<Uint8Array> {
+/**
+ * What a bundle unpacks to: this much plus this many times its own size. Its payload is a profile's rows and files as
+ * base64, which gzip never shrinks dozens of times; one of a few hundred KB that unpacks to a gigabyte was made to.
+ */
+const MAX_PLAIN_FLOOR = 64 * 1024 * 1024;
+const MAX_PLAIN_PER_BUNDLE_BYTE = 64;
+
+async function through(bytes: Uint8Array, stream: CompressionStream | DecompressionStream, limit = MAX_BACKUP_BYTES): Promise<Uint8Array> {
   const reader = new Blob([bytes as BlobPart]).stream().pipeThrough(stream).getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
   for (let next = await reader.read(); !next.done; next = await reader.read()) {
     size += next.value.length;
-    if (size > MAX_BACKUP_BYTES) { await reader.cancel(); throw new Error("This backup is too large to restore"); }
+    if (size > limit) { await reader.cancel(); throw new Error("This backup is too large to restore"); }
     chunks.push(next.value);
   }
   const out = new Uint8Array(size);
@@ -67,6 +74,6 @@ export async function open(text: string, passphrase: string): Promise<string> {
   try {
     body = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromBase64Url(envelope.cipher.iv) as BufferSource, additionalData: header(envelope) as BufferSource }, await keyFrom(passphrase, fromBase64Url(envelope.kdf.salt), envelope.kdf.iterations), fromBase64Url(envelope.ciphertext) as BufferSource));
   } catch { throw new Error("Wrong passphrase, or the backup was changed"); }
-  const plain = envelope.compression === "gzip" ? await through(body, new DecompressionStream("gzip")) : body;
+  const plain = envelope.compression === "gzip" ? await through(body, new DecompressionStream("gzip"), Math.min(MAX_BACKUP_BYTES, MAX_PLAIN_FLOOR + MAX_PLAIN_PER_BUNDLE_BYTE * text.length)) : body;
   return new TextDecoder().decode(plain);
 }

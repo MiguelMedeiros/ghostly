@@ -1,8 +1,9 @@
 import { useEffect, useReducer } from "react";
 import type { AttentionEvent } from "@ghostly/browser/shared/rpc";
-import type { NotificationSettings } from "./settings";
+import type { Language, NotificationSettings } from "./settings";
 import { keyedStorage } from "./keyedStorage";
 import { getPrefix, sessionIdForPeer } from "./storage";
+import { formatAt } from "./time";
 
 /*
  * Muting one chat's notifications, for a while or until turned back on. The choice is this profile's, on this
@@ -154,10 +155,7 @@ export function useChatMute(chat: string): MutedUntil | undefined {
 }
 
 /** When a mute ends, as a person reads it: the time today, else the weekday and time. */
-export function muteEndText(until: number, language: string, now = Date.now()): string {
-  const end = new Date(until);
-  const today = end.toDateString() === new Date(now).toDateString();
-  return today
-    ? end.toLocaleTimeString(language, { hour: "numeric", minute: "2-digit" })
-    : end.toLocaleString(language, { weekday: "short", hour: "numeric", minute: "2-digit" });
+export function muteEndText(until: number, language: Language, now = Date.now()): string {
+  const today = new Date(until).toDateString() === new Date(now).toDateString();
+  return formatAt(until, today ? { hour: "numeric", minute: "2-digit" } : { weekday: "short", hour: "numeric", minute: "2-digit" }, language);
 }

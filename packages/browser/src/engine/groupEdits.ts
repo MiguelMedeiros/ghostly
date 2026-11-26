@@ -374,8 +374,10 @@ export class GroupEdits {
       if (!takes(current) || (current.edit?.seq ?? 0) >= edit.e) return null;
       wasMentioned = !!current.mentioned;
       const next = withEdit(current, { seq: edit.e, at: heardTime(edit.ts), heardAt: this.now(), text: edit.m, card: edit.sc });
-      // Who it names now shows as such; an edit that names me is never a new mention (no sound, no @ in the list).
-      return { text: next.text, edit: next.edit, card: next.card, mentions: edit.k?.length ? edit.k : undefined, mentioned: mentionsMember(edit.k, me) ? true : undefined };
+      // Who it names now shows as such; an edit that names me is never a new mention (no sound, no @ in the list), and
+      // is noted so a restart reads none from it either. One that kept me named since it came stays the mention it was.
+      const names = mentionsMember(edit.k, me), byEdit = names && (!current.mentioned || !!current.mentionedByEdit);
+      return { text: next.text, edit: next.edit, card: next.card, mentions: edit.k?.length ? edit.k : undefined, mentioned: names ? true : undefined, mentionedByEdit: byEdit ? true : undefined };
     });
     if (!updated) return "stale";
     // One that names me no more takes its "@" out of the list too, as a restart reads it from the history.

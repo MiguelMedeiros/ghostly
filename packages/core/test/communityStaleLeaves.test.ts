@@ -77,6 +77,8 @@ class Net {
 }
 
 const CYCLES = 70;
+/** An answer without the name Alice signed at creation: Bob, who never asked her, does not hold it to hand on. */
+const beyondName = (sent: Sent[]) => sent.filter(s => s.t !== "group-meta");
 
 /** Alice (the admin, who commits), Bob and Carol (who never do); then `CYCLES` joiners let in, one text each, and their leave committed by Alice. */
 async function churn() {
@@ -108,7 +110,7 @@ describe("a member who does not commit leaves holds no request for someone alrea
     // Bob answers Carol, who misses nothing, as Alice does: no leave for a member already out.
     const fromBob = await net.answer(bob, carol), fromAlice = await net.answer(alice, carol);
     expect(fromBob.filter(s => s.t === "group-leave")).toEqual([]);
-    expect(fromBob.length).toBe(fromAlice.length);
+    expect(fromBob.length).toBe(beyondName(fromAlice).length);
   });
 
   it("a record that still holds such requests (saved by an earlier version) hands none of them on", async () => {
@@ -123,7 +125,7 @@ describe("a member who does not commit leaves holds no request for someone alrea
     const reopened = net.add("Bob", saved);
     const fromBob = await net.answer(reopened, carol), fromAlice = await net.answer(alice, carol);
     expect(fromBob.filter(s => s.t === "group-leave")).toEqual([]);
-    expect(fromBob.length).toBe(fromAlice.length);
+    expect(fromBob.length).toBe(beyondName(fromAlice).length);
   });
 
   it("a request for a member still in is held and handed on, as before", async () => {

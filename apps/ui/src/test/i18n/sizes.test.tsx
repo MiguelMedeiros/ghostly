@@ -68,6 +68,14 @@ describe("sizes in the app's language", () => {
     expect(formatFileSize(2 * 1024 ** 4, inAr)).toBe("2.0 ت.ب");
   });
 
+  it("a size that rounds up to 1024 of a unit is said in the next one", () => {
+    expect(formatFileSize(1_048_524)).toBe("1023.9 KB");
+    expect(formatFileSize(1_048_570)).toBe("1.0 MB");
+    expect(formatFileSize(1_048_570, inPt)).toBe("1,0 MB");
+    expect(formatFileSize(1024 ** 3 - 1)).toBe("1.0 GB");
+    expect(formatFileSize(1024 ** 4 - 1)).toBe("1.0 TB");
+  });
+
   it("Settings says the storage used in the app's language", async () => {
     windowIs(false);
     renderApp(<LockScreenProvider><UpdateProvider><Routes><Route path="/settings/:section?" element={<Settings />} /></Routes></UpdateProvider></LockScreenProvider>,

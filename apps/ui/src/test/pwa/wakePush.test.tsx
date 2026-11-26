@@ -1049,6 +1049,26 @@ describe("a call that wakes a contact who is away", () => {
       expect(document.activeElement).toBe(screen.getByTestId(pressed));
     });
 
+    // The wait giving up takes Cancel away too: its notice stays with the gave-up text, and the focus fell to the page.
+    it("gives the focus back to the call button when the wait gives up while Cancel has it", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
+        const { user, engine } = renderApp(<Chat sessionId="chat-1" onCallChange={vi.fn()} callLayer={null} visible />);
+        engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("wakeForCall", () => true);
+        act(() => engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "connecting" }, dataLink: "idle", peerWakes: true } as never)] }));
+
+        await user.click(await screen.findByTestId("call-audio"));
+        (await screen.findByTestId("wake-call-cancel")).focus();
+        await act(async () => { await vi.advanceTimersByTimeAsync(WAKE_CALL_WAIT_MS + 10); });
+        expect(screen.getByTestId("wake-call")).toHaveAttribute("data-state", "gave-up");
+        expect(screen.queryByTestId("wake-call-cancel")).toBeNull();
+        expect(document.activeElement).toBe(screen.getByTestId("call-audio"));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("leaves the focus alone when it went elsewhere meanwhile", async () => {
       saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
       const { user, engine } = renderApp(<Chat sessionId="chat-1" onCallChange={vi.fn()} callLayer={null} visible />);

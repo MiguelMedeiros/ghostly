@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { connect } from "node:net";
-import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { dirname, sep } from "node:path";
 import packageJson from "../package.json" with { type: "json" };
 import { checkSettingKey, checkSettingValue, GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, shownWord, unknownGlobalOption, type OptionSpec, type Parsed } from "./args";
@@ -10,7 +10,7 @@ import { childEnv, dropSecretEnv } from "./childEnv";
 import { COMMANDS, idSlot, noMoreThan, numberSlot, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, INPUT_BYTES, localStat, readInput, since as sinceOf, STDIN_TOO_BIG, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS, hideSecretFields } from "./engineMethods";
-import { asCliError, CliError, type ErrorCode, EXIT, localFileError } from "./errors";
+import { asCliError, CliError, type ErrorCode, EXIT, localFileError, secretFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { identityWaitLines } from "./identityWait";
@@ -349,16 +349,30 @@ export function offlineCall(method: string, params: Record<string, unknown>): bo
 }
 
 /** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the
- *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin; anything else may take as long
- *  as it takes, once the daemon has answered the version check sent ahead of it (session()). */
+ *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin (a file send, plus the time to
+ *  copy the file in); anything else may take as long as it takes, once the daemon has answered the version check sent
+ *  ahead of it (session()). */
 const ANSWER_MS = 15_000;
 export function answerWithin(method: string, params: Record<string, unknown>): number | undefined {
   // A `--timeout` outside the daemon's range (1 to 3600 s, 86 400 for `chat wait` and `file wait`) is refused by the
   // daemon at once (bad_request); the deadline only has to be a timer Node takes (-10 s fired at once, 1e12 after 1 ms).
   const waits = typeof params.timeout === "number" ? Math.min(Math.max(params.timeout, 1), 86_400) : waitsFor(method, params);
-  if (waits !== undefined) return (waits + 10) * 1000;
+  if (waits !== undefined) return (waits + 10 + stagingSeconds(method, params)) * 1000;
   if (readOnly(method, params)) return ANSWER_MS;
   return undefined;
+}
+
+/**
+ * A `file send` copies the file into the profile before its wait starts (files.ts `stageWhileAsked`), 6-30 s for 1 GiB:
+ * its deadline adds a second per `STAGED_BYTES_PER_SECOND` of the file, well past that. Counted against the wait's
+ * own, a large file with a short `--timeout` failed as "The daemon did not answer" (exit 4) while it was still copied
+ * in, and the copy then stopped with the command gone: nothing was sent. A file it cannot read adds nothing (the
+ * daemon refuses it at once).
+ */
+const STAGED_BYTES_PER_SECOND = 8 * 1024 * 1024;
+function stagingSeconds(method: string, params: Record<string, unknown>): number {
+  if (method !== "file.send" || typeof params.path !== "string") return 0;
+  try { return Math.ceil(statSync(params.path).size / STAGED_BYTES_PER_SECOND); } catch { return 0; }
 }
 
 /**
@@ -448,8 +462,11 @@ function throughDaemon(client: DaemonClient, again?: () => Promise<Session>): Se
   };
 }
 
-/** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
-const HOLDER_WAIT_MS = 5_000;
+/**
+ * How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second.
+ * GHOSTLY_TEST_HOLDER_WAIT_MS: a test of one-shots at once, whose holders on a loaded CI runner kept it past 5 s.
+ */
+const HOLDER_WAIT_MS = Number(process.env.GHOSTLY_TEST_HOLDER_WAIT_MS) || 5_000;
 /** How long it waits for the profile's daemon that is starting (`startingDaemon`): its engine takes seconds on a large profile. */
 const STARTING_WAIT_MS = 30_000;
 /**
@@ -1038,7 +1055,7 @@ async function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): Pro
   if (file === "-" && process.stdin.isTTY) throw new CliError("usage", "--passphrase-file - reads stdin: pipe the passphrase in (… | ghostly profile …), or name a file");
   let value: string;
   if (file === "-") value = (await readStdin()).replace(/\r?\n$/, "");
-  else try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw localFileError(error, file) ?? error; }
+  else try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw secretFileError(error, file, "--passphrase-file", "the passphrase") ?? error; }
   if (!value) throw new CliError("bad_request", `${file === "-" ? "Stdin" : file} is empty: it holds the backup's passphrase`);
   return value;
 }
@@ -1739,7 +1756,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     // terminal) as a join or a redeem says it, a usage error.
     try { params.credential = params.file === "-" ? await credentialFromStdin(readStdin, process.stdin.isTTY === true) : readInput(params.file as string); }
     // A file not there, a folder, one not allowed: said as every other file the CLI reads.
-    catch (error) { throw (error instanceof CliError && error) || localFileError(error, params.file as string) || new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { throw (error instanceof CliError && error) || secretFileError(error, params.file as string, "<file>", "the SD-JWT VC the issuer sent, or - to read it from stdin") || new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
     if (!params.credential) throw new CliError("bad_request", `${params.file as string} is empty: it holds the SD-JWT VC the issuer sent`);
     delete params.file;
   }

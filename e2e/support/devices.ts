@@ -16,6 +16,13 @@ export const DEVICE_SET_PASSWORD = "a long lock password";
  */
 export async function enrollDevice(active: Peer, joiner: Peer, options: { name?: string; password?: string } = {}): Promise<void> {
   const password = options.password ?? DEVICE_SET_PASSWORD;
+  // Each step of the device link goes to the console, so a trace of a link that stays connecting names the one that
+  // stalled (an answer given up, an offer dropped). The joiner starts again into its standby screen: the init script
+  // covers that page.
+  for (const peer of [active, joiner]) {
+    await peer.context.addInitScript(() => { (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace = true; });
+    await peer.page.evaluate(() => { (globalThis as { __ghostlyLinkTrace?: boolean }).__ghostlyLinkTrace = true; });
+  }
   await active.page.goto("/#/profile");
   await active.page.getByTestId("device-add-open").click();
   const add = active.page.getByTestId("device-add");

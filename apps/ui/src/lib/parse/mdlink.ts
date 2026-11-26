@@ -34,10 +34,42 @@ const FILE_IN_PATH = /\.(?:md|py|rs|sh)$/i;
 /**
  * Characters a browser reads as the dot between a host's labels, and ones that only look like it (Unicode's
  * confusables of "." and the middle, raised and word-separator dots fonts draw like it). Read before NFKC ("˙" would
- * become a space and an accent) and after it ("･" becomes "・"). The combining dots stand alone, outside the class.
+ * become a space and an accent) and after it ("･" becomes "・").
  */
 const DOTS =
-  /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}\u2981]|\u0323|\u{1d16d}/gu;
+  /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}\u2981]/gu;
+/**
+ * Combining dots below a letter ("paypaḷcom"), several on one letter included: they draw in one place, so they are one
+ * dot, and none beside a written one ("paypaḷ.com"). Only other marks between two of them, so the run has one reading.
+ */
+const MARK_DOTS = /(\.\p{M}*)?[̣\u{1d16d}](?:[^\P{M}̣\u{1d16d}]*[̣\u{1d16d}])*(\p{M}*\.)?/gu;
+/**
+ * A word: letters with their marks, and digits, across the narrow spaces that read as no gap (as `SPACE_BY_DOT` has
+ * them), so a space of a pixel or two cannot set a stroke letter and its mark off as a word of their own script.
+ */
+const WORD = /[\p{L}\p{M}\p{N}\u2000-\u200a\u202f\u205f]+/gu;
+/** A script's dot below marks: a dot unless the word they sit in has a letter of that script and of no other. */
+const scriptDot = (script: string, marks: string) => ({
+  marks: new RegExp(`[${marks}]`, "gu"),
+  own: new RegExp(`(?=\\p{L})\\p{sc=${script}}`, "u"),
+  other: new RegExp(`(?=\\p{L})[^\\p{sc=${script}}\\p{sc=Common}\\p{sc=Inherited}]`, "u"),
+});
+/**
+ * Thai and Lao phinthu, the Hebrew hiriq and lower dot and the Arabic dot below draw on an "l" like U+0323. "ภิกฺขุ"
+ * and "שִׁיר" keep theirs; on a letter of the script that looks like an "l", in a Latin word, it is a dot ("paypaๅฺcom").
+ */
+const SCRIPT_DOTS = [scriptDot("Thai", "ฺ"), scriptDot("Lao", "຺"), scriptDot("Hebrew", "ִׅ"), scriptDot("Arabic", "ٜ")];
+
+/** The label with each thing that reads as the dot between a host's labels written as one ".". */
+function readDots(text: string): string {
+  text = text.replace(WORD, (word) =>
+    SCRIPT_DOTS.reduce((w, s) => (s.own.test(w) && !s.other.test(w) ? w : w.replace(s.marks, "̣")), word),
+  );
+  return text
+    .replace(DOTS, ".")
+    .replace(MARK_DOTS, (_, before?: string, after?: string) => (before || after ? (before ?? "") + (after ?? "") : "."));
+}
+
 /**
  * The typographic spaces (en quad to hair space, the narrow no-break and the medium mathematical space) beside a dot:
  * a gap of a pixel or two that reads as none ("paypal .com"). Read before NFKC, which makes them a word's space; a
@@ -67,7 +99,7 @@ export function labelMisleads(label: string, url: string): boolean {
   const target = hostOf(url);
   if (!target) return true;
   if (new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
-  const text = label.replace(DOTS, ".").replace(SPACE_BY_DOT, "").normalize("NFKC").replace(DOTS, ".");
+  const text = readDots(readDots(label).replace(SPACE_BY_DOT, "").normalize("NFKC"));
   for (const found of text.matchAll(ADDRESS)) {
     const written = found[0];
     const bare = written.replace(/^[a-z][a-z\d+.-]*:\/\//i, "");

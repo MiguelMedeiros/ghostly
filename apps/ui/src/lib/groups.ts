@@ -46,7 +46,7 @@ const lookalikeForm = (s: string) => foldLookalikes(foldLookalikes(s.normalize("
  * (…k1p0aa)" are all "Alice". Look-alikes are folded both before NFKC (which turns Greek Ϲ into Σ) and after it (which
  * turns 𝚨 into Α). Only the comparison: the name is shown as chosen.
  */
-const sameNameForm = (nick: string) => lookalikeForm(
+export const sameNameForm = (nick: string) => lookalikeForm(
   lookalikeForm(nick).normalize("NFKC").replace(DRAWS_NOTHING, "").replace(/\s*\(\s*\.\.\.[^()]*\)\s*$/u, "").replace(/\s+/gu, " ").trim(),
 ).normalize("NFC");
 

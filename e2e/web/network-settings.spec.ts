@@ -209,6 +209,46 @@ test("relays: only http(s) addresses are kept, normalized and without duplicates
   await expect(form.relays).toHaveValue(DEFAULT_RELAYS);
 });
 
+/*
+ * A refused relay address is said under its field with the address as typed, and an address has no space to break at:
+ * on a phone the line ran past the card (in Arabic off the screen's left side) and the whole of Settings scrolled
+ * sideways. Each refusal now wraps inside its field's card.
+ */
+for (const language of ["en", "ar"]) {
+  test(`${language}: on a phone a refused relay address wraps under its field, and Settings never scrolls sideways`, { tag: ["@feature:settings.network.relays", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+    const alice = await peer("alice", { mobile: true, viewport: { width: 375, height: 667 } });
+    await keepOffline(alice);
+    const { page } = alice;
+    await page.goto("/#/settings/network");
+    await page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
+    for (const [field, address] of [
+      // Over 126 characters: "Use a shorter relay address: <address>".
+      ["network-hyperdht-relay", `wss://${"a".repeat(130)}.example.org`],
+      // "Use an https:// relay address: <address>".
+      ["network-push-relay", `http://${"push".repeat(15)}.example.org/push`],
+    ] as const) {
+      await page.getByTestId(field).fill(address);
+      await page.getByTestId("network-save").click();
+      const error = page.getByTestId("network-error");
+      await expect(error).toContainText(address);
+      const fits = await error.evaluate((line) => {
+        const card = line.parentElement!.getBoundingClientRect();
+        const box = line.getBoundingClientRect();
+        let scroller = line.parentElement;
+        while (scroller && !["auto", "scroll"].includes(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+        return { inCard: box.left >= card.left - 1 && box.right <= card.right + 1 && line.scrollWidth <= line.clientWidth + 1, sideways: scroller!.scrollWidth - scroller!.clientWidth };
+      });
+      expect(fits, field).toEqual({ inCard: true, sideways: 0 });
+      await page.getByTestId(field).fill("");
+    }
+  });
+}
+
 // A list with nothing usable in it would leave this browser unable to reach anyone: refused.
 test("relays: a list with no valid address is refused, and the relays stay", { tag: ["@feature:settings.network.relays"] }, async ({ peer }) => {
   const alice = await peer("alice");

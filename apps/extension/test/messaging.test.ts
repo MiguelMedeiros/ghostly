@@ -3,7 +3,7 @@ import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
 import { OTHER_PEER, OTHER_TAG, PEER, SERVICE, TAG, askPeer, bodyText, bootExtension, endBootPeer, engine, openViewer, pauseRequest } from "./extension";
 import servicesEn from "../../ui/src/locales/en/services.json";
-import { CLIPBOARD_GUARD_HASH, VIEWER_GUARD_CSP } from "@ghostly/core";
+import { CLIPBOARD_GUARD_HASH, CLIPBOARD_GUARD_SCRIPT, VIEWER_GUARD_CSP } from "@ghostly/core";
 
 // covers: extension.engine, services.open, payments.external
 
@@ -273,8 +273,19 @@ describe("viewer tabs", () => {
     expect(world.callsTo("debugger.sendCommand").map(([, method, params]) => [method, params])).toEqual([
       ["Fetch.enable", { patterns: [{ urlPattern: "https://*.invalid/*", requestStage: "Request" }] }],
       ["Page.enable", undefined],
+      ["Page.addScriptToEvaluateOnNewDocument", { source: CLIPBOARD_GUARD_SCRIPT }],
     ]);
     expect(world.tabs.get(tabId)!.url).toBe(`https://${SERVICE}.${PEER}.${TAG}.invalid/`);
+  });
+
+  it("runs the clipboard guard in each new document of the tab as it commits, from before the app's first page", async () => {
+    // DevTools runs it in every new document of the tab, frames included, before the app's first page.
+    await openViewer(world);
+    const sent = world.calls.findIndex(({ api, args }) => api === "debugger.sendCommand" && args[1] === "Page.addScriptToEvaluateOnNewDocument");
+    const navigated = world.calls.findIndex(({ api }) => api === "tabs.update");
+    expect(sent).toBeGreaterThanOrEqual(0);
+    expect(world.calls[sent].args[2]).toEqual({ source: CLIPBOARD_GUARD_SCRIPT });
+    expect(navigated).toBeGreaterThan(sent);
   });
 
   it("opens the same contact's app in another origin for another profile's chat with them", async () => {
@@ -341,7 +352,7 @@ describe("viewer tabs", () => {
     expect(request.init.maxResponseBytes).toBe(32 * 1024 * 1024);
   });
 
-  it("serves every answer with Ghostly's connection policy after the contact's own, the error page's too", async () => {
+  it("serves every answer with Ghostly's connection policy after the contact's own; the error page loads and frames nothing", async () => {
     const policy = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; form-action 'self'; sandbox allow-scripts allow-same-origin allow-forms";
     const policies = (params: Record<string, unknown>) =>
       (params.responseHeaders as { name: string; value: string }[]).filter(({ name }) => name.toLowerCase() === "content-security-policy").map(({ value }) => value);
@@ -355,11 +366,19 @@ describe("viewer tabs", () => {
     engineControl().respond = async () => okResponse("<h1>atlas</h1>", 200, [["content-type", "text/html"], ["Content-Security-Policy", "default-src * http: ws:"], ["content-security-policy", "img-src *"]]);
     expect(policies((await pauseRequest(world, tabId, { url }, "Document")).params)).toEqual([`default-src * http: ws: ${CLIPBOARD_GUARD_HASH}, img-src *, ${VIEWER_GUARD_CSP}, ${policy}`]);
 
+    // The error page is one the clipboard guard never runs in, and the app can frame it and read its window by index as
+    // it loads: it gets an origin of its own (an empty sandbox), and needs nothing but its own style.
+    const own = "default-src 'none'; style-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; base-uri 'none'; sandbox";
     const offline = await httpError("offline", "offline");
     engineControl().respond = async () => {
       throw offline;
     };
-    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([policy]);
+    expect(policies((await pauseRequest(world, tabId, { url })).params)).toEqual([own]);
+    // The app can make it on purpose: a page it answers with a file to save.
+    engineControl().respond = async () => okResponse("PK", 200, [["content-type", "application/zip"], ["content-disposition", "attachment"]]);
+    const download = (await pauseRequest(world, tabId, { url: `${url}a.zip` }, "Document")).params;
+    expect(download.responseHeaders).toContainEqual({ name: "x-ghostly-error", value: "download" });
+    expect(policies(download)).toEqual([own]);
   });
 
   it("shows a page the contact's app answers as a file to save as the error page, not a download: the tab's own navigation has no sandbox", async () => {
@@ -424,7 +443,9 @@ describe("viewer tabs", () => {
     const errorPage = sandboxes((await pauseRequest(world, tabId, { url })).params);
 
     // The contact's own sandbox may name allow-popups: Chrome takes the flags every policy allows, so Ghostly's decides.
-    for (const flags of [served.at(-1), errorPage.at(-1)]) expect(flags).toEqual(["allow-scripts", "allow-same-origin", "allow-forms"]);
+    expect(served.at(-1)).toEqual(["allow-scripts", "allow-same-origin", "allow-forms"]);
+    // The error page runs nothing and has an origin of its own: no flag at all.
+    expect(errorPage).toEqual([[]]);
   });
 
   it("opens no tab while Hide my IP from contacts is on, and says why", async () => {

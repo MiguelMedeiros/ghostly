@@ -279,6 +279,56 @@ describe("app publish", () => {
     expect(ok(await ghostly(["app", "publish", parser, "--key", key]))).toMatchObject({ files: ["index.html", "pem.js"] });
   }, 60_000);
 
+  it("never bundles a Ghostly home: the CLI's own inside the folder, or any folder holding a profile's store", async () => {
+    const key = vectorKey(tmp(), "publisher");
+    // A bot's repository with its home beside the code (`GHOSTLY_HOME=./data`): the store holds the profile's seed.
+    const dir = tmp();
+    ok(await ghostly(["app", "init", dir]));
+    ok(await ghostly(["--home", join(dir, "data"), "profile", "create", "first", "--use"]));
+    mkdirSync(join(dir, "data", "profiles", "first", "db"), { recursive: true });
+    writeFileSync(join(dir, "data", "profiles", "first", "db", "snapshot.bin"), "a store");
+    for (const env of [{ GHOSTLY_HOME: join(dir, "data") }, { GHOSTLY_HOME: join(tmp(), "home") }]) {
+      const refusal = error(await ghostly(["app", "publish", dir, "--key", key], { env }), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+      expect(refusal.details?.reason).toBe("private-key");
+      expect(refusal.details?.detail).toMatch(/^data(\/profiles\/first)?$/);
+      expect(refusal.message).toContain("move it out of the app's folder");
+      expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
+    }
+    // --home names it as the variable does; the home is refused before its profile has a store too.
+    const fresh = tmp();
+    ok(await ghostly(["app", "init", fresh]));
+    ok(await ghostly(["--home", join(fresh, "bot"), "profile", "create", "first", "--use"]));
+    expect((error(await ghostly(["--home", join(fresh, "bot"), "app", "publish", fresh, "--key", key]), "refused", 1) as { details?: unknown }).details).toEqual({ reason: "private-key", detail: "bot" });
+    // Another home's profile, deeper in the folder, and the folder that is a profile's own.
+    const other = tmp();
+    ok(await ghostly(["app", "init", other]));
+    mkdirSync(join(other, "backup", "old", "profiles", "ana", "db"), { recursive: true });
+    writeFileSync(join(other, "backup", "old", "profiles", "ana", "db", "journal.bin"), "a journal");
+    await expect(publishApp(other, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "backup/old/profiles/ana" } });
+    writeFileSync(join(other, "backup", "old", "profiles", "ana", "ghostly-app.json"), readFileSync(join(other, "ghostly-app.json")));
+    await expect(publishApp(join(other, "backup", "old", "profiles", "ana"), key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "." } });
+    // A store under any name: a profile's folder copied as another, a bare store folder, and the store folder itself.
+    const copied = tmp();
+    ok(await ghostly(["app", "init", copied]));
+    mkdirSync(join(copied, "data", "db"), { recursive: true });
+    for (const file of ["snapshot.bin", "journal.bin"]) writeFileSync(join(copied, "data", "db", file), "a store");
+    await expect(publishApp(copied, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "data/db" } });
+    const loose = tmp();
+    ok(await ghostly(["app", "init", loose]));
+    mkdirSync(join(loose, "store"));
+    for (const file of ["journal.bin", "rows.db", "snapshot.bin"]) writeFileSync(join(loose, "store", file), "a store");
+    await expect(publishApp(loose, key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "store" } });
+    writeFileSync(join(loose, "store", "ghostly-app.json"), readFileSync(join(loose, "ghostly-app.json")));
+    await expect(publishApp(join(loose, "store"), key)).rejects.toMatchObject({ details: { reason: "private-key", detail: "." } });
+    // A folder that is only named so, with no store in it, is the app's.
+    const plain = tmp();
+    ok(await ghostly(["app", "init", plain]));
+    mkdirSync(join(plain, "profiles", "ana"), { recursive: true });
+    writeFileSync(join(plain, "profiles", "ana", "card.json"), "{}");
+    writeFileSync(join(plain, "snapshot.bin"), "a game's save");
+    expect(ok(await ghostly(["app", "publish", plain, "--key", key]))).toMatchObject({ files: expect.arrayContaining(["profiles/ana/card.json", "snapshot.bin"]) });
+  }, 60_000);
+
   it("reads a file of key headers with no end once: 1 MiB of them publishes in moments, a key after them is still found", async () => {
     const { manifest, files } = chess();
     const key = vectorKey(tmp(), "publisher");

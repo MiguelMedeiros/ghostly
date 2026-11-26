@@ -91,6 +91,7 @@
     "status": "Niente a quel link.",
     "storage": "Questo browser non può tenere app qui (navigazione privata?). Prova una finestra normale.",
     "storageInfo": "Ghostly tiene i file di ogni app su questo dispositivo. Le finestre private, come la Navigazione privata di Safari, non lo permettono, e anche un disco pieno lo impedisce.",
+    "storeChanged": "Il posto da cui questa app riceve gli aggiornamenti è cambiato. Controllala di nuovo prima di installarla.",
     "storeKey": "Quello store è firmato con un'altra chiave.",
     "tooLarge": "Troppo grande.",
     "unlistedVersion": "Il link contiene una versione che questo store non elenca ancora.",

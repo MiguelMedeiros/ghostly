@@ -13,7 +13,7 @@ import { CliError, localFileError, shownValue } from "./errors";
 import { jsonOut } from "./jsonOut";
 import { guardText } from "./secretGuard";
 import { nativeEd25519 } from "./nativeEd25519";
-import { userPath } from "./profiles";
+import { ghostlyHome, userPath } from "./profiles";
 
 /*
  * The publisher tools of WISP 1200 (Apps · Publishing): `app init` writes a folder to start from, `app publish` bundles
@@ -446,6 +446,10 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
   const skipped: string[] = [];
   let bytes = 0;
   const walk = (folder: string) => {
+    if (isGhostlyData(folder)) {
+      const path = relative(dir, folder).split(sep).join("/") || ".";
+      throw refused(`${path} in ${dir} is a Ghostly home, profile or store, which holds the profile's seed, and a bundle is public: move it out of the app's folder, or publish a folder without it`, { reason: "private-key", detail: path });
+    }
     // Read as bytes: a name that is not UTF-8 comes back from a string read with U+FFFD in it, a path no file has.
     const names = readdirSync(folder, { encoding: "buffer" }).map((raw) => ({ raw, name: raw.toString("utf8") }));
     for (const { raw, name } of names.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
@@ -493,6 +497,18 @@ function realPath(path: string): string {
 /** {@link isUnder} as written or through a symlink: another name for the folder (or for the file) is the same place. */
 const isInside = (dir: string, path: string) => isUnder(dir, path) || isUnder(realPath(dir), realPath(path));
 
+const isFolder = (path: string) => { try { return lstatSync(path).isDirectory(); } catch { return false; } };
+/** The files of a profile's store (./runtime/storage.ts): two of them in one folder are a store, whatever it is called. */
+const STORE_FILES = ["snapshot.bin", "journal.bin", "rows.db"];
+/**
+ * A Ghostly home (its `current` file beside `profiles/`), a profile's folder (`profiles/<name>/` with its store in
+ * `db/`), of any home, or a store's own folder under any name: the store is not encrypted at rest, and its snapshot
+ * and journal hold the profile's seed.
+ */
+const isGhostlyData = (folder: string) =>
+  (isFolder(join(folder, "profiles")) && existsSync(join(folder, "current"))) || (basename(dirname(folder)) === "profiles" && isFolder(join(folder, "db")))
+  || STORE_FILES.filter((name) => existsSync(join(folder, name))).length >= 2;
+
 /** Fields of `ghostly-app.json` the command writes itself. */
 const WRITTEN = ["publisher", "files"] as const;
 
@@ -531,7 +547,7 @@ export function writeWhole(path: string, bytes: Uint8Array): void {
  * the source's `sequence`, if higher, else 1). The
  * key file is made when it is missing and no earlier bundle is there to update.
  */
-export async function publishApp(dirArg: string, keyArg: string, outArg?: string, sequenceArg?: number): Promise<Record<string, unknown>> {
+export async function publishApp(dirArg: string, keyArg: string, outArg?: string, sequenceArg?: number, homeArg?: string): Promise<Record<string, unknown>> {
   if (sequenceArg !== undefined && !(Number.isSafeInteger(sequenceArg) && sequenceArg >= 1)) throw new CliError("usage", `--sequence takes a whole number from 1, not ${sequenceArg}`);
   const dir = userPath(dirArg);
   if (!statSync(dir).isDirectory()) throw new CliError("bad_request", `${dir} is not a folder`);
@@ -539,6 +555,12 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   // Every file of the folder is published, and the folder is often the repository the bundle is committed to.
   if (isInside(dir, keyPath)) {
     throw refused(`${keyPath} is inside ${dir}, which is published: keep the publisher key outside the app's folder (and its repository)`, { reason: "private-key" });
+  }
+  // A bot's home kept beside its code (`GHOSTLY_HOME=./data`), before it has a profile too; another home is found by its shape.
+  const home = ghostlyHome(homeArg);
+  if (isInside(dir, home)) {
+    const path = relative(realPath(dir), realPath(home)).split(sep).join("/") || ".";
+    throw refused(`${home} is inside ${dir}, which is published: this Ghostly home holds its profiles' seeds; move it out of the app's folder, or publish a folder without it`, { reason: "private-key", detail: path });
   }
   const out = userPath(outArg ?? join(dir, APP_BUNDLE_FILE));
   const sourcePath = join(dir, APP_SOURCE);
