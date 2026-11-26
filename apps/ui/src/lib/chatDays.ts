@@ -77,12 +77,12 @@ export function byDay<R>(rows: readonly R[], days: readonly number[], from = 0):
 /**
  * How a day of a chat is named above its messages: Today, Yesterday, else its weekday and date, with the year when it is
  * not this year's, in the interface's language. One formatter per language and year or none: a chat with a message a day
- * has a hundred days in its page, named again on each render.
+ * has a hundred days in its page, named again on each render. Yesterday is the day whose next is today: a day before
+ * today's at today's hour is an hour into it where the clocks skipped today's midnight.
  */
 export function dayLabel(day: number, today: number, language: Language, t: Translate): string {
   if (day === today) return t("chat.today");
-  const yesterday = new Date(today);
-  if (day === yesterday.setDate(yesterday.getDate() - 1)) return t("chat.yesterday");
+  if (nextDay(day) === today) return t("chat.yesterday");
   const year = new Date(day).getFullYear() !== new Date(today).getFullYear();
   return formatAt(day, { weekday: "long", day: "numeric", month: "long", ...(year && { year: "numeric" }) }, language);
 }
