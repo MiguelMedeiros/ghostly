@@ -14,7 +14,8 @@
  * `section` names a "### " heading of "## Unreleased" (Security, For users, Fixed or For developers, written so), and
  * after " / " a **bold** group under it. A group that does not exist yet is added at the end of its heading, and a
  * heading in its place in that order. The body is one or more Markdown list items (no line of it a heading or an HTML
- * comment), added at the end of that section, in the files' name order.
+ * comment), added at the end of that section, in the files' name order. Only a <slug>.md file right in the folder is an
+ * entry: the check and the bump refuse another name there (b.MD, x.markdown, none) or a folder, which no bump reads.
  *
  * An optional `release: <major>.<minor>` holds an entry for that release: a bump to an older version (a 1.1.x patch
  * for `release: 1.2`) leaves the file where it is, and the first bump to 1.2.0 or later takes it. A release at or
@@ -199,19 +200,42 @@ export function repositoryVersion(root = ROOT) {
   }
 }
 
-/** Every fragment in docs/changelog/unreleased/, in name order (README.md is the folder's own notes). */
+/**
+ * Why a bump would not read an entry of docs/changelog/unreleased/ (undefined: it reads it), after the entry's name.
+ * Only a file directly in the folder, named <slug>.md, is one: b.MD, x.markdown, a name with no extension and a
+ * folder's files were skipped by the check and by the bump alike, so the change never reached the release notes and
+ * the file stayed for good.
+ */
+function unread(entry) {
+  if (entry.isSymbolicLink()) return ": a symbolic link, which a checkout without links reads as its target's path: write the entry as a file of its own";
+  if (entry.isDirectory()) return `/: a folder, which no release reads: move its entries into ${CHANGES}/ as <slug>.md`;
+  if (!entry.isFile()) return ": not a file: write the entry as a <slug>.md file";
+  if (!entry.name.endsWith(".md")) return `: no release reads it: name it <slug>.md, such as ${entry.name.replace(/\.[A-Za-z]+$/, "")}.md`;
+  return undefined;
+}
+
+/**
+ * Every fragment in docs/changelog/unreleased/, in name order (README.md is the folder's own notes). An entry no bump
+ * would read (unread) comes back with that as its problem, so the check and the bump refuse it. A dotfile that is no
+ * <slug>.md (.DS_Store, .gitkeep) is not an entry: what a Mac leaves in the folder must not fail a local check.
+ */
 export function readFragments(root = ROOT) {
   const version = repositoryVersion(root);
-  let names = [];
+  let entries = [];
   try {
-    names = readdirSync(join(root, CHANGES));
+    entries = readdirSync(join(root, CHANGES), { withFileTypes: true });
   } catch {
     return [];
   }
-  return names
-    .filter((name) => name.endsWith(".md") && name !== "README.md")
-    .sort()
-    .map((name) => ({ name: `${CHANGES}/${name}`, ...parseFragment(`${CHANGES}/${name}`, readFileSync(join(root, CHANGES, name), "utf8"), version) }));
+  return entries
+    .filter(({ name }) => name !== "README.md" && !(name.startsWith(".") && !name.endsWith(".md")))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    .map((entry) => {
+      const name = `${CHANGES}/${entry.name}`;
+      const why = unread(entry);
+      if (why) return { name, problems: [`${name}${why}`] };
+      return { name, ...parseFragment(name, readFileSync(join(root, CHANGES, entry.name), "utf8"), version) };
+    });
 }
 
 /**
