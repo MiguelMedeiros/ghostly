@@ -65,3 +65,11 @@ export function formatAt(at: number, options: Intl.DateTimeFormatOptions, langua
   if (!format) { format = hold(new Intl.DateTimeFormat(locale, options)); formats.set(key, format); }
   return written(format, at);
 }
+
+/**
+ * `formatAt`, with the year when `at` falls in another calendar year than `now` on this device's clock (its own year,
+ * not UTC's): "Dec 3, 14:05" alone reads as this December. Two formatters per language and options at most.
+ */
+export function formatAtWithYear(at: number, options: Intl.DateTimeFormatOptions, language?: Language, now = Date.now()): string {
+  return formatAt(at, new Date(at).getFullYear() === new Date(now).getFullYear() ? options : { ...options, year: "numeric" }, language);
+}
