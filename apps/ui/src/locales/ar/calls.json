@@ -6,6 +6,8 @@
   "cameraUnavailable": "لم يُعثر على كاميرا، لذا الفيديو متوقف",
   "connected": "متصل",
   "connecting": "جارٍ الاتصال...",
+  "contactBlocked": "لقد حظرت جهة الاتصال هذه",
+  "contactBlockedNext": "ألغِ الحظر لتتصل بها",
   "contactCannot": "تطبيق جهة اتصالك لا يستقبل المكالمات",
   "contactOutdated": "تحتاج جهة اتصالك إلى تحديث Ghostly لإجراء المكالمات",
   "decline": "رفض",

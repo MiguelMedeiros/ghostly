@@ -11190,7 +11190,8 @@ export class GhostlyNode implements EngineImplementation {
       paymentNetworks: Object.fromEntries(PAYMENT_METHODS.map(m => [m, WALLET_NETWORKS.filter((n) => this.acceptsNetwork(stored, m, n))])) as Record<PaymentMethodName, WalletNetwork[]>,
       groups: live.link?.groupsSupport ?? false,
       sessionOffers: stored.profile ? live.link?.sessionOffers : undefined,
-      callsUnavailable: !stored.profile ? undefined : live.link ? live.link.callsUnavailable : "Calls need a live connection",
+      // A blocked contact's answer is dropped (`onCallSignal`): a call placed would ring its app and never connect.
+      callsUnavailable: !stored.profile ? undefined : this.blockedChat(stored) ? "You blocked this contact. Unblock them to call" : live.link ? live.link.callsUnavailable : "Calls need a live connection",
       // A blocked contact's typing, presence and status show nothing either (whether its app is reachable still does:
       // that is this side's connection).
       ...(stored.profile && !stored.group && live.link?.peerTyping && !this.blockedChat(stored) ? typingView(live.link.peerTypingActivity) : {}),

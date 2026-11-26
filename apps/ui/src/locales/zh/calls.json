@@ -6,6 +6,8 @@
   "cameraUnavailable": "未找到摄像头，因此视频已关闭",
   "connected": "已连接",
   "connecting": "正在连接...",
+  "contactBlocked": "你已屏蔽此联系人",
+  "contactBlockedNext": "解除屏蔽后即可通话",
   "contactCannot": "对方的应用无法接听通话",
   "contactOutdated": "对方需要更新 Ghostly 才能通话",
   "decline": "拒绝",
