@@ -246,6 +246,31 @@ describe("GroupChat: payments in the timeline", () => {
     expect(screen.getByTestId("group-pay-caption")).toHaveTextContent("You asked Alice · Paid");
   });
 
+  const long = "W".repeat(64);
+  const longAlice = () => [group({ members: members.map((m) => m.key === ALICE ? { ...m, nick: long } : m) })];
+  const wraps = (el: HTMLElement) => expect(el.className).toContain("[overflow-wrap:anywhere]");
+
+  it("a member's name of one long word breaks inside the note, not past it", async () => {
+    openGroup([line({ id: "gpay:req-1", groupPay: note({ claims: [ALICE] }) })], { groups: longAlice() });
+    const shown = await screen.findByTestId("group-pay-note");
+    expect(within(shown).getByTestId("group-pay-note-title")).toHaveTextContent(`${long} asked Bob`);
+    wraps(within(shown).getByTestId("group-pay-note-title"));
+    expect(within(shown).getByTestId("group-pay-note-state")).toHaveTextContent(long);
+    wraps(within(shown).getByTestId("group-pay-note-state"));
+  });
+
+  it("a member's name of one long word breaks inside the caption under my bubble, not past it", async () => {
+    const groups = longAlice();
+    const payments = { "req-1": paymentView({ id: "req-1", linkId: "edge-a", kind: "request", direction: "out", amount: 21, state: "pending", mints: ["https://mint.example.com"] }) };
+    openGroup([
+      line({ id: "edge-a:me_1", sender: "me", paymentId: "req-1", text: "⚡ Requested 21 sats" }),
+      line({ id: "gpay:req-1", groupPay: note({ from: ALICE, to: ME }) }),
+    ], { payments, groups });
+    const caption = await screen.findByTestId("group-pay-caption");
+    expect(caption).toHaveTextContent(`You asked ${long}`);
+    wraps(caption);
+  });
+
   it("my own request paid while the group is open is said once, as its bubble says it, not again for its hidden note", async () => {
     const request = (state: "pending" | "settled") => ({ "req-1": paymentView({ id: "req-1", linkId: "edge-a", kind: "request", direction: "out", amount: 21, state, mints: ["https://mint.example.com"] }) });
     const mine = line({ id: "edge-a:me_1", sender: "me", paymentId: "req-1", text: "⚡ Requested 21 sats" });
