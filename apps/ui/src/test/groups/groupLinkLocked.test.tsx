@@ -61,6 +61,8 @@ it("groups' links opened while locked are each joined after the unlock, up to th
   }
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(joins).toHaveLength(0);
+  // Not drawn under the lock screen, where nobody reads it: the alert comes after the unlock, so it is said then.
+  expect(screen.queryByTestId("group-link-invalid")).toBeNull();
 
   lock.isLocked = false;
   rerender(<Root />);
@@ -68,6 +70,24 @@ it("groups' links opened while locked are each joined after the unlock, up to th
   expect(screen.getByTestId("group-link-invalid-title")).toHaveTextContent("Too many group links opened");
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(joins).toHaveLength(3);
+});
+
+// covers: groups.link.join, profiles.lock
+/*
+ * A group's link with a `%` that is not an escape, opened while locked: refused at once, but said only after the unlock.
+ * Drawn under the lock screen, the alert was in inert content, and the same element after it: never said.
+ */
+it("a broken group's link opened while locked is refused after the unlock, not under the lock screen", async () => {
+  window.location.hash = "#/join/group2/%zz";
+  const { rerender } = render(<Root />);
+  await waitFor(() => expect(window.location.hash).toBe("#/"));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(screen.queryByTestId("group-link-invalid")).toBeNull();
+
+  lock.isLocked = false;
+  rerender(<Root />);
+  expect(await screen.findByTestId("group-link-invalid-title")).toHaveTextContent("This link to a group does not work");
+  expect(fakeEngine.callsTo("joinGroupByLink")).toHaveLength(0);
 });
 
 // covers: groups.link.join, profiles.lock

@@ -373,7 +373,9 @@ function GroupLinkIntake() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [heldCount, isLocked, hasUnlocked, groupsLoaded]);
-  return problem ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
+  // Kept until closed, and said only once the lock is passed, as the invite's: under the lock screen nobody can read it,
+  // and the same alert after the unlock is not said again.
+  return problem && !isLocked && hasUnlocked ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
 }
 
 /**
