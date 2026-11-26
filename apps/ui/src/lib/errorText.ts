@@ -276,6 +276,8 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot take calls", "calls.contactCannot"),
   exact("Your contact needs an updated Ghostly for calls", "calls.contactOutdated"),
   exact("Calls are not available in this app", "calls.unavailableHere"),
+  // engine/node.ts `viewOf`: a blocked contact's chat (`setContactBlocked`).
+  exact("You blocked this contact. Unblock them to call", "calls.contactBlocked", "calls.contactBlockedNext"),
   // In a call: why a screen share failed (packages/react useWebRTC.ts `screenShareErrorMessage`), the call window's
   // alert, and why the share button is off (`screenShareUnavailable`; apps/ui/src/desktop/nativeCalls.ts on Linux).
   exact("Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings.", "calls.share.blocked", "calls.share.blockedNext"),
