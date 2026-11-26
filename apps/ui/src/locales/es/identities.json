@@ -158,6 +158,7 @@
     "published": "Publicado {{time}}. Se vuelve a publicar cada hora mientras la app está abierta.",
     "publishing": "Publicando…",
     "qrTitle": "Código QR de tu DID",
+    "refreshFailed": "Publicado {{time}}. La última renovación no salió; se volverá a intentar en unos minutos.",
     "showQr": "Mostrar código QR",
     "title": "DID público",
     "updating": "Publicando el cambio…",

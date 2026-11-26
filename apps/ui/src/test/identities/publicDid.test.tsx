@@ -1,5 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ProfileDidView } from "@ghostly/browser/shared/types";
 import { IdentityProofsSection } from "../../components/identities/IdentityProofsSection";
 import { renderApp as render } from "../render";
@@ -54,6 +54,25 @@ describe("Public DID", () => {
     expect(screen.getByTestId("did-status")).toHaveTextContent("Could not publish: Can't reach the relays. Trying again in a few minutes.");
     act(() => engine.update({ did: didView(), settings: { online: false } }));
     expect(screen.getByTestId("did-status")).toHaveTextContent("Not published while the network is off.");
+  });
+
+  it("keeps a published document Published when only its refresh failed, and says offline while the device has no network", () => {
+    const { engine } = renderApp(<IdentityProofsSection />);
+    const at = Date.UTC(2026, 8, 25, 12, 0);
+    const time = formatAt(at, { dateStyle: "medium", timeStyle: "short" }, "en").replace(/\s+/g, " ");
+    // The hourly refresh of an unchanged document failed: it is still out there, so it stays Published, with a muted note.
+    act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, upToDate: true, error: "Publish failed on every relay" }) }));
+    expect(screen.getByTestId("did-published")).toHaveTextContent(/^Published$/);
+    expect(screen.getByTestId("did-status")).toHaveTextContent(`Published ${time}. The last refresh did not go out; trying again in a few minutes.`);
+    expect(screen.getByTestId("did-status")).not.toHaveTextContent("Could not publish");
+
+    // Never published, and the device has no network: offline, not a relay error.
+    const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      act(() => { engine.update({ did: didView({ error: "Publish failed on every relay" }) }); window.dispatchEvent(new Event("offline")); });
+      expect(screen.getByTestId("did-published")).toHaveTextContent("Not published");
+      expect(screen.getByTestId("did-status")).toHaveTextContent("Not published while the network is off.");
+    } finally { onLine.mockRestore(); }
   });
 
   it("warns that listed identities are public for good, and has nothing to list without identities that have an address", async () => {

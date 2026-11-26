@@ -158,6 +158,7 @@
     "published": "Published {{time}}. It goes out again every hour while the app runs.",
     "publishing": "Publishing…",
     "qrTitle": "QR code of your DID",
+    "refreshFailed": "Published {{time}}. The last refresh did not go out; trying again in a few minutes.",
     "showQr": "Show QR code",
     "title": "Public DID",
     "updating": "Publishing the change…",
