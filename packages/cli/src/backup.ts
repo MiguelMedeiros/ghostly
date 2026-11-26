@@ -122,6 +122,31 @@ async function removeDeadPartials(path: string): Promise<void> {
 }
 
 /**
+ * Gives the whole backup at `partial` the name `path`, never over a file there (EEXIST). Where the file system has no
+ * hard links (FAT/exFAT, the USB stick a profile is moved on, answers EPERM; some network shares ENOTSUP), it is copied
+ * under the name, which it takes first; a copy cut short (a full stick) leaves no file. Before, "Not allowed to write
+ * or read" and no backup.
+ */
+async function place(partial: string, path: string): Promise<void> {
+  try { return await link(partial, path); } catch (error) {
+    if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+  }
+  const target = await open(path, "wx", 0o600);
+  try {
+    const source = await open(partial, "r"), buffer = new Uint8Array(FRAME_BYTES);
+    try {
+      for (let read; (read = (await source.read(buffer, 0, buffer.length)).bytesRead);) await target.write(buffer.subarray(0, read));
+    } finally { await source.close(); }
+    await target.sync();
+    await target.close();
+  } catch (error) {
+    await target.close().catch(() => {});
+    await rm(path, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+/**
  * Every file under `root`, with the size its one stat read. A second stat of each for its size, all at once, held the
  * daemon's thread ~100 ms at 20,000 files; one removed after the walk is left out by the copy.
  */
@@ -257,7 +282,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       out = null;
       // Its name only now, and never over a file that appeared meanwhile, nor once nobody asks for it.
       stillAsked(gone);
-      try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
+      try { await place(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
       return { path, bytes: written, files: copied, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
     } catch (error) {
       // The name it is written under is never typed and gone after: an error on it (a folder it may not write) names
