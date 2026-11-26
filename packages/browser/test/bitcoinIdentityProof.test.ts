@@ -124,6 +124,14 @@ describe("Bitcoin identity provider", () => {
     await expect(verify(statementFor(w.address), { signature: "pofAAAA" })).rejects.toThrow(/Proof-of-funds/);
   });
 
+  it("refuses a subject not in canonical form: an upper-case bech32 address is not a second identity", async () => {
+    for (const kind of ["p2wpkh", "p2tr"] as const) {
+      const w = testBitcoinWallet(kind, MAINNET);
+      const s = statementFor(w.address.toUpperCase());
+      await expect(verify(s, { signature: w.signBip322(s.text).simple })).rejects.toThrow(/canonical form/);
+    }
+  });
+
   it("accepts a real Bitcoin Core legacy signature only over its own message", async () => {
     // Bitcoin Core signed other messages; the provider checks the exact statement.
     const [v] = core.legacy;
