@@ -138,8 +138,8 @@ describe("a shared screen", () => {
     const { rerenderWith } = view(state(0, { participants: [person("ana", { screen: true, tracks: { screen: video() } })] }));
     act(() => screen.getByTestId("group-call-info").click());
     // On a black backing, as its words: white alone was 1.0:1 over a white shared screen. Open, white too: the accent
-    // it takes elsewhere was 3.2:1 on black in the light theme.
-    expect(screen.getByTestId("group-call-info")).toHaveClass("bg-black/70", "text-white", "aria-expanded:text-white");
+    // it takes elsewhere was 3.2:1 on black in the light theme. Under the mouse too: its accent was 1.06 to 1.3:1 there.
+    expect(screen.getByTestId("group-call-info")).toHaveClass("bg-black/70", "text-white", "hover:bg-black/80", "hover:text-white", "aria-expanded:text-white");
     expect(screen.getByTestId("group-call-info-text")).toHaveClass("bg-black/70", "text-white");
     expect(screen.getByTestId("group-call-info-text")).not.toHaveClass("text-text-secondary");
     rerenderWith(state(2));
