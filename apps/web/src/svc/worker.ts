@@ -165,8 +165,12 @@ const MAX_KEPT = 4;
 
 /** The query key the "go on" page puts its token under, on its own address: the next navigation's referrer. */
 export const GO_KEY = "ghostly-go";
-/** The "go on" page's one script: its token into its own address, then the same navigation again, with a referrer. */
-export const GO_SCRIPT = `(()=>{const to=location.href,at=new URL(to);at.searchParams.set("${GO_KEY}",document.currentScript.dataset.go);history.replaceState(null,"",at);location.replace(to)})()`;
+/**
+ * The "go on" page's one script: its token into its own address, then the same navigation again, with a referrer. Only
+ * as the view the bridge frames: a frame this origin's pages sent off the bridge is framed by the app itself (whose
+ * location it cannot read), and there it would go on to whichever bridge of this origin is open, in another tab too.
+ */
+export const GO_SCRIPT = `(()=>{try{if(parent===top||parent.location.pathname!=="${BRIDGE_PAGE}")return}catch{return}const to=location.href,at=new URL(to);at.searchParams.set("${GO_KEY}",document.currentScript.dataset.go);history.replaceState(null,"",at);location.replace(to)})()`;
 let goHash: Promise<string> | undefined;
 
 /**

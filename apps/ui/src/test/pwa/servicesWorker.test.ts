@@ -113,6 +113,29 @@ describe("the services worker", () => {
       expect((bridge.postMessage.mock.calls[2]![0] as { method: string; path: string }).method).toBe("GET");
     });
 
+    it("goes on from its page only while that page is the view the bridge frames: under the app itself, or anywhere else, nothing asks again", async () => {
+      const { GO_SCRIPT } = await import("../../../../web/src/svc/worker");
+      const app = { get location(): Location { throw new DOMException("cross-origin", "SecurityError"); } };
+      /** The go-on page's script run with `parent` and `top` as given: the address it asked for again, if any. */
+      const run = (parent: unknown, top: unknown): string | null => {
+        let asked: string | null = null;
+        const location = { href: `${ORIGIN}/account?x=1`, replace: (to: string) => { asked = to; } };
+        const history = { replaceState: (_s: unknown, _t: string, to: URL) => { location.href = String(to); } };
+        const document = { currentScript: { dataset: { go: "token" } } };
+        new Function("location", "history", "document", "parent", "top", GO_SCRIPT)(location, history, document, parent, top);
+        return asked;
+      };
+      const bridgePage = { location: new URL(`${ORIGIN}${BRIDGE_PAGE}`) };
+      expect(run(bridgePage, app)).toBe(`${ORIGIN}/account?x=1`);
+      // Its frame left the bridge (the app frames this origin itself): the parent is the app's, unreadable.
+      expect(run(app, app)).toBeNull();
+      // Another page of this origin frames it, or it is the top.
+      expect(run({ location: new URL(`${ORIGIN}/`) }, app)).toBeNull();
+      const self = {};
+      expect(run(self, self)).toBeNull();
+      expect(run(bridgePage, bridgePage)).toBeNull();
+    });
+
     it("is never another site's: its form POST at the top or into a frame of its own, or a window it opens", async () => {
       const tries = [
         { method: "POST", path: "/api/delete", mode: "navigate", destination: "document", referrer: `${OTHER}/` },
