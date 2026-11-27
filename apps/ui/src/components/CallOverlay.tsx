@@ -70,6 +70,14 @@ interface CallOverlayProps {
 
 const MINI_KEY = "ghostly_call_mini";
 
+/**
+ * A call's round button at rest (microphone and camera on, share, devices, the small window's), in the 1:1 call and the
+ * group call. Their window follows the theme (`bg-chat-bg`), so the button does too: the theme's raised surface under
+ * its ink, inside an edge in the muted ink, 3:1 or more on the window, on a tile and over a picture in every colour
+ * theme. White on a 10 % white tint was about 1.0:1 on a light theme's pale window: the buttons all but vanished.
+ */
+export const CALL_BUTTON = "border border-field-border bg-surface-hover text-text-primary";
+
 /** Corner grips of a floating box; they show when the pointer is over it. */
 function Grips({ handleProps }: { handleProps: (corner: Corner) => Record<string, unknown> }) {
   return (
@@ -290,7 +298,7 @@ export function CallOverlay({
       {/* Shrink to a floating window, or back to the whole screen */}
       <button
         onClick={() => (pinned ? onReturnToChat?.() : setMini(!mini))}
-        className="call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center cursor-pointer transition-colors"
+        className={`call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full ${CALL_BUTTON} hover:bg-border-bright flex items-center justify-center cursor-pointer transition-colors`}
         title={pinned ? t("calls.window.chat") : mini ? t("calls.window.full") : t("calls.window.small")}
         data-testid="call-minimize"
       >
@@ -431,7 +439,7 @@ export function CallOverlay({
           className={`call-compact-keep w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
             isMuted
               ? "bg-danger/30 text-danger"
-              : "bg-white/10 text-white hover:bg-white/20"
+              : `${CALL_BUTTON} hover:bg-border-bright`
           }`}
           data-testid="call-mute"
           title={isMuted ? t("calls.unmute") : t("calls.mute")}
@@ -479,7 +487,7 @@ export function CallOverlay({
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
               !cameraOn
                 ? "bg-danger/30 text-danger"
-                : "bg-white/10 text-white hover:bg-white/20"
+                : `${CALL_BUTTON} hover:bg-border-bright`
             }`}
             data-testid="call-camera"
             title={cameraOn ? t("calls.turnCameraOff") : t("calls.turnCameraOn")}
@@ -528,7 +536,7 @@ export function CallOverlay({
             aria-label={isScreenSharing ? t("calls.stopSharing") : t("calls.shareScreen")}
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               // Its icon is the same on and off: in forced colors, where the accent goes, Highlight tells you are sharing.
-              isScreenSharing ? "bg-accent text-on-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]" : "bg-white/10 text-white enabled:hover:bg-white/20"
+              isScreenSharing ? "bg-accent text-on-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]" : `${CALL_BUTTON} enabled:hover:bg-border-bright`
             }`}
             title={isScreenSharing ? t("calls.stopSharing") : canShareScreen ? t("calls.shareScreen") : screenShareUnavailable ? errorText(screenShareUnavailable, t) : t("calls.shareScreen")}
           >
@@ -591,7 +599,7 @@ export function DeviceMenu({ devices, overVideo, host }: { devices: CallDevices;
         aria-expanded={open}
         aria-haspopup="true"
         title={label}
-        className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${open ? "bg-white/25 text-white" : "bg-white/10 text-white hover:bg-white/20"}`}
+        className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer ${open ? "border border-field-border bg-border-bright text-text-primary" : `${CALL_BUTTON} hover:bg-border-bright`}`}
       >
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />

@@ -17,7 +17,7 @@ import { mediaProblemKeys } from "../lib/mediaProblemText";
 import { ownDirection } from "../lib/ownDirection";
 import { isolate } from "../lib/ownStatus";
 import { openAppSettings } from "../desktop/androidCameraRefusal";
-import { DeviceMenu, DeviceNoticeBar } from "./CallOverlay";
+import { DeviceMenu, DeviceNoticeBar, CALL_BUTTON } from "./CallOverlay";
 import { InfoButton } from "./layout/Section";
 import { useCallModeration, type GroupCallModerator } from "../hooks/useCallModeration";
 import { ModerationProblem, RemovedFromCall, TileModerationMenu } from "./GroupCallModerationMenu";
@@ -171,11 +171,14 @@ function TrackAudio({ track, speaker, testId = "group-call-audio" }: { track: Me
   return <audio ref={ref} autoPlay className="hidden" data-testid={testId} />;
 }
 
-/** Muted, or muted by the admin (`byAdmin`): ringed, and named so, on the tile and to a screen reader. */
+/**
+ * Muted, or muted by the admin (`byAdmin`): ringed, and named so, on the tile and to a screen reader. On the window's own
+ * colour, as the call's buttons are: danger's red on a black tint was about 1.1:1 in a light theme, where that red is dark.
+ */
 function MutedMark({ label, byAdmin = false }: { label: string; byAdmin?: boolean }) {
   return (
     <span data-testid="group-call-muted" data-by-admin={byAdmin} role="img" aria-label={label} title={label}
-      className={`grid place-items-center w-6 h-6 rounded-full bg-black/60 text-danger shrink-0 ${byAdmin ? "ring-2 ring-danger forced-colors:border forced-colors:border-[color:CanvasText]" : ""}`}>
+      className={`grid place-items-center w-6 h-6 rounded-full bg-chat-bg text-danger shrink-0 ${byAdmin ? "ring-2 ring-danger forced-colors:border forced-colors:border-[color:CanvasText]" : ""}`}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <line x1="1" y1="1" x2="23" y2="23" />
         <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17M12 19v4" />
@@ -358,7 +361,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       {compact && <p dir="auto" className="call-compact-name min-w-0 truncate text-text-primary text-sm font-medium">{groupName}</p>}
       <button
         onClick={() => (pinned ? onReturnToChat?.() : setMini(!mini))}
-        className="call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full bg-white/10 text-white hover:bg-white/20 flex items-center justify-center cursor-pointer transition-colors"
+        className={`call-resize absolute top-4 left-4 z-20 w-11 h-11 rounded-full ${CALL_BUTTON} hover:bg-border-bright flex items-center justify-center cursor-pointer transition-colors`}
         title={pinned ? t("calls.window.chat") : mini ? t("calls.window.full") : t("calls.window.small")}
         data-testid="group-call-minimize"
       >
@@ -437,7 +440,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
       <div className="call-controls absolute bottom-12 max-md:bottom-[calc(2rem+env(safe-area-inset-bottom))] left-0 right-0 flex items-center justify-center gap-6 max-md:gap-8 z-10">
         <button onClick={held?.mic ? undefined : onToggleMic} {...(held?.mic && { "aria-disabled": true })} data-testid="group-call-mic"
           title={held?.mic ? t("calls.group.mutedByAdmin") : local.mic ? t("calls.mute") : t("calls.unmute")}
-          className={`call-compact-keep ${roundButton} ${heldLook} ${local.mic ? "bg-white/10 text-white hover:bg-white/20" : "bg-danger/30 text-danger"}`}>
+          className={`call-compact-keep ${roundButton} ${heldLook} ${local.mic ? `${CALL_BUTTON} hover:bg-border-bright` : "bg-danger/30 text-danger"}`}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             {local.mic
               ? <><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8" /></>
@@ -446,7 +449,7 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         </button>
         <button onClick={held?.camera ? undefined : onToggleCamera} {...(held?.camera && { "aria-disabled": true })} data-testid="group-call-camera"
           title={held?.camera ? t("calls.group.offByAdmin") : local.camera ? t("calls.turnCameraOff") : t("calls.turnCameraOn")}
-          className={`${roundButton} ${heldLook} ${local.camera ? "bg-white/10 text-white hover:bg-white/20" : "bg-danger/30 text-danger"}`}>
+          className={`${roundButton} ${heldLook} ${local.camera ? `${CALL_BUTTON} hover:bg-border-bright` : "bg-danger/30 text-danger"}`}>
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             {local.camera
               ? <><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></>
@@ -457,14 +460,14 @@ export function GroupCallView({ call, groupName, onToggleMic, onToggleCamera, on
         {canShareScreen && (
           <button onClick={held?.screen ? undefined : onToggleScreen} {...(held?.screen && { "aria-disabled": true })} data-testid="group-call-screen"
             aria-label={screenLabel} title={screenLabel}
-            className={`${roundButton} ${heldLook} ${local.screen ? "bg-accent text-on-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]" : "bg-white/10 text-white hover:bg-white/20"}`}>
+            className={`${roundButton} ${heldLook} ${local.screen ? "bg-accent text-on-accent forced-colors:forced-color-adjust-none forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText]" : `${CALL_BUTTON} hover:bg-border-bright`}`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="2" y="4" width="20" height="13" rx="2" />
               <path d="M8 21h8M12 17v4M12 13V8m0 0l-2.5 2.5M12 8l2.5 2.5" />
             </svg>
           </button>
         )}
-        {anyHeld && !mini && <InfoButton open={heldInfo} onToggle={() => setHeldInfo(!heldInfo)} controls={heldInfoId} testId="group-call-by-admin-info" className="text-white/80" />}
+        {anyHeld && !mini && <InfoButton open={heldInfo} onToggle={() => setHeldInfo(!heldInfo)} controls={heldInfoId} testId="group-call-by-admin-info" />}
         <button onClick={onLeave} data-testid="group-call-leave" title={t("calls.group.leave")}
           className="call-compact-keep w-16 h-16 max-md:w-[72px] max-md:h-[72px] rounded-full bg-danger-fill flex items-center justify-center text-white hover:bg-danger-fill/80 transition-colors cursor-pointer">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
