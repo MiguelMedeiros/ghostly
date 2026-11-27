@@ -83,6 +83,30 @@ export function sanitizeNick(nick: unknown): string | undefined {
   return typeof nick === "string" ? sanitizeDisplayText(nick, MAX_NICK_LENGTH) : undefined;
 }
 
+type Segmenter = { segment(input: string): Iterable<{ segment: string }> };
+let segmenter: Segmenter | null | undefined;
+
+/**
+ * `text` cut to at most `maxBytes` of UTF-8, at a grapheme boundary so no emoji family or combining stack is split
+ * (at a code point where the runtime has no `Intl.Segmenter`).
+ */
+export function cutToUtf8Bytes(text: string, maxBytes: number): string {
+  const encoder = new TextEncoder();
+  if (encoder.encode(text).length <= maxBytes) return text;
+  if (segmenter === undefined) {
+    const Ctor = (globalThis as { Intl?: { Segmenter?: new (locale?: string, options?: { granularity: string }) => Segmenter } }).Intl?.Segmenter;
+    segmenter = Ctor ? new Ctor(undefined, { granularity: "grapheme" }) : null;
+  }
+  const parts = segmenter ? Array.from(segmenter.segment(text), s => s.segment) : Array.from(text);
+  let out = "", used = 0;
+  for (const part of parts) {
+    used += encoder.encode(part).length;
+    if (used > maxBytes) break;
+    out += part;
+  }
+  return out;
+}
+
 /**
  * `text` without the characters of `chars` it ends with, in one pass from the end. A `/[…]+$/` replace would retry
  * from every character of a run that does not reach the end.

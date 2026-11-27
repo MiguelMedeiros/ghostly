@@ -18,8 +18,8 @@ import { renderApp } from "../render";
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
 
 const WORDS = {
-  en: { limit: "Up to 20 letters.", full: "That's the most: 20 letters.", needName: "Type a name to continue." },
-  ar: { limit: "حتى 20 حرفًا.", full: "هذا هو الحد الأقصى: 20 حرفًا.", needName: "اكتب اسمًا للمتابعة." },
+  en: { limit: "Up to 64 letters.", full: "That's the most: 64 letters.", needName: "Type a name to continue." },
+  ar: { limit: "حتى 64 حرفًا.", full: "هذا هو الحد الأقصى: 64 حرفًا.", needName: "اكتب اسمًا للمتابعة." },
 } as const;
 
 /** What a screen reader reads after an element's name: the text of each element its aria-describedby names. */
@@ -69,12 +69,12 @@ describe.each(["en", "ar"] as const)("the name step in %s says what a name may b
     expect(screen.getByText(words.limit)).toBeVisible();
   });
 
-  it("25 letters typed: 20 kept, and the cut said once in a polite status, not once per key; a delete clears it", async () => {
+  it("70 letters typed: 64 kept, and the cut said once in a polite status, not once per key; a delete clears it", async () => {
     const { user, input } = await open(language);
     const { said, stop } = watchSaid();
-    await user.type(input, "a".repeat(25));
+    await user.type(input, "a".repeat(70));
     await settle();
-    expect(input.value).toBe("a".repeat(20));
+    expect(input.value).toBe("a".repeat(64));
     expect(said.filter((text) => text === words.full)).toEqual([words.full]);
     const region = screen.getByText(words.full).closest("[role=status]");
     expect(region, "a status, said politely, not an alert").not.toBeNull();
@@ -85,56 +85,56 @@ describe.each(["en", "ar"] as const)("the name step in %s says what a name may b
     stop();
   });
 
-  it("15 letters, then a paste of 10: the 5 that fit go in, and the cut is said once", async () => {
+  it("59 letters, then a paste of 10: the 5 that fit go in, and the cut is said once", async () => {
     const { user, input } = await open(language);
-    await user.type(input, "a".repeat(15));
+    await user.type(input, "a".repeat(59));
     const { said, stop } = watchSaid();
     await user.paste("b".repeat(10));
     await settle();
-    expect(input.value).toBe("a".repeat(15) + "b".repeat(5));
+    expect(input.value).toBe("a".repeat(59) + "b".repeat(5));
     expect(said).toEqual([words.full]);
     expect(status()).toBe(words.full);
     stop();
   });
 
-  it("a name of emoji, all selected, then a paste of 25 letters: 20 go in, and the cut is said though the name is shorter in UTF-16", async () => {
+  it("a name of emoji, all selected, then a paste of 70 letters: 64 go in, and the cut is said though the name is shorter in UTF-16", async () => {
     const { user, input } = await open(language);
     const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}";
     await user.paste(family.repeat(4));
     expect(input.value).toBe(family.repeat(4));
     expect(status()).toBe("");
     input.setSelectionRange(0, input.value.length);
-    await user.paste("b".repeat(25));
+    await user.paste("b".repeat(70));
     await settle();
-    expect(input.value).toBe("b".repeat(20));
+    expect(input.value).toBe("b".repeat(64));
     expect(status()).toBe(words.full);
   });
 
   it("a word composed past the limit is left out whole, and the cut is said though the name has room for a letter", async () => {
     const { user, input } = await open(language);
-    await user.type(input, "a".repeat(18));
+    await user.type(input, "a".repeat(62));
     act(() => compose(input, ["\u306B\u307B\u3093\u3054", "\u65E5\u672C\u8A9E"]));
     await settle();
-    expect(input.value).toBe("a".repeat(18));
+    expect(input.value).toBe("a".repeat(62));
     expect(status()).toBe(words.full);
   });
 
   it("at the limit, a character replaced keeps the cut said; only a delete that makes room clears it", async () => {
     const { user, input } = await open(language);
     const smile = "\u{1F600}";
-    await user.paste(smile.repeat(20));
+    await user.paste(smile.repeat(64));
     await user.type(input, "x");
     await settle();
-    expect(input.value).toBe(smile.repeat(20));
+    expect(input.value).toBe(smile.repeat(64));
     expect(status()).toBe(words.full);
-    // The last emoji (two UTF-16 units) replaced by one letter: still 20 characters, no room made.
-    await user.type(input, "b", { initialSelectionStart: 38, initialSelectionEnd: 40 });
+    // The last emoji (two UTF-16 units) replaced by one letter: still 64 characters, no room made.
+    await user.type(input, "b", { initialSelectionStart: 126, initialSelectionEnd: 128 });
     await settle();
-    expect(input.value).toBe(smile.repeat(19) + "b");
+    expect(input.value).toBe(smile.repeat(63) + "b");
     expect(status()).toBe(words.full);
     await user.keyboard("{Backspace}");
     await settle();
-    expect(input.value).toBe(smile.repeat(19));
+    expect(input.value).toBe(smile.repeat(63));
     expect(status()).toBe("");
   });
 

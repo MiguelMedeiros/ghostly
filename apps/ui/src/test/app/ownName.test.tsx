@@ -1,6 +1,6 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { sanitizeNick } from "@ghostly/core";
+import { MAX_NICK_LENGTH, sanitizeNick } from "@ghostly/core";
 import { NameStep } from "../../components/NameStep";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
@@ -17,7 +17,7 @@ import { renderApp } from "../render";
 /*
  * The person's own name in chats is cleaned as a contact cleans it (`sanitizeNick`), in the name step, Profile and
  * Settings alike: hidden characters gone, spaces collapsed and trimmed, a name with nothing visible is no name, and
- * the 20 characters are counted as seen, never cut inside an emoji.
+ * the name is as long as a contact keeps it (`MAX_NICK_LENGTH`), never cut inside an emoji.
  */
 
 /** happy-dom has no <dialog> modal; the dialog only needs to open. */
@@ -49,7 +49,7 @@ describe("the name step", () => {
     expect(stored()).toBe("");
   });
 
-  it("keeps two emoji families whole: the 20 are counted as characters seen, not UTF-16 units", async () => {
+  it("keeps two emoji families whole: the field counts characters, not UTF-16 units", async () => {
     const { user } = renderApp(<NameStep />);
     await settle();
     const input = await screen.findByTestId("name-step-input");
@@ -58,6 +58,16 @@ describe("the name step", () => {
     expect((input as HTMLInputElement).value).toBe(`${FAMILY}${FAMILY}`);
     await user.click(screen.getByTestId("name-step-save"));
     await waitFor(() => expect(stored()).toBe(`${FAMILY}${FAMILY}`));
+  });
+
+  it("says the limit a contact keeps, and takes a name that long", async () => {
+    const { user } = renderApp(<NameStep />);
+    await settle();
+    const input = await screen.findByTestId("name-step-input");
+    expect(screen.getByTestId("name-step-limit")).toHaveTextContent(`Up to ${MAX_NICK_LENGTH} letters.`);
+    input.focus();
+    await user.paste("a".repeat(70));
+    expect((input as HTMLInputElement).value).toBe("a".repeat(MAX_NICK_LENGTH));
   });
 
   it("saves the name without its hidden characters", async () => {
@@ -90,13 +100,27 @@ describe("Name in chats", () => {
     });
   }
 
-  it("counts 20 characters as seen: 20 emoji fit, the 21st does not", async () => {
+  it("takes as long a name as a contact keeps, 64 characters, and cuts it there", async () => {
     const { user } = renderApp(<Profile />);
     const input = screen.getByTestId("account-nickname") as HTMLInputElement;
     input.focus();
-    await user.paste("👻".repeat(25));
-    expect(input.value).toBe("👻".repeat(20));
-    await waitFor(() => expect(stored()).toBe("👻".repeat(20)));
+    await user.paste("a".repeat(70));
+    expect(input.value).toBe("a".repeat(MAX_NICK_LENGTH));
+    await waitFor(() => expect(stored()).toBe("a".repeat(MAX_NICK_LENGTH)));
+    expect(sanitizeNick(stored())).toBe(stored());
+  });
+
+  it("counts an emoji as the characters a contact counts: 64 ghosts fit, families stay whole", async () => {
+    const { user } = renderApp(<Profile />);
+    const input = screen.getByTestId("account-nickname") as HTMLInputElement;
+    input.focus();
+    await user.paste("👻".repeat(70));
+    expect(input.value).toBe("👻".repeat(MAX_NICK_LENGTH));
+    await user.clear(input);
+    // A family is 7 characters: 9 of them (63) fit, the 10th is left out whole.
+    await user.paste(FAMILY.repeat(10));
+    expect(input.value).toBe(FAMILY.repeat(9));
+    await waitFor(() => expect(stored()).toBe(FAMILY.repeat(9)));
   });
 });
 

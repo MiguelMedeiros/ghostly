@@ -25,6 +25,21 @@ describe("participation-authenticated discovery signals", () => {
     expect(JSON.parse(fitted).c.length).toBeGreaterThan(0);
     expect(verifyPairedSignal(fitted, from, to, owner.pubKeyZ32, true)).not.toBeNull();
   });
+  it("keeps a signed offer's candidates next to a long name in any script", () => {
+    const offer = JSON.stringify({ ...JSON.parse(signal), ts: Date.now(), o: Date.now() - 1, u: "a".repeat(24), p: "b".repeat(48),
+      c: ["h,192.168.1.20,50000", "h,2001:db8::1,50001", "s,203.0.113.1,54321", "s,2001:db8:ffff::2,54322", "r,203.0.113.3,3478", "r,203.0.113.4,3479"] });
+    const kept = (nick: string) => {
+      const session = new LinkSession({ params: createLink().mine, nick, getServices: () => [{ id: "chat", type: "chat" }],
+        transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "test", relays: [] }) } });
+      return JSON.parse(fitSignedPairedSignal(offer, owner.seedB64, from, to, candidate => session.fitsRtcSignal(candidate))).c.length;
+    };
+    // The 20 characters names had before: a CJK one is 60 bytes, about what the packet's name is cut to.
+    const short = kept("名".repeat(20));
+    expect(short).toBeGreaterThan(0);
+    expect(kept("名".repeat(64))).toBe(short);
+    expect(kept("👻".repeat(64))).toBe(short);
+    expect(kept("a".repeat(64))).toBeGreaterThanOrEqual(short);
+  });
   it("allows unsigned first-increment discovery only before migration is committed", () => {
     expect(verifyPairedSignal(signal, from, to, owner.pubKeyZ32)).toBe(signal);
     expect(verifyPairedSignal(signal, from, to, owner.pubKeyZ32, true)).toBeNull();
