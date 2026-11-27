@@ -17,7 +17,6 @@ import { GroupConnection } from "../../components/GroupConnection";
 import { PeerAvatar } from "../../components/Avatar";
 import { PeerPresenceLine } from "../../components/PresenceMarks";
 import { ChatSubtitle } from "../../components/TypingIndicator";
-import { usePeerTyping } from "../../hooks/useTyping";
 import { StorageFullBanner } from "../../components/StorageFullBanner";
 import type { ChatSession } from "../../lib/types";
 
@@ -453,23 +452,14 @@ describe("the contact's typing while the tab lost its peer", () => {
     await waitFor(() => expect(engine.reconnecting).toBe(false), { timeout: 3000 });
   }
 
-  function Typing() {
-    return <span data-testid="typing-flag">{String(usePeerTyping(PEER))}</span>;
-  }
-
   it("is not said until the peer is back", async () => {
-    const view = renderApp(<div>
-      <ChatSubtitle peerKey={PEER} keyLabel="ABCD" />
-      <Typing />
-    </div>);
+    const view = renderApp(<ChatSubtitle peerKey={PEER} keyLabel="ABCD" />);
     act(() => view.engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", peerTyping: true, peerTypingKind: "recording" })] }));
     expect(screen.getByTestId("chat-typing")).toHaveAttribute("data-kind", "recording");
-    expect(screen.getByTestId("typing-flag")).toHaveTextContent("true");
 
     await losePeer();
     expect(screen.queryByTestId("chat-typing")).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-subtitle")).toHaveTextContent("ABCD");
-    expect(screen.getByTestId("typing-flag")).toHaveTextContent("false");
 
     await back();
     expect(screen.getByTestId("chat-typing")).toHaveAttribute("data-kind", "recording");

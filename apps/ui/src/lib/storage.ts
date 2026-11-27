@@ -759,13 +759,6 @@ export function pinnedOrder(): string[] {
 /** A place among the pinned chats: `index` from 0, the top. */
 export interface PinnedPlace { index: number; count: number }
 
-/** A pinned chat's place among the pinned ones, or undefined for a chat that is not pinned. */
-export function pinnedPlace(sessionId: string): PinnedPlace | undefined {
-  const order = pinnedOrder();
-  const index = order.indexOf(sessionId);
-  return index < 0 ? undefined : { index, count: order.length };
-}
-
 /** Pins a chat, at the top of the pinned ones, or unpins it. */
 export function setSessionPinned(sessionId: string, pinned: boolean): void {
   if (!loadSession(sessionId)) return;
@@ -788,12 +781,6 @@ export function movePinnedTo(sessionId: string, index: number): PinnedPlace | un
   writePinOrder(next);
   window.dispatchEvent(new Event("session-updated"));
   return { index: next.indexOf(sessionId), count: next.length };
-}
-
-/** Moves a pinned chat one place up or down; undefined at that end, or when it is not pinned. */
-export function movePinned(sessionId: string, direction: "up" | "down"): PinnedPlace | undefined {
-  const at = pinnedOrder().indexOf(sessionId);
-  return at < 0 ? undefined : movePinnedTo(sessionId, at + (direction === "up" ? -1 : 1));
 }
 
 /**
