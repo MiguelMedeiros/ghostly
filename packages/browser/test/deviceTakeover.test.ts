@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { identityFromSeed, readSetUpdate, readTurnPacket, seedSigner, sign, signTurnPacket, signTurnRelease, toBase64Url, turnInstance, turnKeys, turnStatedVerifier, turnVerifierMark, TURN_SETTLE_MS, type Identity, type TurnRecord } from "@ghostly/core";
+import { fromBase64Url, identityFromSeed, readSetUpdate, readTurnPacket, seedSigner, sign, signTurnPacket, signTurnRelease, toBase64Url, turnInstance, turnKeys, turnStatedVerifier, turnVerifierMark, TURN_SETTLE_MS, type Identity, type TurnRecord } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import { TurnKeeper, takeoverTurn, type TurnStore } from "../src/devices/turn";
 import { TakeoverRefusal, canTakeOver, forceTakeover, takeoverTarget, verifierStands } from "../src/devices/takeover";
@@ -380,6 +380,49 @@ describe("what keeps a forced takeover from locking the owner out", () => {
     expect(phone.store.record).toMatchObject({ state: "standby", takeovers: 0, copy: "frozen" });
     expect(phone.store.record.raise).toBeUndefined();
   });
+
+  it("a set-update accepted while the takeover's read is out: nothing is written under the old secret, and the next check reads the new set", async () => {
+    // The desktop removes the laptop: the phone takes the new secret (`setUpdate.ts`) while its read of the old address is out.
+    const NEW_D = new Uint8Array(32).fill(0xe7);
+    const phone = await device(network, 1, "standby");
+    network.seed(phone.stored);
+    network.afterRead = () => {
+      network.afterRead = undefined;
+      void phone.store.amend("ghostly", { d: toBase64Url(NEW_D), deviceSet: [...deviceSet().slice(0, 2), null], turn: N, rev: 0, activeSlot: 0, turnPacket: undefined, seenSequence: 0, tombstone: undefined, settle: undefined });
+    };
+    clock.onSleep = async () => {};
+    const outcome = await forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" });
+    expect(outcome.kind).not.toBe("start");
+    expect(phone.store.record).toMatchObject({ state: "standby", d: toBase64Url(NEW_D), takeovers: 0 });
+    expect(phone.store.record.raise).toBeUndefined();
+    // Whatever packet it holds verifies under its own secret: the turn is still read.
+    if (phone.store.record.turnPacket) expect(readTurnPacket(turnKeys(NEW_D), fromBase64Url(phone.store.record.turnPacket)).kind).toBe("valid");
+    await expect(phone.keeper.check(true)).resolves.toBeTruthy();
+  });
+
+  // The two later windows: between the read's check of the secret and its amend of the mark (which hands back the
+  // new record), and between the takeover's check of the secret and its move to `taking`.
+  for (const window of ["mark", "move"] as const) {
+    it(`a set-update accepted just before the takeover's ${window === "mark" ? "amend of the mark" : "move to taking"}: nothing is written under the old secret`, async () => {
+      const NEW_D = new Uint8Array(32).fill(0xe8);
+      const phone = await device(network, 1, "standby");
+      network.seed(phone.stored);
+      const newSet = { d: toBase64Url(NEW_D), deviceSet: [...deviceSet().slice(0, 2), null], turn: N, rev: 0, activeSlot: 0, turnPacket: undefined, seenSequence: 0, tombstone: undefined, settle: undefined };
+      const { amend: amendStore, move } = phone.store;
+      let landed = false;
+      const land = async () => { if (!landed) { landed = true; await amendStore("ghostly", newSet); } };
+      if (window === "mark") phone.store.amend = async (profile, patch) => { if (patch.seenSequence) await land(); return amendStore(profile, patch); };
+      else phone.store.move = async (profile, to, patch) => { if (to === "taking") await land(); return move(profile, to, patch); };
+      clock.onSleep = async () => {};
+      const outcome = await forceTakeover(ports(phone.store, phone.keeper), { password: PASSWORD, name: "Desktop" });
+      expect(landed).toBe(true);
+      expect(outcome.kind).not.toBe("start");
+      expect(phone.store.record).toMatchObject({ state: "standby", d: toBase64Url(NEW_D), takeovers: 0 });
+      expect(phone.store.record.raise).toBeUndefined();
+      expect(phone.store.record.turnPacket).toBeUndefined();
+      await expect(phone.keeper.check(true)).resolves.toBeTruthy();
+    });
+  }
 
   it("a superseded device takes the turn back (It wasn't me) above the turn that replaced it", async () => {
     const desktop = await device(network, 0, "superseded", { activeSlot: 1 });

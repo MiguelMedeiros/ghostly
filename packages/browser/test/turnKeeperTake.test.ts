@@ -95,6 +95,16 @@ describe("the take of a handoff", () => {
     expect(network.puts().every((p) => p.condition === null)).toBe(true);
   });
 
+  it("a new device secret taken while the take's read is out: nothing is written under the old one, and it waits", async () => {
+    const { keeper, store, stored } = await taker(network);
+    network.seed(stored);
+    const release = await releaseTo(N + 1, 0, 1);
+    network.afterRead = () => { network.afterRead = undefined; void store.amend("ghostly", { d: toBase64Url(new Uint8Array(32).fill(0xe1)), turnPacket: undefined, seenSequence: 0 }); };
+    expect((await keeper.take(release, N + 1))?.kind).toBe("wait");
+    expect(store.record.turnPacket).toBeUndefined();
+    expect(network.puts()).toEqual([]);
+  });
+
   it("a third device forced N + 1 before the take: the taker yields without putting, steps back and is standby", async () => {
     let undone = 0;
     const { keeper, store } = await taker(network, async () => { undone += 1; });
