@@ -85,6 +85,26 @@ describe("a 1:1 voice message that needs an answer or is on its way", () => {
     await vi.waitFor(() => expect(lastAction()).toEqual({ linkId: "link-1", fileId: id, action: "cancel" }));
   });
 
+  // Cut with … in a 300 px bubble, "Waiting for Ana to accept · 86.0 MB" lost its end (its size; paused: how far it is).
+  it("its status wraps under the waveform, as a file's and an audio file's do, not cut with …", () => {
+    const asking = voice("me");
+    const paused = voice();
+    fakeEngine.update({ links: [linkView({ id: "link-1" })], transfers: {
+      [asking.file!.id]: { state: "transferring", stage: "asking", direction: "out", transferred: 0, size: 86 * MB },
+      [paused.file!.id]: { state: "transferring", stage: "paused", pausedBy: "peer", direction: "in", transferred: 34 * MB, size: 86 * MB },
+    } });
+    for (const message of [asking, paused]) show(message);
+    const [waiting, held] = screen.getAllByTestId("voice-status");
+    expect(waiting).toHaveTextContent(/Waiting for .Ana. to accept · 86\.0\sMB$/);
+    expect(held).toHaveTextContent(/Paused by .Ana. · 39% of 86\.0\sMB$/);
+    for (const status of [waiting, held]) {
+      expect(status).not.toHaveClass("truncate");
+      expect(status.className).toContain("[overflow-wrap:anywhere]");
+    }
+    // The time beside it keeps its line whole.
+    for (const time of screen.getAllByTestId("voice-time")) expect(time).toHaveClass("shrink-0", "whitespace-nowrap");
+  });
+
   // They took taps on 20 px of height on a phone, under a file's 44 px Accept, Decline, Pause, Resume and Cancel.
   it("Download, Decline, Pause, Resume and Cancel are a thumb's height on a phone, as a file's are", () => {
     const offer = voice();
