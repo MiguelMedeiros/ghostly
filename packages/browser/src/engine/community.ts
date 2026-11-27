@@ -525,10 +525,10 @@ export class Communities {
     if (!session?.isMember) return undefined;
     return { me: session.myKey, community: true, inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId) => session.couldRead(key, messageId) };
   }
-  /** Me in a community I am a member of, for its call (WISP 602): my member key, its seed, the admin's metadata, and whether I am the admin. */
-  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta; isAdmin: boolean } | undefined {
+  /** Me in a community I am a member of, for its call (WISP 602): my member key, its seed, the admin's metadata, whether I am the admin, and how many keys its roster has. */
+  callMember(groupId: string): { key: string; seedB64: string; meta?: GroupMeta; isAdmin: boolean; members: number } | undefined {
     const session = this.live.get(groupId)?.session;
-    return session?.isMember ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta, isAdmin: session.isAdmin } : undefined;
+    return session?.isMember ? { key: session.myKey, seedB64: session.state.seedB64, meta: session.state.meta, isAdmin: session.isAdmin, members: session.roster.length } : undefined;
   }
   /** Is this device a hub of the group? (tests and the load harness) */
   isHub(groupId: string): boolean { const live = this.live.get(groupId); return !!live?.hub && live.session.status === "active"; }

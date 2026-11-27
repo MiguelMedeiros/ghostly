@@ -179,10 +179,11 @@ describe("the engine's groupCallToken", () => {
     });
   }
 
-  it("asks the node through the host's groupCallFetch (the CLI's checks the address when it connects), the pass and the moderation alike", async () => {
+  it("asks the node through the host's groupCallFetch (the CLI's checks the address when it connects), the pass, the moderation and the occupancy alike", async () => {
     const page = vi.fn();
     vi.stubGlobal("fetch", page);
-    const host = vi.fn(async (input: string | URL | Request) => String(input).endsWith("/sfu/group-token") ? new Response("", { status: 429 }) : Response.json({ muted: {}, banned: [] }));
+    const host = vi.fn(async (input: string | URL | Request) =>
+      String(input).endsWith("/sfu/group-token") ? new Response("", { status: 429 }) : String(input).endsWith("/sfu/group-occupancy") ? Response.json({ count: 0 }) : Response.json({ muted: {}, banned: [] }));
     const { node, inner } = await started({ groupCallFetch: host as unknown as typeof fetch });
     const { groupId } = await node.createGroup({ name: "Plaza", profile: "community" });
     const session = inner.groups.communities.session(groupId)!;
@@ -190,7 +191,8 @@ describe("the engine's groupCallToken", () => {
     withCall(session.state);
     await expect(node.groupCallToken({ groupId })).rejects.toThrow("call.ghostly.test is busy");
     await node.groupCallModerate({ groupId, act: "state" });
-    expect(host.mock.calls.map(([url]) => String(url))).toEqual([`${SFU}/sfu/group-token`, `${SFU}/sfu/group-moderate`]);
+    expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: true, count: 0 });
+    expect(host.mock.calls.map(([url]) => String(url))).toEqual([`${SFU}/sfu/group-token`, `${SFU}/sfu/group-moderate`, `${SFU}/sfu/group-occupancy`]);
     expect(page).not.toHaveBeenCalled();
   });
 
