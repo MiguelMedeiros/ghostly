@@ -93,6 +93,8 @@ describe("the state a 1:1 chat's link pushes as it goes live or drops", () => {
       ["its link ready", () => events.onPairingState({ status: "ready" } as never)],
       ["its session's group frames", () => events.onGroupsSupport(true)],
       ["the contact's hold word", () => events.onHold({ peerAllows: false })],
+      // Its policy, said on each session's start: here a change of how to dial it.
+      ["the contact's transports", () => events.onTransportDiscovery({ "iroh/1": { v: 1 } } as never, ["iroh/1", "webrtc/1"], true)],
       ["its data link gone", () => events.onDataLinkState("closed")],
     ];
     for (const [what, change] of changes) {
@@ -105,5 +107,27 @@ describe("the state a 1:1 chat's link pushes as it goes live or drops", () => {
       expect(chatView(after, bob.id), what).not.toBe(chatView(before, bob.id));
       before = after;
     }
+  });
+
+  it("the contact's policy that says the transports kept already writes nothing and posts no state", async () => {
+    const { node } = engine();
+    const bob = await add(node, { ...row("Bob"), peerDescriptors: { "iroh/1": { v: 1 } } as never, peerTransports: ["iroh/1", "webrtc/1"], peerFallback: true });
+    node["startLink"](bob.id);
+    const events = recorded.find(link => link.options.params.id === bob.id)!.options.events;
+    const patches = vi.spyOn(db, "patchLink");
+    // The link's start writes rows of its own meanwhile: only the contact's transports are counted.
+    const writes = { get mock() { return { calls: patches.mock.calls.filter(([, patch]) => "peerDescriptors" in patch) }; } };
+    const whole = vi.spyOn(node as never as { emitState(): void }, "emitState"), own = vi.spyOn(node as never as { chatChanged(id: string): void }, "chatChanged");
+    // Every session's start says it again (`TransportSwitch.begin`): a reconnect wave wrote each chat's row and built
+    // every chat's view once per chat.
+    await events.onTransportDiscovery({ "iroh/1": { v: 1 } } as never, ["iroh/1", "webrtc/1"], true);
+    expect(writes.mock.calls).toEqual([]);
+    expect(whole).not.toHaveBeenCalled();
+    expect(own).not.toHaveBeenCalled();
+    // A change is kept, for the next start.
+    await events.onTransportDiscovery({ "iroh/1": { v: 1 } } as never, ["iroh/1", "webrtc/1"], false);
+    expect(writes.mock.calls).toEqual([[bob.id, { peerDescriptors: { "iroh/1": { v: 1 } }, peerTransports: ["iroh/1", "webrtc/1"], peerFallback: false }]]);
+    expect(node["links"].get(bob.id)!.stored.peerFallback).toBe(false);
+    expect(whole).not.toHaveBeenCalled();
   });
 });

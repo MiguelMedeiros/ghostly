@@ -9868,10 +9868,16 @@ export class GhostlyNode implements EngineImplementation {
           if (live.goneListener && this.contactUnread(live)) this.listenAgain(live);
           this.chatChanged(linkId);
         },
+        // Said with the contact's policy on every session's start (`TransportSwitch.begin`): one that says what is kept
+        // writes nothing, and a change builds this chat's view alone. A reconnect wave at 2,000 chats wrote each row and
+        // built every chat's and group's view once per chat (9.8 s of state builds in 15 s; bug hunt, 2026-11-27).
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
           const patch = { peerDescriptors, peerTransports, peerFallback };
+          const kept = live.stored;
+          if (kept.peerFallback === peerFallback && JSON.stringify(kept.peerTransports) === JSON.stringify(peerTransports)
+            && JSON.stringify(kept.peerDescriptors) === JSON.stringify(peerDescriptors)) return;
           await db.patchLink(linkId, patch);
-          live.stored = { ...live.stored, ...patch }; this.emitState();
+          live.stored = { ...live.stored, ...patch }; this.chatChanged(linkId);
         },
         onPairingState: state => {
           live.pairing = state;
