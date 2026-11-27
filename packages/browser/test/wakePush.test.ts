@@ -739,6 +739,35 @@ describe("private groups: a mention wakes a member whose app is closed", () => {
     expect(framesOf(b)).toHaveLength(said);
   });
 
+  it("keeps each of two groups muted at once while the subscription is replaced, and an unmute asked meanwhile", async () => {
+    const node = engine();
+    const [b, c, d] = [edgeLink(), edgeLink(), edgeLink()];
+    await addEdge(node, "g", memberKey(), b);
+    await addEdge(node, "other", memberKey(), c);
+    await addEdge(node, "third", memberKey(), d);
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect([b, c, d].map((link) => framesOf(link).length)).toEqual([1, 1, 1]));
+    vi.spyOn(node as never as { rotateWake(): Promise<void> }, "rotateWake").mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    await Promise.all([node.setWakeMuted({ linkId: "group:g", muted: true }), node.setWakeMuted({ linkId: "group:other", muted: true })]);
+    expect((await db.getSettings()).wakeMutedGroups).toEqual(["g", "other"]);
+    expect([node["groupWakeView"]({ id: "g", profile: "mesh" } as never), node["groupWakeView"]({ id: "other", profile: "mesh" } as never)]).toEqual([{ wakeMuted: true }, { wakeMuted: true }]);
+    await Promise.all([node.setWakeMuted({ linkId: "group:third", muted: true }), node.setWakeMuted({ linkId: "group:g", muted: false })]);
+    expect((await db.getSettings()).wakeMutedGroups).toEqual(["other", "third"]);
+  });
+
+  it("a group mute that fails does not hold up the next one", async () => {
+    const node = engine();
+    const [b, c] = [edgeLink(), edgeLink()];
+    await addEdge(node, "g", memberKey(), b);
+    await addEdge(node, "other", memberKey(), c);
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect([b, c].map((link) => framesOf(link).length)).toEqual([1, 1]));
+    vi.spyOn(node as never as { rotateWake(): Promise<void> }, "rotateWake").mockRejectedValueOnce(new Error("push service down")).mockResolvedValue();
+    const [failed, muted] = await Promise.allSettled([node.setWakeMuted({ linkId: "group:g", muted: true }), node.setWakeMuted({ linkId: "group:other", muted: true })]);
+    expect([failed.status, muted.status]).toEqual(["rejected", "fulfilled"]);
+    expect((await db.getSettings()).wakeMutedGroups).toEqual(["other"]);
+  });
+
   it("an edge whose member held a token closes: replaced when the member is out of the group, not when a group on hubs only drops the edge", async () => {
     const node = engine();
     const [kept, removed] = [memberKey(), memberKey()];

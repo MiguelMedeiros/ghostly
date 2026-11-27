@@ -4106,7 +4106,17 @@ export class GhostlyNode implements EngineImplementation {
     this.awaitingSoon();
   }
 
-  private async setGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
+  private setGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
+    // One at a time: each reads the list the one before kept. Two at once both read it before the subscription was
+    // replaced, and the later one saved over the other's group.
+    const run = this.groupMuting.then(() => this.applyGroupWakeMuted(groupId, muted));
+    this.groupMuting = run.catch(() => {});
+    return run;
+  }
+
+  private groupMuting: Promise<void> = Promise.resolve();
+
+  private async applyGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
     const list = this.settings.wakeMutedGroups ?? [];
     if (list.includes(groupId) === muted) return;
     // Members told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
