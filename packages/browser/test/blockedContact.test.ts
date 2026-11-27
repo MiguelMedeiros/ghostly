@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, type GhostLinkOptions } from "@ghostly/core";
+import { cashuRequestPayload, createIdentity, ENDPOINT, type GhostLinkOptions } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore, transact } from "../src/shared/idb";
@@ -235,6 +235,24 @@ describe("a blocked contact", () => {
     await db.putLink(other);
     await host.receivePaymentRequest(other.id, { id: "other-request", timestamp: Date.now(), amount: { value: 21, asset: "sat" } }).catch(() => {});
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("says nothing of its own requests taken before the block: neither paid nor closed, nor in its words", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const peer = linkOf(chat.id).options.events;
+    for (const [i, id] of ["r1", "r2"].entries()) {
+      await peer.onPaymentRequest({ id, timestamp: Date.now() + i, amount: { value: "21", asset: "sat" }, network: "testnet",
+        endpoints: [[ENDPOINT.cashu, cashuRequestPayload(["https://testnut.cashu.space"])]] } as never);
+    }
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    await peer.onPaymentResult({ id: "r1", ok: false, closed: true, error: "Pay me at another place" } as never);
+    await peer.onPaymentResult({ id: "r2", ok: true } as never);
+    const requests = node["desk"].records().filter((p) => p.linkId === chat.id && p.kind === "request");
+    expect(requests.map(({ id, state, closed, error, payeeConfirmed }) => ({ id, state, closed, error, payeeConfirmed })).sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+      { id: "r1", state: "pending", closed: undefined, error: undefined, payeeConfirmed: undefined },
+      { id: "r2", state: "pending", closed: undefined, error: undefined, payeeConfirmed: undefined },
+    ]);
   });
 
   it("is not kept when the block lands while its text is being stored", async () => {
