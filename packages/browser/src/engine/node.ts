@@ -4094,7 +4094,9 @@ export class GhostlyNode implements EngineImplementation {
     this.reactionNotesWhole.delete(linkId);
     this.events.onMessages(linkId, []);
     // Its mute goes too, as the page's does: joined again under the id, it is not muted. Not through
-    // `setGroupWakeMuted`, which would hand the members of a group just left a new token.
+    // `setGroupWakeMuted`, which would hand the members of a group just left a new token. A mute asked for before
+    // this, still waiting, is dropped by the count.
+    this.groupEnds.set(groupId, (this.groupEnds.get(groupId) ?? 0) + 1);
     const muted = this.settings.wakeMutedGroups;
     if (muted?.includes(groupId)) {
       const next = muted.filter(id => id !== groupId);
@@ -4109,18 +4111,23 @@ export class GhostlyNode implements EngineImplementation {
   private setGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
     // One at a time: each reads the list the one before kept. Two at once both read it before the subscription was
     // replaced, and the later one saved over the other's group.
-    const run = this.groupMuting.then(() => this.applyGroupWakeMuted(groupId, muted));
+    // A group that ends before its turn (or during its own wait) is not muted: joined again, it would come back muted.
+    const ends = this.groupEnds.get(groupId);
+    const run = this.groupMuting.then(() => this.groupEnds.get(groupId) === ends ? this.applyGroupWakeMuted(groupId, muted, ends) : undefined);
     this.groupMuting = run.catch(() => {});
     return run;
   }
 
   private groupMuting: Promise<void> = Promise.resolve();
+  /** How many times each group ended here (`groupHistoryGone`): a mute asked for before its group's end is dropped. */
+  private groupEnds = new Map<string, number>();
 
-  private async applyGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
+  private async applyGroupWakeMuted(groupId: string, muted: boolean, ends: number | undefined): Promise<void> {
     if ((this.settings.wakeMutedGroups ?? []).includes(groupId) === muted) return;
     // Members told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
     // Those whose edges a group on hubs dropped hold it too, with no edge left to tell them.
     if (muted && ([...this.links.values()].some(live => live.stored.group === groupId && this.meshEdge(live.stored) && live.stored.wakeToken) || this.settings.wakeHeldBy?.[groupId]?.length)) await this.rotateWake();
+    if (this.groupEnds.get(groupId) !== ends) return;
     // Read after the wait: a muted group that ended meanwhile (`groupHistoryGone`) took its mute with it.
     const list = this.settings.wakeMutedGroups ?? [];
     const next = muted ? [...list.filter(id => id !== groupId), groupId] : list.filter(id => id !== groupId);
