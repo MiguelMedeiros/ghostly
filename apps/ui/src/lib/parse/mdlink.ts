@@ -79,6 +79,12 @@ function readDots(text: string): string {
  */
 const SPACE_BY_DOT = /[\u2000-\u200a\u202f\u205f]+(?=\.)|(?<=\.)[\u2000-\u200a\u202f\u205f]+/gu;
 /**
+ * Bars a font can draw as an "l" ("paypa\u2223.com"): the vertical line, divides, Hebrew paseq, the vertical line extension,
+ * the broken-circle bar, box drawing light vertical, the light vertical bar and the danda. Read after NFKC, which makes
+ * the fullwidth and halfwidth ones two of these.
+ */
+const BARS = /[|\u2223\u05c0\u23d0\u23fd\u2502\u2758\u0964]/gu;
+/**
  * The same spaces between two letters or digits too ("paypal.c om"), a mark beside the space included (a
  * one-character look either side, so a run of marks costs no more than a run of letters). Some of them read as no
  * gap, others (the em space) as a word's: a label is read both with `SPACE_BY_DOT` and with this, and either reading
@@ -133,7 +139,8 @@ export function labelMisleads(label: string, url: string): boolean {
   // Only then, so a text with one kind costs two readings.
   const kinds = new Set(label.match(TYPO_SPACE));
   const readings = new Set([read(SPACE_BY_DOT), read(NARROW_SPACE), ...(kinds.size > 1 ? BY_WIDTH.map(read) : [])]);
-  for (const text of readings) if (namesAnotherHost(text, target)) return true;
+  // A bar reads as an "l" in some fonts and as a bar in others: either reading naming another host counts.
+  for (const text of readings) for (const t of new Set([text, text.replace(BARS, "l")])) if (namesAnotherHost(t, target)) return true;
   return false;
 }
 
