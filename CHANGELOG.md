@@ -4,6 +4,79 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.13.11
+
+### For users
+
+**Calls**
+
+- In a group call where several people share their screens, click a screen beside the main one to show it large. It stays large while others start or stop sharing.
+
+### Fixed
+
+**Apps**
+
+- Uninstalling an app, fetching its files again, updating it or removing a built-in app reads the list of installed apps once, not twice. Each read looks for every installed app's files, so a profile with many apps did that work twice for each change.
+- With no app installed, opening the Apps page reads your stores' listings and the installed list once, not twice: the update check, which reads nothing when no app is installed, no longer tells every open page to read them again.
+
+**Chat**
+
+- The web app at a start, and the browser extension when a tab opens after its background page started again, no longer redraw the chat list once for every chat with new messages: the chats' new messages are told once for all of them. With 2,000 chats that each had a new message, this took about 17 s before.
+- A file its sender pauses just as it starts arriving here stays paused: it no longer read as arriving for a moment and asked the sender for its bytes, which the sender answered with its pause again.
+- A file you send or receive in a chat builds only that chat again as it is queued, asked about, taken, paused or finished, not every chat and group: with 2,000 chats a small file sent cost four builds of every chat (about 100 ms), and each open tab of the browser extension got a whole copy of every chat each time.
+- Opening the app again, or a contact coming back after a short drop, no longer adds a "Moved to WebRTC" line to the chat and no longer plays the switch sound. That stop over Iroh, on the way back to WebRTC, now shows only in the Connection panel's history.
+- Opening a message's menu, by a right-click, its ⋮ or the keyboard's menu key, closes any other menu that was open, so only one shows at a time. Before, right-clicking three messages left three menus open. The same goes for the folders' menus in the chat list.
+
+**Everywhere**
+
+- A delete, a pin or unpin and a reaction in a 1:1 chat, yours or your contact's, and a change of what a DHT-only chat says of its delivery build that chat again, not every chat and group: at 2,000 chats each cost about 16 to 26 ms of building what the app shows instead of under 3 ms.
+- A file that never left this device (no room for its copy) no longer offers Reply, React, Pin, Save, Forward or Select, and can't be chosen into a forward: each was refused, the reply only at Send, a reaction, a pin or a save with nothing said, and a forward with it in sent none of the chosen messages.
+- In a private group or a community, a message deleted for everyone, an edit that takes your mention out and a message's mention or file arriving after its text now update only that group, not every chat and group.
+
+**CLI**
+
+- `ghostly profile backup` to a drive with no hard links (a FAT or exFAT USB stick) no longer reports a backup cut short as written when the drive fills as it is copied under its name: it writes the rest, or fails with `unavailable` ("No room left for" the backup) and leaves no file.
+- `ghostly profile backup` onto a disk that takes no byte of a write (full) fails with `unavailable` ("No room left for" the backup), as restore and the copy under its name do, not with the bare error "The backup's file took no more bytes".
+- `ghostly profile backup` of a profile with many small files takes about half the time. Each frame is now sealed (or chained) at once, and frames are written together, where before each took one WebCrypto call and one write. 50,000 files of 1 KB went from 16.2 s to 8.6 s with a passphrase, and from 12.6 s to 6.9 s without.
+- `ghostly listen`: a contact's identity proof that a newer proof of the same identity replaced now gets its `identity.status` `withdrawn`, as the chat's own timeline and the contact's side say. Before, it left without an event, so a script or an agent that follows proofs by id kept it as verified for good.
+- `ghostly profile restore` no longer reports a profile as restored with its last file cut short when the disk fills as that file is written: it writes the rest, or fails with `unavailable` ("No room left on the disk") and leaves no profile.
+- `ghostly settings set iceServers` given a list of addresses (`'["stun:host:3478"]'`) or one server alone says each server is an object and shows one, `'[{"urls":"stun:stun.example.org:3478"}]'`; `relays` and `irohRelays` given an address alone show a list of them. Before, the refusal read "takes a JSON list of ICE servers" to a person who had just given one.
+
+**Devices**
+
+- When a relay missed the last check of a Take over and a later check finished it, the device now opens the profile. Before, its screen went blank with no text, the old device had already stopped, and the profile ran nowhere until you reloaded the page.
+
+**Groups**
+
+- In the browser extension, a group text you sent just as Ghostly's background page went away no longer comes back to the field with "Lost the Ghostly peer" when Ghostly had already kept it: it goes to the group once, and pressing Send again no longer posts it twice.
+- In the list that opens when you type @ in a group, the @everyone row's "Notify everyone" is now set in the app's usual font, not the code font that a member's key ending uses. In Arabic on Linux its letters no longer read spread apart.
+
+**Wallets**
+
+- In a chat's payment sheet, Approve payment takes the first click as soon as the review shows. The card still grew for half a second after Send, sliding Approve under the pointer, so a click made then could do nothing and the review stayed open with nothing sent.
+- The Cashu wallet's history and a Lightning card's recent payments write the year next to the date of a move from an earlier year ("Dec 31, 2026, 11:30 PM"), so it no longer reads like a date from this year.
+- A Cashu mint's fee per proof is written with the language's decimal mark ("0,1 sat de teste por prova" in Portuguese), like the amounts around it, instead of "0.1" in every language.
+- The Cashu card's Create invoice stays off at an amount of 0, as it does for an empty field, instead of asking the mint and coming back "Enter an amount in sats".
+- A token redeemed under Send on the other network's Cashu card is said in its own money: a test mint's token on the Mainnet card reads "Redeemed 39 test sats", and a real mint's token on the Testnet card reads in sats, not test sats.
+
+**Web**
+
+- Backup sizes, the amounts of a move between devices, Settings' storage and a message's details no longer read "1024 KB" just under 1 MB: a size is said in the next unit once it rounds up to 1024 ("1.0 MB", "1.0 GB"), and Settings no longer shows a key in place of a size under one byte.
+
+**Website**
+
+- An old link to the WISPs page whose anchor names a built-in object key (`#wisp-constructor`, `#wisp-toString`, `#wisp-__proto__`) leaves the page as it is, like any other unknown anchor, instead of sending it to a page that does not exist.
+
+### For developers
+
+- The engine's contact link (the owner's side, not in the app yet) tries a failed publish again 5 minutes later when it ran right after a change (a new link, Turn off, a request taken, a busy link open again). Before, it waited for the hourly one, so a new link, its `off` or the link's busy or open state could stay unpublished for up to an hour.
+
+**CI**
+
+- The changelog check and the version bump refuse an entry in `docs/changelog/unreleased/` that no release would read (a name in another case or with another extension, such as `b.MD` or `x.markdown`, one with none, a subfolder or a symbolic link), instead of skipping it, which left the change out of the release notes and the file in the folder for good.
+- The merge train no longer rebases and force-pushes the branch of a pull request alone in line when that branch is also the head of another open pull request (into another base), or when it cannot read the full list of pull requests the branch heads: such a pull request goes the batch way, which pushes nothing to its branch. Before, the push moved the other pull request's head too (an epic's pull request then carried `dev`'s commits), and the next run refused the lone one's green CI as not its own, so neither moved.
+- A `// quarantine: #<issue> until <date>` line now covers only the first `@quarantine` test under it: a second tagged test a few lines below needs its own line, so it no longer leaves the gate under the first test's flake issue.
+
 ## 1.13.10
 
 ### Security
