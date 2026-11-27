@@ -1,4 +1,4 @@
-import { createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
@@ -275,8 +275,24 @@ export const BACKUP_METHODS: Record<string, Method> = {
       writing = true;
       out = await open(partial, "wx", 0o600);
       const handle = out;
+      // Frames are held up to FRAME_BYTES and written together, and sealed or chained at once (`nodeFrames`): a write
+      // and a WebCrypto call per frame, two frames for each small file, took 16 s for 50,000 of them.
+      let held: Uint8Array[] = [], heldBytes = 0;
+      const flush = async () => {
+        if (!held.length) return;
+        const chunk = held.length === 1 ? held[0] : Buffer.concat(held);
+        held = [];
+        heldBytes = 0;
+        // A write may take only part of the chunk (a disk filling): the rest goes on, and the disk's error with it.
+        for (let at = 0; at < chunk.length;) {
+          const { bytesWritten } = await handle.write(chunk, at, chunk.length - at);
+          if (!bytesWritten) throw new Error("The backup's file took no more bytes");
+          at += bytesWritten;
+        }
+      };
+      const sink = { write: async (chunk: Uint8Array) => { held.push(chunk); heldBytes += chunk.length; if (heldBytes >= FRAME_BYTES) await flush(); } };
       let writer: BackupWriter;
-      try { writer = await BackupWriter.start({ write: async (chunk) => { await handle.write(chunk); } }, unsealed ? null : passphrase!); } catch (error) { throw localFileError(error, path) ?? new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
+      try { writer = await BackupWriter.start(sink, unsealed ? null : passphrase!, undefined, 2, nodeFrames); } catch (error) { throw localFileError(error, path) ?? new CliError("bad_request", error instanceof Error ? error.message : String(error)); }
       const put = (record: BackupRecord) => writer.json(JSON.stringify(record));
       await writer.json(head);
       await put({ t: "file", kind: "store", size: storeSize });
@@ -295,6 +311,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       for (const { json } of records) await writer.json(json);
       await put({ t: "end", files: copied, bytes: copiedBytes });
       const written = await writer.finish();
+      await flush();
       await handle.sync();
       await handle.close();
       out = null;
@@ -358,6 +375,11 @@ const nodeFrames: FrameCrypto = {
     decipher.setAAD(additionalData);
     decipher.setAuthTag(sealed.subarray(sealed.length - TAG_BYTES));
     return Buffer.concat([decipher.update(sealed.subarray(0, sealed.length - TAG_BYTES)), decipher.final()]);
+  },
+  seal: (key, iv, additionalData, plain) => {
+    const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
+    cipher.setAAD(additionalData);
+    return Buffer.concat([cipher.update(plain), cipher.final(), cipher.getAuthTag()]);
   },
   gunzip: (bytes, limit) => {
     try { return gunzipSync(bytes, { maxOutputLength: Math.max(1, limit) }); } catch (error) {
