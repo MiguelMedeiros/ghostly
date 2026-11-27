@@ -14,7 +14,7 @@ import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findChatOrGroup, findGroup, groupById, groupCalled, groupNameOf, groupOf, groupPrefixed, inCall, inviteTaken, keptForJoin, list, messageOf, noMessage, nobodyJoined, node, notInYet, notInYetError, num, oneOf, oneShotWaits, onlyKeys, settingsOf, sharedGroupIds, shownName, sinceSeq, somebodyJoined, state, str, transportOffered, waitForState,
   type ApiContext, type CallScope, type Lookup, type Method, type Params, type RefPlace,
 } from "./apiKit";
-import { FILE_METHODS } from "./files";
+import { FILE_METHODS, fileKept, waitForFile } from "./files";
 import { checkShownName } from "./profiles";
 import { ended, foldsAnyway, goesOn, nobodyElseIn, outOf, purgeMessage, waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn, textsIn } from "./statusCards";
@@ -900,8 +900,13 @@ const METHODS: Record<string, Method> = {
       if (to[i]!.group) continue;
       watch(async () => {
         const sent = await node(ctx).getMessage(to[i]!.id, messageId);
-        if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
-        else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, to[i]!.id, sent?.text ?? "", to[i]!.ref, ms, error); });
+        // A file's copy waits as `file send --wait sent` does, and a timeout says the copy is kept and goes on: it said
+        // only that the wait timed out, and a bot forwarded the file again.
+        if (sent?.file) {
+          const { file } = sent;
+          await waitForFile(ctx, { chat: to[i]!.id, file: file.id, timeout: ms / 1000 }, undefined, to[i]!.ref)
+            .catch((error: unknown) => { throw fileKept(ctx, error, { linkId: to[i]!.id, ref: to[i]!.ref, messageId, file }); });
+        } else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms).catch((error: unknown) => { throw dhtOnlyTimeout(ctx, to[i]!.id, sent?.text ?? "", to[i]!.ref, ms, error); });
       }, () => undefined, () => {});
     }
     for (const { ended, now, done } of waits) {
