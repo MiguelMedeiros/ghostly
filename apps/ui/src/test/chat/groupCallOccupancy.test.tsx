@@ -170,18 +170,6 @@ describe("asking whether a group's call is on", () => {
     expect(asks()).toBe(12);
   });
 
-  it("an older engine's `unreachable` is no answer too", async () => {
-    answer(() => ({ ok: false, code: "unreachable" }) as unknown as GroupCallOccupancyResult);
-    open();
-    await elapse(0);
-    await elapse(15_000);
-    expect(asks()).toBe(2);
-    await elapse(30_000 - 1);
-    expect(asks()).toBe(2);
-    await elapse(1);
-    expect(asks()).toBe(3);
-  });
-
   it("counts an engine that can't ask (an error) as no answer too", async () => {
     // Nothing answers `groupCallOccupancy`: the fake engine fails the call, as an engine error would.
     open();
@@ -371,7 +359,7 @@ describe("what the node's answer says of the next ask", () => {
 
   it("\"Hide my IP\" on (the engine says hidden and sends nothing): not known, and no group asked again until it is turned off", async () => {
     fakeEngine.update({ settings: { relayOnly: true } });
-    answer(() => ({ ok: false, code: "hidden" }) as unknown as GroupCallOccupancyResult);
+    answer(() => ({ ok: false, code: "hidden" }));
     const group = community();
     const first = open(group);
     await elapse(0);

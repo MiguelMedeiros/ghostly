@@ -21,8 +21,8 @@ import { useWindowAway } from "../lib/windowAway";
  *   way (the engine forgets it then, so this does too) or the app starts again.
  * - `rate_limited` (a 429): its `retryAfter` is waited out, `OCCUPANCY_RETRY_AFTER_MS` when it is null (none the
  *   page could read).
- * - `no_answer` (no status at all: an old node refusing the preflight, a node away, the timeout; an engine error, and
- *   the older `unreachable`, the same): each one in a row waits twice as long, from the floor up to
+ * - `no_answer` (no status at all: an old node refusing the preflight, a node away, the timeout; an engine error the
+ *   same): the first one waits the floor, and each one in a row after it twice as long as the last, up to
  *   `OCCUPANCY_BACKOFF_MAX_MS`; a 200 brings it back to the floor.
  * - `not_member` (told by the engine itself, nothing sent): not asked again while the group stays open.
  * - `hidden` (told by the engine itself, nothing sent: "Hide my IP" is on, and asking would show the node my address
@@ -147,13 +147,12 @@ export function useGroupCallOccupancy(groupId: string, call: { sfu: string; e2ee
         asks.until = 0;
       } else {
         answers.delete(groupId);
-        // Read as a string: `hidden` and the older `unreachable` too, whichever engine answers.
-        const code: string = result?.code ?? "no_answer";
+        const code = result?.code ?? "no_answer";
         if (code === "unsupported") asks.unsupported = true;
         else if (code === "rate_limited") asks.until = Date.now() + retryAfterMs(result && "retryAfter" in result ? result.retryAfter : null);
         else if (code === "not_member") outside.current = key;
         else if (code === "hidden") hiddenUnder = relayOnlyNow.current;
-        else if (code === "no_answer" || code === "unreachable") {
+        else if (code === "no_answer") {
           asks.failures += 1;
           asks.until = Date.now() + occupancyBackoffMs(asks.failures);
         }
