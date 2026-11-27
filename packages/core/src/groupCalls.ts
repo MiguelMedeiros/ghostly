@@ -172,3 +172,78 @@ export function verifyGroupCallModeration(raw: unknown, sfu: string, now: number
   seen.set(f.n, nowS);
   return { ok: true, request: { v: GROUP_CALL_VERSION, g: f.g, k: f.k, room, act, target, src: [...src], ts, n: f.n, sig: f.sig } };
 }
+
+/**
+ * A member asks its group's call node whether the call is on before joining it (WISP 602 · Group Calls § Occupancy):
+ * what it sends to `POST <sfu>/sfu/group-occupancy`, the token request's fields without `name`, signed under its own
+ * tag, so none of the three requests can stand for another.
+ *
+ *     {"v":1,"g":"<group>","k":"<member key>","room":"g_<group>","ts":1794700800,"n":"<nonce>","sig":"…"}
+ *
+ * The node answers `{ count, since }`: how many members are in the room, and since when once one is.
+ */
+
+export interface GroupCallOccupancyRequest {
+  v: typeof GROUP_CALL_VERSION;
+  g: string;
+  k: string;
+  room: string;
+  ts: number;
+  n: string;
+  sig: string;
+}
+
+const OCCUPANCY_FIELDS = ["g", "k", "n", "room", "sig", "ts", "v"].join();
+
+/** Exactly the bytes a member signs: the token request's, under the occupancy tag. */
+export const groupCallOccupancyBytes = (sfu: string, g: string, room: string, k: string, ts: number, n: string) =>
+  utf8Encode(JSON.stringify(["ghostly-sfu/1 occupancy", sfu, g, room, k, ts, n]));
+
+/** An occupancy request for `sfu` (the group's `call.sfu`, as read), signed by the member's group key `seed`. */
+export function signGroupCallOccupancy(input: { sfu: string; g: string; ts?: number; n?: string }, seed: Uint8Array): GroupCallOccupancyRequest {
+  const k = identityFromSeed(seed).pubKeyZ32;
+  const room = groupCallRoom(input.g);
+  const ts = input.ts ?? Math.floor(Date.now() / 1000);
+  const n = input.n ?? toBase64Url(randomBytes(16));
+  const sig = toBase64Url(sign(groupCallOccupancyBytes(input.sfu, input.g, room, k, ts, n), seed));
+  return { v: GROUP_CALL_VERSION, g: input.g, k, room, ts, n, sig };
+}
+
+/**
+ * The node's checks of an occupancy request but the roster, in order: the shape (the token request's fields without
+ * `name`, and no other), the time within `GROUP_CALL_SKEW_S` of `now` (ms), a nonce not in `seen`, and the signature
+ * over the node's own origin `sfu`. A request that passes has its nonce added to `seen`; entries older than
+ * `GROUP_CALL_NONCE_S` are dropped on the way.
+ */
+export function verifyGroupCallOccupancy(raw: unknown, sfu: string, now: number, seen: GroupCallNonces): { ok: true; request: GroupCallOccupancyRequest } | { ok: false; reason: GroupCallRefusal } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, reason: "malformed" };
+  const f = raw as Record<string, unknown>;
+  if (Object.keys(f).sort().join() !== OCCUPANCY_FIELDS) return { ok: false, reason: "malformed" };
+  if (f.v !== GROUP_CALL_VERSION || typeof f.g !== "string" || !GROUP_ID.test(f.g) || !isZ32Key(f.k) || f.room !== groupCallRoom(f.g) ||
+    !Number.isSafeInteger(f.ts) || (f.ts as number) <= 0 || typeof f.n !== "string" || !NONCE.test(f.n) || toBase64Url(fromBase64Url(f.n)) !== f.n ||
+    typeof f.sig !== "string" || !SIG.test(f.sig)) return { ok: false, reason: "malformed" };
+  const room = groupCallRoom(f.g), ts = f.ts as number, nowS = Math.floor(now / 1000);
+  if (Math.abs(nowS - ts) > GROUP_CALL_SKEW_S) return { ok: false, reason: "stale" };
+  for (const [n, at] of seen) if (nowS - at > GROUP_CALL_NONCE_S) seen.delete(n);
+  if (seen.has(f.n)) return { ok: false, reason: "replayed" };
+  let holds = false;
+  try { holds = verify(fromBase64Url(f.sig), groupCallOccupancyBytes(sfu, f.g, room, f.k, ts, f.n), publicKeyFromZ32(f.k)); } catch { /* not a signature */ }
+  if (!holds) return { ok: false, reason: "signature" };
+  seen.set(f.n, nowS);
+  return { ok: true, request: { v: GROUP_CALL_VERSION, g: f.g, k: f.k, room, ts, n: f.n, sig: f.sig } };
+}
+
+/** What the node answers (WISP 602 § Occupancy, the reply): `since` (unix seconds) only while `count` is above 0. */
+export interface GroupCallOccupancy { count: number; since?: number }
+
+/**
+ * The reply's occupancy, or null when it is none: `count` a whole number of 0 or more. A `since` that is not a positive
+ * whole number of seconds, or comes with a `count` of 0, is left out: the count alone still says whether the call is on.
+ */
+export function parseGroupCallOccupancy(raw: unknown): GroupCallOccupancy | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const { count, since } = raw as Record<string, unknown>;
+  if (!Number.isSafeInteger(count) || (count as number) < 0) return null;
+  const opened = (count as number) > 0 && Number.isSafeInteger(since) && (since as number) > 0;
+  return { count: count as number, ...(opened ? { since: since as number } : {}) };
+}

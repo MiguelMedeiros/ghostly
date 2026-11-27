@@ -1,6 +1,6 @@
 import {
-  GROUP_CALL_SOURCES, engineError, isZ32Key, randomBytes, sign, signGroupCallModeration, toBase64Url, utf8Encode,
-  type GroupCallModerationAct, type GroupCallSource, type GroupMeta,
+  GROUP_CALL_SOURCES, engineError, isZ32Key, parseGroupCallOccupancy, randomBytes, sign, signGroupCallModeration, signGroupCallOccupancy, toBase64Url,
+  utf8Encode, type GroupCallModerationAct, type GroupCallOccupancy, type GroupCallSource, type GroupMeta,
 } from "@ghostly/core";
 
 /**
@@ -46,6 +46,11 @@ export function groupCallSfu(meta: GroupMeta | undefined): string | undefined {
     const url = new URL(sfu);
     return url.protocol === "https:" && url.origin === sfu ? sfu : undefined;
   } catch { return undefined; }
+}
+
+/** The group's `call` as its metadata writes it, so a change to it (its node, its sealing) is told from a rename. */
+export function groupCallStamp(meta: GroupMeta | undefined): string {
+  try { return JSON.stringify((JSON.parse(meta?.body ?? "null") as { call?: unknown } | null)?.call ?? null); } catch { return "null"; }
 }
 
 /** WISP 602 § Signed bytes. */
@@ -218,6 +223,49 @@ export function parseGroupCallRoomState(raw: unknown): GroupCallRoomState | null
   }
   if (!state.banned.every(isZ32Key)) return null;
   return { muted, banned: [...new Set(state.banned as string[])].sort() };
+}
+
+/**
+ * Whether the group's call is on (WISP 602 § Occupancy): how many members are in the room, and since when (unix
+ * seconds) once one is; or why that is not known. `not_member`: I am not in the group, so nothing was sent.
+ * `unsupported`: the group names no node, or its node is older than the route (404 or 405). `refused`: its 403.
+ * `rate_limited`: its 429, again after `retryAfter` seconds. `unreachable`: no answer in time, or not an occupancy.
+ * Each of them says nothing about the call: a page shows it as it would without the route.
+ */
+export type GroupCallOccupancyCode = "not_member" | "unsupported" | "refused" | "rate_limited" | "unreachable";
+export type GroupCallOccupancyResult = ({ ok: true } & GroupCallOccupancy) | { ok: false; code: GroupCallOccupancyCode; retryAfter?: number };
+
+export interface GroupCallOccupancyAsk {
+  sfu: string;
+  g: string;
+  /** The seed of my member key in the group. */
+  seed: Uint8Array;
+  fetch?: typeof fetch;
+  now?: () => number;
+}
+
+/**
+ * Asks `<sfu>/sfu/group-occupancy` once, signed with my member key (WISP 602 § Occupancy), as a token request goes (no
+ * redirect, no cookie, the same timeout and capped read), and says what came back as a result, never as a throw.
+ */
+export async function fetchGroupCallOccupancy(ask: GroupCallOccupancyAsk): Promise<GroupCallOccupancyResult> {
+  const doFetch = ask.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
+  const now = ask.now ?? Date.now;
+  const request = signGroupCallOccupancy({ sfu: ask.sfu, g: ask.g, ts: Math.floor(now() / 1000) }, ask.seed);
+  let response: Response;
+  try {
+    response = await doFetch(`${ask.sfu}/sfu/group-occupancy`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal: AbortSignal.timeout(GROUP_CALL_TIMEOUT_MS),
+      redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store",
+    });
+  } catch { return { ok: false, code: "unreachable" }; }
+  if (response.status === 403) return { ok: false, code: "refused" };
+  if (response.status === 429) return { ok: false, code: "rate_limited", retryAfter: retryAfterS(response.headers.get("Retry-After"), now()) };
+  if (response.status === 404 || response.status === 405) return { ok: false, code: "unsupported" };
+  let raw: unknown = null;
+  if (response.ok) try { const text = await readCapped(response, MAX_REPLY_BYTES); raw = text === null ? null : JSON.parse(text); } catch { raw = null; }
+  const occupancy = parseGroupCallOccupancy(raw);
+  return occupancy ? { ok: true, ...occupancy } : { ok: false, code: "unreachable" };
 }
 
 /**

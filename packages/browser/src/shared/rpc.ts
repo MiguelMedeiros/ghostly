@@ -16,7 +16,7 @@ import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, Me
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrNoteView, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
 import type { GroupCallModerationAct, GroupCallSource } from "@ghostly/core";
-import type { GroupCallModerationResult } from "../engine/groupCall";
+import type { GroupCallModerationResult, GroupCallOccupancyResult } from "../engine/groupCall";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
 export interface EngineApi {
@@ -499,6 +499,13 @@ export interface EngineApi {
    * `retryAfter` seconds), `unreachable`.
    */
   groupCallModerate(params: { groupId: string; act: GroupCallModerationAct; target?: string; src?: GroupCallSource[] }): GroupCallModerationResult;
+  /**
+   * Whether the group's call is on, asked of the node its `call` names (WISP 602 § Occupancy): `count` members in the
+   * room, and `since` (unix seconds) the room opened once one is; or why that is not known, which says nothing about
+   * the call: `not_member` and `unsupported` (no node named, or one without the route, not asked again until the
+   * group's `call` changes) before anything is sent, `refused`, `rate_limited` (with `retryAfter` seconds), `unreachable`.
+   */
+  groupCallOccupancy(params: { groupId: string }): GroupCallOccupancyResult;
   /**
    * The key that seals the group's call media for its newest epoch (WISP 602 § End-to-end encryption): base64url of
    * 32 bytes, and that epoch. Null until the epoch's secret arrives, once out of the group, or in a private group.

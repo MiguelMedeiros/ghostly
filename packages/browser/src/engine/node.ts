@@ -158,7 +158,9 @@ import { isRefusalId } from "../shared/refusals";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
 import { groupFileId, storedGroupFiles } from "./groupFiles";
-import { fetchGroupCallToken, groupCallSfu, sendGroupCallModeration, type GroupCallModerationResult, type GroupCallPass } from "./groupCall";
+import {
+  fetchGroupCallOccupancy, fetchGroupCallToken, groupCallSfu, groupCallStamp, sendGroupCallModeration, type GroupCallModerationResult, type GroupCallOccupancyResult, type GroupCallPass,
+} from "./groupCall";
 import { DEFAULT_MINTS, TEST_MINT, mintNetwork } from "../shared/mints";
 import type {
   ContactLinkView,
@@ -6980,6 +6982,25 @@ export class GhostlyNode implements EngineImplementation {
     const sfu = groupCallSfu(me.meta);
     if (!sfu) return { ok: false, code: "unsupported" };
     return sendGroupCallModeration({ sfu, g: groupId, seed: identityFromSeedB64(me.seedB64).seed, act, target: act === "state" ? "" : target, src: takesSources ? src : [], fetch: (...request) => (this.options.groupCallFetch ?? globalThis.fetch)(...request) });
+  }
+
+  /** Per group, its `call` (`groupCallStamp`) when its node answered the occupancy route 404 or 405: not asked again until it changes. */
+  private readonly occupancyUnsupported = new Map<string, string>();
+
+  /**
+   * Whether the group's call is on, from the node its `call` names (WISP 602 § Occupancy): how many members are in the
+   * room and since when, or why that is not known. A node without the route (404, 405) is not asked again until the
+   * group's `call` changes or the engine starts again; a 429 says how long to wait. Never throws.
+   */
+  async groupCallOccupancy({ groupId }: { groupId: string }): Promise<GroupCallOccupancyResult> {
+    const me = typeof groupId === "string" ? this.groups.callMember(groupId) : undefined;
+    if (!me) return { ok: false, code: "not_member" };
+    const sfu = groupCallSfu(me.meta), stamp = groupCallStamp(me.meta);
+    if (!sfu || this.occupancyUnsupported.get(groupId) === stamp) return { ok: false, code: "unsupported" };
+    this.occupancyUnsupported.delete(groupId);
+    const result = await fetchGroupCallOccupancy({ sfu, g: groupId, seed: identityFromSeedB64(me.seedB64).seed, fetch: (...request) => (this.options.groupCallFetch ?? globalThis.fetch)(...request) });
+    if (!result.ok && result.code === "unsupported") this.occupancyUnsupported.set(groupId, stamp);
+    return result;
   }
 
   /**

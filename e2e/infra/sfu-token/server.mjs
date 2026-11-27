@@ -5,6 +5,7 @@
 // spec's outsider: someone with a pass but not the group's call key, joining sealed with a key of its own.
 // It answers the group's admin (the roster's `admin`) on POST /sfu/group-moderate too: it keeps each room's mutes and
 // bans in memory, acts on LiveKit through its RoomService (Twirp, with a roomAdmin token), and its passes honour them.
+// And a member on POST /sfu/group-occupancy: how many of the roster are in the group's room, and since when.
 import { createRequire } from "node:module";
 import { createHmac, createPublicKey, verify } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -106,6 +107,23 @@ export function verifyModeration(sfuOrigin, body) {
   return verify(null, moderateBytes(sfuOrigin, body), spki, Buffer.from(sig, "base64url"));
 }
 
+/** The bytes a member's key signs for an occupancy request: the token request's, under its own tag. */
+export const occupancyBytes = (sfuOrigin, { g, room, k, ts, n }) => Buffer.from(JSON.stringify(["ghostly-sfu/1 occupancy", sfuOrigin, g, room, k, ts, n]));
+
+const OCCUPANCY_FIELDS = ["g", "k", "n", "room", "sig", "ts", "v"].join();
+
+/** Whether `body` is an occupancy request of the right shape (the token request's fields without `name`, no other) whose `sig` verifies. */
+export function verifyOccupancy(sfuOrigin, body) {
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join() !== OCCUPANCY_FIELDS) return false;
+  const { v, g, k, room, ts, n, sig } = body;
+  const shaped = v === 1 && typeof g === "string" && g.length === 22 && B64URL.test(g) && room === `g_${g}` && Number.isInteger(ts)
+    && typeof n === "string" && n.length === 22 && B64URL.test(n) && typeof sig === "string" && sig.length === 86 && B64URL.test(sig);
+  const key = shaped ? keyBytes(k) : null;
+  if (!key) return false;
+  const spki = createPublicKey({ key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), key]), format: "der", type: "spki" });
+  return verify(null, occupancyBytes(sfuOrigin, body), spki, Buffer.from(sig, "base64url"));
+}
+
 /** The sources a key muted of `muted` may still publish (LiveKit's names); `screen_share` takes its audio along. */
 const allowedSources = (muted = []) => [...SOURCES, "screen_share_audio"].filter((s) => !muted.includes(s) && !(s === "screen_share_audio" && muted.includes("screen_share")));
 
@@ -191,11 +209,13 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
   }
 
   /** A LiveKit RoomService call (Twirp JSON) for `room`, as its admin: the reply, or null where LiveKit has no such participant. */
-  async function roomService(method, room, request) {
+  const roomService = (method, room, request) => livekit(method, { room, ...request }, { room, roomAdmin: true });
+  /** A LiveKit RoomService call with a token granting `video`. */
+  async function livekit(method, request, video) {
     const t = Math.floor(now() / 1000);
-    const admin = jwt(apiSecret, { iss: apiKey, nbf: t, exp: t + 60, video: { room, roomAdmin: true } });
+    const admin = jwt(apiSecret, { iss: apiKey, nbf: t, exp: t + 60, video });
     const res = await fetch(`${livekitApi}/twirp/livekit.RoomService/${method}`, {
-      method: "POST", headers: { authorization: `Bearer ${admin}`, "content-type": "application/json" }, body: JSON.stringify({ room, ...request }), signal: AbortSignal.timeout(5000),
+      method: "POST", headers: { authorization: `Bearer ${admin}`, "content-type": "application/json" }, body: JSON.stringify(request), signal: AbortSignal.timeout(5000),
     });
     const reply = await res.json().catch(() => ({}));
     if (res.ok) return reply;
@@ -245,12 +265,38 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
     send(res, 200, { state: { muted: Object.fromEntries([...muted].sort(([a], [b]) => (a < b ? -1 : 1))), banned: [...banned].sort() } });
   }
 
+  /**
+   * WISP 602 § Occupancy: how many of the roster are in the group's room, from LiveKit (ListRooms, then
+   * ListParticipants), and the room's creation_time while one is. A key banned from the call is still answered.
+   */
+  async function occupancy(req, res) {
+    const body = await signed(req, res, "o:", (b) => verifyOccupancy(origin, b));
+    if (!body) return;
+    const { members } = roster.get(body.g) ?? {};
+    if (members?.[body.k] === undefined) return send(res, 403, { error: "refused" });
+    nonces.set(body.n, now());
+    try {
+      const listed = await livekit("ListRooms", { names: [body.room] }, { roomList: true });
+      const room = (listed?.rooms ?? []).find((r) => r.name === body.room);
+      if (!room) return send(res, 200, { count: 0 });
+      const { participants = [] } = (await roomService("ListParticipants", body.room, {})) ?? {};
+      // Only keys of the roster: a participant the node runs itself (a recorder, a bot) is not a member in the call.
+      const count = new Set(participants.map((p) => p.identity).filter((k) => typeof k === "string" && members[k] !== undefined)).size;
+      const since = Number(room.creation_time ?? room.creationTime);
+      send(res, 200, count > 0 && Number.isSafeInteger(since) && since > 0 ? { count, since } : { count });
+    } catch (error) {
+      console.error("group-occupancy:", error);
+      send(res, 502, { error: "livekit" });
+    }
+  }
+
   const server = createServer(async (req, res) => {
     const path = new URL(req.url, "http://x").pathname;
-    const signedRoute = path === "/sfu/group-token" || path === "/sfu/group-moderate";
+    const signedRoute = path === "/sfu/group-token" || path === "/sfu/group-moderate" || path === "/sfu/group-occupancy";
     if (signedRoute && req.method === "OPTIONS") return send(res, 204, undefined, { "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "Content-Type" });
     if (path === "/sfu/group-token" && req.method === "POST") return token(req, res);
     if (path === "/sfu/group-moderate" && req.method === "POST") return moderate(req, res);
+    if (path === "/sfu/group-occupancy" && req.method === "POST") return occupancy(req, res);
     const group = /^\/test\/roster\/([A-Za-z0-9_-]{22})$/.exec(path);
     if (group && req.method === "PUT") {
       let set = null;
