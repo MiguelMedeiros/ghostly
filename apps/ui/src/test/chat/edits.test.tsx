@@ -8,6 +8,7 @@ import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { buildDetails } from "../../lib/messageDetails";
 import type { ChatMessage } from "../../lib/types";
 import { renderApp } from "../render";
+import { installFakeAudio, installFakeMedia, removeFakeMedia } from "../voice/fakeMedia";
 
 // covers: chat.edit
 
@@ -97,11 +98,11 @@ describe("the edited mark", () => {
 });
 
 describe("the composer while editing", () => {
-  function Composer({ onSave, onSend = async () => null, last = mine() }: { onSave: (text: string) => Promise<string | null>; onSend?: (text: string) => Promise<string | null>; last?: ChatMessage }) {
+  function Composer({ onSave, onSend = async () => null, onSendFile, last = mine() }: { onSave: (text: string) => Promise<string | null>; onSend?: (text: string) => Promise<string | null>; onSendFile?: () => Promise<string | null>; last?: ChatMessage }) {
     const [editing, setEditing] = useState<ChatMessage | null>(null);
     return <LockScreenProvider>
       <button onClick={() => setEditing(last)}>edit it</button>
-      <MessageInput onSend={onSend} onEditLast={() => setEditing(last)}
+      <MessageInput onSend={onSend} onSendFile={onSendFile} onEditLast={() => setEditing(last)}
         edit={editing ? { key: editing.id, text: editing.text, snippet: editing.text, onSave, onClose: () => setEditing(null) } : undefined} />
     </LockScreenProvider>;
   }
@@ -211,5 +212,31 @@ describe("the composer while editing", () => {
     await user.keyboard("{Enter}");
     expect(onSave).not.toHaveBeenCalled();
     expect(await screen.findByTestId("secret-guard-send")).toBeInTheDocument();
+  });
+
+  it("an edit emptied keeps Send, not the mic: no voice message goes beside the edit", async () => {
+    // Before, the mic took Send's place once the field was empty, as for a new message: the edit had no Save, and the
+    // mic recorded a new voice message while the bar still said Editing.
+    installFakeMedia(); installFakeAudio();
+    try {
+      const onSave = vi.fn(async () => null), onSendFile = vi.fn(async () => null);
+      const { user } = renderApp(<Composer onSave={onSave} onSendFile={onSendFile} />);
+      expect(screen.getByTestId("voice-record")).toBeInTheDocument();
+      await user.click(screen.getByText("edit it"));
+      await user.clear(field());
+      expect(screen.queryByTestId("voice-record")).not.toBeInTheDocument();
+      const send = screen.getByRole("button", { name: "Send message" });
+      expect(send).toBeDisabled();
+      await user.type(field(), "Done");
+      expect(send).toBeEnabled();
+      await user.click(send);
+      expect(onSave).toHaveBeenCalledWith("Done", undefined);
+      expect(onSendFile).not.toHaveBeenCalled();
+      // The edit over, an empty field has the mic again.
+      expect(screen.queryByTestId("composer-edit")).not.toBeInTheDocument();
+      expect(screen.getByTestId("voice-record")).toBeInTheDocument();
+    } finally {
+      removeFakeMedia();
+    }
   });
 });
