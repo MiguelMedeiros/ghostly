@@ -254,6 +254,52 @@ describe("the event stream", () => {
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
   });
 
+  it("a contact's proof a newer one of the same identity replaced is told withdrawn; one that had ended is not told again", async () => {
+    const { h, events } = await hub("identity-replaced.jsonl");
+    h.baseline(state([link("c1")]), new Map());
+    const proof = (id: string, status: string) => ({ id, provider: "ssh", subject: "SHA256:abc", status, verified: { subject: "SHA256:abc" }, verifiedAt: 1, checkedAt: 1, expiresAt: 0, recheckDue: false });
+    const received = (...proofs: ReturnType<typeof proof>[]) => link("c1", { identities: { support: true, shared: [], received: proofs } } as never);
+    h.sink.post({ kind: "state", state: state([received(proof("p1", "verified"))]) });
+    // The engine keeps only the newer proof: the older one leaves the list.
+    h.sink.post({ kind: "state", state: state([received(proof("p2", "verified"))]) });
+    h.sink.post({ kind: "state", state: state([received(proof("p2", "withdrawn"))]) });
+    // A proof that had ended, dropped later to make room: nothing more to tell.
+    h.sink.post({ kind: "state", state: state([received(proof("p3", "verified"))]) });
+    expect(events.map((e) => ({ type: e.type, ...(e.identity as { id: string; status: string; subject: string }) })).map(({ type, id, status, subject }) => ({ type, id, status, subject }))).toEqual([
+      { type: "identity.received", id: "p1", status: "verified", subject: "SHA256:abc" },
+      { type: "identity.received", id: "p2", status: "verified", subject: "SHA256:abc" },
+      { type: "identity.status", id: "p1", status: "withdrawn", subject: "SHA256:abc" },
+      { type: "identity.status", id: "p2", status: "withdrawn", subject: "SHA256:abc" },
+      { type: "identity.received", id: "p3", status: "verified", subject: "SHA256:abc" },
+    ]);
+    expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+  });
+
+  it("a contact's proof that left the list and is shared again is a change of status, with an id of its own", async () => {
+    const { h, events } = await hub("identity-back.jsonl");
+    h.baseline(state([link("c1")]), new Map());
+    const proof = (id: string, status: string) => ({ id, provider: "ssh", subject: "SHA256:abc", status, verified: { subject: "SHA256:abc" }, verifiedAt: 1, checkedAt: 1, expiresAt: 0, recheckDue: false });
+    const received = (...proofs: ReturnType<typeof proof>[]) => link("c1", { identities: { support: true, shared: [], received: proofs } } as never);
+    // p1 replaced by p2, p2 withdrawn, then p1 shared again (p2 dropped as the one it replaces).
+    h.sink.post({ kind: "state", state: state([received(proof("p1", "verified"))]) });
+    h.sink.post({ kind: "state", state: state([received(proof("p2", "verified"))]) });
+    h.sink.post({ kind: "state", state: state([received(proof("p2", "withdrawn"))]) });
+    h.sink.post({ kind: "state", state: state([received(proof("p1", "verified"))]) });
+    // p2, withdrawn and dropped, shared again.
+    h.sink.post({ kind: "state", state: state([received(proof("p2", "verified"))]) });
+    const told = events.map((e) => ({ type: e.type, ...(e.identity as { id: string; status: string }) })).map(({ type, id, status }) => ({ type, id, status }));
+    expect(told).toEqual([
+      { type: "identity.received", id: "p1", status: "verified" },
+      { type: "identity.received", id: "p2", status: "verified" },
+      { type: "identity.status", id: "p1", status: "withdrawn" },
+      { type: "identity.status", id: "p2", status: "withdrawn" },
+      { type: "identity.status", id: "p1", status: "verified" },
+      { type: "identity.status", id: "p2", status: "verified" },
+      { type: "identity.status", id: "p1", status: "withdrawn" },
+    ]);
+    expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+  });
+
   it("says when a member of a group starts and stops typing, with what it does, once per change", async () => {
     const { h, events } = await hub("group-typing.jsonl");
     const group = (typing?: unknown[]) => ({ id: "g1", status: "active", members: [{ key: "ana" }, { key: "bo" }], ...(typing ? { typing } : {}) });
