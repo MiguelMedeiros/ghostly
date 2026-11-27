@@ -529,6 +529,19 @@ export function passphraseForms(given: string): string[] {
   return [...new Set([given, core, `\uFEFF${core}`, `${core}\n`, `${core}\r`, asUtf16])];
 }
 
+/**
+ * Writes all of `chunk` to `handle` (at `position` when given, else where the file is). One `FileHandle.write` may
+ * take only part of it, a disk filling as it writes, and says so only in `bytesWritten`: the rest is written by the
+ * next call, where the disk's ENOSPC comes. A write that takes nothing is the same full disk, as ENOSPC says it.
+ */
+async function writeAll(handle: FileHandle, chunk: Uint8Array, position?: number): Promise<void> {
+  for (let at = 0; at < chunk.length;) {
+    const { bytesWritten } = await handle.write(chunk, at, chunk.length - at, position === undefined ? null : position + at);
+    if (!bytesWritten) throw localFileError(Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC", syscall: "write" }))!;
+    at += bytesWritten;
+  }
+}
+
 /** One restore with one passphrase (none for a backup made without one). */
 async function restoreWith(home: string, name: string, file: string, passphrase?: string, stop?: AbortSignal, copy = false): Promise<ProfilePaths> {
   if (profileExists(home, name)) throw new CliError("refused", `Profile ${name} exists: restore into a new name`);
@@ -558,7 +571,8 @@ async function restoreWith(home: string, name: string, file: string, passphrase?
     // A file's frames are held up to FRAME_BYTES and written together: one write per frame, however small, cost ~35 µs.
     let out: { handle: FileHandle; left: number; store: boolean; held: Uint8Array[]; heldBytes: number } | null = null, files = 0, bytes = 0, ended = false, stored = false;
     const flush = async (file: NonNullable<typeof out>) => {
-      if (file.held.length) await file.handle.write(file.held.length === 1 ? file.held[0] : Buffer.concat(file.held));
+      // Whole, or the restore fails: the last file's last write has no write after it to meet a full disk.
+      if (file.held.length) await writeAll(file.handle, file.held.length === 1 ? file.held[0] : Buffer.concat(file.held));
       file.held = [];
       file.heldBytes = 0;
     };
