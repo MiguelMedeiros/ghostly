@@ -1,10 +1,10 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, type GhostLinkOptions } from "@ghostly/core";
+import { cashuRequestPayload, createIdentity, ENDPOINT, type GhostLinkOptions } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { STORES, fileStore, transact } from "../src/shared/idb";
-import type { StoredLink } from "../src/shared/types";
+import type { StoredLink, StoredPayment } from "../src/shared/types";
 // covers: chat.paired.block
 
 /**
@@ -252,6 +252,40 @@ describe("a blocked contact", () => {
     await db.putLink(other);
     await host.receivePaymentRequest(other.id, { id: "other-request", timestamp: Date.now(), amount: { value: 21, asset: "sat" } }).catch(() => {});
     expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("still closes or settles its own requests taken before the block, in the app's words, not its own", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const peer = linkOf(chat.id).options.events;
+    for (const [i, id] of ["r1", "r2"].entries()) {
+      await peer.onPaymentRequest({ id, timestamp: Date.now() + i, amount: { value: "21", asset: "sat" }, network: "testnet",
+        endpoints: [[ENDPOINT.cashu, cashuRequestPayload(["https://testnut.cashu.space"])]] } as never);
+    }
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    await peer.onPaymentResult({ id: "r1", ok: false, closed: true, error: "Pay me at another place" } as never);
+    await peer.onPaymentResult({ id: "r2", ok: true } as never);
+    const requests = node["desk"].records().filter((p) => p.linkId === chat.id && p.kind === "request");
+    // Neither keeps a Pay: one would pay a removed wallet, the other pay twice.
+    expect(requests.map(({ id, state, closed, error, payeeConfirmed }) => ({ id, state, closed, error, payeeConfirmed })).sort((a, b) => a.id.localeCompare(b.id))).toEqual([
+      { id: "r1", state: "failed", closed: true, error: "your contact closed it", payeeConfirmed: undefined },
+      { id: "r2", state: "settled", closed: undefined, error: undefined, payeeConfirmed: true },
+    ]);
+    for (const paymentId of ["r1", "r2"]) {
+      await expect(node["desk"].payRequest({ linkId: chat.id, paymentId, confirmedReal: true })).rejects.toThrow("This request is no longer open");
+    }
+  });
+
+  it("refuses our payment without its words: the ecash comes back, with the app's own reason", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const sent: StoredPayment = { id: "p", linkId: chat.id, kind: "payment", direction: "out", amount: 10, unit: "sat", state: "pending", createdAt: 1, token: "cashuBtoken", mint: "https://testnut.cashu.space" };
+    node["desk"]["payments"].set(sent.id, sent);
+    const redeem = vi.spyOn(node["wallet"], "receiveToken").mockResolvedValue({ amount: 10, mint: sent.mint!, fee: 0 });
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    await linkOf(chat.id).options.events.onPaymentResult({ id: "p", ok: false, error: "Blocked me? Call me tonight" } as never);
+    expect(redeem).toHaveBeenCalledWith("cashuBtoken", "reclaimed", undefined, expect.anything());
+    expect(node["desk"].payment("p")).toMatchObject({ state: "reclaimed", error: "The payment was refused" });
   });
 
   it("is not kept when the block lands while its text is being stored", async () => {

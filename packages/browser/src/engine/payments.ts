@@ -1245,9 +1245,11 @@ export class PaymentDesk {
     await this.refusalLine(record.linkId, `peer_${record.createdAt}_refused`, refusedRow({ amount: record.amount, network: record.mint ? mintNetwork(record.mint) : undefined, reason }), record.createdAt);
   }
 
-  async onPaymentResult(linkId: string, said: PaymentResult): Promise<void> {
+  async onPaymentResult(linkId: string, said: PaymentResult, { blocked = false }: { blocked?: boolean } = {}): Promise<void> {
     // The contact's reason, kept only as `contactReason` leaves it: without one the app's own words below are said.
-    const result: PaymentResult = { ...said, error: contactReason(said.error) };
+    // A blocked contact's words are never kept, but its states are: a request it says is paid turns Paid (no second
+    // Pay), one it closed stops being payable, and its refusal of our payment still gives our ecash back.
+    const result: PaymentResult = { ...said, error: blocked ? undefined : contactReason(said.error) };
     const payment = this.find(linkId, result.id);
     if (payment?.target?.method === "fedimint" && payment.linkId === linkId && payment.direction === "out" && payment.kind === "payment") {
       if (payment.state !== "pending") return;

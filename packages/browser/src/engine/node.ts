@@ -10031,12 +10031,13 @@ export class GhostlyNode implements EngineImplementation {
         onAppFrame: this.appsOn ? event => { if (!this.blockedChat(live.stored)) this.events.onAppFrame?.(linkId, event); } : undefined,
         onAppRangeTask: this.appsOn ? task => this.blockedChat(live.stored) ? undefined : this.appRangeAsked(linkId, task) : undefined,
         // Each way of paying is checked where it is used: what this chat does not allow is dropped or refused.
-        // A blocked contact's request, ask or payment is not answered: its ecash stays its own to take back.
+        // A blocked contact's request, ask or payment is not answered: its ecash stays its own to take back. Its result
+        // is heard without its words (`onPaymentResult`): a paid or closed request has no Pay left, our refused ecash comes back.
         onPaymentRequest: (request) => this.blockedChat(live.stored) ? undefined : this.desk.onPaymentRequest(linkId, request),
         onPaymentAsk: (ask) => this.blockedChat(live.stored) ? undefined : this.desk.onPaymentAsk(linkId, ask),
         onPayment: (payment) => this.blockedChat(live.stored) ? undefined : this.desk.onPayment(linkId, payment),
         onPaymentResult: async (result) => {
-          await this.desk.onPaymentResult(linkId, result);
+          await this.desk.onPaymentResult(linkId, result, { blocked: this.blockedChat(live.stored) });
           // Its receipt, whatever the answer (the bubble says taken or refused): the contact's app has the payment.
           void this.notePaymentReceipt(linkId, result.id).catch(() => {});
         },
