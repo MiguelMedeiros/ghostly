@@ -457,6 +457,7 @@ export class TurnKeeper {
       const prior = held.record.state;
       if (prior !== "standby" && prior !== "superseded") throw new Error(`A ${prior} device does not force a takeover`);
       const read = await this.readWith(held, true);
+      if (await this.secretMoved(held)) return { kind: "wait", read };
       if (!read.good || read.result === "tombstone") return this.settle(held, read, true);
       // What the caller checks against the last record known before anything is written (`takeover.ts`): it throws to refuse.
       options.before?.(latestKnown(read, held.storedRecord));
@@ -496,7 +497,7 @@ export class TurnKeeper {
       if (!held) return null;
       if (held.record.state !== "taking") throw new Error("Only a device that holds a release takes the turn");
       const read = await this.readWith(held, true);
-      if (!read.good) return { kind: "wait", read };
+      if (!read.good || await this.secretMoved(held)) return { kind: "wait", read };
       // A record below the turn the release names is the releaser's (its last, or a later `rev` of it this device never
       // stored): a release is for the turn above it by construction. One at or above that turn is a rival.
       const below = (read.result === "other" || read.result === "behind") && !!read.record && read.record.turn < turn;
@@ -601,6 +602,15 @@ export class TurnKeeper {
   private async exhausted(held: Held, row: TurnRow, read: TurnRead): Promise<TurnOutcome> {
     const outcome = await this.carryOut(held, row, turnAction(row, { result: "closed" }), read);
     return { ...(outcome ?? { kind: "wait", read }), exhausted: true };
+  }
+
+  /**
+   * A new device secret taken while this read was out (a `set-update`, `links.ts`): the read was of the old address,
+   * and a record written on it would be signed under a secret the device no longer holds. Nothing is written.
+   */
+  private async secretMoved(held: Held): Promise<boolean> {
+    const fresh = await this.store.read(this.options.profile);
+    return !!fresh && fresh.d !== held.record.d;
   }
 
   /** One action. Null: read again. */

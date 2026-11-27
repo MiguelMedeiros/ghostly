@@ -1248,13 +1248,14 @@ export class DeviceLinks implements DeviceLinkEngine {
           await this.afterOwnSet(outcome);
           return { kind: outcome };
         }
-        const outcome = await forceTakeover({
+        // In the turn's queue, as a set of its own is: a set-update taken while its read is out waits for it.
+        const outcome = await this.turnExclusive(() => forceTakeover({
           read: () => (this.options.readRecord ?? readDeviceRecord)(this.options.profile),
           amend: (patch) => amendDevice(this.options.profile, patch),
           proves: (verifier, password) => provesHandoffPassword(verifier, password),
           keeper: () => this.turnKeeper(),
           dropStaging: async () => { await this.handoff?.dropStaging?.(); },
-        }, { password: typeof p.password === "string" ? p.password : "", name: typeof p.name === "string" ? p.name : "" });
+        }, { password: typeof p.password === "string" ? p.password : "", name: typeof p.name === "string" ? p.name : "" }));
         // Lost or stolen: once the profile opens here, the money checklist comes first, then removing that device.
         if (outcome.kind === "start" && p.lost === true) {
           const now = await (this.options.readRecord ?? readDeviceRecord)(this.options.profile);
