@@ -289,12 +289,9 @@ export const BACKUP_METHODS: Record<string, Method> = {
         const chunk = held.length === 1 ? held[0] : Buffer.concat(held);
         held = [];
         heldBytes = 0;
-        // A write may take only part of the chunk (a disk filling): the rest goes on, and the disk's error with it.
-        for (let at = 0; at < chunk.length;) {
-          const { bytesWritten } = await handle.write(chunk, at, chunk.length - at);
-          if (!bytesWritten) throw new Error("The backup's file took no more bytes");
-          at += bytesWritten;
-        }
+        // A write may take only part of the chunk (a disk filling): the rest goes on, and the disk's error with it. One
+        // that takes nothing is a full disk, said as one naming --out, not "The backup's file took no more bytes".
+        await writeAll(handle, chunk, undefined, path);
       };
       const sink = { write: async (chunk: Uint8Array) => { held.push(chunk); heldBytes += chunk.length; if (heldBytes >= FRAME_BYTES) await flush(); } };
       let writer: BackupWriter;
