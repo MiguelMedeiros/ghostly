@@ -4117,12 +4117,13 @@ export class GhostlyNode implements EngineImplementation {
   private groupMuting: Promise<void> = Promise.resolve();
 
   private async applyGroupWakeMuted(groupId: string, muted: boolean): Promise<void> {
-    const list = this.settings.wakeMutedGroups ?? [];
-    if (list.includes(groupId) === muted) return;
+    if ((this.settings.wakeMutedGroups ?? []).includes(groupId) === muted) return;
     // Members told to forget the subscription may keep it anyway: as for a muted chat, the app replaces it.
     // Those whose edges a group on hubs dropped hold it too, with no edge left to tell them.
     if (muted && ([...this.links.values()].some(live => live.stored.group === groupId && this.meshEdge(live.stored) && live.stored.wakeToken) || this.settings.wakeHeldBy?.[groupId]?.length)) await this.rotateWake();
-    const next = muted ? [...list, groupId] : list.filter(id => id !== groupId);
+    // Read after the wait: a muted group that ended meanwhile (`groupHistoryGone`) took its mute with it.
+    const list = this.settings.wakeMutedGroups ?? [];
+    const next = muted ? [...list.filter(id => id !== groupId), groupId] : list.filter(id => id !== groupId);
     this.settings = { ...this.settings, wakeMutedGroups: next.length ? next : undefined };
     if (!next.length) delete this.settings.wakeMutedGroups;
     await db.putSettings(this.settings);
