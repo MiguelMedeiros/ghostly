@@ -146,6 +146,38 @@ function forgetServer(server: RelayedServer): void {
   if (internal._onStreamClose) internal._protocol?._stream?.off("close", internal._onStreamClose);
 }
 
+/** The parts of dht-relay 0.4.3's own `Stream` (the one under each SecretStream) that `forgetStream` reads. */
+interface RelayStreamInternals {
+  noiseStream?: unknown;
+  _onStreamClose: () => void;
+  _protocol: { _stream: { off(event: string, listener: () => void): unknown } };
+}
+function relayStreamInternals(value: unknown): RelayStreamInternals | null {
+  const stream = value as Partial<RelayStreamInternals> | null;
+  return typeof stream?._onStreamClose === "function" && typeof stream._protocol?._stream?.off === "function" ? stream as RelayStreamInternals : null;
+}
+
+/**
+ * The same as `forgetServer`, for every relayed stream, dialled or dialled in: dht-relay 0.4.3's `Stream` waits for the
+ * relay connection to close (to close itself) and never stops waiting, so each one ever opened on the connection, with
+ * its SecretStream and buffers (about 7 KB), stayed in memory until the connection went. Once the stream has closed,
+ * that wait goes. An incoming stream's `Stream` is its SecretStream's `rawStream`; a dialled one gets it only when the
+ * dial opens, so it is found where `connect` just put it (the node's `_connecting`, by its `noiseStream`). A dht-relay
+ * of another shape leaves everything as it was (test/hyperdhtRelayStreams.test.ts fails then).
+ */
+function forgetStream(socket: SecretSocket, node: RelayedNode): void {
+  let stream = relayStreamInternals((socket as { rawStream?: unknown }).rawStream);
+  const connecting = (node as { _connecting?: unknown })._connecting;
+  if (!stream && connecting instanceof Map) {
+    for (const candidate of connecting.values()) {
+      if ((candidate as { noiseStream?: unknown } | null)?.noiseStream === socket) { stream = relayStreamInternals(candidate); break; }
+    }
+  }
+  if (!stream) return;
+  const found = stream;
+  socket.once("close", () => { found._protocol._stream.off("close", found._onStreamClose); });
+}
+
 function release(url: string, client: RelayClient, endpoint: { unavailable(): void }): void {
   client.endpoints.delete(endpoint);
   if (client.endpoints.size || client.gone) return;
@@ -339,6 +371,7 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
   };
   client.endpoints.add(member);
   const server = client.node.createServer({}, socket => {
+    forgetStream(socket, client.node);
     void attach(socket, channels, dialledIn).then(bound => {
       if (stopped) bound.channel.close();
       else if (handler) handler(bound);
@@ -379,7 +412,9 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
     async connect(address) {
       const publicKey = (address as { publicKey?: unknown } | null)?.publicKey;
       if (stopped || typeof publicKey !== "string" || !/^[a-f0-9]{64}$/.test(publicKey)) throw new Error("Invalid HyperDHT endpoint");
-      return attach(client.node.connect(fromHex(publicKey), { keyPair }), channels);
+      const socket = client.node.connect(fromHex(publicKey), { keyPair });
+      forgetStream(socket, client.node);
+      return attach(socket, channels);
     },
     async close() {
       stopped = true;
