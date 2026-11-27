@@ -198,6 +198,23 @@ describe("a blocked contact", () => {
     expect(asked).not.toHaveBeenCalled();
   });
 
+  it("joins no group of mine by accepting an invitation made before the block; unblocked, its accept comes in", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const peer = linkOf(chat.id).options.events;
+    const contactFrame = vi.spyOn(node["groups"], "handleContactFrame").mockResolvedValue();
+    const accept = { t: "group-accept", g: "g".repeat(22), key: createIdentity().pubKeyZ32 };
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: true });
+    await peer.onGroupFrame(accept);
+    expect(contactFrame).not.toHaveBeenCalled();
+    // The signaling of a group both are in still goes through.
+    await peer.onGroupFrame({ t: "group-signal", g: "g".repeat(22) });
+    expect(contactFrame).toHaveBeenCalledTimes(1);
+    await node.setContactBlocked({ peerPubKeyZ32: chat.peerPubKeyZ32, blocked: false });
+    await peer.onGroupFrame(accept);
+    expect(contactFrame).toHaveBeenLastCalledWith(chat.id, accept);
+  });
+
   it("cannot be called: its answer would be dropped, so its chat says why and no call rings it for nothing", async () => {
     const chat = row(), other = row();
     const { node } = await started(chat, other);

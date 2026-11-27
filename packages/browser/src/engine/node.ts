@@ -251,6 +251,11 @@ import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayP
  */
 const RELAY_RETRY_MS = 30_000;
 /**
+ * The group frames a blocked contact's chat drops (`setContactBlocked`): its invitation, and its accept of one made
+ * before the block, which would let it into the group. A group both are in already goes on (its signaling, a leave).
+ */
+const BLOCKED_GROUP_FRAMES = new Set(["group-invite", "group-accept"]);
+/**
  * A chat's relayed HyperDHT listener went with the relay connection (`relayHolds`): for this long the chat keeps first
  * claim on a listener, and another chat does not take the slot it held. A socket closed with no close reaching the relay
  * (a network switch, a NAT that forgot it) leaves the old connection holding the chat's key until the relay's ping drops
@@ -9769,8 +9774,9 @@ export class GhostlyNode implements EngineImplementation {
           live.pairingProgress = progress;
           this.chatChanged(linkId);
         },
-        // A blocked contact's group invitation is dropped; the signaling of groups we are both in still goes through.
-        onGroupFrame: stored.profile ? frame => frame.t === "group-invite" && this.blockedChat(live.stored) ? undefined : this.groups.handleContactFrame(linkId, frame) : undefined,
+        // A blocked contact's group invitation is dropped, and so is its accept of one made before the block (it would let
+        // the contact into the group); the signaling of groups we are both in still goes through.
+        onGroupFrame: stored.profile ? frame => BLOCKED_GROUP_FRAMES.has(frame.t as string) && this.blockedChat(live.stored) ? undefined : this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.chatChanged(linkId),
         // The contact takes texts again: those paced out wait for no backoff check (minutes after the contact was away).
         onTextRoom: () => void this.outboxes.get(linkId)?.flush().catch(() => {}),
