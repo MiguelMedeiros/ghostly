@@ -20,7 +20,8 @@ it("a backup of a profile still in the home is refused as the same person, names
   const daemon = new Running(["--home", dir, "daemon"]);
   try {
     await daemon.waitFor((line) => line.daemon === "ready");
-    const refused = error(await ghostly(["--home", dir, "profile", "restore", file, "bob"], { env: NO_PASS }), "refused", 1) as { message: string; details?: unknown };
+    // A refusal --copy lifts, as --yes or --force do theirs: `confirm`, exit 5.
+    const refused = error(await ghostly(["--home", dir, "profile", "restore", file, "bob"], { env: NO_PASS }), "confirm", 5) as { message: string; details?: unknown };
     expect(refused.details).toEqual({ reason: "same-profile", profiles: ["default"] });
     expect(refused.message).toContain("default");
     expect(refused.message).toContain("--copy");
@@ -28,7 +29,7 @@ it("a backup of a profile still in the home is refused as the same person, names
 
     expect(ok(await ghostly(["--home", dir, "profile", "restore", file, "bob", "--copy"], { env: NO_PASS }))).toMatchObject({ restored: "bob" });
     // The copy is one more profile of the same person: a third restore names both.
-    const again = error(await ghostly(["--home", dir, "profile", "restore", file, "carol"], { env: NO_PASS }), "refused", 1) as { details?: unknown };
+    const again = error(await ghostly(["--home", dir, "profile", "restore", file, "carol"], { env: NO_PASS }), "confirm", 5) as { details?: unknown };
     expect(again.details).toEqual({ reason: "same-profile", profiles: ["bob", "default"] });
     expect(profiles(dir)).toEqual(["bob", "default"]);
   } finally { await daemon.stop(); }
@@ -55,7 +56,7 @@ it("a version-1 backup of a profile still in the home is refused too, nothing le
   const payload = { format: "ghostly-cli-profile/1", createdAt: 1, store: serialize(saved).toString("base64"), files: [] };
   const file = join(dir, "old.ghostly-backup");
   writeFileSync(file, await seal(JSON.stringify(payload), PASS.GHOSTLY_BACKUP_PASSPHRASE));
-  const refused = error(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: PASS }), "refused", 1) as { details?: unknown };
+  const refused = error(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: PASS }), "confirm", 5) as { details?: unknown };
   expect(refused.details).toEqual({ reason: "same-profile", profiles: ["default"] });
   expect(profiles(dir), "nothing is written, not even a folder being restored").toEqual(["default"]);
 });
