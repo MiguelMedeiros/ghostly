@@ -1332,6 +1332,19 @@ html[data-keyboard="true"] .menu-sheet:has(input):focus-within .reaction-picker 
   max-height: calc(var(--keyboard-room, 100dvh) - env(safe-area-inset-top) - 2.5rem);
 }
 
+/* The same picker in a popover (a phone on its side, two panes wide): while its search is in use the menu stands over
+   its message in the room left above the keyboard (components/Menu.tsx), and the picker is no taller than that room
+   (`--menu-room`), so what it found scrolls under the field instead of the field with it. With the keyboard up the
+   categories make way for the results, in a sheet too: on a short screen they took a whole row's height. While the
+   focus is anywhere in the menu, not only in the field: a tap on an emoji found must not move it under the finger. */
+html[data-keyboard="true"] [data-menu="popover"]:has(input):focus-within .reaction-picker {
+  max-height: calc(var(--menu-room, 100dvh) - 0.5rem - 2px);
+}
+
+html[data-keyboard="true"] [data-menu]:has(input):focus-within .reaction-picker .expression-categories {
+  display: none;
+}
+
 /* In a chat's header (`toast-place-header`, the call buttons' why): just under the header, over the top of the chat's
    column, near the button pressed. At the bottom it sat over the message field's + and emoji buttons on a desktop. */
 html .toast-place.toast-place-header,

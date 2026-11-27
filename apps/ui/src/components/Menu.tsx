@@ -123,7 +123,11 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
     const fit = () => {
       const menu = ref.current, anchor = anchorRef.current;
       if (!menu || !anchor) return;
-      const box = bounds(anchor, within);
+      // In use with the keyboard up, a menu with a field of its own (the reaction picker's search on a phone on its side)
+      // has the room left above the keyboard, not the `within` ancestor's. The message list is a few px tall then, and the picker was a
+      // sliver in it, its field and what it found out of view.
+      const typing = !!portal && typingIn(menu);
+      const box = bounds(anchor, typing ? undefined : within);
       // Measured at its own height, without a cap from an earlier fit. Uncapped it has nothing to scroll, so a menu
       // scrolled to its last rows went back to its top: its scroll is put back with the cap.
       const cap = menu.style.maxHeight, scrolled = menu.scrollTop;
@@ -136,7 +140,10 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
         const height = room ?? rect.height;
         // Lined up with the opener's start or end edge (the end is the left one in a right-to-left page), kept in the bounds.
         const left = (align === "start") === (getComputedStyle(anchor).direction !== "rtl") ? opener.left : opener.right - rect.width;
-        const next = { left: Math.max(box.left + MARGIN, Math.min(left, box.right - MARGIN - rect.width)), top: up ? opener.top - GAP - height : opener.bottom + GAP, room };
+        const x = Math.max(box.left + MARGIN, Math.min(left, box.right - MARGIN - rect.width));
+        // Too tall for either side of its opener while typing: over it, as tall as all the room above the keyboard.
+        const next = typing && room !== undefined ? { left: x, top: box.top + MARGIN, room: Math.max(0, box.bottom - box.top - 2 * MARGIN) }
+          : { left: x, top: up ? opener.top - GAP - height : opener.bottom + GAP, room };
         setFixed(was => was?.left === next.left && was.top === next.top && was.room === next.room ? was : next);
         return;
       }
@@ -162,11 +169,17 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
     window.addEventListener("resize", fit);
     window.visualViewport?.addEventListener("resize", keyboardMoved);
     if (portal) window.addEventListener("scroll", pageScrolled, true);
+    // The focus coming into it or leaving it with the keyboard up: over the opener, or back beside it.
+    const menu = ref.current;
+    menu?.addEventListener("focusin", keyboardMoved);
+    menu?.addEventListener("focusout", keyboardMoved);
     return () => {
       cancelAnimationFrame(frame);
       window.removeEventListener("resize", fit);
       window.visualViewport?.removeEventListener("resize", keyboardMoved);
       window.removeEventListener("scroll", pageScrolled, true);
+      menu?.removeEventListener("focusin", keyboardMoved);
+      menu?.removeEventListener("focusout", keyboardMoved);
     };
   }, [open, phone, anchorRef, prefer, portal, align, within, at]);
 
@@ -245,7 +258,7 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", p
 
   if (portal) return createPortal(
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} aria-describedby={describedBy} onKeyDown={keys}
-      style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0, maxHeight: fixed?.room }}
+      style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0, maxHeight: fixed?.room, "--menu-room": fixed?.room === undefined ? undefined : `${fixed.room}px` } as CSSProperties}
       className={`fixed ${stack} w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
       {children}
     </div>, host ?? document.body);
@@ -263,6 +276,12 @@ type Rect = { left: number; right: number; top: number; bottom: number };
 
 /** Whether an on-screen keyboard is up (hooks/useViewportHeight.ts). */
 const keyboardUp = () => document.documentElement.dataset.keyboard === "true";
+
+/**
+ * Whether a menu with a field of its own (the reaction picker's search) has the focus with the keyboard up: in the
+ * field, or on what it found, a tap there keeping the place it was tapped in (`.menu-sheet:has(input):focus-within`).
+ */
+const typingIn = (menu: HTMLElement) => keyboardUp() && menu.contains(document.activeElement) && !!menu.querySelector(TYPED);
 
 /**
  * The window's safe area, or the part of it the opener's `within` ancestor covers. On a phone on its side the notch's
