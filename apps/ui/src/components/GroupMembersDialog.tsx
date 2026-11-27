@@ -11,6 +11,7 @@ import { useComposition } from "../hooks/useComposition";
 import { useGroupNameField } from "../hooks/useGroupNameField";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { useEngineValue } from "../lib/engineState";
+import { contactName as chatName, usePeerChats } from "../lib/identities";
 import { agoIn } from "../lib/relativeTime";
 import { GroupLinkPanel } from "./GroupLinkPanel";
 import { RemoveMemberDialog } from "./RemoveMemberDialog";
@@ -47,11 +48,15 @@ const dialogLink = ({ id, label, peerNick, peerPubKeyZ32, peerAvatar, profile, g
 export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { group: GroupView; onClose(): void; focusKey?: string; returnFocus?: RefObject<HTMLElement | null> }) {
   const id = useId();
   const { t, language } = useI18n();
-  const contactName = (link: DialogLink) => link.label || link.peerNick || t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
   // What the panel shows of the engine's state, each compared by content (lib/engineState): the whole state drew it and
   // worked out every member's row again on every change, up to 20 a second while a file moves, with 256 in a community.
   const live = useEngineValue(state => state?.groups.find(g => g.id === group.id)) ?? group;
   const links = useEngineValue(state => state?.links.map(dialogLink));
+  // A contact to invite is named as the chat list names their chat: a name given in the chat's header is kept in the
+  // page's stored chat, not on the engine's link (`usePeerChats`). The link's names stay for a chat only the engine has.
+  const chats = usePeerChats(!!links?.length, links);
+  const contactName = (link: DialogLink) => chatName(chats.get(link.peerPubKeyZ32)) || link.label || link.peerNick
+    || t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
   const myNick = useEngineValue(state => state?.settings.nick);
   const myAvatar = useEngineValue(state => state?.settings.avatar);
   const dialog = useRef<HTMLDialogElement>(null);
