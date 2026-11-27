@@ -502,10 +502,10 @@ export interface EngineApi {
   /**
    * Whether the group's call is on, asked of the node its `call` names (WISP 602 § Occupancy): `count` members in the
    * room, and `since` (unix seconds) the room opened once one is; or why that is not known, which says nothing about
-   * the call: `not_member` and `unsupported` (no node named, or one without the route, not asked again until the
+   * the call: `not_member`, `hidden` (nothing sent while Hide my IP is on) and `unsupported` (no node named, or one without the route, not asked again until the
    * group's `call` changes) before anything is sent, `refused` (403), `rate_limited` (429, with `retryAfter` seconds,
    * or null when it said none it could read), `no_answer` (no status at all, as from a node that refuses the preflight),
-   * `bad_reply` (any other status, or a 200 that is not an occupancy).
+   * `bad_reply` (any other status, a 200 that is not an occupancy, or a count above the group's roster).
    */
   groupCallOccupancy(params: { groupId: string }): GroupCallOccupancyResult;
   /**

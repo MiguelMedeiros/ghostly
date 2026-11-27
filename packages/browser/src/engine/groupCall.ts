@@ -1,5 +1,5 @@
 import {
-  GROUP_CALL_SOURCES, engineError, isZ32Key, parseGroupCallOccupancy, randomBytes, sign, signGroupCallModeration, signGroupCallOccupancy, toBase64Url,
+  GROUP_CALL_SKEW_S, GROUP_CALL_SOURCES, engineError, isZ32Key, parseGroupCallOccupancy, randomBytes, sign, signGroupCallModeration, signGroupCallOccupancy, toBase64Url,
   utf8Encode, type GroupCallModerationAct, type GroupCallOccupancy, type GroupCallSource, type GroupMeta,
 } from "@ghostly/core";
 
@@ -232,14 +232,16 @@ export function parseGroupCallRoomState(raw: unknown): GroupCallRoomState | null
  * Whether the group's call is on (WISP 602 § Occupancy): how many members are in the room, and since when (unix
  * seconds) once one is; or why that is not known. `not_member`: I am not in the group, so nothing was sent.
  * `unsupported`: the group names no node, or its node is older than the route (404 or 405). `refused`: its 403.
+ * `hidden`: Hide my IP is on, so nothing was sent (the node, the admin's choice, would learn this device's address).
  * `rate_limited`: its 429, with `retryAfter` the seconds its `Retry-After` says, or null when the page cannot read one.
  * `no_answer`: the request got no status at all (a network error, the timeout, or a node from before the route that
  * refuses the browser's preflight); the page waits longer each time. `bad_reply`: any other status, or a 200 that is
- * not an occupancy. Each of them says nothing about the call: a page shows it as it would without the route.
+ * not an occupancy, or counts more members than the group's roster has. A `since` past now (beyond the clock skew a
+ * request is allowed) is left out. Each of them says nothing about the call: a page shows it as it would without the route.
  */
 export type GroupCallOccupancyResult =
   | ({ ok: true } & GroupCallOccupancy)
-  | { ok: false; code: "not_member" | "unsupported" | "refused" | "no_answer" | "bad_reply" }
+  | { ok: false; code: "not_member" | "hidden" | "unsupported" | "refused" | "no_answer" | "bad_reply" }
   | { ok: false; code: "rate_limited"; retryAfter: number | null };
 export type GroupCallOccupancyCode = Extract<GroupCallOccupancyResult, { ok: false }>["code"];
 
@@ -248,6 +250,8 @@ export interface GroupCallOccupancyAsk {
   g: string;
   /** The seed of my member key in the group. */
   seed: Uint8Array;
+  /** How many keys the group's roster has: a count above it is no occupancy. */
+  members?: number;
   fetch?: typeof fetch;
   now?: () => number;
 }
@@ -273,7 +277,9 @@ export async function fetchGroupCallOccupancy(ask: GroupCallOccupancyAsk): Promi
   let raw: unknown = null;
   if (response.status === 200) try { const text = await readCapped(response, MAX_REPLY_BYTES); raw = text === null ? null : JSON.parse(text); } catch { raw = null; }
   const occupancy = parseGroupCallOccupancy(raw);
-  return occupancy ? { ok: true, ...occupancy } : { ok: false, code: "bad_reply" };
+  if (!occupancy || (ask.members !== undefined && occupancy.count > ask.members)) return { ok: false, code: "bad_reply" };
+  if (occupancy.since !== undefined && occupancy.since > Math.floor(now() / 1000) + GROUP_CALL_SKEW_S) delete occupancy.since;
+  return { ok: true, ...occupancy };
 }
 
 /**

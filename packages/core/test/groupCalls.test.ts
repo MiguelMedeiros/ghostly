@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { utf8Decode } from "../src/bytes";
+import { fromBase64Url, utf8Decode } from "../src/bytes";
 import { identityFromSeed, publicKeyFromZ32 } from "../src/identity";
 import {
   GROUP_CALL_NONCE_S, GROUP_CALL_SKEW_S, GROUP_CALL_SOURCES, MAX_GROUP_CALL_NAME, groupCallModerationBytes, groupCallOccupancyBytes, groupCallRequestBytes,
@@ -198,6 +198,15 @@ describe("group call occupancy request (WISP 602 § Occupancy)", () => {
     expect(hex(bytes)).toBe(OCCUPANCY_HEX);
     expect(occupancy()).toEqual({ v: 1, g: G, k: K, room: ROOM, ts: TS, n: N, sig: OCCUPANCY_SIG });
     expect(hex(Buffer.from(OCCUPANCY_SIG, "base64url"))).toBe(OCCUPANCY_SIG_HEX);
+  });
+
+  it("draws a new 16-byte nonce for each request, so the node never takes the next ask for a replay", () => {
+    const a = signGroupCallOccupancy({ sfu: SFU, g: G }, SEED), b = signGroupCallOccupancy({ sfu: SFU, g: G }, SEED);
+    expect(a.n).not.toBe(b.n);
+    for (const { n } of [a, b]) {
+      expect(n).toMatch(/^[A-Za-z0-9_-]{22}$/);
+      expect(fromBase64Url(n)).toHaveLength(16);
+    }
   });
 
   it("takes the test vector, then refuses it again as replayed", () => {
