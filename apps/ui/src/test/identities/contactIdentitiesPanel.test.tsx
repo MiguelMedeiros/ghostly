@@ -34,10 +34,19 @@ function open(state: Parameters<ReturnType<typeof renderApp>["engine"]["update"]
 
 const theirs = () => within(screen.getByTestId("chat-identities-received")).getAllByTestId("chat-identity-received");
 const back = () => screen.getByTestId("chat-identity-back");
-/** Turns the contact's card over, as a click on it does. */
+/**
+ * Turns the contact's card over, as a click on it does, and waits until it is still. The turn starts a frame or two
+ * after the click (deck/useCardFlip.ts), and until it is over the back's buttons wait and the keys are not on it yet:
+ * a press on Check again before that reached nothing (a slow frame on a loaded CI runner).
+ */
 async function turnOver(user: ReturnType<typeof renderApp>["user"], i: number) {
   await user.click(theirs()[i]);
-  return back();
+  const card = back();
+  await vi.waitFor(() => {
+    expect(card.closest("[data-flipped]")).toHaveAttribute("data-settled");
+    expect(within(card).getByTestId("chat-identity-cards")).toHaveFocus();
+  });
+  return card;
 }
 const withReceived = (received: ReceivedIdentityView[]) => ({ links: [paired({ identities: identitiesView({ received }) })] });
 
