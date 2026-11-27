@@ -91,7 +91,7 @@ function takeCarriedShare(): Shared | null {
     const file = (f: Shared["files"][number] | null) => typeof f?.token === "string" && typeof f.size === "number";
     const names = (left: unknown) => left === undefined || (Array.isArray(left) && left.every((name) => typeof name === "string"));
     return shared && typeof shared.title === "string" && typeof shared.text === "string" && Array.isArray(shared.files) && shared.files.every(file)
-      && names(shared.leftOut)
+      && names(shared.leftOut) && names(shared.unread) && names(shared.noRoom) && names(shared.pastLimit)
       ? shared
       : null;
   } catch { return null; }
@@ -170,6 +170,16 @@ function withinPasteTotal<T extends { size: number }>(files: T[]): T[] {
   });
 }
 
+/** `names` without one of each of `less` (a name in both twice loses one). */
+function withoutOnce(names: string[], less: string[]): string[] {
+  const rest = [...names];
+  for (const name of less) {
+    const at = rest.indexOf(name);
+    if (at >= 0) rest.splice(at, 1);
+  }
+  return rest;
+}
+
 /**
  * "Share to Ghostly" from another app: taken when the app starts (a share can be what started it) and whenever Rust
  * says one arrived. The page shows the Share to… picker, as the web app's share target does, from the files' names
@@ -192,7 +202,9 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
   let carried: (() => void) | null = null;
   const receive = (shared: Shared) => {
     const taken = withinPasteTotal(shared.files);
-    const leftOut = [...shared.leftOut ?? [], ...shared.files.filter((file) => !taken.includes(file)).map((file) => file.name ?? "")];
+    // Past what a paste brings in: named by this page, and again by the next one from `files` when it is kept.
+    const overTotal = shared.files.filter((file) => !taken.includes(file)).map((file) => file.name ?? "");
+    const leftOut = [...shared.leftOut ?? [], ...overTotal];
     const unread = shared.unread ?? [];
     const noRoom = shared.noRoom ?? [];
     const pastLimit = shared.pastLimit ?? [];
@@ -232,10 +244,18 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
           done();
         }
       },
-      carry: () => {
+      carry: (now) => {
         // Its copies already let go: nothing of it would read on the next page.
         if (clips.length && !held) return false;
-        sessionStorage.setItem(CARRIED_SHARE_KEY, JSON.stringify(shared));
+        // With the names the picker says now: those of a later notice joined to it (`receiveShare`) too.
+        const kept: Shared = {
+          ...shared,
+          leftOut: withoutOnce(now.leftOut ?? [], overTotal),
+          unread: now.unread ?? [],
+          noRoom: now.noRoom ?? [],
+          pastLimit: now.pastLimit ?? [],
+        };
+        sessionStorage.setItem(CARRIED_SHARE_KEY, JSON.stringify(kept));
         withPage.delete(done);
         // One share is kept (the next page's picker shows one): the one kept before it, sent to a chat, is in no page now.
         const before = carried;

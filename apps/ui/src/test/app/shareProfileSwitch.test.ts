@@ -66,7 +66,12 @@ function androidHost() {
     page.android.takeIncomingShares(invoke as never, async (_event, handler) => { handlers.push(handler); });
     return page;
   };
-  return { share, startPage, taken, shelf, cache };
+  /** Another share Rust holds in its slot and tells the page of (a notice: only names of files Android did not copy). */
+  const shareNext = (next: unknown) => {
+    slot = next;
+    handlers.forEach((handler) => handler());
+  };
+  return { share, shareNext, startPage, taken, shelf, cache };
 }
 
 const names = (page: Page) => page.share.incomingShare()?.files.map((file) => file.name);
@@ -108,6 +113,55 @@ it("a photo waiting in profile A's picker is in profile B's picker after the swi
   expect([photo!.name, photo!.size]).toEqual(["IMG_1.jpg", 3]);
   expect([...host.shelf]).toEqual([]);
   expect([...host.cache]).toEqual([]);
+});
+
+it("the names a later share's notice added to the waiting photo are still said in profile B's picker after the switch", async () => {
+  const host = androidHost();
+  const pageA = await host.startPage();
+  host.share();
+  await vi.waitFor(() => expect(names(pageA)).toEqual(["IMG_1.jpg"]));
+  // A second share brings only a video too large to bring in, a document Android could not read, one it had no room
+  // for and one past the most a share brings: a notice, which joins the photo that waits.
+  host.shareNext({ title: "", text: "", files: [], leftOut: ["VID_1.mp4"], unread: ["DOC_1.pdf"], noRoom: ["VID_2.mp4"], pastLimit: ["IMG_33.jpg"] });
+  await vi.waitFor(() => expect(pageA.share.incomingShare()?.leftOut).toEqual(["VID_1.mp4"]));
+  location.hash = "#/settings";
+  const b = pageA.profiles.createProfile("B");
+
+  switchTo(pageA, b.id);
+
+  const pageB = await host.startPage();
+  await vi.waitFor(() => expect(names(pageB)).toEqual(["IMG_1.jpg"]));
+  const kept = pageB.share.incomingShare()!;
+  expect([kept.leftOut, kept.unread, kept.noRoom, kept.pastLimit]).toEqual([["VID_1.mp4"], ["DOC_1.pdf"], ["VID_2.mp4"], ["IMG_33.jpg"]]);
+  expect(kept.text).toBe("for Ana");
+});
+
+it("a file over the paste total is named once in profile B's picker, with a notice's names, after the switch", async () => {
+  const host = androidHost();
+  const pageA = await host.startPage();
+  const { PLATFORM_PASTE_MAX } = await import("../../lib/pastedFiles");
+  host.shelf.add("paste-1");
+  host.shelf.add("paste-2");
+  // A photo and a video that together pass what a paste brings in: the page leaves the video out, and names it.
+  host.shareNext({
+    title: "",
+    text: "",
+    files: [
+      { token: "paste-1", name: "IMG_1.jpg", size: 3, mime: "image/jpeg" },
+      { token: "paste-2", name: "VID_9.mp4", size: PLATFORM_PASTE_MAX, mime: "video/mp4" },
+    ],
+  });
+  await vi.waitFor(() => expect(pageA.share.incomingShare()?.leftOut).toEqual(["VID_9.mp4"]));
+  host.shareNext({ title: "", text: "", files: [], leftOut: ["VID_1.mp4"] });
+  await vi.waitFor(() => expect(pageA.share.incomingShare()?.leftOut).toEqual(["VID_9.mp4", "VID_1.mp4"]));
+  location.hash = "#/settings";
+  const b = pageA.profiles.createProfile("B");
+
+  switchTo(pageA, b.id);
+
+  const pageB = await host.startPage();
+  await vi.waitFor(() => expect(names(pageB)).toEqual(["IMG_1.jpg"]));
+  expect([...pageB.share.incomingShare()!.leftOut!].sort()).toEqual(["VID_1.mp4", "VID_9.mp4"]);
 });
 
 it("a share the page never read goes with the page, its copy out of the app's cache with it", async () => {
