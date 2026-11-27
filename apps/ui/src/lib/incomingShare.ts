@@ -44,10 +44,11 @@ export interface IncomingShare {
   read?: () => Promise<File[]>;
   /**
    * Keeps the share for the page that loads next (a profile switch restarts the app), which shows it in its picker
-   * again. False where it could not be kept. Without it, the share goes with this page. Called with the share's
-   * `dropped` as it is now (those not kept counted since it came), which the next page says with it.
+   * again. False where it could not be kept. Without it, the share goes with this page. Called with the share as it
+   * is now: the names a later notice joined to it (`receiveShare`) and its `dropped` (those not kept counted since it
+   * came), which the next page says with it.
    */
-  carry?: (dropped?: number) => boolean;
+  carry?: (now: IncomingShare) => boolean;
   /**
    * Told when the share is sent to a chat: it no longer waits in the picker, so a later share does not take its place
    * (the Android app's copies stay until that chat's composer reads them, or the page goes).
@@ -144,7 +145,7 @@ export function dropIncomingShare(): void {
  * is redrawn: the page is going.
  */
 export function carryIncomingShare(): boolean {
-  const carry = (share: IncomingShare | null) => { try { return share?.carry?.(share.dropped) ?? false; } catch { return false; } };
+  const carry = (share: IncomingShare | null) => { try { return share?.carry?.(share) ?? false; } catch { return false; } };
   let sent = false;
   for (const [chat, shares] of forChat) {
     const left = shares.filter((share) => !carry(share));
