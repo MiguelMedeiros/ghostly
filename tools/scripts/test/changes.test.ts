@@ -110,6 +110,11 @@ describe("changelog fragments", () => {
     // One space (or a no-break space) is not enough: after a blank line the item's text needs two columns.
     expect(fragment("For users / Chat", "- Chat part.\n\n **Calls**\n\n- Calls part.").problems).toEqual([item(" **Calls**")]);
     expect(fragment("For users / Chat", "- Chat part.\n\n **Calls**").problems).toEqual([item(" **Calls**")]);
+    // Only spaces and tabs make a line blank: a no-break space alone is text at the margin, and it ends the list.
+    expect(fragment("For users / Chat", "- Chat part.\n\n \n\n  **Calls**").problems).toEqual([item(" ")]);
+    // An item's text starts right after "- ": with "-  " a line under it needs three columns, and two leave it.
+    expect(fragment("For users / Chat", "- One.\n-  Chat part.\n\n  **Calls**").problems).toEqual([item("-  Chat part.")]);
+    expect(fragment("For users / Chat", "-  Chat part.\n\n  **Calls**").problems).toEqual([`${x}: the text is one or more list items ("- ...")`]);
     expect(fragment("Fixed", "- A fix,\n  over two lines.\n\n  A second paragraph.\n\t**Bold** in it.\n- Another, with **bold** -- and = in it.").problems).toEqual([]);
   });
 

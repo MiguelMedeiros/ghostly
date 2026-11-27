@@ -131,15 +131,16 @@ export function parseFragment(name, saved, version) {
   if (group && groupSpelling(group) !== group) problems.push(`${name}: the group is written "${groupSpelling(group)}", not "${group}"`);
   const body = match[2].trim();
   if (!body) problems.push(`${name}: no text after the front matter`);
-  else if (!body.startsWith("- ")) problems.push(`${name}: the text is one or more list items ("- ...")`);
+  else if (!/^- \S/.test(body)) problems.push(`${name}: the text is one or more list items ("- ...")`);
   // The bump copies every line: "## 9.9.9" would be a release of its own, and "<!--" would stay in "## Unreleased" as its note.
   // A line of only - or = (a heading's underline, a rule) or one outside every item (such as "**Calls**", a second
   // group the bump would file there) breaks the list too.
   for (const line of body.split("\n").slice(1)) {
     if (/^\s*(#|<!--)/.test(line)) problems.push(`${name}: the line "${line}" would be a heading or a note in the changelog: write it as a list item ("- ...")`);
     else if (/^\s*[-=][-=\s]*$/.test(line)) problems.push(`${name}: the line "${line}" would be a heading or a rule in the changelog: write it as a list item ("- ...")`);
-    // In an item is "- ", two spaces or a tab: one space (or a no-break space) ends the item after a blank line.
-    else if (line.trim() && !/^(- | {2}|\t)/.test(line)) problems.push(`${name}: the line "${line}" is not in a list item: start it with "- ", or indent it under its item`);
+    // In an item is "- " and its text, two spaces or a tab: one space (or a no-break space) ends the item after a blank
+    // line, and so does a line of only a no-break space (only spaces and tabs make a line blank).
+    else if (/[^ \t]/.test(line) && !/^(- \S| {2}|\t)/.test(line)) problems.push(`${name}: the line "${line}" is not in a list item: start it with "- ", or indent it under its item`);
   }
   if (/[–—]/.test(text)) problems.push(`${name}: no em or en dashes`);
   const release = fields.release === undefined ? undefined : fields.release.trim();
