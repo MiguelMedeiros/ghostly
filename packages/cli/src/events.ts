@@ -1,5 +1,5 @@
 import { appendFileSync, closeSync, existsSync, fstatSync, ftruncateSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, truncateSync, writeFileSync, writeSync } from "node:fs";
-import type { AppFrameEvent } from "@ghostly/core";
+import { IDENTITY_MAX_RECEIVED, type AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import { parsePayLink } from "@ghostly/browser/shared/payLinks";
@@ -108,8 +108,8 @@ export class EventHub {
   private groups = new Map<string, GroupShape>();
   private payments = new Map<string, string>();
   private transfers = new Map<string, string>();
-  /** Each chat's proofs from the contact, by id, as the last event told them. */
-  private received = new Map<string, Map<string, ReceivedJson>>();
+  /** Each chat's proofs from the contact, by id, as the last event told them: those in its list, and those that left it. */
+  private received = new Map<string, { shown: Map<string, ReceivedJson>; gone: Map<string, ReceivedJson> }>();
   /** File id to the message that carries it, for `file.*` events. */
   private fileMessages = new Map<string, string>();
   /** `file.*` events whose message was not seen yet: they wait for it a moment (the engine stores it right after). */
@@ -783,7 +783,7 @@ export class EventHub {
       if (last.get(link.id) === link) continue;
       const before = this.received.get(link.id), shown = new Map<string, ReceivedJson>();
       for (const identity of link.identities?.received ?? []) {
-        const key = `${link.id}:${identity.id}`, shape = identity.status, was = before?.get(identity.id)?.status;
+        const key = `${link.id}:${identity.id}`, shape = identity.status, was = (before?.shown.get(identity.id) ?? before?.gone.get(identity.id))?.status;
         const json = { id: identity.id, provider: identity.provider, subject: identity.subject, status: identity.status, verified: identity.verified, error: identity.error ?? null };
         shown.set(identity.id, json);
         if (quiet || was === shape) continue;
@@ -792,14 +792,22 @@ export class EventHub {
         const id = was === undefined ? `identity.received:${key}:${shape}` : `identity.status:${key}:${shape}:${this.now()}:${this.seq + 1}`;
         this.emit(was === undefined ? "identity.received" : "identity.status", id, { chat: link.id, identity: json });
       }
-      if (shown.size) this.received.set(link.id, shown); else this.received.delete(link.id);
       // A newer proof of the same identity replaces the older one, which leaves the chat's list: the engine's timeline
       // says it stopped, withdrawn, and so does its owner's side. One that had ended already (withdrawn, revoked,
-      // expired) and was dropped to make room had its last status told.
-      for (const [proof, identity] of before ?? []) {
-        if (quiet || shown.has(proof) || identity.status === "withdrawn" || identity.status === "revoked" || identity.status === "expired") continue;
-        this.emit("identity.status", `identity.status:${link.id}:${proof}:withdrawn:${this.now()}:${this.seq + 1}`, { chat: link.id, identity: { ...identity, status: "withdrawn", error: null } });
+      // expired) and was dropped to make room had its last status told. Either stays known as last told, so one shared
+      // again is a change of status with an id of its own, not its first `identity.received` again.
+      const gone = new Map([...before?.gone ?? []].filter(([proof]) => !shown.has(proof)));
+      for (const [proof, identity] of before?.shown ?? []) {
+        if (shown.has(proof)) continue;
+        const ended = identity.status === "withdrawn" || identity.status === "revoked" || identity.status === "expired";
+        const told = ended ? identity : { ...identity, status: "withdrawn", error: null };
+        gone.delete(proof);
+        gone.set(proof, told);
+        if (!quiet && !ended) this.emit("identity.status", `identity.status:${link.id}:${proof}:withdrawn:${this.now()}:${this.seq + 1}`, { chat: link.id, identity: told });
       }
+      // As many as the engine keeps: the oldest to leave goes first.
+      for (const proof of [...gone.keys()].slice(0, Math.max(0, gone.size - IDENTITY_MAX_RECEIVED))) gone.delete(proof);
+      if (shown.size || gone.size) this.received.set(link.id, { shown, gone }); else this.received.delete(link.id);
     }
     for (const [id, transfer] of Object.entries(state.transfers ?? {})) this.transferChanged(id, transfer, state, quiet);
     this.state = state;
