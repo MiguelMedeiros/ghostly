@@ -7,7 +7,7 @@
 | Document kind | Profile |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [600](600-media.md), [601](601-webrtc-media.md), [902](902-group-mesh.md), [903](903-group-community.md) |
-| Implementation | Since 1.12, in communities: the `call` field in core [`groupMeta.ts`](../../packages/core/src/groupMeta.ts); the engine's `setGroupCall` and `groupCallToken` in [`node.ts`](../../packages/browser/src/engine/node.ts); the app's [`GroupCallButton`](../../apps/ui/src/components/GroupCallButton.tsx) and [`groupCallPass.ts`](../../apps/ui/src/lib/groupCallPass.ts). The CLI names the node (`group call <group> --sfu`) but does not join. |
+| Implementation | Since 1.12, in communities: the `call` field in core [`groupMeta.ts`](../../packages/core/src/groupMeta.ts); the engine's `setGroupCall` and `groupCallToken` in [`node.ts`](../../packages/browser/src/engine/node.ts); the app's [`GroupCallButton`](../../apps/ui/src/components/GroupCallButton.tsx) and [`groupCallPass.ts`](../../apps/ui/src/lib/groupCallPass.ts). The CLI names the node (`group call <group> --sfu`) but does not join. The occupancy request (§ Occupancy) is not built yet. |
 | Summary | A community group names a node that forwards its calls, and a member asks that node for a call pass, or whether a call is on, with a signed request. |
 | Availability | Available |
 | Notes | Community groups only, joined from the web app, the extension, Android and the desktop app on macOS and Windows; not from the desktop app on Linux or the CLI yet. Media goes through the node's forwarding server (an SFU, LiveKit), not from each member to each other. End-to-end encryption of the media is optional in this revision. |
@@ -272,7 +272,7 @@ utf8(JSON.stringify(["ghostly-sfu/1 occupancy", sfuOrigin, g, room, k, ts, n]))
 
 as the token request's bytes, under its own tag, so it cannot be taken for a token or a moderation request, nor either of them for it.
 
-**What the node checks.** Checks 1 to 5 of the token request (§ What the node checks), with this body's fields and its 4 KiB bound. A key banned from the call (§ Moderation) is still in the roster and is answered. Every refusal is the same `403` with the same body as the token route's. Past 30 requests in a minute from one address, or for one `k`, the node answers `429` with a `Retry-After` header; these requests are counted apart from the token route's, so asking never keeps a member from joining. The route answers CORS as the token route does (§ CORS). A node that does not have this route answers `404`.
+**What the node checks.** Checks 1 to 5 of the token request (§ What the node checks), with this body's fields and its 4 KiB bound. A key banned from the call (§ Moderation) gets the same `403` as any refusal, as the token route gives it, and its app shows the group's call as it would without this route. Every refusal is the same `403` with the same body as the token route's. Past 30 requests in a minute for one `k`, or 240 from one address, the node answers `429` with a `Retry-After` header; these requests are counted apart from the token route's, so asking never keeps a member from joining. The route answers CORS as the token route does (§ CORS); on its `429` it also sends `Access-Control-Expose-Headers: Retry-After`, and on its preflight `Access-Control-Max-Age: 600`. A preflight is not counted toward either limit. A node that does not have this route answers `404`.
 
 **The reply.**
 
@@ -281,12 +281,12 @@ as the token request's bytes, under its own tag, so it cannot be taken for a tok
 { "count": 3, "since": 1794700500 }
 ```
 
-- `count`: how many members are in `"g_" + g` now, an integer, `0` when the room is empty or does not exist (with LiveKit, the participants `ListParticipants` gives for the room, `0` when it is absent from `ListRooms`). A participant the node itself runs in the room, one whose identity is not a key of the roster, is not counted.
-- `since`: present only when `count` is above `0`: the unix time in seconds the room was opened (with LiveKit, the room's `creation_time`), on the node's clock.
+- `count`: how many participants are in `"g_" + g` now whose identity is a key of the roster other than the node's own, an integer, `0` when there are none or the room does not exist (with LiveKit, from `ListParticipants` for the room, `0` when it is absent from `ListRooms`). A participant the node itself runs (a recorder, an egress), under its own key or under any identity that is not a key of the roster, is not counted.
+- `since`: present only when `count` is above `0`: the earliest time, in unix seconds on the node's clock, that a participant counted in `count` joined the room (with LiveKit, the smallest `joined_at` among them). The call has been on without a break since then at least.
 
 The reply says how many and since when, not who: the app learns who is in the call by joining it. The node MAY answer from a look at the SFU up to 5 seconds old.
 
-**How the app asks.** It asks while the group is open and in sight (a hidden tab or a window in the background does not ask), at most once every 15 seconds, and once more when the user comes back to the group. A `count` above `0` is a call that is on: the app offers to join it. A `0` is no call: the app offers to start one, which is the same token request. A `404`, a `403`, a `429`, or no answer, tells the app nothing: it shows the group's call as it would without this route, and on a `404` does not ask that node again until the group's `call` changes or the app starts again. On a `429` it waits `Retry-After` before it asks again.
+**How the app asks.** It asks while the group is open and in sight (a hidden tab or a window in the background does not ask), at most once every 15 seconds, and when the user comes back to the group if 15 seconds have passed since it last asked. A `count` above `0` is a call that is on: the app offers to join it. A `0` is no call: the app offers to start one, which is the same token request. A `404`, a `405`, a `403`, a `429`, or no answer, tells the app nothing: it shows the group's call as it would without this route. After a request that gets no answer at all (a node from before this route refuses the browser's preflight, so a web app sees no status), the app waits twice as long as it last waited before it asks that node again, from 15 seconds up to 10 minutes, and back to 15 seconds after a `200`. On a `404` or a `405` it does not ask that node again until the group's `call` changes or the app starts again. On a `429` it waits `Retry-After` (60 seconds when it cannot read it) before it asks again.
 
 ### Occupancy test vector
 
@@ -326,7 +326,7 @@ hlyYqmKssxvlNpMEQIUUd5k2arVEyIVBKbwYL3L7CfLgvZYFlZy0ZfwA8DAujkC-rhmsG0oxTSJQBRNE
 
 `parseGroupMetaBody` drops keys it does not know, so an app from before this WISP reads a body with `call` as before and shows no call. An admin on such an app who renames the group or changes its picture writes a body without `call`, which turns the group's calls off until the admin sets it again from an app that knows it. Nothing changes in the membership chain, in the frames between members, or in 1:1 calls.
 
-The occupancy route (§ Occupancy) is optional on both sides. A node from before it answers `404` and the app shows the group's call as before; an app from before it never asks, and joins as before.
+The occupancy route (§ Occupancy) is optional on both sides. A node from before it answers `404`, or refuses a browser's preflight so the app gets no answer, and the app shows the group's call as before and asks it less and less often (§ Occupancy, How the app asks); an app from before it never asks, and joins as before.
 
 ## Security and privacy
 
@@ -334,7 +334,7 @@ The node learns who joins the call, when, from which address, and the name it gi
 
 A moderation request proves the admin asked, for this node, within the last minute, and the node acts only for the admin its roster names. Taking someone out of the call (§ Moderation) does not change the call key: a member banned from the call but still in the group keeps the current epoch's secret, so it could open the call's sealed media if it got it some other way (from the node, or from a member), until the group moves to a new epoch. A group remove ([903](903-group-community.md#membership-chain)) moves it, and the call key with it. The node learns nothing new from a moderation request: the admin and the roster are already known to it.
 
-An occupancy request tells a member of the roster only what joining would show it, and less: whether a call is on, how many are in it and since when, not who. Someone outside the roster gets the one `403`. The node learns that a member has the group open, and from which address, about every 15 seconds while it does; an app that does not want the node to know that does not ask, and still joins as before.
+An occupancy request tells a member of the roster whether a call is on, how many are in it and since when, not who; joining it shows more. Unlike joining, asking is not seen by those in the call: a member can follow when the group's calls start and end without joining them. A key banned from the call gets the one `403`, as does someone outside the roster, and neither can tell from it whether the group or a call exists. The node learns that a member has the group open, and from which address, about every 15 seconds while it does; an app that does not want the node to know that does not ask, and still joins as before.
 
 ## Open decisions
 
@@ -347,7 +347,7 @@ The test vector above. An implementation of the node refuses each of the five ch
 
 The moderation test vector. A node that has the moderation route refuses each of its six checks with the same `403`, refuses a banned key's token request with it too, leaves a muted key's sources out of its next token, and drops a room's state once the call has ended.
 
-The occupancy test vector. A node that has the occupancy route refuses each of its five checks with the same `403`, counts only roster keys in `"g_" + g`, and answers `0` without `since` for a room that is empty or gone.
+The occupancy test vector. A node that has the occupancy route refuses each of its five checks with the same `403`, refuses a banned key with it too, counts only roster keys other than its own in `"g_" + g`, and answers `0` without `since` for a room that is empty or gone.
 
 ## Revision log
 

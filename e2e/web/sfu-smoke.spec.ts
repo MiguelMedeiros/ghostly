@@ -80,14 +80,14 @@ test("a member asks the token mock whether the group's call is on: 0 before anyo
   const { url, token } = await pass(g, ana, "Ana");
   await page.goto(`${endpoints.sfu.token}/smoke`);
   await page.evaluate(([u, t]) => (window as unknown as { joinCall(u: string, t: string): Promise<void> }).joinCall(u, t), [url, token]);
-  // Bia has not joined: she sees Ana's call is on, from the room's creation time on LiveKit's clock.
+  // Bia has not joined: she sees Ana's call is on, since Ana joined on LiveKit's clock.
   await expect.poll(async () => (await occupancy(g, bia)).body.count, { timeout: 15_000, intervals: [500, 1_000] }).toBe(1);
   const { body } = await occupancy(g, bia);
   expect(body.since).toBeGreaterThanOrEqual(before - 5);
   expect(body.since).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 5);
 
   // Ana leaves; a page closed without a word may stay in LiveKit's room until its connection times out. Asked every
-  // 3 s, under the mock's 30 a minute from one address.
+  // 3 s, under the mock's 30 a minute for one key.
   await page.evaluate(() => (window as unknown as { room: { disconnect(): Promise<void> } }).room.disconnect());
   await page.context().close();
   await expect.poll(async () => (await occupancy(g, bia)).body, { timeout: 45_000, intervals: [1_000, 3_000] }).toEqual({ count: 0 });

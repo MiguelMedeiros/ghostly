@@ -16,6 +16,8 @@ import { fileURLToPath } from "node:url";
 const ZBASE32 = "ybndrfg8ejkmcpqxot1uwisza345h769";
 const B64URL = /^[A-Za-z0-9_-]+$/;
 const LIMIT = 30, MINUTE = 60_000;
+/** WISP 602 § Occupancy: a member's app asks about every 15 s, so one address (a household, a NAT) gets more than one key. */
+const OCCUPANCY_ADDRESS_LIMIT = 240;
 
 /**
  * A page that joins a room with a pass and publishes its camera; each remote camera plays in a <video data-identity>.
@@ -140,9 +142,12 @@ export function accessToken({ apiKey, apiSecret, room, identity, name, ttl, now,
   return jwt(apiSecret, { iss: apiKey, sub: identity, jti: identity, name, nbf: now, exp: now + ttl, video: { room, roomJoin: true, ...publish, canSubscribe: true, canPublishData: true } });
 }
 
-/** A roster as a test gives it: `{ members: { k: name }, admin: k }`, or the older plain `{ k: name }` with no admin. */
+/**
+ * A roster as a test gives it: `{ members: { k: name }, admin: k, node: k }`, or the older plain `{ k: name }` with no
+ * admin. `node` is the node's own member key, which an occupancy does not count.
+ */
 const asRoster = (body) => (body && typeof body === "object" && !Array.isArray(body)
-  ? ("members" in body ? { members: body.members ?? {}, admin: body.admin } : { members: body, admin: undefined })
+  ? ("members" in body ? { members: body.members ?? {}, admin: body.admin, node: body.node } : { members: body, admin: undefined, node: undefined })
   : null);
 
 /**
@@ -161,15 +166,15 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
     res.writeHead(status, { ...cors, ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers });
     res.end(body === undefined ? undefined : JSON.stringify(body));
   };
-  /** Past LIMIT requests in a minute from one address or for one key: the seconds to wait, else 0. */
+  /** Past its limit of requests in a minute from one address or for one key (`[id, limit]`): the seconds to wait, else 0. */
   const limited = (...who) => {
     const t = now();
     let wait = 0;
-    for (const id of who.filter(Boolean)) {
+    for (const [id, limit] of who.filter(([id]) => id)) {
       const times = (asked.get(id) ?? []).filter((at) => t - at < MINUTE);
       times.push(t);
       asked.set(id, times);
-      if (times.length > LIMIT) wait = Math.max(wait, Math.ceil((times[0] + MINUTE - t) / 1000));
+      if (times.length > limit) wait = Math.max(wait, Math.ceil((times[0] + MINUTE - t) / 1000));
     }
     return wait;
   };
@@ -180,13 +185,16 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
     req.on("end", () => resolve(size > 4096 ? null : Buffer.concat(chunks).toString("utf8")));
   });
 
-  /** The body of a signed request past the limiter, its time and its nonce checked (checks 2 and 3), or null once answered. */
-  async function signed(req, res, route, verified) {
+  /**
+   * The body of a signed request past the limiter, its time and its nonce checked (checks 2 and 3), or null once
+   * answered. `limits` are its route's per address and per key; `slow` the headers its 429 adds.
+   */
+  async function signed(req, res, route, verified, { limits = [LIMIT, LIMIT], slow = {} } = {}) {
     const text = await read(req);
     let body = null;
     try { body = text === null ? null : JSON.parse(text); } catch { /* refused below */ }
-    const wait = limited(`${route}a:${req.socket.remoteAddress}`, typeof body?.k === "string" ? `${route}k:${body.k}` : null);
-    if (wait) return send(res, 429, { error: "slow down" }, { "retry-after": String(wait) });
+    const wait = limited([`${route}a:${req.socket.remoteAddress}`, limits[0]], [typeof body?.k === "string" ? `${route}k:${body.k}` : null, limits[1]]);
+    if (wait) return send(res, 429, { error: "slow down" }, { "retry-after": String(wait), ...slow });
     const t = now();
     for (const [n, at] of nonces) if (t - at > 120_000) nonces.delete(n);
     // One refusal for every check, so a caller is not told which one failed.
@@ -266,24 +274,31 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
   }
 
   /**
-   * WISP 602 § Occupancy: how many of the roster are in the group's room, from LiveKit (ListRooms, then
-   * ListParticipants), and the room's creation_time while one is. A key banned from the call is still answered.
+   * WISP 602 § Occupancy: how many roster keys other than the node's own are in the group's room, from LiveKit
+   * (ListRooms, then ListParticipants), and the earliest joined_at among them while one is. A key banned from the call
+   * gets the one 403. Its limits are its own (30 a minute per key, 240 per address), apart from the token route's.
    */
   async function occupancy(req, res) {
-    const body = await signed(req, res, "o:", (b) => verifyOccupancy(origin, b));
+    const body = await signed(req, res, "o:", (b) => verifyOccupancy(origin, b), {
+      limits: [OCCUPANCY_ADDRESS_LIMIT, LIMIT], slow: { "access-control-expose-headers": "Retry-After" },
+    });
     if (!body) return;
-    const { members } = roster.get(body.g) ?? {};
-    if (members?.[body.k] === undefined) return send(res, 403, { error: "refused" });
+    const { members, node } = roster.get(body.g) ?? {};
+    if (members?.[body.k] === undefined || rooms.get(body.room)?.banned.has(body.k)) return send(res, 403, { error: "refused" });
     nonces.set(body.n, now());
     try {
       const listed = await livekit("ListRooms", { names: [body.room] }, { roomList: true });
-      const room = (listed?.rooms ?? []).find((r) => r.name === body.room);
-      if (!room) return send(res, 200, { count: 0 });
+      if (!(listed?.rooms ?? []).some((r) => r.name === body.room)) return send(res, 200, { count: 0 });
       const { participants = [] } = (await roomService("ListParticipants", body.room, {})) ?? {};
-      // Only keys of the roster: a participant the node runs itself (a recorder, a bot) is not a member in the call.
-      const count = new Set(participants.map((p) => p.identity).filter((k) => typeof k === "string" && members[k] !== undefined)).size;
-      const since = Number(room.creation_time ?? room.creationTime);
-      send(res, 200, count > 0 && Number.isSafeInteger(since) && since > 0 ? { count, since } : { count });
+      // Only keys of the roster but the node's own: a participant the node runs itself (a recorder, a bot) is not a member in the call.
+      const joined = new Map();
+      for (const p of participants) {
+        if (typeof p.identity !== "string" || members[p.identity] === undefined || p.identity === node) continue;
+        const at = Number(p.joined_at ?? p.joinedAt);
+        joined.set(p.identity, Math.min(joined.get(p.identity) ?? Infinity, Number.isSafeInteger(at) && at > 0 ? at : Infinity));
+      }
+      const count = joined.size, since = Math.min(...joined.values());
+      send(res, 200, count > 0 && Number.isSafeInteger(since) ? { count, since } : { count });
     } catch (error) {
       console.error("group-occupancy:", error);
       send(res, 502, { error: "livekit" });
@@ -293,7 +308,13 @@ export function startTokenService({ port = 0, host = "127.0.0.1", origin, liveki
   const server = createServer(async (req, res) => {
     const path = new URL(req.url, "http://x").pathname;
     const signedRoute = path === "/sfu/group-token" || path === "/sfu/group-moderate" || path === "/sfu/group-occupancy";
-    if (signedRoute && req.method === "OPTIONS") return send(res, 204, undefined, { "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "Content-Type" });
+    if (signedRoute && req.method === "OPTIONS") {
+      return send(res, 204, undefined, {
+        "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "Content-Type",
+        // A member's app asks about every 15 s: the browser keeps this answer 10 minutes, not a preflight per ask.
+        ...(path === "/sfu/group-occupancy" && { "access-control-max-age": "600" }),
+      });
+    }
     if (path === "/sfu/group-token" && req.method === "POST") return token(req, res);
     if (path === "/sfu/group-moderate" && req.method === "POST") return moderate(req, res);
     if (path === "/sfu/group-occupancy" && req.method === "POST") return occupancy(req, res);

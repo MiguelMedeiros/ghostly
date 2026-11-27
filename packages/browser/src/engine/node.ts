@@ -6990,7 +6990,7 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Whether the group's call is on, from the node its `call` names (WISP 602 § Occupancy): how many members are in the
    * room and since when, or why that is not known. A node without the route (404, 405) is not asked again until the
-   * group's `call` changes or the engine starts again; a 429 says how long to wait. Never throws.
+   * group's `call` changes or the engine starts again; a 429 says how long to wait, when it says. Never throws.
    */
   async groupCallOccupancy({ groupId }: { groupId: string }): Promise<GroupCallOccupancyResult> {
     const me = typeof groupId === "string" ? this.groups.callMember(groupId) : undefined;

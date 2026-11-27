@@ -200,12 +200,15 @@ export async function sendGroupCallModeration(ask: GroupCallModerationAsk): Prom
   return state ? { ok: true, state } : { ok: false, code: "unreachable" };
 }
 
-/** `Retry-After` in seconds, given as seconds or as an HTTP date. */
-function retryAfterS(header: string | null, now: number): number {
+/** `Retry-After` in seconds, given as seconds or as an HTTP date; the node's minute when it says none. */
+const retryAfterS = (header: string | null, now: number): number => readRetryAfterS(header, now) ?? DEFAULT_RETRY_AFTER_S;
+
+/** `Retry-After` in seconds, given as seconds or as an HTTP date, an hour at most; null when it is absent or unreadable. */
+function readRetryAfterS(header: string | null, now: number): number | null {
   const value = header?.trim() ?? "";
   if (/^\d{1,10}$/.test(value)) return Math.min(Number(value), MAX_RETRY_AFTER_S);
   const at = value ? Date.parse(value) : NaN;
-  return Number.isFinite(at) ? Math.min(Math.max(0, Math.ceil((at - now) / 1000)), MAX_RETRY_AFTER_S) : DEFAULT_RETRY_AFTER_S;
+  return Number.isFinite(at) ? Math.min(Math.max(0, Math.ceil((at - now) / 1000)), MAX_RETRY_AFTER_S) : null;
 }
 
 /**
@@ -229,11 +232,16 @@ export function parseGroupCallRoomState(raw: unknown): GroupCallRoomState | null
  * Whether the group's call is on (WISP 602 § Occupancy): how many members are in the room, and since when (unix
  * seconds) once one is; or why that is not known. `not_member`: I am not in the group, so nothing was sent.
  * `unsupported`: the group names no node, or its node is older than the route (404 or 405). `refused`: its 403.
- * `rate_limited`: its 429, again after `retryAfter` seconds. `unreachable`: no answer in time, or not an occupancy.
- * Each of them says nothing about the call: a page shows it as it would without the route.
+ * `rate_limited`: its 429, with `retryAfter` the seconds its `Retry-After` says, or null when the page cannot read one.
+ * `no_answer`: the request got no status at all (a network error, the timeout, or a node from before the route that
+ * refuses the browser's preflight); the page waits longer each time. `bad_reply`: any other status, or a 200 that is
+ * not an occupancy. Each of them says nothing about the call: a page shows it as it would without the route.
  */
-export type GroupCallOccupancyCode = "not_member" | "unsupported" | "refused" | "rate_limited" | "unreachable";
-export type GroupCallOccupancyResult = ({ ok: true } & GroupCallOccupancy) | { ok: false; code: GroupCallOccupancyCode; retryAfter?: number };
+export type GroupCallOccupancyResult =
+  | ({ ok: true } & GroupCallOccupancy)
+  | { ok: false; code: "not_member" | "unsupported" | "refused" | "no_answer" | "bad_reply" }
+  | { ok: false; code: "rate_limited"; retryAfter: number | null };
+export type GroupCallOccupancyCode = Extract<GroupCallOccupancyResult, { ok: false }>["code"];
 
 export interface GroupCallOccupancyAsk {
   sfu: string;
@@ -258,14 +266,14 @@ export async function fetchGroupCallOccupancy(ask: GroupCallOccupancyAsk): Promi
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal: AbortSignal.timeout(GROUP_CALL_TIMEOUT_MS),
       redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store",
     });
-  } catch { return { ok: false, code: "unreachable" }; }
+  } catch { return { ok: false, code: "no_answer" }; }
   if (response.status === 403) return { ok: false, code: "refused" };
-  if (response.status === 429) return { ok: false, code: "rate_limited", retryAfter: retryAfterS(response.headers.get("Retry-After"), now()) };
+  if (response.status === 429) return { ok: false, code: "rate_limited", retryAfter: readRetryAfterS(response.headers.get("Retry-After"), now()) };
   if (response.status === 404 || response.status === 405) return { ok: false, code: "unsupported" };
   let raw: unknown = null;
-  if (response.ok) try { const text = await readCapped(response, MAX_REPLY_BYTES); raw = text === null ? null : JSON.parse(text); } catch { raw = null; }
+  if (response.status === 200) try { const text = await readCapped(response, MAX_REPLY_BYTES); raw = text === null ? null : JSON.parse(text); } catch { raw = null; }
   const occupancy = parseGroupCallOccupancy(raw);
-  return occupancy ? { ok: true, ...occupancy } : { ok: false, code: "unreachable" };
+  return occupancy ? { ok: true, ...occupancy } : { ok: false, code: "bad_reply" };
 }
 
 /**

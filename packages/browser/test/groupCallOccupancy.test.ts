@@ -63,20 +63,31 @@ describe("asking the node", () => {
     expect(sfu.seen).toHaveLength(1);
   });
 
-  it("each status says its code: 429 with its wait, 404 and 405 an older node, the rest unreachable", async () => {
+  it("a 429 says the wait its Retry-After gives, or null when it gives none it can read", async () => {
     const at = Date.parse("2026-11-15T12:00:00Z");
     const limited = (header?: string) => ask(once(async () => new Response("", { status: 429, ...(header !== undefined && { headers: { "Retry-After": header } }) })), () => at);
     expect(await limited("30")).toEqual({ ok: false, code: "rate_limited", retryAfter: 30 });
     expect(await limited("Sun, 15 Nov 2026 12:00:45 GMT")).toEqual({ ok: false, code: "rate_limited", retryAfter: 45 });
-    expect(await limited()).toEqual({ ok: false, code: "rate_limited", retryAfter: 60 });
+    expect(await limited("99999")).toEqual({ ok: false, code: "rate_limited", retryAfter: 3600 });
+    expect(await limited()).toEqual({ ok: false, code: "rate_limited", retryAfter: null });
+    expect(await limited("soon")).toEqual({ ok: false, code: "rate_limited", retryAfter: null });
+  });
+
+  it("404 and 405 are a node without the route, 403 its refusal", async () => {
     for (const status of [404, 405]) expect(await ask(once(async () => new Response("", { status })))).toEqual({ ok: false, code: "unsupported" });
-    const unreachable = { ok: false, code: "unreachable" };
-    expect(await ask(once(async () => { throw new TypeError("Failed to fetch"); }))).toEqual(unreachable);
-    expect(await ask(once(async () => { throw new DOMException("timed out", "TimeoutError"); }))).toEqual(unreachable);
-    expect(await ask(once(async () => new Response("oops", { status: 500 })))).toEqual(unreachable);
-    expect(await ask(once(async () => new Response("not json")))).toEqual(unreachable);
-    expect(await ask(once(async () => Response.json({ count: -1 })))).toEqual(unreachable);
-    expect(await ask(once(async () => new Response(JSON.stringify({ count: 1, since: 1 }).padEnd(64 * 1024 + 1))))).toEqual(unreachable);
+    expect(await ask(once(async () => new Response("", { status: 403 })))).toEqual({ ok: false, code: "refused" });
+  });
+
+  it("no status at all (a refused preflight, a network error, the timeout) is no answer, kept apart from a bad reply", async () => {
+    const noAnswer = { ok: false, code: "no_answer" };
+    expect(await ask(once(async () => { throw new TypeError("Failed to fetch"); }))).toEqual(noAnswer);
+    expect(await ask(once(async () => { throw new DOMException("timed out", "TimeoutError"); }))).toEqual(noAnswer);
+    const bad = { ok: false, code: "bad_reply" };
+    expect(await ask(once(async () => new Response("oops", { status: 500 })))).toEqual(bad);
+    expect(await ask(once(async () => Response.json({ count: 1 }, { status: 201 })))).toEqual(bad);
+    expect(await ask(once(async () => new Response("not json")))).toEqual(bad);
+    expect(await ask(once(async () => Response.json({ count: -1 })))).toEqual(bad);
+    expect(await ask(once(async () => new Response(JSON.stringify({ count: 1, since: 1 }).padEnd(64 * 1024 + 1))))).toEqual(bad);
   });
 });
 
@@ -144,14 +155,20 @@ describe("the engine's groupCallOccupancy", () => {
     expect(sfu.seen).toHaveLength(2);
   });
 
-  it("a refusal, a 429 or no answer is asked again next time", async () => {
+  it("a refusal, a 429, a bad reply or no answer is asked again next time", async () => {
     const { node, groupId } = await community();
-    const statuses = [403, 429, 500];
-    const fetch = vi.fn(async () => new Response("", { status: statuses.shift() ?? 403, headers: { "Retry-After": "20" } }));
+    const statuses = [403, 429, 500, 0];
+    const fetch = vi.fn(async () => {
+      const status = statuses.shift() ?? 403;
+      if (!status) throw new TypeError("Failed to fetch");
+      return new Response("", { status, headers: { "Retry-After": "20" } });
+    });
     vi.stubGlobal("fetch", fetch);
     expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: false, code: "refused" });
     expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: false, code: "rate_limited", retryAfter: 20 });
-    expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: false, code: "unreachable" });
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: false, code: "bad_reply" });
+    expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: false, code: "no_answer" });
+    expect(await node.groupCallOccupancy({ groupId })).toEqual({ ok: false, code: "refused" });
+    expect(fetch).toHaveBeenCalledTimes(5);
   });
 });

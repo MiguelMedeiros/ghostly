@@ -180,7 +180,8 @@ export function verifyGroupCallModeration(raw: unknown, sfu: string, now: number
  *
  *     {"v":1,"g":"<group>","k":"<member key>","room":"g_<group>","ts":1794700800,"n":"<nonce>","sig":"…"}
  *
- * The node answers `{ count, since }`: how many members are in the room, and since when once one is.
+ * The node answers `{ count, since }`: how many roster keys other than its own are in the room, and, once one is, the
+ * earliest time one of them joined.
  */
 
 export interface GroupCallOccupancyRequest {
@@ -210,9 +211,9 @@ export function signGroupCallOccupancy(input: { sfu: string; g: string; ts?: num
 }
 
 /**
- * The node's checks of an occupancy request but the roster, in order: the shape (the token request's fields without
- * `name`, and no other), the time within `GROUP_CALL_SKEW_S` of `now` (ms), a nonce not in `seen`, and the signature
- * over the node's own origin `sfu`. A request that passes has its nonce added to `seen`; entries older than
+ * The node's checks of an occupancy request but the roster and the room's bans (the node's, each the same 403), in
+ * order: the shape (the token request's fields without `name`, and no other), the time within `GROUP_CALL_SKEW_S` of
+ * `now` (ms), a nonce not in `seen`, and the signature over the node's own origin `sfu`. A request that passes has its nonce added to `seen`; entries older than
  * `GROUP_CALL_NONCE_S` are dropped on the way.
  */
 export function verifyGroupCallOccupancy(raw: unknown, sfu: string, now: number, seen: GroupCallNonces): { ok: true; request: GroupCallOccupancyRequest } | { ok: false; reason: GroupCallRefusal } {
