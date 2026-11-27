@@ -428,7 +428,8 @@ describe("setContactBlocked's input", () => {
     const kept = (await db.getSettings()).blockedContacts;
     expect(kept).toContain(b.peerPubKeyZ32);
     expect(node.getSettings().blockedContacts).toEqual(kept);
-    // C waits for the wake to rotate while D is asked: C's list is read after the wait, so D stays.
+    // C waits for the wake to rotate while D is asked: whether D lands during the wait (C reads the list again after it)
+    // or runs after C (one at a time), both stay.
     let release: (() => void) | undefined;
     rotated.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
     const first = node.setContactBlocked({ peerPubKeyZ32: c.peerPubKeyZ32, blocked: true });
