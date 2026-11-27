@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BackupReader, BackupWriter, backupProtection, bytesSource, isCancelled, memorySink, readBackupHeader, type BackupHeader, type BackupRecord, type BackupSource } from "../src/backup/stream";
+import { BackupReader, BackupWriter, backupProtection, bytesSource, isCancelled, memorySink, readBackupHeader, type BackupHeader, type BackupRecord, type BackupSource, type FrameCrypto } from "../src/backup/stream";
 import { seal } from "../src/backup/envelope";
 // covers: backup.envelope, backup.passphrase-rules, backup.stream, backup.unprotected
 
@@ -77,6 +77,38 @@ describe("a backup written a piece at a time (envelope version 2)", () => {
     expect(ha.cipher!.nonce).not.toBe(hb.cipher!.nonce);
     const first = frames(a)[0];
     expect(a.slice(first.at + 5, first.at + 5 + 32)).not.toEqual(b.slice(frames(b)[0].at + 5, frames(b)[0].at + 5 + 32));
+  });
+
+  it("written with frames sealed or chained at once (FrameCrypto), opens with WebCrypto as one written without, and makes no WebCrypto call per frame", async () => {
+    const bits = crypto.subtle.deriveBits.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "deriveBits").mockImplementation(((algorithm: Pbkdf2Params, ...rest: [CryptoKey, number]) => {
+      asked.push(algorithm.iterations);
+      return bits({ ...algorithm, iterations: 1_000 }, ...rest);
+    }) as typeof crypto.subtle.deriveBits);
+    const { createCipheriv, createHash } = await import("node:crypto");
+    const frames: FrameCrypto = {
+      sha256: (...parts) => { const hash = createHash("sha256"); for (const part of parts) hash.update(part); return hash.digest(); },
+      seal: (key, iv, additionalData, plain) => { const cipher = createCipheriv("aes-256-gcm", key, iv).setAAD(additionalData); return Buffer.concat([cipher.update(plain), cipher.final(), cipher.getAuthTag()]); },
+      open: () => { throw new Error("not read here"); },
+      gunzip: () => { throw new Error("not read here"); },
+    };
+    for (const passphrase of [PASS, null]) {
+      const sink = memorySink();
+      const encrypt = vi.spyOn(crypto.subtle, "encrypt"), digest = vi.spyOn(crypto.subtle, "digest");
+      const writer = await BackupWriter.start(sink, passphrase, undefined, 2, frames);
+      await sample(writer);
+      for (let i = 0; i < 50; i++) await writer.json(JSON.stringify({ t: "file", n: i }));
+      expect(await writer.finish()).toBe(sink.bytes().length);
+      expect(encrypt.mock.calls.length + digest.mock.calls.length, String(passphrase)).toBe(0);
+      encrypt.mockRestore();
+      digest.mockRestore();
+      const records = await readAll(sink.bytes(), passphrase ?? undefined);
+      expect(records[0].json).toBe(JSON.stringify({ t: "profile", name: "Diary" }));
+      expect(same(joined(records), pattern(2 * MIB + 5))).toBe(true);
+      expect(records.slice(-50).map((r) => r.json)).toEqual(Array.from({ length: 50 }, (_, i) => JSON.stringify({ t: "file", n: i })));
+    }
+    // The same 600,000 rounds, as raw bits for the writer and as a key for the reader.
+    expect(asked).toEqual([600_000, 600_000]);
   });
 
   it("refuses the wrong passphrase, and a passphrase under 12 characters is never used to make one", async () => {
