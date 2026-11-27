@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NetworkWalletsView, WalletView } from "@ghostly/browser/shared/types";
-import { cardId, networkState, parseCardId, satsUnit, spendable, walletCard, walletCards, type WalletRail } from "../../components/walletCardData";
+import { cardId, networkState, parseCardId, spendable, walletCard, walletCards, type WalletRail } from "../../components/walletCardData";
 import { WALLET_RAILS } from "../../components/walletCardTypes";
 import type { WalletNetwork, WalletState } from "../../lib/platform";
 import { walletView } from "../fakeEngine";
@@ -95,11 +95,6 @@ describe("a test wallet's amounts always say test sats, a Mainnet one's plain sa
   it("whatever network a flat fixture falls back to", () => {
     expect(cardOf("arkade:testnet", { mode: "mainnet", ark: arkReady({ network: "mutinynet", balance: 5_000 }) }).balance).toBe("5,000 test sats");
     expect(cardOf("cashu:testnet", { mode: "testnet", mints: [mint(TEST_MINT, 500)], balance: 500 }).balance).toBe("500 test sats");
-  });
-
-  it("satsUnit: the unit of a network's amounts", () => {
-    expect(satsUnit("testnet")).toBe("test sats");
-    expect(satsUnit("mainnet")).toBe("sats");
   });
 });
 
