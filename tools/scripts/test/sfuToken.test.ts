@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { keyBytes, moderateBytes, signedBytes, startTokenService, verifyModeration, verifyRequest } from "../../../e2e/infra/sfu-token/server.mjs";
+import { keyBytes, moderateBytes, occupancyBytes, signedBytes, startTokenService, verifyModeration, verifyOccupancy, verifyRequest } from "../../../e2e/infra/sfu-token/server.mjs";
 
 /** WISP 602 § Test vector. */
 const SEED = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -281,5 +281,159 @@ describe("the group-token mock's moderation route (POST /sfu/group-moderate)", (
     expect([slow.status, slow.headers.get("access-control-allow-origin")]).toEqual([429, "*"]);
     expect(Number(slow.headers.get("retry-after"))).toBeGreaterThan(0);
     expect((await pass(targetPass())).status).toBe(200);
+  });
+});
+
+/** WISP 602 § Occupancy's test vector: the token request's key and inputs, under the occupancy tag. */
+const OCCUPANCY = { v: 1, g: G, k: K, room: `g_${G}`, ts: TS, n: "EBESExQVFhcYGRobHB0eHw", sig: "hlyYqmKssxvlNpMEQIUUd5k2arVEyIVBKbwYL3L7CfLgvZYFlZy0ZfwA8DAujkC-rhmsG0oxTSJQBRNEfJl1CQ" };
+
+/** The node's own member key in the group (its roster's `node`): in the room for a recorder, never counted. */
+const NODE = `${"n".repeat(51)}y`;
+let occupancyNonce = 0;
+
+/** An occupancy request signed by `by` (the vector's key unless told), a new nonce each time, past the 256 of a filled buffer. */
+function occupancyAsk(over: Record<string, unknown> = {}, by = member, origin = ORIGIN) {
+  const n = Buffer.alloc(16, 0xa5);
+  n.writeUInt32BE(++occupancyNonce);
+  const body: Record<string, unknown> = { ...OCCUPANCY, n: n.toString("base64url"), ...over };
+  return { ...body, sig: sign(null, occupancyBytes(origin, body), by).toString("base64url") };
+}
+
+describe("the group-token mock's occupancy route (POST /sfu/group-occupancy)", () => {
+  it("verifies the WISP's test vector byte for byte, and is neither of the other requests", () => {
+    const bytes = occupancyBytes(ORIGIN, OCCUPANCY);
+    expect(bytes.length).toBe(199);
+    expect(bytes.toString("hex")).toBe("5b2267686f73746c792d7366752f31206f63637570616e6379222c2268747470733a2f2f63616c6c2e67686f73746c792e746f6f6c73222c226f4b47696f36536c7071656f71617172724b32757277222c22675f6f4b47696f36536c7071656f71617172724b32757277222c2279716f6f787839753361656d68386d6f3577637171313679756675366a69746f7571316f347a6137353164676572316967676879222c313739343730303830302c2245424553457851564668635947526f62484230654877225d");
+    expect(Buffer.from(OCCUPANCY.sig, "base64url").toString("hex")).toBe("865c98aa62acb31be53693044085147799366ab544c8854129bc182f72fb09f2e0bd9605959cb465fc00f0302e8e40beae19ac1b4a314d22500513447c997509");
+    expect(verifyOccupancy(ORIGIN, OCCUPANCY)).toBe(true);
+    expect(verifyOccupancy("https://other.ghostly.tools", OCCUPANCY)).toBe(false);
+    expect(verifyOccupancy(ORIGIN, VECTOR)).toBe(false);
+    expect(verifyRequest(ORIGIN, { ...VECTOR, sig: OCCUPANCY.sig })).toBe(false);
+    // The token request's fields without name, and no other.
+    expect(verifyOccupancy(ORIGIN, { ...OCCUPANCY, name: "Ana" })).toBe(false);
+  });
+
+  let close: (() => Promise<void>)[] = [];
+  afterEach(async () => { await Promise.all(close.map((c) => c())); close = []; });
+
+  /** The mock in front of a LiveKit RoomService stand-in whose rooms `rooms` gives: name → its creation_time and who joined when. */
+  async function service(rooms: Record<string, { creation_time: string; joined: [identity: string, joinedAt: string][] }>) {
+    const calls: { method: string; auth: Record<string, unknown>; body: Record<string, unknown> }[] = [];
+    const livekit = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => {
+        const method = req.url!.replace("/twirp/livekit.RoomService/", "");
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        calls.push({ method, auth: JSON.parse(Buffer.from(req.headers.authorization!.split(".")[1], "base64url").toString()), body });
+        res.writeHead(200, { "content-type": "application/json" });
+        if (method === "ListRooms") res.end(JSON.stringify({ rooms: Object.entries(rooms).filter(([name]) => body.names.includes(name)).map(([name, r]) => ({ sid: `RM_${name}`, name, creation_time: r.creation_time })) }));
+        else if (method === "ListParticipants") res.end(JSON.stringify({ participants: (rooms[body.room]?.joined ?? []).map(([identity, joined_at]) => ({ identity, state: "ACTIVE", joined_at })) }));
+        else res.end("{}");
+      });
+    });
+    await new Promise<void>((done) => livekit.listen(0, "127.0.0.1", done));
+    close.push(() => new Promise((done) => livekit.close(() => done())));
+    const clock = { now: TS * 1000 };
+    const rosters = { [G]: { members: { [K]: "Ana", [T]: "Bia", [NODE]: "Node" }, admin: K, node: NODE } };
+    const s = await startTokenService({ origin: ORIGIN, livekitUrl: "ws://127.0.0.1:47120", livekitApi: `http://127.0.0.1:${(livekit.address() as { port: number }).port}`, rosters, now: () => clock.now });
+    close.push(s.close);
+    const post = (route: string, body: unknown) => fetch(`${s.url}/sfu/${route}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const ask = async (body: unknown) => { const res = await post("group-occupancy", body); return { status: res.status, cors: res.headers.get("access-control-allow-origin"), body: await res.json() }; };
+    return { ...s, calls, clock, post, ask };
+  }
+
+  // The room opened before any of them joined (someone came and went): since is the earliest join of those counted.
+  const IN_ROOM = { creation_time: "1794700000", joined: [[T, "1794700600"], [K, "1794700500"], ["EG_recorder", "1794700100"], ["y".repeat(52), "1794700200"]] as [string, string][] };
+
+  it("counts the roster's keys in the room, and says since when the first of them joined", async () => {
+    const { ask, calls, url } = await service({ [`g_${G}`]: IN_ROOM });
+    expect(await ask(occupancyAsk())).toEqual({ status: 200, cors: "*", body: { count: 2, since: 1794700500 } });
+    expect(calls.map((c) => [c.method, c.body])).toEqual([["ListRooms", { names: [`g_${G}`] }], ["ListParticipants", { room: `g_${G}` }]]);
+    expect(calls[0].auth).toMatchObject({ iss: "devkey", video: { roomList: true } });
+    expect(calls[1].auth).toMatchObject({ video: { room: `g_${G}`, roomAdmin: true } });
+    // Any member asks, not only the admin; taken out of the roster, it gets the one 403, with nothing asked of LiveKit.
+    expect((await ask(occupancyAsk({ k: T }, targetKey))).body).toEqual({ count: 2, since: 1794700500 });
+    expect((await fetch(`${url}/test/roster/${G}`, { method: "PUT", body: JSON.stringify({ members: { [K]: "Ana" }, admin: K }) })).status).toBe(204);
+    calls.length = 0;
+    expect(await ask(occupancyAsk({ k: T }, targetKey))).toEqual({ status: 403, cors: "*", body: { error: "refused" } });
+    expect(calls).toHaveLength(0);
+    // T is in the room still, but no longer of the roster: not counted.
+    expect((await ask(occupancyAsk())).body).toEqual({ count: 1, since: 1794700500 });
+  });
+
+  it("does not count the node's own key, though it is of the roster, nor take since from it", async () => {
+    const { ask } = await service({ [`g_${G}`]: { creation_time: "1794700000", joined: [[NODE, "1794700050"], [K, "1794700500"]] } });
+    expect((await ask(occupancyAsk())).body).toEqual({ count: 1, since: 1794700500 });
+  });
+
+  it("answers 0 without since for a room that is gone, or holds no member of the roster but the node", async () => {
+    expect((await (await service({})).ask(occupancyAsk())).body).toEqual({ count: 0 });
+    const { ask, calls } = await service({ [`g_${G}`]: { creation_time: "1794700500", joined: [["EG_recorder", "1794700500"], [NODE, "1794700500"]] } });
+    expect((await ask(occupancyAsk())).body).toEqual({ count: 0 });
+    expect(calls.map((c) => c.method)).toEqual(["ListRooms", "ListParticipants"]);
+  });
+
+  it("refuses each of the five checks, and a key banned from the call, with the token route's 403", async () => {
+    const { ask, post } = await service({ [`g_${G}`]: { creation_time: "1794700500", joined: [[K, "1794700500"]] } });
+    const refused = async (body: unknown, why: string) => expect(await ask(body), why).toEqual({ status: 403, cors: "*", body: { error: "refused" } });
+    await refused({ ...occupancyAsk(), name: "Ana" }, "a name, which it has not");
+    await refused(occupancyAsk({ room: "g_AAAAAAAAAAAAAAAAAAAAAA" }), "a room other than g_ + g");
+    await refused(occupancyAsk({ ts: TS - 61 }), "a minute and a second old");
+    await refused(occupancyAsk({}, member, "https://other.ghostly.tools"), "signed for another node");
+    await refused({ ...occupancyAsk(), sig: OCCUPANCY.sig }, "a signature over other bytes");
+    await refused(request(), "a token request");
+    await refused(occupancyAsk({ g: "AAAAAAAAAAAAAAAAAAAAAA", room: "g_AAAAAAAAAAAAAAAAAAAAAA" }), "a group whose roster has not the key");
+    const once = occupancyAsk();
+    expect((await ask(once)).status).toBe(200);
+    await refused(once, "the same nonce again");
+
+    // The admin bans T from the call: T is still in the roster, and gets the one 403 as its pass does; unbanned, it is answered.
+    expect(await ask(occupancyAsk({ k: T }, targetKey))).toMatchObject({ status: 200, body: { count: 1 } });
+    expect((await post("group-moderate", moderation({ act: "remove", src: [] }))).status).toBe(200);
+    expect((await post("group-token", targetPass())).status).toBe(403);
+    await refused(occupancyAsk({ k: T }, targetKey), "a key banned from the call");
+    expect((await post("group-moderate", moderation({ act: "unban", src: [] }))).status).toBe(200);
+    expect(await ask(occupancyAsk({ k: T }, targetKey))).toMatchObject({ status: 200, body: { count: 1 } });
+  });
+
+  it("answers the preflight with a 10-minute Max-Age, and counts no preflight toward its limits", async () => {
+    const { ask, url } = await service({});
+    const preflight = await fetch(`${url}/sfu/group-occupancy`, { method: "OPTIONS" });
+    expect([preflight.status, ...["allow-origin", "allow-methods", "allow-headers", "max-age"].map((h) => preflight.headers.get(`access-control-${h}`))])
+      .toEqual([204, "*", "POST, OPTIONS", "Content-Type", "600"]);
+    // The token route's preflight is as it was.
+    expect((await fetch(`${url}/sfu/group-token`, { method: "OPTIONS" })).headers.get("access-control-max-age")).toBeNull();
+    for (let i = 0; i < 300; i++) expect((await fetch(`${url}/sfu/group-occupancy`, { method: "OPTIONS" })).status).toBe(204);
+    for (let i = 0; i < 30; i++) expect((await ask(occupancyAsk())).status, `ask ${i + 1}`).toBe(200);
+  });
+
+  it("slows one key down past 30 a minute, with a Retry-After the page can read, apart from the passes", async () => {
+    const { ask, post } = await service({});
+    for (let i = 0; i < 30; i++) expect((await ask(occupancyAsk())).status).toBe(200);
+    const slow = await post("group-occupancy", occupancyAsk());
+    expect([slow.status, slow.headers.get("access-control-allow-origin"), slow.headers.get("access-control-expose-headers")]).toEqual([429, "*", "Retry-After"]);
+    expect(Number(slow.headers.get("retry-after"))).toBeGreaterThan(0);
+    // Another key from the same address is still answered: 30 is per key, not per address.
+    expect((await ask(occupancyAsk({ k: T }, targetKey))).status).toBe(200);
+    for (let i = 0; i < 30; i++) expect((await post("group-token", request())).status).toBe(200);
+  });
+
+  it("slows one address down past 240 a minute, whatever keys it asks for, apart from the passes", async () => {
+    const { ask, post, clock } = await service({});
+    // 240 asks for keys of no roster: each counted against the address (and its own key), each the one 403.
+    for (let i = 0; i < 240; i++) expect((await ask(occupancyAsk({ k: `key${i}` }))).status, `ask ${i + 1}`).toBe(403);
+    const slow = await post("group-occupancy", occupancyAsk());
+    expect([slow.status, slow.headers.get("access-control-expose-headers")]).toEqual([429, "Retry-After"]);
+    expect((await post("group-token", request())).status).toBe(200);
+    clock.now += 60_000;
+    expect((await ask(occupancyAsk({ ts: TS + 60 }))).status).toBe(200);
+  });
+
+  it("a LiveKit that does not answer is a 502, never a count", async () => {
+    const s = await startTokenService({ origin: ORIGIN, livekitUrl: "ws://127.0.0.1:47120", livekitApi: "http://127.0.0.1:9", rosters: { [G]: { [K]: "Ana" } }, now: () => TS * 1000 });
+    close.push(s.close);
+    const res = await fetch(`${s.url}/sfu/group-occupancy`, { method: "POST", body: JSON.stringify(occupancyAsk()) });
+    expect(res.status).toBe(502);
   });
 });
