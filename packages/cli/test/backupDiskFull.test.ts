@@ -48,3 +48,31 @@ it.each([
   expect(readdirSync(outDir)).toEqual([]);
   expect(readdirSync(paths.db)).toEqual([]);
 });
+
+it("a backup whose write takes nothing of what it is given fails as a disk full, naming --out, and leaves no file", async () => {
+  const dir = home("backup-disk-full-none");
+  const paths = { dir, db: join(dir, "db"), files: join(dir, "files") };
+  mkdirSync(paths.db, { recursive: true });
+  mkdirSync(paths.files, { recursive: true });
+  for (let i = 0; i < 20; i++) writeFileSync(join(paths.files, `file-${i}`), `file ${i} `.repeat(50));
+  const store = { async exportSnapshot(path: string) { await writeFile(path, "STORE", { mode: 0o600 }); } };
+  const ctx = { runtime: { paths, store } } as unknown as ApiContext;
+  const outDir = join(dir, "out");
+  mkdirSync(outDir);
+  const probe = await open(join(dir, "probe"), "w");
+  const proto = Object.getPrototypeOf(probe) as { write: Write };
+  await probe.close();
+  const write = proto.write;
+  // The disk says it is full only by taking no byte of the backup's one held chunk.
+  vi.spyOn(proto, "write").mockImplementation(async function (this: FileHandle, buffer, offset, length) {
+    if (!(buffer instanceof Uint8Array) || buffer.length < 1000) return write.call(this, buffer, offset, length);
+    return { bytesWritten: 0, buffer };
+  } as Write);
+  const out = join(outDir, "b.ghostly-backup");
+  await expect(BACKUP_METHODS["profile.backup"](ctx, { path: out, noPassphrase: true })).rejects.toMatchObject({
+    code: "unavailable",
+    message: `No room left for ${out}: free some space, then try again`,
+    details: { reason: "no_space", errno: "ENOSPC", path: out },
+  });
+  expect(readdirSync(outDir)).toEqual([]);
+});
