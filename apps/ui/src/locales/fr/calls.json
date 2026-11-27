@@ -31,6 +31,7 @@
     "hideIpBody": "Cet appel passe par le nœud du groupe et son relais, pas par votre serveur TURN.",
     "hideIpInfo": "C'est l'admin du groupe qui a choisi ce nœud. Lui et son relais voient l'IP de cet appareil. Les autres participants, non.",
     "hideIpTitle": "Rejoindre avec Masquer mon IP activé ?",
+    "inCall": "{{count}} dans l'appel",
     "info": "Il passe par le nœud du groupe. Tout membre peut parler, montrer sa caméra et partager son écran. Au-delà de 8 personnes, vous arrivez en sourdine.",
     "join": "Rejoindre l'appel",
     "joinAnyway": "Rejoindre quand même",
@@ -58,6 +59,7 @@
     "screenOf": "Écran de {{name}}",
     "showScreen": "Afficher en grand l'écran de {{name}}",
     "showYourScreen": "Afficher en grand votre écran",
+    "start": "Lancer un appel",
     "unreachable": "Impossible de joindre l'appel du groupe"
   },
   "incomingAudio": "Appel audio entrant...",

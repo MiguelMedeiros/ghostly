@@ -31,6 +31,7 @@
     "hideIpBody": "Questa chiamata passa dal nodo del gruppo e dal suo relay, non dal tuo server TURN.",
     "hideIpInfo": "Quel nodo l'ha scelto l'admin del gruppo. Il nodo e il suo relay vedono l'IP di questo dispositivo. Gli altri nella chiamata no.",
     "hideIpTitle": "Entrare con Nascondi il mio IP attivo?",
+    "inCall": "{{count}} nella chiamata",
     "info": "Passa dal nodo del gruppo. Chiunque nel gruppo può parlare, mostrare la fotocamera e condividere lo schermo. Oltre 8 persone entri senza microfono.",
     "join": "Entra nella chiamata",
     "joinAnyway": "Entra comunque",
@@ -58,6 +59,7 @@
     "screenOf": "Schermo di {{name}}",
     "showScreen": "Mostra in grande lo schermo di {{name}}",
     "showYourScreen": "Mostra in grande il tuo schermo",
+    "start": "Avvia chiamata",
     "unreachable": "Impossibile raggiungere la chiamata del gruppo"
   },
   "incomingAudio": "Chiamata vocale in arrivo...",

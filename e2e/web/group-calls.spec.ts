@@ -499,3 +499,62 @@ test.describe("group call moderation", () => {
     }
   });
 });
+
+// The header asks the group's node whether its call is on (WISP 602 § Occupancy), at most every 15 s while the group
+// is open and the page shown: Start call while nobody is in it, Join call with how many while someone is.
+test.describe("a group's call button before joining", () => {
+  test("shows Start call while nobody is in the call, Join call with how many once someone starts it, Start call again once they leave", { tag: ["@feature:calls.group", "@feature:calls.group.room"] }, async ({ peer, relay }, testInfo) => {
+    const started = Date.now();
+    const node = new HeadlessBot();
+    try {
+      await node.start(await relay.listen(), "Thursday node");
+      const group = (await node.run("group", "create", "Thursday")).group as string;
+      await node.run("group", "call", group, "--sfu", endpoints.sfu.origin);
+      const link = (await node.run("group", "link", group)).link as string;
+
+      const [ana, bia] = await Promise.all(["Ana", "Bia"].map((name) => peer(name)));
+      for (const p of [ana, bia]) await routeSfu(p);
+      await servesThisCheckout(ana.page);
+      await Promise.all([ana, bia].map((p) => joinGroup(p, link)));
+      type Shown = { id: string; members: { key: string; me: boolean }[] };
+      const shown = async () => (await node.run("group", "show", group)) as unknown as Shown;
+      await expect.poll(async () => (await shown()).members.length, { timeout: 180_000, intervals: [2_000] }).toBe(3);
+      const { id, members } = await shown();
+      const roster = await fetch(`${endpoints.sfu.token}/test/roster/${id}`, { method: "PUT", body: JSON.stringify(Object.fromEntries(members.filter((m) => !m.me).map((m) => [m.key, "Member"]))) });
+      expect(roster.status).toBe(204);
+      // Asked before the node knew them, each got its one 403 and waits longer and longer: opened again, each asks now.
+      for (const p of [ana, bia]) {
+        await p.page.reload();
+        await expect(p.page.getByTestId("group-chat")).toHaveAttribute("data-status", "active", { timeout: 120_000 });
+      }
+
+      // Nobody in the call: both see Start call, a plain phone.
+      for (const p of [ana, bia]) {
+        const button = p.page.getByTestId("group-call-join");
+        await expect(button).toHaveAttribute("data-call", "off", { timeout: 60_000 });
+        await expect(button).toHaveAccessibleName("Start call");
+      }
+
+      // Ana starts it: Bia, not in it, sees Join call, saying one is in the call (never who).
+      await ana.page.getByTestId("group-call-join").click();
+      await expect(ana.page.getByTestId("group-call")).toBeVisible({ timeout: 30_000 });
+      await expect(ana.page.getByTestId("group-call-join")).toHaveAttribute("data-call", "joined");
+      const join = bia.page.getByTestId("group-call-join");
+      await expect(join).toHaveAttribute("data-call", "on", { timeout: 45_000 });
+      await expect(join).toHaveAccessibleName("Join call");
+      await expect(join).toHaveAccessibleDescription("1 in the call");
+
+      // Ana leaves: Bia's button goes back to Start call (LiveKit may hold a closed connection a while).
+      await ana.page.getByTestId("group-call-leave").click();
+      await expect(join).toHaveAttribute("data-call", "off", { timeout: 90_000 });
+      await expect(join).toHaveAccessibleName("Start call");
+
+      testInfo.annotations.push({ type: "run time", description: `${Math.round((Date.now() - started) / 1000)} s` });
+    } catch (error) {
+      await node.attachLogs(testInfo);
+      throw error;
+    } finally {
+      await node.stop();
+    }
+  });
+});

@@ -31,6 +31,7 @@
     "hideIpBody": "Esta llamada pasa por el nodo del grupo y su relay, no por tu servidor TURN.",
     "hideIpInfo": "Ese nodo lo eligió el admin del grupo. Él y su relay ven la IP de este dispositivo. Los demás en la llamada no.",
     "hideIpTitle": "¿Unirte con Ocultar mi IP activado?",
+    "inCall": "{{count}} en la llamada",
     "info": "Pasa por el nodo del grupo. Cualquiera del grupo puede hablar, mostrar su cámara y compartir su pantalla. Con más de 8 personas entras silenciado.",
     "join": "Unirse a la llamada",
     "joinAnyway": "Unirme igualmente",
@@ -58,6 +59,7 @@
     "screenOf": "Pantalla de {{name}}",
     "showScreen": "Ver en grande la pantalla de {{name}}",
     "showYourScreen": "Ver en grande tu pantalla",
+    "start": "Iniciar llamada",
     "unreachable": "No se pudo llegar a la llamada del grupo"
   },
   "incomingAudio": "Llamada de voz entrante...",

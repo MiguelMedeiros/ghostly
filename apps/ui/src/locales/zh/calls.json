@@ -31,6 +31,7 @@
     "hideIpBody": "此通话经过群组的节点及其中继，而不是你的 TURN 服务器。",
     "hideIpInfo": "该节点由群组管理员选择。它和它的中继能看到这台设备的 IP，通话中的其他人看不到。",
     "hideIpTitle": "在开启隐藏我的 IP 时加入？",
+    "inCall": "{{count}} 人正在通话",
     "info": "通话经过群组的节点。群组中的任何人都可以发言、开启摄像头和共享屏幕。超过 8 人时，你加入时为静音。",
     "join": "加入通话",
     "joinAnyway": "仍然加入",
@@ -58,6 +59,7 @@
     "screenOf": "{{name}} 的屏幕",
     "showScreen": "放大显示 {{name}} 的屏幕",
     "showYourScreen": "放大显示你的屏幕",
+    "start": "发起通话",
     "unreachable": "无法连接到群组通话"
   },
   "incomingAudio": "语音来电...",
