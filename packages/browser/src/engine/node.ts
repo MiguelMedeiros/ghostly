@@ -2077,8 +2077,9 @@ export class GhostlyNode implements EngineImplementation {
     },
     // The group's "@" in the list as it is without the mention, as a removal's (`forgetGroupMessage`): the row stays.
     unmentioned: async (chat, row) => {
-      await this.groups.unmark(chat.slice("group:".length), row, true);
-      this.emitState();
+      const groupId = chat.slice("group:".length);
+      await this.groups.unmark(groupId, row, true);
+      this.groupChanged(groupId);
     },
     edge: (groupId, member) => {
       const link = this.links.get(this.memberEdges(groupId).get(member) ?? "")?.link;
@@ -2103,7 +2104,8 @@ export class GhostlyNode implements EngineImplementation {
     // Its quotes cost no read of the group each (`QuoteSweeps`): a member can post and remove at the pace of edits.
     this.quoteSweeps.add(chat, id, id);
     await this.messagesChanged(chat, [id]);
-    this.emitState();
+    // Its group's view alone is built again (its last message, its marks, its pin): a removal built every chat's and group's.
+    this.groupChanged(groupId);
   }
 
   private groupRemovalRows(chat: string): StoredMessage[] {
@@ -10960,7 +10962,8 @@ export class GhostlyNode implements EngineImplementation {
     });
     if (!patched) return;
     await this.messagesChanged(message.linkId, [message.id]);
-    this.emitState();
+    // Its "@" or its file is its group's view alone: a whole copy built every chat's and group's.
+    this.historyChanged(message.linkId);
   }
 
   /**
