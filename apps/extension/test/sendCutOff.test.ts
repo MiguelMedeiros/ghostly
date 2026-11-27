@@ -83,6 +83,18 @@ describe("a text being sent when the peer's document goes away", () => {
     world.endOffscreen();
     await expect(sending).rejects.toThrow("Lost the Ghostly peer");
   }, 15_000);
+
+  it("not kept, and the same words a moment after its own time: still given back", async () => {
+    peer(false);
+    const engine = await page();
+    const sending = engine.call("sendMessage", { linkId: "a", text: "pay me back", timestamp: 1700 });
+    await vi.waitFor(() => expect(engineControl().servers[0].handled.some(({ request }) => request.method === "sendMessage")).toBe(true));
+
+    world.endOffscreen();
+    // Another tab's text in the same words, dated after this one's.
+    rows.push({ id: "me_other", linkId: "a", text: "pay me back", sender: "me", timestamp: 1701 });
+    await expect(sending).rejects.toThrow("Lost the Ghostly peer");
+  }, 15_000);
 });
 
 /**
@@ -141,6 +153,18 @@ describe("a group text being sent when the peer's document goes away", () => {
     await vi.waitFor(() => expect(engineControl().servers[0].handled.some(({ request }) => request.method === "sendGroupMessage")).toBe(true));
 
     world.endOffscreen();
+    await expect(sending).rejects.toThrow("Lost the Ghostly peer");
+  }, 15_000);
+
+  it("not kept, and the same words stored after the peer went: still given back", async () => {
+    groupPeer(false);
+    const engine = await page();
+    const sending = engine.call("sendGroupMessage", { groupId: "g1", text: "on my way" });
+    await vi.waitFor(() => expect(engineControl().servers[0].handled.some(({ request }) => request.method === "sendGroupMessage")).toBe(true));
+
+    world.endOffscreen();
+    // Another tab's send of the same words, stored by the next peer once it is up.
+    rows.push({ id: "g_later", linkId: "group:g1", text: "on my way", sender: "me", timestamp: Date.now() + 1_000 });
     await expect(sending).rejects.toThrow("Lost the Ghostly peer");
   }, 15_000);
 
