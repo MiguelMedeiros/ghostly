@@ -208,6 +208,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   groupCallToken: "{ groupId }",
   groupCallKey: "{ groupId }",
   groupCallModerate: "{ groupId, act, target?, src? }",
+  groupCallOccupancy: "{ groupId }",
   forgetGroup: "{ groupId }",
   setGroupManage: "{ groupId, on }",
   deviceEnrollInvite: "{ name }",

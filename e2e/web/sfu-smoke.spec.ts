@@ -28,6 +28,16 @@ async function pass(g: string, { k, key }: ReturnType<typeof member>, name: stri
   return (await res.json()) as { url: string; token: string; room: string; identity: string };
 }
 
+/** What the mock says of `k`'s group call (WISP 602 § Occupancy), by a signed occupancy request: its status and body. */
+async function occupancy(g: string, { k, key }: ReturnType<typeof member>) {
+  const body = { v: 1, g, k, room: `g_${g}`, ts: Math.floor(Date.now() / 1000), n: randomBytes(16).toString("base64url") };
+  const signed = Buffer.from(JSON.stringify(["ghostly-sfu/1 occupancy", endpoints.sfu.origin, g, body.room, k, body.ts, body.n]));
+  const res = await fetch(`${endpoints.sfu.token}/sfu/group-occupancy`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, sig: sign(null, signed, key).toString("base64url") }),
+  });
+  return { status: res.status, body: (await res.json()) as { count?: number; since?: number } };
+}
+
 /** The other member's camera plays on `page`: a picture with a size, and its time moving on. */
 async function seesCamera(page: Page, identity: string) {
   const video = page.locator(`video[data-identity="${identity}"]`);
@@ -54,4 +64,31 @@ test("two members join their group's room with passes from the token mock and se
   await seesCamera(pages[0], bia.k);
   await seesCamera(pages[1], ana.k);
   await Promise.all(pages.map((page) => page.context().close()));
+});
+
+test("a member asks the token mock whether the group's call is on: 0 before anyone joins, then how many and since when", { tag: ["@feature:groups.protocol.call-occupancy"] }, async ({ browser }) => {
+  const g = randomBytes(16).toString("base64url");
+  const [ana, bia, cleo] = [member(), member(), member()];
+  const roster = await fetch(`${endpoints.sfu.token}/test/roster/${g}`, { method: "PUT", body: JSON.stringify({ [ana.k]: "Ana", [bia.k]: "Bia" }) });
+  expect(roster.status).toBe(204);
+  expect(await occupancy(g, bia)).toEqual({ status: 200, body: { count: 0 } });
+  // Someone not in the roster is told nothing.
+  expect(await occupancy(g, cleo)).toEqual({ status: 403, body: { error: "refused" } });
+
+  const before = Math.floor(Date.now() / 1000);
+  const page = await (await browser.newContext()).newPage();
+  const { url, token } = await pass(g, ana, "Ana");
+  await page.goto(`${endpoints.sfu.token}/smoke`);
+  await page.evaluate(([u, t]) => (window as unknown as { joinCall(u: string, t: string): Promise<void> }).joinCall(u, t), [url, token]);
+  // Bia has not joined: she sees Ana's call is on, since Ana joined on LiveKit's clock.
+  await expect.poll(async () => (await occupancy(g, bia)).body.count, { timeout: 15_000, intervals: [500, 1_000] }).toBe(1);
+  const { body } = await occupancy(g, bia);
+  expect(body.since).toBeGreaterThanOrEqual(before - 5);
+  expect(body.since).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 5);
+
+  // Ana leaves; a page closed without a word may stay in LiveKit's room until its connection times out. Asked every
+  // 3 s, under the mock's 30 a minute for one key.
+  await page.evaluate(() => (window as unknown as { room: { disconnect(): Promise<void> } }).room.disconnect());
+  await page.context().close();
+  await expect.poll(async () => (await occupancy(g, bia)).body, { timeout: 45_000, intervals: [1_000, 3_000] }).toEqual({ count: 0 });
 });
