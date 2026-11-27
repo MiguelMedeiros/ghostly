@@ -6,7 +6,7 @@ vi.mock("@tauri-apps/api/core", async (importOriginal) => ({ ...await importOrig
 
 import { GroupCallView, type GroupCallParticipant, type GroupCallState } from "../../components/GroupCallView";
 import type { CallDevices } from "../../hooks/useCallDevices";
-import { forgetVolumes } from "../../lib/groupCallVolume";
+import { forgetVolumes, setVolumeOf } from "../../lib/groupCallVolume";
 import { EMPTY_DEVICES } from "../../lib/mediaDevices";
 import { FakeTrack } from "../../../../../packages/react/test/fakes";
 import { axeViolations } from "../axe";
@@ -35,26 +35,40 @@ const volumeButton = (identity: string) => within(tileOf(identity)).getByTestId(
 const players = () => screen.getAllByTestId("group-call-audio") as HTMLAudioElement[];
 const slide = (percent: number) => fireEvent.change(screen.getByTestId("group-call-volume-slider"), { target: { value: String(percent) } });
 
-/** A Web Audio stand-in: each context's gain, whether it was closed, and its state (`starts`: what `resume()` gives). */
+/**
+ * A Web Audio stand-in: each context's gain, whether it was closed, and its state (`starts`: what `resume()` gives, as
+ * a gesture would; `held`: each `resume()` waits for its context's `release()`).
+ */
 class FakeAudioContext {
   static made: FakeAudioContext[] = [];
   static starts: AudioContextState = "running";
+  static held = false;
   gain = { gain: { value: 1 }, connect: vi.fn((to: unknown) => to) };
   closed = false;
   destination = {};
   state: AudioContextState = "suspended";
   onstatechange: (() => void) | null = null;
+  release = () => {};
   constructor() { FakeAudioContext.made.push(this); }
   createGain() { return this.gain; }
   createMediaStreamSource() { return { connect: (to: unknown) => to }; }
-  resume = vi.fn(async () => { this.state = FakeAudioContext.starts; });
-  close = vi.fn(async () => { this.closed = true; });
+  resume = vi.fn(async () => {
+    if (FakeAudioContext.held) await new Promise<void>((done) => { this.release = done; });
+    if (!this.closed) this.state = FakeAudioContext.starts;
+  });
+  close = vi.fn(async () => { this.closed = true; this.state = "closed"; });
   /** The engine starts or stops it on its own (a gesture, an interruption). */
   becomes(state: AudioContextState) { this.state = state; this.onstatechange?.(); }
 }
 const withWebAudio = () => {
   vi.stubGlobal("AudioContext", FakeAudioContext);
   vi.stubGlobal("MediaStream", class { constructor(readonly tracks: MediaStreamTrack[]) {} });
+};
+/** iOS ignores `volume` written from script: it reads back 1. */
+const onIos = () => {
+  const real = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume")!;
+  Object.defineProperty(HTMLMediaElement.prototype, "volume", { configurable: true, get: () => 1, set: () => {} });
+  onTestFinished(() => { Object.defineProperty(HTMLMediaElement.prototype, "volume", real); });
 };
 /** A speaker picked in the call's device menu. */
 const onSpeaker = (speaker: string): CallDevices => ({
@@ -66,6 +80,7 @@ afterEach(() => {
   forgetVolumes();
   FakeAudioContext.made = [];
   FakeAudioContext.starts = "running";
+  FakeAudioContext.held = false;
   vi.unstubAllGlobals();
   localStorage.removeItem("ghostly_group_call_mini");
 });
@@ -138,10 +153,7 @@ describe("each person's volume in a group call", () => {
 
   it("turns someone down through the gain where the element's volume can't be set (iOS)", async () => {
     withWebAudio();
-    // iOS ignores `volume` written from script: it reads back 1.
-    const real = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "volume")!;
-    Object.defineProperty(HTMLMediaElement.prototype, "volume", { configurable: true, get: () => 1, set: () => {} });
-    onTestFinished(() => { Object.defineProperty(HTMLMediaElement.prototype, "volume", real); });
+    onIos();
     const { user } = view();
     await user.click(volumeButton(ANA));
     slide(40);
@@ -150,6 +162,75 @@ describe("each person's volume in a group call", () => {
     await waitFor(() => expect(players()[0]!.muted).toBe(true));
     // Bo, at 100%, needs no gain.
     expect(players()[1]!.muted).toBe(false);
+  });
+
+  it("starts a gain made outside a gesture from the slider, for a level kept from an earlier call", async () => {
+    withWebAudio();
+    setVolumeOf(ANA, 1.5);
+    // The call starts outside a gesture: WebKit leaves the context suspended, and Ana plays at 1 meanwhile.
+    FakeAudioContext.starts = "suspended";
+    const { user } = view();
+    await act(async () => {});
+    const context = FakeAudioContext.made[0]!;
+    expect(context.state).toBe("suspended");
+    expect(players()[0]!.muted).toBe(false);
+
+    // The slider is a gesture: there the context can start.
+    FakeAudioContext.starts = "running";
+    await user.click(volumeButton(ANA));
+    slide(160);
+    await act(async () => {});
+    expect(FakeAudioContext.made).toHaveLength(1);
+    expect(context.state).toBe("running");
+    expect(players()[0]!.muted).toBe(true);
+  });
+
+  it("plays someone as close to their level as the element can while the gain doesn't run", async () => {
+    withWebAudio();
+    FakeAudioContext.starts = "suspended";
+    const { user } = view();
+    await user.click(volumeButton(ANA));
+    slide(40);
+    // Straight from 40% to 150%: the element alone plays them, at 1.
+    slide(150);
+    await act(async () => {});
+    expect(FakeAudioContext.made[0]!.state).toBe("suspended");
+    expect({ muted: players()[0]!.muted, volume: players()[0]!.volume }).toEqual({ muted: false, volume: 1 });
+  });
+
+  it("mutes someone at 0 on iOS while the gain doesn't run", async () => {
+    withWebAudio();
+    onIos();
+    // Interrupted (a phone call): no resume() settles.
+    FakeAudioContext.held = true;
+    const { user } = view();
+    await user.click(volumeButton(ANA));
+    slide(40);
+    await act(async () => {});
+    expect(players()[0]!.muted).toBe(false);
+    slide(0);
+    await act(async () => {});
+    expect(players()[0]!.muted).toBe(true);
+  });
+
+  it("leaves the element to the new gain when a replaced one starts late", async () => {
+    withWebAudio();
+    setVolumeOf(ANA, 1.5);
+    FakeAudioContext.held = true;
+    const state = call();
+    const handlers = { onToggleMic: vi.fn(), onToggleCamera: vi.fn(), onToggleScreen: vi.fn(), onLeave: vi.fn() };
+    const { rerender } = renderApp(<GroupCallView call={state} groupName="Club" {...handlers} />);
+    const [first] = FakeAudioContext.made;
+    // Ana's track is replaced (a new microphone): a new gain, while the first one's resume is still on its way.
+    const next = { ...state, participants: [{ ...state.participants[0]!, tracks: { audio: audio() } }, state.participants[1]!] };
+    rerender(<GroupCallView call={next} groupName="Club" {...handlers} />);
+    const second = FakeAudioContext.made[1]!;
+    expect(first!.closed).toBe(true);
+    await act(async () => { second.release(); });
+    expect(players()[0]!.muted).toBe(true);
+    await act(async () => { first!.release(); });
+    // Not unmuted under the running gain: she'd be heard twice.
+    expect(players()[0]!.muted).toBe(true);
   });
 
   it("goes only up to 100% on a chosen speaker that Web Audio can't play on", async () => {

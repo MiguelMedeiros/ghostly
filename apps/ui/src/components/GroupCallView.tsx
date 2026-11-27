@@ -161,7 +161,8 @@ function TrackVideo({ track, fit, mirror }: { track: MediaStreamTrack; fit: "cov
  * 1 as sent). Up to 1 the element's own volume, and 0 mutes it. Past 1, which an element can't play, or any level on
  * an engine that ignores the element's volume (iOS), through a Web Audio gain with the element muted while the gain
  * plays: it keeps the stream, which Chrome plays to Web Audio only while an element holds it. A context that doesn't
- * run (WebKit starts none outside a gesture, iOS interrupts one) leaves the element playing at 1. An engine whose Web
+ * run (WebKit starts none outside a gesture, iOS interrupts one) leaves the element playing, as close to the level as
+ * it can (at most 1), and each move of the slider, a gesture, asks it to start again. An engine whose Web
  * Audio can't play on the speaker you chose stays at 1 there, and its slider stops there too (`volumeMaxOn`).
  */
 function TrackAudio({ track, speaker, volume = 1, testId = "group-call-audio" }: { track: MediaStreamTrack; speaker?: string; volume?: number; testId?: string }) {
@@ -199,7 +200,11 @@ function TrackAudio({ track, speaker, volume = 1, testId = "group-call-audio" }:
     }
     // The element is muted only while the gain plays, and only for this gain (a closed one's late resume says nothing).
     const live = () => {
-      if (boost.current?.context === context) element.muted = context.state === "running" || level.current === 0;
+      if (boost.current?.context !== context) return;
+      const plays = context.state === "running";
+      element.muted = plays || level.current === 0;
+      // Not yet: the element plays them, as close to the level as it can.
+      if (!plays) element.volume = Math.min(1, level.current);
     };
     boost.current = { context, gain, live };
     context.onstatechange = live;
@@ -217,8 +222,11 @@ function TrackAudio({ track, speaker, volume = 1, testId = "group-call-audio" }:
     const element = ref.current;
     if (!element) return;
     if (boost.current) {
-      boost.current.gain.gain.value = played;
-      boost.current.live();
+      const { context, gain, live } = boost.current;
+      gain.gain.value = played;
+      live();
+      // A context made outside a gesture (a kept level, as a call starts) can start in this one: the slider's.
+      if (context.state !== "running") void context.resume().catch(() => {}).then(live);
       return;
     }
     element.volume = Math.min(1, played);
