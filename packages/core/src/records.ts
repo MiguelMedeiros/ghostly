@@ -1,7 +1,7 @@
 import { encrypt, tryDecrypt } from "./crypto";
 import { MAX_DNS_PACKET_BYTES, measureRecords, type GhostRecord, type SignedPacket } from "./pkarr";
 import { decodeServices, encodeServices, type ServiceAd } from "./services";
-import { sanitizeNick } from "./text";
+import { cutToUtf8Bytes, sanitizeNick } from "./text";
 
 /**
  * TXT labels a peer publishes under its own key. Every value except `_ts` and
@@ -32,6 +32,11 @@ export const RECORD_TTL = 300;
 /** Same ceiling the Rust implementation applies to the encrypted message batch. */
 export const MAX_MSGS_PAYLOAD_B64 = 800;
 const MAX_SINGLE_MESSAGE_CHARS = 400;
+/**
+ * Most of a name the `_nick` record carries, as the capability record's (`CAPS_LIMITS.nameBytes`): a 64-character CJK
+ * or emoji name would leave no room for a signed WebRTC offer. A paired contact gets the whole name in its frames.
+ */
+export const MAX_PACKET_NICK_BYTES = 64;
 
 export interface CompactMessage {
   t: number;
@@ -93,7 +98,8 @@ export function buildLinkRecords(
 
   const fixed: GhostRecord[] = [record(LABEL.ts, String(latestTs))];
   if (state.ackTimestamp > 0) fixed.push(record(LABEL.ack, String(state.ackTimestamp)));
-  if (state.nick) fixed.push(record(LABEL.nick, encrypt(state.nick, encKey)));
+  const nick = state.nick ? cutToUtf8Bytes(state.nick, MAX_PACKET_NICK_BYTES) : "";
+  if (nick) fixed.push(record(LABEL.nick, encrypt(nick, encKey)));
   if (state.callSignal) fixed.push(record(LABEL.call, encrypt(state.callSignal, encKey)));
   if (state.rtcSignal) fixed.push(record(LABEL.rtc, encrypt(state.rtcSignal, encKey)));
   const tr = state.transports ? record(LABEL.tr, encrypt(state.transports, encKey)) : null;

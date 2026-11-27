@@ -42,6 +42,7 @@
     "leftMany": "{{names}} saíram",
     "muted": "No mudo",
     "mutedByAdmin": "Silenciado pelo admin",
+    "mutedForYou": "{{name}} está silenciado para você",
     "noCallKey": "Ainda não dá para entrar: a chave da chamada não chegou",
     "noCallKeyInfo": "As chamadas deste grupo são criptografadas de ponta a ponta, e a chave delas ainda não chegou a este aparelho. Tente de novo daqui a pouco.",
     "noRelay": "Não dá para entrar com Ocultar meu IP ligado",
@@ -60,7 +61,9 @@
     "showScreen": "Ver a tela de {{name}} em tamanho grande",
     "showYourScreen": "Ver a sua tela em tamanho grande",
     "start": "Iniciar chamada",
-    "unreachable": "Não foi possível alcançar a chamada do grupo"
+    "unreachable": "Não foi possível alcançar a chamada do grupo",
+    "volumeNote": "Só você ouve a mudança. Em 0 fica silenciado para você.",
+    "volumeOf": "Volume de {{name}}"
   },
   "incomingAudio": "Chamada de áudio recebida...",
   "incomingVideo": "Chamada de vídeo recebida...",

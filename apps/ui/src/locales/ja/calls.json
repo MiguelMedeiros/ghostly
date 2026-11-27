@@ -42,6 +42,7 @@
     "leftMany": "{{names}} が退出しました",
     "muted": "ミュート中",
     "mutedByAdmin": "管理者がミュートしました",
+    "mutedForYou": "{{name}}はあなたの側でミュート中",
     "noCallKey": "まだ参加できません：通話の鍵が届いていません",
     "noCallKeyInfo": "このグループの通話はエンドツーエンドで暗号化されていますが、その鍵がまだこのデバイスに届いていません。少し待ってからもう一度お試しください。",
     "noRelay": "IPを隠すがオンのため参加できません",
@@ -60,7 +61,9 @@
     "showScreen": "{{name}}の画面を大きく表示",
     "showYourScreen": "自分の画面を大きく表示",
     "start": "通話を開始",
-    "unreachable": "グループの通話につながりませんでした"
+    "unreachable": "グループの通話につながりませんでした",
+    "volumeNote": "変更が聞こえるのはあなただけです。0にするとあなたの側でミュートになります。",
+    "volumeOf": "{{name}}の音量"
   },
   "incomingAudio": "音声通話の着信...",
   "incomingVideo": "ビデオ通話の着信...",
