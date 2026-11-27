@@ -8,7 +8,8 @@
 //   neither CI Success nor the draft's fast tier (CI Success (draft)) green on its last commit, or with CI Success red
 //   there, waits without losing its place. So does one with `queue:hold` (HOLD), whatever else it has: it never boards
 //   or lands until the label comes off, and the train never takes the hold off itself. So does one a reviewer asked
-//   changes on: "Review: changes needed (head <sha>)" on its head, newer than any "Review: approved" on its head, holds
+//   changes on: "Review: changes needed (head <sha>)" on its head (a comment, or a GitHub review on that commit, by its
+//   body or as "changes requested"), newer than any "Review: approved" on its head, holds
 //   it with no time limit, whatever "in progress" comes after it; a later approved or a new head ends it (for every
 //   pull request, `queue:priority` too). So does one with a review running: a reviewer's newest `Review:` comment is
 //   "Review: in progress (head <sha>)" on its head, posted less than 90 minutes ago (REVIEW_HOLD, `reviewHold`); a
@@ -137,13 +138,18 @@ export const onHold = (p) => !!p?.labels?.includes(HOLD);
  */
 export const REVIEW_HOLD = 90 * 60_000;
 // The first line of a review comment: "Review: in progress (head <sha>)" when one starts, then the verdict (markdown,
-// emoji or spaces before it are fine, as review-verdict reads it).
-const REVIEW_LINE = /^[\W_]*review:\s*(in progress|approved|changes needed)\b(?:\s*\(head ([0-9a-z]+)\))?/i;
+// emoji or spaces before it are fine), read as review-verdict reads it: the head is a `head <sha>` anywhere on that line
+// ("(head `<sha>`)", "head: <sha>", ", head <sha>" too). A GitHub review counts by that line of its body, else by its
+// state, on the commit it was given on.
+const REVIEW_LINE = /^[\W_]*review:\s*(in progress|approved|changes needed)\b/i;
+const HEAD_NAMED = /\bhead\W{0,3}([0-9a-z]+)\b/gi;
+const REVIEW_STATES = { APPROVED: "approved", CHANGES_REQUESTED: "changes needed" };
 // Who may start one: an account that could put `queue:hold` on it as well. Anyone may comment on a public pull request.
 const REVIEWERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 /**
  * A review holding a pull request's head `sha`, { since, until } (ms; `until` null: no time limit), or null. `Review:`
- * comments by a reviewer say it, naming this head (all of it, or its first 7 or more digits). "Changes needed" on this
+ * comments and GitHub reviews (`comments` holds both) by a reviewer say it, naming this head (all of it, or its first 7
+ * or more digits; a GitHub review names the commit it was given on). "Changes needed" on this
  * head holds it with no time limit (as review-verdict reads it) while it is newer than any "approved" on this head,
  * whatever "in progress" comes after it, so a pull request that still has `queue` before its reviewer takes the label
  * off never boards, nor once a re-review that never ends started on it. Else the newest one, "in progress" on this
@@ -161,13 +167,15 @@ export function reviewHold(comments, sha, now, priority = false) {
   let approved = NaN;
   for (const c of comments ?? []) {
     if (!REVIEWERS.has(c.author_association)) continue;
-    const m = REVIEW_LINE.exec((c.body ?? "").trimStart().split("\n", 1)[0]);
-    if (!m) continue;
-    const at = Date.parse(c.created_at);
-    const what = m[1].toLowerCase();
-    const head = m[2]?.toLowerCase();
+    const first = (c.body ?? "").trimStart().split("\n", 1)[0];
+    const what = REVIEW_LINE.exec(first)?.[1].toLowerCase() ?? REVIEW_STATES[c.state];
+    // A GitHub review not submitted yet has no time.
+    const at = Date.parse(c.submitted_at ?? c.created_at);
+    if (!what || Number.isNaN(at)) continue;
+    const heads = c.commit_id ? [c.commit_id.toLowerCase()] : [...first.matchAll(HEAD_NAMED)].map((h) => h[1].toLowerCase());
+    const head = heads.find(onHead);
     if (!(at < newest?.at)) newest = { at, what, head };
-    if (!onHead(head)) continue;
+    if (!head) continue;
     if (what === "changes needed" && !(at < asked)) asked = at;
     if (what === "approved" && !(at < approved)) approved = at;
   }
@@ -875,7 +883,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.redAt = p.ci === "failure" ? gateDoneAt(jobs, "CI Success") : null;
     p.failed = p.ci === "failure" ? failedJobs(jobs) : [];
     const said = await gh.comments(p.number);
-    comments.set(p.number, said);
+    comments.set(p.number, [...said, ...(await gh.reviews(p.number))]);
     p.sticky = said.find((c) => isPosition(c, login));
     // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
     // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
@@ -1222,7 +1230,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const leftSince = async (s) => {
       const read = await gh.pull(s.number);
       // A review that started since the line was read: its comment, read again too.
-      if (read.open && read.sha === s.sha && !onHold(read)) read.review = reviewHold(await gh.comments(s.number), read.sha, now, read.labels.includes(LABEL.priority));
+      if (read.open && read.sha === s.sha && !onHold(read)) read.review = reviewHold([...(await gh.comments(s.number)), ...(await gh.reviews(s.number))], read.sha, now, read.labels.includes(LABEL.priority));
       const out = !read.open || read.sha !== s.sha || isHeld(read) || !(inLine(read.labels) || also.includes(s.number)) || (bySquash && read.draft);
       return out ? read : null;
     };
@@ -2017,6 +2025,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       return moved && Date.parse(moved) > Date.parse(first) ? moved : first;
     },
     comments: (n) => all(`/issues/${n}/comments`),
+    reviews: (n) => all(`/pulls/${n}/reviews`),
     /**
      * Who last wrote each comment, or each pull request's body (by `node_id`): its last editor, else its author, by the
      * login REST gives (a bot's with "[bot]"). One GitHub no longer has, or whose account is gone, is left out. One
