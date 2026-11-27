@@ -206,6 +206,26 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(within(screen.getByTestId("mini-app")).getByTestId("app-connection-options")).toHaveAttribute("data-state", "connected");
   });
 
+  /** A chat not live yet whose contact's app dials, the contact sharing `peerNick`. */
+  const notLive = (peerNick: string) => linkView({ id: "link-1", peerPubKeyZ32: "peer", profile: "paired-chat/1", peerNick,
+    pairing: { status: "connecting" } as LinkView["pairing"], dataLink: "idle", peerParticipationKey: "saved", liveDialer: "contact" } as Partial<LinkView>);
+
+  it("names the contact in its connection panel as the chat does, a name given on this device first", async () => {
+    windowIs(false);
+    renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Mom", named: true }} peerKey="peer" />);
+    act(() => fakeEngine.update({ links: [notLive("Ana")] }));
+    await act(() => open(REF, "link-1"));
+    expect(within(screen.getByTestId("mini-app")).getByTestId("connection-not-live")).toHaveTextContent("Mom's app connects to this one");
+  });
+
+  it("says your contact in its connection panel when the chat has only the contact's key", async () => {
+    windowIs(false);
+    renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Contact · abcdef", named: false }} peerKey="peer" />);
+    act(() => fakeEngine.update({ links: [notLive("")] }));
+    await act(() => open(REF, "link-1"));
+    expect(within(screen.getByTestId("mini-app")).getByTestId("connection-not-live")).toHaveTextContent("Your contact's app connects to this one");
+  });
+
   it("on a wide screen sits beside the chat, goes full width and back, and Close stops it", async () => {
     windowIs(false);
     const { user } = panel();

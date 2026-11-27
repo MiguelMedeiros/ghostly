@@ -1115,7 +1115,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
         <div className="flex items-center gap-1 max-md:gap-0 shrink-0">
           {/* The chat's one connection control: its icon, and one panel with the choice and the rest under Details. */}
-          <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} contact={isAnonymous ? undefined : lineName} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
+          <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} contact={isAnonymous ? undefined : shownName} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined}
             scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle" && !ringsIn}

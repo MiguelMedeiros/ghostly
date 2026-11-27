@@ -1619,6 +1619,15 @@ describe("the connection Details of a contact with no name", () => {
     expect(screen.getByTestId("connection-waiting-why")).toHaveTextContent("Mom chose Iroh. Mom's Iroh is starting.");
     expect(screen.getByTestId("connection-history-event")).toHaveTextContent("Mom chose Iroh");
   });
+
+  // The chat's header quoted a contact named "You", the mini-app's did not: their choice read as mine, "You chose Iroh".
+  it.each([["the chat", "You", ""], ["the contact", undefined, "You"]])("quotes a contact %s names as the app calls me", (_, given, peerNick) => {
+    const view = renderApp(<ChatConnection peerKey="peer" contact={given} />);
+    act(() => view.engine.update({ links: [linkView({ availableTransports: ["webrtc/1", "iroh/1"], ...onDht, liveDialer: "contact", peerNick,
+      transportHistory: [{ at: 1, kind: "chose", cause: "contact", target: "iroh/1" }] })] }));
+    expect(screen.getByTestId("connection-history-event")).toHaveTextContent("“You” chose Iroh");
+    expect(lines("connection-not-live").slice(1)[0]).toBe("“You”'s app connects to this one: this app answers.");
+  });
 });
 
 // On a phone the panel's own buttons kept the desktop's 36 px (Details 53 × 36, Verify 40-44 × 36, Connection history

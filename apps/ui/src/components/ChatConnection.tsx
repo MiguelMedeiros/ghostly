@@ -26,6 +26,7 @@ import { DiscoveryHealth } from "./DiscoveryHealth";
 import { DirectBlockedHint } from "./DirectBlockedHint";
 import { ClockOffHint } from "./ClockOffHint";
 import { rawError } from "../lib/errorText";
+import { othersName } from "../lib/groups";
 import { problemText, problemLine } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { useWindowAway } from "../lib/windowAway";
@@ -149,8 +150,10 @@ export function ChatConnection({ peerKey, contact: shownName, paired = true, myK
   const clock = (at: number) => clockTime(at, language);
   // The contact's name, as the header and the chat's lines say it; none when the chat has only their key, and the
   // Details text then says "your contact" in sentences of its own: a fallback name dropped into a sentence read "No
-  // attempt of Your contact's", "L'app di Il tuo contatto".
-  const contact = shownName || link?.peerNick || undefined;
+  // attempt of Your contact's", "L'app di Il tuo contatto". A contact named as the app calls me is quoted
+  // (`othersName`): their "“You” chose Iroh" is not my "You chose Iroh".
+  const contactName = shownName || link?.peerNick;
+  const contact = contactName ? othersName(contactName, t) : undefined;
   // Their name in the waiting and not-live boxes: its own <bdi>, put where the line has `CONTACT`.
   const named = (text: string) => fillNames(text, { contact: contact ?? "" });
   // A chosen transport not reached yet (WISP 100): waited for, never a connection issue. `waitOff`: nothing else may

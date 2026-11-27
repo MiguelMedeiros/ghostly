@@ -88,6 +88,17 @@ describe("a chat's header on a phone", () => {
     expect(screen.getByTestId("connection-not-live")).toHaveTextContent("Cérebro (Mac)'s app connects to this one: this app answers.");
   });
 
+  it("says your contact in the connection's panel of a chat that has only the contact's key", async () => {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000 });
+    const { user, engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
+    engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
+    engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "connecting" }, dataLink: "idle",
+      peerParticipationKey: "saved", liveDialer: "contact", peerNick: "" } as never)] });
+    await user.click(await screen.findByTestId("connection-options"));
+    // Not the header's "Contact · peerpp" dropped into the sentence.
+    expect(screen.getByTestId("connection-not-live")).toHaveTextContent("Your contact's app connects to this one: this app answers.");
+  });
+
   it("gives the name its room before the status's emoji: it does not shrink beside it, and is cut only alone", async () => {
     viewport(375, 667);
     const { engine } = openChat();
