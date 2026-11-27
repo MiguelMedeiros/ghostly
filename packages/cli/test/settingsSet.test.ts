@@ -41,8 +41,13 @@ describe("settings set", () => {
     const settings = "ghostly settings set <key> <json-value> [--force]";
     expect(error(await usage(["online", "maybe"]), "usage", 2).message).toBe(`online takes true or false, not "maybe": ${settings}`);
     expect(error(await usage(["online", "1"]), "usage", 2).message).toBe(`online takes true or false, not "1": ${settings}`);
-    expect(error(await usage(["relays", "wss://relay.example"]), "usage", 2).message).toBe(`relays takes a JSON list of strings: ${settings}`);
-    expect(error(await usage(["iceServers", "[1]"]), "usage", 2).message).toBe(`iceServers takes a JSON list of ICE servers: ${settings}`);
+    expect(error(await usage(["relays", "wss://relay.example"]), "usage", 2).message).toBe(`relays takes a JSON list of strings, like '["https://relay.example.org"]': ${settings}`);
+    const ice = `iceServers takes a JSON list of ICE servers, each an object, like '[{"urls":"stun:stun.example.org:3478"}]' (a TURN one also has "username" and "credential"): ${settings}`;
+    expect(error(await usage(["iceServers", "[1]"]), "usage", 2).message).toBe(ice);
+    // A list of addresses, as relays takes, or one server alone: the refusal shows the shape. Before, both read "takes a
+    // JSON list of ICE servers" to a person who had just given a list of them.
+    expect(error(await usage(["iceServers", '["stun:127.0.0.1:3478"]']), "usage", 2).message).toBe(ice);
+    expect(error(await usage(["iceServers", '{"urls":"stun:127.0.0.1:3478"}']), "usage", 2).message).toBe(ice);
     // Nothing was made of the home: the profile never opened.
     expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
   });
