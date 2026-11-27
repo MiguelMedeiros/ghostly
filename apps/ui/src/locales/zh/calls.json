@@ -41,6 +41,7 @@
     "leftMany": "{{names}} 已离开通话",
     "muted": "已静音",
     "mutedByAdmin": "已被管理员静音",
+    "mutedForYou": "你已将 {{name}} 静音",
     "noCallKey": "暂时无法加入：通话密钥还没到",
     "noCallKeyInfo": "这个群组的通话采用端到端加密，但它的密钥还没到达这台设备。请稍后再试。",
     "noRelay": "开启隐藏我的 IP 时无法加入",
@@ -58,7 +59,9 @@
     "screenOf": "{{name}} 的屏幕",
     "showScreen": "放大显示 {{name}} 的屏幕",
     "showYourScreen": "放大显示你的屏幕",
-    "unreachable": "无法连接到群组通话"
+    "unreachable": "无法连接到群组通话",
+    "volumeNote": "只有你听得到这个变化。调到 0 即在你这边静音。",
+    "volumeOf": "{{name}} 的音量"
   },
   "incomingAudio": "语音来电...",
   "incomingVideo": "视频来电...",
