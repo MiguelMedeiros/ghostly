@@ -223,7 +223,7 @@ export function listenForShares(peerLock?: string): void {
     const { item } = message;
     // The page restarts with it still in the picker (a profile switch): the worker holds it again for the next page,
     // with the count of those not kept that it shows.
-    const carry = (lost?: number) => {
+    const carry = ({ dropped: lost }: IncomingShare) => {
       if (!workers.controller) return false;
       tell(workers.controller, { type: "share-keep", item, ...(typeof lost === "number" && lost > 0 && { dropped: lost }) });
       return true;
