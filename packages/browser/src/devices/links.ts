@@ -10,7 +10,7 @@ import { viewOf } from "./gate";
 import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "./linkOnly";
 import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
-import { forkTimes, type DevicePatch, type DeviceRecord, type DeviceSlot, type DeviceState, type SecretOffer } from "./state";
+import { forkTimes, runsEngine, type DevicePatch, type DeviceRecord, type DeviceSlot, type DeviceState, type SecretOffer } from "./state";
 import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store";
 import { acknowledged, delivered, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
@@ -389,6 +389,9 @@ export class DeviceLinks implements DeviceLinkEngine {
     const now = await this.record().catch(() => null);
     // A name is news too: the active device renamed a device (`rename.ts`), and the screen names the active device.
     const names = (record: DeviceRecord) => record.deviceSet.map((slot) => slot?.name ?? "").join("\n");
+    // Active now (a forced takeover whose settle read missed a source, settled by this read): the pages start again
+    // into the gate, as after a takeover that settled at once. The standby screen has nothing to show for `active`.
+    if (now && before && runsEngine(now.state) && !runsEngine(before.state)) { this.host?.show({ state: "standby", reload: true }); return outcome; }
     if (now && before && (now.state !== before.state || now.activeSlot !== before.activeSlot || now.d !== before.d || now.reenroll !== before.reenroll || names(now) !== names(before))) {
       this.host?.show(viewOf(now));
       if (names(now) !== names(before)) this.changed();
