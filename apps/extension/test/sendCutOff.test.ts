@@ -89,12 +89,20 @@ describe("a text being sent when the peer's document goes away", () => {
  * A group text is saved before its send answers too (`GroupSession.sendText`: the frame saved as unsaid, then the row),
  * and the next peer stores and says what was saved (`resume`). Its time is the peer's own, not the page's.
  */
-function groupPeer(stores: boolean): void {
+/**
+ * `stores`: whether the n-th send (from 0) gets as far as its row; `answers`: whether it then answers; `lagMs`: how far
+ * behind the wall clock the row is dated, as a community's clock may run (`CommunityGroups.sendTime`).
+ */
+function groupPeer(stores: boolean | ((n: number) => boolean), { answers = () => false, lagMs = 0 }: { answers?: (n: number) => boolean; lagMs?: number } = {}): void {
+  let sends = 0;
   engineControl().answer = (method, params) => {
     if (method === "sendGroupMessage") {
       const { groupId, text } = params as { groupId: string; text: string };
-      if (stores) rows.push({ id: `g_${rows.length}`, linkId: `group:${groupId}`, text: text.trim(), sender: "me", timestamp: Date.now() });
-      return new Promise(() => {});
+      const n = sends++;
+      if (!(typeof stores === "function" ? stores(n) : stores)) return new Promise(() => {});
+      const id = `g_${rows.length}`;
+      rows.push({ id, linkId: `group:${groupId}`, text: text.trim(), sender: "me", timestamp: Date.now() - lagMs });
+      return answers(n) ? Promise.resolve({ error: null, messageId: id }) : new Promise(() => {});
     }
     if (method === "messagePage") {
       const { linkId, after, before } = params as { linkId: string; after: number; before: number };
@@ -134,5 +142,38 @@ describe("a group text being sent when the peer's document goes away", () => {
 
     world.endOffscreen();
     await expect(sending).rejects.toThrow("Lost the Ghostly peer");
+  }, 15_000);
+
+  it("two of the same words in flight, only the first kept: the first is sent, the second comes back", async () => {
+    groupPeer((n) => n === 0);
+    const engine = await page();
+    const first = engine.call("sendGroupMessage", { groupId: "g1", text: "ok" });
+    const second = engine.call("sendGroupMessage", { groupId: "g1", text: "ok" });
+    await vi.waitFor(() => expect(engineControl().servers[0].handled.filter(({ request }) => request.method === "sendGroupMessage")).toHaveLength(2));
+
+    world.endOffscreen();
+    await expect(first).resolves.toEqual({ error: null, messageId: "g_0" });
+    await expect(second).rejects.toThrow("Lost the Ghostly peer");
+  }, 15_000);
+
+  it("the same words sent and answered a moment before: not taken for the text that was lost", async () => {
+    groupPeer((n) => n === 0, { answers: (n) => n === 0 });
+    const engine = await page();
+    await expect(engine.call("sendGroupMessage", { groupId: "g1", text: "ok" })).resolves.toEqual({ error: null, messageId: "g_0" });
+    const again = engine.call("sendGroupMessage", { groupId: "g1", text: "ok" });
+    await vi.waitFor(() => expect(engineControl().servers[0].handled.filter(({ request }) => request.method === "sendGroupMessage")).toHaveLength(2));
+
+    world.endOffscreen();
+    await expect(again).rejects.toThrow("Lost the Ghostly peer");
+  }, 15_000);
+
+  it("kept under a time a little behind the page's, as a community's clock runs: still answered as sent", async () => {
+    groupPeer(true, { lagMs: 500 });
+    const engine = await page();
+    const sending = engine.call("sendGroupMessage", { groupId: "c1", text: "on my way" });
+    await vi.waitFor(() => expect(rows).toHaveLength(1));
+
+    world.endOffscreen();
+    await expect(sending).resolves.toEqual({ error: null, messageId: "g_0" });
   }, 15_000);
 });
